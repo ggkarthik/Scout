@@ -1,0 +1,277 @@
+package com.prototype.vulnwatch.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Lob;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(
+        name = "findings",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_findings_component_vulnerability", columnNames = {"component_id", "vulnerability_id"})
+        },
+        indexes = {
+                @Index(name = "idx_findings_tenant_status_updated", columnList = "tenant_id,status,updated_at"),
+                @Index(name = "idx_findings_tenant_component_vuln", columnList = "tenant_id,component_id,vulnerability_id"),
+                @Index(name = "idx_findings_asset_id", columnList = "asset_id"),
+                @Index(name = "idx_findings_vulnerability_id", columnList = "vulnerability_id"),
+                @Index(name = "idx_findings_vulnerability_status", columnList = "vulnerability_id,status")
+        }
+)
+public class Finding {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "tenant_id")
+    private Tenant tenant;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "asset_id")
+    private Asset asset;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "component_id")
+    private InventoryComponent component;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "vulnerability_id")
+    private Vulnerability vulnerability;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private FindingStatus status = FindingStatus.OPEN;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decision_state", length = 40)
+    private FindingDecisionState decisionState = FindingDecisionState.NEEDS_REVIEW;
+
+    @Column(nullable = false)
+    private double riskScore;
+
+    @Column
+    private double confidenceScore;
+
+    @Column(nullable = false)
+    private String matchedBy;
+
+    @Column(length = 255)
+    private String assignedTo;
+
+    @Column(length = 255)
+    private String assignedBy;
+
+    @Column
+    private Instant assignedAt;
+
+    @Column
+    private Instant dueAt;
+
+    @Column(length = 2000)
+    private String suppressionReason;
+
+    @Column
+    private Instant suppressedUntil;
+
+    @Lob
+    @Column
+    private String evidence;
+
+    @Lob
+    @Column(name = "precedence_trace")
+    private String precedenceTrace;
+
+    @Column
+    private Instant firstObservedAt = Instant.now();
+
+    @Column
+    private Instant lastObservedAt = Instant.now();
+
+    @Column(nullable = false)
+    private Instant createdAt = Instant.now();
+
+    @Column(nullable = false)
+    private Instant updatedAt = Instant.now();
+
+    public UUID getId() {
+        return id;
+    }
+
+    public Tenant getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
+    }
+
+    public Asset getAsset() {
+        return asset;
+    }
+
+    public void setAsset(Asset asset) {
+        this.asset = asset;
+    }
+
+    public InventoryComponent getComponent() {
+        return component;
+    }
+
+    public void setComponent(InventoryComponent component) {
+        this.component = component;
+    }
+
+    public Vulnerability getVulnerability() {
+        return vulnerability;
+    }
+
+    public void setVulnerability(Vulnerability vulnerability) {
+        this.vulnerability = vulnerability;
+    }
+
+    public FindingStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(FindingStatus status) {
+        this.status = status;
+    }
+
+    public FindingDecisionState getDecisionState() {
+        return decisionState;
+    }
+
+    public void setDecisionState(FindingDecisionState decisionState) {
+        this.decisionState = decisionState;
+    }
+
+    public double getRiskScore() {
+        return riskScore;
+    }
+
+    public void setRiskScore(double riskScore) {
+        this.riskScore = riskScore;
+    }
+
+    public double getConfidenceScore() {
+        return confidenceScore;
+    }
+
+    public void setConfidenceScore(double confidenceScore) {
+        this.confidenceScore = confidenceScore;
+    }
+
+    public String getMatchedBy() {
+        return matchedBy;
+    }
+
+    public void setMatchedBy(String matchedBy) {
+        this.matchedBy = matchedBy;
+    }
+
+    public String getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(String assignedTo) {
+        this.assignedTo = assignedTo;
+    }
+
+    public String getAssignedBy() {
+        return assignedBy;
+    }
+
+    public void setAssignedBy(String assignedBy) {
+        this.assignedBy = assignedBy;
+    }
+
+    public Instant getAssignedAt() {
+        return assignedAt;
+    }
+
+    public void setAssignedAt(Instant assignedAt) {
+        this.assignedAt = assignedAt;
+    }
+
+    public Instant getDueAt() {
+        return dueAt;
+    }
+
+    public void setDueAt(Instant dueAt) {
+        this.dueAt = dueAt;
+    }
+
+    public String getSuppressionReason() {
+        return suppressionReason;
+    }
+
+    public void setSuppressionReason(String suppressionReason) {
+        this.suppressionReason = suppressionReason;
+    }
+
+    public Instant getSuppressedUntil() {
+        return suppressedUntil;
+    }
+
+    public void setSuppressedUntil(Instant suppressedUntil) {
+        this.suppressedUntil = suppressedUntil;
+    }
+
+    public String getEvidence() {
+        return evidence;
+    }
+
+    public void setEvidence(String evidence) {
+        this.evidence = evidence;
+    }
+
+    public String getPrecedenceTrace() {
+        return precedenceTrace;
+    }
+
+    public void setPrecedenceTrace(String precedenceTrace) {
+        this.precedenceTrace = precedenceTrace;
+    }
+
+    public Instant getFirstObservedAt() {
+        return firstObservedAt;
+    }
+
+    public void setFirstObservedAt(Instant firstObservedAt) {
+        this.firstObservedAt = firstObservedAt;
+    }
+
+    public Instant getLastObservedAt() {
+        return lastObservedAt;
+    }
+
+    public void setLastObservedAt(Instant lastObservedAt) {
+        this.lastObservedAt = lastObservedAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void touch() {
+        this.updatedAt = Instant.now();
+    }
+}

@@ -1,0 +1,105 @@
+spring:
+  application:
+    name: vulnwatch-backend
+  datasource:
+    url: jdbc:h2:file:./data/vulnwatch;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+app:
+  features:
+    vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
+    vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
+  security:
+    api-key: ${APP_API_KEY:change-me-in-prod}
+    creator-key: ${APP_CREATOR_KEY:}
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+  sbom-fetch:
+    max-payload-bytes: ${SBOM_FETCH_MAX_PAYLOAD_BYTES:5242880}
+    allow-user-auth-header: ${SBOM_FETCH_ALLOW_USER_AUTH_HEADER:false}
+    allowed-hosts: ${SBOM_FETCH_ALLOWED_HOSTS:}
+  http:
+    connect-timeout-ms: ${HTTP_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${HTTP_READ_TIMEOUT_MS:30000}
+  nvd:
+    base-url: https://services.nvd.nist.gov/rest/json/cves/2.0
+    api-key: ${NVD_API_KEY:}
+    api-key-file: ${NVD_API_KEY_FILE:}
+    default-lookback-hours: 24
+    cve-delta-recompute-page-interval: ${NVD_CVE_DELTA_RECOMPUTE_PAGE_INTERVAL:${NVD_FINDINGS_RECOMPUTE_PAGE_INTERVAL:5}}
+    results-per-page: ${NVD_RESULTS_PER_PAGE:2000}
+    min-request-interval-ms: ${NVD_MIN_REQUEST_INTERVAL_MS:700}
+    max-retries: ${NVD_MAX_RETRIES:5}
+    retry-base-backoff-ms: ${NVD_RETRY_BASE_BACKOFF_MS:1000}
+  csaf:
+    max-documents-per-sync: ${CSAF_MAX_DOCUMENTS_PER_SYNC:300}
+    document-fetch-max-attempts: ${CSAF_DOCUMENT_FETCH_MAX_ATTEMPTS:3}
+    document-retry-backoff-ms: ${CSAF_DOCUMENT_RETRY_BACKOFF_MS:300}
+    microsoft:
+      provider-metadata-url: ${MICROSOFT_CSAF_PROVIDER_METADATA_URL:https://msrc.microsoft.com/csaf/provider-metadata.json}
+      advisories-distribution-url: ${MICROSOFT_CSAF_ADVISORIES_DISTRIBUTION_URL:https://msrc.microsoft.com/csaf/advisories}
+      vex-distribution-url: ${MICROSOFT_CSAF_VEX_DISTRIBUTION_URL:https://msrc.microsoft.com/csaf/vex}
+    redhat:
+      provider-metadata-url: ${REDHAT_CSAF_PROVIDER_METADATA_URL:https://security.access.redhat.com/data/csaf/v2/provider-metadata.json}
+      advisories-distribution-url: ${REDHAT_CSAF_ADVISORIES_DISTRIBUTION_URL:https://security.access.redhat.com/data/csaf/v2/advisories}
+      vex-distribution-url: ${REDHAT_CSAF_VEX_DISTRIBUTION_URL:https://security.access.redhat.com/data/csaf/v2/vex}
+  ghsa:
+    api-url: ${GHSA_API_URL:https://api.github.com/advisories}
+    default-lookback-days: ${GHSA_DEFAULT_LOOKBACK_DAYS:7}
+    per-page: ${GHSA_PER_PAGE:100}
+    max-pages-per-sync: ${GHSA_MAX_PAGES_PER_SYNC:40}
+  correlation:
+    delta-queue-capacity: ${APP_CORRELATION_DELTA_QUEUE_CAPACITY:500}
+    delta-queue-enqueue-timeout-ms: ${APP_CORRELATION_DELTA_QUEUE_ENQUEUE_TIMEOUT_MS:2000}
+  github:
+    base-url: https://api.github.com
+    api-token: ${GITHUB_API_TOKEN:}
+    api-token-file: ${GITHUB_API_TOKEN_FILE:}
+    allowlist-enabled: ${GITHUB_ALLOWLIST_ENABLED:true}
+    allowed-repos: ${GITHUB_ALLOWED_REPOS:}
+    max-retries: ${GITHUB_MAX_RETRIES:4}
+    retry-base-backoff-ms: ${GITHUB_RETRY_BASE_BACKOFF_MS:1000}
+  assets:
+    stale-days-to-inactive: ${ASSET_STALE_DAYS_TO_INACTIVE:30}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vulnwatch}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+  h2:
+    console:
+      enabled: false

@@ -1,0 +1,16 @@
+.DS_Store
+
+# Local runtime data and secrets
+prototype-app/backend/data/
+prototype-app/backend/secrets/
+prototype-app/backend/.env
+prototype-app/backend/.env.*
+prototype-app/frontend/.env
+prototype-app/frontend/.env.*
+
+# Build artifacts
+prototype-app/backend/target/
+prototype-app/frontend/dist/
+
+# Dependency caches
+prototype-app/frontend/node_modules/

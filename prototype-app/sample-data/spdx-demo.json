@@ -1,0 +1,25 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Demo SPDX",
+  "documentNamespace": "https://example.com/spdx/demo",
+  "creationInfo": {
+    "created": "2026-02-15T00:00:00Z",
+    "creators": ["Tool: demo"]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-lodash",
+      "name": "lodash",
+      "versionInfo": "4.17.19",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/lodash@4.17.19"
+        }
+      ]
+    }
+  ]
+}
