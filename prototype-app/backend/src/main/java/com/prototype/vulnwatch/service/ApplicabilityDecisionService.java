@@ -116,6 +116,11 @@ public class ApplicabilityDecisionService {
                 trace.put("finalReason", "vex_under_investigation");
                 return new ApplicabilityDecision(ApplicabilityResult.UNKNOWN, "vex_under_investigation", trace);
             }
+            if (normalized.contains("NO_PATCH")) {
+                // Vendor acknowledges no fix exists; component is affected regardless of version.
+                trace.put("finalReason", "vex_no_patch");
+                return new ApplicabilityDecision(ApplicabilityResult.TRUE, "vex_no_patch", trace);
+            }
             if (normalized.contains("AFFECTED")) {
                 trace.put("finalReason", "vex_known_affected");
                 return new ApplicabilityDecision(ApplicabilityResult.TRUE, "vex_known_affected", trace);
@@ -125,7 +130,7 @@ public class ApplicabilityDecisionService {
         String componentVersion = component.getVersion();
         if (componentVersion == null || componentVersion.isBlank()) {
             trace.put("finalReason", "VERSION_UNKNOWN");
-            return new ApplicabilityDecision(ApplicabilityResult.FALSE, "VERSION_UNKNOWN", trace);
+            return new ApplicabilityDecision(ApplicabilityResult.UNKNOWN, "VERSION_UNKNOWN", trace);
         }
 
         VersionScheme scheme = target.getVersionScheme() == null ? VersionScheme.UNKNOWN : target.getVersionScheme();
@@ -320,8 +325,12 @@ public class ApplicabilityDecisionService {
         if ("microsoft".equals(normalizedProvider) || "redhat".equals(normalizedProvider)) {
             return "HIGH";
         }
-        if (hasText(source) && source.trim().toLowerCase(Locale.ROOT).contains("vex")) {
-            return "MEDIUM";
+        if (hasText(source)) {
+            String normalizedSource = source.trim().toLowerCase(Locale.ROOT);
+            // vex-* sources and csaf-* sources with explicit product status both qualify as VEX signals.
+            if (normalizedSource.contains("vex") || normalizedSource.startsWith("csaf-")) {
+                return "MEDIUM";
+            }
         }
         return "UNKNOWN";
     }
@@ -350,7 +359,9 @@ public class ApplicabilityDecisionService {
 
     private int freshnessDaysForStatus(String normalizedStatus, RiskPolicy policy) {
         if (normalizedStatus != null && normalizedStatus.contains("FIXED")) {
-            return policy == null ? DEFAULT_VEX_FIXED_FRESHNESS_DAYS : Math.max(1, policy.getVexFixedFreshnessDays());
+            // VEX FIX #3: FIXED status is permanent - once vendor confirms a fix, it doesn't "un-fix"
+            // Return Integer.MAX_VALUE to effectively make FIXED statements never expire
+            return Integer.MAX_VALUE;
         }
         return policy == null ? DEFAULT_VEX_NOT_AFFECTED_FRESHNESS_DAYS : Math.max(1, policy.getVexNotAffectedFreshnessDays());
     }

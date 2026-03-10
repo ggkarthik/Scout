@@ -27,6 +27,22 @@ public class Tenant {
         return id;
     }
 
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
+    /**
+     * Legacy compatibility for older APIs still passing numeric tenant IDs.
+     * Maps deterministic numeric IDs to UUID space.
+     */
+    public void setId(Long legacyTenantId) {
+        if (legacyTenantId == null) {
+            this.id = null;
+            return;
+        }
+        this.id = new UUID(0L, legacyTenantId);
+    }
+
     public String getName() {
         return name;
     }

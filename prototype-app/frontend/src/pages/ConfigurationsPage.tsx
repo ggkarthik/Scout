@@ -2,25 +2,24 @@ import React from 'react';
 import { api } from '../api/client';
 import { GithubSbomSource, RiskPolicy } from '../types';
 import { ResizableTable } from '../components/ResizableTable';
-import { SourcesPage } from './SourcesPage';
 
 type ConfigurationSectionKey =
   | 'risk-score'
   | 'asset-boost'
   | 'sla'
   | 'auto-close'
+  | 'finding-generation'
   | 'github-pipelines'
-  | 'prototype-reset'
-  | 'integration-queue';
+  | 'prototype-reset';
 
 const CONFIGURATION_SECTIONS: Array<{ key: ConfigurationSectionKey; title: string }> = [
   { key: 'risk-score', title: 'Risk Score Calculator' },
   { key: 'asset-boost', title: 'Asset Context Risk Boost' },
   { key: 'sla', title: 'SLA Configuration (Risk + Asset Context)' },
   { key: 'auto-close', title: 'Auto Close Configuration' },
+  { key: 'finding-generation', title: 'Org CVE Finding Generation' },
   { key: 'github-pipelines', title: 'GitHub Auto Ingestion Pipelines' },
-  { key: 'prototype-reset', title: 'Prototype Data Reset' },
-  { key: 'integration-queue', title: 'Integration Run Queue' }
+  { key: 'prototype-reset', title: 'Prototype Data Reset' }
 ];
 
 type PolicyValidationError = {
@@ -71,6 +70,19 @@ function validateRiskPolicy(policy: RiskPolicy): PolicyValidationError[] {
   return errors;
 }
 
+const SECTION_POLICY_FIELDS: Partial<Record<ConfigurationSectionKey, ReadonlyArray<keyof RiskPolicy>>> = {
+  'risk-score': ['cvssWeight', 'kevBoost', 'epssWeight', 'vexNotAffectedFreshnessDays', 'vexFixedFreshnessDays', 'vexKnownAffectedBoost', 'vexUnderInvestigationPenalty', 'vexNotAffectedReduction', 'vexStalePenalty', 'criticalThreshold', 'highThreshold'],
+  'sla': ['criticalSlaDays', 'highSlaDays', 'mediumSlaDays', 'lowSlaDays', 'assetCriticalSlaMultiplier', 'assetHighSlaMultiplier', 'assetMediumSlaMultiplier', 'assetLowSlaMultiplier'],
+  'auto-close': ['autoCloseAfterDays']
+};
+
+function pipelineStatusMeta(status?: string | null): { cls: string; label: string } {
+  if (!status) return { cls: 'pipeline-dot--none', label: 'Never run' };
+  if (status === 'SUCCESS') return { cls: 'pipeline-dot--success', label: 'Success' };
+  if (status === 'FAILURE') return { cls: 'pipeline-dot--failure', label: 'Failed' };
+  return { cls: 'pipeline-dot--active', label: status };
+}
+
 export function ConfigurationsPage() {
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
@@ -95,6 +107,7 @@ export function ConfigurationsPage() {
   const [openSections, setOpenSections] = React.useState<Set<ConfigurationSectionKey>>(
     () => new Set(CONFIGURATION_SECTIONS.map((section) => section.key))
   );
+  const [showAdvancedVex, setShowAdvancedVex] = React.useState(false);
   const policyValidationErrors = React.useMemo(
     () => (policy == null ? [] : validateRiskPolicy(policy)),
     [policy]
@@ -250,7 +263,7 @@ export function ConfigurationsPage() {
     <div className="panel">
       <div className="panel-header">
         <h3>Configurations</h3>
-        <span className="panel-caption">Centralized settings for risk, SLA, auto-close and GitHub auto-ingestion pipelines</span>
+        <span className="panel-caption">Centralized settings for risk, SLA, auto-close, org CVE finding generation, and GitHub auto-ingestion pipelines</span>
       </div>
       <div className="config-subtabs">
         {CONFIGURATION_SECTIONS.map((section) => (
@@ -283,31 +296,63 @@ export function ConfigurationsPage() {
               <label>EPSS Weight
                 <input type="number" step="0.1" min={0} max={5} value={policy.epssWeight} onChange={(e) => updatePolicy('epssWeight', Number(e.target.value))} />
               </label>
-              <label>VEX Not-Affected Freshness (days)
-                <input type="number" min={1} max={365} value={policy.vexNotAffectedFreshnessDays} onChange={(e) => updatePolicy('vexNotAffectedFreshnessDays', Number(e.target.value))} />
-              </label>
-              <label>VEX Fixed Freshness (days)
-                <input type="number" min={1} max={365} value={policy.vexFixedFreshnessDays} onChange={(e) => updatePolicy('vexFixedFreshnessDays', Number(e.target.value))} />
-              </label>
-              <label>VEX Known-Affected Boost
-                <input type="number" step="0.1" min={0} max={3} value={policy.vexKnownAffectedBoost} onChange={(e) => updatePolicy('vexKnownAffectedBoost', Number(e.target.value))} />
-              </label>
-              <label>VEX Under-Investigation Penalty
-                <input type="number" step="0.1" min={0} max={3} value={policy.vexUnderInvestigationPenalty} onChange={(e) => updatePolicy('vexUnderInvestigationPenalty', Number(e.target.value))} />
-              </label>
-              <label>VEX Not-Affected Reduction
-                <input type="number" step="0.1" min={0} max={3} value={policy.vexNotAffectedReduction} onChange={(e) => updatePolicy('vexNotAffectedReduction', Number(e.target.value))} />
-              </label>
-              <label>VEX Stale Assertion Penalty
-                <input type="number" step="0.1" min={0} max={3} value={policy.vexStalePenalty} onChange={(e) => updatePolicy('vexStalePenalty', Number(e.target.value))} />
-              </label>
               <label>Critical Threshold
                 <input type="number" step="0.1" min={0} max={10} value={policy.criticalThreshold} onChange={(e) => updatePolicy('criticalThreshold', Number(e.target.value))} />
+                <span className="field-hint">Findings with risk score &ge; {policy.criticalThreshold} are classified as Critical</span>
               </label>
               <label>High Threshold
                 <input type="number" step="0.1" min={0} max={10} value={policy.highThreshold} onChange={(e) => updatePolicy('highThreshold', Number(e.target.value))} />
+                <span className="field-hint">Findings with risk score &ge; {policy.highThreshold} are classified as High</span>
               </label>
             </div>
+
+            <div className="advanced-vex-toggle-row">
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => setShowAdvancedVex((v) => !v)}
+              >
+                <span className={showAdvancedVex ? 'config-chevron open' : 'config-chevron'}>▾</span>
+                {showAdvancedVex ? 'Hide advanced VEX settings' : 'Show advanced VEX settings'}
+              </button>
+              {!showAdvancedVex && (
+                <span className="field-hint">Freshness windows, score modifiers for VEX assertion states</span>
+              )}
+            </div>
+
+            {showAdvancedVex && (
+              <div className="form-grid ingestion-grid">
+                <label>VEX Not-Affected Freshness (days)
+                  <input type="number" min={1} max={365} value={policy.vexNotAffectedFreshnessDays} onChange={(e) => updatePolicy('vexNotAffectedFreshnessDays', Number(e.target.value))} />
+                </label>
+                <label>VEX Fixed Freshness (days)
+                  <input type="number" min={1} max={365} value={policy.vexFixedFreshnessDays} onChange={(e) => updatePolicy('vexFixedFreshnessDays', Number(e.target.value))} />
+                </label>
+                <label>VEX Known-Affected Boost
+                  <input type="number" step="0.1" min={0} max={3} value={policy.vexKnownAffectedBoost} onChange={(e) => updatePolicy('vexKnownAffectedBoost', Number(e.target.value))} />
+                </label>
+                <label>VEX Under-Investigation Penalty
+                  <input type="number" step="0.1" min={0} max={3} value={policy.vexUnderInvestigationPenalty} onChange={(e) => updatePolicy('vexUnderInvestigationPenalty', Number(e.target.value))} />
+                </label>
+                <label>VEX Not-Affected Reduction
+                  <input type="number" step="0.1" min={0} max={3} value={policy.vexNotAffectedReduction} onChange={(e) => updatePolicy('vexNotAffectedReduction', Number(e.target.value))} />
+                </label>
+                <label>VEX Stale Assertion Penalty
+                  <input type="number" step="0.1" min={0} max={3} value={policy.vexStalePenalty} onChange={(e) => updatePolicy('vexStalePenalty', Number(e.target.value))} />
+                </label>
+              </div>
+            )}
+            {policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['risk-score']?.includes(e.field)).length > 0 && (
+              <div className="notice error">
+                <ul>{policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['risk-score']?.includes(e.field)).map((e) => <li key={e.field}>{e.message}</li>)}</ul>
+              </div>
+            )}
+            <div className="button-row form-submit-row">
+              <button type="button" className="btn btn-primary" onClick={savePolicy} disabled={policySaving || policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['risk-score']?.includes(e.field)).length > 0}>
+                {policySaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {policyMessage && activeSection === 'risk-score' && <div className="notice">{policyMessage}</div>}
           </div>
         )}
       </section>
@@ -335,6 +380,12 @@ export function ConfigurationsPage() {
                 <input type="number" step="0.1" value={policy.assetLowRiskBoost} onChange={(e) => updatePolicy('assetLowRiskBoost', Number(e.target.value))} />
               </label>
             </div>
+            <div className="button-row form-submit-row">
+              <button type="button" className="btn btn-primary" onClick={savePolicy} disabled={policySaving}>
+                {policySaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {policyMessage && activeSection === 'asset-boost' && <div className="notice">{policyMessage}</div>}
           </div>
         )}
       </section>
@@ -351,29 +402,48 @@ export function ConfigurationsPage() {
             <div className="form-grid ingestion-grid">
               <label>Critical Risk SLA (days)
                 <input type="number" min={0} max={365} value={policy.criticalSlaDays} onChange={(e) => updatePolicy('criticalSlaDays', Number(e.target.value))} />
+                <span className="field-hint">Teams have {policy.criticalSlaDays} days to remediate Critical findings</span>
               </label>
               <label>High Risk SLA (days)
                 <input type="number" min={0} max={365} value={policy.highSlaDays} onChange={(e) => updatePolicy('highSlaDays', Number(e.target.value))} />
+                <span className="field-hint">Teams have {policy.highSlaDays} days to remediate High findings</span>
               </label>
               <label>Medium Risk SLA (days)
                 <input type="number" min={0} max={365} value={policy.mediumSlaDays} onChange={(e) => updatePolicy('mediumSlaDays', Number(e.target.value))} />
+                <span className="field-hint">Teams have {policy.mediumSlaDays} days to remediate Medium findings</span>
               </label>
               <label>Low Risk SLA (days)
                 <input type="number" min={0} max={365} value={policy.lowSlaDays} onChange={(e) => updatePolicy('lowSlaDays', Number(e.target.value))} />
+                <span className="field-hint">Teams have {policy.lowSlaDays} days to remediate Low findings</span>
               </label>
               <label>Critical Asset SLA Multiplier
                 <input type="number" step="0.1" min={0} max={5} value={policy.assetCriticalSlaMultiplier} onChange={(e) => updatePolicy('assetCriticalSlaMultiplier', Number(e.target.value))} />
+                <span className="field-hint">Critical assets get ~{Math.round(policy.criticalSlaDays * policy.assetCriticalSlaMultiplier)} days for Critical findings</span>
               </label>
               <label>High Asset SLA Multiplier
                 <input type="number" step="0.1" min={0} max={5} value={policy.assetHighSlaMultiplier} onChange={(e) => updatePolicy('assetHighSlaMultiplier', Number(e.target.value))} />
+                <span className="field-hint">High assets get ~{Math.round(policy.highSlaDays * policy.assetHighSlaMultiplier)} days for High findings</span>
               </label>
               <label>Medium Asset SLA Multiplier
                 <input type="number" step="0.1" min={0} max={5} value={policy.assetMediumSlaMultiplier} onChange={(e) => updatePolicy('assetMediumSlaMultiplier', Number(e.target.value))} />
+                <span className="field-hint">Medium assets get ~{Math.round(policy.mediumSlaDays * policy.assetMediumSlaMultiplier)} days for Medium findings</span>
               </label>
               <label>Low Asset SLA Multiplier
                 <input type="number" step="0.1" min={0} max={5} value={policy.assetLowSlaMultiplier} onChange={(e) => updatePolicy('assetLowSlaMultiplier', Number(e.target.value))} />
+                <span className="field-hint">Low assets get ~{Math.round(policy.lowSlaDays * policy.assetLowSlaMultiplier)} days for Low findings</span>
               </label>
             </div>
+            {policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['sla']?.includes(e.field)).length > 0 && (
+              <div className="notice error">
+                <ul>{policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['sla']?.includes(e.field)).map((e) => <li key={e.field}>{e.message}</li>)}</ul>
+              </div>
+            )}
+            <div className="button-row form-submit-row">
+              <button type="button" className="btn btn-primary" onClick={savePolicy} disabled={policySaving || policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['sla']?.includes(e.field)).length > 0}>
+                {policySaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {policyMessage && activeSection === 'sla' && <div className="notice">{policyMessage}</div>}
           </div>
         )}
       </section>
@@ -417,6 +487,50 @@ export function ConfigurationsPage() {
             <div className="inline-note">
               Findings matching the configured asset identifier will be moved to <span className="mono">AUTO_CLOSED</span> after the configured age.
             </div>
+            {policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['auto-close']?.includes(e.field)).length > 0 && (
+              <div className="notice error">
+                <ul>{policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['auto-close']?.includes(e.field)).map((e) => <li key={e.field}>{e.message}</li>)}</ul>
+              </div>
+            )}
+            <div className="button-row form-submit-row">
+              <button type="button" className="btn btn-primary" onClick={savePolicy} disabled={policySaving || policyValidationErrors.filter((e) => SECTION_POLICY_FIELDS['auto-close']?.includes(e.field)).length > 0}>
+                {policySaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {policyMessage && activeSection === 'auto-close' && <div className="notice">{policyMessage}</div>}
+          </div>
+        )}
+      </section>
+      )}
+
+      {activeSection === 'finding-generation' && (
+      <section id="config-section-finding-generation" className="config-accordion-section">
+        <button type="button" className="config-accordion-toggle" onClick={() => toggleSection('finding-generation')}>
+          <span>Org CVE Finding Generation</span>
+          <span className={isSectionOpen('finding-generation') ? 'config-chevron open' : 'config-chevron'}>▾</span>
+        </button>
+        {isSectionOpen('finding-generation') && (
+          <div className="config-accordion-body">
+            <div className="form-grid ingestion-grid">
+              <label>Finding generation mode
+                <select
+                  value={policy.findingGenerationMode}
+                  onChange={(e) => updatePolicy('findingGenerationMode', e.target.value)}
+                >
+                  <option value="AUTO">Generate findings automatically</option>
+                  <option value="MANUAL">Require manual CVE review before creating findings</option>
+                </select>
+              </label>
+            </div>
+            <div className="inline-note">
+              <strong>AUTO</strong> creates findings automatically during recompute. <strong>MANUAL</strong> still computes org-level CVE exposure, but no findings are auto-created until an analyst reviews the CVE and triggers manual finding creation explicitly.
+            </div>
+            <div className="button-row form-submit-row">
+              <button type="button" className="btn btn-primary" onClick={savePolicy} disabled={policySaving}>
+                {policySaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {policyMessage && activeSection === 'finding-generation' && <div className="notice">{policyMessage}</div>}
           </div>
         )}
       </section>
@@ -497,28 +611,33 @@ export function ConfigurationsPage() {
                 <ResizableTable storageKey="github-source-pipelines-table-widths">
                   <thead>
                     <tr>
+                      <th style={{ width: 32 }}></th>
                       <th>Name</th>
                       <th>Repository</th>
-                      <th>Endpoint</th>
                       <th>Asset</th>
                       <th>Frequency</th>
                       <th>Enabled</th>
                       <th>Last Run</th>
-                      <th>Status</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {githubSources.map((source) => (
+                    {githubSources.map((source) => {
+                      const dot = pipelineStatusMeta(source.lastRunStatus);
+                      return (
                       <tr key={source.id}>
+                        <td>
+                          <span
+                            className={`pipeline-dot ${dot.cls}`}
+                            title={source.lastError ? `${dot.label}: ${source.lastError}` : dot.label}
+                          />
+                        </td>
                         <td>{source.name}</td>
                         <td>{`${source.owner}/${source.repo}`}</td>
-                        <td className="mono">{source.path || '-'}</td>
                         <td>{`${source.assetName} (${source.assetIdentifier})`}</td>
                         <td>{source.frequency === 'ONCE' ? 'Once' : `Every ${source.intervalMinutes}m`}</td>
                         <td>{source.enabled ? 'Yes' : 'No'}</td>
                         <td>{source.lastRunAt ? new Date(source.lastRunAt).toLocaleString() : 'Never'}</td>
-                        <td>{source.lastRunStatus ?? '-'}</td>
                         <td>
                           <button
                             type="button"
@@ -530,7 +649,8 @@ export function ConfigurationsPage() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </ResizableTable>
               </div>
@@ -541,7 +661,7 @@ export function ConfigurationsPage() {
       )}
 
       {activeSection === 'prototype-reset' && (
-      <section id="config-section-prototype-reset" className="config-accordion-section">
+      <section id="config-section-prototype-reset" className="config-accordion-section danger-zone-section">
         <button type="button" className="config-accordion-toggle" onClick={() => toggleSection('prototype-reset')}>
           <span>Prototype Data Reset</span>
           <span className={isSectionOpen('prototype-reset') ? 'config-chevron open' : 'config-chevron'}>▾</span>
@@ -567,46 +687,6 @@ export function ConfigurationsPage() {
       </section>
       )}
 
-      {activeSection === 'integration-queue' && (
-      <section id="config-section-integration-queue" className="config-accordion-section">
-        <button type="button" className="config-accordion-toggle" onClick={() => toggleSection('integration-queue')}>
-          <span>Integration Run Queue</span>
-          <span className={isSectionOpen('integration-queue') ? 'config-chevron open' : 'config-chevron'}>▾</span>
-        </button>
-        {isSectionOpen('integration-queue') && (
-          <div className="config-accordion-body">
-            <SourcesPage
-              focusSource="all"
-              title="Integration Queue"
-              caption="NVD, KEV, and CSAF/VEX ingestion jobs are processed in a single shared queue."
-            />
-          </div>
-        )}
-      </section>
-      )}
-
-      {policyValidationErrors.length > 0 && (
-        <div className="notice error">
-          <strong>Inline validation:</strong>
-          <ul>
-            {policyValidationErrors.map((error) => (
-              <li key={`${error.field}-${error.message}`}>{error.message}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="button-row form-submit-row">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={savePolicy}
-          disabled={policySaving || policyValidationErrors.length > 0}
-        >
-          {policySaving ? 'Saving...' : 'Save Configuration'}
-        </button>
-      </div>
-      {policyMessage && <div className="notice">{policyMessage}</div>}
     </div>
   );
 }

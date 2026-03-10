@@ -12,19 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class RiskPolicyService {
 
     private final RiskPolicyRepository riskPolicyRepository;
-    private final RiskPolicySchemaService riskPolicySchemaService;
 
-    public RiskPolicyService(
-            RiskPolicyRepository riskPolicyRepository,
-            RiskPolicySchemaService riskPolicySchemaService
-    ) {
+    public RiskPolicyService(RiskPolicyRepository riskPolicyRepository) {
         this.riskPolicyRepository = riskPolicyRepository;
-        this.riskPolicySchemaService = riskPolicySchemaService;
     }
 
     @Transactional
     public RiskPolicy getOrCreate(Tenant tenant) {
-        riskPolicySchemaService.ensureColumns();
         return riskPolicyRepository.findByTenant(tenant)
                 .orElseGet(() -> {
                     RiskPolicy policy = new RiskPolicy();
@@ -116,6 +110,9 @@ public class RiskPolicyService {
         if (req.autoCloseAfterDays() != null) {
             policy.setAutoCloseAfterDays(Math.max(0, req.autoCloseAfterDays()));
         }
+        if (req.findingGenerationMode() != null) {
+            policy.setFindingGenerationMode(parseFindingGenerationMode(req.findingGenerationMode()));
+        }
 
         policy.touch();
         return toResponse(riskPolicyRepository.save(policy));
@@ -152,6 +149,18 @@ public class RiskPolicyService {
                 policy.getAssetLowSlaMultiplier(),
                 policy.isAutoCloseEnabled(),
                 policy.getAutoCloseAssetIdentifier(),
-                policy.getAutoCloseAfterDays());
+                policy.getAutoCloseAfterDays(),
+                policy.getFindingGenerationMode().name());
+    }
+
+    private RiskPolicy.FindingGenerationMode parseFindingGenerationMode(String value) {
+        if (value == null || value.isBlank()) {
+            return RiskPolicy.FindingGenerationMode.MANUAL;
+        }
+        try {
+            return RiskPolicy.FindingGenerationMode.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            return RiskPolicy.FindingGenerationMode.MANUAL;
+        }
     }
 }

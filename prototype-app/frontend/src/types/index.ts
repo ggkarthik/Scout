@@ -25,6 +25,7 @@ export type RiskPolicy = {
   autoCloseEnabled: boolean;
   autoCloseAssetIdentifier?: string;
   autoCloseAfterDays: number;
+  findingGenerationMode: 'AUTO' | 'MANUAL';
 };
 
 export type PrototypeDataResetResponse = {
@@ -179,7 +180,7 @@ export type CveInventoryMappingRecord = {
   impactedComponentCount: number;
   noPatchComponentCount: number;
   lastModifiedAt?: string;
-  mappedCpes: string[];
+  matchedIdentifiers: string[];
   mappedSoftware: string[];
   mappedSoftwareCount: number;
 };
@@ -187,11 +188,6 @@ export type CveInventoryMappingRecord = {
 export type DashboardCveInventoryMap = {
   topHighRisk: CveInventoryMappingRecord[];
   latest: CveInventoryMappingRecord[];
-};
-
-export type AuthContext = {
-  creator: boolean;
-  principal: string;
 };
 
 export type OperationalEndpointMetric = {
@@ -267,7 +263,6 @@ export type OperationalNoiseLifecycle = {
   filteredPercentOfPotential: number;
   reopenRatePercent: number;
   notApplicableCategories: TopFindingMetric[];
-  autoResolvedTrendLast30Days: TopFindingMetric[];
 };
 
 export type OperationalApiReadPath = {
@@ -303,6 +298,11 @@ export type OperationalMetricDefinition = {
   key: string;
   label: string;
   description: string;
+};
+
+export type OperationalSectionResponse<T> = {
+  generatedAt: string;
+  data: T;
 };
 
 export type OperationalDashboard = {
@@ -486,28 +486,16 @@ export type InventoryComponentFilterValues = {
   assetTypes: string[];
   componentStatuses: string[];
   sourceSystems: string[];
+  ecosystems: string[];
 };
 
-export type SoftwareModelRecord = {
-  id: string;
-  normalizedKey: string;
-  canonicalPublisher: string;
-  canonicalProduct: string;
-  primaryIdentifierType: string;
-  primaryIdentifier: string;
-  totalComponents: number;
-  activeComponents: number;
-  assetsRepresented: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type SoftwareModelPage = {
-  items: SoftwareModelRecord[];
-  page: number;
-  size: number;
-  totalItems: number;
-  totalPages: number;
+export type AffectedPackage = {
+  ecosystem?: string;
+  packageName?: string;
+  affectedVersions: string;
+  fixedVersion?: string;
+  cpe?: string;
+  vexStatus?: string;
 };
 
 export type VulnerabilityIntelRecord = {
@@ -526,6 +514,7 @@ export type VulnerabilityIntelRecord = {
   publishedAt?: string;
   lastModifiedAt?: string;
   updatedAt: string;
+  affectedPackages: AffectedPackage[];
 };
 
 export type VulnerabilityIntelObservation = {
@@ -571,6 +560,7 @@ export type VulnerabilityIntelDetail = {
   sources: string[];
   openFindings: number;
   observations: VulnerabilityIntelObservation[];
+  affectedPackages: AffectedPackage[];
 };
 
 export type VulnerabilityIntelPage = {
@@ -581,43 +571,19 @@ export type VulnerabilityIntelPage = {
   totalPages: number;
 };
 
+export type VulnerabilityIntelDashboardSummary = {
+  trackedCount: number;
+  resolvedCount: number;
+  criticalCount: number;
+  exploitCount: number;
+  criticalRecords: VulnerabilityIntelPage;
+};
+
 export type VulnerabilityIntelFilterValues = {
   severities: string[];
   sources: string[];
   vulnStatuses: string[];
   inKevValues: string[];
-};
-
-export type OrgSpecificCveExposureRecord = {
-  stateId: string;
-  vulnerabilityId: string;
-  externalId: string;
-  component: string;
-  version: string;
-  applicability: 'APPLICABLE' | 'NOT_APPLICABLE' | 'UNKNOWN';
-  impacted: boolean;
-  impactState: 'IMPACTED' | 'NOT_IMPACTED' | 'FIXED' | 'NO_PATCH' | 'UNKNOWN';
-  severity: string;
-  cvssScore?: number;
-  lastEvaluatedAt?: string;
-};
-
-export type OrgSpecificCveExposurePage = {
-  items: OrgSpecificCveExposureRecord[];
-  page: number;
-  size: number;
-  totalItems: number;
-  totalPages: number;
-};
-
-export type OrgSpecificCveExposureRecomputeResponse = {
-  scope: string;
-  activeComponentCount: number;
-  correlatedExposureCount: number;
-  stateRowsChanged: number;
-  exposureStateRowCount: number;
-  openFindingsCount: number;
-  recomputedAt: string;
 };
 
 export type CmdbAssetRecord = {

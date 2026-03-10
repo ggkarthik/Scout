@@ -1,15 +1,16 @@
 package com.prototype.vulnwatch.domain;
 
+import jakarta.persistence.Basic;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -27,7 +28,10 @@ import java.util.UUID;
                 @Index(name = "idx_findings_tenant_component_vuln", columnList = "tenant_id,component_id,vulnerability_id"),
                 @Index(name = "idx_findings_asset_id", columnList = "asset_id"),
                 @Index(name = "idx_findings_vulnerability_id", columnList = "vulnerability_id"),
-                @Index(name = "idx_findings_vulnerability_status", columnList = "vulnerability_id,status")
+                @Index(name = "idx_findings_vulnerability_status", columnList = "vulnerability_id,status"),
+                @Index(name = "idx_findings_vex_status", columnList = "vex_status"),
+                @Index(name = "idx_findings_vex_freshness", columnList = "vex_freshness"),
+                @Index(name = "idx_findings_vex_provider", columnList = "vex_provider")
         }
 )
 public class Finding {
@@ -87,12 +91,21 @@ public class Finding {
     @Column
     private Instant suppressedUntil;
 
-    @Lob
-    @Column
+    @Basic(fetch = FetchType.LAZY)
+    @Column(columnDefinition = "TEXT")
     private String evidence;
 
-    @Lob
-    @Column(name = "precedence_trace")
+    @Column(name = "vex_status", length = 64)
+    private String vexStatus;
+
+    @Column(name = "vex_freshness", length = 64)
+    private String vexFreshness;
+
+    @Column(name = "vex_provider", length = 128)
+    private String vexProvider;
+
+    @Basic(fetch = FetchType.LAZY)
+    @Column(name = "precedence_trace", columnDefinition = "TEXT")
     private String precedenceTrace;
 
     @Column
@@ -237,6 +250,30 @@ public class Finding {
 
     public void setEvidence(String evidence) {
         this.evidence = evidence;
+    }
+
+    public String getVexStatus() {
+        return vexStatus;
+    }
+
+    public void setVexStatus(String vexStatus) {
+        this.vexStatus = vexStatus;
+    }
+
+    public String getVexFreshness() {
+        return vexFreshness;
+    }
+
+    public void setVexFreshness(String vexFreshness) {
+        this.vexFreshness = vexFreshness;
+    }
+
+    public String getVexProvider() {
+        return vexProvider;
+    }
+
+    public void setVexProvider(String vexProvider) {
+        this.vexProvider = vexProvider;
     }
 
     public String getPrecedenceTrace() {

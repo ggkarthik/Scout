@@ -15,7 +15,6 @@ import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentifierRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
 import com.prototype.vulnwatch.repo.SoftwareInventoryItemRepository;
-import com.prototype.vulnwatch.repo.SoftwareModelRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityConfigExprRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
@@ -26,10 +25,8 @@ import com.prototype.vulnwatch.repo.VulnerabilityRuleRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,7 +54,6 @@ public class PrototypeDataResetService {
     private final IdentityLinkRepository identityLinkRepository;
     private final SoftwareIdentifierRepository softwareIdentifierRepository;
     private final SoftwareIdentityRepository softwareIdentityRepository;
-    private final SoftwareModelRepository softwareModelRepository;
     private final CpeDimRepository cpeDimRepository;
     private final SyncRunRepository syncRunRepository;
     private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
@@ -84,7 +80,6 @@ public class PrototypeDataResetService {
             IdentityLinkRepository identityLinkRepository,
             SoftwareIdentifierRepository softwareIdentifierRepository,
             SoftwareIdentityRepository softwareIdentityRepository,
-            SoftwareModelRepository softwareModelRepository,
             CpeDimRepository cpeDimRepository,
             SyncRunRepository syncRunRepository,
             VulnerabilityIntelligenceService vulnerabilityIntelligenceService,
@@ -110,7 +105,6 @@ public class PrototypeDataResetService {
         this.identityLinkRepository = identityLinkRepository;
         this.softwareIdentifierRepository = softwareIdentifierRepository;
         this.softwareIdentityRepository = softwareIdentityRepository;
-        this.softwareModelRepository = softwareModelRepository;
         this.cpeDimRepository = cpeDimRepository;
         this.syncRunRepository = syncRunRepository;
         this.vulnerabilityIntelligenceService = vulnerabilityIntelligenceService;
@@ -141,44 +135,32 @@ public class PrototypeDataResetService {
         deletedRows.put("identity_links", identityLinkRepository.count());
         deletedRows.put("software_identifiers", softwareIdentifierRepository.count());
         deletedRows.put("software_identities", softwareIdentityRepository.count());
-        deletedRows.put("software_models", softwareModelRepository.count());
         deletedRows.put("cpe_dim", cpeDimRepository.count());
         deletedRows.put("sync_runs", syncRunRepository.count());
 
-        boolean h2Database = isH2Database();
-        if (h2Database) {
-            jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY FALSE");
-        }
-        try {
-            truncateOrDeleteTable("finding_suggestions");
-            truncateOrDeleteTable("finding_comments");
-            truncateOrDeleteTable("finding_events");
-            truncateOrDeleteTable("findings");
-            truncateOrDeleteTable("component_vulnerability_state");
-            truncateOrDeleteTable("org_cve_records");
-            truncateOrDeleteTable("software_inventory_items");
-            truncateOrDeleteTable("inventory_component_cpe_map");
-            truncateOrDeleteTable("inventory_components");
-            truncateOrDeleteTable("sbom_uploads");
-            truncateOrDeleteTable("assets");
-            truncateOrDeleteTable("vulnerability_intel_summary_sources");
-            truncateOrDeleteTable("vulnerability_intel_summary");
-            truncateOrDeleteTable("vulnerability_config_expr");
-            truncateOrDeleteTable("vulnerability_intel_observations");
-            truncateOrDeleteTable("vulnerability_rules");
-            truncateOrDeleteTable("vulnerability_targets");
-            truncateOrDeleteTable("vulnerabilities");
-            truncateOrDeleteTable("identity_links");
-            truncateOrDeleteTable("software_identifiers");
-            truncateOrDeleteTable("software_identities");
-            truncateOrDeleteTable("software_models");
-            truncateOrDeleteTable("cpe_dim");
-            truncateOrDeleteTable("sync_runs");
-        } finally {
-            if (h2Database) {
-                jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE");
-            }
-        }
+        truncateOrDeleteTable("finding_suggestions");
+        truncateOrDeleteTable("finding_comments");
+        truncateOrDeleteTable("finding_events");
+        truncateOrDeleteTable("findings");
+        truncateOrDeleteTable("component_vulnerability_state");
+        truncateOrDeleteTable("org_cve_records");
+        truncateOrDeleteTable("software_inventory_items");
+        truncateOrDeleteTable("inventory_component_cpe_map");
+        truncateOrDeleteTable("inventory_components");
+        truncateOrDeleteTable("sbom_uploads");
+        truncateOrDeleteTable("assets");
+        truncateOrDeleteTable("vulnerability_intel_summary_sources");
+        truncateOrDeleteTable("vulnerability_intel_summary");
+        truncateOrDeleteTable("vulnerability_config_expr");
+        truncateOrDeleteTable("vulnerability_intel_observations");
+        truncateOrDeleteTable("vulnerability_rules");
+        truncateOrDeleteTable("vulnerability_targets");
+        truncateOrDeleteTable("vulnerabilities");
+        truncateOrDeleteTable("identity_links");
+        truncateOrDeleteTable("software_identifiers");
+        truncateOrDeleteTable("software_identities");
+        truncateOrDeleteTable("cpe_dim");
+        truncateOrDeleteTable("sync_runs");
 
         vulnerabilityIntelligenceService.resetReadModelCaches();
         return new PrototypeDataResetResponse(deletedRows, Instant.now());
@@ -207,17 +189,8 @@ public class PrototypeDataResetService {
         Long present = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where lower(table_name) = ?",
                 Long.class,
-                tableName.toLowerCase(Locale.ROOT)
+                tableName.toLowerCase(java.util.Locale.ROOT)
         );
         return present != null && present > 0L;
-    }
-
-    private boolean isH2Database() {
-        String productName = jdbcTemplate.execute((ConnectionCallback<String>) connection ->
-                connection.getMetaData().getDatabaseProductName());
-        if (productName == null) {
-            return false;
-        }
-        return productName.toLowerCase(Locale.ROOT).contains("h2");
     }
 }

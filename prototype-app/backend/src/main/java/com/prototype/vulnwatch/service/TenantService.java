@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,16 @@ public class TenantService {
     public Tenant getDefaultTenant() {
         return tenantRepository.findByNameIgnoreCase(DEFAULT_TENANT_NAME)
                 .orElseGet(this::resolveExistingTenantOrCreateDefault);
+    }
+
+    @Transactional(readOnly = true)
+    public Tenant resolveTenant(Long legacyTenantId) {
+        if (legacyTenantId == null) {
+            return getDefaultTenant();
+        }
+        UUID legacyTenantUuid = new UUID(0L, legacyTenantId);
+        return tenantRepository.findById(legacyTenantUuid)
+                .orElseGet(this::getDefaultTenant);
     }
 
     private Tenant resolveExistingTenantOrCreateDefault() {

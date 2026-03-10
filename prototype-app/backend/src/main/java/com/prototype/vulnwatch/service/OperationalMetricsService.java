@@ -16,6 +16,14 @@ public class OperationalMetricsService {
     public static final String KEY_VULN_INTEL_FILTERS = "vulnerability-intelligence-filters";
     public static final String KEY_DASHBOARD_OVERVIEW = "dashboard-overview";
     public static final String KEY_OPERATIONS_DASHBOARD = "operations-dashboard";
+    public static final String KEY_OPERATIONS_OVERVIEW = "operations-overview";
+    public static final String KEY_OPERATIONS_INGESTION = "operations-ingestion-efficiency";
+    public static final String KEY_OPERATIONS_NORMALIZATION = "operations-normalization-quality";
+    public static final String KEY_OPERATIONS_CORRELATION = "operations-correlation-effectiveness";
+    public static final String KEY_OPERATIONS_LIFECYCLE = "operations-noise-lifecycle";
+    public static final String KEY_OPERATIONS_READ_PATH = "operations-api-read-path";
+    public static final String KEY_OPERATIONS_FRESHNESS = "operations-freshness-drift";
+    public static final String KEY_OPERATIONS_CATALOG = "operations-metric-catalog";
     public static final String KEY_FINDINGS_LIST = "findings-list";
     public static final String KEY_SBOM_UPLOAD = "sbom-upload";
     public static final String KEY_SBOM_FETCH_ENDPOINT = "sbom-fetch-endpoint";

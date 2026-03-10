@@ -9,7 +9,6 @@ public record OperationalNoiseLifecycleResponse(
         long deferredUnderInvestigation,
         double filteredPercentOfPotential,
         double reopenRatePercent,
-        List<TopFindingMetricResponse> notApplicableCategories,
-        List<TopFindingMetricResponse> autoResolvedTrendLast30Days
+        List<TopFindingMetricResponse> notApplicableCategories
 ) {
 }

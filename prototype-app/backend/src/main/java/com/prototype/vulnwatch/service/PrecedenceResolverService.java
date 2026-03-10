@@ -192,10 +192,14 @@ public class PrecedenceResolverService {
 
     private Comparator<CandidateDecision> priorityComparator() {
         return Comparator
-                .comparingInt((CandidateDecision candidate) -> sourceProfile(candidate.target().getSource()).priority())
+                .comparingInt((CandidateDecision candidate) -> sourcePriority(candidate.target().getSource()))
                 .thenComparingInt(CandidateDecision::rank)
                 .thenComparing(Comparator.comparingDouble(CandidateDecision::confidence).reversed())
                 .thenComparing(candidate -> candidate.target().getId());
+    }
+
+    int sourcePriority(String source) {
+        return sourceProfile(source).priority();
     }
 
     private SourceProfile sourceProfile(String source) {

@@ -9,7 +9,6 @@ import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SbomFormat;
 import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
-import com.prototype.vulnwatch.domain.SoftwareModel;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.GithubRepoIngestionResult;
@@ -59,7 +58,6 @@ public class SbomIngestionService {
     private final AssetRepository assetRepository;
     private final SbomUploadRepository sbomUploadRepository;
     private final InventoryComponentRepository inventoryComponentRepository;
-    private final SoftwareModelService softwareModelService;
     private final IdentityGraphService identityGraphService;
     private final InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
     private final SoftwareInventorySyncService softwareInventorySyncService;
@@ -78,7 +76,6 @@ public class SbomIngestionService {
             AssetRepository assetRepository,
             SbomUploadRepository sbomUploadRepository,
             InventoryComponentRepository inventoryComponentRepository,
-            SoftwareModelService softwareModelService,
             IdentityGraphService identityGraphService,
             InventoryComponentCpeMappingService inventoryComponentCpeMappingService,
             SoftwareInventorySyncService softwareInventorySyncService,
@@ -95,7 +92,6 @@ public class SbomIngestionService {
         this.assetRepository = assetRepository;
         this.sbomUploadRepository = sbomUploadRepository;
         this.inventoryComponentRepository = inventoryComponentRepository;
-        this.softwareModelService = softwareModelService;
         this.identityGraphService = identityGraphService;
         this.inventoryComponentCpeMappingService = inventoryComponentCpeMappingService;
         this.softwareInventorySyncService = softwareInventorySyncService;
@@ -527,14 +523,9 @@ public class SbomIngestionService {
                         parsed.purl(),
                         "sbom");
                 component.setSoftwareIdentity(softwareIdentity);
-                SoftwareModel softwareModel = softwareModelService.resolveFromComponent(
-                        parsed.ecosystem(),
-                        parsed.packageName(),
-                        parsed.purl());
-                component.setSoftwareModel(softwareModel);
-                component.setNormalizedName(resolveNormalizedName(parsed, softwareModel));
+                component.setNormalizedName(resolveNormalizedName(parsed));
                 component.setNormalizedVersion(resolveNormalizedVersion(parsed.version()));
-                component.setSoftwareModelResult(resolveSoftwareModelResult(softwareModel));
+                component.setSoftwareModelResult(resolveSoftwareModelResult());
                 toPersist.add(component);
             }
 
@@ -607,19 +598,7 @@ public class SbomIngestionService {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private String resolveNormalizedName(ParsedComponent parsed, SoftwareModel softwareModel) {
-        if (softwareModel != null) {
-            String publisher = normalize(softwareModel.getCanonicalPublisher());
-            String product = normalize(softwareModel.getCanonicalProduct());
-            if (!publisher.isBlank() && !product.isBlank()) {
-                return publisher + "/" + product;
-            }
-            String modelKey = normalize(softwareModel.getNormalizedKey());
-            if (!modelKey.isBlank()) {
-                return modelKey;
-            }
-        }
-
+    private String resolveNormalizedName(ParsedComponent parsed) {
         PurlUtil.ParsedPurl parsedPurl = PurlUtil.parse(parsed.purl());
         String namespace = normalize(parsedPurl.namespace());
         String packageName = normalize(parsedPurl.packageName());
@@ -645,15 +624,8 @@ public class SbomIngestionService {
         return normalized;
     }
 
-    private String resolveSoftwareModelResult(SoftwareModel softwareModel) {
-        if (softwareModel == null) {
-            return "UNRESOLVED";
-        }
-        String key = normalize(softwareModel.getNormalizedKey());
-        if (key.isBlank()) {
-            return "UNRESOLVED";
-        }
-        return "MATCHED:" + key;
+    private String resolveSoftwareModelResult() {
+        return "UNRESOLVED";
     }
 
     private String sha256(byte[] content) {

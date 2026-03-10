@@ -4,26 +4,18 @@ import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
-import com.prototype.vulnwatch.domain.SoftwareModel;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.InventoryComponentFilterValuesResponse;
 import com.prototype.vulnwatch.dto.InventoryComponentPageResponse;
 import com.prototype.vulnwatch.dto.InventoryComponentResponse;
-import com.prototype.vulnwatch.dto.SoftwareModelPageResponse;
-import com.prototype.vulnwatch.dto.SoftwareModelResponse;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
-import com.prototype.vulnwatch.repo.SoftwareModelRepository;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -35,36 +27,37 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     private final InventoryComponentRepository inventoryComponentRepository;
-    private final SoftwareModelRepository softwareModelRepository;
 
-    public InventoryService(
-            InventoryComponentRepository inventoryComponentRepository,
-            SoftwareModelRepository softwareModelRepository
-    ) {
+    public InventoryService(InventoryComponentRepository inventoryComponentRepository) {
         this.inventoryComponentRepository = inventoryComponentRepository;
-        this.softwareModelRepository = softwareModelRepository;
     }
 
     @Transactional(readOnly = true)
     public InventoryComponentPageResponse listComponentsPage(
             Tenant tenant,
-            AssetType assetType,
-            InventoryComponentStatus componentStatus,
-            String sourceSystem,
+            List<AssetType> assetTypes,
+            List<InventoryComponentStatus> componentStatuses,
+            List<String> sourceSystems,
+            List<String> ecosystems,
+            String query,
             int page,
             int size
     ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.min(200, Math.max(1, size));
-        String normalizedSourceSystem = sourceSystem == null || sourceSystem.isBlank()
-                ? null
-                : sourceSystem.trim();
+        List<AssetType> normalizedAssetTypes = sanitizeEnumValues(assetTypes);
+        List<InventoryComponentStatus> normalizedComponentStatuses = sanitizeEnumValues(componentStatuses);
+        List<String> normalizedSourceSystems = normalizeValueList(sourceSystems, this::normalizeSourceSystem);
+        List<String> normalizedEcosystems = normalizeValueList(ecosystems, this::normalizeExactValue);
+        String normalizedQueryPattern = buildQueryPattern(query);
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "lastObservedAt"));
         Page<InventoryComponent> componentPage = inventoryComponentRepository.findPageByFilters(
                 tenant,
-                assetType,
-                componentStatus,
-                normalizedSourceSystem,
+                normalizedAssetTypes,
+                normalizedComponentStatuses,
+                normalizedSourceSystems,
+                normalizedEcosystems,
+                normalizedQueryPattern,
                 pageable
         );
         List<InventoryComponentResponse> items = componentPage.getContent().stream()
@@ -76,64 +69,6 @@ public class InventoryService {
                 componentPage.getSize(),
                 componentPage.getTotalElements(),
                 componentPage.getTotalPages()
-        );
-    }
-
-    @Transactional(readOnly = true)
-    public SoftwareModelPageResponse listSoftwareModelsPage(Tenant tenant, int page, int size) {
-        int safePage = Math.max(0, page);
-        int safeSize = Math.min(200, Math.max(1, size));
-        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "updatedAt"));
-        Page<SoftwareModel> modelPage = softwareModelRepository.findAll(pageable);
-        List<SoftwareModel> models = modelPage.getContent();
-
-        List<InventoryComponent> components = models.isEmpty()
-                ? List.of()
-                : inventoryComponentRepository.findByTenantAndSoftwareModel_IdIn(
-                        tenant,
-                        models.stream().map(SoftwareModel::getId).toList());
-
-        Map<UUID, ModelStats> statsByModel = new HashMap<>();
-        for (InventoryComponent component : components) {
-            SoftwareModel model = component.getSoftwareModel();
-            if (model == null) {
-                continue;
-            }
-            ModelStats stats = statsByModel.computeIfAbsent(model.getId(), ignored -> new ModelStats());
-            stats.totalComponents += 1;
-            if (component.getComponentStatus() == InventoryComponentStatus.ACTIVE) {
-                stats.activeComponents += 1;
-            }
-            if (component.getAsset() != null && component.getAsset().getId() != null) {
-                stats.assetIds.add(component.getAsset().getId());
-            }
-        }
-
-        List<SoftwareModelResponse> items = models.stream()
-                .map(model -> {
-                    ModelStats stats = statsByModel.getOrDefault(model.getId(), new ModelStats());
-                    return new SoftwareModelResponse(
-                            model.getId(),
-                            model.getNormalizedKey(),
-                            model.getCanonicalPublisher(),
-                            model.getCanonicalProduct(),
-                            model.getPrimaryIdentifierType(),
-                            model.getPrimaryIdentifier(),
-                            stats.totalComponents,
-                            stats.activeComponents,
-                            stats.assetIds.size(),
-                            model.getCreatedAt(),
-                            model.getUpdatedAt()
-                    );
-                })
-                .toList();
-
-        return new SoftwareModelPageResponse(
-                items,
-                modelPage.getNumber(),
-                modelPage.getSize(),
-                modelPage.getTotalElements(),
-                modelPage.getTotalPages()
         );
     }
 
@@ -166,10 +101,17 @@ public class InventoryService {
         sourceSystems.add("api");
         sourceSystems.add("github");
 
+        LinkedHashSet<String> ecosystems = new LinkedHashSet<>();
+        inventoryComponentRepository.findDistinctEcosystemsByTenant(tenant).stream()
+                .filter(this::hasText)
+                .map(this::normalizeExactValue)
+                .forEach(ecosystems::add);
+
         return new InventoryComponentFilterValuesResponse(
                 sortByPreferredOrder(assetTypes, List.of("APPLICATION", "HOST", "CONTAINER_IMAGE")),
                 sortByPreferredOrder(componentStatuses, List.of("ACTIVE", "RETIRED")),
-                sourceSystems.stream().sorted().toList()
+                sourceSystems.stream().sorted().toList(),
+                ecosystems.stream().sorted().toList()
         );
     }
 
@@ -220,13 +162,42 @@ public class InventoryService {
                 .replace(' ', '-');
     }
 
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
+    private String normalizeExactValue(String value) {
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static final class ModelStats {
-        private int totalComponents;
-        private int activeComponents;
-        private final Set<UUID> assetIds = new HashSet<>();
+    private String buildQueryPattern(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        return "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
+    }
+
+    private <T> List<T> sanitizeEnumValues(List<T> values) {
+        if (values == null) {
+            return null;
+        }
+        List<T> normalized = values.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private List<String> normalizeValueList(List<String> values, java.util.function.Function<String, String> normalizer) {
+        if (values == null) {
+            return null;
+        }
+        List<String> normalized = values.stream()
+                .filter(this::hasText)
+                .map(normalizer)
+                .filter(this::hasText)
+                .distinct()
+                .toList();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

@@ -62,28 +62,22 @@ export function DashboardPage() {
 
   React.useEffect(() => {
     let active = true;
-    setError(null);
-    Promise.all([
-      api.getDashboard(),
-      api.listApplicableSoftware({ page: 0, size: 10 }),
-      api.listImpactedCves({ page: 0, size: 10 }),
-      api.getCveInventoryMap(5)
-    ])
-      .then(([dashboard, softwarePage, impactedPage, mapResponse]) => {
-        if (!active) {
-          return;
-        }
-        setData(dashboard);
-        setApplicableSoftware(softwarePage);
-        setImpactedCves(impactedPage);
-        setCveInventoryMap(mapResponse);
-      })
-      .catch((requestError) => {
-        if (!active) {
-          return;
-        }
-        setError(requestError instanceof Error ? requestError.message : String(requestError));
-      });
+
+    api.getDashboard()
+      .then(d => { if (active) setData(d); })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+
+    api.listApplicableSoftware({ page: 0, size: 10 })
+      .then(p => { if (active) setApplicableSoftware(p); })
+      .catch(() => {});
+
+    api.listImpactedCves({ page: 0, size: 10 })
+      .then(p => { if (active) setImpactedCves(p); })
+      .catch(() => {});
+
+    api.getCveInventoryMap(5)
+      .then(m => { if (active) setCveInventoryMap(m); })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -93,7 +87,7 @@ export function DashboardPage() {
   if (error) {
     return <div className="panel">Failed to load dashboard: {error}</div>;
   }
-  if (!data || !applicableSoftware || !impactedCves || !cveInventoryMap) {
+  if (!data) {
     return <div className="panel">Loading dashboard...</div>;
   }
 
@@ -110,8 +104,8 @@ export function DashboardPage() {
   const correlation = data.correlationEfficiency;
   const staleTrend = analytics?.staleSuppressionsTrendLast30Days ?? [];
   const staleTrendMax = Math.max(1, ...staleTrend.map((point) => point.count));
-  const topHighRiskMap = cveInventoryMap.topHighRisk ?? [];
-  const latestMap = cveInventoryMap.latest ?? [];
+  const topHighRiskMap = cveInventoryMap?.topHighRisk ?? [];
+  const latestMap = cveInventoryMap?.latest ?? [];
 
   return (
     <div className="page-grid">
@@ -172,8 +166,8 @@ export function DashboardPage() {
 
       <section className="panel csaf-vex-analytics-panel">
         <div className="panel-header">
-          <h3>CPE Correlation Efficiency</h3>
-          <span className="panel-caption">CPE-only finding generation and match quality</span>
+          <h3>Correlation Efficiency</h3>
+          <span className="panel-caption">Coverage, match quality, and finding generation across correlation methods</span>
         </div>
 
         <div className="noise-summary-grid">
@@ -203,6 +197,10 @@ export function DashboardPage() {
             <div className="noise-summary-label">CPE Created (24h)</div>
             <div className="noise-summary-value">{correlation.cpeFindingsCreatedLast24Hours.toLocaleString()}</div>
           </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Other Methods Created (24h)</div>
+            <div className="noise-summary-value">{correlation.nonCpeFindingsCreatedLast24Hours.toLocaleString()}</div>
+          </div>
         </div>
       </section>
 
@@ -210,10 +208,12 @@ export function DashboardPage() {
         <div className="panel-header">
           <h3>Applicable Software</h3>
           <span className="panel-caption">
-            {applicableSoftware.totalItems.toLocaleString()} components with at least one applicable CVE
+            {applicableSoftware ? `${applicableSoftware.totalItems.toLocaleString()} components with at least one applicable CVE` : 'Loading...'}
           </span>
         </div>
-        {applicableSoftware.items.length === 0 ? (
+        {!applicableSoftware ? (
+          <div className="panel-caption">Loading...</div>
+        ) : applicableSoftware.items.length === 0 ? (
           <div className="panel-caption">No applicable software components found.</div>
         ) : (
           <div className="table-scroll">
@@ -256,10 +256,12 @@ export function DashboardPage() {
         <div className="panel-header">
           <h3>Impacted CVEs</h3>
           <span className="panel-caption">
-            {impactedCves.totalItems.toLocaleString()} CVEs impacted by current inventory and VEX status
+            {impactedCves ? `${impactedCves.totalItems.toLocaleString()} CVEs impacted by current inventory and VEX status` : 'Loading...'}
           </span>
         </div>
-        {impactedCves.items.length === 0 ? (
+        {!impactedCves ? (
+          <div className="panel-caption">Loading...</div>
+        ) : impactedCves.items.length === 0 ? (
           <div className="panel-caption">No impacted CVEs found.</div>
         ) : (
           <div className="table-scroll">
@@ -302,9 +304,11 @@ export function DashboardPage() {
       <section className="panel">
         <div className="panel-header">
           <h3>Top CVE Inventory Mapping</h3>
-          <span className="panel-caption">CPE-level mapping for top high risk and latest impacted CVEs</span>
+          <span className="panel-caption">Identifier-level mapping for top high risk and latest impacted CVEs</span>
         </div>
-        <div className="noise-panel-grid">
+        {!cveInventoryMap ? (
+          <div className="panel-caption">Loading...</div>
+        ) : (<div className="noise-panel-grid">
           <div>
             <div className="noise-subtitle">Top 5 High Risk CVEs</div>
             {topHighRiskMap.length === 0 ? (
@@ -317,7 +321,7 @@ export function DashboardPage() {
                       <th>CVE</th>
                       <th>Severity</th>
                       <th>CVSS</th>
-                      <th>Mapped CPEs</th>
+                      <th>Matched Identifiers</th>
                       <th>Mapped Software</th>
                     </tr>
                   </thead>
@@ -329,7 +333,7 @@ export function DashboardPage() {
                           <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
                         </td>
                         <td>{row.cvssScore == null ? '-' : row.cvssScore.toFixed(1)}</td>
-                        <td className="mono">{summarizeList(row.mappedCpes)}</td>
+                        <td className="mono">{summarizeList(row.matchedIdentifiers)}</td>
                         <td title={row.mappedSoftware.join(', ')}>
                           {row.mappedSoftwareCount.toLocaleString()} ({summarizeList(row.mappedSoftware, 2)})
                         </td>
@@ -353,7 +357,7 @@ export function DashboardPage() {
                       <th>CVE</th>
                       <th>Severity</th>
                       <th>CVSS</th>
-                      <th>Mapped CPEs</th>
+                      <th>Matched Identifiers</th>
                       <th>Mapped Software</th>
                     </tr>
                   </thead>
@@ -365,7 +369,7 @@ export function DashboardPage() {
                           <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
                         </td>
                         <td>{row.cvssScore == null ? '-' : row.cvssScore.toFixed(1)}</td>
-                        <td className="mono">{summarizeList(row.mappedCpes)}</td>
+                        <td className="mono">{summarizeList(row.matchedIdentifiers)}</td>
                         <td title={row.mappedSoftware.join(', ')}>
                           {row.mappedSoftwareCount.toLocaleString()} ({summarizeList(row.mappedSoftware, 2)})
                         </td>
@@ -376,7 +380,7 @@ export function DashboardPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>)}
       </section>
 
       <section className="panel csaf-vex-analytics-panel">

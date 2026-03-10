@@ -15,11 +15,8 @@ type ConnectorId =
   | 'redhat-csaf-vex'
   | 'advisory-feed';
 
-type ConnectTab = 'inventory' | 'vulnerability';
-
-type Props = {
-  initialTab?: ConnectTab;
-};
+type CategoryFilter = 'all' | 'inventory' | 'vulnerability';
+type ConnectView = 'sources' | 'integration-queue';
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -28,8 +25,8 @@ type ConnectorDefinition = {
   icon: string;
 };
 
-const CONNECT_TAB_QUERY_KEY = 'connectTab';
 const CONNECT_SOURCE_QUERY_KEY = 'connectSource';
+const CONNECT_VIEW_QUERY_KEY = 'connectView';
 
 const CONNECTORS: ConnectorDefinition[] = [
   {
@@ -110,32 +107,23 @@ const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
   'servicenow-cmdb'
 ];
 
-function isConnectTab(value: string | null): value is ConnectTab {
-  return value === 'inventory' || value === 'vulnerability';
+function isConnectView(value: string | null): value is ConnectView {
+  return value === 'sources' || value === 'integration-queue';
 }
 
-function isConnectorId(value: string | null): value is ConnectorId {
-  return CONNECTORS.some((connector) => connector.id === value);
+function readInitialConnectView(): ConnectView {
+  const fromQuery = new URLSearchParams(window.location.search).get(CONNECT_VIEW_QUERY_KEY);
+  return isConnectView(fromQuery) ? fromQuery : 'sources';
 }
 
-function readConnectTabFromQuery(initialTab?: ConnectTab): ConnectTab {
-  if (initialTab) return initialTab;
-  const value = new URLSearchParams(window.location.search).get(CONNECT_TAB_QUERY_KEY);
-  return isConnectTab(value) ? value : 'inventory';
-}
-
-function readConnectorFromQuery(_initialTab?: ConnectTab): ConnectorId | null {
-  // Always open Connect on the source catalog to keep the two-section landing view predictable.
-  return null;
-}
-
-function writeConnectQuery(connectorId: ConnectorId | null): void {
+function writeConnectQuery(connectorId: ConnectorId | null, view: ConnectView): void {
   const url = new URL(window.location.href);
   if (connectorId) {
     url.searchParams.set(CONNECT_SOURCE_QUERY_KEY, connectorId);
   } else {
     url.searchParams.delete(CONNECT_SOURCE_QUERY_KEY);
   }
+  url.searchParams.set(CONNECT_VIEW_QUERY_KEY, view);
   window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
 }
 
@@ -245,13 +233,23 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   );
 }
 
-export function ConnectPage({ initialTab }: Props) {
-  const [connectTab] = React.useState<ConnectTab>(() => readConnectTabFromQuery(initialTab));
+export function ConnectPage() {
+  const [activeView, setActiveView] = React.useState<ConnectView>(readInitialConnectView);
+  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all');
   const [search, setSearch] = React.useState('');
-  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromQuery(initialTab));
+  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(null);
 
   React.useEffect(() => {
-    writeConnectQuery(activeConnector);
+    writeConnectQuery(activeConnector, activeView);
+  }, [activeConnector, activeView]);
+
+  React.useEffect(() => {
+    if (!activeConnector) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveConnector(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
 
   const query = search.trim().toLowerCase();
@@ -273,121 +271,166 @@ export function ConnectPage({ initialTab }: Props) {
     .filter((connector) => INVENTORY_SOURCE_CONNECTOR_IDS.includes(connector.id))
     .filter(matchesSearch);
 
-  const sectionOrder: Array<{ key: 'vulnerability' | 'inventory'; title: string; connectors: ConnectorDefinition[]; caption: string }> =
-    connectTab === 'vulnerability'
-      ? [
-          {
-            key: 'vulnerability',
-            title: 'Vulnerability Intelligence Sources',
-            connectors: vulnerabilityConnectors,
-            caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.'
-          },
-          {
-            key: 'inventory',
-            title: 'Inventory Sources',
-            connectors: inventoryConnectors,
-            caption: 'SBOM, CMDB, cloud and platform integrations that ingest asset/component inventory.'
-          }
-        ]
-      : [
-          {
-            key: 'inventory',
-            title: 'Inventory Sources',
-            connectors: inventoryConnectors,
-            caption: 'SBOM, CMDB, cloud and platform integrations that ingest asset/component inventory.'
-          },
-          {
-            key: 'vulnerability',
-            title: 'Vulnerability Intelligence Sources',
-            connectors: vulnerabilityConnectors,
-            caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.'
-          }
-        ];
+  const allSections = [
+    {
+      key: 'inventory' as const,
+      title: 'Inventory Sources',
+      connectors: inventoryConnectors,
+      caption: 'SBOM, CMDB, cloud and platform integrations that ingest asset/component inventory.'
+    },
+    {
+      key: 'vulnerability' as const,
+      title: 'Vulnerability Intelligence Sources',
+      connectors: vulnerabilityConnectors,
+      caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.'
+    }
+  ];
 
-  const totalVisible = sectionOrder.reduce((sum, section) => sum + section.connectors.length, 0);
+  const visibleSections = categoryFilter === 'all'
+    ? allSections
+    : allSections.filter((s) => s.key === categoryFilter);
+
+  const totalVisible = visibleSections.reduce((sum, section) => sum + section.connectors.length, 0);
 
   const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
-
-  if (activeConnector && selectedConnector) {
-    return (
-      <div className="page-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <h3>{selectedConnector.name}</h3>
-            <span className="panel-caption">{selectedConnector.summary}</span>
-          </div>
-          <div className="button-row section-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setActiveConnector(null)}>
-              Back To Connector Catalog
-            </button>
-          </div>
-        </section>
-        <ConnectorDetailContent connectorId={activeConnector} />
-      </div>
-    );
-  }
 
   return (
     <div className="page-grid">
       <section className="panel">
         <div className="panel-header">
           <h3>Connect</h3>
-          <span className="panel-caption">Connect inventory and vulnerability sources. Click any source to open its configuration.</span>
-        </div>
-        <div className="panel-caption">
-          Active catalog: <span className="mono">{connectTab === 'inventory' ? 'Inventory-first' : 'Vulnerability-first'}</span>
+          <span className="panel-caption">
+            {activeView === 'sources'
+              ? 'Connect inventory and vulnerability sources. Click any source to open its configuration.'
+              : 'Monitor vulnerability intelligence ingestion jobs and the shared integration queue.'}
+          </span>
         </div>
       </section>
 
-      <section className="panel connect-catalog-panel">
-        <div className="connect-search-row">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search sources..."
-            aria-label="Search sources"
-          />
+      <section className="panel">
+        <div className="connect-filter-bar">
+          {(['sources', 'integration-queue'] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              className={`connect-filter-btn${activeView === view ? ' active' : ''}`}
+              onClick={() => {
+                setActiveView(view);
+                if (view !== 'sources') {
+                  setActiveConnector(null);
+                }
+              }}
+            >
+              {view === 'sources' && 'Sources'}
+              {view === 'integration-queue' && 'Integration Run Queue'}
+            </button>
+          ))}
         </div>
+      </section>
 
-        <div className="connect-sections-layout">
-          {totalVisible === 0 ? (
-            <div className="empty-state">
-              <p>No sources match the current search.</p>
-            </div>
-          ) : (
-            sectionOrder.map((section) => (
-              <div key={section.key} className="connect-source-section">
-                <div className="connect-source-section-head">
-                  <h4>{section.title}</h4>
-                  <span className="panel-caption">{section.caption}</span>
-                </div>
-                {section.connectors.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No sources in this section match the search.</p>
-                  </div>
-                ) : (
-                  <div className="connect-card-grid">
-                    {section.connectors.map((connector) => (
-                      <button
-                        key={connector.id}
-                        type="button"
-                        className="connect-source-card"
-                        onClick={() => setActiveConnector(connector.id)}
-                      >
-                        <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
-                        <div>
-                          <div className="connect-source-name">{connector.name}</div>
-                          <div className="panel-caption">{connector.summary}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+      {activeView === 'sources' ? (
+        <section className="panel connect-catalog-panel">
+          <div className="connect-search-row">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search sources..."
+              aria-label="Search sources"
+            />
+          </div>
+
+          <div className="connect-filter-bar">
+            {(['all', 'inventory', 'vulnerability'] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                className={`connect-filter-btn${categoryFilter === filter ? ' active' : ''}`}
+                onClick={() => setCategoryFilter(filter)}
+              >
+                {filter === 'all' && 'All'}
+                {filter === 'inventory' && <>Inventory Sources <strong>{inventoryConnectors.length}</strong></>}
+                {filter === 'vulnerability' && <>Vulnerability Intelligence <strong>{vulnerabilityConnectors.length}</strong></>}
+              </button>
+            ))}
+          </div>
+
+          <div className="connect-sections-layout">
+            {totalVisible === 0 ? (
+              <div className="empty-state">
+                <p>No sources match the current search.</p>
               </div>
-            ))
-          )}
+            ) : (
+              visibleSections.map((section) => (
+                <div key={section.key} className="connect-source-section">
+                  <div className="connect-source-section-head">
+                    <h4>{section.title}</h4>
+                    <span className="panel-caption">{section.caption}</span>
+                  </div>
+                  {section.connectors.length === 0 ? (
+                    <div className="empty-state">
+                      <p>No sources in this section match the search.</p>
+                    </div>
+                  ) : (
+                    <div className="connect-card-grid">
+                      {section.connectors.map((connector) => (
+                        <button
+                          key={connector.id}
+                          type="button"
+                          className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}`}
+                          onClick={() => setActiveConnector(connector.id)}
+                        >
+                          <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
+                          <div>
+                            <div className="connect-source-name">{connector.name}</div>
+                            <div className="panel-caption">{connector.summary}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : (
+        <SourcesPage
+          focusSource="all"
+          title="Integration Queue"
+          caption="NVD, KEV, GHSA, and CSAF/VEX ingestion jobs are processed in a shared queue."
+        />
+      )}
+
+      {activeConnector && selectedConnector && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setActiveConnector(null); }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedConnector.name}
+        >
+          <div className="modal-panel modal-panel-wide">
+            <div className="connector-drawer-header">
+              <div className="connector-drawer-title">
+                <span className="connect-source-icon" aria-hidden="true">{selectedConnector.icon}</span>
+                <div>
+                  <h3>{selectedConnector.name}</h3>
+                  <span className="panel-caption">{selectedConnector.summary}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setActiveConnector(null)}
+                aria-label="Close connector setup"
+              >
+                ✕
+              </button>
+            </div>
+            <ConnectorDetailContent connectorId={activeConnector} />
+          </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }

@@ -37,7 +37,6 @@ public class FindingWorkflowService {
     private final FindingCommentRepository findingCommentRepository;
     private final FindingEventRepository findingEventRepository;
     private final RiskPolicyRepository riskPolicyRepository;
-    private final RiskPolicySchemaService riskPolicySchemaService;
     private final AssetRepository assetRepository;
     private final ObjectMapper objectMapper;
 
@@ -46,7 +45,6 @@ public class FindingWorkflowService {
             FindingCommentRepository findingCommentRepository,
             FindingEventRepository findingEventRepository,
             RiskPolicyRepository riskPolicyRepository,
-            RiskPolicySchemaService riskPolicySchemaService,
             AssetRepository assetRepository,
             ObjectMapper objectMapper
     ) {
@@ -54,7 +52,6 @@ public class FindingWorkflowService {
         this.findingCommentRepository = findingCommentRepository;
         this.findingEventRepository = findingEventRepository;
         this.riskPolicyRepository = riskPolicyRepository;
-        this.riskPolicySchemaService = riskPolicySchemaService;
         this.assetRepository = assetRepository;
         this.objectMapper = objectMapper;
     }
@@ -230,7 +227,6 @@ public class FindingWorkflowService {
     @Transactional
     public void autoCloseFindingsByPolicy() {
         Instant now = Instant.now();
-        riskPolicySchemaService.ensureColumns();
         List<RiskPolicy> policies = riskPolicyRepository.findAll();
 
         for (RiskPolicy policy : policies) {

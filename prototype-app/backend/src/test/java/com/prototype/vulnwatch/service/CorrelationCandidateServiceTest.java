@@ -101,6 +101,7 @@ class CorrelationCandidateServiceTest {
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                Map.of(),
                 Map.of()
         );
 
@@ -135,7 +136,8 @@ class CorrelationCandidateServiceTest {
                 Map.of(component.getId(), Set.of("pkg:maven/org.apache.logging.log4j/log4j@2.14.1")),
                 Map.of("pkg:maven/org.apache.logging.log4j/log4j@2.14.1", List.of(purlTarget)),
                 Map.of(component.getId(), Set.of("maven:org.apache.logging.log4j:log4j")),
-                Map.of("maven:org.apache.logging.log4j:log4j", List.of(coordTarget))
+                Map.of("maven:org.apache.logging.log4j:log4j", List.of(coordTarget)),
+                Map.of()
         );
 
         List<CorrelationCandidateService.CandidateMatch> candidates = service.candidatesForComponent(component, bundle);

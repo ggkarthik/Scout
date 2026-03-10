@@ -52,7 +52,6 @@ public class FindingEvidenceService {
         payload.put("componentEcosystem", component.getEcosystem());
         payload.put("componentPackage", component.getPackageName());
         payload.put("softwareIdentityKey", component.getSoftwareIdentity() == null ? null : component.getSoftwareIdentity().getCanonicalKey());
-        payload.put("softwareModelKey", component.getSoftwareModel() == null ? null : component.getSoftwareModel().getNormalizedKey());
         payload.put("vulnerabilityId", vulnerability.getExternalId());
         payload.put("vulnerabilitySeverity", vulnerability.getSeverity());
         payload.put("vulnerabilityCvssVector", vulnerability.getCvssVector());

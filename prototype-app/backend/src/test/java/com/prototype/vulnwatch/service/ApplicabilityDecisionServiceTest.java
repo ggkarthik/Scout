@@ -24,7 +24,7 @@ class ApplicabilityDecisionServiceTest {
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
-        assertEquals(ApplicabilityDecisionService.ApplicabilityResult.FALSE, decision.result());
+        assertEquals(ApplicabilityDecisionService.ApplicabilityResult.UNKNOWN, decision.result());
         assertEquals("VERSION_UNKNOWN", decision.reason());
         assertEquals("VERSION_UNKNOWN", decision.trace().get("finalReason"));
     }

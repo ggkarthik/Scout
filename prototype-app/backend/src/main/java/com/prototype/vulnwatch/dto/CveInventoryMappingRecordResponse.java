@@ -14,7 +14,7 @@ public record CveInventoryMappingRecordResponse(
         long impactedComponentCount,
         long noPatchComponentCount,
         Instant lastModifiedAt,
-        List<String> mappedCpes,
+        List<String> matchedIdentifiers,
         List<String> mappedSoftware,
         long mappedSoftwareCount
 ) {

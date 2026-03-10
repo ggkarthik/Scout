@@ -56,6 +56,30 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         if ("GET".equalsIgnoreCase(method) && "/api/operations/dashboard".equals(path)) {
             return OperationalMetricsService.KEY_OPERATIONS_DASHBOARD;
         }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/overview".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_OVERVIEW;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/ingestion-efficiency".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_INGESTION;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/normalization-quality".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_NORMALIZATION;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/correlation-effectiveness".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_CORRELATION;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/noise-lifecycle".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_LIFECYCLE;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/api-read-path".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_READ_PATH;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/freshness-drift".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_FRESHNESS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/operations/metric-catalog".equals(path)) {
+            return OperationalMetricsService.KEY_OPERATIONS_CATALOG;
+        }
         if ("GET".equalsIgnoreCase(method) && "/api/findings".equals(path)) {
             return OperationalMetricsService.KEY_FINDINGS_LIST;
         }

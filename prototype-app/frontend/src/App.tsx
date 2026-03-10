@@ -4,10 +4,14 @@ import { ConnectPage } from './pages/ConnectPage';
 import { ConfigurationsPage } from './pages/ConfigurationsPage';
 import { FindingsPage } from './pages/FindingsPage';
 import { InventoryPage, InventoryViewKey } from './pages/InventoryPage';
-import { OperationalDashboardPage } from './pages/OperationalDashboardPage';
+import {
+  OperationalDashboardPage,
+  OPERATIONS_NAV_ITEMS,
+  OperationsViewKey,
+  normalizeOperationsView
+} from './pages/OperationalDashboardPage';
 import {
   VulnerabilityIntelDashboardPage,
-  VulnerabilityIntelSectionPlaceholderPage,
   VulnerabilityIntelViewKey
 } from './pages/VulnerabilityIntelDashboardPage';
 import { VulnerabilityIntelOrgCvePage } from './pages/VulnerabilityIntelOrgCvePage';
@@ -18,7 +22,6 @@ type Tab =
   | 'findings'
   | 'operations'
   | 'vulnerability-intelligence'
-  | 'software-models'
   | 'inventory'
   | 'connect'
   | 'configurations';
@@ -30,24 +33,22 @@ const tabs: { key: Tab; label: string; navLabel: string }[] = [
   { key: 'findings', label: 'Findings', navLabel: 'Findings' },
   { key: 'operations', label: 'Operational Dashboard', navLabel: 'Operations' },
   { key: 'vulnerability-intelligence', label: 'Vulnerability Intelligence', navLabel: 'Vuln Intel' },
-  { key: 'software-models', label: 'Software Models', navLabel: 'Models' },
   { key: 'inventory', label: 'Inventory', navLabel: 'Inventory' },
   { key: 'connect', label: 'Connect', navLabel: 'Connect' },
   { key: 'configurations', label: 'Configurations', navLabel: 'Config' }
 ];
 
-const primaryNavTabs: Tab[] = ['dashboard', 'findings', 'operations', 'vulnerability-intelligence', 'software-models', 'inventory'];
+const primaryNavTabs: Tab[] = ['dashboard', 'findings', 'operations', 'vulnerability-intelligence', 'inventory'];
 const bottomNavTabs: Tab[] = ['connect', 'configurations'];
 
 const INVENTORY_VIEW_QUERY_KEY = 'inventoryView';
+const OPERATIONS_VIEW_QUERY_KEY = 'operationsView';
 const VULN_INTEL_VIEW_QUERY_KEY = 'vulnIntelView';
 
 const vulnerabilityIntelNavItems: Array<{ key: VulnerabilityIntelViewKey; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Vulnerabilities' },
-  { key: 'org-cves', label: 'Org CVEs' },
-  { key: 'threat-feeds', label: 'Threat Feeds' },
-  { key: 'reports', label: 'Reports' }
+  { key: 'org-cves', label: 'CVE Assessment Workbench' }
 ];
 
 type InventoryFlyoutGroup = {
@@ -120,15 +121,6 @@ function TabIcon({ tab }: { tab: Tab }) {
       </svg>
     );
   }
-  if (tab === 'software-models') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5 19.5 7.5 12 11.5 4.5 7.5 12 3.5Z" />
-        <path d="M4.5 12 12 16l7.5-4" />
-        <path d="M4.5 16.5 12 20.5l7.5-4" />
-      </svg>
-    );
-  }
   if (tab === 'configurations') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -162,6 +154,10 @@ function isInventoryView(value: string | null): value is InventoryViewKey {
   return inventoryFlyoutGroups.some((group) => group.items.some((item) => item.key === value));
 }
 
+function isOperationsView(value: string | null): value is OperationsViewKey {
+  return OPERATIONS_NAV_ITEMS.some((item) => item.key === value);
+}
+
 function isVulnerabilityIntelView(value: string | null): value is VulnerabilityIntelViewKey {
   return vulnerabilityIntelNavItems.some((item) => item.key === value);
 }
@@ -184,9 +180,6 @@ function readInitialRoute(): { tab: Tab } {
   if (rawTab === 'configurations') {
     return { tab: 'configurations' };
   }
-  if ((rawTab === 'inventory' || rawTab === 'assets') && rawInventoryView === 'software-models') {
-    return { tab: 'software-models' };
-  }
   if (rawTab === 'assets') {
     return { tab: 'inventory' };
   }
@@ -198,6 +191,11 @@ function readInitialRoute(): { tab: Tab } {
 function readInitialInventoryView(): InventoryViewKey {
   const fromQuery = new URLSearchParams(window.location.search).get(INVENTORY_VIEW_QUERY_KEY);
   return isInventoryView(fromQuery) ? fromQuery : 'sbom';
+}
+
+function readInitialOperationsView(): OperationsViewKey {
+  const fromQuery = new URLSearchParams(window.location.search).get(OPERATIONS_VIEW_QUERY_KEY);
+  return normalizeOperationsView(fromQuery);
 }
 
 function readInitialVulnerabilityIntelView(): VulnerabilityIntelViewKey {
@@ -217,10 +215,38 @@ function updateInventoryViewInUrl(view: InventoryViewKey): void {
   window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
 }
 
+function updateOperationsViewInUrl(view: OperationsViewKey): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set(OPERATIONS_VIEW_QUERY_KEY, view);
+  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+}
+
 function updateVulnerabilityIntelViewInUrl(view: VulnerabilityIntelViewKey): void {
   const url = new URL(window.location.href);
   url.searchParams.set(VULN_INTEL_VIEW_QUERY_KEY, view);
   window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+}
+
+function buildAppHref(
+  tab: Tab,
+  options?: {
+    inventoryView?: InventoryViewKey;
+    operationsView?: OperationsViewKey;
+    vulnerabilityIntelView?: VulnerabilityIntelViewKey;
+  }
+): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', tab);
+  if (options?.inventoryView) {
+    url.searchParams.set(INVENTORY_VIEW_QUERY_KEY, options.inventoryView);
+  }
+  if (options?.operationsView) {
+    url.searchParams.set(OPERATIONS_VIEW_QUERY_KEY, options.operationsView);
+  }
+  if (options?.vulnerabilityIntelView) {
+    url.searchParams.set(VULN_INTEL_VIEW_QUERY_KEY, options.vulnerabilityIntelView);
+  }
+  return `${url.pathname}?${url.searchParams.toString()}`;
 }
 
 function matchTabFromInput(value: string, allowedTabs: Tab[]): Tab | null {
@@ -240,12 +266,15 @@ export default function App() {
   const [navOpen, setNavOpen] = React.useState(false);
   const [tabSearch, setTabSearch] = React.useState('');
   const [inventoryView, setInventoryView] = React.useState<InventoryViewKey>(() => readInitialInventoryView());
+  const [operationsView, setOperationsView] = React.useState<OperationsViewKey>(() => readInitialOperationsView());
   const [vulnerabilityIntelView, setVulnerabilityIntelView] = React.useState<VulnerabilityIntelViewKey>(() => (
     readInitialVulnerabilityIntelView()
   ));
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
+  const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [vulnerabilityIntelFlyoutOpen, setVulnerabilityIntelFlyoutOpen] = React.useState(false);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
+  const operationsFlyoutTimer = React.useRef<number | null>(null);
   const vulnerabilityIntelFlyoutTimer = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -263,12 +292,32 @@ export default function App() {
   }, [inventoryView]);
 
   React.useEffect(() => {
+    updateOperationsViewInUrl(operationsView);
+  }, [operationsView]);
+
+  React.useEffect(() => {
     updateVulnerabilityIntelViewInUrl(vulnerabilityIntelView);
   }, [vulnerabilityIntelView]);
+
+  React.useEffect(() => {
+    const handlePopState = (): void => {
+      const route = readInitialRoute();
+      setActiveTab(route.tab);
+      setInventoryView(readInitialInventoryView());
+      setOperationsView(readInitialOperationsView());
+      setVulnerabilityIntelView(readInitialVulnerabilityIntelView());
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   React.useEffect(() => () => {
     if (inventoryFlyoutTimer.current != null) {
       window.clearTimeout(inventoryFlyoutTimer.current);
+    }
+    if (operationsFlyoutTimer.current != null) {
+      window.clearTimeout(operationsFlyoutTimer.current);
     }
     if (vulnerabilityIntelFlyoutTimer.current != null) {
       window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
@@ -299,6 +348,24 @@ export default function App() {
     }, 180);
   };
 
+  const openOperationsFlyout = (): void => {
+    if (operationsFlyoutTimer.current != null) {
+      window.clearTimeout(operationsFlyoutTimer.current);
+      operationsFlyoutTimer.current = null;
+    }
+    setOperationsFlyoutOpen(true);
+  };
+
+  const closeOperationsFlyoutWithDelay = (): void => {
+    if (operationsFlyoutTimer.current != null) {
+      window.clearTimeout(operationsFlyoutTimer.current);
+    }
+    operationsFlyoutTimer.current = window.setTimeout(() => {
+      setOperationsFlyoutOpen(false);
+      operationsFlyoutTimer.current = null;
+    }, 180);
+  };
+
   const applyTabSearch = (): void => {
     const next = matchTabFromInput(tabSearch, [...visiblePrimaryTabs, ...bottomNavTabs]);
     if (!next) return;
@@ -315,6 +382,9 @@ export default function App() {
         setNavOpen(false);
         if (tab !== 'inventory') {
           setInventoryFlyoutOpen(false);
+        }
+        if (tab !== 'operations') {
+          setOperationsFlyoutOpen(false);
         }
         if (tab !== 'vulnerability-intelligence') {
           setVulnerabilityIntelFlyoutOpen(false);
@@ -356,6 +426,62 @@ export default function App() {
 
         <div className="nav-main-section">
           {visiblePrimaryTabs.map((tab) => {
+            if (tab === 'operations') {
+              return (
+                <div
+                  key={tab}
+                  className="operations-nav-wrap"
+                  onMouseEnter={openOperationsFlyout}
+                  onMouseLeave={closeOperationsFlyoutWithDelay}
+                >
+                  <button
+                    className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
+                    onClick={() => {
+                      setActiveTab('operations');
+                      setNavOpen(false);
+                      setInventoryFlyoutOpen(false);
+                      setVulnerabilityIntelFlyoutOpen(false);
+                      setOperationsFlyoutOpen((open) => !open);
+                    }}
+                  >
+                    <span className="nav-icon">
+                      <TabIcon tab="operations" />
+                    </span>
+                    <span className="nav-label">Operations</span>
+                  </button>
+
+                  {operationsFlyoutOpen && (
+                    <div
+                      className="operations-flyout"
+                      onMouseEnter={openOperationsFlyout}
+                      onMouseLeave={closeOperationsFlyoutWithDelay}
+                    >
+                      <div className="operations-flyout-header">
+                        <span>Operations</span>
+                        <span aria-hidden="true">→</span>
+                      </div>
+                      <div className="operations-flyout-items">
+                        {OPERATIONS_NAV_ITEMS.map((item) => (
+                          <a
+                            key={item.key}
+                            href={buildAppHref('operations', { operationsView: item.key })}
+                            className={operationsView === item.key ? 'operations-flyout-item active' : 'operations-flyout-item'}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              setActiveTab('operations');
+                              setOperationsView(item.key);
+                              setOperationsFlyoutOpen(false);
+                            }}
+                          >
+                            <span>{item.label}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
             if (tab === 'vulnerability-intelligence') {
               return (
                 <div
@@ -370,6 +496,7 @@ export default function App() {
                       setActiveTab('vulnerability-intelligence');
                       setNavOpen(false);
                       setInventoryFlyoutOpen(false);
+                      setOperationsFlyoutOpen(false);
                       setVulnerabilityIntelFlyoutOpen((open) => !open);
                     }}
                   >
@@ -445,6 +572,7 @@ export default function App() {
                                   setInventoryView(item.key);
                                   setActiveTab('inventory');
                                   setInventoryFlyoutOpen(false);
+                                  setOperationsFlyoutOpen(false);
                                   setVulnerabilityIntelFlyoutOpen(false);
                                 }}
                               >
@@ -522,7 +650,7 @@ export default function App() {
 
         {activeTab === 'dashboard' && <DashboardPage />}
         {activeTab === 'findings' && <FindingsPage />}
-        {activeTab === 'operations' && <OperationalDashboardPage />}
+        {activeTab === 'operations' && <OperationalDashboardPage selectedView={operationsView} />}
         {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'dashboard' && (
           <VulnerabilityIntelDashboardPage onOpenVulnerabilities={() => setVulnerabilityIntelView('vulnerabilities')} />
         )}
@@ -531,21 +659,6 @@ export default function App() {
         )}
         {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'org-cves' && (
           <VulnerabilityIntelOrgCvePage />
-        )}
-        {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'threat-feeds' && (
-          <VulnerabilityIntelSectionPlaceholderPage
-            section="threat-feeds"
-            onOpenVulnerabilities={() => setVulnerabilityIntelView('vulnerabilities')}
-          />
-        )}
-        {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'reports' && (
-          <VulnerabilityIntelSectionPlaceholderPage
-            section="reports"
-            onOpenVulnerabilities={() => setVulnerabilityIntelView('vulnerabilities')}
-          />
-        )}
-        {activeTab === 'software-models' && (
-          <InventoryPage selectedView="software-models" />
         )}
         {activeTab === 'inventory' && (
           <InventoryPage selectedView={inventoryView} />

@@ -1,6 +1,5 @@
 import {
   ApplicableSoftwarePage,
-  AuthContext,
   Asset,
   CmdbAssetRecord,
   CmdbAssetSyncResponse,
@@ -15,24 +14,24 @@ import {
   InventoryComponentFilterValues,
   InventoryComponentPage,
   IngestionResult,
-  OrgSpecificCveExposurePage,
-  OrgSpecificCveExposureRecomputeResponse,
   OperationalDashboard,
+  OperationalSectionResponse,
   PrototypeDataResetResponse,
   RiskPolicy,
   SbomUploadEvidence,
-  SoftwareModelPage,
-  SoftwareModelRecord,
   SyncRun,
   SyncTriggerResponse,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
+  VulnerabilityIntelDashboardSummary,
   VulnerabilityIntelPage
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
 const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
+const TENANT_ID = import.meta.env.VITE_TENANT_ID ?? '1';
+const USER_ID = import.meta.env.VITE_USER_ID ?? 'local-analyst';
 
 type ApiErrorPayload = {
   code?: string;
@@ -73,6 +72,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers ?? {});
   headers.set('Content-Type', 'application/json');
   headers.set('X-API-Key', API_KEY);
+  headers.set('X-Tenant-ID', TENANT_ID);
+  headers.set('X-User-ID', USER_ID);
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
   }
@@ -95,8 +96,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json();
 }
 
+export { request as apiRequest };
+
 export const api = {
-  getAuthContext: () => request<AuthContext>('/auth/context'),
   getDashboard: () => request<Dashboard>('/dashboard'),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {
     const searchParams = new URLSearchParams();
@@ -155,38 +157,38 @@ export const api = {
   },
   listFindingFilters: () => request<FindingFilterValues>('/findings/filters'),
   getOperationalDashboard: () => request<OperationalDashboard>('/operations/dashboard'),
+  getOperationalOverview: () => request<OperationalSectionResponse<OperationalDashboard['executiveHealth']>>('/operations/overview'),
+  getOperationalIngestionEfficiency: () => request<OperationalSectionResponse<OperationalDashboard['ingestionEfficiency']>>('/operations/ingestion-efficiency'),
+  getOperationalNormalizationQuality: () => request<OperationalSectionResponse<OperationalDashboard['normalizationQuality']>>('/operations/normalization-quality'),
+  getOperationalCorrelationEffectiveness: () => request<OperationalSectionResponse<OperationalDashboard['correlationEffectiveness']>>('/operations/correlation-effectiveness'),
+  getOperationalNoiseLifecycle: () => request<OperationalSectionResponse<OperationalDashboard['noiseLifecycle']>>('/operations/noise-lifecycle'),
+  getOperationalApiReadPath: () => request<OperationalSectionResponse<OperationalDashboard['apiReadPath']>>('/operations/api-read-path'),
+  getOperationalFreshnessDrift: () => request<OperationalSectionResponse<OperationalDashboard['freshnessDrift']>>('/operations/freshness-drift'),
+  getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
   listAssets: () => request<Asset[]>('/assets'),
   listInventoryComponents: (
     params?: {
-      assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
-      componentStatus?: 'ACTIVE' | 'RETIRED';
-      sourceSystem?: string;
+      assetType?: Array<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>;
+      componentStatus?: Array<'ACTIVE' | 'RETIRED'>;
+      sourceSystem?: string[];
+      ecosystem?: string[];
+      query?: string;
       page?: number;
       size?: number;
     }
   ) => {
     const searchParams = new URLSearchParams();
-    if (params?.assetType) searchParams.set('assetType', params.assetType);
-    if (params?.componentStatus) searchParams.set('componentStatus', params.componentStatus);
-    if (params?.sourceSystem) searchParams.set('sourceSystem', params.sourceSystem);
+    params?.assetType?.forEach((value) => searchParams.append('assetType', value));
+    params?.componentStatus?.forEach((value) => searchParams.append('componentStatus', value));
+    params?.sourceSystem?.forEach((value) => searchParams.append('sourceSystem', value));
+    params?.ecosystem?.forEach((value) => searchParams.append('ecosystem', value));
+    if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
     if (params?.page != null) searchParams.set('page', String(params.page));
     if (params?.size != null) searchParams.set('size', String(params.size));
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<InventoryComponentPage>(`/inventory/components${suffix}`);
   },
   listInventoryComponentFilters: () => request<InventoryComponentFilterValues>('/inventory/components/filters'),
-  listSoftwareModels: (
-    params?: {
-      page?: number;
-      size?: number;
-    }
-  ) => {
-    const searchParams = new URLSearchParams();
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<SoftwareModelPage>(`/inventory/software-models${suffix}`);
-  },
   listVulnerabilityIntelligence: (
     params?: {
       page?: number;
@@ -211,26 +213,15 @@ export const api = {
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<VulnerabilityIntelPage>(`/vulnerability-intelligence${suffix}`);
   },
+  getVulnerabilityIntelDashboardSummary: (params?: { minCvssExclusive?: number; criticalLimit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.minCvssExclusive != null) searchParams.set('minCvssExclusive', String(params.minCvssExclusive));
+    if (params?.criticalLimit != null) searchParams.set('criticalLimit', String(params.criticalLimit));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<VulnerabilityIntelDashboardSummary>(`/vulnerability-intelligence/dashboard-summary${suffix}`);
+  },
   listVulnerabilityIntelligenceSources: () => request<string[]>('/vulnerability-intelligence/sources'),
   listVulnerabilityIntelligenceFilters: () => request<VulnerabilityIntelFilterValues>('/vulnerability-intelligence/filters'),
-  listOrgSpecificCves: (
-    params?: {
-      page?: number;
-      size?: number;
-      query?: string;
-    }
-  ) => {
-    const searchParams = new URLSearchParams();
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<OrgSpecificCveExposurePage>(`/vulnerability-intelligence/org-cves${suffix}`);
-  },
-  recomputeOrgSpecificCves: () => request<OrgSpecificCveExposureRecomputeResponse>(
-    '/vulnerability-intelligence/org-cves/recompute',
-    { method: 'POST' }
-  ),
   getVulnerabilityIntelligenceDetail: (externalId: string) => request<VulnerabilityIntelDetail>(
     `/vulnerability-intelligence/${encodeURIComponent(externalId)}`
   ),
@@ -253,23 +244,6 @@ export const api = {
     }
   ) => request<GithubSbomSource>('/github-sbom-sources', {
     method: 'POST',
-    body: JSON.stringify(payload)
-  }),
-  updateGithubSbomSource: (
-    sourceId: string,
-    payload: {
-      name: string;
-      owner: string;
-      repo: string;
-      assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
-      assetName?: string;
-      assetIdentifier?: string;
-      frequency?: 'ONCE' | 'INTERVAL';
-      intervalMinutes?: number;
-      enabled?: boolean;
-    }
-  ) => request<GithubSbomSource>(`/github-sbom-sources/${sourceId}`, {
-    method: 'PUT',
     body: JSON.stringify(payload)
   }),
   runGithubSbomSource: (sourceId: string) => request<void>(`/github-sbom-sources/${sourceId}/run`, { method: 'POST' }),

@@ -8,12 +8,9 @@ import { ResizableTable } from '../components/ResizableTable';
 import { StatCard } from '../components/StatCard';
 
 const PAGE_SIZE = 25;
-const CPE_MATCH_METHODS = [
-  'cpe-indexed-direct+version',
-  'cpe-indexed-fallback+version',
-  'cpe-direct+version',
-  'cpe-fallback+version'
-];
+const DEFAULT_MATCH_METHODS: string[] = [];
+const DEFAULT_ACTIVE_FILTERS: FindingFilterKey[] = [];
+const DEFAULT_MIN_CONFIDENCE = 0.7;
 
 type FindingFilterKey =
   | 'severity'
@@ -58,9 +55,9 @@ const FINDING_FILTER_FIELDS: FilterBuilderField[] = [
   },
   {
     key: 'matchMethod',
-    label: 'CPE Match Type',
+    label: 'Match Method',
     categoryKey: 'correlation',
-    description: 'Limit results by direct or fallback CPE match.',
+    description: 'Limit results by the correlation method used to create the finding.',
     typeLabel: 'Enum property'
   },
   {
@@ -130,7 +127,7 @@ const DEFAULT_FILTER_VALUES: FindingFilterValues = {
   severities: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE', 'UNKNOWN'],
   statuses: ['OPEN', 'RESOLVED', 'SUPPRESSED', 'AUTO_CLOSED'],
   decisionStates: ['AFFECTED', 'NOT_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'NEEDS_REVIEW'],
-  matchMethods: CPE_MATCH_METHODS,
+  matchMethods: DEFAULT_MATCH_METHODS,
   vexStatuses: ['AFFECTED', 'NOT_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'UNKNOWN'],
   vexFreshness: ['FRESH', 'STALE', 'UNKNOWN'],
   vexProviders: ['unknown']
@@ -154,11 +151,11 @@ function matchMethodLabel(value: string): string {
   if (value.startsWith('cpe-indexed-fallback')) return 'CPE Fallback + Version';
   if (value.startsWith('cpe-direct')) return 'CPE Direct + Version';
   if (value.startsWith('cpe-fallback')) return 'CPE Fallback + Version';
-  return value;
-}
-
-function isCpeMethod(value: string): boolean {
-  return value.trim().toLowerCase().startsWith('cpe-');
+  if (value.startsWith('purl-indexed-exact')) return 'PURL Exact + Version';
+  if (value.startsWith('coord-indexed-exact')) return 'Package Coordinate Exact + Version';
+  if (value.startsWith('advisory-pkg-indexed-exact')) return 'Advisory Package Exact + Version';
+  if (value.startsWith('manual-org-cve-review')) return 'Manual Org CVE Review';
+  return formatLabel(value);
 }
 
 function statusClass(status: Finding['status']): string {
@@ -187,15 +184,15 @@ export function FindingsPage() {
   const [error, setError] = React.useState('');
 
   const [filterValues, setFilterValues] = React.useState<FindingFilterValues>(DEFAULT_FILTER_VALUES);
-  const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(['severity', 'status', 'decisionState', 'matchMethod']);
+  const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(DEFAULT_ACTIVE_FILTERS);
   const [severities, setSeverities] = React.useState<string[]>([]);
   const [statuses, setStatuses] = React.useState<string[]>([]);
   const [decisionStates, setDecisionStates] = React.useState<string[]>([]);
-  const [matchMethods, setMatchMethods] = React.useState<string[]>(CPE_MATCH_METHODS);
+  const [matchMethods, setMatchMethods] = React.useState<string[]>(DEFAULT_MATCH_METHODS);
   const [vexStatuses, setVexStatuses] = React.useState<string[]>([]);
   const [vexFreshness, setVexFreshness] = React.useState<string[]>([]);
   const [vexProviders, setVexProviders] = React.useState<string[]>([]);
-  const [minConfidence, setMinConfidence] = React.useState(0.7);
+  const [minConfidence, setMinConfidence] = React.useState(DEFAULT_MIN_CONFIDENCE);
   const [vulnerabilityId, setVulnerabilityId] = React.useState('');
   const [packageName, setPackageName] = React.useState('');
   const [ecosystem, setEcosystem] = React.useState('');
@@ -215,9 +212,7 @@ export function FindingsPage() {
     [filterValues.decisionStates]
   );
   const matchMethodOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.matchMethods
-      .filter((value) => isCpeMethod(value))
-      .map((value) => ({ value, label: matchMethodLabel(value) })),
+    () => filterValues.matchMethods.map((value) => ({ value, label: matchMethodLabel(value) })),
     [filterValues.matchMethods]
   );
   const vexStatusOptions = React.useMemo<FilterValueOption[]>(
@@ -242,27 +237,27 @@ export function FindingsPage() {
     if (key === 'severity') setSeverities([]);
     if (key === 'status') setStatuses([]);
     if (key === 'decisionState') setDecisionStates([]);
-    if (key === 'matchMethod') setMatchMethods(CPE_MATCH_METHODS);
+    if (key === 'matchMethod') setMatchMethods(DEFAULT_MATCH_METHODS);
     if (key === 'vexStatus') setVexStatuses([]);
     if (key === 'vexFreshness') setVexFreshness([]);
     if (key === 'vexProvider') setVexProviders([]);
-    if (key === 'minConfidence') setMinConfidence(0.7);
+    if (key === 'minConfidence') setMinConfidence(DEFAULT_MIN_CONFIDENCE);
     if (key === 'vulnerabilityId') setVulnerabilityId('');
     if (key === 'packageName') setPackageName('');
     if (key === 'ecosystem') setEcosystem('');
     setPage(0);
-  }, []);
+  }, [filterValues.matchMethods]);
 
   const clearFilters = React.useCallback(() => {
-    setActiveFilters(['severity', 'status', 'decisionState', 'matchMethod']);
+    setActiveFilters(DEFAULT_ACTIVE_FILTERS);
     setSeverities([]);
     setStatuses([]);
     setDecisionStates([]);
-    setMatchMethods(CPE_MATCH_METHODS);
+    setMatchMethods(DEFAULT_MATCH_METHODS);
     setVexStatuses([]);
     setVexFreshness([]);
     setVexProviders([]);
-    setMinConfidence(0.7);
+    setMinConfidence(DEFAULT_MIN_CONFIDENCE);
     setVulnerabilityId('');
     setPackageName('');
     setEcosystem('');
@@ -275,16 +270,13 @@ export function FindingsPage() {
     setLoading(true);
     setError('');
 
-    const cpeScopedMatchMethods = matchMethods.filter((value) => isCpeMethod(value));
-    const effectiveMatchMethods = cpeScopedMatchMethods.length > 0 ? cpeScopedMatchMethods : CPE_MATCH_METHODS;
-
     api.listFindings({
       page,
       size: PAGE_SIZE,
       severity: activeFilters.includes('severity') && severities.length > 0 ? severities : undefined,
       status: activeFilters.includes('status') && statuses.length > 0 ? statuses : undefined,
       decisionState: activeFilters.includes('decisionState') && decisionStates.length > 0 ? decisionStates : undefined,
-      matchMethod: effectiveMatchMethods,
+      matchMethod: activeFilters.includes('matchMethod') && matchMethods.length > 0 ? matchMethods : undefined,
       vexStatus: activeFilters.includes('vexStatus') && vexStatuses.length > 0 ? vexStatuses : undefined,
       vexFreshness: activeFilters.includes('vexFreshness') && vexFreshness.length > 0 ? vexFreshness : undefined,
       vexProvider: activeFilters.includes('vexProvider') && vexProviders.length > 0 ? vexProviders : undefined,
@@ -330,33 +322,25 @@ export function FindingsPage() {
   React.useEffect(() => {
     api.listFindingFilters()
       .then((values) => {
-        const cpeMatchValues = values.matchMethods.filter((method) => isCpeMethod(method));
-        const effectiveCpeMatchValues = cpeMatchValues.length > 0 ? cpeMatchValues : CPE_MATCH_METHODS;
         setFilterValues({
           severities: values.severities,
           statuses: values.statuses,
           decisionStates: values.decisionStates,
-          matchMethods: effectiveCpeMatchValues,
+          matchMethods: values.matchMethods,
           vexStatuses: values.vexStatuses,
           vexFreshness: values.vexFreshness,
           vexProviders: values.vexProviders
         });
-        setMatchMethods(effectiveCpeMatchValues);
       })
       .catch(() => {
         setFilterValues(DEFAULT_FILTER_VALUES);
-        setMatchMethods(CPE_MATCH_METHODS);
+        setMatchMethods(DEFAULT_MATCH_METHODS);
       });
   }, []);
 
   React.useEffect(() => {
     loadFindings();
   }, [loadFindings]);
-
-  const openCount = rows.filter((row) => row.status === 'OPEN').length;
-  const highConfidenceCount = rows.filter((row) => row.confidenceScore >= 0.8).length;
-  const directCount = rows.filter((row) => row.matchedBy.startsWith('cpe-indexed-direct')).length;
-  const fallbackCount = rows.filter((row) => row.matchedBy.startsWith('cpe-indexed-fallback')).length;
 
   const groupedCards = React.useMemo(() => {
     return groupBy
@@ -393,7 +377,7 @@ export function FindingsPage() {
                 if (key === 'severity') label = `Severity${severities.length > 0 ? ` (${severities.length})` : ''}`;
                 if (key === 'status') label = `Status${statuses.length > 0 ? ` (${statuses.length})` : ''}`;
                 if (key === 'decisionState') label = `Decision${decisionStates.length > 0 ? ` (${decisionStates.length})` : ''}`;
-                if (key === 'matchMethod') label = `CPE Match${matchMethods.length > 0 ? ` (${matchMethods.length})` : ''}`;
+                if (key === 'matchMethod') label = `Match Method${matchMethods.length > 0 ? ` (${matchMethods.length})` : ''}`;
                 if (key === 'vexStatus') label = `VEX Status${vexStatuses.length > 0 ? ` (${vexStatuses.length})` : ''}`;
                 if (key === 'vexFreshness') label = `VEX Freshness${vexFreshness.length > 0 ? ` (${vexFreshness.length})` : ''}`;
                 if (key === 'vexProvider') label = `VEX Provider${vexProviders.length > 0 ? ` (${vexProviders.length})` : ''}`;
@@ -456,12 +440,11 @@ export function FindingsPage() {
             )}
             {activeFilters.includes('matchMethod') && (
               <FilterValueSelectCard
-                label="CPE Match Type"
+                label="Match Method"
                 selectedValues={matchMethods}
                 options={matchMethodOptions}
                 onChange={(values) => {
-                  const cpeOnly = values.filter((value) => isCpeMethod(value));
-                  setMatchMethods(cpeOnly.length > 0 ? cpeOnly : CPE_MATCH_METHODS);
+                  setMatchMethods(values);
                   setPage(0);
                 }}
                 onRemove={() => removeFilter('matchMethod')}
@@ -619,10 +602,8 @@ export function FindingsPage() {
       </section>
 
       <div className="stats-grid">
-        <StatCard title="Findings (Page)" value={rows.length} />
-        <StatCard title="Open (Page)" value={openCount} tone="warn" />
-        <StatCard title="High Confidence" value={highConfidenceCount} caption="Confidence >= 0.80" />
-        <StatCard title="CPE Direct (Page)" value={directCount} caption={`Fallback: ${fallbackCount.toLocaleString()}`} />
+        <StatCard title="Total Findings" value={totalItems} caption="Across all pages matching current filters" />
+        <StatCard title="This Page" value={rows.length} caption={`Page ${totalPages === 0 ? 0 : page + 1} of ${Math.max(totalPages, 1)}`} />
       </div>
 
       {groupedCards.length > 0 && (
@@ -641,7 +622,7 @@ export function FindingsPage() {
                   ) : (
                     group.items.map(([value, count]) => (
                       <div className="findings-widget-row" key={`${group.key}:${value}`}>
-                        <span>{value}</span>
+                        <span>{group.key === 'matchedBy' ? matchMethodLabel(value) : value}</span>
                         <strong>{count.toLocaleString()}</strong>
                       </div>
                     ))
@@ -655,9 +636,9 @@ export function FindingsPage() {
 
       <section className="panel">
         <div className="panel-header">
-          <h3>CPE Correlated Findings</h3>
+          <h3>Correlated Findings</h3>
           <span className="panel-caption">
-            CPE-only scope active. Showing {totalItems.toLocaleString()} total findings.
+            Showing {totalItems.toLocaleString()} total findings for the current filter set.
           </span>
         </div>
 
@@ -667,7 +648,7 @@ export function FindingsPage() {
           <div className="notice">Loading findings...</div>
         ) : rows.length === 0 ? (
           <div className="empty-state">
-            <p>No findings matched the current CPE filter set.</p>
+            <p>No findings matched the current filter set.</p>
           </div>
         ) : (
           <>
@@ -683,7 +664,7 @@ export function FindingsPage() {
                     <th>Decision</th>
                     <th>Risk</th>
                     <th>Confidence</th>
-                    <th>CPE Match</th>
+                    <th>Match Method</th>
                     <th>KEV</th>
                     <th>First Observed</th>
                     <th>Last Observed</th>

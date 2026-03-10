@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
-import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
@@ -22,6 +21,7 @@ import com.prototype.vulnwatch.dto.OperationalIngestionSourceMetricResponse;
 import com.prototype.vulnwatch.dto.OperationalMetricDefinitionResponse;
 import com.prototype.vulnwatch.dto.OperationalNoiseLifecycleResponse;
 import com.prototype.vulnwatch.dto.OperationalNormalizationQualityResponse;
+import com.prototype.vulnwatch.dto.OperationalSectionResponse;
 import com.prototype.vulnwatch.dto.OperationalSourceFreshnessResponse;
 import com.prototype.vulnwatch.dto.TopFindingMetricResponse;
 import com.prototype.vulnwatch.repo.FindingEventRepository;
@@ -99,11 +99,13 @@ public class OperationalDashboardService {
         DashboardResponse dashboard = dashboardService.get(tenant);
         DashboardNoiseReductionResponse noise = dashboard.noiseReduction();
 
-        List<InventoryComponent> activeComponents = inventoryComponentRepository
-                .findByTenantAndComponentStatusOrderByLastObservedAtDesc(tenant, InventoryComponentStatus.ACTIVE);
+        // Time-bounded loads: no full table scans
+        Instant sevenDaysAgo = now.minus(Duration.ofHours(HOURS_24_X_7));
+        Instant thirtyDaysAgo = now.minus(Duration.ofDays(30));
         List<Finding> findings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant);
-        List<SbomUpload> uploads = sbomUploadRepository.findByTenantOrderByUploadedAtDesc(tenant);
-        List<SyncRun> syncRuns = syncRunRepository.findAll();
+        List<SbomUpload> uploads = sbomUploadRepository
+                .findByTenantAndUploadedAtGreaterThanEqualOrderByUploadedAtDesc(tenant, thirtyDaysAgo);
+        List<SyncRun> syncRuns = syncRunRepository.findByStartedAtGreaterThanEqual(sevenDaysAgo);
         List<SyncRun> syncRuns24h = syncRuns.stream()
                 .filter(run -> run.getStartedAt() != null && run.getStartedAt().isAfter(now.minus(Duration.ofHours(HOURS_24))))
                 .toList();
@@ -112,7 +114,7 @@ public class OperationalDashboardService {
                         && upload.getUploadedAt().isAfter(now.minus(Duration.ofHours(HOURS_24))))
                 .toList();
 
-        NormalizationStats normalizationStats = buildNormalizationStats(activeComponents);
+        NormalizationStats normalizationStats = buildNormalizationStats(tenant);
         CorrelationStats correlationStats = buildCorrelationStats(findings, now);
         double normalizationCoveragePercent = average(
                 normalizationStats.normalizedNameCoveragePercent(),
@@ -164,13 +166,12 @@ public class OperationalDashboardService {
                 noise.deferredUnderInvestigation(),
                 noise.filteredPercentOfPotential(),
                 buildAutoResolvedReopenRate(findings, tenant),
-                noise.categories(),
-                noise.trendLast30Days()
+                noise.categories()
         );
         OperationalApiReadPathResponse apiReadPath = buildApiReadPath();
         OperationalFreshnessDriftResponse freshnessDrift = buildFreshnessDrift(
                 now,
-                activeComponents,
+                tenant,
                 findings,
                 uploads,
                 syncRuns
@@ -187,6 +188,46 @@ public class OperationalDashboardService {
                 freshnessDrift,
                 metricCatalog()
         );
+    }
+
+    public OperationalSectionResponse<OperationalExecutiveHealthResponse> getOverview() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.executiveHealth());
+    }
+
+    public OperationalSectionResponse<OperationalIngestionEfficiencyResponse> getIngestionEfficiency() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.ingestionEfficiency());
+    }
+
+    public OperationalSectionResponse<OperationalNormalizationQualityResponse> getNormalizationQuality() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.normalizationQuality());
+    }
+
+    public OperationalSectionResponse<OperationalCorrelationEffectivenessResponse> getCorrelationEffectiveness() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.correlationEffectiveness());
+    }
+
+    public OperationalSectionResponse<OperationalNoiseLifecycleResponse> getNoiseLifecycle() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.noiseLifecycle());
+    }
+
+    public OperationalSectionResponse<OperationalApiReadPathResponse> getApiReadPath() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.apiReadPath());
+    }
+
+    public OperationalSectionResponse<OperationalFreshnessDriftResponse> getFreshnessDrift() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.freshnessDrift());
+    }
+
+    public OperationalSectionResponse<List<OperationalMetricDefinitionResponse>> getMetricCatalog() {
+        OperationalDashboardResponse dashboard = get();
+        return new OperationalSectionResponse<>(dashboard.generatedAt(), dashboard.metricCatalog());
     }
 
     private OperationalIngestionEfficiencyResponse buildIngestionEfficiency(
@@ -336,6 +377,14 @@ public class OperationalDashboardService {
                 OperationalMetricsService.KEY_VULN_INTEL_FILTERS,
                 OperationalMetricsService.KEY_DASHBOARD_OVERVIEW,
                 OperationalMetricsService.KEY_OPERATIONS_DASHBOARD,
+                OperationalMetricsService.KEY_OPERATIONS_OVERVIEW,
+                OperationalMetricsService.KEY_OPERATIONS_INGESTION,
+                OperationalMetricsService.KEY_OPERATIONS_NORMALIZATION,
+                OperationalMetricsService.KEY_OPERATIONS_CORRELATION,
+                OperationalMetricsService.KEY_OPERATIONS_LIFECYCLE,
+                OperationalMetricsService.KEY_OPERATIONS_READ_PATH,
+                OperationalMetricsService.KEY_OPERATIONS_FRESHNESS,
+                OperationalMetricsService.KEY_OPERATIONS_CATALOG,
                 OperationalMetricsService.KEY_FINDINGS_LIST,
                 OperationalMetricsService.KEY_SBOM_UPLOAD,
                 OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT,
@@ -382,7 +431,7 @@ public class OperationalDashboardService {
 
     private OperationalFreshnessDriftResponse buildFreshnessDrift(
             Instant now,
-            List<InventoryComponent> activeComponents,
+            Tenant tenant,
             List<Finding> findings,
             List<SbomUpload> uploads,
             List<SyncRun> syncRuns
@@ -411,11 +460,8 @@ public class OperationalDashboardService {
                 .toList();
         long staleSourceCount = freshness.stream().filter(OperationalSourceFreshnessResponse::stale).count();
 
-        double currentCoverage = buildNormalizationStats(activeComponents).overallCoveragePercent();
-        double baselineCoverage = buildNormalizationStats(activeComponents.stream()
-                .filter(component -> component.getLastObservedAt() != null
-                        && component.getLastObservedAt().isBefore(now.minus(Duration.ofHours(HOURS_24_X_7))))
-                .toList()).overallCoveragePercent();
+        double currentCoverage = buildNormalizationStats(tenant).overallCoveragePercent();
+        double baselineCoverage = buildBaselineNormalizationCoverage(tenant, now.minus(Duration.ofHours(HOURS_24_X_7)));
         if (baselineCoverage == 0.0) {
             baselineCoverage = currentCoverage;
         }
@@ -444,31 +490,40 @@ public class OperationalDashboardService {
         return new OperationalSourceFreshnessResponse(source, lastSuccessfulAt, ageHours, stale);
     }
 
-    private NormalizationStats buildNormalizationStats(List<InventoryComponent> components) {
-        long total = components.size();
-        if (total <= 0) {
+    private NormalizationStats buildNormalizationStats(Tenant tenant) {
+        InventoryComponentRepository.NormalizationAggregateRow row =
+                inventoryComponentRepository.findNormalizationAggregate(tenant, InventoryComponentStatus.ACTIVE)
+                        .orElse(null);
+        if (row == null || row.getTotal() == 0) {
             return new NormalizationStats(0, 0, 0, 0, 0, 0, 0);
         }
-        long normalizedName = components.stream().filter(component -> hasText(component.getNormalizedName())).count();
-        long normalizedVersion = components.stream().filter(component -> hasText(component.getNormalizedVersion())).count();
-        long softwareIdentity = components.stream().filter(component -> component.getSoftwareIdentity() != null).count();
-        long softwareModel = components.stream()
-                .filter(component -> component.getSoftwareModel() != null
-                        && hasText(component.getSoftwareModelResult())
-                        && component.getSoftwareModelResult().toUpperCase(Locale.ROOT).startsWith("MATCHED:"))
-                .count();
-        long unresolved = components.stream()
-                .filter(component -> !hasText(component.getSoftwareModelResult())
-                        || component.getSoftwareModelResult().toUpperCase(Locale.ROOT).startsWith("UNRESOLVED"))
-                .count();
+        long total = row.getTotal();
+        long unresolved = row.getUnresolvedCount();
         return new NormalizationStats(
                 total,
                 unresolved,
-                percentage(normalizedName, total),
-                percentage(normalizedVersion, total),
-                percentage(softwareIdentity, total),
-                percentage(softwareModel, total),
+                percentage(row.getNormalizedNameCount(), total),
+                percentage(row.getNormalizedVersionCount(), total),
+                percentage(row.getSoftwareIdentityCount(), total),
+                percentage(row.getSoftwareModelCount(), total),
                 percentage(unresolved, total)
+        );
+    }
+
+    private double buildBaselineNormalizationCoverage(Tenant tenant, Instant before) {
+        InventoryComponentRepository.NormalizationAggregateRow row =
+                inventoryComponentRepository.findNormalizationAggregateBeforeLastObservedAt(
+                        tenant, InventoryComponentStatus.ACTIVE, before)
+                        .orElse(null);
+        if (row == null || row.getTotal() == 0) {
+            return 0.0;
+        }
+        long total = row.getTotal();
+        return average(
+                percentage(row.getNormalizedNameCount(), total),
+                percentage(row.getNormalizedVersionCount(), total),
+                percentage(row.getSoftwareIdentityCount(), total),
+                percentage(row.getSoftwareModelCount(), total)
         );
     }
 
@@ -555,6 +610,14 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_VULN_INTEL_FILTERS -> "Vulnerability Intelligence Filters";
             case OperationalMetricsService.KEY_DASHBOARD_OVERVIEW -> "Overview Dashboard";
             case OperationalMetricsService.KEY_OPERATIONS_DASHBOARD -> "Operations Dashboard";
+            case OperationalMetricsService.KEY_OPERATIONS_OVERVIEW -> "Operations Overview";
+            case OperationalMetricsService.KEY_OPERATIONS_INGESTION -> "Operations Ingestion Efficiency";
+            case OperationalMetricsService.KEY_OPERATIONS_NORMALIZATION -> "Operations Normalization Quality";
+            case OperationalMetricsService.KEY_OPERATIONS_CORRELATION -> "Operations Correlation Effectiveness";
+            case OperationalMetricsService.KEY_OPERATIONS_LIFECYCLE -> "Operations Noise & Lifecycle";
+            case OperationalMetricsService.KEY_OPERATIONS_READ_PATH -> "Operations API Read-Path";
+            case OperationalMetricsService.KEY_OPERATIONS_FRESHNESS -> "Operations Freshness & Drift";
+            case OperationalMetricsService.KEY_OPERATIONS_CATALOG -> "Operations Metric Catalog";
             case OperationalMetricsService.KEY_FINDINGS_LIST -> "Findings List";
             case OperationalMetricsService.KEY_SBOM_UPLOAD -> "SBOM Upload";
             case OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT -> "SBOM Fetch Endpoint";

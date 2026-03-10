@@ -35,7 +35,7 @@ public class CorrelationCandidateService {
 
     public CandidateBundle buildCandidateBundle(List<InventoryComponent> components) {
         if (components == null || components.isEmpty()) {
-            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
         Set<UUID> componentIds = new HashSet<>();
@@ -45,7 +45,7 @@ public class CorrelationCandidateService {
             }
         }
         if (componentIds.isEmpty()) {
-            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
         List<InventoryComponentCpeMap> mapRows = inventoryComponentCpeMapRepository.findByComponent_IdIn(componentIds);
@@ -105,13 +105,23 @@ public class CorrelationCandidateService {
                         coordKeys
                 ));
 
+        // ADVISORY_PACKAGE targets use the same coordKey(ecosystem, packageName) format —
+        // look them up using the same derived coord keys so GHSA/custom advisory rules match.
+        Map<String, List<VulnerabilityTarget>> advisoryPackageTargetsByKey = coordKeys.isEmpty()
+                ? Map.of()
+                : groupByNormalizedTargetKey(vulnerabilityTargetRepository.findByTargetTypeAndNormalizedTargetKeyIn(
+                        VulnerabilityTargetType.ADVISORY_PACKAGE,
+                        coordKeys
+                ));
+
         return new CandidateBundle(
                 componentCpeIds,
                 cpeTargetsByCpeId,
                 componentPurls,
                 purlTargetsByKey,
                 componentCoordKeys,
-                coordTargetsByKey
+                coordTargetsByKey,
+                advisoryPackageTargetsByKey
         );
     }
 
@@ -158,6 +168,15 @@ public class CorrelationCandidateService {
                 bundle.coordTargetsByNormalizedKey(),
                 "coord-indexed-exact+version",
                 40,
+                dedupeTargetIds,
+                matches
+        );
+
+        appendIndexedMatches(
+                bundle.componentCoordKeysByComponentId().getOrDefault(component.getId(), Set.of()),
+                bundle.advisoryPackageTargetsByNormalizedKey(),
+                "advisory-pkg-indexed-exact+version",
+                50,
                 dedupeTargetIds,
                 matches
         );
@@ -215,6 +234,7 @@ public class CorrelationCandidateService {
             case "cpe-indexed-fallback" -> 0.54;
             case "purl-indexed-exact" -> 0.66;
             case "coord-indexed-exact" -> 0.58;
+            case "advisory-pkg-indexed-exact" -> 0.60;
             default -> 0.50;
         };
 
@@ -236,6 +256,9 @@ public class CorrelationCandidateService {
         if ("coord-indexed-exact".equals(matcherPrefix(matchedBy))) {
             penalties += 0.04;
         }
+        if ("advisory-pkg-indexed-exact".equals(matcherPrefix(matchedBy))) {
+            penalties += 0.03;
+        }
 
         Map<String, Double> breakdown = new LinkedHashMap<>();
         breakdown.put("base", base);
@@ -251,6 +274,7 @@ public class CorrelationCandidateService {
             case "cpe-indexed-fallback" -> 0.76;
             case "purl-indexed-exact" -> 0.84;
             case "coord-indexed-exact" -> 0.78;
+            case "advisory-pkg-indexed-exact" -> 0.80;
             default -> 0.70;
         };
     }
@@ -332,7 +356,8 @@ public class CorrelationCandidateService {
             Map<UUID, Set<String>> componentPurlsByComponentId,
             Map<String, List<VulnerabilityTarget>> purlTargetsByNormalizedKey,
             Map<UUID, Set<String>> componentCoordKeysByComponentId,
-            Map<String, List<VulnerabilityTarget>> coordTargetsByNormalizedKey
+            Map<String, List<VulnerabilityTarget>> coordTargetsByNormalizedKey,
+            Map<String, List<VulnerabilityTarget>> advisoryPackageTargetsByNormalizedKey
     ) {
     }
 

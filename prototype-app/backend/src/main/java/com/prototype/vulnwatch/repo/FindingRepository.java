@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.TopFindingMetricResponse;
 import java.time.Instant;
+import java.util.Collection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -20,6 +21,11 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpecificationExecutor<Finding> {
+    interface VulnerabilityFindingCountRow {
+        UUID getVulnerabilityId();
+        long getFindingCount();
+    }
+
     List<Finding> findByTenantOrderByUpdatedAtDesc(Tenant tenant);
     Page<Finding> findByTenantOrderByUpdatedAtDesc(Tenant tenant, Pageable pageable);
     List<Finding> findByTenantAndStatusOrderByUpdatedAtDesc(Tenant tenant, FindingStatus status);
@@ -163,6 +169,22 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     );
 
     @Query("""
+            select
+              f.vulnerability.id as vulnerabilityId,
+              count(f) as findingCount
+            from Finding f
+            where f.tenant = :tenant
+              and f.status = :status
+              and f.vulnerability.id in :vulnerabilityIds
+            group by f.vulnerability.id
+            """)
+    List<VulnerabilityFindingCountRow> countByTenantAndVulnerabilityIdsAndStatus(
+            @Param("tenant") Tenant tenant,
+            @Param("vulnerabilityIds") Collection<UUID> vulnerabilityIds,
+            @Param("status") FindingStatus status
+    );
+
+    @Query("""
             select count(distinct f.id)
             from Finding f
             where f.tenant = :tenant
@@ -214,4 +236,31 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
               and trim(f.matchedBy) <> ''
             """)
     List<String> findDistinctMatchMethodsByTenant(@Param("tenant") Tenant tenant);
+
+    @Query("""
+            select distinct f.vexStatus
+            from Finding f
+            where f.tenant = :tenant
+              and f.vexStatus is not null
+              and trim(f.vexStatus) <> ''
+            """)
+    List<String> findDistinctVexStatusesByTenant(@Param("tenant") Tenant tenant);
+
+    @Query("""
+            select distinct f.vexFreshness
+            from Finding f
+            where f.tenant = :tenant
+              and f.vexFreshness is not null
+              and trim(f.vexFreshness) <> ''
+            """)
+    List<String> findDistinctVexFreshnessByTenant(@Param("tenant") Tenant tenant);
+
+    @Query("""
+            select distinct f.vexProvider
+            from Finding f
+            where f.tenant = :tenant
+              and f.vexProvider is not null
+              and trim(f.vexProvider) <> ''
+            """)
+    List<String> findDistinctVexProvidersByTenant(@Param("tenant") Tenant tenant);
 }

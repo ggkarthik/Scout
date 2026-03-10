@@ -13,8 +13,6 @@ import com.prototype.vulnwatch.domain.InventoryComponentCpeMap;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
-import com.prototype.vulnwatch.domain.VulnerabilityTarget;
-import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
 import com.prototype.vulnwatch.dto.ApplicableSoftwarePageResponse;
 import com.prototype.vulnwatch.dto.ApplicableSoftwareRecordResponse;
 import com.prototype.vulnwatch.dto.CveInventoryMappingRecordResponse;
@@ -34,12 +32,11 @@ import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
+import com.prototype.vulnwatch.util.IdentityUtil;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,6 +48,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,7 +62,6 @@ public class DashboardService {
     private final InventoryComponentRepository inventoryComponentRepository;
     private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
-    private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
     private final FindingRepository findingRepository;
     private final FindingEventRepository findingEventRepository;
     private final FindingService findingService;
@@ -76,7 +73,6 @@ public class DashboardService {
             InventoryComponentRepository inventoryComponentRepository,
             InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
-            VulnerabilityTargetRepository vulnerabilityTargetRepository,
             FindingRepository findingRepository,
             FindingEventRepository findingEventRepository,
             FindingService findingService,
@@ -87,7 +83,6 @@ public class DashboardService {
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.inventoryComponentCpeMapRepository = inventoryComponentCpeMapRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
-        this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
         this.findingRepository = findingRepository;
         this.findingEventRepository = findingEventRepository;
         this.findingService = findingService;
@@ -95,6 +90,7 @@ public class DashboardService {
         this.objectMapper = objectMapper;
     }
 
+    @Cacheable(value = "dashboard", key = "#tenant.id")
     public DashboardResponse get(Tenant tenant) {
         long assets = assetRepository.countByTenant(tenant);
         long components = inventoryComponentRepository.countByTenantAndComponentStatus(tenant, InventoryComponentStatus.ACTIVE);
@@ -286,28 +282,8 @@ public class DashboardService {
                     .computeIfAbsent(vulnerabilityId, ignored -> new LinkedHashSet<>())
                     .add(toSoftwareInventoryLabel(state));
         }
-
-        List<VulnerabilityTarget> targets = vulnerabilityTargetRepository.findByVulnerability_IdInAndTargetType(
-                requestedIds,
-                VulnerabilityTargetType.CPE
-        );
-        Map<UUID, LinkedHashSet<String>> targetCpesByVulnerability = new HashMap<>();
-        for (VulnerabilityTarget target : targets) {
-            if (target.getVulnerability() == null || target.getVulnerability().getId() == null) {
-                continue;
-            }
-            String cpe = normalizedCpe(target);
-            if (!hasText(cpe)) {
-                continue;
-            }
-            targetCpesByVulnerability
-                    .computeIfAbsent(target.getVulnerability().getId(), ignored -> new LinkedHashSet<>())
-                    .add(cpe);
-        }
-
-        Set<UUID> allImpactedComponentIds = componentIdsByVulnerability.values().stream()
-                .flatMap(Collection::stream)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<UUID> allImpactedComponentIds = new LinkedHashSet<>();
+        componentIdsByVulnerability.values().forEach(allImpactedComponentIds::addAll);
         List<InventoryComponentCpeMap> componentCpeMaps = allImpactedComponentIds.isEmpty()
                 ? List.of()
                 : inventoryComponentCpeMapRepository.findByTenant_IdAndComponent_IdIn(tenant.getId(), allImpactedComponentIds);
@@ -324,21 +300,31 @@ public class DashboardService {
             cpesByComponentId.computeIfAbsent(map.getComponent().getId(), ignored -> new HashSet<>()).add(cpe);
         }
 
+        Map<UUID, LinkedHashSet<String>> matchedIdentifiersByVulnerability = new HashMap<>();
+        for (ComponentVulnerabilityState state : impactedStates) {
+            if (state.getVulnerability() == null || state.getVulnerability().getId() == null) {
+                continue;
+            }
+            List<String> identifiers = matchedIdentifiersForState(state, cpesByComponentId);
+            if (identifiers.isEmpty()) {
+                continue;
+            }
+            matchedIdentifiersByVulnerability
+                    .computeIfAbsent(state.getVulnerability().getId(), ignored -> new LinkedHashSet<>())
+                    .addAll(identifiers);
+        }
+
         List<CveInventoryMappingRecordResponse> highRisk = buildCveInventoryMappings(
                 highRiskIds,
                 aggregatesByVulnerability,
                 mappedSoftwareByVulnerability,
-                componentIdsByVulnerability,
-                targetCpesByVulnerability,
-                cpesByComponentId
+                matchedIdentifiersByVulnerability
         );
         List<CveInventoryMappingRecordResponse> latest = buildCveInventoryMappings(
                 latestIds,
                 aggregatesByVulnerability,
                 mappedSoftwareByVulnerability,
-                componentIdsByVulnerability,
-                targetCpesByVulnerability,
-                cpesByComponentId
+                matchedIdentifiersByVulnerability
         );
 
         return new DashboardCveInventoryMapResponse(highRisk, latest);
@@ -366,9 +352,7 @@ public class DashboardService {
             List<UUID> vulnerabilityIds,
             Map<UUID, ComponentVulnerabilityStateRepository.ImpactedCveAggregateRow> aggregatesByVulnerability,
             Map<UUID, LinkedHashSet<String>> mappedSoftwareByVulnerability,
-            Map<UUID, Set<UUID>> componentIdsByVulnerability,
-            Map<UUID, LinkedHashSet<String>> targetCpesByVulnerability,
-            Map<UUID, Set<String>> cpesByComponentId
+            Map<UUID, LinkedHashSet<String>> matchedIdentifiersByVulnerability
     ) {
         if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return List.of();
@@ -386,29 +370,10 @@ public class DashboardService {
                 continue;
             }
 
-            LinkedHashSet<String> mappedCpes = new LinkedHashSet<>();
-            LinkedHashSet<String> targetCpesSet = targetCpesByVulnerability.get(vulnerabilityId);
-            Set<String> targetCpes = targetCpesSet == null ? Set.of() : targetCpesSet;
-            Set<UUID> componentIds = componentIdsByVulnerability.getOrDefault(vulnerabilityId, Set.of());
-            for (UUID componentId : componentIds) {
-                Set<String> inventoryCpes = cpesByComponentId.getOrDefault(componentId, Set.of());
-                if (inventoryCpes.isEmpty()) {
-                    continue;
-                }
-                if (targetCpes.isEmpty()) {
-                    mappedCpes.addAll(inventoryCpes);
-                    continue;
-                }
-                for (String inventoryCpe : inventoryCpes) {
-                    if (targetCpes.contains(inventoryCpe)) {
-                        mappedCpes.add(inventoryCpe);
-                    }
-                }
-            }
-            if (mappedCpes.isEmpty() && !targetCpes.isEmpty()) {
-                mappedCpes.addAll(targetCpes);
-            }
-
+            List<String> matchedIdentifiers = new ArrayList<>(matchedIdentifiersByVulnerability.getOrDefault(
+                    vulnerabilityId,
+                    new LinkedHashSet<>()
+            ));
             List<String> mappedSoftware = new ArrayList<>(mappedSoftwareByVulnerability.getOrDefault(
                     vulnerabilityId,
                     new LinkedHashSet<>()
@@ -424,7 +389,7 @@ public class DashboardService {
                     row.getImpactedComponentCount(),
                     row.getNoPatchComponentCount(),
                     row.getLastModifiedAt(),
-                    List.copyOf(mappedCpes),
+                    matchedIdentifiers,
                     mappedSoftware,
                     mappedSoftware.size()
             ));
@@ -456,23 +421,47 @@ public class DashboardService {
         return label.toString();
     }
 
-    private String normalizedCpe(VulnerabilityTarget target) {
-        if (target == null) {
+    private List<String> matchedIdentifiersForState(
+            ComponentVulnerabilityState state,
+            Map<UUID, Set<String>> cpesByComponentId
+    ) {
+        if (state == null || state.getComponent() == null || !hasText(state.getMatchedBy())) {
+            return List.of();
+        }
+        String matchedBy = state.getMatchedBy().trim().toLowerCase(Locale.ROOT);
+        if (matchedBy.startsWith("cpe-")) {
+            UUID componentId = state.getComponent().getId();
+            if (componentId == null) {
+                return List.of();
+            }
+            List<String> identifiers = new ArrayList<>(cpesByComponentId.getOrDefault(componentId, Set.of()));
+            identifiers.sort(String::compareTo);
+            return identifiers;
+        }
+        if (matchedBy.startsWith("purl-") && hasText(state.getComponent().getPurl())) {
+            return List.of(state.getComponent().getPurl().trim());
+        }
+        if (matchedBy.startsWith("coord-")) {
+            String coordKey = componentCoordKey(state);
+            return hasText(coordKey) ? List.of(coordKey) : List.of();
+        }
+        if (matchedBy.startsWith("advisory-pkg-")) {
+            String coordKey = componentCoordKey(state);
+            return hasText(coordKey) ? List.of("advisory:" + coordKey) : List.of();
+        }
+        return List.of(matchedBy);
+    }
+
+    private String componentCoordKey(ComponentVulnerabilityState state) {
+        if (state == null || state.getComponent() == null) {
             return null;
         }
-        if (target.getCpeDim() != null && hasText(target.getCpeDim().getNormalizedCpe())) {
-            return target.getCpeDim().getNormalizedCpe().trim().toLowerCase(Locale.ROOT);
+        String ecosystem = IdentityUtil.normalize(state.getComponent().getEcosystem());
+        String packageName = IdentityUtil.normalize(state.getComponent().getPackageName());
+        if (ecosystem.isBlank() || packageName.isBlank() || "unknown".equals(packageName)) {
+            return null;
         }
-        if (hasText(target.getCpe())) {
-            return target.getCpe().trim().toLowerCase(Locale.ROOT);
-        }
-        if (hasText(target.getNormalizedTargetKey())) {
-            return target.getNormalizedTargetKey().trim().toLowerCase(Locale.ROOT);
-        }
-        if (hasText(target.getRawTarget())) {
-            return target.getRawTarget().trim().toLowerCase(Locale.ROOT);
-        }
-        return null;
+        return IdentityUtil.coordKey(ecosystem, packageName);
     }
 
     private DashboardCorrelationEfficiencyResponse buildCorrelationEfficiency(Tenant tenant, long activeComponents) {
@@ -624,9 +613,9 @@ public class DashboardService {
             if (finding == null) {
                 continue;
             }
-            VexEvidence vex = parseVexEvidence(finding.getEvidence());
-            if (finding.getStatus() == FindingStatus.OPEN && hasText(vex.provider())) {
-                providerCounts.merge(vex.provider(), 1L, Long::sum);
+            String vexProvider = finding.getVexProvider();
+            if (finding.getStatus() == FindingStatus.OPEN && hasText(vexProvider)) {
+                providerCounts.merge(vexProvider, 1L, Long::sum);
             }
             if (finding.getStatus() == FindingStatus.OPEN
                     && finding.getDecisionState() == FindingDecisionState.UNDER_INVESTIGATION
@@ -671,8 +660,7 @@ public class DashboardService {
             if (finding == null || finding.getStatus() != FindingStatus.SUPPRESSED || finding.getUpdatedAt() == null) {
                 continue;
             }
-            VexEvidence vex = parseVexEvidence(finding.getEvidence());
-            if (!"STALE".equals(vex.freshness())) {
+            if (!"STALE".equals(finding.getVexFreshness())) {
                 continue;
             }
             LocalDate day = finding.getUpdatedAt().atZone(ZoneOffset.UTC).toLocalDate();

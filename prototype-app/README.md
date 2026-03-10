@@ -1,59 +1,21 @@
 # VulnWatch Prototype
 
-Last updated: 2026-03-03
+Last updated: 2026-03-08
 
-This repository contains a Spring Boot + React prototype for SBOM-based vulnerability correlation.
+VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection.
 
-## Current Correlation Model (Implemented)
+## Documentation
 
-The backend now uses one deterministic model for applicability/impact projection:
+The repository documentation is intentionally consolidated into four maintained documents:
 
-1. CPE 2.3 normalization into `cpe_dim`.
-2. Tenant inventory projection into `inventory_component_cpe_map`.
-3. CVE/advisory CPE targets in `vulnerability_targets.cpe_id`.
-4. Indexed join on `cpe_id` to generate candidate matches.
-5. Deterministic version checks (`exact`, `introduced/fixed`, `start/end` inclusive/exclusive).
-6. VEX overlay applied after base applicability (status precedence + deterministic tie-break).
+- [Architecture](docs/architecture.md)
+- [Frontend](docs/frontend.md)
+- [Backend](docs/backend.md)
+- [Database](docs/database.md)
 
-Intentionally disabled for runtime candidate generation:
+Historical implementation summaries, design notes, report cards, and migration checklists were folded into those files so the repo only has one source of truth per area.
 
-- PURL exact matching
-- COORD matching
-- advisory-package direct matching
-- repo matching
-- digest matching
-- fuzzy/AI matching
-
-Current `matchedBy` values in correlation evidence:
-
-- `cpe-indexed-direct+version`
-- `cpe-indexed-fallback+version`
-
-## Scope and Data Boundaries
-
-- Global vulnerability intel remains immutable in global tables:
-  - `vulnerabilities`
-  - `vulnerability_intel_summary`
-  - `vulnerability_intel_observations`
-- Tenant-specific outcomes are projected in tenant-scoped tables:
-  - `findings` (created and updated by deterministic CPE correlation)
-  - `inventory_components`
-  - `inventory_component_cpe_map`
-
-## Incremental Correlation Triggers
-
-- Software delta (`SBOM`): `FindingService.recomputeOnSoftwareDelta(tenantId, componentId)`.
-- CVE delta (`NVD/GHSA/KEV/Advisory` target changes): `FindingService.recomputeOnCveDelta(vulnerabilityId)`.
-- VEX delta (`CSAF/VEX` statement changes): `FindingService.applyVexDelta*` updates overlay state without full rejoin.
-
-## Architecture
-
-- `backend/` Java 17, Spring Boot, Spring Data JPA
-  - Default DB: H2 file
-  - Schema style: entity-first (`spring.jpa.hibernate.ddl-auto=update`)
-- `frontend/` React + Vite
-
-## Run Locally
+## Quick Start
 
 Backend:
 
@@ -70,38 +32,46 @@ npm install
 npm run dev
 ```
 
-Default URLs:
+Default local URLs:
 
-- Backend: `http://localhost:8080`
 - Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8080/api`
 
-## Key Endpoints
+Default local auth values used by the frontend:
 
-Ingestion:
+- `X-API-Key`: `change-me-in-prod`
+- `X-Creator-Key`: `local-creator`
+- `X-Tenant-ID`: `1`
+- `X-User-ID`: `local-analyst`
 
-- `POST /api/sbom-upload`
-- `POST /api/sbom-fetch`
-- `POST /api/sbom-fetch/github`
-- `POST /api/ingestion/nvd-sync`
-- `POST /api/ingestion/nvd-full-sync`
-- `POST /api/ingestion/kev-sync`
-- `POST /api/ingestion/ghsa-sync`
-- `POST /api/ingestion/csaf/microsoft-sync`
-- `POST /api/ingestion/csaf/redhat-sync`
-- `POST /api/ingestion/advisories`
+## Core Runtime Shape
 
-Read/workflow:
+- `frontend/`: React 18 + TypeScript + Vite SPA
+- `backend/`: Java 17 + Spring Boot 3.3, Spring Web, Spring Data JPA, Spring Security
+- Database: PostgreSQL
+- Schema management: Flyway-managed PostgreSQL migrations with `spring.jpa.hibernate.ddl-auto=none`
 
-- `GET /api/dashboard`
-- `GET /api/findings`
-- `GET /api/findings/filters`
-- `GET /api/vulnerability-intelligence`
-- `GET /api/vulnerability-intelligence/{externalId}`
-- `GET /api/inventory/components`
-- `GET /api/sbom-uploads`
+## PostgreSQL Notes
 
-## Documentation
+If an older local PostgreSQL `vulnwatch` database already has Flyway history from before the migration files stabilized, repair it once:
 
-- Backend architecture and API behavior: `docs/backend.md`
-- Frontend architecture and UI behavior: `docs/frontend.md`
-- Database schema and data flows: `docs/database.md`
+```bash
+cd backend
+mvn -q \
+  -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
+  -Dflyway.user="$USER" \
+  -Dflyway.password= \
+  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres \
+  flyway:repair
+```
+
+The old H2 files are kept only as offline archive artifacts. If you need a one-off parity comparison against an archived H2 snapshot:
+
+```bash
+cd backend
+./tools/run-database-parity.sh
+```
+
+The parity helper is outside the Maven build on purpose, so H2 is no longer part of the normal app or test dependency graph.
+
+For implementation details, API groupings, schema notes, and current limitations, use the docs above instead of older milestone-style markdown.

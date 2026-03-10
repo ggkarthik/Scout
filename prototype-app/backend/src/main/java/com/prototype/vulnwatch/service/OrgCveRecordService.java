@@ -5,14 +5,10 @@ import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.OrgCveRecord;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
-import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
-import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
-import com.prototype.vulnwatch.repo.SoftwareInventoryItemRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -33,7 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class OrgCveRecordService {
 
-    private static final String REASON_NOT_APPLICABLE = "no_cpe_match_in_software_inventory";
+    private static final int REFRESH_BATCH_SIZE = 500;
+    private static final String REASON_NOT_APPLICABLE = "no_supported_match_in_software_inventory";
     private static final String REASON_AWAITING_VEX = "awaiting_vex_assessment";
     private static final String REASON_VEX_NO_PATCH = "vex_no_patch";
     private static final String REASON_VEX_AFFECTED = "vex_affected_or_untriaged";
@@ -43,26 +40,17 @@ public class OrgCveRecordService {
 
     private final OrgCveRecordRepository orgCveRecordRepository;
     private final VulnerabilityRepository vulnerabilityRepository;
-    private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
-    private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
-    private final SoftwareInventoryItemRepository softwareInventoryItemRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final TenantRepository tenantRepository;
 
     public OrgCveRecordService(
             OrgCveRecordRepository orgCveRecordRepository,
             VulnerabilityRepository vulnerabilityRepository,
-            VulnerabilityTargetRepository vulnerabilityTargetRepository,
-            InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
-            SoftwareInventoryItemRepository softwareInventoryItemRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             TenantRepository tenantRepository
     ) {
         this.orgCveRecordRepository = orgCveRecordRepository;
         this.vulnerabilityRepository = vulnerabilityRepository;
-        this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
-        this.inventoryComponentCpeMapRepository = inventoryComponentCpeMapRepository;
-        this.softwareInventoryItemRepository = softwareInventoryItemRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.tenantRepository = tenantRepository;
     }
@@ -76,6 +64,25 @@ public class OrgCveRecordService {
         List<Tenant> tenants = tenantRepository.findAllByOrderByCreatedAtAsc();
         for (Tenant tenant : tenants) {
             updated += refreshForTenantAndVulnerabilities(tenant, List.of(vulnerabilityId));
+        }
+        return updated;
+    }
+
+    @Transactional
+    public int refreshForTenant(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return 0;
+        }
+
+        List<UUID> vulnerabilityIds = vulnerabilityRepository.findAllIdsOrderedForOrgExposureRefresh();
+        if (vulnerabilityIds.isEmpty()) {
+            return 0;
+        }
+
+        int updated = 0;
+        for (int offset = 0; offset < vulnerabilityIds.size(); offset += REFRESH_BATCH_SIZE) {
+            int end = Math.min(offset + REFRESH_BATCH_SIZE, vulnerabilityIds.size());
+            updated += refreshForTenantAndVulnerabilities(tenant, vulnerabilityIds.subList(offset, end));
         }
         return updated;
     }
@@ -129,55 +136,12 @@ public class OrgCveRecordService {
             }
         });
 
-        Map<UUID, Set<UUID>> cpeIdsByVulnerability = new HashMap<>();
-        Set<UUID> allCpeIds = new LinkedHashSet<>();
-        vulnerabilityTargetRepository.findVulnerabilityCpeRows(existingVulnerabilityIds, VulnerabilityTargetType.CPE).forEach(row -> {
-            if (row.getVulnerabilityId() == null || row.getCpeId() == null) {
-                return;
-            }
-            cpeIdsByVulnerability
-                    .computeIfAbsent(row.getVulnerabilityId(), ignored -> new LinkedHashSet<>())
-                    .add(row.getCpeId());
-            allCpeIds.add(row.getCpeId());
-        });
-
-        Map<UUID, Set<UUID>> componentIdsByCpeId = new HashMap<>();
-        if (!allCpeIds.isEmpty()) {
-            inventoryComponentCpeMapRepository
-                    .findDistinctCpeComponentRowsByTenantIdAndCpeIds(tenant.getId(), allCpeIds)
-                    .forEach(row -> {
-                        if (row.getCpeId() == null || row.getComponentId() == null) {
-                            return;
-                        }
-                        componentIdsByCpeId
-                                .computeIfAbsent(row.getCpeId(), ignored -> new LinkedHashSet<>())
-                                .add(row.getComponentId());
-                    });
-        }
-
-        Map<UUID, Set<UUID>> componentIdsByVulnerability = new HashMap<>();
-        Set<UUID> allMatchedComponentIds = new LinkedHashSet<>();
-        for (UUID vulnerabilityId : existingVulnerabilityIds) {
-            Set<UUID> cpeIds = cpeIdsByVulnerability.getOrDefault(vulnerabilityId, Set.of());
-            if (cpeIds.isEmpty()) {
-                continue;
-            }
-            LinkedHashSet<UUID> matchedComponentIds = new LinkedHashSet<>();
-            for (UUID cpeId : cpeIds) {
-                matchedComponentIds.addAll(componentIdsByCpeId.getOrDefault(cpeId, Set.of()));
-            }
-            if (matchedComponentIds.isEmpty()) {
-                continue;
-            }
-            componentIdsByVulnerability.put(vulnerabilityId, matchedComponentIds);
-            allMatchedComponentIds.addAll(matchedComponentIds);
-        }
-
-        Set<UUID> softwareInventoryComponentIds = allMatchedComponentIds.isEmpty()
-                ? Set.of()
-                : softwareInventoryItemRepository.findDistinctComponentIdsByTenantIdAndComponentIds(
-                        tenant.getId(),
-                        allMatchedComponentIds
+        // Determine applicability from ComponentVulnerabilityState — covers CPE, PURL, COORD,
+        // and ADVISORY_PACKAGE matches equally, and only counts ACTIVE components (G4 + G11).
+        Set<UUID> applicableVulnerabilityIds =
+                componentVulnerabilityStateRepository.findApplicableVulnerabilityIdsByTenantAndVulnerabilityIds(
+                        tenant,
+                        existingVulnerabilityIds
                 );
 
         Map<UUID, ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow> impactByVulnerability = new HashMap<>();
@@ -197,14 +161,15 @@ public class OrgCveRecordService {
                 continue;
             }
 
-            Set<UUID> matchedComponentIds = componentIdsByVulnerability.getOrDefault(vulnerabilityId, Set.of());
-            long matchedComponentCount = matchedComponentIds.size();
-            long matchedSoftwareCount = matchedComponentIds.stream()
-                    .filter(softwareInventoryComponentIds::contains)
-                    .count();
-
+            boolean applicable = applicableVulnerabilityIds.contains(vulnerabilityId);
             ApplicabilityState applicabilityState =
-                    matchedSoftwareCount > 0 ? ApplicabilityState.APPLICABLE : ApplicabilityState.NOT_APPLICABLE;
+                    applicable ? ApplicabilityState.APPLICABLE : ApplicabilityState.NOT_APPLICABLE;
+            ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow agg =
+                    impactByVulnerability.get(vulnerabilityId);
+            long matchedComponentCount = agg == null ? 0
+                    : agg.getNoPatchCount() + agg.getImpactedCount() + agg.getUnknownCount()
+                    + agg.getFixedCount() + agg.getNotImpactedCount();
+            long matchedSoftwareCount = applicable ? matchedComponentCount : 0;
             ImpactSummary impactSummary = resolveImpact(
                     applicabilityState,
                     impactByVulnerability.get(vulnerabilityId)
@@ -252,6 +217,44 @@ public class OrgCveRecordService {
         return toSave.size();
     }
 
+    @Transactional(readOnly = true)
+    public boolean isActivelySuppressed(Tenant tenant, Vulnerability vulnerability, Instant at) {
+        if (tenant == null || tenant.getId() == null || vulnerability == null) {
+            return false;
+        }
+        return orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
+                .map(record -> record.isActivelySuppressed(at))
+                .orElse(false);
+    }
+
+    @Transactional
+    public OrgCveRecord suppress(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            String reason,
+            String justification,
+            String suppressedBy,
+            Instant suppressedAt,
+            Instant suppressedUntil
+    ) {
+        if (tenant == null || tenant.getId() == null || vulnerability == null) {
+            throw new IllegalArgumentException("Tenant and vulnerability are required");
+        }
+        Instant now = suppressedAt == null ? Instant.now() : suppressedAt;
+        OrgCveRecord record = orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
+                .orElseGet(() -> initializeRecord(tenant, vulnerability, now));
+        record.setSuppressionReason(trimToNull(reason));
+        record.setSuppressionJustification(trimToNull(justification));
+        record.setSuppressedBy(trimToNull(suppressedBy));
+        record.setSuppressedAt(now);
+        record.setSuppressedUntil(suppressedUntil);
+        if (record.getLastEvaluatedAt() == null) {
+            record.setLastEvaluatedAt(now);
+        }
+        record.touch();
+        return orgCveRecordRepository.save(record);
+    }
+
     private boolean applySnapshot(OrgCveRecord record, OrgCveSnapshot snapshot) {
         boolean changed = false;
         changed |= setIfChanged(record.getExternalId(), snapshot.externalId(), record::setExternalId);
@@ -267,6 +270,27 @@ public class OrgCveRecordService {
         changed |= setIfChanged(record.getMatchedComponentCount(), snapshot.matchedComponentCount(), record::setMatchedComponentCount);
         changed |= setIfChanged(record.getMatchedSoftwareCount(), snapshot.matchedSoftwareCount(), record::setMatchedSoftwareCount);
         return changed;
+    }
+
+    private OrgCveRecord initializeRecord(Tenant tenant, Vulnerability vulnerability, Instant now) {
+        OrgCveRecord record = new OrgCveRecord();
+        record.setTenant(tenant);
+        record.setVulnerability(vulnerability);
+        record.setExternalId(resolveExternalId(vulnerability));
+        record.setSeverity(normalizeSeverity(vulnerability.getSeverity()));
+        record.setCvssScore(vulnerability.getCvssScore());
+        record.setEpssScore(vulnerability.getEpssScore());
+        record.setInKev(vulnerability.isInKev());
+        record.setVulnStatus(hasText(vulnerability.getVulnStatus()) ? vulnerability.getVulnStatus().trim() : null);
+        record.setApplicabilityState(ApplicabilityState.UNKNOWN);
+        record.setImpacted(false);
+        record.setImpactState(ImpactState.UNKNOWN);
+        record.setImpactReason("suppressed_before_evaluation");
+        record.setMatchedComponentCount(0);
+        record.setMatchedSoftwareCount(0);
+        record.setLastEvaluatedAt(now);
+        record.touch();
+        return record;
     }
 
     private ImpactSummary resolveImpact(
@@ -308,9 +332,17 @@ public class OrgCveRecordService {
         return value != null && !value.isBlank();
     }
 
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private String resolveExternalId(Vulnerability vulnerability) {
         if (vulnerability != null && hasText(vulnerability.getExternalId())) {
-            return vulnerability.getExternalId().trim();
+            return vulnerability.getExternalId().trim().toUpperCase(Locale.ROOT);
         }
         if (vulnerability != null && vulnerability.getId() != null) {
             return "VULN-" + vulnerability.getId();

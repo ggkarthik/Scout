@@ -98,10 +98,12 @@ public class FindingDeltaQueueService {
             } catch (TaskRejectedException rejected) {
                 if (System.nanoTime() >= deadlineNanos) {
                     dedupeKeys.remove(event.key());
-                    LOG.warn(
-                            "Finding delta queue backpressure: dropped event key={} type={} depth={} timeoutMs={}",
+                    LOG.error(
+                            "Finding delta queue backpressure: DROPPED event key={} type={} vulnerabilityId={} tenantId={} depth={} timeoutMs={} — recompute may be required",
                             event.key(),
                             event.type(),
+                            event.vulnerabilityId(),
+                            event.tenantId(),
                             queueDepth(),
                             enqueueTimeoutMs
                     );

@@ -10,7 +10,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import com.prototype.vulnwatch.util.IdentityUtil;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -20,9 +23,10 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_inventory_tenant_asset", columnList = "tenant_id,asset_id"),
                 @Index(name = "idx_inventory_sbom_upload", columnList = "sbom_upload_id"),
-                @Index(name = "idx_inventory_software_model", columnList = "software_model_id"),
                 @Index(name = "idx_inventory_software_identity", columnList = "software_identity_id"),
-                @Index(name = "idx_inventory_component_digest", columnList = "component_digest")
+                @Index(name = "idx_inventory_component_digest", columnList = "component_digest"),
+                @Index(name = "idx_inventory_norm_purl_tenant", columnList = "normalized_purl,tenant_id"),
+                @Index(name = "idx_inventory_coord_key_tenant", columnList = "coord_key,tenant_id")
         }
 )
 public class InventoryComponent {
@@ -42,10 +46,6 @@ public class InventoryComponent {
     @ManyToOne(optional = false)
     @JoinColumn(name = "sbom_upload_id")
     private SbomUpload sbomUpload;
-
-    @ManyToOne
-    @JoinColumn(name = "software_model_id")
-    private SoftwareModel softwareModel;
 
     @ManyToOne
     @JoinColumn(name = "software_identity_id")
@@ -71,6 +71,12 @@ public class InventoryComponent {
 
     @Column(nullable = false)
     private String purl;
+
+    @Column(name = "normalized_purl", length = 1200)
+    private String normalizedPurl;
+
+    @Column(name = "coord_key", length = 500)
+    private String coordKey;
 
     @Column(name = "component_digest", length = 120)
     private String componentDigest;
@@ -116,14 +122,6 @@ public class InventoryComponent {
         this.sbomUpload = sbomUpload;
     }
 
-    public SoftwareModel getSoftwareModel() {
-        return softwareModel;
-    }
-
-    public void setSoftwareModel(SoftwareModel softwareModel) {
-        this.softwareModel = softwareModel;
-    }
-
     public SoftwareIdentity getSoftwareIdentity() {
         return softwareIdentity;
     }
@@ -162,6 +160,22 @@ public class InventoryComponent {
 
     public void setPurl(String purl) {
         this.purl = purl;
+    }
+
+    public String getNormalizedPurl() {
+        return normalizedPurl;
+    }
+
+    public void setNormalizedPurl(String normalizedPurl) {
+        this.normalizedPurl = normalizedPurl;
+    }
+
+    public String getCoordKey() {
+        return coordKey;
+    }
+
+    public void setCoordKey(String coordKey) {
+        this.coordKey = coordKey;
     }
 
     public String getNormalizedName() {
@@ -226,5 +240,13 @@ public class InventoryComponent {
 
     public void setRetiredAt(Instant retiredAt) {
         this.retiredAt = retiredAt;
+    }
+
+    @PrePersist
+    @PreUpdate
+    void synchronizeLookupKeys() {
+        String normalizedPurlValue = IdentityUtil.normalizePurl(purl);
+        this.normalizedPurl = normalizedPurlValue.isBlank() ? null : normalizedPurlValue;
+        this.coordKey = IdentityUtil.coordKey(ecosystem, packageName);
     }
 }

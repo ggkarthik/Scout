@@ -1,145 +1,195 @@
-# VulnWatch Database Documentation
+# VulnWatch Database
 
-Last updated: 2026-03-03
+Last updated: 2026-03-08
 
-This schema is generated from JPA entities (`spring.jpa.hibernate.ddl-auto=update`).
+The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
-## Engine And Profiles
+## Engine
 
-- Default runtime: H2 file database (`./data/vulnwatch`)
-- Optional profile: PostgreSQL (`--spring.profiles.active=postgres`)
-- Migration model: entity-first (no Flyway/Liquibase in this prototype)
+- Runtime: PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
+- Schema strategy: Flyway-owned PostgreSQL migrations with `ddl-auto=none`
 
-## Tenancy And Data Boundaries
+## Tenant Model
 
-- Tenant boundary exists in schema (`tenants` + tenant foreign keys).
-- Runtime API currently resolves one default workspace via `TenantService`.
+The schema is tenant-aware even though the current runtime mostly uses one default tenant.
 
-Boundary intent:
+Tenant-scoped tables include:
 
-- Global vulnerability intelligence:
-  - `vulnerabilities`
-  - `vulnerability_intel_observations`
-  - `vulnerability_intel_summary`
-  - `vulnerability_intel_summary_sources`
-- Tenant-scoped inventory/projection:
-  - `assets`
-  - `sbom_uploads`
-  - `inventory_components`
-  - `inventory_component_cpe_map`
-  - `findings`
-  - workflow/audit tables (`finding_events`, `finding_comments`)
+- `assets`
+- `sbom_uploads`
+- `inventory_components`
+- `inventory_component_cpe_map`
+- `software_inventory_items`
+- `component_vulnerability_states`
+- `org_cve_records`
+- `findings`
+- `risk_policies`
+
+Global or mostly global intelligence tables include:
+
+- `vulnerabilities`
+- `vulnerability_intel_observations`
+- `vulnerability_intel_summary`
+- `vulnerability_intel_summary_sources`
+- `vulnerability_targets`
+- `vulnerability_rules`
+- `vulnerability_config_expr`
 
 ## Major Table Groups
 
-### Inventory And Asset Model
+### Inventory and Identity
 
+- `tenants`
 - `assets`
-  - unique: `uk_assets_tenant_identifier (tenant_id, identifier)`
-  - stores type, ownership metadata, business criticality, lifecycle state
+  - unique key on `(tenant_id, identifier)`
+  - stores asset type, owner metadata, and lifecycle state
 - `sbom_uploads`
-  - ingestion evidence (source type/system, endpoint, status, hash, counts)
+  - immutable ingestion evidence and counts
 - `inventory_components`
-  - component records by asset/upload
-  - lifecycle: `ACTIVE` / `RETIRED`
-  - normalized identity/model fields
-- `software_identities`, `software_identifiers`, `identity_links`, `software_models`
-  - normalization and canonical identity/model graph
+  - tenant asset components, active/retired lifecycle, normalized package fields
+- `software_identities`
+- `software_identifiers`
+- `identity_links`
+- `software_inventory_items`
+  - flattened software inventory projection used by read/reporting paths
 
-### Correlation Model
+### Correlation Inputs
 
 - `cpe_dim`
-  - canonical CPE dimension
-  - unique `normalized_cpe`
-  - indexes: `idx_cpe_dim_key`, `idx_cpe_dim_normalized`
+  - canonical normalized CPE dimension
 - `inventory_component_cpe_map`
-  - bridge: tenant component -> CPE
-  - unique `uk_inventory_component_cpe (tenant_id, component_id, cpe_id)`
-  - indexes: `idx_iccm_tenant_cpe`, `idx_iccm_tenant_component`
+  - bridge from component to normalized CPE
 - `vulnerability_targets`
-  - normalized target rows from NVD/GHSA/CSAF/VEX/advisory ingest
-  - includes version constraints + qualifiers
-  - CPE linkage via `cpe_id` to `cpe_dim`
-  - indexes include `idx_vuln_target_cpe_id`, `idx_vuln_target_type_cpe_id`
+  - normalized target rows with version bounds, qualifiers, and optional `cpe_id`
+- `vulnerability_rules`
+- `vulnerability_config_expr`
 
-### Vulnerability Intelligence Model
+### Vulnerability Intelligence
 
 - `vulnerabilities`
-  - canonical vulnerability row by `external_id` (unique)
-  - CVSS/severity/status/reference fields
-  - indexes for list and filter paths (external id + score/time, severity, status, kev)
+  - canonical vulnerability record keyed by `external_id`
+  - stores severity, CVSS, EPSS, KEV, title, snippet, archive keys, timestamps
 - `vulnerability_intel_observations`
-  - source-specific observations per vulnerability
-  - unique `(vulnerability_id, source_system, source_record_id)`
+  - source-specific raw observations
 - `vulnerability_intel_summary`
-  - read model for list performance and filtering
-  - includes `description_snippet`, `source_count`, summary timestamps
+  - list/read-model projection
 - `vulnerability_intel_summary_sources`
-  - source system list projected per vulnerability summary row
+  - projected source list per summary row
 
-### Finding And Workflow Model
+### Exposure and Findings
 
+- `component_vulnerability_states`
+  - component-level applicability and impact projection
+  - stores matched method, VEX fields, confidence, eligibility, and trace JSON
+- `org_cve_records`
+  - tenant-level rollup for one row per CVE per tenant
+  - stores applicability, impact state, matched component count, and software count
 - `findings`
-  - unique: `uk_findings_component_vulnerability`
-  - stores risk/confidence/decision/status and JSON evidence
-  - indexes for tenant/status/time and vulnerability lookups
-- `finding_events`, `finding_comments`
-  - workflow trail and human/operator notes
+  - tenant-scoped workflow records
+  - unique key on `(component_id, vulnerability_id)`
+- `finding_events`
+- `finding_comments`
 - `risk_policies`
-  - per-tenant scoring and SLA policy (single row per tenant)
 
-### Operational Integration Model
+### Operational and Workflow Support
 
 - `sync_runs`
-  - run diagnostics for NVD/KEV/GHSA/CSAF/advisory jobs
 - `github_sbom_sources`
-  - scheduled GitHub SBOM source configs and last-run status
+- `investigations`
+- `investigation_activities`
+- `investigation_attachments`
+- `applicability_assessments`
 
 ## Key Relationships
 
-- `tenants` 1->N `assets`, `inventory_components`, `inventory_component_cpe_map`, `sbom_uploads`, `findings`
-- `assets` 1->N `sbom_uploads`, `inventory_components`, `findings`
-- `inventory_components` 1->N `inventory_component_cpe_map`, 1->N `findings`
-- `cpe_dim` 1->N `inventory_component_cpe_map`, 1->N `vulnerability_targets`
-- `vulnerabilities` 1->N `vulnerability_targets`, 1->N `findings`, 1->N `vulnerability_intel_observations`
-- `vulnerabilities` 1->1 `vulnerability_intel_summary` (enforced by `vulnerability_id` uniqueness in summary)
+- `tenants` 1->N inventory, findings, org-CVE, and policy records
+- `assets` 1->N `sbom_uploads`, `inventory_components`, `software_inventory_items`, and `findings`
+- `inventory_components` 1->N `inventory_component_cpe_map`, `component_vulnerability_states`, and `findings`
+- `cpe_dim` 1->N `inventory_component_cpe_map` and `vulnerability_targets`
+- `vulnerabilities` 1->N `vulnerability_targets`, `vulnerability_intel_observations`, `component_vulnerability_states`, `org_cve_records`, and `findings`
+- `vulnerabilities` 1->1 `vulnerability_intel_summary` via unique `vulnerability_id`
 
-## Write Paths
+## Important Write Paths
 
-### SBOM ingestion (`/api/sbom-*`)
+### SBOM Ingestion
 
-1. Upsert asset + create `sbom_uploads` evidence row.
-2. Upsert `inventory_components`; retire missing components.
-3. Normalize CPEs into `cpe_dim`.
-4. Sync `inventory_component_cpe_map`.
-5. Trigger component-scoped finding recompute.
+1. upsert asset and upload evidence
+2. upsert component rows and retire missing components
+3. maintain software identity and software inventory projections
+4. normalize CPEs and bridge them to components
+5. enqueue component recomputation
 
-### Vulnerability ingestion (`/api/ingestion/*`)
+### Vulnerability Ingestion
 
-1. Upsert source observations in `vulnerability_intel_observations`.
-2. Merge canonical `vulnerabilities`.
-3. Refresh `vulnerability_intel_summary` and `vulnerability_intel_summary_sources`.
-4. Upsert `vulnerability_rules`, `vulnerability_config_expr`, `vulnerability_targets`.
-5. Run vulnerability-scoped recompute and VEX overlay updates.
+1. upsert source observations
+2. merge canonical vulnerability records
+3. refresh vulnerability summary projections
+4. upsert targets, rules, and config expressions
+5. enqueue CVE-level recomputation
 
-### CMDB and asset lifecycle (`/api/assets/cmdb-sync`, schedulers)
+### Exposure Projection
 
-1. Upsert asset metadata/state.
-2. On non-active asset transitions, resolve/suppress open findings accordingly.
-3. Scheduled stale-asset job marks assets inactive based on `last_inventory_at`.
+The current backend writes two important projection tables before or alongside finding updates:
 
-## Determinism And Auditability
+- `component_vulnerability_states` for component-level truth
+- `org_cve_records` for tenant/CVE rollups
 
-`findings.evidence` stores:
+This is a major change from the older documentation set and is now the correct place to look for current applicability and org-CVE exposure state.
 
-- selected match method and confidence breakdown
-- applicability trace (version + VEX policy outcomes)
-- precedence resolution trace
-- target metadata including CPE linkage
-- risk breakdown context
+### Workflow Operations
 
-This enables replayable, explainable decisions from persisted inputs.
+- investigations and applicability assessments are persisted directly from `/api/cve-detail/*`
+- finding events/comments capture audit trail around status and suppression changes
+- scheduled jobs mutate asset state, suppression expiry, and policy-based auto-close behavior
 
-## Known Current Behavior
+## Optimization and Archive Notes
 
-Correlation recompute creates and updates findings from deterministic CPE matching (`matchedBy` starts with `cpe-`). Additional matcher families remain disabled for finding creation until explicitly enabled.
+The vulnerability archival work is partially realized in the active schema:
+
+- `vulnerabilities` includes `description_snippet`, `description_archive_key`, and `raw_payload_archive_key`
+- legacy columns such as expanded CVSS fields, `source_identifier`, and `vuln_status` still remain in the `Vulnerability` entity for compatibility
+
+That means the database is still somewhat broader than a fully slimmed final form, even though PostgreSQL and Flyway now own the live runtime path cleanly.
+
+## Cutover Validation
+
+The backend includes a parity validator for comparing an archived H2 source snapshot with a PostgreSQL target:
+
+```bash
+cd backend
+./tools/run-database-parity.sh
+```
+
+Default inputs:
+
+- H2: `jdbc:h2:file:./data/archive/h2-archive-20260308-postgres-cutover/vulnwatch;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH`
+- PostgreSQL: `jdbc:postgresql://localhost:5432/vulnwatch`
+- PostgreSQL user: the current OS user
+
+Overridable properties:
+
+- `-Dh2.url=...`
+- `-Dh2.user=...`
+- `-Dh2.password=...`
+- `-Dpostgres.url=...`
+- `-Dpostgres.user=...`
+- `-Dpostgres.password=...`
+- `H2_JAR=/path/to/h2-*.jar`
+- `POSTGRES_JAR=/path/to/postgresql-*.jar`
+
+The validator is intentionally outside Maven so H2 does not remain in the normal build or test dependency graph.
+
+## Determinism and Auditability
+
+The data model preserves explainability rather than only final status:
+
+- `component_vulnerability_states.trace_json` stores component-level reasoning
+- `findings.evidence` and `findings.precedence_trace` preserve decision traces
+- `finding_events` records workflow changes
+- `sync_runs` records ingest execution history
+
+## Current Caveats
+
+- `software_models` is no longer part of the active code model. Older docs that described `software_models` as a core table are obsolete.
+- Flyway owns the PostgreSQL startup path and normal runtime no longer relies on startup schema mutation.
+- Because schema evolution was compatibility-oriented, some tables and columns reflect transitional states rather than a clean-room final design.

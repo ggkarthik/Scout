@@ -2,22 +2,34 @@ spring:
   application:
     name: vulnwatch-backend
   datasource:
-    url: jdbc:h2:file:./data/vulnwatch;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vulnwatch}
+    username: ${DB_USERNAME:${USER:postgres}}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/postgres
+    baseline-on-migrate: true
+    baseline-version: 1000
+    validate-on-migrate: true
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
+    open-in-view: false
     show-sql: false
     properties:
       hibernate:
         format_sql: true
+  cache:
+    caffeine:
+      spec: maximumSize=100,expireAfterWrite=60s
+    cache-names: dashboard,vulnIntelDashboard
   jackson:
     default-property-inclusion: non_null
   servlet:
@@ -29,6 +41,7 @@ app:
   features:
     vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
     vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
+    software-model-enabled: ${FEATURE_SOFTWARE_MODEL_ENABLED:false}
   security:
     api-key: ${APP_API_KEY:change-me-in-prod}
     creator-key: ${APP_CREATOR_KEY:}
@@ -81,25 +94,16 @@ app:
     retry-base-backoff-ms: ${GITHUB_RETRY_BASE_BACKOFF_MS:1000}
   assets:
     stale-days-to-inactive: ${ASSET_STALE_DAYS_TO_INACTIVE:30}
+  archive:
+    # Storage backend: 'filesystem' or 's3'
+    storage-backend: ${ARCHIVE_STORAGE_BACKEND:filesystem}
+    # S3 bucket name (only used when storage-backend=s3)
+    s3-bucket: ${ARCHIVE_S3_BUCKET:}
+    # Local filesystem path (only used when storage-backend=filesystem)
+    local-path: ${ARCHIVE_LOCAL_PATH:./data/vulnerability-archives}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info
-
----
-spring:
-  config:
-    activate:
-      on-profile: postgres
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/vulnwatch}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
-  h2:
-    console:
-      enabled: false

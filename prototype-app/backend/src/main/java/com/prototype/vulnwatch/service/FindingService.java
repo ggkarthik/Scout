@@ -21,6 +21,7 @@ import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingResponse;
+import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
@@ -39,6 +40,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -115,6 +117,12 @@ public class FindingService {
         this.vulnerabilityConfigExprRepository = vulnerabilityConfigExprRepository;
         this.orgCveRecordService = orgCveRecordService;
         this.objectMapper = objectMapper;
+    }
+
+    @Transactional
+    public Finding saveFinding(Finding finding) {
+        finding.touch();
+        return findingRepository.save(finding);
     }
 
     @Transactional
@@ -200,30 +208,79 @@ public class FindingService {
                     continue;
                 }
                 if (vexOverlay.applied() && vexOverlay.finalState() == PrecedenceResolverService.FinalState.NOT_AFFECTED) {
+                    // VEX FIX #1: Auto-resolve existing findings when VEX says NOT_AFFECTED
+                    PrecedenceResolverService.CandidateDecision selected = resolution.primary();
+                    VulnerabilityTarget target = selected.target();
+                    Vulnerability vulnerability = target.getVulnerability();
+                    String key = exposureKey(component.getId(), vulnerability.getId());
+                    Finding existingFinding = existingByKey.get(key);
+
+                    if (existingFinding != null
+                            && existingFinding.getStatus() != FindingStatus.RESOLVED
+                            && existingFinding.getStatus() != FindingStatus.AUTO_CLOSED) {
+                        // Resolve the existing finding (consistent with applyVexDelta logic)
+                        existingFinding.setStatus(FindingStatus.RESOLVED);
+                        existingFinding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
+                        setEvidenceWithVex(existingFinding, withVexOverlayEvidence(existingFinding.getEvidence(), vexOverlay));
+                        existingFinding.setLastObservedAt(now);
+                        existingFinding.touch();
+
+                        // Log the auto-resolution event
+                        findingWorkflowService.appendEvent(
+                            existingFinding,
+                            "VEX_RESOLVED",
+                            "system",
+                            String.format("Finding resolved due to %s VEX statement: %s",
+                                vexOverlay.provider(), vexOverlay.status()),
+                            Map.of(
+                                "vexProvider", vexOverlay.provider(),
+                                "vexStatus", vexOverlay.status(),
+                                "vexFreshness", vexOverlay.freshness(),
+                                "previousStatus", existingFinding.getStatus().name(),
+                                "previousDecisionState", existingFinding.getDecisionState() != null ? existingFinding.getDecisionState().name() : "UNKNOWN",
+                                "vexSource", vexOverlay.source() != null ? vexOverlay.source() : "unknown",
+                                "resolvedAt", now.toString()
+                            )
+                        );
+
+                        LOG.info("VEX resolved finding {} for component {} and vulnerability {} (provider: {}, status: {})",
+                            existingFinding.getId(), component.getId(), vulnerability.getExternalId(),
+                            vexOverlay.provider(), vexOverlay.status());
+                    }
                     continue;
                 }
 
                 PrecedenceResolverService.CandidateDecision selected = resolution.primary();
-                VulnerabilityTarget target = selected.target();
+                String key = exposureKey(component.getId(), vulnerabilityId);
+                Finding finding = existingByKey.get(key);
+                PrecedenceResolverService.CandidateDecision findingSelected = selected;
+                if (finding == null) {
+                    findingSelected = selectAutomaticFindingCandidate(resolution, decisions);
+                    if (findingSelected == null) {
+                        continue;
+                    }
+                }
+                VulnerabilityTarget target = findingSelected.target();
                 Vulnerability vulnerability = target.getVulnerability();
-                String key = exposureKey(component.getId(), vulnerability.getId());
+                if (finding == null && orgCveRecordService.isActivelySuppressed(tenant, vulnerability, now)) {
+                    continue;
+                }
 
                 RiskScoringService.RiskScoreOutcome riskScoreOutcome =
-                        riskScoringService.score(vulnerability, policy, asset, selected, resolution);
+                        riskScoringService.score(vulnerability, policy, asset, findingSelected, resolution);
                 double riskScore = riskScoreOutcome.score();
                 String evidence = findingEvidenceService.buildEvidence(
                         component,
                         vulnerability,
                         target,
-                        selected,
+                        findingSelected,
                         resolution,
                         riskScoreOutcome
                 );
                 evidence = withVexOverlayEvidence(evidence, vexOverlay);
 
-                Finding finding = existingByKey.get(key);
                 if (finding == null) {
-                    if (!isFindingCreationEligible(selected)) {
+                    if (!isAutomaticFindingGenerationEnabled(policy)) {
                         continue;
                     }
                     finding = createFinding(
@@ -231,7 +288,7 @@ public class FindingService {
                             asset,
                             component,
                             vulnerability,
-                            selected,
+                            findingSelected,
                             resolution,
                             riskScore,
                             evidence,
@@ -261,11 +318,11 @@ public class FindingService {
                     }
                 }
                 finding.setDecisionState(FindingDecisionState.AFFECTED);
-                finding.setMatchedBy(selected.matchedBy());
+                finding.setMatchedBy(findingSelected.matchedBy());
                 finding.setRiskScore(riskScore);
                 finding.setDueAt(deriveSlaDueAt(finding.getFirstObservedAt(), riskScore, asset, policy));
-                finding.setConfidenceScore(selected.confidence());
-                finding.setEvidence(evidence);
+                finding.setConfidenceScore(findingSelected.confidence());
+                setEvidenceWithVex(finding, evidence);
                 finding.setPrecedenceTrace(toJson(resolution.precedenceTrace()));
                 finding.setLastObservedAt(now);
                 finding.touch();
@@ -304,7 +361,7 @@ public class FindingService {
                         finding,
                         "CREATED_BY_CORRELATION",
                         "system",
-                        "Finding created from deterministic CPE correlation",
+                        "Finding created from deterministic inventory-to-vulnerability correlation",
                         Map.of(
                                 "matchedBy", finding.getMatchedBy(),
                                 "riskScore", finding.getRiskScore(),
@@ -358,14 +415,15 @@ public class FindingService {
         RiskPolicy policy = riskPolicyService.getOrCreate(components.get(0).getTenant());
         Instant now = Instant.now();
         int total = 0;
+        Set<UUID> touchedVulnerabilityIds = new LinkedHashSet<>();
         for (InventoryComponent component : components) {
-            total += recomputeForComponent(component.getTenant(), component, policy, now);
+            ComponentRecomputeResult result = recomputeForComponent(component.getTenant(), component, policy, now);
+            total += result.activeFindingCount();
+            touchedVulnerabilityIds.addAll(result.touchedVulnerabilityIds());
         }
-        Set<UUID> refreshedVulnerabilityIds = componentVulnerabilityStateRepository.findDistinctVulnerabilityIdsByTenantIdAndComponentIds(
-                tenantId,
-                components.stream().map(InventoryComponent::getId).toList()
-        );
-        orgCveRecordService.refreshForTenantAndVulnerabilities(components.get(0).getTenant(), refreshedVulnerabilityIds);
+        if (!touchedVulnerabilityIds.isEmpty()) {
+            orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, touchedVulnerabilityIds);
+        }
         return total;
     }
 
@@ -374,17 +432,11 @@ public class FindingService {
         if (vulnerabilityId == null) {
             return 0;
         }
-        Set<UUID> cpeIds = vulnerabilityTargetRepository.findDistinctCpeIdsByVulnerabilityAndType(
-                vulnerabilityId,
-                com.prototype.vulnwatch.domain.VulnerabilityTargetType.CPE
-        );
+        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(vulnerabilityId);
+
         int total = 0;
-        if (!cpeIds.isEmpty()) {
-            Set<UUID> tenantIds = inventoryComponentCpeMapRepository.findDistinctTenantIdsByCpeIds(cpeIds);
-            for (UUID tenantId : tenantIds) {
-                Set<UUID> componentIds = inventoryComponentCpeMapRepository.findDistinctComponentIdsByTenantIdAndCpeIds(tenantId, cpeIds);
-                total += recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
-            }
+        for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
+            total += recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue());
         }
         orgCveRecordService.refreshForAllTenants(vulnerabilityId);
         return total;
@@ -392,7 +444,7 @@ public class FindingService {
 
     @Transactional
     public int applyVexDelta(UUID tenantId, UUID vulnerabilityId) {
-        return applyVexDelta(tenantId, vulnerabilityId, null);
+        return applyVexDelta(tenantId, vulnerabilityId, (String) null);
     }
 
     @Transactional
@@ -400,10 +452,10 @@ public class FindingService {
         if (vulnerabilityId == null) {
             return 0;
         }
+        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(vulnerabilityId);
         int total = 0;
-        Set<UUID> tenantIds = findingRepository.findDistinctTenantIdsByVulnerabilityId(vulnerabilityId);
-        for (UUID tenantId : tenantIds) {
-            total += applyVexDelta(tenantId, vulnerabilityId, sourceKey);
+        for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
+            total += applyVexDeltaForAffectedComponents(entry.getKey(), vulnerabilityId, entry.getValue());
         }
         orgCveRecordService.refreshForAllTenants(vulnerabilityId);
         return total;
@@ -414,81 +466,88 @@ public class FindingService {
         if (tenantId == null || vulnerabilityId == null) {
             return 0;
         }
-        List<Finding> findings = findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId);
-        if (findings.isEmpty()) {
-            orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, List.of(vulnerabilityId));
-            return 0;
-        }
-
-        Instant now = Instant.now();
-        List<Finding> toPersist = new ArrayList<>();
-        Map<UUID, List<CorrelationCandidateService.CandidateMatch>> candidatesByComponent = new HashMap<>();
-        for (Finding finding : findings) {
-            InventoryComponent component = finding.getComponent();
-            if (component == null || component.getId() == null) {
-                continue;
-            }
-            List<CorrelationCandidateService.CandidateMatch> componentCandidates = candidatesByComponent.computeIfAbsent(
-                    component.getId(),
-                    ignored -> correlationCandidateService.candidatesForComponent(
-                            component,
-                            correlationCandidateService.buildCandidateBundle(List.of(component)))
-            );
-            VexOverlayOutcome overlay = resolveVexOverlay(component, vulnerabilityId, sourceKey, componentCandidates, null);
-            if (!overlay.applied()) {
-                continue;
-            }
-
-            boolean changed = false;
-            switch (overlay.finalState()) {
-                case NOT_AFFECTED -> {
-                    if (finding.getDecisionState() != FindingDecisionState.NOT_AFFECTED) {
-                        finding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
-                        changed = true;
-                    }
-                    if (finding.getStatus() != FindingStatus.AUTO_CLOSED && finding.getStatus() != FindingStatus.RESOLVED) {
-                        finding.setStatus(FindingStatus.RESOLVED);
-                        changed = true;
-                    }
-                }
-                case AFFECTED -> {
-                    if (finding.getDecisionState() != FindingDecisionState.AFFECTED) {
-                        finding.setDecisionState(FindingDecisionState.AFFECTED);
-                        changed = true;
-                    }
-                    if (finding.getStatus() == FindingStatus.RESOLVED) {
-                        finding.setStatus(FindingStatus.OPEN);
-                        changed = true;
-                    }
-                }
-                case UNKNOWN -> {
-                    if (finding.getDecisionState() != FindingDecisionState.UNDER_INVESTIGATION) {
-                        finding.setDecisionState(FindingDecisionState.UNDER_INVESTIGATION);
-                        changed = true;
-                    }
-                    if (finding.getStatus() == FindingStatus.RESOLVED) {
-                        finding.setStatus(FindingStatus.OPEN);
-                        changed = true;
-                    }
-                }
-            }
-
-            if (!changed) {
-                continue;
-            }
-
-            finding.setEvidence(withVexOverlayEvidence(finding.getEvidence(), overlay));
-            finding.setLastObservedAt(now);
-            finding.touch();
-            toPersist.add(finding);
-        }
-
-        if (toPersist.isEmpty()) {
-            return 0;
-        }
-        findingRepository.saveAll(toPersist);
+        Set<UUID> affectedComponentIds = collectAffectedComponentsByTenant(vulnerabilityId).getOrDefault(tenantId, Set.of());
+        int changed = applyVexDeltaForAffectedComponents(tenantId, vulnerabilityId, affectedComponentIds);
         orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, List.of(vulnerabilityId));
-        return toPersist.size();
+        return changed;
+    }
+
+    private int applyVexDeltaForAffectedComponents(UUID tenantId, UUID vulnerabilityId, Set<UUID> affectedComponentIds) {
+        if (tenantId == null || vulnerabilityId == null) {
+            return 0;
+        }
+        if (affectedComponentIds == null || affectedComponentIds.isEmpty()) {
+            return 0;
+        }
+
+        Map<UUID, Instant> findingUpdatedAtBefore = findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId).stream()
+                .filter(finding -> finding.getId() != null)
+                .collect(Collectors.toMap(
+                        Finding::getId,
+                        Finding::getUpdatedAt,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+
+        recomputeOnSoftwareDeltaBatch(tenantId, affectedComponentIds);
+
+        int changed = 0;
+        for (Finding finding : findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)) {
+            if (finding.getId() == null) {
+                continue;
+            }
+            Instant previousUpdatedAt = findingUpdatedAtBefore.get(finding.getId());
+            if (previousUpdatedAt == null || !Objects.equals(previousUpdatedAt, finding.getUpdatedAt())) {
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    private Map<UUID, Set<UUID>> collectAffectedComponentsByTenant(UUID vulnerabilityId) {
+        Map<UUID, Set<UUID>> componentsByTenant = new HashMap<>();
+
+        Set<UUID> cpeIds = vulnerabilityTargetRepository.findDistinctCpeIdsByVulnerabilityAndType(
+                vulnerabilityId,
+                com.prototype.vulnwatch.domain.VulnerabilityTargetType.CPE
+        );
+        if (!cpeIds.isEmpty()) {
+            inventoryComponentCpeMapRepository.findDistinctTenantComponentRowsByCpeIds(cpeIds).forEach(row ->
+                    addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
+        }
+
+        List<String> purlKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
+                vulnerabilityId,
+                com.prototype.vulnwatch.domain.VulnerabilityTargetType.PURL
+        );
+        if (!purlKeys.isEmpty()) {
+            inventoryComponentRepository.findDistinctTenantComponentRowsByNormalizedPurlIn(purlKeys).forEach(row ->
+                    addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
+        }
+
+        List<String> coordKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
+                vulnerabilityId,
+                com.prototype.vulnwatch.domain.VulnerabilityTargetType.COORD
+        );
+        List<String> advisoryKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
+                vulnerabilityId,
+                com.prototype.vulnwatch.domain.VulnerabilityTargetType.ADVISORY_PACKAGE
+        );
+        Set<String> allCoordKeys = new HashSet<>(coordKeys);
+        allCoordKeys.addAll(advisoryKeys);
+        if (!allCoordKeys.isEmpty()) {
+            inventoryComponentRepository.findDistinctTenantComponentRowsByCoordKeyIn(allCoordKeys).forEach(row ->
+                    addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
+        }
+
+        return componentsByTenant;
+    }
+
+    private void addComponentLookupRow(Map<UUID, Set<UUID>> componentsByTenant, UUID tenantId, UUID componentId) {
+        if (tenantId == null || componentId == null) {
+            return;
+        }
+        componentsByTenant.computeIfAbsent(tenantId, ignored -> new HashSet<>()).add(componentId);
     }
 
     @Transactional(readOnly = true)
@@ -584,41 +643,21 @@ public class FindingService {
                 status,
                 decisionState,
                 matchMethod,
+                vexStatus,
+                vexFreshness,
+                vexProvider,
                 minConfidence,
                 vulnerabilityId,
                 packageName,
                 ecosystem
         );
-        Set<String> normalizedVexStatus = normalizeUpperFilterValues(vexStatus);
-        Set<String> normalizedVexFreshness = normalizeUpperFilterValues(vexFreshness);
-        Set<String> normalizedVexProvider = normalizeLowerFilterValues(vexProvider);
-        boolean hasVexFilters = !normalizedVexStatus.isEmpty()
-                || !normalizedVexFreshness.isEmpty()
-                || !normalizedVexProvider.isEmpty();
-
-        if (!hasVexFilters) {
-            Page<Finding> findings = findingRepository.findAll(specification, pageable);
-            return new FindingPageResponse(
-                    findings.getContent().stream().map(this::toResponse).toList(),
-                    findings.getNumber(),
-                    findings.getSize(),
-                    findings.getTotalElements(),
-                    findings.getTotalPages()
-            );
-        }
-
-        List<Finding> base = findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"));
-        List<Finding> filtered = applyVexFilters(base, normalizedVexStatus, normalizedVexFreshness, normalizedVexProvider);
-        int fromIndex = Math.min(filtered.size(), safePage * safeSize);
-        int toIndex = Math.min(filtered.size(), fromIndex + safeSize);
-        List<Finding> pageContent = fromIndex >= toIndex ? List.of() : filtered.subList(fromIndex, toIndex);
-        int totalPages = filtered.isEmpty() ? 0 : (int) Math.ceil((double) filtered.size() / (double) safeSize);
+        Page<Finding> findings = findingRepository.findAll(specification, pageable);
         return new FindingPageResponse(
-                pageContent.stream().map(this::toResponse).toList(),
-                safePage,
-                safeSize,
-                filtered.size(),
-                totalPages
+                findings.getContent().stream().map(this::toResponse).toList(),
+                findings.getNumber(),
+                findings.getSize(),
+                findings.getTotalElements(),
+                findings.getTotalPages()
         );
     }
 
@@ -642,18 +681,15 @@ public class FindingService {
                 status,
                 decisionState,
                 matchMethod,
+                vexStatus,
+                vexFreshness,
+                vexProvider,
                 minConfidence,
                 vulnerabilityId,
                 packageName,
                 ecosystem
         );
-        List<Finding> base = findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"));
-        return applyVexFilters(
-                base,
-                normalizeUpperFilterValues(vexStatus),
-                normalizeUpperFilterValues(vexFreshness),
-                normalizeLowerFilterValues(vexProvider)
-        );
+        return findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"));
     }
 
     public List<Finding> listEntitiesByTenantAndIds(Tenant tenant, List<UUID> findingIds) {
@@ -707,16 +743,24 @@ public class FindingService {
                 .forEach(matchMethods::add);
 
         LinkedHashSet<String> vexStatuses = new LinkedHashSet<>();
-        LinkedHashSet<String> vexFreshness = new LinkedHashSet<>();
-        LinkedHashSet<String> vexProviders = new LinkedHashSet<>();
-        findingRepository.findByTenantOrderByUpdatedAtDesc(tenant).forEach(finding -> {
-            VexFilterEvidence vexEvidence = parseVexFilterEvidence(finding);
-            vexStatuses.add(vexEvidence.status());
-            vexFreshness.add(vexEvidence.freshness());
-            vexProviders.add(vexEvidence.provider());
-        });
+        findingRepository.findDistinctVexStatusesByTenant(tenant).stream()
+                .filter(this::hasText)
+                .map(value -> value.trim().toUpperCase(java.util.Locale.ROOT))
+                .forEach(vexStatuses::add);
         vexStatuses.addAll(List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "NO_PATCH", "UNDER_INVESTIGATION", "UNKNOWN"));
+
+        LinkedHashSet<String> vexFreshness = new LinkedHashSet<>();
+        findingRepository.findDistinctVexFreshnessByTenant(tenant).stream()
+                .filter(this::hasText)
+                .map(value -> value.trim().toUpperCase(java.util.Locale.ROOT))
+                .forEach(vexFreshness::add);
         vexFreshness.addAll(List.of("FRESH", "STALE", "UNKNOWN"));
+
+        LinkedHashSet<String> vexProviders = new LinkedHashSet<>();
+        findingRepository.findDistinctVexProvidersByTenant(tenant).stream()
+                .filter(this::hasText)
+                .map(value -> value.trim().toLowerCase(java.util.Locale.ROOT))
+                .forEach(vexProviders::add);
         vexProviders.add("unknown");
 
         return new FindingFilterValuesResponse(
@@ -748,7 +792,170 @@ public class FindingService {
         return findingRepository.countByTenantAndStatusAndRiskScoreGreaterThanEqual(tenant, FindingStatus.OPEN, 9.0);
     }
 
-    private int recomputeForComponent(
+    @Transactional
+    public ManualFindingCreationResult createManualFindingsForVulnerability(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            String justification,
+            String createdBy,
+            Collection<UUID> selectedComponentIds
+    ) {
+        if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
+            return new ManualFindingCreationResult(0, 0, 0, 0);
+        }
+
+        RiskPolicy policy = riskPolicyService.getOrCreate(tenant);
+        Instant now = Instant.now();
+        String normalizedJustification = justification == null ? "" : justification.trim();
+
+        List<ComponentVulnerabilityState> states =
+                componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+        List<Finding> existingFindings =
+                findingRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+        Map<UUID, Finding> findingsByComponentId = new HashMap<>();
+        for (Finding finding : existingFindings) {
+            if (finding.getComponent() != null && finding.getComponent().getId() != null) {
+                findingsByComponentId.put(finding.getComponent().getId(), finding);
+            }
+        }
+
+        int eligibleCount = 0;
+        int createdCount = 0;
+        int reopenedCount = 0;
+        int alreadyOpenCount = 0;
+        List<Finding> toPersist = new ArrayList<>();
+        List<Finding> createdFindings = new ArrayList<>();
+        List<Finding> reopenedFindings = new ArrayList<>();
+
+        Set<UUID> selectedIds = selectedComponentIds == null ? Set.of() : selectedComponentIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<ComponentVulnerabilityState> eligibleStates = states.stream()
+                .filter(this::isEligibleForManualFinding)
+                .filter(state -> state.getComponent() != null && state.getComponent().getId() != null)
+                .filter(state -> selectedIds.isEmpty() || selectedIds.contains(state.getComponent().getId()))
+                .filter(state -> state.getComponent().getAsset() != null)
+                .filter(state -> state.getComponent().getComponentStatus() == InventoryComponentStatus.ACTIVE)
+                .sorted(Comparator
+                        .comparing((ComponentVulnerabilityState state) -> state.getComponent().getAsset().getName(), Comparator.nullsLast(String::compareToIgnoreCase))
+                        .thenComparing(state -> state.getComponent().getPackageName(), Comparator.nullsLast(String::compareToIgnoreCase))
+                        .thenComparing(state -> state.getComponent().getVersion(), Comparator.nullsLast(String::compareToIgnoreCase)))
+                .toList();
+
+        for (ComponentVulnerabilityState state : eligibleStates) {
+            InventoryComponent component = state.getComponent();
+            if (component == null || component.getId() == null || component.getAsset() == null) {
+                continue;
+            }
+
+            eligibleCount++;
+            Finding finding = findingsByComponentId.get(component.getId());
+            double riskScore = riskScoringService.score(vulnerability, policy, component.getAsset());
+            String evidence = buildManualFindingEvidence(state, normalizedJustification, createdBy);
+
+            if (finding != null) {
+                if (finding.getStatus() == FindingStatus.RESOLVED || finding.getStatus() == FindingStatus.AUTO_CLOSED) {
+                    finding.setStatus(FindingStatus.OPEN);
+                    finding.setDecisionState(FindingDecisionState.AFFECTED);
+                    finding.setMatchedBy(hasText(state.getMatchedBy()) ? state.getMatchedBy() : "manual-org-cve-review");
+                    finding.setRiskScore(riskScore);
+                    finding.setDueAt(deriveSlaDueAt(finding.getFirstObservedAt(), riskScore, component.getAsset(), policy));
+                    finding.setConfidenceScore(state.getConfidenceScore() == null ? 0.0 : state.getConfidenceScore());
+                    setEvidenceWithVex(finding, evidence);
+                    finding.setPrecedenceTrace(state.getTraceJson());
+                    finding.setSuppressionReason(null);
+                    finding.setSuppressedUntil(null);
+                    finding.setLastObservedAt(now);
+                    finding.touch();
+                    toPersist.add(finding);
+                    reopenedFindings.add(finding);
+                    reopenedCount++;
+                } else {
+                    alreadyOpenCount++;
+                }
+                continue;
+            }
+
+            Finding created = createManualFinding(
+                    tenant,
+                    component.getAsset(),
+                    component,
+                    vulnerability,
+                    state,
+                    riskScore,
+                    evidence,
+                    now,
+                    policy
+            );
+            toPersist.add(created);
+            createdFindings.add(created);
+            createdCount++;
+        }
+
+        if (!toPersist.isEmpty()) {
+            findingRepository.saveAll(toPersist);
+            for (Finding finding : createdFindings) {
+                findingWorkflowService.appendEvent(
+                        finding,
+                        "CREATED_BY_MANUAL_CVE_REVIEW",
+                        createdBy,
+                        "Finding created manually from Org CVE review",
+                        Map.of(
+                                "justification", normalizedJustification,
+                                "matchedBy", finding.getMatchedBy(),
+                                "riskScore", finding.getRiskScore()
+                        )
+                );
+            }
+            for (Finding finding : reopenedFindings) {
+                findingWorkflowService.appendEvent(
+                        finding,
+                        "REOPENED_BY_MANUAL_CVE_REVIEW",
+                        createdBy,
+                        "Finding reopened manually from Org CVE review",
+                        Map.of(
+                                "justification", normalizedJustification,
+                                "matchedBy", finding.getMatchedBy(),
+                                "riskScore", finding.getRiskScore()
+                        )
+                );
+            }
+        }
+
+        orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
+        return new ManualFindingCreationResult(eligibleCount, createdCount, reopenedCount, alreadyOpenCount);
+    }
+
+    @Transactional
+    public int suppressFindingsForVulnerability(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            String reason,
+            String justification,
+            String actor,
+            Instant suppressedUntil
+    ) {
+        if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
+            return 0;
+        }
+        List<Finding> findings = findingRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+        if (findings.isEmpty()) {
+            return 0;
+        }
+        return findingWorkflowService.updateWorkflowBulk(
+                findings,
+                new FindingWorkflowUpdateRequest(
+                        FindingStatus.SUPPRESSED.name(),
+                        null,
+                        null,
+                        buildSuppressionReason(reason, justification),
+                        suppressedUntil,
+                        actor
+                )
+        );
+    }
+
+    private ComponentRecomputeResult recomputeForComponent(
             Tenant tenant,
             InventoryComponent component,
             RiskPolicy policy,
@@ -756,11 +963,13 @@ public class FindingService {
     ) {
         List<Finding> existing = findingRepository.findByComponent(component);
         List<ComponentVulnerabilityState> existingStates = componentVulnerabilityStateRepository.findByTenantAndComponent(tenant, component);
+        Set<UUID> touchedVulnerabilityIds = collectTouchedVulnerabilityIds(existing, existingStates);
         if (component.getAsset() == null
                 || component.getAsset().getState() != AssetState.ACTIVE
                 || component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
             resolveInactiveComponentAssessments(existingStates, now);
-            return resolveInactiveComponentFindings(existing, now);
+            resolveInactiveComponentFindings(existing, now);
+            return new ComponentRecomputeResult(0, touchedVulnerabilityIds);
         }
 
         CorrelationCandidateService.CandidateBundle bundle = correlationCandidateService.buildCandidateBundle(List.of(component));
@@ -780,6 +989,9 @@ public class FindingService {
                 existingStateByVulnerability.put(state.getVulnerability().getId(), state);
             }
         }
+        touchedVulnerabilityIds.addAll(existingByVulnerability.keySet());
+        touchedVulnerabilityIds.addAll(existingStateByVulnerability.keySet());
+        touchedVulnerabilityIds.addAll(decisionsByVulnerability.keySet());
 
         Set<UUID> activeVulnerabilityIds = new HashSet<>();
         Set<UUID> evaluatedVulnerabilityIds = new HashSet<>();
@@ -824,24 +1036,32 @@ public class FindingService {
                 continue;
             }
 
+            Finding finding = existingByVulnerability.get(vulnerability.getId());
+            PrecedenceResolverService.CandidateDecision findingSelected = selected;
+            if (finding == null) {
+                findingSelected = selectAutomaticFindingCandidate(resolution, decisions);
+                if (findingSelected == null) {
+                    continue;
+                }
+            }
+
             RiskScoringService.RiskScoreOutcome riskScoreOutcome =
-                    riskScoringService.score(vulnerability, policy, component.getAsset(), selected, resolution);
+                    riskScoringService.score(vulnerability, policy, component.getAsset(), findingSelected, resolution);
             double riskScore = riskScoreOutcome.score();
-            VulnerabilityTarget target = selected.target();
+            VulnerabilityTarget target = findingSelected.target();
             String evidence = findingEvidenceService.buildEvidence(
                     component,
                     vulnerability,
                     target,
-                    selected,
+                    findingSelected,
                     resolution,
                     riskScoreOutcome
             );
             evidence = withVexOverlayEvidence(evidence, vexOverlay);
 
-            Finding finding = existingByVulnerability.get(vulnerability.getId());
             boolean findingCreated = false;
             if (finding == null) {
-                if (!isFindingCreationEligible(selected)) {
+                if (!isAutomaticFindingGenerationEnabled(policy)) {
                     continue;
                 }
                 finding = createFinding(
@@ -849,7 +1069,7 @@ public class FindingService {
                         component.getAsset(),
                         component,
                         vulnerability,
-                        selected,
+                        findingSelected,
                         resolution,
                         riskScore,
                         evidence,
@@ -872,7 +1092,7 @@ public class FindingService {
             if (!findingCreated && finding.getDecisionState() != nextDecisionState) {
                 findingChanged = true;
             }
-            String nextMatchedBy = selected.matchedBy();
+            String nextMatchedBy = findingSelected.matchedBy();
             if (!findingCreated && !java.util.Objects.equals(finding.getMatchedBy(), nextMatchedBy)) {
                 findingChanged = true;
             }
@@ -883,7 +1103,7 @@ public class FindingService {
             if (!findingCreated && !java.util.Objects.equals(finding.getDueAt(), nextDueAt)) {
                 findingChanged = true;
             }
-            if (!findingCreated && Double.compare(finding.getConfidenceScore(), selected.confidence()) != 0) {
+            if (!findingCreated && Double.compare(finding.getConfidenceScore(), findingSelected.confidence()) != 0) {
                 findingChanged = true;
             }
             String nextPrecedenceTrace = toJson(resolution.precedenceTrace());
@@ -899,8 +1119,8 @@ public class FindingService {
                 finding.setMatchedBy(nextMatchedBy);
                 finding.setRiskScore(riskScore);
                 finding.setDueAt(nextDueAt);
-                finding.setConfidenceScore(selected.confidence());
-                finding.setEvidence(evidence);
+                finding.setConfidenceScore(findingSelected.confidence());
+                setEvidenceWithVex(finding, evidence);
                 finding.setPrecedenceTrace(nextPrecedenceTrace);
                 finding.setLastObservedAt(now);
                 finding.touch();
@@ -966,7 +1186,7 @@ public class FindingService {
                         finding,
                         "CREATED_BY_CORRELATION",
                         "system",
-                        "Finding created from deterministic CPE correlation",
+                        "Finding created from deterministic inventory-to-vulnerability correlation",
                         Map.of(
                                 "matchedBy", finding.getMatchedBy(),
                                 "riskScore", finding.getRiskScore(),
@@ -975,7 +1195,7 @@ public class FindingService {
                 );
             }
         }
-        return activeVulnerabilityIds.size();
+        return new ComponentRecomputeResult(activeVulnerabilityIds.size(), touchedVulnerabilityIds);
     }
 
     private int resolveInactiveComponentFindings(List<Finding> existing, Instant now) {
@@ -1035,6 +1255,36 @@ public class FindingService {
         }
     }
 
+    private Set<UUID> collectTouchedVulnerabilityIds(
+            List<Finding> existingFindings,
+            List<ComponentVulnerabilityState> existingStates
+    ) {
+        Set<UUID> vulnerabilityIds = new LinkedHashSet<>();
+        if (existingFindings != null) {
+            for (Finding finding : existingFindings) {
+                UUID vulnerabilityId = finding.getVulnerability() == null ? null : finding.getVulnerability().getId();
+                if (vulnerabilityId != null) {
+                    vulnerabilityIds.add(vulnerabilityId);
+                }
+            }
+        }
+        if (existingStates != null) {
+            for (ComponentVulnerabilityState state : existingStates) {
+                UUID vulnerabilityId = state.getVulnerability() == null ? null : state.getVulnerability().getId();
+                if (vulnerabilityId != null) {
+                    vulnerabilityIds.add(vulnerabilityId);
+                }
+            }
+        }
+        return vulnerabilityIds;
+    }
+
+    private record ComponentRecomputeResult(
+            int activeFindingCount,
+            Set<UUID> touchedVulnerabilityIds
+    ) {
+    }
+
     private String exposureKey(UUID componentId, UUID vulnerabilityId) {
         return componentId + "::" + vulnerabilityId;
     }
@@ -1049,6 +1299,9 @@ public class FindingService {
             List<String> status,
             List<String> decisionState,
             List<String> matchMethod,
+            List<String> vexStatus,
+            List<String> vexFreshness,
+            List<String> vexProvider,
             Double minConfidence,
             String vulnerabilityId,
             String packageName,
@@ -1059,6 +1312,9 @@ public class FindingService {
                 .and(byStatus(status))
                 .and(byDecisionState(decisionState))
                 .and(byMatchMethod(matchMethod))
+                .and(byVexStatus(vexStatus))
+                .and(byVexFreshness(vexFreshness))
+                .and(byVexProvider(vexProvider))
                 .and(byMinConfidence(minConfidence))
                 .and(byVulnerabilityId(vulnerabilityId))
                 .and(byPackageName(packageName))
@@ -1121,6 +1377,51 @@ public class FindingService {
         return (root, query, cb) -> cb.lower(root.get("matchedBy")).in(lower);
     }
 
+    private Specification<Finding> byVexStatus(List<String> vexStatuses) {
+        Set<String> normalized = normalizeUpperFilterValues(vexStatuses);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
+            if (normalized.contains("UNKNOWN")) {
+                predicates.add(cb.isNull(root.get("vexStatus")));
+            }
+            predicates.add(cb.upper(root.get("vexStatus")).in(normalized));
+            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        };
+    }
+
+    private Specification<Finding> byVexFreshness(List<String> vexFreshness) {
+        Set<String> normalized = normalizeUpperFilterValues(vexFreshness);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
+            if (normalized.contains("UNKNOWN")) {
+                predicates.add(cb.isNull(root.get("vexFreshness")));
+            }
+            predicates.add(cb.upper(root.get("vexFreshness")).in(normalized));
+            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        };
+    }
+
+    private Specification<Finding> byVexProvider(List<String> vexProviders) {
+        Set<String> normalized = normalizeLowerFilterValues(vexProviders);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
+            if (normalized.contains("unknown")) {
+                predicates.add(cb.isNull(root.get("vexProvider")));
+            }
+            predicates.add(cb.lower(root.get("vexProvider")).in(normalized));
+            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        };
+    }
+
     private List<Finding> applyVexFilters(
             List<Finding> findings,
             Set<String> vexStatuses,
@@ -1148,6 +1449,14 @@ public class FindingService {
             filtered.add(finding);
         }
         return filtered;
+    }
+
+    private void setEvidenceWithVex(Finding finding, String evidence) {
+        finding.setEvidence(evidence);
+        VexFilterEvidence vex = parseVexFilterEvidence(finding);
+        finding.setVexStatus(vex.status());
+        finding.setVexFreshness(vex.freshness());
+        finding.setVexProvider(vex.provider());
     }
 
     private VexFilterEvidence parseVexFilterEvidence(Finding finding) {
@@ -1268,7 +1577,7 @@ public class FindingService {
             if (target == null || target.getVulnerability() == null || !vulnerabilityId.equals(target.getVulnerability().getId())) {
                 continue;
             }
-            if (!isVexSource(target.getSource())) {
+            if (!isVexSource(target.getSource(), target.getQualifiersJson())) {
                 continue;
             }
             if (!sourceFilter.isEmpty()
@@ -1364,10 +1673,28 @@ public class FindingService {
     }
 
     private boolean isVexSource(String source) {
+        return isVexSource(source, null);
+    }
+
+    private boolean isVexSource(String source, String qualifiersJson) {
         if (!hasText(source)) {
             return false;
         }
-        return source.trim().toLowerCase(Locale.ROOT).contains(VEX_SOURCE_FRAGMENT);
+        String normalized = source.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains(VEX_SOURCE_FRAGMENT)) {
+            return true;
+        }
+        // CSAF advisory documents that carry explicit product status (vexStatus in qualifiersJson)
+        // also function as VEX trimming signals (G10).
+        if (normalized.startsWith("csaf-") && hasText(qualifiersJson)) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(qualifiersJson);
+                return hasText(node.path("vexStatus").asText(""));
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private String extractVexStatus(VulnerabilityTarget target) {
@@ -1486,6 +1813,14 @@ public class FindingService {
         }
     }
 
+    public record ManualFindingCreationResult(
+            int eligibleComponentCount,
+            int createdCount,
+            int reopenedCount,
+            int alreadyOpenCount
+    ) {
+    }
+
     private record ImpactAssessment(
             ApplicabilityState applicabilityState,
             String applicabilityReason,
@@ -1597,9 +1932,18 @@ public class FindingService {
             created = true;
         }
 
+        String newVexStatus = vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.status(), "UNKNOWN");
+        String newVexProvider = vexOverlay == null ? "unknown" : defaultString(vexOverlay.provider(), "unknown");
+        String newVexFreshness = vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.freshness(), "UNKNOWN");
+        String newVexSource = vexOverlay == null ? null : vexOverlay.source();
+
         boolean stateChanged = created
                 || state.getApplicabilityState() != impactAssessment.applicabilityState()
-                || state.getImpactState() != impactAssessment.impactState();
+                || state.getImpactState() != impactAssessment.impactState()
+                || !java.util.Objects.equals(state.getVexStatus(), newVexStatus)
+                || !java.util.Objects.equals(state.getVexProvider(), newVexProvider)
+                || !java.util.Objects.equals(state.getVexFreshness(), newVexFreshness)
+                || !java.util.Objects.equals(state.getVexSource(), newVexSource);
         if (!stateChanged) {
             return;
         }
@@ -1608,10 +1952,10 @@ public class FindingService {
         state.setApplicabilityReason(impactAssessment.applicabilityReason());
         state.setImpactState(impactAssessment.impactState());
         state.setImpactReason(impactAssessment.impactReason());
-        state.setVexStatus(vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.status(), "UNKNOWN"));
-        state.setVexProvider(vexOverlay == null ? "unknown" : defaultString(vexOverlay.provider(), "unknown"));
-        state.setVexFreshness(vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.freshness(), "UNKNOWN"));
-        state.setVexSource(vexOverlay == null ? null : vexOverlay.source());
+        state.setVexStatus(newVexStatus);
+        state.setVexProvider(newVexProvider);
+        state.setVexFreshness(newVexFreshness);
+        state.setVexSource(newVexSource);
         state.setVexTargetId(vexOverlay == null ? null : vexOverlay.targetId());
         state.setPrecedenceReason(resolution == null ? "unknown" : resolution.reason());
         state.setMatchedBy(selected == null ? null : selected.matchedBy());
@@ -1926,8 +2270,40 @@ public class FindingService {
         finding.setDueAt(deriveSlaDueAt(now, riskScore, asset, policy));
         finding.setSuppressionReason(null);
         finding.setSuppressedUntil(null);
-        finding.setEvidence(evidence);
+        setEvidenceWithVex(finding, evidence);
         finding.setPrecedenceTrace(toJson(resolution.precedenceTrace()));
+        finding.touch();
+        return finding;
+    }
+
+    private Finding createManualFinding(
+            Tenant tenant,
+            Asset asset,
+            InventoryComponent component,
+            Vulnerability vulnerability,
+            ComponentVulnerabilityState state,
+            double riskScore,
+            String evidence,
+            Instant now,
+            RiskPolicy policy
+    ) {
+        Finding finding = new Finding();
+        finding.setTenant(tenant);
+        finding.setAsset(asset);
+        finding.setComponent(component);
+        finding.setVulnerability(vulnerability);
+        finding.setStatus(FindingStatus.OPEN);
+        finding.setDecisionState(FindingDecisionState.AFFECTED);
+        finding.setMatchedBy(hasText(state.getMatchedBy()) ? state.getMatchedBy() : "manual-org-cve-review");
+        finding.setRiskScore(riskScore);
+        finding.setConfidenceScore(state.getConfidenceScore() == null ? 0.0 : state.getConfidenceScore());
+        finding.setFirstObservedAt(now);
+        finding.setLastObservedAt(now);
+        finding.setDueAt(deriveSlaDueAt(now, riskScore, asset, policy));
+        finding.setSuppressionReason(null);
+        finding.setSuppressedUntil(null);
+        setEvidenceWithVex(finding, evidence);
+        finding.setPrecedenceTrace(state.getTraceJson());
         finding.touch();
         return finding;
     }
@@ -1943,24 +2319,109 @@ public class FindingService {
         if (decision == null || !hasText(decision.matchedBy())) {
             return false;
         }
-        if (isCpeMatchMethod(decision.matchedBy())) {
-            return true;
-        }
-        if (!isSupportedNonCpeMatch(decision.matchedBy())) {
+        return isFindingCreationEligible(decision.matchedBy(), decision.confidence());
+    }
+
+    private boolean isFindingCreationEligible(String matchedBy, Double confidenceScore) {
+        if (!hasText(matchedBy)) {
             return false;
         }
-        return decision.confidence() >= nonCpeCreateMinConfidence;
+        if (isCpeMatchMethod(matchedBy)) {
+            return true;
+        }
+        if (!isSupportedNonCpeMatch(matchedBy)) {
+            return false;
+        }
+        return (confidenceScore == null ? 0.0 : confidenceScore) >= nonCpeCreateMinConfidence;
+    }
+
+    private boolean isEligibleForManualFinding(ComponentVulnerabilityState state) {
+        if (state == null) {
+            return false;
+        }
+        // For manual analyst-driven creation the impact-based flag is sufficient.
+        // The confidence threshold is only a gate for automatic finding generation.
+        return state.isEligibleForFinding();
     }
 
     private boolean isSupportedNonCpeMatch(String matchedBy) {
         String normalized = matchedBy == null ? "" : matchedBy.trim().toLowerCase(java.util.Locale.ROOT);
-        return normalized.startsWith("purl-") || normalized.startsWith("coord-");
+        return normalized.startsWith("purl-")
+                || normalized.startsWith("coord-")
+                || normalized.startsWith("advisory-pkg-");
+    }
+
+    private boolean isAutomaticFindingGenerationEnabled(RiskPolicy policy) {
+        return policy != null && policy.getFindingGenerationMode() == RiskPolicy.FindingGenerationMode.AUTO;
+    }
+
+    private PrecedenceResolverService.CandidateDecision selectAutomaticFindingCandidate(
+            PrecedenceResolverService.PrecedenceResolution resolution,
+            List<PrecedenceResolverService.CandidateDecision> decisions
+    ) {
+        if (resolution == null || decisions == null || decisions.isEmpty()) {
+            return null;
+        }
+        PrecedenceResolverService.CandidateDecision primary = resolution.primary();
+        if (primary == null
+                || primary.target() == null
+                || primary.applicabilityDecision() == null
+                || !primary.applicabilityDecision().isAffected()) {
+            return null;
+        }
+        if (isFindingCreationEligible(primary)) {
+            return primary;
+        }
+
+        int sourcePriority = precedenceResolverService.sourcePriority(primary.target().getSource());
+        return decisions.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> candidate.target() != null)
+                .filter(candidate -> candidate.applicabilityDecision() != null && candidate.applicabilityDecision().isAffected())
+                .filter(this::isFindingCreationEligible)
+                .filter(candidate -> precedenceResolverService.sourcePriority(candidate.target().getSource()) == sourcePriority)
+                .sorted(Comparator
+                        .comparingInt(PrecedenceResolverService.CandidateDecision::rank)
+                        .thenComparing(Comparator.comparingDouble(PrecedenceResolverService.CandidateDecision::confidence).reversed())
+                        .thenComparing(candidate -> candidate.target().getId(), Comparator.nullsLast(Comparator.naturalOrder())))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String buildManualFindingEvidence(
+            ComponentVulnerabilityState state,
+            String justification,
+            String createdBy
+    ) {
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("source", "manual-org-cve-review");
+        evidence.put("analyst", createdBy);
+        evidence.put("justification", justification);
+        evidence.put("matchedBy", state.getMatchedBy());
+        evidence.put("confidenceScore", state.getConfidenceScore());
+        evidence.put("applicabilityState", state.getApplicabilityState() == null ? null : state.getApplicabilityState().name());
+        evidence.put("impactState", state.getImpactState() == null ? null : state.getImpactState().name());
+        evidence.put("impactReason", state.getImpactReason());
+        evidence.put("lastEvaluatedAt", state.getLastEvaluatedAt());
+        if (hasText(state.getTraceJson())) {
+            evidence.put("correlationTrace", state.getTraceJson());
+        }
+        return toJson(evidence);
     }
 
     private boolean isSuppressionExpired(Finding finding, Instant now) {
         return finding.getStatus() == FindingStatus.SUPPRESSED
                 && finding.getSuppressedUntil() != null
                 && finding.getSuppressedUntil().isBefore(now);
+    }
+
+    private String buildSuppressionReason(String reason, String justification) {
+        String normalizedReason = hasText(reason) ? reason.trim() : "UNSPECIFIED";
+        String normalizedJustification = hasText(justification) ? justification.trim() : null;
+        if (normalizedJustification == null) {
+            return normalizedReason;
+        }
+        return normalizedReason + ": " + normalizedJustification;
     }
 
     private Instant deriveSlaDueAt(Instant firstObservedAt, double riskScore, Asset asset, RiskPolicy policy) {

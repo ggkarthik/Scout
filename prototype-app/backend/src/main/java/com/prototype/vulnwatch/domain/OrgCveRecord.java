@@ -26,9 +26,15 @@ import java.util.UUID;
         },
         indexes = {
                 @Index(name = "idx_org_cve_record_tenant_vulnerability", columnList = "tenant_id,vulnerability_id"),
+                @Index(name = "idx_org_cve_record_tenant_external_id", columnList = "tenant_id,external_id"),
                 @Index(name = "idx_org_cve_record_tenant_applicability", columnList = "tenant_id,applicability_state"),
                 @Index(name = "idx_org_cve_record_tenant_impacted", columnList = "tenant_id,impacted"),
-                @Index(name = "idx_org_cve_record_tenant_impact_state", columnList = "tenant_id,impact_state")
+                @Index(name = "idx_org_cve_record_tenant_impact_state", columnList = "tenant_id,impact_state"),
+                @Index(name = "idx_org_cve_record_tenant_suppressed_until", columnList = "tenant_id,suppressed_until"),
+                @Index(
+                        name = "idx_org_cve_record_tenant_rank",
+                        columnList = "tenant_id,impacted,applicability_state,cvss_score,external_id"
+                )
         }
 )
 public class OrgCveRecord {
@@ -82,6 +88,21 @@ public class OrgCveRecord {
 
     @Column(name = "matched_software_count", nullable = false)
     private long matchedSoftwareCount;
+
+    @Column(name = "suppression_reason", length = 120)
+    private String suppressionReason;
+
+    @Column(name = "suppression_justification", length = 4000)
+    private String suppressionJustification;
+
+    @Column(name = "suppressed_by", length = 255)
+    private String suppressedBy;
+
+    @Column(name = "suppressed_at")
+    private Instant suppressedAt;
+
+    @Column(name = "suppressed_until")
+    private Instant suppressedUntil;
 
     @Column(name = "last_evaluated_at", nullable = false)
     private Instant lastEvaluatedAt = Instant.now();
@@ -206,6 +227,61 @@ public class OrgCveRecord {
 
     public void setMatchedSoftwareCount(long matchedSoftwareCount) {
         this.matchedSoftwareCount = matchedSoftwareCount;
+    }
+
+    public long getMatchedAssetCount() {
+        return matchedComponentCount;
+    }
+
+    public String getSuppressionReason() {
+        return suppressionReason;
+    }
+
+    public void setSuppressionReason(String suppressionReason) {
+        this.suppressionReason = suppressionReason;
+    }
+
+    public String getSuppressionJustification() {
+        return suppressionJustification;
+    }
+
+    public void setSuppressionJustification(String suppressionJustification) {
+        this.suppressionJustification = suppressionJustification;
+    }
+
+    public String getSuppressedBy() {
+        return suppressedBy;
+    }
+
+    public void setSuppressedBy(String suppressedBy) {
+        this.suppressedBy = suppressedBy;
+    }
+
+    public Instant getSuppressedAt() {
+        return suppressedAt;
+    }
+
+    public void setSuppressedAt(Instant suppressedAt) {
+        this.suppressedAt = suppressedAt;
+    }
+
+    public Instant getSuppressedUntil() {
+        return suppressedUntil;
+    }
+
+    public void setSuppressedUntil(Instant suppressedUntil) {
+        this.suppressedUntil = suppressedUntil;
+    }
+
+    public boolean isActivelySuppressed(Instant at) {
+        if (suppressedAt == null) {
+            return false;
+        }
+        if (suppressedUntil == null) {
+            return true;
+        }
+        Instant reference = at == null ? Instant.now() : at;
+        return suppressedUntil.isAfter(reference);
     }
 
     public Instant getLastEvaluatedAt() {

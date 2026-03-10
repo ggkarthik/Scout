@@ -1,17 +1,19 @@
-# VulnWatch Frontend Documentation
+# VulnWatch Frontend
 
-Last updated: 2026-03-03
+Last updated: 2026-03-07
 
-## What The Frontend Does
+## Purpose
 
-The frontend is a React single-page console for security operations. It drives ingestion, inventory visibility, vulnerability intelligence, and operational analytics by calling backend `/api` endpoints.
+The frontend is a React single-page operations console. It drives SBOM ingestion, vulnerability intelligence review, org-level CVE exposure review, findings workflows, connector setup, and configuration management against the backend `/api` surface.
 
-## Stack And Runtime
+## Stack
 
-- React 18 + TypeScript
+- React 18
+- TypeScript
 - Vite 5
-- No external state library; React state/hooks are used throughout
-- No React Router; navigation is tab/query-param driven in `App.tsx`
+- Plain React state/hooks; no external state library
+- Query-param-driven navigation in `src/App.tsx`
+- No React Router
 
 Run locally:
 
@@ -23,108 +25,118 @@ npm run dev
 
 Default URL: `http://localhost:5173`
 
-## API Integration
+## API Client
 
-Central API client: `src/api/client.ts`.
+Primary client: `src/api/client.ts`.
 
 Environment variables:
 
-- `VITE_API_BASE` (default `http://localhost:8080/api`)
-- `VITE_API_KEY` (default `change-me-in-prod`)
-- `VITE_CREATOR_KEY` (default `local-creator`)
+- `VITE_API_BASE` defaults to `http://localhost:8080/api`
+- `VITE_API_KEY` defaults to `change-me-in-prod`
+- `VITE_CREATOR_KEY` defaults to `local-creator`
+- `VITE_TENANT_ID` defaults to `1`
+- `VITE_USER_ID` defaults to `local-analyst`
 
-Behavior:
+Every JSON request includes:
 
-- Every request sends `X-API-Key`.
-- `X-Creator-Key` is sent when configured.
-- Standard JSON error envelope is parsed into user-facing messages.
-- Multipart upload (`/sbom-upload`) uses dedicated `uploadSbom(...)`.
+- `X-API-Key`
+- `X-Tenant-ID`
+- `X-User-ID`
+- `X-Creator-Key` when configured
 
-## App Shell And Navigation
+The client also handles:
 
-`App.tsx` renders a left navigation + content area:
+- JSON error-envelope parsing into readable messages
+- multipart SBOM uploads
+- org-CVE drill-down calls
+- risk policy, GitHub source, sync run, and prototype reset calls
 
-- Overview (`DashboardPage`)
-- Findings (`FindingsPage`)
-- Operations (`OperationalDashboardPage`)
-- Vulnerability Intelligence (`InventoryPage` with vuln-intel view)
-- Software Models (`InventoryPage` with models view)
-- Inventory (`InventoryPage` with inventory view variants)
-- Connect (`ConnectPage`)
-- Configurations (`ConfigurationsPage`)
+## Navigation Model
 
-State is mirrored into URL query params (`tab`, `inventoryView`, `ingestMode`, etc.) for deep-link style behavior.
+`src/App.tsx` renders a sidebar shell with query-param state for `tab`, `inventoryView`, `vulnIntelView`, and connector state.
 
-## Key Screens
+Current top-level sections:
 
-### Dashboard
+- Overview
+- Findings
+- Operational Dashboard
+- Vulnerability Intelligence
+- Inventory
+- Connect
+- Configurations
 
-- Calls `GET /dashboard`.
-- Shows top KPIs, severity distribution, security score, CPE correlation efficiency, and CSAF/VEX analytics.
+The active app is organized as a shell, not route-based pages. Most drill-downs happen inline in tables, drawers, and modals.
+
+## Main Experiences
+
+### Overview
+
+- `DashboardPage`
+- Reads `/dashboard`, `/dashboard/applicable-software`, `/dashboard/impacted-cves`, and `/dashboard/cve-inventory-map`
+- Focuses on high-level posture, impacted CVEs, and coverage summaries
 
 ### Findings
 
-- Calls `GET /findings` and `GET /findings/filters`.
-- Uses filter-builder + active-chip UX and multi-group-by controls.
-- Defaults to CPE correlation scope (`cpe-*` match methods) for phased rollout.
+- `FindingsPage`
+- Reads `/findings` and `/findings/filters`
+- Supports severity, status, decision state, VEX, match-method, and package filters
 
 ### Operations
 
-- Calls `GET /operations/dashboard`.
-- Auto-refreshes every 15 seconds.
-- Shows ingestion efficiency, normalization quality, read-path metrics, freshness drift, and metric catalog.
-- Handles creator-access errors with guided setup messaging.
+- `OperationalDashboardPage`
+- Reads `/operations/dashboard`
+- Intended for creator-level operational metrics and queue/ingestion visibility
 
-### Inventory (multi-view)
+### Vulnerability Intelligence
 
-- Component inventory: `GET /inventory/components`, `GET /inventory/components/filters`
-- Software models: `GET /inventory/software-models`
-- Vulnerability intelligence list/detail:
-  - `GET /vulnerability-intelligence`
-  - `GET /vulnerability-intelligence/filters`
-  - `GET /vulnerability-intelligence/{externalId}`
+There are three distinct views under the Vulnerability Intelligence flyout:
 
-Notes:
+- Dashboard: `VulnerabilityIntelDashboardPage`
+- Vulnerability list/detail: `InventoryPage` in `vulnerability-intelligence` mode using `/vulnerability-intelligence`, `/vulnerability-intelligence/filters`, and `/vulnerability-intelligence/{externalId}`
+- Org CVEs: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/recompute`
 
-- Supports filter-builder style query controls.
-- Uses async filter loading for vulnerability intelligence while rendering rows quickly.
+Org CVEs is the primary place where the current UI exposes CVE drill-down. It opens `OrgCveDetailDrawer`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+
+### Inventory
+
+The current sidebar exposes four reachable inventory views:
+
+- Imported Assets
+- Hosts
+- Container Images
+- SBOM
+
+All of them currently sit on top of `/inventory/components` and `/inventory/components/filters`, with default asset-type filters changing by view. `InventoryPage` contains additional future-oriented view keys, but those are not wired into the current navigation or backed by dedicated backend APIs.
 
 ### Connect
 
-Connector catalog that routes to focused workflows:
+`ConnectPage` is a connector catalog that swaps in focused workflow pages:
 
-- SBOM upload / endpoint / GitHub generated SBOM (`IngestionPage`)
-- ServiceNow-style CMDB sync (`AssetsPage`)
-- Source sync triggers (NVD, KEV, GHSA, CSAF/VEX, advisories) via `SourcesPage`
-
-### Ingestion
-
-`IngestionPage` supports:
-
-- File upload (`/sbom-upload`)
-- Endpoint fetch (`/sbom-fetch`)
-- GitHub generated SBOM (`/sbom-fetch/github`)
-- Upload history/evidence view (`GET /sbom-uploads`)
+- `IngestionPage` for SBOM upload, endpoint fetch, and GitHub-generated SBOM ingestion
+- `AssetsPage` for CMDB sync payloads
+- `SourcesPage` for NVD, KEV, GHSA, CSAF/VEX, and advisory ingestion runs
 
 ### Configurations
 
-- Risk policy editor (`GET/POST /risk-policy`)
-- GitHub auto-ingestion pipeline management (`/github-sbom-sources`)
-- Embedded integration queue monitor (`SourcesPage`)
+`ConfigurationsPage` manages:
 
-### Assets
+- risk score and SLA policy settings via `/risk-policy`
+- auto-close and finding generation mode settings
+- scheduled GitHub SBOM sources via `/github-sbom-sources`
+- prototype data reset via `/configurations/clean-all`
+- embedded source/integration queue visibility
 
-- CMDB sync payload builders (form/CSV/JSON)
-- Calls `POST /assets/cmdb-sync` and refreshes `GET /assets`
+## Shared Patterns
 
-## Shared UI Components
+- `ResizableTable` is the default dense data-grid primitive
+- `FilterBuilder` and `FilterValueSelectCard` drive reusable filter UX
+- `StatCard` is used for summary metrics
+- Most long-running actions surface inline status text instead of global toasts
 
-- `ResizableTable`: persisted user-adjustable column widths
-- `FilterBuilder` and `FilterValueSelectCard`: dynamic filtering UI
-- `StatCard` and `SeverityPill`: KPI/status presentation
+## Current Caveats
 
-## Important Implementation Notes
-
-- The app is designed as an operations prototype, not a public-facing site.
-- Some legacy page files exist (for example `PolicyPage`) but are not active in current navigation.
-- Frontend behavior assumes the backend API key model and single-workspace backend mode.
+- There is no route-level page system; deep links depend on query params and mounted shell state.
+- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer.
+- The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
+- The inventory UI exposes more conceptual categories than the backend currently models explicitly.
+- The frontend package currently ships only `dev`, `build`, and `preview` scripts; there is no dedicated frontend test or lint script in `package.json`.

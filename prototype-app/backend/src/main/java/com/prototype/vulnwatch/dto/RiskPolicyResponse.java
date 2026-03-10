@@ -26,6 +26,7 @@ public record RiskPolicyResponse(
         double assetLowSlaMultiplier,
         boolean autoCloseEnabled,
         String autoCloseAssetIdentifier,
-        int autoCloseAfterDays
+        int autoCloseAfterDays,
+        String findingGenerationMode
 ) {
 }

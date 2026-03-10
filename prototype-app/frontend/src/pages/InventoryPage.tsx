@@ -3,7 +3,6 @@ import { api } from '../api/client';
 import {
   InventoryComponentFilterValues,
   InventoryComponentRecord,
-  SoftwareModelRecord,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelRecord
@@ -14,7 +13,6 @@ import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../com
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
 
 export type InventoryViewKey =
-  | 'software-models'
   | 'vulnerability-intelligence'
   | 'technologies'
   | 'service-catalog'
@@ -40,11 +38,8 @@ type Props = {
   selectedView: InventoryViewKey;
 };
 
-type AssetTypeFilter = 'ALL' | string;
-type ComponentStatusFilter = 'ALL' | string;
-type SourceSystemFilter = 'ALL' | string;
+type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'query';
 type VulnerabilityIntelFilterKey = 'severity' | 'source' | 'vulnStatus' | 'inKev' | 'query';
-const SOFTWARE_MODELS_PAGE_SIZE = 25;
 const VULNERABILITY_INTEL_PAGE_SIZE = 25;
 const COMPONENTS_PAGE_SIZE = 25;
 const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
@@ -56,8 +51,52 @@ const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
 const DEFAULT_COMPONENT_FILTERS: InventoryComponentFilterValues = {
   assetTypes: ['APPLICATION', 'HOST', 'CONTAINER_IMAGE'],
   componentStatuses: ['ACTIVE', 'RETIRED'],
-  sourceSystems: ['upload', 'api', 'github']
+  sourceSystems: ['upload', 'api', 'github'],
+  ecosystems: []
 };
+
+const INVENTORY_FILTER_CATEGORIES: FilterBuilderCategory[] = [
+  { key: 'inventory', label: 'Inventory' },
+  { key: 'ingestion', label: 'Ingestion' }
+];
+
+const INVENTORY_FILTER_FIELDS: FilterBuilderField[] = [
+  {
+    key: 'assetType',
+    label: 'Asset Type',
+    categoryKey: 'inventory',
+    description: 'Filter inventory records by the underlying asset class.',
+    typeLabel: 'Enum property'
+  },
+  {
+    key: 'componentStatus',
+    label: 'Component Status',
+    categoryKey: 'inventory',
+    description: 'Filter inventory rows by whether the component is active or retired.',
+    typeLabel: 'Enum property'
+  },
+  {
+    key: 'ecosystem',
+    label: 'Ecosystem',
+    categoryKey: 'inventory',
+    description: 'Filter by package ecosystem such as Maven, npm, or PyPI.',
+    typeLabel: 'Enum property'
+  },
+  {
+    key: 'sourceSystem',
+    label: 'Source System',
+    categoryKey: 'ingestion',
+    description: 'Filter records by how the inventory was ingested.',
+    typeLabel: 'Enum property'
+  },
+  {
+    key: 'query',
+    label: 'Inventory Search',
+    categoryKey: 'inventory',
+    description: 'Search asset name, asset identifier, package, normalized name, software identity, or PURL.',
+    typeLabel: 'String property'
+  }
+];
 
 const VULNERABILITY_INTEL_FILTER_CATEGORIES: FilterBuilderCategory[] = [
   { key: 'vulnerability', label: 'Vulnerability' },
@@ -114,7 +153,6 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const INVENTORY_VIEW_LABELS: Record<InventoryViewKey, string> = {
-  'software-models': 'Software Models',
   'vulnerability-intelligence': 'Vulnerability Intelligence',
   technologies: 'Technologies',
   'service-catalog': 'Service Catalog',
@@ -137,7 +175,7 @@ const INVENTORY_VIEW_LABELS: Record<InventoryViewKey, string> = {
   developers: 'Developers'
 };
 
-function defaultAssetTypeForView(view: InventoryViewKey): AssetTypeFilter {
+function defaultAssetTypeForView(view: InventoryViewKey): 'ALL' | InventoryComponentRecord['assetType'] {
   if (view === 'container-images' || view === 'secured-image-catalog' || view === 'container-registries') {
     return 'CONTAINER_IMAGE';
   }
@@ -177,6 +215,14 @@ function formatInventorySourceSystem(value: string): string {
   return value;
 }
 
+function formatInventoryLabel(value: string): string {
+  return value
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function canonicalVulnerabilitySource(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, '-');
   if (normalized === 'microsoft-csaf' || normalized === 'msrc-csaf' || normalized === 'msrc-csaf-advisory') return 'csaf-microsoft';
@@ -190,14 +236,18 @@ function canonicalVulnerabilitySource(value: string): string {
 }
 
 export function InventoryPage({ selectedView }: Props) {
+  const scopedAssetType = defaultAssetTypeForView(selectedView);
   const [rows, setRows] = React.useState<InventoryComponentRecord[]>([]);
   const [componentPage, setComponentPage] = React.useState(0);
   const [componentTotalItems, setComponentTotalItems] = React.useState(0);
   const [componentTotalPages, setComponentTotalPages] = React.useState(0);
-  const [softwareModels, setSoftwareModels] = React.useState<SoftwareModelRecord[]>([]);
-  const [softwareModelPage, setSoftwareModelPage] = React.useState(0);
-  const [softwareModelTotalItems, setSoftwareModelTotalItems] = React.useState(0);
-  const [softwareModelTotalPages, setSoftwareModelTotalPages] = React.useState(0);
+  const [componentQuery, setComponentQuery] = React.useState('');
+  const [debouncedComponentQuery, setDebouncedComponentQuery] = React.useState('');
+  const [componentAssetTypes, setComponentAssetTypes] = React.useState<string[]>([]);
+  const [componentStatuses, setComponentStatuses] = React.useState<string[]>([]);
+  const [componentSourceSystems, setComponentSourceSystems] = React.useState<string[]>([]);
+  const [componentEcosystems, setComponentEcosystems] = React.useState<string[]>([]);
+  const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>([]);
   const [vulnerabilityIntelRows, setVulnerabilityIntelRows] = React.useState<VulnerabilityIntelRecord[]>([]);
   const [vulnerabilityIntelPage, setVulnerabilityIntelPage] = React.useState(0);
   const [vulnerabilityIntelTotalItems, setVulnerabilityIntelTotalItems] = React.useState(0);
@@ -216,12 +266,16 @@ export function InventoryPage({ selectedView }: Props) {
   const [selectedVulnerabilityIntelId, setSelectedVulnerabilityIntelId] = React.useState<string | null>(null);
   const [selectedVulnerabilityIntelDetail, setSelectedVulnerabilityIntelDetail] = React.useState<VulnerabilityIntelDetail | null>(null);
   const [vulnerabilityIntelDetailLoading, setVulnerabilityIntelDetailLoading] = React.useState(false);
-  const [assetType, setAssetType] = React.useState<AssetTypeFilter>(() => defaultAssetTypeForView(selectedView));
-  const [componentStatus, setComponentStatus] = React.useState<ComponentStatusFilter>('ACTIVE');
-  const [sourceSystem, setSourceSystem] = React.useState<SourceSystemFilter>('ALL');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const loadRequestIdRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedComponentQuery(componentQuery);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [componentQuery]);
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -231,21 +285,19 @@ export function InventoryPage({ selectedView }: Props) {
   }, [vulnerabilityIntelQuery]);
 
   React.useEffect(() => {
-    setAssetType(defaultAssetTypeForView(selectedView));
-    if (selectedView === 'software-models') {
-      setSourceSystem('ALL');
-      setComponentStatus('ALL');
-      setSoftwareModelPage(0);
-    } else if (selectedView === 'vulnerability-intelligence') {
-      setSourceSystem('ALL');
-      setComponentStatus('ALL');
+    if (selectedView === 'vulnerability-intelligence') {
       setVulnerabilityIntelPage(0);
       setSelectedVulnerabilityIntelId(null);
       setSelectedVulnerabilityIntelDetail(null);
     } else {
-      setSourceSystem('ALL');
-      setComponentStatus('ACTIVE');
       setComponentPage(0);
+      setComponentQuery('');
+      setDebouncedComponentQuery('');
+      setComponentAssetTypes([]);
+      setComponentStatuses([]);
+      setComponentSourceSystems([]);
+      setComponentEcosystems([]);
+      setComponentActiveFilters([]);
     }
   }, [selectedView]);
 
@@ -365,35 +417,76 @@ export function InventoryPage({ selectedView }: Props) {
       }));
   }, [vulnerabilityIntelFilterValues.inKevValues, vulnerabilityIntelInKevValues]);
 
-  const assetTypeOptions = React.useMemo<string[]>(() => {
+  const inventoryFilterFields = React.useMemo<FilterBuilderField[]>(() => (
+    scopedAssetType === 'ALL'
+      ? INVENTORY_FILTER_FIELDS
+      : INVENTORY_FILTER_FIELDS.filter((field) => field.key !== 'assetType')
+  ), [scopedAssetType]);
+
+  const assetTypeOptions = React.useMemo<FilterValueOption[]>(() => {
     const values = new Set<string>(DEFAULT_COMPONENT_FILTERS.assetTypes);
     componentFilterValues.assetTypes.forEach((value) => {
       if (value && value.trim().length > 0) {
         values.add(value.trim().toUpperCase());
       }
     });
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({
+        value,
+        label: formatAssetType(value as InventoryComponentRecord['assetType'])
+      }));
   }, [componentFilterValues.assetTypes]);
 
-  const componentStatusOptions = React.useMemo<string[]>(() => {
+  const componentStatusOptions = React.useMemo<FilterValueOption[]>(() => {
     const values = new Set<string>(DEFAULT_COMPONENT_FILTERS.componentStatuses);
     componentFilterValues.componentStatuses.forEach((value) => {
       if (value && value.trim().length > 0) {
         values.add(value.trim().toUpperCase());
       }
     });
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({
+        value,
+        label: formatInventoryLabel(value)
+      }));
   }, [componentFilterValues.componentStatuses]);
 
-  const sourceSystemOptions = React.useMemo<string[]>(() => {
+  const sourceSystemOptions = React.useMemo<FilterValueOption[]>(() => {
     const values = new Set<string>(DEFAULT_COMPONENT_FILTERS.sourceSystems);
     componentFilterValues.sourceSystems.forEach((value) => {
       if (value && value.trim().length > 0) {
         values.add(value.trim().toLowerCase());
       }
     });
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({
+        value,
+        label: formatInventorySourceSystem(value)
+      }));
   }, [componentFilterValues.sourceSystems]);
+
+  const ecosystemOptions = React.useMemo<FilterValueOption[]>(() => {
+    const values = new Set<string>(DEFAULT_COMPONENT_FILTERS.ecosystems);
+    componentFilterValues.ecosystems.forEach((value) => {
+      if (value && value.trim().length > 0) {
+        values.add(value.trim().toLowerCase());
+      }
+    });
+    componentEcosystems.forEach((value) => {
+      if (value && value.trim().length > 0) {
+        values.add(value.trim().toLowerCase());
+      }
+    });
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({
+        value,
+        label: formatInventoryLabel(value)
+      }));
+  }, [componentFilterValues.ecosystems, componentEcosystems]);
 
   const addVulnerabilityIntelFilter = React.useCallback((key: VulnerabilityIntelFilterKey) => {
     setVulnerabilityIntelActiveFilters((current) => (current.includes(key) ? current : [...current, key]));
@@ -425,30 +518,43 @@ export function InventoryPage({ selectedView }: Props) {
     setVulnerabilityIntelActiveFilters([]);
   }, []);
 
+  const addComponentFilter = React.useCallback((key: InventoryComponentFilterKey) => {
+    setComponentActiveFilters((current) => (current.includes(key) ? current : [...current, key]));
+  }, []);
+
+  const removeComponentFilter = React.useCallback((key: InventoryComponentFilterKey) => {
+    setComponentActiveFilters((current) => current.filter((item) => item !== key));
+    if (key === 'assetType') {
+      setComponentAssetTypes([]);
+    } else if (key === 'componentStatus') {
+      setComponentStatuses([]);
+    } else if (key === 'sourceSystem') {
+      setComponentSourceSystems([]);
+    } else if (key === 'ecosystem') {
+      setComponentEcosystems([]);
+    } else if (key === 'query') {
+      setComponentQuery('');
+    }
+    setComponentPage(0);
+  }, []);
+
+  const clearComponentFilters = React.useCallback(() => {
+    setComponentQuery('');
+    setComponentAssetTypes([]);
+    setComponentStatuses([]);
+    setComponentSourceSystems([]);
+    setComponentEcosystems([]);
+    setComponentPage(0);
+    setComponentActiveFilters([]);
+  }, []);
+
   const loadInventory = React.useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
     setLoading(true);
     setError('');
     try {
-      if (selectedView === 'software-models') {
-        const response = await api.listSoftwareModels({
-          page: softwareModelPage,
-          size: SOFTWARE_MODELS_PAGE_SIZE
-        });
-        if (requestId !== loadRequestIdRef.current) {
-          return;
-        }
-        setSoftwareModels(response.items);
-        setSoftwareModelTotalItems(response.totalItems);
-        setSoftwareModelTotalPages(response.totalPages);
-        setRows([]);
-        setComponentTotalItems(0);
-        setComponentTotalPages(0);
-        setVulnerabilityIntelRows([]);
-        setVulnerabilityIntelTotalItems(0);
-        setVulnerabilityIntelTotalPages(0);
-      } else if (selectedView === 'vulnerability-intelligence') {
+      if (selectedView === 'vulnerability-intelligence') {
         const response = await api.listVulnerabilityIntelligence({
           page: vulnerabilityIntelPage,
           size: VULNERABILITY_INTEL_PAGE_SIZE,
@@ -477,9 +583,6 @@ export function InventoryPage({ selectedView }: Props) {
         setRows([]);
         setComponentTotalItems(0);
         setComponentTotalPages(0);
-        setSoftwareModels([]);
-        setSoftwareModelTotalItems(0);
-        setSoftwareModelTotalPages(0);
 
         void api.listVulnerabilityIntelligenceFilters()
           .then((availableFilters) => {
@@ -516,17 +619,31 @@ export function InventoryPage({ selectedView }: Props) {
             setVulnerabilityIntelFilterValues(DEFAULT_VULNERABILITY_INTEL_FILTERS);
           });
       } else {
-        const assetTypeParam = assetType === 'APPLICATION' || assetType === 'HOST' || assetType === 'CONTAINER_IMAGE'
-          ? assetType
-          : undefined;
-        const componentStatusParam = componentStatus === 'ACTIVE' || componentStatus === 'RETIRED'
-          ? componentStatus
+        const assetTypeParam = scopedAssetType === 'ALL'
+          ? (
+            componentActiveFilters.includes('assetType') && componentAssetTypes.length > 0
+              ? componentAssetTypes.filter((value): value is InventoryComponentRecord['assetType'] => (
+                value === 'APPLICATION' || value === 'HOST' || value === 'CONTAINER_IMAGE'
+              ))
+              : undefined
+          )
+          : [scopedAssetType as InventoryComponentRecord['assetType']];
+        const componentStatusParam = componentActiveFilters.includes('componentStatus') && componentStatuses.length > 0
+          ? componentStatuses.filter((value): value is InventoryComponentRecord['componentStatus'] => (
+            value === 'ACTIVE' || value === 'RETIRED'
+          ))
           : undefined;
         const [data, availableFilters] = await Promise.all([
           api.listInventoryComponents({
             assetType: assetTypeParam,
             componentStatus: componentStatusParam,
-            sourceSystem: sourceSystem === 'ALL' ? undefined : sourceSystem,
+            sourceSystem: componentActiveFilters.includes('sourceSystem') && componentSourceSystems.length > 0
+              ? componentSourceSystems
+              : undefined,
+            ecosystem: componentActiveFilters.includes('ecosystem') && componentEcosystems.length > 0
+              ? componentEcosystems
+              : undefined,
+            query: componentActiveFilters.includes('query') ? debouncedComponentQuery.trim() : undefined,
             page: componentPage,
             size: COMPONENTS_PAGE_SIZE
           }),
@@ -550,14 +667,16 @@ export function InventoryPage({ selectedView }: Props) {
             (availableFilters.sourceSystems || [])
               .filter((value) => value && value.trim().length > 0)
               .map((value) => value.trim().toLowerCase())
+          )),
+          ecosystems: Array.from(new Set(
+            (availableFilters.ecosystems || [])
+              .filter((value) => value && value.trim().length > 0)
+              .map((value) => value.trim().toLowerCase())
           ))
         });
         setRows(data.items);
         setComponentTotalItems(data.totalItems);
         setComponentTotalPages(data.totalPages);
-        setSoftwareModels([]);
-        setSoftwareModelTotalItems(0);
-        setSoftwareModelTotalPages(0);
         setVulnerabilityIntelRows([]);
         setVulnerabilityIntelTotalItems(0);
         setVulnerabilityIntelTotalPages(0);
@@ -573,12 +692,15 @@ export function InventoryPage({ selectedView }: Props) {
       }
     }
   }, [
-    assetType,
-    componentStatus,
-    sourceSystem,
+    scopedAssetType,
+    componentActiveFilters,
+    componentAssetTypes,
+    componentStatuses,
+    componentSourceSystems,
+    componentEcosystems,
     selectedView,
     componentPage,
-    softwareModelPage,
+    debouncedComponentQuery,
     vulnerabilityIntelPage,
     debouncedVulnerabilityIntelQuery,
     vulnerabilityIntelSeverities,
@@ -627,27 +749,15 @@ export function InventoryPage({ selectedView }: Props) {
     setSelectedVulnerabilityIntelId(externalId);
   };
 
-  const activeCount = selectedView === 'software-models'
-    ? softwareModels.reduce((sum, model) => sum + model.activeComponents, 0)
-    : rows.filter((row) => row.componentStatus === 'ACTIVE').length;
-  const retiredCount = selectedView === 'software-models'
-    ? Math.max(0, softwareModels.reduce((sum, model) => sum + model.totalComponents, 0) - activeCount)
-    : rows.filter((row) => row.componentStatus === 'RETIRED').length;
-  const assetCount = selectedView === 'software-models'
-    ? softwareModels.reduce((sum, model) => sum + model.assetsRepresented, 0)
-    : new Set(rows.map((row) => row.assetId)).size;
+  const activeCount = rows.filter((row) => row.componentStatus === 'ACTIVE').length;
+  const retiredCount = rows.filter((row) => row.componentStatus === 'RETIRED').length;
+  const assetCount = new Set(rows.map((row) => row.assetId)).size;
 
   return (
     <div className="page-grid">
       <section className={selectedView === 'vulnerability-intelligence' ? 'panel panel-vuln-intel-filters' : 'panel'}>
         <div>
-          {selectedView === 'software-models' ? (
-            <div className="button-row form-submit-row">
-              <button className="btn btn-secondary" type="button" onClick={loadInventory} disabled={loading}>
-                {loading ? 'Refreshing...' : 'Refresh Software Models'}
-              </button>
-            </div>
-          ) : selectedView === 'vulnerability-intelligence' ? (
+          {selectedView === 'vulnerability-intelligence' ? (
             <>
               <div className="findings-filter-shell">
                 <div className="findings-filter-builder-row">
@@ -777,65 +887,135 @@ export function InventoryPage({ selectedView }: Props) {
             </>
           ) : (
             <>
-              {selectedView === 'sbom' && (
+              {selectedView === 'sbom' && scopedAssetType === 'ALL' && (
                 <div className="panel-caption">
-                  Application inventory is part of SBOM view. Set <span className="mono">Asset Type = Application</span>.
+                  Add <span className="mono">Asset Type = Application</span> to focus the SBOM view on application inventory.
                 </div>
               )}
-              <div className="filters-grid">
-                <label>Asset Type
-                <select
-                  value={assetType}
-                  onChange={(event) => {
-                    setAssetType(event.target.value as AssetTypeFilter);
-                    setComponentPage(0);
-                  }}
-                >
-                  <option value="ALL">All Asset Types</option>
-                  {assetTypeOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {formatAssetType(value as InventoryComponentRecord['assetType'])}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>Component Status
-                <select
-                  value={componentStatus}
-                  onChange={(event) => {
-                    setComponentStatus(event.target.value as ComponentStatusFilter);
-                    setComponentPage(0);
-                  }}
-                >
-                  <option value="ALL">All Statuses</option>
-                  {componentStatusOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>Source System
-                <select
-                  value={sourceSystem}
-                  onChange={(event) => {
-                    setSourceSystem(event.target.value as SourceSystemFilter);
-                    setComponentPage(0);
-                  }}
-                >
-                  <option value="ALL">All Sources</option>
-                  {sourceSystemOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {formatInventorySourceSystem(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="button-row form-submit-row">
-                <button className="btn btn-secondary" type="button" onClick={loadInventory} disabled={loading}>
-                  {loading ? 'Refreshing...' : 'Refresh Inventory'}
-                </button>
-              </div>
+              <div className="findings-filter-shell">
+                <div className="findings-filter-builder-row">
+                  <FilterBuilder
+                    categories={INVENTORY_FILTER_CATEGORIES}
+                    fields={inventoryFilterFields}
+                    activeKeys={componentActiveFilters}
+                    onAddFilter={(key) => addComponentFilter(key as InventoryComponentFilterKey)}
+                  />
+                  <div className="findings-filter-active-chips">
+                    {componentActiveFilters.map((key) => {
+                      let label = '';
+                      if (key === 'assetType') {
+                        label = `Asset Type${componentAssetTypes.length > 0 ? ` (${componentAssetTypes.length})` : ''}`;
+                      } else if (key === 'componentStatus') {
+                        label = `Component Status${componentStatuses.length > 0 ? ` (${componentStatuses.length})` : ''}`;
+                      } else if (key === 'sourceSystem') {
+                        label = `Source System${componentSourceSystems.length > 0 ? ` (${componentSourceSystems.length})` : ''}`;
+                      } else if (key === 'ecosystem') {
+                        label = `Ecosystem${componentEcosystems.length > 0 ? ` (${componentEcosystems.length})` : ''}`;
+                      } else {
+                        label = `Inventory Search${componentQuery.trim() ? ' (1)' : ''}`;
+                      }
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className="findings-filter-chip-tag"
+                          onClick={() => removeComponentFilter(key)}
+                          title="Remove filter"
+                        >
+                          <span>{label}</span>
+                          <span aria-hidden="true">x</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="findings-active-filter-grid">
+                  {scopedAssetType === 'ALL' && componentActiveFilters.includes('assetType') && (
+                    <FilterValueSelectCard
+                      label="Asset Type"
+                      selectedValues={componentAssetTypes}
+                      options={assetTypeOptions}
+                      onChange={(values) => {
+                        setComponentAssetTypes(values);
+                        setComponentPage(0);
+                      }}
+                      onRemove={() => removeComponentFilter('assetType')}
+                    />
+                  )}
+
+                  {componentActiveFilters.includes('componentStatus') && (
+                    <FilterValueSelectCard
+                      label="Component Status"
+                      selectedValues={componentStatuses}
+                      options={componentStatusOptions}
+                      onChange={(values) => {
+                        setComponentStatuses(values);
+                        setComponentPage(0);
+                      }}
+                      onRemove={() => removeComponentFilter('componentStatus')}
+                    />
+                  )}
+
+                  {componentActiveFilters.includes('sourceSystem') && (
+                    <FilterValueSelectCard
+                      label="Source System"
+                      selectedValues={componentSourceSystems}
+                      options={sourceSystemOptions}
+                      onChange={(values) => {
+                        setComponentSourceSystems(values);
+                        setComponentPage(0);
+                      }}
+                      onRemove={() => removeComponentFilter('sourceSystem')}
+                    />
+                  )}
+
+                  {componentActiveFilters.includes('ecosystem') && (
+                    <FilterValueSelectCard
+                      label="Ecosystem"
+                      selectedValues={componentEcosystems}
+                      options={ecosystemOptions}
+                      onChange={(values) => {
+                        setComponentEcosystems(values);
+                        setComponentPage(0);
+                      }}
+                      onRemove={() => removeComponentFilter('ecosystem')}
+                    />
+                  )}
+
+                  {componentActiveFilters.includes('query') && (
+                    <label className="findings-filter-chip findings-filter-text-card">Inventory Search
+                      <button
+                        type="button"
+                        className="findings-filter-chip-remove"
+                        onClick={() => removeComponentFilter('query')}
+                        aria-label="Remove Inventory Search filter"
+                      >
+                        x
+                      </button>
+                      <input
+                        value={componentQuery}
+                        onChange={(event) => {
+                          setComponentQuery(event.target.value);
+                          setComponentPage(0);
+                        }}
+                        placeholder="asset, package, software identity, or purl"
+                        className="mono"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <div className="findings-filter-row">
+                  <div className="findings-filter-actions">
+                    <button className="btn btn-secondary btn-inline" type="button" onClick={clearComponentFilters}>
+                      Clear Filters
+                    </button>
+                    <button className="btn btn-secondary btn-inline" type="button" onClick={loadInventory} disabled={loading}>
+                      {loading ? 'Refreshing...' : 'Refresh Inventory'}
+                    </button>
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -845,8 +1025,8 @@ export function InventoryPage({ selectedView }: Props) {
       {selectedView !== 'vulnerability-intelligence' && (
         <div className="stats-grid">
           <StatCard
-            title={selectedView === 'software-models' ? 'Software Models' : 'Inventory Records'}
-            value={selectedView === 'software-models' ? softwareModelTotalItems : componentTotalItems}
+            title="Inventory Records"
+            value={componentTotalItems}
           />
           <StatCard title="Active Components" value={activeCount} />
           <StatCard title="Retired Components" value={retiredCount} />
@@ -860,92 +1040,20 @@ export function InventoryPage({ selectedView }: Props) {
       <section className="panel">
         <div className="panel-header">
           <h3>
-            {selectedView === 'software-models'
-              ? 'Software Model Records'
-              : selectedView === 'vulnerability-intelligence'
-                ? 'Unified Vulnerability Records'
-                : 'Component Inventory Records'}
+            {selectedView === 'vulnerability-intelligence'
+              ? 'Unified Vulnerability Records'
+              : 'Component Inventory Records'}
           </h3>
           {selectedView !== 'vulnerability-intelligence' && (
             <span className="panel-caption">
-              {selectedView === 'software-models'
-                ? 'Normalized software model records used by deterministic correlation and matching'
-                : 'SBOM ingestions are persisted as inventory evidence and shown by asset type'}
+              SBOM ingestions are persisted as inventory evidence and shown by asset type
             </span>
           )}
         </div>
 
         {error && <div className="notice error">Failed to load inventory: {error}</div>}
 
-        {selectedView === 'software-models' ? (
-          loading && softwareModels.length === 0 ? (
-            <div className="notice">Loading software models...</div>
-          ) : softwareModels.length === 0 ? (
-            <div className="empty-state">
-              <p>
-                No software models found yet. Ingest an SBOM from <span className="mono">Connect</span> to populate normalized model records.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="table-scroll">
-                <ResizableTable storageKey="inventory-software-models-table-widths">
-                  <thead>
-                  <tr>
-                    <th>Publisher</th>
-                    <th>Product</th>
-                    <th>Primary Identifier Type</th>
-                    <th>Primary Identifier</th>
-                    <th>Normalized Key</th>
-                    <th>Total Components</th>
-                    <th>Active Components</th>
-                    <th>Assets Represented</th>
-                    <th>Created</th>
-                    <th>Updated</th>
-                  </tr>
-                  </thead>
-                  <tbody>
-                  {softwareModels.map((model) => (
-                    <tr key={model.id}>
-                      <td>{model.canonicalPublisher}</td>
-                      <td>{model.canonicalProduct}</td>
-                      <td className="mono">{model.primaryIdentifierType}</td>
-                      <td className="mono">{model.primaryIdentifier}</td>
-                      <td className="mono">{model.normalizedKey}</td>
-                      <td>{model.totalComponents}</td>
-                      <td>{model.activeComponents}</td>
-                      <td>{model.assetsRepresented}</td>
-                      <td>{model.createdAt ? new Date(model.createdAt).toLocaleString() : '-'}</td>
-                      <td>{model.updatedAt ? new Date(model.updatedAt).toLocaleString() : '-'}</td>
-                    </tr>
-                  ))}
-                  </tbody>
-                </ResizableTable>
-              </div>
-              <div className="pagination-row">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setSoftwareModelPage((current) => Math.max(0, current - 1))}
-                  disabled={softwareModelPage <= 0 || loading}
-                >
-                  Previous
-                </button>
-                <span className="panel-caption pagination-caption">
-                  Page {softwareModelTotalPages === 0 ? 0 : softwareModelPage + 1} of {Math.max(softwareModelTotalPages, 1)}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setSoftwareModelPage((current) => (current + 1 < softwareModelTotalPages ? current + 1 : current))}
-                  disabled={loading || softwareModelTotalPages === 0 || softwareModelPage + 1 >= softwareModelTotalPages}
-                >
-                  Next
-                </button>
-              </div>
-            </>
-          )
-        ) : selectedView === 'vulnerability-intelligence' ? (
+        {selectedView === 'vulnerability-intelligence' ? (
           loading && vulnerabilityIntelRows.length === 0 ? (
             <div className="notice">Loading vulnerability intelligence records...</div>
           ) : vulnerabilityIntelRows.length === 0 ? (
@@ -965,6 +1073,7 @@ export function InventoryPage({ selectedView }: Props) {
                       <th>Severity</th>
                       <th>CVSS</th>
                       <th>EPSS</th>
+                      <th>Affected Packages</th>
                       <th>Primary Source</th>
                       <th>All Sources</th>
                       <th>Open Findings</th>
@@ -994,6 +1103,15 @@ export function InventoryPage({ selectedView }: Props) {
                       <td>{record.severity || '-'}</td>
                       <td>{record.cvssScore ?? '-'}</td>
                       <td>{record.epssScore ?? '-'}</td>
+                      <td>
+                        {record.affectedPackages && record.affectedPackages.length > 0
+                          ? record.affectedPackages.slice(0, 3).map((pkg) =>
+                              pkg.packageName
+                                ? `${pkg.packageName}${pkg.ecosystem ? ` (${pkg.ecosystem})` : ''}`
+                                : pkg.cpe ?? '-'
+                            ).join(', ') + (record.affectedPackages.length > 3 ? ` +${record.affectedPackages.length - 3} more` : '')
+                          : '-'}
+                      </td>
                       <td>{record.sources.length > 0 ? formatSourceSystem(record.sources[0]) : '-'}</td>
                       <td>
                         {record.sources.length > 0 ? record.sources.map(formatSourceSystem).join(', ') : '-'}
@@ -1157,6 +1275,37 @@ export function InventoryPage({ selectedView }: Props) {
                   <div><strong>Open Findings:</strong> {selectedVulnerabilityIntelDetail.openFindings}</div>
                   <div><strong>Sources:</strong> {selectedVulnerabilityIntelDetail.sources.map(formatSourceSystem).join(', ') || '-'}</div>
                 </div>
+                {selectedVulnerabilityIntelDetail.affectedPackages && selectedVulnerabilityIntelDetail.affectedPackages.length > 0 && (
+                  <div className="section-block">
+                    <h4 className="section-title">Affected Packages</h4>
+                    <div className="table-scroll">
+                      <ResizableTable storageKey="inventory-vuln-intel-affected-packages-widths">
+                        <thead>
+                          <tr>
+                            <th>Package</th>
+                            <th>Ecosystem</th>
+                            <th>Affected Versions</th>
+                            <th>Fixed In</th>
+                            <th>CPE</th>
+                            <th>VEX Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedVulnerabilityIntelDetail.affectedPackages.map((pkg, idx) => (
+                            <tr key={idx}>
+                              <td className="mono">{pkg.packageName ?? '-'}</td>
+                              <td>{pkg.ecosystem ?? '-'}</td>
+                              <td className="mono">{pkg.affectedVersions}</td>
+                              <td className="mono">{pkg.fixedVersion ?? '-'}</td>
+                              <td className="mono">{pkg.cpe ?? '-'}</td>
+                              <td>{pkg.vexStatus ?? '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </ResizableTable>
+                    </div>
+                  </div>
+                )}
                 {selectedVulnerabilityIntelDetail.references.length > 0 && (
                   <div className="section-block">
                     <h4 className="section-title">References</h4>

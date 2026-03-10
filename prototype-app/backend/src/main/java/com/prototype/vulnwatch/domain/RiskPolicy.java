@@ -2,6 +2,8 @@ package com.prototype.vulnwatch.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -14,6 +16,11 @@ import java.util.UUID;
 @Entity
 @Table(name = "risk_policies")
 public class RiskPolicy {
+
+    public enum FindingGenerationMode {
+        AUTO,
+        MANUAL
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -100,6 +107,10 @@ public class RiskPolicy {
 
     @Column(nullable = false)
     private int autoCloseAfterDays = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "finding_generation_mode", nullable = false, length = 20)
+    private FindingGenerationMode findingGenerationMode = FindingGenerationMode.MANUAL;
 
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
@@ -322,6 +333,14 @@ public class RiskPolicy {
 
     public void setAutoCloseAfterDays(int autoCloseAfterDays) {
         this.autoCloseAfterDays = autoCloseAfterDays;
+    }
+
+    public FindingGenerationMode getFindingGenerationMode() {
+        return findingGenerationMode;
+    }
+
+    public void setFindingGenerationMode(FindingGenerationMode findingGenerationMode) {
+        this.findingGenerationMode = findingGenerationMode == null ? FindingGenerationMode.MANUAL : findingGenerationMode;
     }
 
     public Instant getUpdatedAt() {

@@ -19,6 +19,11 @@ public interface InventoryComponentCpeMapRepository extends JpaRepository<Invent
         UUID getComponentId();
     }
 
+    interface TenantComponentRow {
+        UUID getTenantId();
+        UUID getComponentId();
+    }
+
     List<InventoryComponentCpeMap> findByTenantAndComponent(Tenant tenant, InventoryComponent component);
 
     List<InventoryComponentCpeMap> findByComponent_IdIn(Collection<UUID> componentIds);
@@ -44,6 +49,17 @@ public interface InventoryComponentCpeMapRepository extends JpaRepository<Invent
             """)
     Set<UUID> findDistinctComponentIdsByTenantIdAndCpeIds(
             @Param("tenantId") UUID tenantId,
+            @Param("cpeIds") Collection<UUID> cpeIds
+    );
+
+    @Query("""
+            select distinct
+              m.tenant.id as tenantId,
+              m.component.id as componentId
+            from InventoryComponentCpeMap m
+            where m.cpeDim.id in :cpeIds
+            """)
+    List<TenantComponentRow> findDistinctTenantComponentRowsByCpeIds(
             @Param("cpeIds") Collection<UUID> cpeIds
     );
 
