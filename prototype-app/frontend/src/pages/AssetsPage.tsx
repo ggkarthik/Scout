@@ -87,6 +87,11 @@ export function AssetsPage() {
   const [businessCriticality, setBusinessCriticality] = React.useState<CmdbAssetRecord['businessCriticality']>('MEDIUM');
   const [assetState, setAssetState] = React.useState<CmdbAssetRecord['state']>('ACTIVE');
 
+  const [imageDigest, setImageDigest] = React.useState('');
+  const [imageTag, setImageTag] = React.useState('');
+  const [imageRepository, setImageRepository] = React.useState('');
+  const [baseImageDigest, setBaseImageDigest] = React.useState('');
+
   const loadAssets = React.useCallback(async () => {
     setLoading(true);
     setError('');
@@ -112,19 +117,26 @@ export function AssetsPage() {
       throw new Error('Asset Identifier is required');
     }
 
-    return [
-      {
-        assetType,
-        assetName: assetName.trim(),
-        assetIdentifier: assetIdentifier.trim(),
-        serviceName: serviceName.trim() || undefined,
-        environment: environment.trim() || undefined,
-        ownerTeam: ownerTeam.trim() || undefined,
-        ownerEmail: ownerEmail.trim() || undefined,
-        businessCriticality,
-        state: assetState
-      }
-    ];
+    const record: CmdbAssetRecord = {
+      assetType,
+      assetName: assetName.trim(),
+      assetIdentifier: assetIdentifier.trim(),
+      serviceName: serviceName.trim() || undefined,
+      environment: environment.trim() || undefined,
+      ownerTeam: ownerTeam.trim() || undefined,
+      ownerEmail: ownerEmail.trim() || undefined,
+      businessCriticality,
+      state: assetState
+    };
+
+    if (assetType === 'CONTAINER_IMAGE') {
+      if (imageDigest.trim()) record.imageDigest = imageDigest.trim();
+      if (imageTag.trim()) record.imageTag = imageTag.trim();
+      if (imageRepository.trim()) record.imageRepository = imageRepository.trim();
+      if (baseImageDigest.trim()) record.baseImageDigest = baseImageDigest.trim();
+    }
+
+    return [record];
   };
 
   const syncCmdb = async (): Promise<void> => {
@@ -223,6 +235,23 @@ export function AssetsPage() {
                 <option value="RETIRED">Retired</option>
                 <option value="DECOMMISSIONED">Decommissioned</option>
               </select>
+            </label>
+          </div>
+        )}
+
+        {cmdbMode === 'form' && assetType === 'CONTAINER_IMAGE' && (
+          <div className="form-grid ingestion-grid">
+            <label>Image Digest
+              <input value={imageDigest} onChange={(event) => setImageDigest(event.target.value)} placeholder="sha256:abc123..." className="mono" />
+            </label>
+            <label>Image Tag
+              <input value={imageTag} onChange={(event) => setImageTag(event.target.value)} placeholder="v1.2.3" />
+            </label>
+            <label>Image Repository
+              <input value={imageRepository} onChange={(event) => setImageRepository(event.target.value)} placeholder="registry.example.com/payments-api" className="mono" />
+            </label>
+            <label>Base Image Digest
+              <input value={baseImageDigest} onChange={(event) => setBaseImageDigest(event.target.value)} placeholder="sha256:base..." className="mono" />
             </label>
           </div>
         )}

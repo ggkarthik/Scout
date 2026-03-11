@@ -41,6 +41,8 @@ app:
   features:
     vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
     vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
+    vex-rollout-controls-enabled: ${FEATURE_VEX_ROLLOUT_CONTROLS_ENABLED:true}
+    vex-rollout-backfill-enabled: ${FEATURE_VEX_ROLLOUT_BACKFILL_ENABLED:true}
     software-model-enabled: ${FEATURE_SOFTWARE_MODEL_ENABLED:false}
   security:
     api-key: ${APP_API_KEY:change-me-in-prod}
@@ -84,14 +86,30 @@ app:
   correlation:
     delta-queue-capacity: ${APP_CORRELATION_DELTA_QUEUE_CAPACITY:500}
     delta-queue-enqueue-timeout-ms: ${APP_CORRELATION_DELTA_QUEUE_ENQUEUE_TIMEOUT_MS:2000}
+    delta-queue-poll-interval-ms: ${APP_CORRELATION_DELTA_QUEUE_POLL_INTERVAL_MS:2000}
+  epss:
+    # BLG-016: EPSS (Exploit Prediction Scoring System) integration
+    base-url: ${EPSS_BASE_URL:https://api.first.org/data/v1/epss}
+    enabled: ${EPSS_ENABLED:true}
+    batch-size: ${EPSS_BATCH_SIZE:100}
+    refresh-cron: ${EPSS_REFRESH_CRON:0 15 3 * * *}
   github:
     base-url: https://api.github.com
     api-token: ${GITHUB_API_TOKEN:}
     api-token-file: ${GITHUB_API_TOKEN_FILE:}
     allowlist-enabled: ${GITHUB_ALLOWLIST_ENABLED:true}
     allowed-repos: ${GITHUB_ALLOWED_REPOS:}
+    allowed-packages: ${GITHUB_ALLOWED_PACKAGES:}
     max-retries: ${GITHUB_MAX_RETRIES:4}
     retry-base-backoff-ms: ${GITHUB_RETRY_BASE_BACKOFF_MS:1000}
+    max-pages-per-collection: ${GITHUB_MAX_PAGES_PER_COLLECTION:250}
+    min-rate-limit-remaining: ${GITHUB_MIN_RATE_LIMIT_REMAINING:25}
+  slo:
+    # BLG-014: Service level objective thresholds
+    sbom-success-rate-min-pct: ${SLO_SBOM_SUCCESS_RATE_MIN_PCT:95.0}
+    queue-max-pending: ${SLO_QUEUE_MAX_PENDING:100}
+    queue-stale-threshold-minutes: ${SLO_QUEUE_STALE_THRESHOLD_MINUTES:10}
+    queue-stale-max-count: ${SLO_QUEUE_STALE_MAX_COUNT:0}
   assets:
     stale-days-to-inactive: ${ASSET_STALE_DAYS_TO_INACTIVE:30}
   archive:

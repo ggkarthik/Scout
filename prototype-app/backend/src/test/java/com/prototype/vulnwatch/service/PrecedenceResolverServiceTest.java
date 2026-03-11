@@ -78,6 +78,53 @@ class PrecedenceResolverServiceTest {
     }
 
     @Test
+    void kevAffectedAloneReturnsUnknownNotAffected() {
+        // BLG-004: KEV says a CVE is being actively exploited somewhere in the world,
+        // but does not provide product/version applicability. A KEV-only candidate must
+        // NOT produce FinalState.AFFECTED — it should return UNKNOWN.
+        PrecedenceResolverService.CandidateDecision kevTrue = candidate(
+                "kev",
+                "kev-annotation",
+                3,
+                0.5,
+                ApplicabilityDecisionService.ApplicabilityResult.TRUE,
+                "within_constraints"
+        );
+
+        PrecedenceResolverService.PrecedenceResolution resolution = service.resolve(List.of(kevTrue));
+
+        assertEquals(PrecedenceResolverService.FinalState.UNKNOWN, resolution.finalState());
+        // KEV candidate must still appear in the considered list for audit trail
+        assertEquals(1, resolution.considered().size());
+    }
+
+    @Test
+    void kevAffectedDoesNotOverrideNvdNotAffected() {
+        // BLG-004: KEV must not override a real NOT_AFFECTED finding from NVD/advisory.
+        PrecedenceResolverService.CandidateDecision kevTrue = candidate(
+                "kev",
+                "kev-annotation",
+                3,
+                0.5,
+                ApplicabilityDecisionService.ApplicabilityResult.TRUE,
+                "within_constraints"
+        );
+        PrecedenceResolverService.CandidateDecision nvdFalse = candidate(
+                "nvd",
+                "cpe-direct+version",
+                2,
+                0.85,
+                ApplicabilityDecisionService.ApplicabilityResult.FALSE,
+                "exact_version_mismatch"
+        );
+
+        PrecedenceResolverService.PrecedenceResolution resolution = service.resolve(List.of(kevTrue, nvdFalse));
+
+        assertEquals(PrecedenceResolverService.FinalState.NOT_AFFECTED, resolution.finalState());
+        assertEquals(nvdFalse, resolution.primary());
+    }
+
+    @Test
     void advisoryAffectedWinsOverNvdAffected() {
         PrecedenceResolverService.CandidateDecision nvdTrue = candidate(
                 "nvd",

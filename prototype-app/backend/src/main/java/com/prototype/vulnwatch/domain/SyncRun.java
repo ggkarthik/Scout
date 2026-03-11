@@ -43,6 +43,9 @@ public class SyncRun {
     @Column(length = 2000)
     private String errorMessage;
 
+    @Column(columnDefinition = "TEXT")
+    private String metadataJson;
+
     public UUID getId() {
         return id;
     }
@@ -113,5 +116,13 @@ public class SyncRun {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
+
+    public void setMetadataJson(String metadataJson) {
+        this.metadataJson = metadataJson;
     }
 }

@@ -52,6 +52,27 @@ public class IdentityLink {
 
     private Double confidence;
 
+    /**
+     * BLG-015: When this link was last verified by an automated or manual process.
+     * NULL means the link has not been re-verified since creation.
+     */
+    @Column
+    private Instant verifiedAt;
+
+    /**
+     * BLG-015: Process or user that performed the last verification.
+     * Examples: "identity-graph-service", "manual-review".
+     */
+    @Column(length = 255)
+    private String verifiedBy;
+
+    /**
+     * BLG-015: Free-text note explaining the evidence for this cross-source link.
+     * Examples: "NVD CPE dictionary match", "CSAF product ID mapping".
+     */
+    @Column(length = 500)
+    private String provenanceNote;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -105,6 +126,30 @@ public class IdentityLink {
 
     public void setConfidence(Double confidence) {
         this.confidence = confidence;
+    }
+
+    public Instant getVerifiedAt() {
+        return verifiedAt;
+    }
+
+    public void setVerifiedAt(Instant verifiedAt) {
+        this.verifiedAt = verifiedAt;
+    }
+
+    public String getVerifiedBy() {
+        return verifiedBy;
+    }
+
+    public void setVerifiedBy(String verifiedBy) {
+        this.verifiedBy = verifiedBy;
+    }
+
+    public String getProvenanceNote() {
+        return provenanceNote;
+    }
+
+    public void setProvenanceNote(String provenanceNote) {
+        this.provenanceNote = provenanceNote;
     }
 
     public Instant getCreatedAt() {

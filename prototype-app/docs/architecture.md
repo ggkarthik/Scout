@@ -114,10 +114,6 @@ The repo now boots PostgreSQL through Flyway without runtime schema mutation, bu
 
 The UI presents a broader inventory taxonomy than the backend currently models with distinct APIs. Some sections are filtered views over the same component endpoint rather than truly separate domains.
 
-### Software Model Documentation Was Overtaken by the Code
-
-Older documentation described a full `software_models` subsystem. The current code has removed that entity and repository layer; only compatibility remnants such as `softwareModelResult` strings remain in some paths and metrics.
-
 ### Release Hygiene Is Still Prototype-Level
 
 The repository has strong feature breadth, but the delivery model is still prototype-oriented:

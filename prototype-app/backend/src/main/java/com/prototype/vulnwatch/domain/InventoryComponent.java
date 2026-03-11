@@ -66,9 +66,6 @@ public class InventoryComponent {
     @Column(name = "normalized_version", length = 255)
     private String normalizedVersion;
 
-    @Column(name = "software_model_result", length = 500)
-    private String softwareModelResult;
-
     @Column(nullable = false)
     private String purl;
 
@@ -192,14 +189,6 @@ public class InventoryComponent {
 
     public void setNormalizedVersion(String normalizedVersion) {
         this.normalizedVersion = normalizedVersion;
-    }
-
-    public String getSoftwareModelResult() {
-        return softwareModelResult;
-    }
-
-    public void setSoftwareModelResult(String softwareModelResult) {
-        this.softwareModelResult = softwareModelResult;
     }
 
     public String getComponentDigest() {

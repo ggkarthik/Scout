@@ -1,7 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
-import { GithubSbomSource, RiskPolicy } from '../types';
-import { ResizableTable } from '../components/ResizableTable';
+import { RiskPolicy } from '../types';
 
 type ConfigurationSectionKey =
   | 'risk-score'
@@ -9,7 +8,6 @@ type ConfigurationSectionKey =
   | 'sla'
   | 'auto-close'
   | 'finding-generation'
-  | 'github-pipelines'
   | 'prototype-reset';
 
 const CONFIGURATION_SECTIONS: Array<{ key: ConfigurationSectionKey; title: string }> = [
@@ -18,7 +16,6 @@ const CONFIGURATION_SECTIONS: Array<{ key: ConfigurationSectionKey; title: strin
   { key: 'sla', title: 'SLA Configuration (Risk + Asset Context)' },
   { key: 'auto-close', title: 'Auto Close Configuration' },
   { key: 'finding-generation', title: 'Org CVE Finding Generation' },
-  { key: 'github-pipelines', title: 'GitHub Auto Ingestion Pipelines' },
   { key: 'prototype-reset', title: 'Prototype Data Reset' }
 ];
 
@@ -76,31 +73,10 @@ const SECTION_POLICY_FIELDS: Partial<Record<ConfigurationSectionKey, ReadonlyArr
   'auto-close': ['autoCloseAfterDays']
 };
 
-function pipelineStatusMeta(status?: string | null): { cls: string; label: string } {
-  if (!status) return { cls: 'pipeline-dot--none', label: 'Never run' };
-  if (status === 'SUCCESS') return { cls: 'pipeline-dot--success', label: 'Success' };
-  if (status === 'FAILURE') return { cls: 'pipeline-dot--failure', label: 'Failed' };
-  return { cls: 'pipeline-dot--active', label: status };
-}
-
 export function ConfigurationsPage() {
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
-
-  const [githubSources, setGithubSources] = React.useState<GithubSbomSource[]>([]);
-  const [sourceBusyId, setSourceBusyId] = React.useState<string | null>(null);
-  const [sourceMessage, setSourceMessage] = React.useState('');
-
-  const [sourceName, setSourceName] = React.useState('');
-  const [sourceOwner, setSourceOwner] = React.useState('');
-  const [sourceRepo, setSourceRepo] = React.useState('');
-  const [sourceAssetType, setSourceAssetType] = React.useState<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>('APPLICATION');
-  const [sourceAssetName, setSourceAssetName] = React.useState('');
-  const [sourceAssetIdentifier, setSourceAssetIdentifier] = React.useState('');
-  const [sourceFrequency, setSourceFrequency] = React.useState<'ONCE' | 'INTERVAL'>('ONCE');
-  const [sourceIntervalMinutes, setSourceIntervalMinutes] = React.useState('60');
-  const [sourceEnabled, setSourceEnabled] = React.useState(true);
   const [resetBusy, setResetBusy] = React.useState(false);
   const [resetMessage, setResetMessage] = React.useState('');
   const [activeSection, setActiveSection] = React.useState<ConfigurationSectionKey>('risk-score');
@@ -122,19 +98,9 @@ export function ConfigurationsPage() {
     }
   }, []);
 
-  const loadGithubSources = React.useCallback(async () => {
-    try {
-      const rows = await api.listGithubSbomSources();
-      setGithubSources(rows);
-    } catch (e) {
-      setSourceMessage(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
   React.useEffect(() => {
     loadPolicy();
-    loadGithubSources();
-  }, [loadPolicy, loadGithubSources]);
+  }, [loadPolicy]);
 
   const updatePolicy = (key: keyof RiskPolicy, value: number | boolean | string): void => {
     if (!policy) return;
@@ -160,53 +126,6 @@ export function ConfigurationsPage() {
     }
   };
 
-  const createGithubSource = async (): Promise<void> => {
-    if (!sourceName.trim()) {
-      setSourceMessage('Pipeline name is required');
-      return;
-    }
-    if (!sourceOwner.trim() || !sourceRepo.trim()) {
-      setSourceMessage('GitHub owner and repository are required');
-      return;
-    }
-
-    setSourceMessage('');
-    setSourceBusyId('create');
-    try {
-      await api.createGithubSbomSource({
-        name: sourceName.trim(),
-        owner: sourceOwner.trim(),
-        repo: sourceRepo.trim(),
-        assetType: sourceAssetType,
-        assetName: sourceAssetName.trim() || undefined,
-        assetIdentifier: sourceAssetIdentifier.trim() || undefined,
-        frequency: sourceFrequency,
-        intervalMinutes: sourceFrequency === 'INTERVAL' ? Math.max(5, Number(sourceIntervalMinutes) || 60) : undefined,
-        enabled: sourceEnabled
-      });
-      setSourceMessage('GitHub pipeline created');
-      await loadGithubSources();
-    } catch (e) {
-      setSourceMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSourceBusyId(null);
-    }
-  };
-
-  const runGithubSource = async (id: string): Promise<void> => {
-    setSourceBusyId(id);
-    setSourceMessage('');
-    try {
-      await api.runGithubSbomSource(id);
-      setSourceMessage('Pipeline run queued');
-      await loadGithubSources();
-    } catch (e) {
-      setSourceMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSourceBusyId(null);
-    }
-  };
-
   const cleanAllPrototypeData = async (): Promise<void> => {
     const confirmed = window.confirm(
       'This will permanently delete findings, inventory, vulnerability intelligence, and sync run history. Continue?'
@@ -221,7 +140,6 @@ export function ConfigurationsPage() {
       const total = Object.values(result.deletedRows ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
       setResetMessage(`Prototype data reset complete. Deleted ${total} rows.`);
       await loadPolicy();
-      await loadGithubSources();
     } catch (e) {
       setResetMessage(e instanceof Error ? e.message : String(e));
     } finally {
@@ -263,7 +181,7 @@ export function ConfigurationsPage() {
     <div className="panel">
       <div className="panel-header">
         <h3>Configurations</h3>
-        <span className="panel-caption">Centralized settings for risk, SLA, auto-close, org CVE finding generation, and GitHub auto-ingestion pipelines</span>
+        <span className="panel-caption">Centralized settings for risk, SLA, auto-close, org CVE finding generation, and prototype controls</span>
       </div>
       <div className="config-subtabs">
         {CONFIGURATION_SECTIONS.map((section) => (
@@ -531,130 +449,6 @@ export function ConfigurationsPage() {
               </button>
             </div>
             {policyMessage && activeSection === 'finding-generation' && <div className="notice">{policyMessage}</div>}
-          </div>
-        )}
-      </section>
-      )}
-
-      {activeSection === 'github-pipelines' && (
-      <section id="config-section-github-pipelines" className="config-accordion-section">
-        <button type="button" className="config-accordion-toggle" onClick={() => toggleSection('github-pipelines')}>
-          <span>GitHub Auto Ingestion Pipelines</span>
-          <span className={isSectionOpen('github-pipelines') ? 'config-chevron open' : 'config-chevron'}>▾</span>
-        </button>
-        {isSectionOpen('github-pipelines') && (
-          <div className="config-accordion-body">
-            <div className="form-grid ingestion-grid">
-              <label>Pipeline Name
-                <input value={sourceName} onChange={(e) => setSourceName(e.target.value)} placeholder="payments-main-sbom" />
-              </label>
-              <label>GitHub Owner
-                <input value={sourceOwner} onChange={(e) => setSourceOwner(e.target.value)} placeholder="org-name" />
-              </label>
-              <label>GitHub Repo
-                <input value={sourceRepo} onChange={(e) => setSourceRepo(e.target.value)} placeholder="service-repo" />
-              </label>
-              <label>Asset Type
-                <select value={sourceAssetType} onChange={(e) => setSourceAssetType(e.target.value as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE')}>
-                  <option value="APPLICATION">Application</option>
-                  <option value="HOST">Host</option>
-                  <option value="CONTAINER_IMAGE">Container Image</option>
-                </select>
-              </label>
-              <label>Asset Name (optional)
-                <input value={sourceAssetName} onChange={(e) => setSourceAssetName(e.target.value)} placeholder="owner/repo default" />
-              </label>
-              <label>Asset Identifier (optional)
-                <input value={sourceAssetIdentifier} onChange={(e) => setSourceAssetIdentifier(e.target.value)} placeholder="github:owner/repo default" />
-              </label>
-              <label>Frequency
-                <select value={sourceFrequency} onChange={(e) => setSourceFrequency(e.target.value as 'ONCE' | 'INTERVAL')}>
-                  <option value="ONCE">Once</option>
-                  <option value="INTERVAL">Every N minutes</option>
-                </select>
-              </label>
-              {sourceFrequency === 'INTERVAL' && (
-                <label>Interval (minutes)
-                  <input
-                    type="number"
-                    min={5}
-                    max={1440}
-                    value={sourceIntervalMinutes}
-                    onChange={(e) => setSourceIntervalMinutes(e.target.value)}
-                  />
-                </label>
-              )}
-              <label>Enabled
-                <select value={sourceEnabled ? 'true' : 'false'} onChange={(e) => setSourceEnabled(e.target.value === 'true')}>
-                  <option value="true">Enabled</option>
-                  <option value="false">Disabled</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="button-row form-submit-row">
-              <button type="button" className="btn btn-primary" onClick={createGithubSource} disabled={sourceBusyId === 'create'}>
-                {sourceBusyId === 'create' ? 'Saving...' : 'Create Auto Pipeline'}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={loadGithubSources} disabled={sourceBusyId != null}>
-                Refresh
-              </button>
-            </div>
-            {sourceMessage && <div className="notice">{sourceMessage}</div>}
-
-            {githubSources.length === 0 ? (
-              <div className="empty-state">
-                <p>No GitHub auto-ingestion pipelines configured.</p>
-              </div>
-            ) : (
-              <div className="table-scroll">
-                <ResizableTable storageKey="github-source-pipelines-table-widths">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 32 }}></th>
-                      <th>Name</th>
-                      <th>Repository</th>
-                      <th>Asset</th>
-                      <th>Frequency</th>
-                      <th>Enabled</th>
-                      <th>Last Run</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {githubSources.map((source) => {
-                      const dot = pipelineStatusMeta(source.lastRunStatus);
-                      return (
-                      <tr key={source.id}>
-                        <td>
-                          <span
-                            className={`pipeline-dot ${dot.cls}`}
-                            title={source.lastError ? `${dot.label}: ${source.lastError}` : dot.label}
-                          />
-                        </td>
-                        <td>{source.name}</td>
-                        <td>{`${source.owner}/${source.repo}`}</td>
-                        <td>{`${source.assetName} (${source.assetIdentifier})`}</td>
-                        <td>{source.frequency === 'ONCE' ? 'Once' : `Every ${source.intervalMinutes}m`}</td>
-                        <td>{source.enabled ? 'Yes' : 'No'}</td>
-                        <td>{source.lastRunAt ? new Date(source.lastRunAt).toLocaleString() : 'Never'}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => runGithubSource(source.id)}
-                            disabled={sourceBusyId === source.id}
-                          >
-                            {sourceBusyId === source.id ? 'Running...' : 'Run Now'}
-                          </button>
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </ResizableTable>
-              </div>
-            )}
           </div>
         )}
       </section>

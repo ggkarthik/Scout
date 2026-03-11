@@ -45,18 +45,4 @@ public class HttpClientConfig {
         return executor;
     }
 
-    @Bean(name = "findingDeltaExecutor")
-    public ThreadPoolTaskExecutor findingDeltaExecutor(
-            @Value("${app.correlation.delta-queue-capacity:500}") int queueCapacity
-    ) {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
-        executor.setQueueCapacity(Math.max(50, queueCapacity));
-        executor.setDaemon(true);
-        executor.setWaitForTasksToCompleteOnShutdown(false);
-        executor.setThreadNamePrefix("finding-delta-");
-        executor.initialize();
-        return executor;
-    }
 }

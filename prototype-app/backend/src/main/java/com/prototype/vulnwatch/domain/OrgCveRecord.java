@@ -89,6 +89,33 @@ public class OrgCveRecord {
     @Column(name = "matched_software_count", nullable = false)
     private long matchedSoftwareCount;
 
+    @Column(name = "matched_asset_count", nullable = false)
+    private long matchedAssetCount;
+
+    @Column(name = "applicable_component_count", nullable = false)
+    private long applicableComponentCount;
+
+    @Column(name = "impacted_component_count", nullable = false)
+    private long impactedComponentCount;
+
+    @Column(name = "not_affected_component_count", nullable = false)
+    private long notAffectedComponentCount;
+
+    @Column(name = "fixed_component_count", nullable = false)
+    private long fixedComponentCount;
+
+    @Column(name = "no_patch_component_count", nullable = false)
+    private long noPatchComponentCount;
+
+    @Column(name = "under_investigation_component_count", nullable = false)
+    private long underInvestigationComponentCount;
+
+    @Column(name = "unknown_component_count", nullable = false)
+    private long unknownComponentCount;
+
+    @Column(name = "review_reason", length = 120)
+    private String reviewReason;
+
     @Column(name = "suppression_reason", length = 120)
     private String suppressionReason;
 
@@ -230,7 +257,75 @@ public class OrgCveRecord {
     }
 
     public long getMatchedAssetCount() {
-        return matchedComponentCount;
+        return matchedAssetCount;
+    }
+
+    public void setMatchedAssetCount(long matchedAssetCount) {
+        this.matchedAssetCount = matchedAssetCount;
+    }
+
+    public long getApplicableComponentCount() {
+        return applicableComponentCount;
+    }
+
+    public void setApplicableComponentCount(long applicableComponentCount) {
+        this.applicableComponentCount = applicableComponentCount;
+    }
+
+    public long getImpactedComponentCount() {
+        return impactedComponentCount;
+    }
+
+    public void setImpactedComponentCount(long impactedComponentCount) {
+        this.impactedComponentCount = impactedComponentCount;
+    }
+
+    public long getNotAffectedComponentCount() {
+        return notAffectedComponentCount;
+    }
+
+    public void setNotAffectedComponentCount(long notAffectedComponentCount) {
+        this.notAffectedComponentCount = notAffectedComponentCount;
+    }
+
+    public long getFixedComponentCount() {
+        return fixedComponentCount;
+    }
+
+    public void setFixedComponentCount(long fixedComponentCount) {
+        this.fixedComponentCount = fixedComponentCount;
+    }
+
+    public long getNoPatchComponentCount() {
+        return noPatchComponentCount;
+    }
+
+    public void setNoPatchComponentCount(long noPatchComponentCount) {
+        this.noPatchComponentCount = noPatchComponentCount;
+    }
+
+    public long getUnderInvestigationComponentCount() {
+        return underInvestigationComponentCount;
+    }
+
+    public void setUnderInvestigationComponentCount(long underInvestigationComponentCount) {
+        this.underInvestigationComponentCount = underInvestigationComponentCount;
+    }
+
+    public long getUnknownComponentCount() {
+        return unknownComponentCount;
+    }
+
+    public void setUnknownComponentCount(long unknownComponentCount) {
+        this.unknownComponentCount = unknownComponentCount;
+    }
+
+    public String getReviewReason() {
+        return reviewReason;
+    }
+
+    public void setReviewReason(String reviewReason) {
+        this.reviewReason = reviewReason;
     }
 
     public String getSuppressionReason() {

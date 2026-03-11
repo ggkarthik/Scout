@@ -65,6 +65,22 @@ public class Asset {
     @Column(nullable = false)
     private AssetState state = AssetState.ACTIVE;
 
+    /** sha256:... digest of the container image manifest (CONTAINER_IMAGE assets). */
+    @Column(length = 255)
+    private String imageDigest;
+
+    /** Mutable image tag (e.g. v1.2.3, latest). Optional; digest is the stable identity. */
+    @Column(length = 255)
+    private String imageTag;
+
+    /** Registry + repository path (e.g. registry.example.com/myorg/myapp). */
+    @Column(length = 500)
+    private String imageRepository;
+
+    /** Digest of the base image manifest; enables layered-analysis correlation. */
+    @Column(length = 255)
+    private String baseImageDigest;
+
     @Column
     private Instant lastInventoryAt;
 
@@ -172,6 +188,38 @@ public class Asset {
 
     public void setLastCmdbSyncAt(Instant lastCmdbSyncAt) {
         this.lastCmdbSyncAt = lastCmdbSyncAt;
+    }
+
+    public String getImageDigest() {
+        return imageDigest;
+    }
+
+    public void setImageDigest(String imageDigest) {
+        this.imageDigest = imageDigest;
+    }
+
+    public String getImageTag() {
+        return imageTag;
+    }
+
+    public void setImageTag(String imageTag) {
+        this.imageTag = imageTag;
+    }
+
+    public String getImageRepository() {
+        return imageRepository;
+    }
+
+    public void setImageRepository(String imageRepository) {
+        this.imageRepository = imageRepository;
+    }
+
+    public String getBaseImageDigest() {
+        return baseImageDigest;
+    }
+
+    public void setBaseImageDigest(String baseImageDigest) {
+        this.baseImageDigest = baseImageDigest;
     }
 
     public Instant getCreatedAt() {

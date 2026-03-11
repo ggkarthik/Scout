@@ -1,11 +1,14 @@
 package com.prototype.vulnwatch.controller;
 
+import com.prototype.vulnwatch.dto.GithubGhcrSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceResponse;
+import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.service.GithubSbomSourceService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,8 +42,18 @@ public class GithubSbomSourceController {
         return githubSbomSourceService.update(id, request);
     }
 
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable UUID id) {
+        githubSbomSourceService.delete(id);
+    }
+
+    @PostMapping("/ghcr/run")
+    public SyncTriggerResponse runGhcrOnce(@Valid @RequestBody GithubGhcrSbomIngestionRequest request) {
+        return githubSbomSourceService.triggerGhcrRunOnce(request.owner());
+    }
+
     @PostMapping("/{id}/run")
-    public void run(@PathVariable UUID id) {
-        githubSbomSourceService.trigger(id);
+    public SyncTriggerResponse run(@PathVariable UUID id) {
+        return githubSbomSourceService.trigger(id);
     }
 }

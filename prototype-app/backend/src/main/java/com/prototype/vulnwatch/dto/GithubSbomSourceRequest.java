@@ -9,7 +9,8 @@ import jakarta.validation.constraints.NotBlank;
 public record GithubSbomSourceRequest(
         @NotBlank String name,
         @NotBlank String owner,
-        @NotBlank String repo,
+        String repo,
+        String path,
         AssetType assetType,
         String assetName,
         String assetIdentifier,

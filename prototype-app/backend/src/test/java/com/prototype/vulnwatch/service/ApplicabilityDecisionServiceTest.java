@@ -15,7 +15,8 @@ import org.junit.jupiter.api.Test;
 
 class ApplicabilityDecisionServiceTest {
 
-    private final ApplicabilityDecisionService service = new ApplicabilityDecisionService(new ObjectMapper());
+    private final ApplicabilityDecisionService service =
+            new ApplicabilityDecisionService(new ObjectMapper(), new VexPolicyService());
 
     @Test
     void returnsVersionUnknownWhenComponentVersionMissing() {
@@ -159,6 +160,20 @@ class ApplicabilityDecisionServiceTest {
 
         assertEquals(ApplicabilityDecisionService.ApplicabilityResult.TRUE, decision.result());
         assertEquals("vex_known_affected", decision.reason());
+    }
+
+    @Test
+    void evaluateCorrelationIgnoresVexDispositionAndUsesExactSoftwareVersionMatch() {
+        InventoryComponent component = component("1.0.0");
+        VulnerabilityTarget target = new VulnerabilityTarget();
+        target.setSource("vex-microsoft");
+        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+
+        ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluateCorrelation(component, target);
+
+        assertEquals(ApplicabilityDecisionService.ApplicabilityResult.TRUE, decision.result());
+        assertEquals("within_constraints", decision.reason());
+        assertEquals("correlation-only", decision.trace().get("vexEvaluationMode"));
     }
 
     @Test

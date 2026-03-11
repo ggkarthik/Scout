@@ -24,8 +24,6 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
         long getNormalizedNameCount();
         long getNormalizedVersionCount();
         long getSoftwareIdentityCount();
-        long getSoftwareModelCount();
-        long getUnresolvedCount();
     }
 
     interface TenantComponentLookupRow {
@@ -38,9 +36,7 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
               count(c) as total,
               sum(case when c.normalizedName is not null and trim(c.normalizedName) <> '' then 1 else 0 end) as normalizedNameCount,
               sum(case when c.normalizedVersion is not null and trim(c.normalizedVersion) <> '' then 1 else 0 end) as normalizedVersionCount,
-              sum(case when c.softwareIdentity is not null then 1 else 0 end) as softwareIdentityCount,
-              sum(case when c.softwareModelResult is not null and upper(c.softwareModelResult) like 'MATCHED:%' then 1 else 0 end) as softwareModelCount,
-              sum(case when c.softwareModelResult is null or trim(c.softwareModelResult) = '' or upper(c.softwareModelResult) like 'UNRESOLVED%' then 1 else 0 end) as unresolvedCount
+              sum(case when c.softwareIdentity is not null then 1 else 0 end) as softwareIdentityCount
             from InventoryComponent c
             where c.tenant = :tenant
               and c.componentStatus = :status
@@ -55,9 +51,7 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
               count(c) as total,
               sum(case when c.normalizedName is not null and trim(c.normalizedName) <> '' then 1 else 0 end) as normalizedNameCount,
               sum(case when c.normalizedVersion is not null and trim(c.normalizedVersion) <> '' then 1 else 0 end) as normalizedVersionCount,
-              sum(case when c.softwareIdentity is not null then 1 else 0 end) as softwareIdentityCount,
-              sum(case when c.softwareModelResult is not null and upper(c.softwareModelResult) like 'MATCHED:%' then 1 else 0 end) as softwareModelCount,
-              sum(case when c.softwareModelResult is null or trim(c.softwareModelResult) = '' or upper(c.softwareModelResult) like 'UNRESOLVED%' then 1 else 0 end) as unresolvedCount
+              sum(case when c.softwareIdentity is not null then 1 else 0 end) as softwareIdentityCount
             from InventoryComponent c
             where c.tenant = :tenant
               and c.componentStatus = :status

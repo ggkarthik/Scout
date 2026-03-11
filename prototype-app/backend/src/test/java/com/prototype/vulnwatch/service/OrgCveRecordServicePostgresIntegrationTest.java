@@ -150,6 +150,31 @@ class OrgCveRecordServicePostgresIntegrationTest {
         assertEquals(0L, unmatchedRecord.getMatchedSoftwareCount());
     }
 
+    @Test
+    void refreshPrefersUnderInvestigationWhenApplicableComponentsAreAwaitingExactResolution() {
+        Tenant tenant = tenantService.getDefaultTenant();
+        Vulnerability vulnerability = createVulnerability("CVE-2099-0601");
+
+        InventoryComponent activeComponent = createComponent(tenant, "under-investigation-host", InventoryComponentStatus.ACTIVE);
+        componentVulnerabilityStateRepository.save(createState(
+                tenant,
+                activeComponent,
+                vulnerability,
+                ApplicabilityState.APPLICABLE,
+                ImpactState.UNDER_INVESTIGATION
+        ));
+
+        int refreshed = orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
+
+        assertEquals(1, refreshed);
+
+        OrgCveRecord record = orgCveRecordRepository.findByTenantAndVulnerability_Id(tenant, vulnerability.getId())
+                .orElseThrow();
+        assertEquals(ApplicabilityState.APPLICABLE, record.getApplicabilityState());
+        assertEquals(ImpactState.UNDER_INVESTIGATION, record.getImpactState());
+        assertFalse(record.isImpacted());
+    }
+
     private Vulnerability createVulnerability(String externalId) {
         Vulnerability vulnerability = new Vulnerability();
         vulnerability.setExternalId(externalId);

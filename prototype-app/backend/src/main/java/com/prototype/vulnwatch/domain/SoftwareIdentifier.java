@@ -57,6 +57,13 @@ public class SoftwareIdentifier {
 
     private Double confidence;
 
+    /**
+     * BLG-015: Free-text note explaining how this identifier was established.
+     * Examples: "extracted from CycloneDX SBOM", "matched via CSAF advisory purl field".
+     */
+    @Column(length = 500)
+    private String provenanceNote;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -129,6 +136,14 @@ public class SoftwareIdentifier {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getProvenanceNote() {
+        return provenanceNote;
+    }
+
+    public void setProvenanceNote(String provenanceNote) {
+        this.provenanceNote = provenanceNote;
     }
 
     public void touch() {

@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
+import com.prototype.vulnwatch.dto.FindingEvidencePayload;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -19,6 +19,13 @@ public class FindingEvidenceService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * BLG-012: Builds a typed {@link FindingEvidencePayload} and serialises it to a JSON string
+     * suitable for storage in the JSONB {@code findings.evidence} column.
+     *
+     * Using the record instead of an ad-hoc Map ensures the evidence schema is enforced at
+     * compile time and documented in one place.
+     */
     public String buildEvidence(
             InventoryComponent component,
             Vulnerability vulnerability,
@@ -27,66 +34,67 @@ public class FindingEvidenceService {
             PrecedenceResolverService.PrecedenceResolution resolution,
             RiskScoringService.RiskScoreOutcome riskScoreOutcome
     ) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("matchedBy", selected.matchedBy());
-        payload.put("matchChain", List.of(selected.matchedBy(), "affectedness-deterministic", "source-precedence"));
-        payload.put("decisionState", resolution.finalState().name());
-        payload.put("decisionReason", resolution.reason());
-        payload.put("sourcePrecedence", resolution.sourcePrecedence());
-        payload.put("consideredCandidates", resolution.considered());
-        payload.put("precedenceTrace", resolution.precedenceTrace());
-        payload.put("confidence", selected.confidence());
-        payload.put("confidenceBreakdown", selected.confidenceBreakdown());
-        payload.put("applicabilityResult", selected.applicabilityDecision() == null ? "UNKNOWN" : selected.applicabilityDecision().result().name());
-        payload.put("applicabilityReason", selected.applicabilityDecision() == null ? "missing_decision" : selected.applicabilityDecision().reason());
-        payload.put("applicabilityTrace", selected.applicabilityDecision() == null ? Map.of() : selected.applicabilityDecision().trace());
-        payload.put("riskScore", riskScoreOutcome == null ? null : riskScoreOutcome.score());
-        payload.put("riskBreakdown", riskScoreOutcome == null ? Map.of() : riskScoreOutcome.breakdown());
-        payload.put("riskVexContext", riskScoreOutcome == null ? Map.of() : riskScoreOutcome.vexContext());
-        payload.put("kbSnapshotVersion", target.getKbVersion());
-        payload.put("assetId", component.getAsset() == null ? null : component.getAsset().getId());
-        payload.put("componentId", component.getId());
-        payload.put("componentPurl", component.getPurl());
-        payload.put("componentDigest", component.getComponentDigest());
-        payload.put("componentVersion", component.getVersion());
-        payload.put("componentEcosystem", component.getEcosystem());
-        payload.put("componentPackage", component.getPackageName());
-        payload.put("softwareIdentityKey", component.getSoftwareIdentity() == null ? null : component.getSoftwareIdentity().getCanonicalKey());
-        payload.put("vulnerabilityId", vulnerability.getExternalId());
-        payload.put("vulnerabilitySeverity", vulnerability.getSeverity());
-        payload.put("vulnerabilityCvssVector", vulnerability.getCvssVector());
-        payload.put("vulnerabilityPublishedAt", vulnerability.getPublishedAt());
-        payload.put("vulnerabilityLastModifiedAt", vulnerability.getLastModifiedAt());
-        payload.put("targetId", target.getId());
-        payload.put("targetSource", target.getSource());
-        payload.put("targetQualifiersJson", target.getQualifiersJson());
-        payload.put("targetType", target.getTargetType() == null ? null : target.getTargetType().name());
-        payload.put("targetKey", target.getNormalizedTargetKey());
-        payload.put("targetCpe", target.getCpe());
-        payload.put("targetCpeId", target.getCpeDim() == null ? null : target.getCpeDim().getId());
-        payload.put("targetNormalizedCpe", target.getCpeDim() == null ? null : target.getCpeDim().getNormalizedCpe());
-        payload.put("targetCpeWildcardScore", target.getCpeWildcardScore());
-        payload.put("targetVersionScheme", target.getVersionScheme() == null ? null : target.getVersionScheme().name());
-        payload.put("targetConstraintType", target.getConstraintType() == null ? null : target.getConstraintType().name());
-        payload.put("targetVersionExact", target.getVersionExact());
-        payload.put("targetVersionStart", target.getVersionStart());
-        payload.put("targetVersionStartInclusive", target.getStartInclusive());
-        payload.put("targetVersionEnd", target.getVersionEnd());
-        payload.put("targetVersionEndInclusive", target.getEndInclusive());
-        payload.put("targetIntroduced", target.getIntroduced());
-        payload.put("targetFixed", target.getFixed());
-        payload.put("targetQualifierPart", target.getQualifierPart());
-        payload.put("targetQualifierVendor", target.getQualifierVendor());
-        payload.put("targetQualifierProduct", target.getQualifierProduct());
-        payload.put("targetQualifierVersion", target.getQualifierVersion());
-        payload.put("targetQualifierUpdate", target.getQualifierUpdate());
-        payload.put("targetQualifierEdition", target.getQualifierEdition());
-        payload.put("targetQualifierLanguage", target.getQualifierLanguage());
-        payload.put("targetQualifierSwEdition", target.getQualifierSwEdition());
-        payload.put("targetQualifierTargetSw", target.getQualifierTargetSw());
-        payload.put("targetQualifierTargetHw", target.getQualifierTargetHw());
-        payload.put("targetQualifierOther", target.getQualifierOther());
-        payload.put("generatedAt", Instant.now());
+        FindingEvidencePayload payload = new FindingEvidencePayload(
+                selected.matchedBy(),
+                List.of(selected.matchedBy(), "affectedness-deterministic", "source-precedence"),
+                resolution.finalState().name(),
+                resolution.reason(),
+                resolution.sourcePrecedence(),
+                resolution.considered(),
+                resolution.precedenceTrace(),
+                selected.confidence(),
+                selected.confidenceBreakdown(),
+                selected.applicabilityDecision() == null ? "UNKNOWN" : selected.applicabilityDecision().result().name(),
+                selected.applicabilityDecision() == null ? "missing_decision" : selected.applicabilityDecision().reason(),
+                selected.applicabilityDecision() == null ? Map.of() : selected.applicabilityDecision().trace(),
+                riskScoreOutcome == null ? null : riskScoreOutcome.score(),
+                riskScoreOutcome == null ? Map.of() : riskScoreOutcome.breakdown(),
+                riskScoreOutcome == null ? Map.of() : riskScoreOutcome.vexContext(),
+                target.getKbVersion(),
+                component.getAsset() == null ? null : component.getAsset().getId(),
+                component.getId(),
+                component.getPurl(),
+                component.getComponentDigest(),
+                component.getVersion(),
+                component.getEcosystem(),
+                component.getPackageName(),
+                component.getSoftwareIdentity() == null ? null : component.getSoftwareIdentity().getCanonicalKey(),
+                vulnerability.getExternalId(),
+                vulnerability.getSeverity(),
+                vulnerability.getCvssVector(),
+                vulnerability.getPublishedAt(),
+                vulnerability.getLastModifiedAt(),
+                target.getId(),
+                target.getSource(),
+                target.getQualifiersJson(),
+                target.getTargetType() == null ? null : target.getTargetType().name(),
+                target.getNormalizedTargetKey(),
+                target.getCpe(),
+                target.getCpeDim() == null ? null : target.getCpeDim().getId(),
+                target.getCpeDim() == null ? null : target.getCpeDim().getNormalizedCpe(),
+                target.getCpeWildcardScore(),
+                target.getVersionScheme() == null ? null : target.getVersionScheme().name(),
+                target.getConstraintType() == null ? null : target.getConstraintType().name(),
+                target.getVersionExact(),
+                target.getVersionStart(),
+                target.getStartInclusive(),
+                target.getVersionEnd(),
+                target.getEndInclusive(),
+                target.getIntroduced(),
+                target.getFixed(),
+                target.getQualifierPart(),
+                target.getQualifierVendor(),
+                target.getQualifierProduct(),
+                target.getQualifierVersion(),
+                target.getQualifierUpdate(),
+                target.getQualifierEdition(),
+                target.getQualifierLanguage(),
+                target.getQualifierSwEdition(),
+                target.getQualifierTargetSw(),
+                target.getQualifierTargetHw(),
+                target.getQualifierOther(),
+                Instant.now()
+        );
 
         try {
             return objectMapper.writeValueAsString(payload);

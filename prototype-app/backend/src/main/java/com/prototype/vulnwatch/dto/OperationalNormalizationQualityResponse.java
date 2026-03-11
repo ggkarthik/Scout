@@ -4,9 +4,6 @@ public record OperationalNormalizationQualityResponse(
         long activeComponents,
         double normalizedNameCoveragePercent,
         double normalizedVersionCoveragePercent,
-        double softwareIdentityCoveragePercent,
-        double softwareModelCoveragePercent,
-        long unresolvedModelCount,
-        double unresolvedModelRatePercent
+        double softwareIdentityCoveragePercent
 ) {
 }

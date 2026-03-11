@@ -33,10 +33,16 @@ public class OrgCveRecordService {
     private static final String REASON_NOT_APPLICABLE = "no_supported_match_in_software_inventory";
     private static final String REASON_AWAITING_VEX = "awaiting_vex_assessment";
     private static final String REASON_VEX_NO_PATCH = "vex_no_patch";
-    private static final String REASON_VEX_AFFECTED = "vex_affected_or_untriaged";
+    private static final String REASON_VEX_AFFECTED = "vex_affected";
     private static final String REASON_VEX_UNDER_INVESTIGATION = "vex_under_investigation";
     private static final String REASON_VEX_FIXED = "vex_fixed";
     private static final String REASON_VEX_NOT_AFFECTED = "vex_not_affected";
+    private static final String REVIEW_REASON_FINDING_ELIGIBLE = "finding_eligible";
+    private static final String REVIEW_REASON_AWAITING_VEX = "awaiting_vex_assessment";
+    private static final String REVIEW_REASON_UNDER_INVESTIGATION = "vendor_under_investigation";
+    private static final String REVIEW_REASON_RESOLVED_FIXED = "resolved_fixed";
+    private static final String REVIEW_REASON_RESOLVED_NOT_AFFECTED = "resolved_not_affected";
+    private static final String REVIEW_REASON_NOT_APPLICABLE = "not_applicable";
 
     private final OrgCveRecordRepository orgCveRecordRepository;
     private final VulnerabilityRepository vulnerabilityRepository;
@@ -136,13 +142,14 @@ public class OrgCveRecordService {
             }
         });
 
-        // Determine applicability from ComponentVulnerabilityState — covers CPE, PURL, COORD,
-        // and ADVISORY_PACKAGE matches equally, and only counts ACTIVE components (G4 + G11).
-        Set<UUID> applicableVulnerabilityIds =
-                componentVulnerabilityStateRepository.findApplicableVulnerabilityIdsByTenantAndVulnerabilityIds(
-                        tenant,
-                        existingVulnerabilityIds
-                );
+        Map<UUID, ComponentVulnerabilityStateRepository.ApplicableExposureAggregateRow> applicabilityByVulnerability = new HashMap<>();
+        componentVulnerabilityStateRepository
+                .findApplicableExposureAggregatesByTenantIdAndVulnerabilityIds(tenant.getId(), existingVulnerabilityIds)
+                .forEach(row -> {
+                    if (row.getVulnerabilityId() != null) {
+                        applicabilityByVulnerability.put(row.getVulnerabilityId(), row);
+                    }
+                });
 
         Map<UUID, ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow> impactByVulnerability = new HashMap<>();
         componentVulnerabilityStateRepository
@@ -161,18 +168,26 @@ public class OrgCveRecordService {
                 continue;
             }
 
-            boolean applicable = applicableVulnerabilityIds.contains(vulnerabilityId);
+            ComponentVulnerabilityStateRepository.ApplicableExposureAggregateRow applicabilityAggregate =
+                    applicabilityByVulnerability.get(vulnerabilityId);
+            boolean applicable = applicabilityAggregate != null && applicabilityAggregate.getApplicableComponentCount() > 0;
             ApplicabilityState applicabilityState =
                     applicable ? ApplicabilityState.APPLICABLE : ApplicabilityState.NOT_APPLICABLE;
             ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow agg =
                     impactByVulnerability.get(vulnerabilityId);
-            long matchedComponentCount = agg == null ? 0
-                    : agg.getNoPatchCount() + agg.getImpactedCount() + agg.getUnknownCount()
-                    + agg.getFixedCount() + agg.getNotImpactedCount();
-            long matchedSoftwareCount = applicable ? matchedComponentCount : 0;
+            long applicableComponentCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getApplicableComponentCount();
+            long matchedAssetCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedAssetCount();
+            long noPatchComponentCount = agg == null ? 0 : agg.getNoPatchCount();
+            long impactedComponentCount = agg == null ? 0 : agg.getImpactedCount();
+            long underInvestigationComponentCount = agg == null ? 0 : agg.getUnderInvestigationCount();
+            long unknownComponentCount = agg == null ? 0 : agg.getUnknownCount();
+            long fixedComponentCount = agg == null ? 0 : agg.getFixedCount();
+            long notAffectedComponentCount = agg == null ? 0 : agg.getNotImpactedCount();
+            long matchedComponentCount = applicableComponentCount;
+            long matchedSoftwareCount = applicableComponentCount;
             ImpactSummary impactSummary = resolveImpact(
                     applicabilityState,
-                    impactByVulnerability.get(vulnerabilityId)
+                    agg
             );
             OrgCveSnapshot snapshot = new OrgCveSnapshot(
                     resolveExternalId(vulnerability),
@@ -185,8 +200,17 @@ public class OrgCveRecordService {
                     impactSummary.impacted(),
                     impactSummary.impactState(),
                     impactSummary.impactReason(),
+                    impactSummary.reviewReason(),
                     matchedComponentCount,
-                    matchedSoftwareCount
+                    matchedSoftwareCount,
+                    matchedAssetCount,
+                    applicableComponentCount,
+                    impactedComponentCount,
+                    notAffectedComponentCount,
+                    fixedComponentCount,
+                    noPatchComponentCount,
+                    underInvestigationComponentCount,
+                    unknownComponentCount
             );
 
             OrgCveRecord record = existingByVulnerability.get(vulnerabilityId);
@@ -267,8 +291,17 @@ public class OrgCveRecordService {
         changed |= setIfChanged(record.isImpacted(), snapshot.impacted(), record::setImpacted);
         changed |= setIfChanged(record.getImpactState(), snapshot.impactState(), record::setImpactState);
         changed |= setIfChanged(record.getImpactReason(), snapshot.impactReason(), record::setImpactReason);
+        changed |= setIfChanged(record.getReviewReason(), snapshot.reviewReason(), record::setReviewReason);
         changed |= setIfChanged(record.getMatchedComponentCount(), snapshot.matchedComponentCount(), record::setMatchedComponentCount);
         changed |= setIfChanged(record.getMatchedSoftwareCount(), snapshot.matchedSoftwareCount(), record::setMatchedSoftwareCount);
+        changed |= setIfChanged(record.getMatchedAssetCount(), snapshot.matchedAssetCount(), record::setMatchedAssetCount);
+        changed |= setIfChanged(record.getApplicableComponentCount(), snapshot.applicableComponentCount(), record::setApplicableComponentCount);
+        changed |= setIfChanged(record.getImpactedComponentCount(), snapshot.impactedComponentCount(), record::setImpactedComponentCount);
+        changed |= setIfChanged(record.getNotAffectedComponentCount(), snapshot.notAffectedComponentCount(), record::setNotAffectedComponentCount);
+        changed |= setIfChanged(record.getFixedComponentCount(), snapshot.fixedComponentCount(), record::setFixedComponentCount);
+        changed |= setIfChanged(record.getNoPatchComponentCount(), snapshot.noPatchComponentCount(), record::setNoPatchComponentCount);
+        changed |= setIfChanged(record.getUnderInvestigationComponentCount(), snapshot.underInvestigationComponentCount(), record::setUnderInvestigationComponentCount);
+        changed |= setIfChanged(record.getUnknownComponentCount(), snapshot.unknownComponentCount(), record::setUnknownComponentCount);
         return changed;
     }
 
@@ -286,8 +319,17 @@ public class OrgCveRecordService {
         record.setImpacted(false);
         record.setImpactState(ImpactState.UNKNOWN);
         record.setImpactReason("suppressed_before_evaluation");
+        record.setReviewReason(REVIEW_REASON_AWAITING_VEX);
         record.setMatchedComponentCount(0);
         record.setMatchedSoftwareCount(0);
+        record.setMatchedAssetCount(0);
+        record.setApplicableComponentCount(0);
+        record.setImpactedComponentCount(0);
+        record.setNotAffectedComponentCount(0);
+        record.setFixedComponentCount(0);
+        record.setNoPatchComponentCount(0);
+        record.setUnderInvestigationComponentCount(0);
+        record.setUnknownComponentCount(0);
         record.setLastEvaluatedAt(now);
         record.touch();
         return record;
@@ -298,27 +340,40 @@ public class OrgCveRecordService {
             ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow impactAggregate
     ) {
         if (applicabilityState != ApplicabilityState.APPLICABLE) {
-            return new ImpactSummary(ImpactState.NOT_IMPACTED, false, REASON_NOT_APPLICABLE);
+            return new ImpactSummary(ImpactState.NOT_IMPACTED, false, REASON_NOT_APPLICABLE, REVIEW_REASON_NOT_APPLICABLE);
         }
         if (impactAggregate == null) {
-            return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_AWAITING_VEX);
+            return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_AWAITING_VEX, REVIEW_REASON_AWAITING_VEX);
         }
         if (impactAggregate.getNoPatchCount() > 0) {
-            return new ImpactSummary(ImpactState.NO_PATCH, true, REASON_VEX_NO_PATCH);
+            return new ImpactSummary(ImpactState.NO_PATCH, true, REASON_VEX_NO_PATCH, REVIEW_REASON_FINDING_ELIGIBLE);
         }
         if (impactAggregate.getImpactedCount() > 0) {
-            return new ImpactSummary(ImpactState.IMPACTED, true, REASON_VEX_AFFECTED);
+            return new ImpactSummary(ImpactState.IMPACTED, true, REASON_VEX_AFFECTED, REVIEW_REASON_FINDING_ELIGIBLE);
+        }
+        if (impactAggregate.getUnderInvestigationCount() > 0) {
+            return new ImpactSummary(
+                    ImpactState.UNDER_INVESTIGATION,
+                    false,
+                    REASON_VEX_UNDER_INVESTIGATION,
+                    REVIEW_REASON_UNDER_INVESTIGATION
+            );
         }
         if (impactAggregate.getUnknownCount() > 0) {
-            return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_VEX_UNDER_INVESTIGATION);
+            return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_AWAITING_VEX, REVIEW_REASON_AWAITING_VEX);
         }
         if (impactAggregate.getFixedCount() > 0) {
-            return new ImpactSummary(ImpactState.FIXED, false, REASON_VEX_FIXED);
+            return new ImpactSummary(ImpactState.FIXED, false, REASON_VEX_FIXED, REVIEW_REASON_RESOLVED_FIXED);
         }
         if (impactAggregate.getNotImpactedCount() > 0) {
-            return new ImpactSummary(ImpactState.NOT_IMPACTED, false, REASON_VEX_NOT_AFFECTED);
+            return new ImpactSummary(
+                    ImpactState.NOT_IMPACTED,
+                    false,
+                    REASON_VEX_NOT_AFFECTED,
+                    REVIEW_REASON_RESOLVED_NOT_AFFECTED
+            );
         }
-        return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_AWAITING_VEX);
+        return new ImpactSummary(ImpactState.UNKNOWN, false, REASON_AWAITING_VEX, REVIEW_REASON_AWAITING_VEX);
     }
 
     private String normalizeSeverity(String value) {
@@ -361,7 +416,8 @@ public class OrgCveRecordService {
     private record ImpactSummary(
             ImpactState impactState,
             boolean impacted,
-            String impactReason
+            String impactReason,
+            String reviewReason
     ) {
     }
 
@@ -376,8 +432,17 @@ public class OrgCveRecordService {
             boolean impacted,
             ImpactState impactState,
             String impactReason,
+            String reviewReason,
             long matchedComponentCount,
-            long matchedSoftwareCount
+            long matchedSoftwareCount,
+            long matchedAssetCount,
+            long applicableComponentCount,
+            long impactedComponentCount,
+            long notAffectedComponentCount,
+            long fixedComponentCount,
+            long noPatchComponentCount,
+            long underInvestigationComponentCount,
+            long unknownComponentCount
     ) {
     }
 }

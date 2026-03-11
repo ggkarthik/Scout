@@ -190,6 +190,5 @@ The data model preserves explainability rather than only final status:
 
 ## Current Caveats
 
-- `software_models` is no longer part of the active code model. Older docs that described `software_models` as a core table are obsolete.
 - Flyway owns the PostgreSQL startup path and normal runtime no longer relies on startup schema mutation.
 - Because schema evolution was compatibility-oriented, some tables and columns reflect transitional states rather than a clean-room final design.

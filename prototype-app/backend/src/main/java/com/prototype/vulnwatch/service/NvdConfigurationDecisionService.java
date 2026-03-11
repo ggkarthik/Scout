@@ -41,8 +41,11 @@ public class NvdConfigurationDecisionService {
 
         if (expressions == null || expressions.isEmpty()) {
             trace.put("finalReason", "nvd_tree_unavailable");
+            // BLG-003: No NVD config data means we cannot determine applicability — return UNKNOWN,
+            // not TRUE (affected). Defaulting to TRUE generates systematic false positives for every
+            // CVE that lacks detailed NVD configuration entries.
             return new ApplicabilityDecisionService.ApplicabilityDecision(
-                    ApplicabilityDecisionService.ApplicabilityResult.TRUE,
+                    ApplicabilityDecisionService.ApplicabilityResult.UNKNOWN,
                     "nvd_tree_unavailable",
                     trace
             );
@@ -60,7 +63,7 @@ public class NvdConfigurationDecisionService {
         if (rootsByConfig.isEmpty()) {
             trace.put("finalReason", "nvd_tree_unavailable");
             return new ApplicabilityDecisionService.ApplicabilityDecision(
-                    ApplicabilityDecisionService.ApplicabilityResult.TRUE,
+                    ApplicabilityDecisionService.ApplicabilityResult.UNKNOWN,
                     "nvd_tree_unavailable",
                     trace
             );
@@ -181,14 +184,16 @@ public class NvdConfigurationDecisionService {
             return TriState.UNKNOWN;
         }
 
-        TriState base = evaluateVersion(component.getVersion(), cpe, match);
+        // BLG-005: use ecosystem-specific version scheme instead of UNKNOWN for all ecosystems.
+        VersionScheme scheme = schemeForComponent(component);
+        TriState base = evaluateVersion(component.getVersion(), cpe, match, scheme);
         if (vulnerable) {
             return base;
         }
         return negate(base);
     }
 
-    private TriState evaluateVersion(String componentVersion, CpeUtil.ParsedCpe cpe, JsonNode match) {
+    private TriState evaluateVersion(String componentVersion, CpeUtil.ParsedCpe cpe, JsonNode match, VersionScheme scheme) {
         String start = textOrNull(match.path("versionStartIncluding"));
         Boolean startInclusive = null;
         if (start == null) {
@@ -225,10 +230,10 @@ public class NvdConfigurationDecisionService {
 
         try {
             if (exact != null) {
-                return VersionUtil.compare(componentVersion, exact, VersionScheme.UNKNOWN) == 0 ? TriState.TRUE : TriState.FALSE;
+                return VersionUtil.compare(componentVersion, exact, scheme) == 0 ? TriState.TRUE : TriState.FALSE;
             }
             if (start != null) {
-                int startCompare = VersionUtil.compare(componentVersion, start, VersionScheme.UNKNOWN);
+                int startCompare = VersionUtil.compare(componentVersion, start, scheme);
                 boolean inclusive = startInclusive == null || startInclusive;
                 if (inclusive && startCompare < 0) {
                     return TriState.FALSE;
@@ -238,7 +243,7 @@ public class NvdConfigurationDecisionService {
                 }
             }
             if (end != null) {
-                int endCompare = VersionUtil.compare(componentVersion, end, VersionScheme.UNKNOWN);
+                int endCompare = VersionUtil.compare(componentVersion, end, scheme);
                 boolean inclusive = endInclusive == null || endInclusive;
                 if (inclusive && endCompare > 0) {
                     return TriState.FALSE;
@@ -406,5 +411,36 @@ public class NvdConfigurationDecisionService {
     private enum IdentityMatch {
         MATCH,
         UNKNOWN
+    }
+
+    // BLG-005: detect ecosystem-specific version scheme from the component PURL so that
+    // Debian (epoch:upstream-revision), RPM (tilde/caret), and Python (PEP 440) versions
+    // are compared correctly instead of falling through to the generic UNKNOWN comparator.
+    private VersionScheme schemeForComponent(InventoryComponent component) {
+        if (component == null) {
+            return VersionScheme.UNKNOWN;
+        }
+        String purl = component.getPurl();
+        if (purl != null && !purl.isBlank()) {
+            PurlUtil.ParsedPurl parsed = PurlUtil.parse(purl);
+            VersionScheme fromPurl = schemeForEcosystem(parsed.ecosystem());
+            if (fromPurl != VersionScheme.UNKNOWN) {
+                return fromPurl;
+            }
+        }
+        return VersionScheme.UNKNOWN;
+    }
+
+    private VersionScheme schemeForEcosystem(String ecosystem) {
+        if (ecosystem == null || ecosystem.isBlank()) {
+            return VersionScheme.UNKNOWN;
+        }
+        return switch (ecosystem.toLowerCase(Locale.ROOT)) {
+            case "deb", "debian" -> VersionScheme.DPKG;
+            case "rpm" -> VersionScheme.RPM;
+            case "pypi" -> VersionScheme.PEP440;
+            case "maven" -> VersionScheme.MAVEN;
+            default -> VersionScheme.UNKNOWN;
+        };
     }
 }

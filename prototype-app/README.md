@@ -24,6 +24,11 @@ cd backend
 mvn spring-boot:run
 ```
 
+If you want GitHub-backed repo or GHCR SBOM ingestion locally, put a GitHub token in
+`backend/secrets/github-api-token` before starting the backend. That path is gitignored.
+The same token is reused across GitHub repo SBOM fetches, GHCR ingestion, and GitHub advisory syncs.
+It needs package-read access for GHCR discovery.
+
 Frontend:
 
 ```bash

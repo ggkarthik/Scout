@@ -130,7 +130,6 @@ public class InventoryService {
                 component.getVersion(),
                 component.getNormalizedName(),
                 component.getNormalizedVersion(),
-                component.getSoftwareModelResult(),
                 component.getPurl(),
                 component.getComponentDigest(),
                 identity == null ? null : identity.getDisplayName(),

@@ -66,6 +66,13 @@ public class AssetLifecycleService {
             asset.setOwnerTeam(trimToNull(record.ownerTeam()));
             asset.setOwnerEmail(trimToNull(record.ownerEmail()));
             asset.setBusinessCriticality(record.businessCriticality() == null ? BusinessCriticality.MEDIUM : record.businessCriticality());
+            // BLG-011: persist container-image artifact identity fields when present
+            if (record.assetType() == com.prototype.vulnwatch.domain.AssetType.CONTAINER_IMAGE) {
+                asset.setImageDigest(trimToNull(record.imageDigest()));
+                asset.setImageTag(trimToNull(record.imageTag()));
+                asset.setImageRepository(trimToNull(record.imageRepository()));
+                asset.setBaseImageDigest(trimToNull(record.baseImageDigest()));
+            }
             AssetState previousState = asset.getState();
             AssetState nextState = record.state() == null ? AssetState.ACTIVE : record.state();
             asset.setState(nextState);

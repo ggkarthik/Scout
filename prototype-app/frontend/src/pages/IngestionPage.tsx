@@ -1,6 +1,6 @@
 import React from 'react';
 import { api, uploadSbom } from '../api/client';
-import { GithubRepoIngestionResult, SbomUploadEvidence } from '../types';
+import { GithubRepoIngestionResult } from '../types';
 import { ResizableTable } from '../components/ResizableTable';
 
 export type IngestionMode = 'upload' | 'endpoint' | 'github';
@@ -13,36 +13,6 @@ type Props = {
 };
 const MODE_QUERY_KEY = 'ingestMode';
 
-function formatBytes(bytes?: number): string {
-  if (!bytes || bytes <= 0) return 'N/A';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = bytes;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  return `${size.toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
-}
-
-function parseEvidenceJson(value?: string): string {
-  if (!value || !value.trim()) {
-    return '{}';
-  }
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2);
-  } catch {
-    return value;
-  }
-}
-
-function formatStatusLabel(value: 'IN_PROGRESS' | 'SUCCESS' | 'FAILURE'): string {
-  return value.replace('_', ' ');
-}
-
-function statusClassName(value: 'IN_PROGRESS' | 'SUCCESS' | 'FAILURE'): string {
-  return `status-${value.toLowerCase().replace('_', '-')}`;
-}
 
 function isMode(value: string | null): value is IngestionMode {
   return value === 'upload' || value === 'endpoint' || value === 'github';
@@ -86,26 +56,15 @@ export function IngestionPage({
   const [githubRepo, setGithubRepo] = React.useState('');
   const [githubRunResults, setGithubRunResults] = React.useState<GithubRepoIngestionResult[]>([]);
 
-  const [uploads, setUploads] = React.useState<SbomUploadEvidence[]>([]);
   const [result, setResult] = React.useState('');
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [wizardStep, setWizardStep] = React.useState<1 | 2 | 3>(1);
   const [wizardStepError, setWizardStepError] = React.useState('');
 
-  const loadUploads = React.useCallback(async () => {
-    try {
-      const rows = await api.listSbomUploads();
-      setUploads(rows);
-    } catch (e) {
-      setError(`Failed to load upload history: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }, []);
-
   React.useEffect(() => {
     setError('');
-    loadUploads();
-  }, [loadUploads]);
+  }, []);
 
   React.useEffect(() => {
     if (initialMode && mode !== initialMode) {
@@ -195,7 +154,6 @@ export function IngestionPage({
         );
       }
 
-      await loadUploads();
       onDone?.();
     } catch (e) {
       setError(`SBOM ingestion failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -621,56 +579,6 @@ export function IngestionPage({
             </ResizableTable>
           </div>
         </>
-      )}
-
-      <h4 className="section-title section-divider">SBOM Upload Evidence</h4>
-      {uploads.length === 0 ? (
-        <div className="empty-state">
-          <p>No SBOM uploads yet. Upload a CycloneDX/SPDX file or fetch from API/GitHub to build evidence history.</p>
-        </div>
-      ) : (
-        <div className="table-scroll">
-          <ResizableTable storageKey="sbom-evidence-table-widths">
-            <thead>
-            <tr>
-              <th>Uploaded</th>
-              <th>Status</th>
-              <th>Asset</th>
-              <th>Source</th>
-              <th>Format</th>
-              <th>Size</th>
-              <th>Components</th>
-              <th>Evidence</th>
-            </tr>
-            </thead>
-            <tbody>
-            {uploads.map((upload) => (
-              <tr key={upload.id}>
-                <td>{new Date(upload.uploadedAt).toLocaleString()}</td>
-                <td>
-                  <span className={`status-pill ${statusClassName(upload.status)}`}>
-                    {formatStatusLabel(upload.status)}
-                  </span>
-                </td>
-                <td>{`${upload.assetName} (${upload.assetIdentifier})`}</td>
-                <td>
-                  <div>{upload.ingestionSourceType ?? 'UNKNOWN'}</div>
-                  <div className="panel-caption">{upload.sourceReference ?? upload.originalFilename}</div>
-                </td>
-                <td>{upload.format}</td>
-                <td>{formatBytes(upload.contentLengthBytes)}</td>
-                <td>{upload.componentCount ?? 'N/A'}</td>
-                <td>
-                  <details className="evidence-details">
-                    <summary>View</summary>
-                    <pre>{parseEvidenceJson(upload.evidenceJson)}</pre>
-                  </details>
-                </td>
-              </tr>
-            ))}
-            </tbody>
-          </ResizableTable>
-        </div>
       )}
     </div>
   );

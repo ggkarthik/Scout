@@ -1,5 +1,41 @@
 import React from 'react';
 import { api } from '../api/client';
+
+type ErrorBoundaryState = { error: Error | null };
+
+class OperationsSectionErrorBoundary extends React.Component<
+  { children: React.ReactNode; viewKey: string },
+  ErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode; viewKey: string }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: { viewKey: string }) {
+    if (prevProps.viewKey !== this.props.viewKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>Failed to render section</h3>
+          </div>
+          <div className="notice">{this.state.error.message}</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import {
   OperationalApiReadPath,
   OperationalCorrelationEffectiveness,
@@ -13,6 +49,7 @@ import {
   OperationalNormalizationQuality,
   OperationalSectionResponse,
   OperationalSourceFreshness,
+  SloStatus,
   TopFindingMetric
 } from '../types';
 import { StatCard } from '../components/StatCard';
@@ -25,7 +62,8 @@ export type OperationsViewKey =
   | 'lifecycle'
   | 'read-path'
   | 'freshness'
-  | 'catalog';
+  | 'catalog'
+  | 'slo';
 
 export const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string }> = [
   { key: 'overview', label: 'Dashboard' },
@@ -35,7 +73,8 @@ export const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string
   { key: 'lifecycle', label: 'Noise & Lifecycle' },
   { key: 'read-path', label: 'API Read-Path' },
   { key: 'freshness', label: 'Freshness & Drift' },
-  { key: 'catalog', label: 'Metric Catalog' }
+  { key: 'catalog', label: 'Metric Catalog' },
+  { key: 'slo', label: 'SLO Status' }
 ];
 
 const LEGACY_VIEW_ALIASES: Record<string, OperationsViewKey> = {
@@ -72,11 +111,12 @@ const SECTION_DESCRIPTIONS: Record<Exclude<OperationsViewKey, 'overview'>, strin
   lifecycle: 'False-positive filtering, lifecycle behavior, and reopen patterns.',
   'read-path': 'API latency, summary-read-model health, and cache behavior.',
   freshness: 'Source staleness, normalization drift, and fallback drift over time.',
-  catalog: 'Metric definitions tracked by the operations workspace.'
+  catalog: 'Metric definitions tracked by the operations workspace.',
+  slo: 'Service level objective compliance for ingestion, queue depth, and queue staleness.'
 };
 
 function formatPercent(value: number): string {
-  return `${value.toFixed(1)}%`;
+  return `${(value ?? 0).toFixed(1)}%`;
 }
 
 function isCreatorAccessError(error: string): boolean {
@@ -161,6 +201,9 @@ function FreshnessTable({ rows = [] }: { rows?: OperationalSourceFreshness[] }) 
 }
 
 function EndpointMetricsTable({ rows = [] }: { rows?: OperationalEndpointMetric[] }) {
+  if (rows.length === 0) {
+    return <div className="panel-caption">No API endpoint metrics observed yet.</div>;
+  }
   return (
     <div className="ops-table">
       <div className="ops-table-header">
@@ -187,6 +230,9 @@ function EndpointMetricsTable({ rows = [] }: { rows?: OperationalEndpointMetric[
 
 function renderOverview(payload: OperationalSectionResponse<OperationalExecutiveHealth>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Operations Overview</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <div className="stats-grid">
@@ -205,7 +251,7 @@ function renderOverview(payload: OperationalSectionResponse<OperationalExecutive
         <div className="noise-summary-grid">
           {Object.entries(SECTION_DESCRIPTIONS).map(([key, description]) => (
             <div key={key} className="noise-summary-item">
-              <div className="noise-summary-label">{key.replace('-', ' ')}</div>
+              <div className="noise-summary-label">{key.split('-').join(' ')}</div>
               <div className="noise-summary-value">{description}</div>
             </div>
           ))}
@@ -217,6 +263,9 @@ function renderOverview(payload: OperationalSectionResponse<OperationalExecutive
 
 function renderIngestion(payload: OperationalSectionResponse<OperationalIngestionEfficiency>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Ingestion Efficiency</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -227,35 +276,35 @@ function renderIngestion(payload: OperationalSectionResponse<OperationalIngestio
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">SBOM Ingestions (24h)</div>
-            <div className="noise-summary-value">{data.sbomIngestionsLast24h.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.sbomIngestionsLast24h ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">SBOM / Hour</div>
-            <div className="noise-summary-value">{data.sbomIngestionsPerHour.toFixed(2)}</div>
+            <div className="noise-summary-value">{(data.sbomIngestionsPerHour ?? 0).toFixed(2)}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">SBOM Success Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.sbomSuccessRatePercent)}</div>
+            <div className="noise-summary-value">{formatPercent(data.sbomSuccessRatePercent ?? 0)}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Sync Success Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.syncSuccessRatePercent)}</div>
+            <div className="noise-summary-value">{formatPercent(data.syncSuccessRatePercent ?? 0)}</div>
           </div>
           <div className="noise-summary-item">
-            <div className="noise-summary-label">Queue Backlog</div>
-            <div className="noise-summary-value">{data.queueBacklog.toLocaleString()}</div>
+            <div className="noise-summary-label">Pending Delta Events</div>
+            <div className="noise-summary-value">{(data.queueBacklog ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Records Fetched</div>
-            <div className="noise-summary-value">{data.recordsFetchedLast24h.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.recordsFetchedLast24h ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Records Inserted</div>
-            <div className="noise-summary-value">{data.recordsInsertedLast24h.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.recordsInsertedLast24h ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Records Updated</div>
-            <div className="noise-summary-value">{data.recordsUpdatedLast24h.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.recordsUpdatedLast24h ?? 0).toLocaleString()}</div>
           </div>
         </div>
         <IngestionSourceTable rows={data.sourceBreakdown} />
@@ -266,6 +315,9 @@ function renderIngestion(payload: OperationalSectionResponse<OperationalIngestio
 
 function renderNormalization(payload: OperationalSectionResponse<OperationalNormalizationQuality>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Normalization Quality</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -276,7 +328,7 @@ function renderNormalization(payload: OperationalSectionResponse<OperationalNorm
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">Active Components</div>
-            <div className="noise-summary-value">{data.activeComponents.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.activeComponents ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Name Coverage</div>
@@ -290,18 +342,6 @@ function renderNormalization(payload: OperationalSectionResponse<OperationalNorm
             <div className="noise-summary-label">Identity Coverage</div>
             <div className="noise-summary-value">{formatPercent(data.softwareIdentityCoveragePercent)}</div>
           </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Model Coverage</div>
-            <div className="noise-summary-value">{formatPercent(data.softwareModelCoveragePercent)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Unresolved Models</div>
-            <div className="noise-summary-value">{data.unresolvedModelCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Unresolved Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.unresolvedModelRatePercent)}</div>
-          </div>
         </div>
       </section>
     </div>
@@ -310,6 +350,9 @@ function renderNormalization(payload: OperationalSectionResponse<OperationalNorm
 
 function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrelationEffectiveness>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Correlation Effectiveness</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -320,7 +363,7 @@ function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrel
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">Open Findings</div>
-            <div className="noise-summary-value">{data.openFindings.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.openFindings ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">High Confidence Affected</div>
@@ -334,17 +377,17 @@ function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrel
         <div className="noise-panel-grid">
           <MetricDistribution
             title="Selected Method Distribution"
-            items={data.selectedMethodDistribution}
+            items={data.selectedMethodDistribution ?? []}
             emptyLabel="No selected method samples yet."
           />
           <MetricDistribution
             title="Decision State Distribution"
-            items={data.decisionStateDistribution}
+            items={data.decisionStateDistribution ?? []}
             emptyLabel="No decision states observed yet."
           />
           <MetricDistribution
             title="Workflow Status Distribution"
-            items={data.workflowStatusDistribution}
+            items={data.workflowStatusDistribution ?? []}
             emptyLabel="No workflow states observed yet."
           />
         </div>
@@ -355,6 +398,9 @@ function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrel
 
 function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLifecycle>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Noise and Lifecycle</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -365,19 +411,19 @@ function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLif
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">Filtered Not Applicable</div>
-            <div className="noise-summary-value">{data.totalFilteredNotApplicable.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.totalFilteredNotApplicable ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Never Opened</div>
-            <div className="noise-summary-value">{data.neverOpenedNotApplicable.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.neverOpenedNotApplicable ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Auto Resolved</div>
-            <div className="noise-summary-value">{data.autoResolvedNotApplicable.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.autoResolvedNotApplicable ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Deferred</div>
-            <div className="noise-summary-value">{data.deferredUnderInvestigation.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.deferredUnderInvestigation ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Filtered Rate</div>
@@ -391,7 +437,7 @@ function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLif
         <div className="noise-panel-grid">
           <MetricDistribution
             title="Not Applicable Categories"
-            items={data.notApplicableCategories}
+            items={data.notApplicableCategories ?? []}
             emptyLabel="No categories observed yet."
           />
         </div>
@@ -402,6 +448,9 @@ function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLif
 
 function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPath>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>API and Read-Path Performance</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -412,11 +461,11 @@ function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPa
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">Canonical CVEs</div>
-            <div className="noise-summary-value">{data.canonicalCveCount.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.canonicalCveCount ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Summary CVEs</div>
-            <div className="noise-summary-value">{data.summaryCveCount.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.summaryCveCount ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Summary Coverage</div>
@@ -435,7 +484,7 @@ function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPa
             <div className="noise-summary-value">{formatPercent(data.filterCacheHitRatioPercent)}</div>
           </div>
         </div>
-        <EndpointMetricsTable rows={data.endpointMetrics} />
+        <EndpointMetricsTable rows={data.endpointMetrics ?? []} />
       </section>
     </div>
   );
@@ -443,6 +492,9 @@ function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPa
 
 function renderFreshness(payload: OperationalSectionResponse<OperationalFreshnessDrift>) {
   const data = payload.data;
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Data Freshness and Drift</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
   return (
     <div className="page-grid">
       <section className="panel">
@@ -453,11 +505,11 @@ function renderFreshness(payload: OperationalSectionResponse<OperationalFreshnes
         <div className="noise-summary-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label">Stale Threshold (h)</div>
-            <div className="noise-summary-value">{data.staleThresholdHours.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.staleThresholdHours ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Stale Source Count</div>
-            <div className="noise-summary-value">{data.staleSourceCount.toLocaleString()}</div>
+            <div className="noise-summary-value">{(data.staleSourceCount ?? 0).toLocaleString()}</div>
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">Normalization Drift (7d)</div>
@@ -468,14 +520,14 @@ function renderFreshness(payload: OperationalSectionResponse<OperationalFreshnes
             <div className="noise-summary-value">{formatPercent(data.cpeFallbackShareDrift7d)}</div>
           </div>
         </div>
-        <FreshnessTable rows={data.sourceFreshness} />
+        <FreshnessTable rows={data.sourceFreshness ?? []} />
       </section>
     </div>
   );
 }
 
 function renderCatalog(payload: OperationalSectionResponse<OperationalMetricDefinition[]>) {
-  const data = payload.data ?? [];
+  const data = Array.isArray(payload.data) ? payload.data : [];
   return (
     <div className="page-grid">
       <section className="panel">
@@ -504,6 +556,49 @@ function renderCatalog(payload: OperationalSectionResponse<OperationalMetricDefi
   );
 }
 
+function renderSlo(data: SloStatus) {
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>SLO Status</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
+  const slos = data.slos ?? [];
+  return (
+    <div className="page-grid">
+      <div className="stats-grid">
+        <StatCard title="SLOs Defined" value={slos.length} />
+        <StatCard title="SLOs Passing" value={slos.filter((s) => s.compliant).length} />
+        <StatCard title="SLOs Failing" value={slos.filter((s) => !s.compliant).length} tone={slos.some((s) => !s.compliant) ? 'critical' : undefined} />
+      </div>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>SLO Status <span className={data.overallCompliant ? 'slo-pass' : 'slo-fail'}>{data.overallCompliant ? 'COMPLIANT' : 'NON-COMPLIANT'}</span></h3>
+          <span className="panel-caption">Evaluated {new Date(data.evaluatedAt).toLocaleString()}</span>
+        </div>
+        <div className="ops-table">
+          <div className="ops-table-header">
+            <span>SLO</span>
+            <span>Description</span>
+            <span>Window</span>
+            <span>Target</span>
+            <span>Current</span>
+            <span>Status</span>
+          </div>
+          {slos.map((slo) => (
+            <div key={slo.name} className="ops-table-row ops-table-row-wide">
+              <span>{slo.name}</span>
+              <span>{slo.description}</span>
+              <span>{slo.window}</span>
+              <span>{slo.target}{slo.unit ? ` ${slo.unit}` : ''}</span>
+              <span>{slo.current}{slo.unit ? ` ${slo.unit}` : ''}</span>
+              <span className={slo.compliant ? 'slo-pass' : 'slo-fail'}>{slo.compliant ? 'PASS' : 'FAIL'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 async function loadOperationsView(selectedView: OperationsViewKey): Promise<unknown> {
   switch (selectedView) {
     case 'overview':
@@ -522,6 +617,8 @@ async function loadOperationsView(selectedView: OperationsViewKey): Promise<unkn
       return api.getOperationalFreshnessDrift();
     case 'catalog':
       return api.getOperationalMetricCatalog();
+    case 'slo':
+      return api.getSloStatus();
     default:
       return api.getOperationalOverview();
   }
@@ -598,24 +695,42 @@ export function OperationalDashboardPage({ selectedView }: OperationalDashboardP
     return <div className="panel">Loading operational section...</div>;
   }
 
+  let content: React.ReactNode;
   switch (normalizedView) {
     case 'overview':
-      return renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
+      content = renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
+      break;
     case 'ingestion':
-      return renderIngestion(payload as OperationalSectionResponse<OperationalIngestionEfficiency>);
+      content = renderIngestion(payload as OperationalSectionResponse<OperationalIngestionEfficiency>);
+      break;
     case 'normalization':
-      return renderNormalization(payload as OperationalSectionResponse<OperationalNormalizationQuality>);
+      content = renderNormalization(payload as OperationalSectionResponse<OperationalNormalizationQuality>);
+      break;
     case 'correlation':
-      return renderCorrelation(payload as OperationalSectionResponse<OperationalCorrelationEffectiveness>);
+      content = renderCorrelation(payload as OperationalSectionResponse<OperationalCorrelationEffectiveness>);
+      break;
     case 'lifecycle':
-      return renderLifecycle(payload as OperationalSectionResponse<OperationalNoiseLifecycle>);
+      content = renderLifecycle(payload as OperationalSectionResponse<OperationalNoiseLifecycle>);
+      break;
     case 'read-path':
-      return renderReadPath(payload as OperationalSectionResponse<OperationalApiReadPath>);
+      content = renderReadPath(payload as OperationalSectionResponse<OperationalApiReadPath>);
+      break;
     case 'freshness':
-      return renderFreshness(payload as OperationalSectionResponse<OperationalFreshnessDrift>);
+      content = renderFreshness(payload as OperationalSectionResponse<OperationalFreshnessDrift>);
+      break;
     case 'catalog':
-      return renderCatalog(payload as OperationalSectionResponse<OperationalMetricDefinition[]>);
+      content = renderCatalog(payload as OperationalSectionResponse<OperationalMetricDefinition[]>);
+      break;
+    case 'slo':
+      content = renderSlo(payload as SloStatus);
+      break;
     default:
-      return renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
+      content = renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
   }
+
+  return (
+    <OperationsSectionErrorBoundary viewKey={normalizedView}>
+      {content}
+    </OperationsSectionErrorBoundary>
+  );
 }

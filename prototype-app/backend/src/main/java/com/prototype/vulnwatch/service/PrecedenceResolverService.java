@@ -51,13 +51,34 @@ public class PrecedenceResolverService {
                     Map.of("finalReason", "no_candidates"));
         }
 
-        List<CandidateDecision> sorted = decisions.stream()
+        List<CandidateDecision> allNonNull = decisions.stream()
                 .filter(Objects::nonNull)
+                .toList();
+
+        // BLG-004: KEV is an exploitability annotation (prioritization signal), not an
+        // applicability authority. A CVE being "known exploited" does not mean a specific
+        // component version is affected. Excluding KEV candidates from the applicability
+        // precedence chain prevents false positives on high-severity findings.
+        // KEV candidates are retained in the considered[] list for audit visibility.
+        List<CandidateDecision> sorted = allNonNull.stream()
+                .filter(d -> !isKevSource(d.target().getSource()))
                 .sorted(priorityComparator())
                 .toList();
 
         List<Map<String, Object>> sourcePrecedence = sourcePrecedence(sorted);
-        List<Map<String, Object>> considered = considered(sorted);
+        List<Map<String, Object>> considered = considered(
+                allNonNull.stream().sorted(priorityComparator()).toList()
+        );
+
+        if (sorted.isEmpty()) {
+            return new PrecedenceResolution(
+                    FinalState.UNKNOWN,
+                    null,
+                    "no_applicable_candidates",
+                    sourcePrecedence,
+                    considered,
+                    Map.of("finalReason", "no_applicable_candidates_after_kev_filter"));
+        }
         List<Integer> priorityLevels = sorted.stream()
                 .map(candidate -> sourceProfile(candidate.target().getSource()).priority())
                 .distinct()
@@ -224,6 +245,13 @@ public class PrecedenceResolverService {
             return "unknown";
         }
         return source.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean isKevSource(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        return source.trim().toLowerCase(Locale.ROOT).contains("kev");
     }
 
     private Map<String, Object> buildTrace(String reason, List<Map<String, Object>> priorityEvaluation) {

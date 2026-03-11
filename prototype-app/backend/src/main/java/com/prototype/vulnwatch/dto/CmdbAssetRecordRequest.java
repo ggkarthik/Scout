@@ -15,6 +15,11 @@ public record CmdbAssetRecordRequest(
         String ownerTeam,
         String ownerEmail,
         BusinessCriticality businessCriticality,
-        AssetState state
+        AssetState state,
+        // BLG-011: OCI/container artifact fields (only meaningful for CONTAINER_IMAGE assets)
+        String imageDigest,
+        String imageTag,
+        String imageRepository,
+        String baseImageDigest
 ) {
 }

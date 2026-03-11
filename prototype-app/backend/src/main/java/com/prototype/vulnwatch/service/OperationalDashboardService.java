@@ -119,8 +119,7 @@ public class OperationalDashboardService {
         double normalizationCoveragePercent = average(
                 normalizationStats.normalizedNameCoveragePercent(),
                 normalizationStats.normalizedVersionCoveragePercent(),
-                normalizationStats.softwareIdentityCoveragePercent(),
-                normalizationStats.softwareModelCoveragePercent()
+                normalizationStats.softwareIdentityCoveragePercent()
         );
 
         OperationalMetricsService.MetricSnapshot recomputeSnapshot =
@@ -146,10 +145,7 @@ public class OperationalDashboardService {
                 normalizationStats.activeComponents(),
                 normalizationStats.normalizedNameCoveragePercent(),
                 normalizationStats.normalizedVersionCoveragePercent(),
-                normalizationStats.softwareIdentityCoveragePercent(),
-                normalizationStats.softwareModelCoveragePercent(),
-                normalizationStats.unresolvedModelCount(),
-                normalizationStats.unresolvedModelRatePercent()
+                normalizationStats.softwareIdentityCoveragePercent()
         );
         OperationalCorrelationEffectivenessResponse correlationEffectiveness = new OperationalCorrelationEffectivenessResponse(
                 correlationStats.openFindings(),
@@ -495,18 +491,14 @@ public class OperationalDashboardService {
                 inventoryComponentRepository.findNormalizationAggregate(tenant, InventoryComponentStatus.ACTIVE)
                         .orElse(null);
         if (row == null || row.getTotal() == 0) {
-            return new NormalizationStats(0, 0, 0, 0, 0, 0, 0);
+            return new NormalizationStats(0, 0, 0, 0);
         }
         long total = row.getTotal();
-        long unresolved = row.getUnresolvedCount();
         return new NormalizationStats(
                 total,
-                unresolved,
                 percentage(row.getNormalizedNameCount(), total),
                 percentage(row.getNormalizedVersionCount(), total),
-                percentage(row.getSoftwareIdentityCount(), total),
-                percentage(row.getSoftwareModelCount(), total),
-                percentage(unresolved, total)
+                percentage(row.getSoftwareIdentityCount(), total)
         );
     }
 
@@ -522,8 +514,7 @@ public class OperationalDashboardService {
         return average(
                 percentage(row.getNormalizedNameCount(), total),
                 percentage(row.getNormalizedVersionCount(), total),
-                percentage(row.getSoftwareIdentityCount(), total),
-                percentage(row.getSoftwareModelCount(), total)
+                percentage(row.getSoftwareIdentityCount(), total)
         );
     }
 
@@ -652,7 +643,7 @@ public class OperationalDashboardService {
                 "Executive Health",
                 "normalization.coverage_composite",
                 "Normalization Coverage Composite",
-                "Average of normalized name, normalized version, software identity, and software model coverage."
+                "Average of normalized name, normalized version, and software identity coverage."
         ));
         metrics.add(new OperationalMetricDefinitionResponse(
                 "Ingestion Efficiency",
@@ -734,16 +725,12 @@ public class OperationalDashboardService {
 
     private record NormalizationStats(
             long activeComponents,
-            long unresolvedModelCount,
             double normalizedNameCoveragePercent,
             double normalizedVersionCoveragePercent,
-            double softwareIdentityCoveragePercent,
-            double softwareModelCoveragePercent,
-            double unresolvedModelRatePercent
+            double softwareIdentityCoveragePercent
     ) {
         double overallCoveragePercent() {
-            return (normalizedNameCoveragePercent + normalizedVersionCoveragePercent + softwareIdentityCoveragePercent
-                    + softwareModelCoveragePercent) / 4.0;
+            return (normalizedNameCoveragePercent + normalizedVersionCoveragePercent + softwareIdentityCoveragePercent) / 3.0;
         }
     }
 

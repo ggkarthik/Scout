@@ -16,6 +16,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -92,7 +94,8 @@ public class Finding {
     private Instant suppressedUntil;
 
     @Basic(fetch = FetchType.LAZY)
-    @Column(columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
     private String evidence;
 
     @Column(name = "vex_status", length = 64)
@@ -103,6 +106,9 @@ public class Finding {
 
     @Column(name = "vex_provider", length = 128)
     private String vexProvider;
+
+    @Column(name = "matched_vex_assertion_id")
+    private UUID matchedVexAssertionId;
 
     @Basic(fetch = FetchType.LAZY)
     @Column(name = "precedence_trace", columnDefinition = "TEXT")
@@ -274,6 +280,14 @@ public class Finding {
 
     public void setVexProvider(String vexProvider) {
         this.vexProvider = vexProvider;
+    }
+
+    public UUID getMatchedVexAssertionId() {
+        return matchedVexAssertionId;
+    }
+
+    public void setMatchedVexAssertionId(UUID matchedVexAssertionId) {
+        this.matchedVexAssertionId = matchedVexAssertionId;
     }
 
     public String getPrecedenceTrace() {

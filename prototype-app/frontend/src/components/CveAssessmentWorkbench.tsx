@@ -11,6 +11,7 @@ import {
   CveDetail,
   CveInvestigation,
   CveMatchedSoftware,
+  CveVexEvidence,
   OrgSpecificCveExposureRecord,
 } from '../features/cve-workbench/types';
 import {
@@ -89,6 +90,7 @@ function impactBadgeClass(state?: string): string {
     case 'NO_PATCH': return 'impact-no-patch';
     case 'FIXED': return 'impact-fixed';
     case 'NOT_IMPACTED': return 'impact-not-impacted';
+    case 'UNDER_INVESTIGATION': return 'impact-unknown';
     default: return 'impact-unknown';
   }
 }
@@ -99,8 +101,30 @@ function impactLabel(state?: string): string {
     case 'NO_PATCH': return 'No Patch';
     case 'FIXED': return 'Fixed';
     case 'NOT_IMPACTED': return 'Not Impacted';
+    case 'UNDER_INVESTIGATION': return 'Under Investigation';
     default: return 'Unknown';
   }
+}
+
+function explainImpact(software: CveMatchedSoftware): string {
+  return software.impactReasonDetail ?? software.impactReason ?? 'No impact evidence available.';
+}
+
+function explainApplicability(software: CveMatchedSoftware): string {
+  return software.applicabilityReasonDetail ?? software.applicabilityReason ?? 'No applicability evidence available.';
+}
+
+function vendorStatementFor(software: CveMatchedSoftware): string {
+  if (software.vexStatus) return formatLabel(software.vexStatus);
+  if (software.impactState === 'UNKNOWN') return 'Awaiting exact VEX';
+  return 'No exact VEX evidence';
+}
+
+function patchStateFor(software: CveMatchedSoftware): string {
+  if (software.impactState === 'NO_PATCH') return 'No Patch';
+  if (software.impactState === 'FIXED') return 'Fixed';
+  if (software.vexFreshness) return formatLabel(software.vexFreshness);
+  return 'Unknown';
 }
 
 function latestByDate<T extends { updatedAt?: string; completedAt?: string; createdAt: string }>(items: T[]): T | null {
@@ -184,9 +208,8 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
   // Unique CPEs from vendor intelligence
   const cpes = [...new Set((detail.vendorIntelligence ?? []).map((vi) => vi.cpe).filter(Boolean))] as string[];
 
-  const severity = (detail.summary.severity ?? item.severity ?? '').toUpperCase();
-  const cvssScore = detail.summary.cvssScore ?? null;
   const epssScore = detail.summary.epssScore ?? null;
+  const epssUpdatedAt = detail.summary.epssUpdatedAt ?? null;
   const cweIds = detail.summary.cweIds;
 
   return (
@@ -196,18 +219,12 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
       <div className="cve-sidebar-header">
         <h4>CVE Summary</h4>
         <div className="cve-sidebar-scores">
-          {severity && (
-            <span className={`severity-pill severity-${severity.toLowerCase()}`}>{severity}</span>
-          )}
-          {cvssScore != null && (
-            <span className="cve-score-chip" title="CVSS Score">
-              CVSS {cvssScore.toFixed(1)}
-            </span>
-          )}
           {epssScore != null && (
             <span
               className={`cve-score-chip ${epssScore >= 0.5 ? 'cve-score-chip-warn' : ''}`}
-              title="Probability of exploitation in the next 30 days"
+              title={epssUpdatedAt
+                ? `Probability of exploitation in the next 30 days — score refreshed ${new Date(epssUpdatedAt).toLocaleDateString()}`
+                : 'Probability of exploitation in the next 30 days'}
             >
               EPSS {(epssScore * 100).toFixed(1)}%
             </span>
@@ -215,14 +232,14 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
         </div>
       </div>
 
-      {/* KEV warning — only show when relevant */}
+      {/* KEV warning — exploitability signal only, not an applicability determination */}
       {item.inKev && (
         <div className="cve-kev-banner">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14">
             <path d="M12 3L2 21h20L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
             <path d="M12 9v5M12 17h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
-          In CISA KEV — active exploitation confirmed
+          In CISA KEV — actively exploited in the wild. Prioritize review; applicability must still be verified against your inventory.
         </div>
       )}
 
@@ -445,7 +462,7 @@ function InvestigationContent({
             <tbody>
               {softwareGroups.map(({ software, assets }) => {
                 const conf = confidenceFromApplicability(software.applicabilityState);
-                const groupKey = `${software.packageName}@${software.version}`;
+                const groupKey = software.version ? `${software.packageName}@${software.version}` : software.packageName;
                 const isExpanded = expandedRows.has(groupKey);
                 return (
                   <React.Fragment key={groupKey}>
@@ -463,6 +480,7 @@ function InvestigationContent({
                         <span className={`cve-impact-badge ${impactBadgeClass(software.impactState)}`}>
                           {impactLabel(software.impactState)}
                         </span>
+                        <div className="panel-caption">{explainImpact(software)}</div>
                       </td>
                       <td>{assets.length}</td>
                       <td>{matchBasisLabel(software.matchedBy)}</td>
@@ -500,6 +518,7 @@ function InvestigationContent({
                                       <span className={`cve-impact-badge ${impactBadgeClass(asset.impactState)}`}>
                                         {impactLabel(asset.impactState)}
                                       </span>
+                                      <div className="panel-caption">{explainImpact(asset)}</div>
                                     </td>
                                     <td>
                                       {asset.eligibleForFinding
@@ -600,26 +619,30 @@ type ApplicabilityTableProps = {
   matchedSoftware: CveMatchedSoftware[];
   applicabilityDecisions: Map<string, ApplicabilityDecision>;
   impactDecisions: Map<string, ImpactDecision>;
-  detail: CveDetail;
+  expandedEvidenceComponentId: string | null;
+  vexEvidenceByComponent: Record<string, CveVexEvidence | null>;
+  vexEvidenceErrors: Record<string, string | null>;
+  vexEvidenceLoadingComponentId: string | null;
   onApplicabilityDecision: (componentId: string, decision: ApplicabilityDecision) => void;
   onImpactDecision: (componentId: string, decision: ImpactDecision) => void;
+  onToggleVexEvidence: (componentId: string) => void | Promise<void>;
 };
 
 function ApplicabilityTable({
-  matchedSoftware, applicabilityDecisions, impactDecisions, detail, onApplicabilityDecision, onImpactDecision,
+  matchedSoftware,
+  applicabilityDecisions,
+  impactDecisions,
+  expandedEvidenceComponentId,
+  vexEvidenceByComponent,
+  vexEvidenceErrors,
+  vexEvidenceLoadingComponentId,
+  onApplicabilityDecision,
+  onImpactDecision,
+  onToggleVexEvidence,
 }: ApplicabilityTableProps) {
   const applicableSoftware = matchedSoftware.filter(
     (s) => applicabilityDecisions.get(s.componentId) === 'APPLICABLE'
   );
-
-  const vendorStatement = (): string => {
-    if (detail.signals.patchAvailable && detail.signals.exploitAvailable) return 'Affected – Patch Available';
-    if (detail.signals.patchAvailable) return 'Affected – Patch Available';
-    if (detail.signals.exploitAvailable) return 'Affected – Exploited';
-    return 'Unknown';
-  };
-
-  const patchState = detail.signals.patchAvailable ? 'Available' : 'Unknown';
 
   return (
     <>
@@ -648,7 +671,10 @@ function ApplicabilityTable({
                 const decision = applicabilityDecisions.get(sw.componentId) ?? 'NEEDS_REVIEW';
                 return (
                   <tr key={sw.componentId}>
-                    <td><strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span></td>
+                    <td>
+                      <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
+                      <div className="panel-caption">{explainApplicability(sw)}</div>
+                    </td>
                     <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
                     <td className="cve-decision-table-muted">{matchBasisLabel(sw.matchedBy)}</td>
                     <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
@@ -695,7 +721,7 @@ function ApplicabilityTable({
             </svg>
             <h4>Impact Assessment</h4>
           </div>
-          <p>Only applicable software shown. Determine actual impact based on vendor intelligence.</p>
+          <p>Only applicable software shown. Analyst disposition is captured here, but computed impact stays server-driven from exact VEX evidence.</p>
         </div>
         {applicableSoftware.length === 0 ? (
           <div className="cve-intel-empty">Mark software as Applicable above to assess impact.</div>
@@ -715,10 +741,48 @@ function ApplicabilityTable({
                 const impact = impactDecisions.get(sw.componentId) ?? 'UNKNOWN';
                 return (
                   <tr key={sw.componentId}>
-                    <td><strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span></td>
+                    <td>
+                      <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
+                      <div className="panel-caption">{explainImpact(sw)}</div>
+                    </td>
                     <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
-                    <td className="cve-decision-table-muted">{vendorStatement()}</td>
-                    <td><span className="cve-patch-badge">{patchState}</span></td>
+                    <td className="cve-decision-table-muted">
+                      <div>{vendorStatementFor(sw)}</div>
+                      {sw.matchedVexAssertionId && (
+                        <div className="panel-caption">
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={() => void onToggleVexEvidence(sw.componentId)}
+                          >
+                            {expandedEvidenceComponentId === sw.componentId ? 'Hide VEX evidence' : 'View VEX evidence'}
+                          </button>
+                        </div>
+                      )}
+                      {expandedEvidenceComponentId === sw.componentId && (
+                        <div className="panel-caption">
+                          {vexEvidenceLoadingComponentId === sw.componentId && <div>Loading VEX evidence...</div>}
+                          {vexEvidenceErrors[sw.componentId] && <div>{vexEvidenceErrors[sw.componentId]}</div>}
+                          {vexEvidenceByComponent[sw.componentId] && (
+                            <>
+                              <div>
+                                {formatLabel(vexEvidenceByComponent[sw.componentId]?.provider)} / {formatLabel(vexEvidenceByComponent[sw.componentId]?.status)}
+                              </div>
+                              <div>
+                                {formatLabel(vexEvidenceByComponent[sw.componentId]?.trustTier)} trust, {formatLabel(vexEvidenceByComponent[sw.componentId]?.freshness)}
+                              </div>
+                              {vexEvidenceByComponent[sw.componentId]?.documentId && (
+                                <div>Document: {vexEvidenceByComponent[sw.componentId]?.documentId}</div>
+                              )}
+                              {typeof vexEvidenceByComponent[sw.componentId]?.evidence?.advisoryUrl === 'string' && (
+                                <div>{String(vexEvidenceByComponent[sw.componentId]?.evidence?.advisoryUrl)}</div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td><span className="cve-patch-badge">{patchStateFor(sw)}</span></td>
                     <td>
                       <div className="cve-decision-btn-group">
                         <button
@@ -743,6 +807,9 @@ function ApplicabilityTable({
                           Unknown
                         </button>
                       </div>
+                      {sw.analystReason && (
+                        <div className="panel-caption">{sw.analystReason}</div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1152,6 +1219,10 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
   const [impactDecisions, setImpactDecisions] = React.useState<Map<string, ImpactDecision>>(new Map());
   const [analystRationale, setAnalystRationale] = React.useState('');
   const [assessmentBusy, setAssessmentBusy] = React.useState(false);
+  const [expandedEvidenceComponentId, setExpandedEvidenceComponentId] = React.useState<string | null>(null);
+  const [vexEvidenceByComponent, setVexEvidenceByComponent] = React.useState<Record<string, CveVexEvidence | null>>({});
+  const [vexEvidenceErrors, setVexEvidenceErrors] = React.useState<Record<string, string | null>>({});
+  const [vexEvidenceLoadingComponentId, setVexEvidenceLoadingComponentId] = React.useState<string | null>(null);
 
   // Findings state
   const [findingTitle, setFindingTitle] = React.useState(() => `${item.externalId} - ${item.title}`);
@@ -1192,11 +1263,13 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     const initialImpact = new Map<string, ImpactDecision>();
     for (const sw of detail.matchedSoftware) {
       if (sw.applicabilityState === 'APPLICABLE') {
-        initialImpact.set(sw.componentId,
-          sw.impactState === 'IMPACTED' || sw.impactState === 'NO_PATCH' ? 'IMPACTED' :
-          sw.impactState === 'NOT_IMPACTED' || sw.impactState === 'FIXED' ? 'NOT_IMPACTED' :
-          'UNKNOWN'
-        );
+        const seededDecision = sw.analystDisposition
+          ?? (sw.impactState === 'IMPACTED' || sw.impactState === 'NO_PATCH'
+            ? 'IMPACTED'
+            : sw.impactState === 'NOT_IMPACTED' || sw.impactState === 'FIXED'
+              ? 'NOT_IMPACTED'
+              : 'UNKNOWN');
+        initialImpact.set(sw.componentId, seededDecision);
       }
     }
     setImpactDecisions(initialImpact);
@@ -1204,7 +1277,36 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     // Pre-select all eligible software for finding creation
     const eligible = detail.matchedSoftware.filter((s) => s.eligibleForFinding);
     setSelectedFindingIds(new Set(eligible.map((s) => s.componentId)));
+    setExpandedEvidenceComponentId(null);
+    setVexEvidenceByComponent({});
+    setVexEvidenceErrors({});
+    setVexEvidenceLoadingComponentId(null);
   }, [detail, item.externalId, latestAssessment, latestInvestigation]);
+
+  const toggleVexEvidence = React.useCallback(async (componentId: string) => {
+    if (expandedEvidenceComponentId === componentId) {
+      setExpandedEvidenceComponentId(null);
+      return;
+    }
+    setExpandedEvidenceComponentId(componentId);
+    if (vexEvidenceByComponent[componentId] || vexEvidenceLoadingComponentId === componentId) {
+      return;
+    }
+    setVexEvidenceLoadingComponentId(componentId);
+    setVexEvidenceErrors((current) => ({ ...current, [componentId]: null }));
+    try {
+      const evidence = await cveWorkbenchApi.getCveVexEvidence(item.externalId, componentId);
+      setVexEvidenceByComponent((current) => ({ ...current, [componentId]: evidence }));
+    } catch (requestError) {
+      const rawMessage = requestError instanceof Error ? requestError.message : String(requestError);
+      const message = rawMessage.includes('(404)') || rawMessage.includes('[NOT_FOUND]')
+        ? 'No persisted VEX evidence is currently linked to this component.'
+        : rawMessage;
+      setVexEvidenceErrors((current) => ({ ...current, [componentId]: message }));
+    } finally {
+      setVexEvidenceLoadingComponentId((current) => (current === componentId ? null : current));
+    }
+  }, [expandedEvidenceComponentId, item.externalId, vexEvidenceByComponent, vexEvidenceLoadingComponentId]);
 
   const softwareGroups = React.useMemo(
     () => buildSoftwareGroups(detail?.matchedSoftware ?? []),
@@ -1287,12 +1389,15 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     }
 
     if (item.inKev) {
+      // BLG-004: KEV signals exploitability, not product applicability. It is NOT an
+      // authoritative source for determining whether your specific version is affected.
+      // Rendered with a distinct style so analysts don't conflate it with NVD/VEX/advisory rows.
       rows.push({
-        source: 'KEV Catalog',
-        statement: 'Actively Exploited',
-        statementClass: 'exploited',
-        affectedVersions: 'N/A',
-        fixedVersion: 'Patch Required',
+        source: 'CISA KEV (exploitability context)',
+        statement: 'Actively Exploited — not an applicability source',
+        statementClass: 'exploited kev-context',
+        affectedVersions: '— (no version data)',
+        fixedVersion: '—',
       });
     }
     return rows;
@@ -1372,6 +1477,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
         justification: analystRationale.trim(),
         recommendedAction: '',
         componentImpactDecisions,
+        componentAnalystDispositions: componentImpactDecisions,
       });
       setAssessmentId(saved.id);
 
@@ -1524,9 +1630,13 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                   matchedSoftware={detail.matchedSoftware}
                   applicabilityDecisions={applicabilityDecisions}
                   impactDecisions={impactDecisions}
-                  detail={detail}
+                  expandedEvidenceComponentId={expandedEvidenceComponentId}
+                  vexEvidenceByComponent={vexEvidenceByComponent}
+                  vexEvidenceErrors={vexEvidenceErrors}
+                  vexEvidenceLoadingComponentId={vexEvidenceLoadingComponentId}
                   onApplicabilityDecision={setApplicabilityDecision}
                   onImpactDecision={setImpactDecision}
+                  onToggleVexEvidence={toggleVexEvidence}
                 />
               </div>
               <DecisionSummary

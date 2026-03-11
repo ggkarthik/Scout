@@ -241,9 +241,6 @@ export type OperationalNormalizationQuality = {
   normalizedNameCoveragePercent: number;
   normalizedVersionCoveragePercent: number;
   softwareIdentityCoveragePercent: number;
-  softwareModelCoveragePercent: number;
-  unresolvedModelCount: number;
-  unresolvedModelRatePercent: number;
 };
 
 export type OperationalCorrelationEffectiveness = {
@@ -345,6 +342,45 @@ export type SyncRun = {
   errorMessage?: string;
 };
 
+export type VexAssertionRepairSummary = {
+  vexLikeTargetCount: number;
+  persistedAssertionCount: number;
+  activeMatchedComponentCount: number;
+  activeApplicableAwaitingVexCount: number;
+  sourceSystems: string[];
+  vexPolicyEnabled: boolean;
+  vexRiskModifiersEnabled: boolean;
+  vexRolloutControlsEnabled: boolean;
+  vexRolloutBackfillEnabled: boolean;
+  latestRepairRun?: SyncRunSnapshot;
+  latestMicrosoftRun?: SyncRunSnapshot;
+  latestRedhatRun?: SyncRunSnapshot;
+  latestBackfillRun?: SyncRunSnapshot;
+  latestBackfillComparison?: VexRolloutComparison;
+  generatedAt: string;
+};
+
+export type SyncRunSnapshot = {
+  runId: string;
+  status: string;
+  startedAt?: string;
+  completedAt?: string;
+  errorMessage?: string;
+};
+
+export type VexRolloutMetricsSnapshot = {
+  vexLikeTargetCount: number;
+  persistedAssertionCount: number;
+  activeMatchedComponentCount: number;
+  activeApplicableAwaitingVexCount: number;
+  capturedAt: string;
+};
+
+export type VexRolloutComparison = {
+  before: VexRolloutMetricsSnapshot;
+  after: VexRolloutMetricsSnapshot;
+};
+
 export type SbomUploadEvidence = {
   id: string;
   assetId: string;
@@ -386,6 +422,26 @@ export type GithubSbomIngestionBatchResponse = {
   componentsIngested: number;
   findingsGenerated: number;
   results: GithubRepoIngestionResult[];
+};
+
+export type GithubGhcrImageIngestionResult = {
+  imageRepository: string;
+  assetIdentifier: string;
+  status: 'SUCCESS' | 'FAILURE';
+  componentsIngested?: number;
+  findingsGenerated?: number;
+  message?: string;
+};
+
+export type GithubGhcrIngestionSummary = {
+  imagesDiscovered: number;
+  imagesProcessed: number;
+  imagesSucceeded: number;
+  imagesFailed: number;
+  componentsIngested: number;
+  findingsGenerated: number;
+  failureSummary?: string;
+  results: GithubGhcrImageIngestionResult[];
 };
 
 export type FindingPage = {
@@ -462,7 +518,6 @@ export type InventoryComponentRecord = {
   version: string;
   normalizedName?: string;
   normalizedVersion?: string;
-  softwareModelResult?: string;
   purl: string;
   componentDigest?: string;
   softwareIdentity?: string;
@@ -596,6 +651,28 @@ export type CmdbAssetRecord = {
   ownerEmail?: string;
   businessCriticality?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   state?: 'ACTIVE' | 'INACTIVE' | 'RETIRED' | 'DECOMMISSIONED';
+  // BLG-011: OCI/container artifact identity (only for CONTAINER_IMAGE assets)
+  imageDigest?: string;
+  imageTag?: string;
+  imageRepository?: string;
+  baseImageDigest?: string;
+};
+
+// BLG-014: SLO status types
+export type SloEntry = {
+  name: string;
+  description: string;
+  unit: string;
+  target: number;
+  current: number;
+  compliant: boolean;
+  window: string;
+};
+
+export type SloStatus = {
+  evaluatedAt: string;
+  overallCompliant: boolean;
+  slos: SloEntry[];
 };
 
 export type CmdbAssetSyncResponse = {

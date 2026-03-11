@@ -1,8 +1,8 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
+import com.prototype.vulnwatch.domain.AnalystDisposition;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
-import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.repo.ApplicabilityAssessmentRepository;
@@ -187,8 +187,15 @@ public class ApplicabilityAssessmentService {
         ApplicabilityAssessment saved = assessmentRepository.save(assessment);
         log.info("Submitted assessment {} for CVE {} with result {}", saved.getId(), cveId, request.getFinalResult());
 
-        // Persist per-component impact decisions to ComponentVulnerabilityState
-        if (request.getComponentImpactDecisions() != null && !request.getComponentImpactDecisions().isEmpty()) {
+        Map<String, String> analystDispositions = request.getComponentAnalystDispositions();
+        if ((analystDispositions == null || analystDispositions.isEmpty())
+                && request.getComponentImpactDecisions() != null
+                && !request.getComponentImpactDecisions().isEmpty()) {
+            analystDispositions = request.getComponentImpactDecisions();
+        }
+
+        // Persist per-component analyst dispositions without overwriting computed impact.
+        if (analystDispositions != null && !analystDispositions.isEmpty()) {
             Vulnerability vulnerability = saved.getVulnerability();
             List<ComponentVulnerabilityState> states =
                     componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
@@ -196,22 +203,27 @@ public class ApplicabilityAssessmentService {
             for (ComponentVulnerabilityState state : states) {
                 if (state.getComponent() == null || state.getComponent().getId() == null) continue;
                 String componentIdStr = state.getComponent().getId().toString();
-                String decision = request.getComponentImpactDecisions().get(componentIdStr);
+                String decision = analystDispositions.get(componentIdStr);
                 if (decision == null) continue;
-                ImpactState newImpactState = switch (decision.toUpperCase()) {
-                    case "IMPACTED"     -> ImpactState.IMPACTED;
-                    case "NOT_IMPACTED" -> ImpactState.NOT_IMPACTED;
-                    default             -> ImpactState.UNKNOWN;
+                AnalystDisposition newDisposition = switch (decision.toUpperCase()) {
+                    case "IMPACTED"     -> AnalystDisposition.IMPACTED;
+                    case "NOT_IMPACTED" -> AnalystDisposition.NOT_IMPACTED;
+                    default             -> AnalystDisposition.UNKNOWN;
                 };
-                if (state.getImpactState() != newImpactState) {
-                    state.setImpactState(newImpactState);
-                    state.setEligibleForFinding(newImpactState == ImpactState.IMPACTED || newImpactState == ImpactState.NO_PATCH);
+                if (state.getAnalystDisposition() != newDisposition
+                        || !java.util.Objects.equals(state.getAnalystReason(), request.getJustification())
+                        || !java.util.Objects.equals(state.getAnalystUpdatedBy(), userId)) {
+                    state.setAnalystDisposition(newDisposition);
+                    state.setAnalystReason(request.getJustification());
+                    state.setAnalystUpdatedBy(userId);
+                    state.setAnalystUpdatedAt(Instant.now());
+                    state.touch();
                     anyChanged = true;
                 }
             }
             if (anyChanged) {
                 componentVulnerabilityStateRepository.saveAll(states);
-                log.info("Updated component impact states for CVE {} based on analyst decisions", cveId);
+                log.info("Updated analyst component dispositions for CVE {}", cveId);
             }
         }
 
@@ -236,8 +248,10 @@ public class ApplicabilityAssessmentService {
         private ApplicabilityAssessment.ConfidenceLevel confidenceLevel;
         private String justification;
         private String recommendedAction;
-        /** Per-component impact decisions: componentId → "IMPACTED" | "NOT_IMPACTED" | "UNKNOWN" */
+        /** Legacy compatibility field. Persisted as analyst disposition only. */
         private Map<String, String> componentImpactDecisions;
+        /** Per-component analyst dispositions: componentId → "IMPACTED" | "NOT_IMPACTED" | "UNKNOWN" */
+        private Map<String, String> componentAnalystDispositions;
     }
 
     // DTO for update requests

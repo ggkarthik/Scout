@@ -15,7 +15,6 @@ public record InventoryComponentResponse(
         String version,
         String normalizedName,
         String normalizedVersion,
-        String softwareModelResult,
         String purl,
         String componentDigest,
         String softwareIdentity,

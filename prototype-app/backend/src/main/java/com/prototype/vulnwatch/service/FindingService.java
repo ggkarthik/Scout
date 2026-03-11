@@ -59,12 +59,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class FindingService {
 
     private static final Logger LOG = LoggerFactory.getLogger(FindingService.class);
-    private static final String VEX_SOURCE_FRAGMENT = "vex";
 
     @Value("${app.correlation.non-cpe-create-min-confidence:0.68}")
     private double nonCpeCreateMinConfidence;
-
-    private static final Set<ImpactState> FINDING_ELIGIBLE_IMPACT_STATES = Set.of(ImpactState.IMPACTED, ImpactState.NO_PATCH);
 
     private final FindingRepository findingRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
@@ -76,6 +73,8 @@ public class FindingService {
     private final RiskScoringService riskScoringService;
     private final FindingWorkflowService findingWorkflowService;
     private final ApplicabilityDecisionService applicabilityDecisionService;
+    private final ImpactEvaluationService impactEvaluationService;
+    private final VexAssertionMatchService vexAssertionMatchService;
     private final FindingEvidenceService findingEvidenceService;
     private final NvdConfigurationDecisionService nvdConfigurationDecisionService;
     private final PrecedenceResolverService precedenceResolverService;
@@ -94,6 +93,8 @@ public class FindingService {
             RiskScoringService riskScoringService,
             FindingWorkflowService findingWorkflowService,
             ApplicabilityDecisionService applicabilityDecisionService,
+            ImpactEvaluationService impactEvaluationService,
+            VexAssertionMatchService vexAssertionMatchService,
             FindingEvidenceService findingEvidenceService,
             NvdConfigurationDecisionService nvdConfigurationDecisionService,
             PrecedenceResolverService precedenceResolverService,
@@ -111,6 +112,8 @@ public class FindingService {
         this.riskScoringService = riskScoringService;
         this.findingWorkflowService = findingWorkflowService;
         this.applicabilityDecisionService = applicabilityDecisionService;
+        this.impactEvaluationService = impactEvaluationService;
+        this.vexAssertionMatchService = vexAssertionMatchService;
         this.findingEvidenceService = findingEvidenceService;
         this.nvdConfigurationDecisionService = nvdConfigurationDecisionService;
         this.precedenceResolverService = precedenceResolverService;
@@ -200,14 +203,17 @@ public class FindingService {
                         }
                     }
                 }
-                VexOverlayOutcome vexOverlay = resolveVexOverlay(component, vulnerabilityId, null, candidates, policy);
+                ImpactEvaluationService.VexOverlayOutcome vexOverlay =
+                        resolveVexOverlay(component, vulnerabilityId, null, candidates, policy);
+                ImpactEvaluationService.ImpactAssessment impactAssessment =
+                        impactEvaluationService.evaluate(resolution, resolution.primary(), vexOverlay);
                 if (resolution.finalState() != PrecedenceResolverService.FinalState.AFFECTED
                         || resolution.primary() == null
                         || resolution.primary().applicabilityDecision() == null
                         || !resolution.primary().applicabilityDecision().isAffected()) {
                     continue;
                 }
-                if (vexOverlay.applied() && vexOverlay.finalState() == PrecedenceResolverService.FinalState.NOT_AFFECTED) {
+                if (!impactAssessment.findingEligible()) {
                     // VEX FIX #1: Auto-resolve existing findings when VEX says NOT_AFFECTED
                     PrecedenceResolverService.CandidateDecision selected = resolution.primary();
                     VulnerabilityTarget target = selected.target();
@@ -220,7 +226,7 @@ public class FindingService {
                             && existingFinding.getStatus() != FindingStatus.AUTO_CLOSED) {
                         // Resolve the existing finding (consistent with applyVexDelta logic)
                         existingFinding.setStatus(FindingStatus.RESOLVED);
-                        existingFinding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
+                        existingFinding.setDecisionState(impactAssessment.findingDecisionState());
                         setEvidenceWithVex(existingFinding, withVexOverlayEvidence(existingFinding.getEvidence(), vexOverlay));
                         existingFinding.setLastObservedAt(now);
                         existingFinding.touch();
@@ -228,14 +234,15 @@ public class FindingService {
                         // Log the auto-resolution event
                         findingWorkflowService.appendEvent(
                             existingFinding,
-                            "VEX_RESOLVED",
+                            "EXACT_IMPACT_RESOLVED",
                             "system",
-                            String.format("Finding resolved due to %s VEX statement: %s",
-                                vexOverlay.provider(), vexOverlay.status()),
+                            impactAssessment.impactReasonDetail(),
                             Map.of(
                                 "vexProvider", vexOverlay.provider(),
                                 "vexStatus", vexOverlay.status(),
                                 "vexFreshness", vexOverlay.freshness(),
+                                "impactState", impactAssessment.impactState().name(),
+                                "impactReason", impactAssessment.impactReason(),
                                 "previousStatus", existingFinding.getStatus().name(),
                                 "previousDecisionState", existingFinding.getDecisionState() != null ? existingFinding.getDecisionState().name() : "UNKNOWN",
                                 "vexSource", vexOverlay.source() != null ? vexOverlay.source() : "unknown",
@@ -243,9 +250,9 @@ public class FindingService {
                             )
                         );
 
-                        LOG.info("VEX resolved finding {} for component {} and vulnerability {} (provider: {}, status: {})",
+                        LOG.info("Resolved finding {} for component {} and vulnerability {} using canonical impact state {}",
                             existingFinding.getId(), component.getId(), vulnerability.getExternalId(),
-                            vexOverlay.provider(), vexOverlay.status());
+                            impactAssessment.impactState());
                     }
                     continue;
                 }
@@ -317,7 +324,7 @@ public class FindingService {
                                 Map.of("reopenedAt", now));
                     }
                 }
-                finding.setDecisionState(FindingDecisionState.AFFECTED);
+                finding.setDecisionState(impactAssessment.findingDecisionState());
                 finding.setMatchedBy(findingSelected.matchedBy());
                 finding.setRiskScore(riskScore);
                 finding.setDueAt(deriveSlaDueAt(finding.getFirstObservedAt(), riskScore, asset, policy));
@@ -413,11 +420,45 @@ public class FindingService {
             return 0;
         }
         RiskPolicy policy = riskPolicyService.getOrCreate(components.get(0).getTenant());
+        CorrelationCandidateService.CandidateBundle candidateBundle =
+                correlationCandidateService.buildCandidateBundle(components);
+        Set<UUID> scopedComponentIds = components.stream()
+                .map(InventoryComponent::getId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, List<Finding>> existingFindingsByComponentId = new HashMap<>();
+        findingRepository.findByComponent_IdIn(scopedComponentIds).forEach(finding -> {
+            if (finding.getComponent() == null || finding.getComponent().getId() == null) {
+                return;
+            }
+            existingFindingsByComponentId
+                    .computeIfAbsent(finding.getComponent().getId(), ignored -> new ArrayList<>())
+                    .add(finding);
+        });
+        Map<UUID, List<ComponentVulnerabilityState>> existingStatesByComponentId = new HashMap<>();
+        componentVulnerabilityStateRepository.findByComponent_IdIn(scopedComponentIds).forEach(state -> {
+            if (state.getTenant() == null || state.getTenant().getId() == null || !tenantId.equals(state.getTenant().getId())) {
+                return;
+            }
+            if (state.getComponent() == null || state.getComponent().getId() == null) {
+                return;
+            }
+            existingStatesByComponentId
+                    .computeIfAbsent(state.getComponent().getId(), ignored -> new ArrayList<>())
+                    .add(state);
+        });
         Instant now = Instant.now();
         int total = 0;
         Set<UUID> touchedVulnerabilityIds = new LinkedHashSet<>();
         for (InventoryComponent component : components) {
-            ComponentRecomputeResult result = recomputeForComponent(component.getTenant(), component, policy, now);
+            ComponentRecomputeResult result = recomputeForComponent(
+                    component.getTenant(),
+                    component,
+                    policy,
+                    now,
+                    candidateBundle,
+                    existingFindingsByComponentId.getOrDefault(component.getId(), List.of()),
+                    existingStatesByComponentId.getOrDefault(component.getId(), List.of())
+            );
             total += result.activeFindingCount();
             touchedVulnerabilityIds.addAll(result.touchedVulnerabilityIds());
         }
@@ -959,10 +1000,15 @@ public class FindingService {
             Tenant tenant,
             InventoryComponent component,
             RiskPolicy policy,
-            Instant now
+            Instant now,
+            CorrelationCandidateService.CandidateBundle candidateBundle,
+            List<Finding> prefetchedFindings,
+            List<ComponentVulnerabilityState> prefetchedStates
     ) {
-        List<Finding> existing = findingRepository.findByComponent(component);
-        List<ComponentVulnerabilityState> existingStates = componentVulnerabilityStateRepository.findByTenantAndComponent(tenant, component);
+        List<Finding> existing = prefetchedFindings == null ? findingRepository.findByComponent(component) : prefetchedFindings;
+        List<ComponentVulnerabilityState> existingStates = prefetchedStates == null
+                ? componentVulnerabilityStateRepository.findByTenantAndComponent(tenant, component)
+                : prefetchedStates;
         Set<UUID> touchedVulnerabilityIds = collectTouchedVulnerabilityIds(existing, existingStates);
         if (component.getAsset() == null
                 || component.getAsset().getState() != AssetState.ACTIVE
@@ -972,7 +1018,9 @@ public class FindingService {
             return new ComponentRecomputeResult(0, touchedVulnerabilityIds);
         }
 
-        CorrelationCandidateService.CandidateBundle bundle = correlationCandidateService.buildCandidateBundle(List.of(component));
+        CorrelationCandidateService.CandidateBundle bundle = candidateBundle == null
+                ? correlationCandidateService.buildCandidateBundle(List.of(component))
+                : candidateBundle;
         List<CorrelationCandidateService.CandidateMatch> candidates = correlationCandidateService.candidatesForComponent(component, bundle);
         Map<UUID, List<PrecedenceResolverService.CandidateDecision>> decisionsByVulnerability =
                 buildCandidateDecisionsByVulnerability(component, candidates, policy);
@@ -1018,8 +1066,10 @@ public class FindingService {
                 continue;
             }
 
-            VexOverlayOutcome vexOverlay = resolveVexOverlay(component, vulnerabilityId, null, candidates, policy);
-            ImpactAssessment impactAssessment = deriveImpactAssessment(resolution, selected, vexOverlay);
+            ImpactEvaluationService.VexOverlayOutcome vexOverlay =
+                    resolveVexOverlay(component, vulnerabilityId, null, candidates, policy);
+            ImpactEvaluationService.ImpactAssessment impactAssessment =
+                    impactEvaluationService.evaluate(resolution, selected, vexOverlay);
             upsertComponentVulnerabilityState(
                     tenant,
                     component,
@@ -1164,6 +1214,7 @@ public class FindingService {
             state.setVexFreshness("UNKNOWN");
             state.setVexSource(null);
             state.setVexTargetId(null);
+            state.setMatchedVexAssertionId(null);
             state.setMatchedBy("not-observed");
             state.setPrecedenceReason("component_not_observed");
             state.setConfidenceScore(0.0);
@@ -1240,6 +1291,7 @@ public class FindingService {
             state.setVexFreshness("UNKNOWN");
             state.setVexSource(null);
             state.setVexTargetId(null);
+            state.setMatchedVexAssertionId(null);
             state.setMatchedBy("component-inactive");
             state.setPrecedenceReason("component_inactive");
             state.setConfidenceScore(0.0);
@@ -1457,6 +1509,7 @@ public class FindingService {
         finding.setVexStatus(vex.status());
         finding.setVexFreshness(vex.freshness());
         finding.setVexProvider(vex.provider());
+        finding.setMatchedVexAssertionId(parseVexAssertionId(finding.getEvidence()));
     }
 
     private VexFilterEvidence parseVexFilterEvidence(Finding finding) {
@@ -1466,19 +1519,32 @@ public class FindingService {
         try {
             JsonNode root = objectMapper.readTree(finding.getEvidence());
             JsonNode overlay = root.path("vexOverlay");
-            String overlayStatus = normalizeStatus(overlay.path("status").asText(""));
-            String overlayFreshness = normalizeFreshness(overlay.path("freshness").asText(""));
-            String overlayProvider = normalizeProvider(overlay.path("provider").asText(""));
+            String overlayStatus = impactEvaluationService.normalizeStatus(overlay.path("status").asText(""));
+            String overlayFreshness = impactEvaluationService.normalizeFreshness(overlay.path("freshness").asText(""));
+            String overlayProvider = impactEvaluationService.normalizeProvider(overlay.path("provider").asText(""));
             if (!"UNKNOWN".equals(overlayStatus) || !"UNKNOWN".equals(overlayFreshness) || !"unknown".equals(overlayProvider)) {
                 return new VexFilterEvidence(overlayStatus, overlayFreshness, overlayProvider);
             }
             JsonNode trace = root.path("applicabilityTrace");
-            String status = normalizeStatus(traceValue(trace, "vexStatus"));
-            String freshness = normalizeFreshness(traceValue(trace, "vexFreshnessOutcome"));
-            String provider = normalizeProvider(traceValue(trace, "vexProvider"));
+            String status = impactEvaluationService.normalizeStatus(traceValue(trace, "vexStatus"));
+            String freshness = impactEvaluationService.normalizeFreshness(traceValue(trace, "vexFreshnessOutcome"));
+            String provider = impactEvaluationService.normalizeProvider(traceValue(trace, "vexProvider"));
             return new VexFilterEvidence(status, freshness, provider);
         } catch (Exception ignored) {
             return new VexFilterEvidence("UNKNOWN", "UNKNOWN", "unknown");
+        }
+    }
+
+    private UUID parseVexAssertionId(String evidence) {
+        if (!hasText(evidence)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(evidence);
+            String value = root.path("vexOverlay").path("assertionId").asText("");
+            return hasText(value) ? UUID.fromString(value.trim()) : null;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
@@ -1498,62 +1564,15 @@ public class FindingService {
         return null;
     }
 
-    private String normalizeStatus(String value) {
-        if (!hasText(value)) {
-            return "UNKNOWN";
-        }
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (normalized.contains("NO_PATCH")
-                || normalized.contains("NO_FIX")
-                || normalized.contains("WONT_FIX")
-                || normalized.contains("WON'T_FIX")
-                || normalized.contains("UNFIXABLE")) {
-            return "NO_PATCH";
-        }
-        if (normalized.contains("AFFECTED") && !normalized.contains("NOT_AFFECTED")) {
-            return "AFFECTED";
-        }
-        if (normalized.contains("NOT_AFFECTED")) {
-            return "NOT_AFFECTED";
-        }
-        if (normalized.contains("FIXED")) {
-            return "FIXED";
-        }
-        if (normalized.contains("UNDER_INVESTIGATION")) {
-            return "UNDER_INVESTIGATION";
-        }
-        return "UNKNOWN";
-    }
-
-    private String normalizeFreshness(String value) {
-        if (!hasText(value)) {
-            return "UNKNOWN";
-        }
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if ("NO_DATE_ASSUME_FRESH".equals(normalized)) {
-            return "UNKNOWN";
-        }
-        if (normalized.contains("STALE")) {
-            return "STALE";
-        }
-        if (normalized.contains("FRESH")) {
-            return "FRESH";
-        }
-        return "UNKNOWN";
-    }
-
-    private String normalizeProvider(String value) {
-        if (!hasText(value)) {
-            return "unknown";
-        }
-        return value.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private VexOverlayOutcome resolveVexOverlay(InventoryComponent component, UUID vulnerabilityId, String sourceKey) {
+    private ImpactEvaluationService.VexOverlayOutcome resolveVexOverlay(
+            InventoryComponent component,
+            UUID vulnerabilityId,
+            String sourceKey
+    ) {
         return resolveVexOverlay(component, vulnerabilityId, sourceKey, null, null);
     }
 
-    private VexOverlayOutcome resolveVexOverlay(
+    private ImpactEvaluationService.VexOverlayOutcome resolveVexOverlay(
             InventoryComponent component,
             UUID vulnerabilityId,
             String sourceKey,
@@ -1561,7 +1580,7 @@ public class FindingService {
             RiskPolicy policy
     ) {
         if (component == null || component.getId() == null || vulnerabilityId == null) {
-            return VexOverlayOutcome.none();
+            return ImpactEvaluationService.VexOverlayOutcome.none();
         }
 
         List<CorrelationCandidateService.CandidateMatch> resolvedCandidates = candidateMatches == null
@@ -1569,79 +1588,10 @@ public class FindingService {
                 component,
                 correlationCandidateService.buildCandidateBundle(List.of(component)))
                 : candidateMatches;
-
-        String sourceFilter = sourceKey == null ? "" : sourceKey.trim().toLowerCase(Locale.ROOT);
-        List<PrecedenceResolverService.CandidateDecision> vexDecisions = new ArrayList<>();
-        for (CorrelationCandidateService.CandidateMatch candidate : resolvedCandidates) {
-            VulnerabilityTarget target = candidate.target();
-            if (target == null || target.getVulnerability() == null || !vulnerabilityId.equals(target.getVulnerability().getId())) {
-                continue;
-            }
-            if (!isVexSource(target.getSource(), target.getQualifiersJson())) {
-                continue;
-            }
-            if (!sourceFilter.isEmpty()
-                    && (target.getSource() == null || !target.getSource().toLowerCase(Locale.ROOT).contains(sourceFilter))) {
-                continue;
-            }
-            ApplicabilityDecisionService.ApplicabilityDecision decision =
-                    applicabilityDecisionService.evaluate(component, target, policy);
-            vexDecisions.add(new PrecedenceResolverService.CandidateDecision(
-                    target,
-                    candidate.matchedBy(),
-                    candidate.rank(),
-                    candidate.confidence(),
-                    new LinkedHashMap<>(candidate.confidenceBreakdown()),
-                    decision
-            ));
-        }
-        if (vexDecisions.isEmpty()) {
-            return VexOverlayOutcome.none();
-        }
-
-        PrecedenceResolverService.PrecedenceResolution resolution = precedenceResolverService.resolve(vexDecisions);
-        PrecedenceResolverService.CandidateDecision selected = resolution.primary();
-        if (selected == null || selected.target() == null) {
-            return new VexOverlayOutcome(
-                    true,
-                    resolution.finalState(),
-                    null,
-                    "unknown",
-                    "UNKNOWN",
-                    sourceKey,
-                    null,
-                    null,
-                    resolution.reason()
-            );
-        }
-
-        Map<String, Object> trace = selected.applicabilityDecision() == null || selected.applicabilityDecision().trace() == null
-                ? Map.of()
-                : selected.applicabilityDecision().trace();
-        String status = traceString(trace, "vexStatus");
-        if (!hasText(status)) {
-            status = extractVexStatus(selected.target());
-        }
-        String provider = traceString(trace, "vexProvider");
-        if (!hasText(provider)) {
-            provider = providerFromSource(selected.target().getSource());
-        }
-        String freshness = traceString(trace, "vexFreshnessOutcome");
-
-        return new VexOverlayOutcome(
-                true,
-                resolution.finalState(),
-                normalizeStatus(status),
-                normalizeProvider(provider),
-                normalizeFreshness(freshness),
-                selected.target().getSource(),
-                selected.target().getId(),
-                selected.target().getUpdatedAt(),
-                resolution.reason()
-        );
+        return vexAssertionMatchService.resolve(component, vulnerabilityId, sourceKey, resolvedCandidates, policy);
     }
 
-    private String withVexOverlayEvidence(String evidence, VexOverlayOutcome overlay) {
+    private String withVexOverlayEvidence(String evidence, ImpactEvaluationService.VexOverlayOutcome overlay) {
         if (overlay == null || !overlay.applied()) {
             return evidence;
         }
@@ -1653,6 +1603,7 @@ public class FindingService {
         overlayPayload.put("freshness", overlay.freshness());
         overlayPayload.put("reason", overlay.reason());
         overlayPayload.put("source", overlay.source());
+        overlayPayload.put("assertionId", overlay.assertionId());
         overlayPayload.put("targetId", overlay.targetId());
         overlayPayload.put("targetUpdatedAt", overlay.targetUpdatedAt() == null ? null : overlay.targetUpdatedAt().toString());
         payload.put("vexOverlay", overlayPayload);
@@ -1672,49 +1623,6 @@ public class FindingService {
         }
     }
 
-    private boolean isVexSource(String source) {
-        return isVexSource(source, null);
-    }
-
-    private boolean isVexSource(String source, String qualifiersJson) {
-        if (!hasText(source)) {
-            return false;
-        }
-        String normalized = source.trim().toLowerCase(Locale.ROOT);
-        if (normalized.contains(VEX_SOURCE_FRAGMENT)) {
-            return true;
-        }
-        // CSAF advisory documents that carry explicit product status (vexStatus in qualifiersJson)
-        // also function as VEX trimming signals (G10).
-        if (normalized.startsWith("csaf-") && hasText(qualifiersJson)) {
-            try {
-                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(qualifiersJson);
-                return hasText(node.path("vexStatus").asText(""));
-            } catch (Exception ignored) {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private String extractVexStatus(VulnerabilityTarget target) {
-        if (target == null) {
-            return null;
-        }
-        if (hasText(target.getQualifiersJson())) {
-            try {
-                JsonNode node = objectMapper.readTree(target.getQualifiersJson());
-                String status = node.path("vexStatus").asText("");
-                if (hasText(status)) {
-                    return status.trim().toUpperCase(Locale.ROOT);
-                }
-            } catch (Exception ignored) {
-                // keep deterministic fallback behavior
-            }
-        }
-        return null;
-    }
-
     private String traceString(Map<String, Object> trace, String key) {
         if (trace == null || trace.isEmpty() || key == null || key.isBlank()) {
             return null;
@@ -1725,26 +1633,6 @@ public class FindingService {
         }
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? null : text;
-    }
-
-    private String providerFromSource(String source) {
-        if (!hasText(source)) {
-            return "unknown";
-        }
-        String normalized = source.trim().toLowerCase(Locale.ROOT);
-        if (normalized.contains("microsoft") || normalized.contains("msrc")) {
-            return "microsoft";
-        }
-        if (normalized.contains("redhat") || normalized.contains("red-hat")) {
-            return "redhat";
-        }
-        if (normalized.startsWith("vex-")) {
-            return normalized.substring("vex-".length());
-        }
-        if (normalized.startsWith("csaf-")) {
-            return normalized.substring("csaf-".length());
-        }
-        return "unknown";
     }
 
     private Set<String> normalizeUpperFilterValues(List<String> rawValues) {
@@ -1787,32 +1675,6 @@ public class FindingService {
     ) {
     }
 
-    private record VexOverlayOutcome(
-            boolean applied,
-            PrecedenceResolverService.FinalState finalState,
-            String status,
-            String provider,
-            String freshness,
-            String source,
-            UUID targetId,
-            Instant targetUpdatedAt,
-            String reason
-    ) {
-        static VexOverlayOutcome none() {
-            return new VexOverlayOutcome(
-                    false,
-                    PrecedenceResolverService.FinalState.AFFECTED,
-                    null,
-                    "unknown",
-                    "UNKNOWN",
-                    null,
-                    null,
-                    null,
-                    "none"
-            );
-        }
-    }
-
     public record ManualFindingCreationResult(
             int eligibleComponentCount,
             int createdCount,
@@ -1821,99 +1683,14 @@ public class FindingService {
     ) {
     }
 
-    private record ImpactAssessment(
-            ApplicabilityState applicabilityState,
-            String applicabilityReason,
-            ImpactState impactState,
-            String impactReason,
-            boolean findingEligible,
-            FindingDecisionState findingDecisionState
-    ) {
-    }
-
-    private ImpactAssessment deriveImpactAssessment(
-            PrecedenceResolverService.PrecedenceResolution resolution,
-            PrecedenceResolverService.CandidateDecision selected,
-            VexOverlayOutcome vexOverlay
-    ) {
-        ApplicabilityState applicabilityState = ApplicabilityState.UNKNOWN;
-        String applicabilityReason = "unknown";
-        if (selected != null && selected.applicabilityDecision() != null) {
-            ApplicabilityDecisionService.ApplicabilityResult result = selected.applicabilityDecision().result();
-            applicabilityReason = selected.applicabilityDecision().reason();
-            if (result == ApplicabilityDecisionService.ApplicabilityResult.TRUE) {
-                applicabilityState = ApplicabilityState.APPLICABLE;
-            } else if (result == ApplicabilityDecisionService.ApplicabilityResult.FALSE) {
-                applicabilityState = ApplicabilityState.NOT_APPLICABLE;
-            }
-        }
-        if (resolution != null) {
-            if (resolution.finalState() == PrecedenceResolverService.FinalState.AFFECTED) {
-                applicabilityState = ApplicabilityState.APPLICABLE;
-            } else if (resolution.finalState() == PrecedenceResolverService.FinalState.NOT_AFFECTED) {
-                applicabilityState = ApplicabilityState.NOT_APPLICABLE;
-            }
-            if (!hasText(applicabilityReason)) {
-                applicabilityReason = resolution.reason();
-            }
-        }
-
-        ImpactState impactState;
-        String impactReason;
-        if (applicabilityState == ApplicabilityState.NOT_APPLICABLE) {
-            impactState = ImpactState.NOT_IMPACTED;
-            impactReason = "not_applicable";
-        } else if (applicabilityState == ApplicabilityState.UNKNOWN) {
-            impactState = ImpactState.UNKNOWN;
-            impactReason = "applicability_unknown";
-        } else if (vexOverlay != null && vexOverlay.applied()) {
-            if (vexOverlay.finalState() == PrecedenceResolverService.FinalState.NOT_AFFECTED) {
-                if ("FIXED".equals(vexOverlay.status())) {
-                    impactState = ImpactState.FIXED;
-                    impactReason = "vex_fixed";
-                } else {
-                    impactState = ImpactState.NOT_IMPACTED;
-                    impactReason = "vex_not_affected";
-                }
-            } else if (vexOverlay.finalState() == PrecedenceResolverService.FinalState.UNKNOWN) {
-                impactState = ImpactState.UNKNOWN;
-                impactReason = "vex_under_investigation";
-            } else if ("NO_PATCH".equals(vexOverlay.status())) {
-                impactState = ImpactState.NO_PATCH;
-                impactReason = "vex_no_patch";
-            } else {
-                impactState = ImpactState.IMPACTED;
-                impactReason = "vex_affected";
-            }
-        } else {
-            impactState = ImpactState.IMPACTED;
-            impactReason = "applicable_without_vex_override";
-        }
-
-        FindingDecisionState findingDecisionState = switch (impactState) {
-            case IMPACTED, NO_PATCH -> FindingDecisionState.AFFECTED;
-            case FIXED -> FindingDecisionState.FIXED;
-            case NOT_IMPACTED -> FindingDecisionState.NOT_AFFECTED;
-            case UNKNOWN -> FindingDecisionState.UNDER_INVESTIGATION;
-        };
-        return new ImpactAssessment(
-                applicabilityState,
-                hasText(applicabilityReason) ? applicabilityReason : "unknown",
-                impactState,
-                impactReason,
-                FINDING_ELIGIBLE_IMPACT_STATES.contains(impactState),
-                findingDecisionState
-        );
-    }
-
     private void upsertComponentVulnerabilityState(
             Tenant tenant,
             InventoryComponent component,
             Vulnerability vulnerability,
             PrecedenceResolverService.CandidateDecision selected,
             PrecedenceResolverService.PrecedenceResolution resolution,
-            VexOverlayOutcome vexOverlay,
-            ImpactAssessment impactAssessment,
+            ImpactEvaluationService.VexOverlayOutcome vexOverlay,
+            ImpactEvaluationService.ImpactAssessment impactAssessment,
             Instant now,
             Map<UUID, ComponentVulnerabilityState> existingStateByVulnerability,
             List<ComponentVulnerabilityState> stateRowsToPersist
@@ -1936,6 +1713,7 @@ public class FindingService {
         String newVexProvider = vexOverlay == null ? "unknown" : defaultString(vexOverlay.provider(), "unknown");
         String newVexFreshness = vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.freshness(), "UNKNOWN");
         String newVexSource = vexOverlay == null ? null : vexOverlay.source();
+        UUID newMatchedVexAssertionId = vexOverlay == null ? null : vexOverlay.assertionId();
 
         boolean stateChanged = created
                 || state.getApplicabilityState() != impactAssessment.applicabilityState()
@@ -1943,19 +1721,25 @@ public class FindingService {
                 || !java.util.Objects.equals(state.getVexStatus(), newVexStatus)
                 || !java.util.Objects.equals(state.getVexProvider(), newVexProvider)
                 || !java.util.Objects.equals(state.getVexFreshness(), newVexFreshness)
-                || !java.util.Objects.equals(state.getVexSource(), newVexSource);
+                || !java.util.Objects.equals(state.getVexSource(), newVexSource)
+                || !java.util.Objects.equals(state.getMatchedVexAssertionId(), newMatchedVexAssertionId)
+                || !java.util.Objects.equals(state.getApplicabilityReasonDetail(), impactAssessment.applicabilityReasonDetail())
+                || !java.util.Objects.equals(state.getImpactReasonDetail(), impactAssessment.impactReasonDetail());
         if (!stateChanged) {
             return;
         }
 
         state.setApplicabilityState(impactAssessment.applicabilityState());
         state.setApplicabilityReason(impactAssessment.applicabilityReason());
+        state.setApplicabilityReasonDetail(impactAssessment.applicabilityReasonDetail());
         state.setImpactState(impactAssessment.impactState());
         state.setImpactReason(impactAssessment.impactReason());
+        state.setImpactReasonDetail(impactAssessment.impactReasonDetail());
         state.setVexStatus(newVexStatus);
         state.setVexProvider(newVexProvider);
         state.setVexFreshness(newVexFreshness);
         state.setVexSource(newVexSource);
+        state.setMatchedVexAssertionId(newMatchedVexAssertionId);
         state.setVexTargetId(vexOverlay == null ? null : vexOverlay.targetId());
         state.setPrecedenceReason(resolution == null ? "unknown" : resolution.reason());
         state.setMatchedBy(selected == null ? null : selected.matchedBy());
@@ -1972,8 +1756,8 @@ public class FindingService {
     private Map<String, Object> buildStateTrace(
             PrecedenceResolverService.CandidateDecision selected,
             PrecedenceResolverService.PrecedenceResolution resolution,
-            VexOverlayOutcome vexOverlay,
-            ImpactAssessment impactAssessment
+            ImpactEvaluationService.VexOverlayOutcome vexOverlay,
+            ImpactEvaluationService.ImpactAssessment impactAssessment
     ) {
         Map<String, Object> trace = new LinkedHashMap<>();
         trace.put("matchedBy", selected == null ? null : selected.matchedBy());
@@ -1981,13 +1765,16 @@ public class FindingService {
         trace.put("precedenceReason", resolution == null ? null : resolution.reason());
         trace.put("applicabilityState", impactAssessment.applicabilityState().name());
         trace.put("applicabilityReason", impactAssessment.applicabilityReason());
+        trace.put("applicabilityReasonDetail", impactAssessment.applicabilityReasonDetail());
         trace.put("impactState", impactAssessment.impactState().name());
         trace.put("impactReason", impactAssessment.impactReason());
+        trace.put("impactReasonDetail", impactAssessment.impactReasonDetail());
         if (vexOverlay != null) {
             trace.put("vexStatus", vexOverlay.status());
             trace.put("vexProvider", vexOverlay.provider());
             trace.put("vexFreshness", vexOverlay.freshness());
             trace.put("vexSource", vexOverlay.source());
+            trace.put("vexAssertionId", vexOverlay.assertionId());
             trace.put("vexTargetId", vexOverlay.targetId());
             trace.put("vexReason", vexOverlay.reason());
         }
@@ -2115,7 +1902,7 @@ public class FindingService {
             VulnerabilityTarget target = candidate.target();
             UUID vulnerabilityId = target.getVulnerability().getId();
             ApplicabilityDecisionService.ApplicabilityDecision applicabilityDecision =
-                    applicabilityDecisionService.evaluate(component, target, policy);
+                    applicabilityDecisionService.evaluateCorrelation(component, target, policy);
             applicabilityDecision = applyNvdConfigurationDecision(
                     component,
                     target,

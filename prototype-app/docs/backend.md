@@ -36,6 +36,17 @@ cd backend
 mvn spring-boot:run
 ```
 
+For GitHub-backed repo SBOM and GHCR image SBOM ingestion, the backend resolves a token in this order:
+
+- `GITHUB_API_TOKEN_FILE`
+- local fallback file `backend/secrets/github-api-token`
+- `GITHUB_API_TOKEN`
+
+The local fallback file is gitignored and is intended for developer machines. For GHCR discovery,
+the token needs at least package-read access.
+The same resolved token is shared by GitHub repo SBOM fetches, GHCR image SBOM ingestion,
+and GHSA advisory syncs.
+
 If an existing local PostgreSQL `vulnwatch` database was created before the Flyway migration files stabilized, repair the Flyway history once:
 
 ```bash
@@ -99,6 +110,8 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `POST /api/sbom-upload`
 - `POST /api/sbom-fetch`
 - `POST /api/sbom-fetch/github`
+- `POST /api/sbom-fetch/github/ghcr`
+- `POST /api/sbom-fetch/github/attestation`
 - `POST /api/ingestion/nvd-sync`
 - `POST /api/ingestion/nvd-full-sync`
 - `POST /api/ingestion/kev-sync`
@@ -143,6 +156,40 @@ The ingestion controllers hand off to `SbomIngestionService` and related service
 6. normalize CPEs into `cpe_dim`
 7. sync `inventory_component_cpe_map`
 8. enqueue component-scoped recomputation
+
+GitHub-backed SBOM ingestion now supports two modes:
+
+- repository dependency-graph SBOM fetch via `POST /api/sbom-fetch/github`
+- GHCR owner-wide image attestation fetch via `POST /api/sbom-fetch/github/ghcr`
+- GHCR image attestation fetch via `POST /api/sbom-fetch/github/attestation`
+
+The GHCR batch path enumerates container packages and image versions in GHCR for a GitHub owner,
+looks up each image digest in GitHub artifact attestations, and feeds every discovered SBOM
+through the same parsing and correlation pipeline used for uploaded SBOM files.
+
+The single-image attestation path retrieves GitHub attestation bundles for a repository or owner and image digest,
+extracts the SPDX/CycloneDX predicate from the DSSE payload, and feeds that payload through the
+same parsing and correlation pipeline used for uploaded SBOM files.
+
+Example request for the attestation path:
+
+```json
+{
+  "owner": "ggkarthik",
+  "repo": "P1_Service-Owner-workspace",
+  "imageRepository": "ghcr.io/ggkarthik/p1_service-owner-workspace",
+  "subjectDigest": "sha256:...",
+  "imageTag": "latest"
+}
+```
+
+Current trust model:
+
+- the backend filters GitHub attestations to `predicate_type=sbom`
+- it matches the attestation subject against the requested image digest and repository
+- it does not yet perform cryptographic signature or trusted-publisher verification of the DSSE bundle
+
+That means this endpoint is ready for automated ingestion, but it should not yet be treated as a hard provenance gate for policy enforcement. The next trust-stage improvement is a verification step against GitHub/Sigstore identity before marking the attestation as verified.
 
 ### 2. Vulnerability Intelligence Ingestion
 

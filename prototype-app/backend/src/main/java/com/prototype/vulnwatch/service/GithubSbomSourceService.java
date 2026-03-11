@@ -1,13 +1,16 @@
 package com.prototype.vulnwatch.service;
 
-import com.prototype.vulnwatch.domain.GithubSbomSource;
-import com.prototype.vulnwatch.domain.GithubIngestionFrequency;
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.GithubIngestionFrequency;
+import com.prototype.vulnwatch.domain.GithubSbomSource;
+import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceResponse;
+import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.GithubSbomSourceRepository;
+import com.prototype.vulnwatch.repo.SyncRunRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,25 +21,39 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class GithubSbomSourceService {
 
+    public static final String PATH_REPOSITORY_SBOM = "dependency-graph/sbom";
+    public static final String PATH_GHCR_ATTESTATIONS = "ghcr/attestations";
+    public static final String SYNC_TYPE_GITHUB_REPOSITORY_SBOM = "GITHUB_REPOSITORY_SBOM";
+    public static final String SYNC_TYPE_GITHUB_GHCR_SBOM = "GITHUB_GHCR_SBOM";
+    private static final String SOURCE_STATUS_QUEUED = "QUEUED";
+    private static final String SOURCE_STATUS_RUNNING = "RUNNING";
+
     private final GithubSbomSourceRepository githubSbomSourceRepository;
+    private final SyncRunRepository syncRunRepository;
     private final SbomIngestionService sbomIngestionService;
     private final TenantService tenantService;
     private final TaskExecutor ingestionExecutor;
+    private final TransactionTemplate transactionTemplate;
 
     public GithubSbomSourceService(
             GithubSbomSourceRepository githubSbomSourceRepository,
+            SyncRunRepository syncRunRepository,
             SbomIngestionService sbomIngestionService,
             TenantService tenantService,
-            TaskExecutor ingestionExecutor
+            TaskExecutor ingestionExecutor,
+            TransactionTemplate transactionTemplate
     ) {
         this.githubSbomSourceRepository = githubSbomSourceRepository;
+        this.syncRunRepository = syncRunRepository;
         this.sbomIngestionService = sbomIngestionService;
         this.tenantService = tenantService;
         this.ingestionExecutor = ingestionExecutor;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -63,57 +80,81 @@ public class GithubSbomSourceService {
     }
 
     @Transactional
-    public void trigger(UUID id) {
-        GithubSbomSource source = githubSbomSourceRepository.findById(id)
+    public void delete(UUID id) {
+        GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + id));
-        ingestionExecutor.execute(() -> executeSource(source.getId()));
+        if (isSourceInFlight(source)) {
+            throw new IllegalStateException("GitHub SBOM source is already queued or running and cannot be deleted");
+        }
+        githubSbomSourceRepository.delete(source);
+    }
+
+    public SyncTriggerResponse trigger(UUID id) {
+        ClaimedGithubSourceRun claimed = claimSourceRun(id, false, true);
+        ingestionExecutor.execute(() -> executeSource(claimed.sourceId(), claimed.runId()));
+        return new SyncTriggerResponse(claimed.runId(), "queued", "GitHub ingestion queued");
+    }
+
+    public SyncTriggerResponse triggerGhcrRunOnce(String owner) {
+        String normalizedOwner = owner == null ? "" : owner.trim();
+        if (normalizedOwner.isBlank()) {
+            throw new IllegalArgumentException("GitHub owner is required");
+        }
+        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_GHCR_SBOM));
+        ingestionExecutor.execute(() -> executeGhcrRunOnce(run.getId(), normalizedOwner));
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub GHCR ingestion queued");
     }
 
     @Scheduled(cron = "0 */5 * * * *")
-    @Transactional
     public void runScheduledSources() {
-        Instant now = Instant.now();
         List<GithubSbomSource> sources = githubSbomSourceRepository.findByEnabledTrueOrderByCreatedAtAsc();
         for (GithubSbomSource source : sources) {
-            if (!isDue(source, now)) {
+            ClaimedGithubSourceRun claimed = claimSourceRun(source.getId(), true, false);
+            if (claimed == null) {
                 continue;
             }
-            ingestionExecutor.execute(() -> executeSource(source.getId()));
+            ingestionExecutor.execute(() -> executeSource(claimed.sourceId(), claimed.runId()));
         }
     }
 
-    @Transactional
-    public void executeSource(UUID sourceId) {
-        GithubSbomSource source = githubSbomSourceRepository.findById(sourceId)
-                .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
-        if (!source.isEnabled()) {
+    public void executeSource(UUID sourceId, UUID runId) {
+        GithubSbomSourceExecution snapshot = markSourceRunRunning(sourceId, runId);
+        if (snapshot == null) {
             return;
         }
-        source.setLastRunStatus("running");
-        source.setLastError(null);
-        source.setLastRunAt(Instant.now());
-        source.touch();
-        githubSbomSourceRepository.save(source);
 
         Tenant tenant = tenantService.getDefaultTenant();
         try {
-            sbomIngestionService.ingestFromGithub(tenant, new GithubSbomIngestionRequest(
-                    source.getOwner(),
-                    source.getRepo(),
-                    false,
-                    source.getAssetType(),
-                    source.getAssetName(),
-                    source.getAssetIdentifier()
-            ));
-            source.setLastRunStatus("completed");
-            source.setLastError(null);
+            if (isGhcrSourcePath(snapshot.path())) {
+                SbomIngestionService.GithubGhcrIngestionSummary summary =
+                        sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, snapshot.owner());
+                completeGhcrSourceRun(sourceId, runId, summary);
+            } else {
+                var summary = sbomIngestionService.ingestFromGithub(tenant, new GithubSbomIngestionRequest(
+                        snapshot.owner(),
+                        snapshot.repo(),
+                        false,
+                        snapshot.assetType(),
+                        snapshot.assetName(),
+                        snapshot.assetIdentifier()
+                ));
+                completeRepositorySourceRun(sourceId, runId, summary);
+            }
         } catch (Exception e) {
-            source.setLastRunStatus("failed");
-            source.setLastError(e.getMessage());
+            failSourceRun(sourceId, runId, e.getMessage());
         }
-        source.setLastRunAt(Instant.now());
-        source.touch();
-        githubSbomSourceRepository.save(source);
+    }
+
+    public void executeGhcrRunOnce(UUID runId, String owner) {
+        markStandaloneRunRunning(runId);
+        Tenant tenant = tenantService.getDefaultTenant();
+        try {
+            SbomIngestionService.GithubGhcrIngestionSummary summary =
+                    sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, owner);
+            completeStandaloneGhcrRun(runId, summary);
+        } catch (Exception e) {
+            failStandaloneRun(runId, e.getMessage());
+        }
     }
 
     private boolean isDue(GithubSbomSource source, Instant now) {
@@ -129,16 +170,36 @@ public class GithubSbomSourceService {
     }
 
     private void apply(GithubSbomSource source, GithubSbomSourceRequest request) {
-        String owner = request.owner().trim();
-        String repo = request.repo().trim();
-        String defaultAssetName = owner + "/" + repo;
-        String defaultAssetIdentifier = "github:" + owner.toLowerCase(Locale.ROOT) + "/" + repo.toLowerCase(Locale.ROOT);
+        String name = request.name() == null ? "" : request.name().trim();
+        String owner = request.owner() == null ? "" : request.owner().trim();
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("Pipeline name is required");
+        }
+        if (owner.isBlank()) {
+            throw new IllegalArgumentException("GitHub owner is required");
+        }
 
-        source.setName(request.name().trim());
+        String path = normalizeSourcePath(request.path());
+        boolean ghcrSource = isGhcrSourcePath(path);
+        String repo = request.repo() == null ? "" : request.repo().trim();
+        if (!ghcrSource && repo.isBlank()) {
+            throw new IllegalArgumentException("GitHub repository is required for repository SBOM sources");
+        }
+
+        String defaultAssetName = ghcrSource
+                ? defaultGhcrScopeAssetName(owner)
+                : owner + "/" + repo;
+        String defaultAssetIdentifier = ghcrSource
+                ? defaultGhcrScopeAssetIdentifier(owner)
+                : "github:" + owner.toLowerCase(Locale.ROOT) + "/" + repo.toLowerCase(Locale.ROOT);
+
+        source.setName(name);
         source.setOwner(owner);
-        source.setRepo(repo);
-        source.setPath("dependency-graph/sbom");
-        source.setAssetType(request.assetType() == null ? AssetType.APPLICATION : request.assetType());
+        source.setRepo(ghcrSource ? "" : repo);
+        source.setPath(path);
+        source.setAssetType(request.assetType() == null
+                ? (ghcrSource ? AssetType.CONTAINER_IMAGE : AssetType.APPLICATION)
+                : request.assetType());
         source.setAssetName(
                 request.assetName() == null || request.assetName().isBlank()
                         ? defaultAssetName
@@ -150,6 +211,236 @@ public class GithubSbomSourceService {
         source.setFrequency(request.frequency() == null ? GithubIngestionFrequency.ONCE : request.frequency());
         source.setIntervalMinutes(request.intervalMinutes() == null ? 60 : Math.max(5, request.intervalMinutes()));
         source.setEnabled(request.enabled() == null || request.enabled());
+    }
+
+    private String normalizeSourcePath(String path) {
+        if (path == null || path.isBlank()) {
+            return PATH_REPOSITORY_SBOM;
+        }
+        String normalized = path.trim().toLowerCase(Locale.ROOT);
+        return isGhcrSourcePath(normalized) ? PATH_GHCR_ATTESTATIONS : PATH_REPOSITORY_SBOM;
+    }
+
+    private boolean isGhcrSourcePath(String path) {
+        return PATH_GHCR_ATTESTATIONS.equalsIgnoreCase(path == null ? "" : path.trim());
+    }
+
+    private String defaultGhcrScopeAssetName(String owner) {
+        return "ghcr.io/" + owner.toLowerCase(Locale.ROOT);
+    }
+
+    private String defaultGhcrScopeAssetIdentifier(String owner) {
+        return "ghcr:" + owner.toLowerCase(Locale.ROOT);
+    }
+
+    private String syncTypeForPath(String path) {
+        return isGhcrSourcePath(path) ? SYNC_TYPE_GITHUB_GHCR_SBOM : SYNC_TYPE_GITHUB_REPOSITORY_SBOM;
+    }
+
+    private ClaimedGithubSourceRun claimSourceRun(UUID sourceId, boolean requireDue, boolean failWhenUnavailable) {
+        return transactionTemplate.execute(status -> {
+            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+            if (!source.isEnabled()) {
+                if (failWhenUnavailable) {
+                    throw new IllegalStateException("GitHub SBOM source is disabled");
+                }
+                return null;
+            }
+            if (isSourceInFlight(source)) {
+                if (failWhenUnavailable) {
+                    throw new IllegalStateException("GitHub SBOM source is already queued or running");
+                }
+                return null;
+            }
+
+            Instant now = Instant.now();
+            if (requireDue && !isDue(source, now)) {
+                return null;
+            }
+
+            source.setLastRunStatus(SOURCE_STATUS_QUEUED);
+            source.setLastError(null);
+            source.setLastRunAt(now);
+            source.touch();
+            githubSbomSourceRepository.save(source);
+
+            SyncRun run = createQueuedRun(syncTypeForPath(source.getPath()));
+            return new ClaimedGithubSourceRun(source.getId(), run.getId());
+        });
+    }
+
+    private GithubSbomSourceExecution markSourceRunRunning(UUID sourceId, UUID runId) {
+        return transactionTemplate.execute(status -> {
+            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+            SyncRun run = requireRun(runId);
+
+            if (!source.isEnabled()) {
+                source.setLastRunStatus("FAILURE");
+                source.setLastError("GitHub SBOM source is disabled");
+                source.setLastRunAt(Instant.now());
+                source.touch();
+                githubSbomSourceRepository.save(source);
+                completeRun(run, "failed", 0, 0, 0, 0, "GitHub SBOM source is disabled");
+                return null;
+            }
+
+            markRunRunning(run);
+            source.setLastRunStatus(SOURCE_STATUS_RUNNING);
+            source.setLastError(null);
+            source.touch();
+            githubSbomSourceRepository.save(source);
+            return new GithubSbomSourceExecution(
+                    source.getOwner(),
+                    source.getRepo(),
+                    source.getPath(),
+                    source.getAssetType(),
+                    source.getAssetName(),
+                    source.getAssetIdentifier()
+            );
+        });
+    }
+
+    private void completeGhcrSourceRun(
+            UUID sourceId,
+            UUID runId,
+            SbomIngestionService.GithubGhcrIngestionSummary summary
+    ) {
+        transactionTemplate.executeWithoutResult(status -> {
+            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+            SyncRun run = requireRun(runId);
+            String errorMessage = buildGhcrFailureMessage(summary);
+            source.setLastRunStatus(summary.imagesFailed() > 0 ? "PARTIAL_SUCCESS" : "SUCCESS");
+            source.setLastError(errorMessage);
+            source.setLastRunAt(Instant.now());
+            source.touch();
+            githubSbomSourceRepository.save(source);
+            completeRun(
+                    run,
+                    summary.imagesFailed() > 0 ? "partial_success" : "completed",
+                    summary.imagesDiscovered(),
+                    summary.componentsIngested(),
+                    summary.findingsGenerated(),
+                    summary.imagesFailed(),
+                    errorMessage);
+        });
+    }
+
+    private void completeRepositorySourceRun(
+            UUID sourceId,
+            UUID runId,
+            com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse summary
+    ) {
+        transactionTemplate.executeWithoutResult(status -> {
+            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+            SyncRun run = requireRun(runId);
+            String errorMessage = summary.repositoriesFailed() > 0
+                    ? "Failed " + summary.repositoriesFailed() + " of " + summary.repositoriesProcessed() + " repositories"
+                    : null;
+            source.setLastRunStatus(summary.repositoriesFailed() > 0 ? "PARTIAL_SUCCESS" : "SUCCESS");
+            source.setLastError(errorMessage);
+            source.setLastRunAt(Instant.now());
+            source.touch();
+            githubSbomSourceRepository.save(source);
+            completeRun(
+                    run,
+                    summary.repositoriesFailed() > 0 ? "partial_success" : "completed",
+                    summary.repositoriesDiscovered(),
+                    summary.componentsIngested(),
+                    summary.findingsGenerated(),
+                    summary.repositoriesFailed(),
+                    errorMessage);
+        });
+    }
+
+    private void failSourceRun(UUID sourceId, UUID runId, String errorMessage) {
+        transactionTemplate.executeWithoutResult(status -> {
+            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+            SyncRun run = requireRun(runId);
+            source.setLastRunStatus("FAILURE");
+            source.setLastError(errorMessage);
+            source.setLastRunAt(Instant.now());
+            source.touch();
+            githubSbomSourceRepository.save(source);
+            completeRun(run, "failed", 0, 0, 0, 0, errorMessage);
+        });
+    }
+
+    private void markStandaloneRunRunning(UUID runId) {
+        transactionTemplate.executeWithoutResult(status -> markRunRunning(requireRun(runId)));
+    }
+
+    private void completeStandaloneGhcrRun(UUID runId, SbomIngestionService.GithubGhcrIngestionSummary summary) {
+        transactionTemplate.executeWithoutResult(status -> completeRun(
+                requireRun(runId),
+                summary.imagesFailed() > 0 ? "partial_success" : "completed",
+                summary.imagesDiscovered(),
+                summary.componentsIngested(),
+                summary.findingsGenerated(),
+                summary.imagesFailed(),
+                buildGhcrFailureMessage(summary)));
+    }
+
+    private void failStandaloneRun(UUID runId, String errorMessage) {
+        transactionTemplate.executeWithoutResult(status -> completeRun(requireRun(runId), "failed", 0, 0, 0, 0, errorMessage));
+    }
+
+    private SyncRun createQueuedRun(String syncType) {
+        SyncRun run = new SyncRun();
+        run.setSyncType(syncType);
+        run.setStatus("queued");
+        return syncRunRepository.save(run);
+    }
+
+    private SyncRun requireRun(UUID runId) {
+        return syncRunRepository.findById(runId)
+                .orElseThrow(() -> new EntityNotFoundException("Sync run not found: " + runId));
+    }
+
+    private void markRunRunning(SyncRun run) {
+        run.setStatus("running");
+        syncRunRepository.save(run);
+    }
+
+    private void completeRun(
+            SyncRun run,
+            String status,
+            int fetched,
+            int inserted,
+            int updated,
+            int failed,
+            String error
+    ) {
+        run.setStatus(status);
+        run.setRecordsFetched(fetched);
+        run.setRecordsInserted(inserted);
+        run.setRecordsUpdated(updated);
+        run.setRecordsFailed(failed);
+        run.setErrorMessage(error);
+        run.setCompletedAt(Instant.now());
+        syncRunRepository.save(run);
+    }
+
+    private String buildGhcrFailureMessage(SbomIngestionService.GithubGhcrIngestionSummary summary) {
+        if (summary.imagesFailed() <= 0) {
+            return null;
+        }
+        if (summary.failureSummary() != null && !summary.failureSummary().isBlank()) {
+            return summary.failureSummary();
+        }
+        return "Failed " + summary.imagesFailed() + " of " + summary.imagesProcessed() + " images";
+    }
+
+    private boolean isSourceInFlight(GithubSbomSource source) {
+        if (source == null || source.getLastRunStatus() == null) {
+            return false;
+        }
+        String status = source.getLastRunStatus().trim().toUpperCase(Locale.ROOT);
+        return SOURCE_STATUS_QUEUED.equals(status) || SOURCE_STATUS_RUNNING.equals(status);
     }
 
     private GithubSbomSourceResponse toResponse(GithubSbomSource source) {
@@ -169,5 +460,21 @@ public class GithubSbomSourceService {
                 source.getLastRunStatus(),
                 source.getLastError()
         );
+    }
+
+    private record ClaimedGithubSourceRun(
+            UUID sourceId,
+            UUID runId
+    ) {
+    }
+
+    private record GithubSbomSourceExecution(
+            String owner,
+            String repo,
+            String path,
+            AssetType assetType,
+            String assetName,
+            String assetIdentifier
+    ) {
     }
 }

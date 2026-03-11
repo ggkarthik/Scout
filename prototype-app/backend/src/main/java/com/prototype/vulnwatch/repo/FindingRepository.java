@@ -33,6 +33,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     List<Finding> findByAsset(Asset asset);
     List<Finding> findByAssetAndStatus(Asset asset, FindingStatus status);
     List<Finding> findByComponent(InventoryComponent component);
+    List<Finding> findByComponent_IdIn(Collection<UUID> componentIds);
     List<Finding> findByTenant_IdAndVulnerability_Id(UUID tenantId, UUID vulnerabilityId);
     @Query("""
             select distinct f.tenant.id

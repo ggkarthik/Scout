@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.GithubAttestationSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubRepoIngestionResult;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
@@ -22,6 +23,8 @@ import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.util.PurlUtil;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
@@ -70,6 +73,8 @@ public class SbomIngestionService {
     private final boolean allowUserAuthHeader;
     private final String allowedHostsCsv;
     private final ConcurrentMap<String, ReentrantLock> ingestionLocks = new ConcurrentHashMap<>();
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public SbomIngestionService(
             SbomParserService sbomParserService,
@@ -141,7 +146,8 @@ public class SbomIngestionService {
                 assetIdentifier,
                 content,
                 originalFilename,
-                metadata));
+                metadata,
+                null));
     }
 
     @Transactional
@@ -197,7 +203,8 @@ public class SbomIngestionService {
                 request.assetIdentifier(),
                 content,
                 "endpoint-sbom.json",
-                metadata));
+                metadata,
+                null));
     }
 
     @Transactional
@@ -299,9 +306,229 @@ public class SbomIngestionService {
                 results);
     }
 
+    @Transactional
+    public SbomIngestionResponse ingestFromGithubAttestation(
+            Tenant tenant,
+            GithubAttestationSbomIngestionRequest request
+    ) throws IOException {
+        String owner = normalize(request.owner());
+        String repo = normalize(request.repo());
+        String imageRepository = normalizeContainerRepository(request.imageRepository());
+        String normalizedDigest = normalizeDigestToken(request.subjectDigest());
+        if (owner.isBlank()) {
+            throw new IOException("GitHub owner/account is required");
+        }
+        if (imageRepository.isBlank()) {
+            throw new IOException("Image repository is required");
+        }
+        if (normalizedDigest.isBlank()) {
+            throw new IOException("A valid sha256 subject digest is required");
+        }
+
+        String assetName = request.assetName() == null || request.assetName().isBlank()
+                ? defaultContainerAssetName(imageRepository)
+                : request.assetName().trim();
+        String assetIdentifier = request.assetIdentifier() == null || request.assetIdentifier().isBlank()
+                ? imageRepository + "@" + normalizedDigest
+                : request.assetIdentifier().trim();
+        String imageTag = request.imageTag() == null || request.imageTag().isBlank()
+                ? null
+                : request.imageTag().trim();
+
+        return ingestGithubAttestation(
+                tenant,
+                owner,
+                repo,
+                imageRepository,
+                normalizedDigest,
+                imageTag,
+                assetName,
+                assetIdentifier
+        );
+    }
+
+    @Transactional
+    public GithubGhcrIngestionSummary ingestAllFromGithubContainerRegistry(
+            Tenant tenant,
+            String owner
+    ) throws IOException {
+        String normalizedOwner = normalize(owner);
+        if (normalizedOwner.isBlank()) {
+            throw new IOException("GitHub owner/account is required");
+        }
+
+        List<GithubApiClient.GithubContainerPackageRef> packages = githubApiClient.listContainerPackages(normalizedOwner);
+        if (packages.isEmpty()) {
+            throw new IOException("No GHCR container packages were discovered for account: " + normalizedOwner);
+        }
+
+        Map<String, DiscoveredGhcrImage> imagesByAssetIdentifier = new LinkedHashMap<>();
+        for (GithubApiClient.GithubContainerPackageRef pkg : packages) {
+            List<GithubApiClient.GithubContainerImageVersionRef> versions =
+                    githubApiClient.listContainerImageVersions(normalizedOwner, pkg.packageName());
+            for (GithubApiClient.GithubContainerImageVersionRef version : versions) {
+                String digest = normalizeDigestToken(version.digest());
+                if (digest.isBlank()) {
+                    continue;
+                }
+                String imageRepository = normalizeContainerRepository(version.imageRepository());
+                if (imageRepository.isBlank()) {
+                    continue;
+                }
+                String assetIdentifier = imageRepository + "@" + digest;
+                imagesByAssetIdentifier.compute(assetIdentifier, (key, existing) -> {
+                    if (existing == null) {
+                        return new DiscoveredGhcrImage(
+                                imageRepository,
+                                digest,
+                                selectPrimaryImageTag(version.tags())
+                        );
+                    }
+                    return existing.mergeTags(version.tags());
+                });
+            }
+        }
+
+        if (imagesByAssetIdentifier.isEmpty()) {
+            throw new IOException("No GHCR image digests with attestation candidates were discovered for account: " + normalizedOwner);
+        }
+
+        int componentsIngested = 0;
+        int findingsGenerated = 0;
+        int imagesSucceeded = 0;
+        int imagesFailed = 0;
+        List<GithubGhcrImageIngestionResult> results = new ArrayList<>();
+        Map<String, GithubApiClient.GithubAttestedSbomResponse> bulkAttestationsByAssetIdentifier = Map.of();
+
+        try {
+            bulkAttestationsByAssetIdentifier = githubApiClient.fetchAttestedSbomsForOwnerBulk(
+                    normalizedOwner,
+                    imagesByAssetIdentifier.values().stream()
+                            .map(image -> new GithubApiClient.GithubAttestationLookup(image.imageRepository(), image.digest()))
+                            .toList()
+            );
+        } catch (IOException ignored) {
+            bulkAttestationsByAssetIdentifier = Map.of();
+        }
+
+        for (DiscoveredGhcrImage image : imagesByAssetIdentifier.values()) {
+            String assetName = defaultContainerAssetName(image.imageRepository());
+            String assetIdentifier = image.imageRepository() + "@" + image.digest();
+            try {
+                GithubApiClient.GithubAttestedSbomResponse attestedSbom = bulkAttestationsByAssetIdentifier.get(assetIdentifier);
+                SbomIngestionResponse response = attestedSbom == null
+                        ? ingestGithubAttestation(
+                                tenant,
+                                normalizedOwner,
+                                "",
+                                image.imageRepository(),
+                                image.digest(),
+                                image.primaryTag(),
+                                assetName,
+                                assetIdentifier
+                        )
+                        : ingestGithubAttestedSbom(
+                                tenant,
+                                normalizedOwner,
+                                "",
+                                image.imageRepository(),
+                                image.digest(),
+                                image.primaryTag(),
+                                assetName,
+                                assetIdentifier,
+                                attestedSbom
+                        );
+                componentsIngested += response.componentsIngested();
+                findingsGenerated += response.findingsGenerated();
+                imagesSucceeded++;
+                results.add(new GithubGhcrImageIngestionResult(
+                        image.imageRepository(),
+                        assetIdentifier,
+                        "SUCCESS",
+                        response.componentsIngested(),
+                        response.findingsGenerated(),
+                        "Ingested successfully"
+                ));
+            } catch (IOException ex) {
+                imagesFailed++;
+                recordGithubAttestationFailureEvidence(
+                        tenant,
+                        normalizedOwner,
+                        "",
+                        image.imageRepository(),
+                        image.primaryTag(),
+                        image.digest(),
+                        assetName,
+                        assetIdentifier,
+                        ex.getMessage()
+                );
+                results.add(new GithubGhcrImageIngestionResult(
+                        image.imageRepository(),
+                        assetIdentifier,
+                        "FAILURE",
+                        null,
+                        null,
+                        ex.getMessage()
+                ));
+            }
+        }
+
+        String failureSummary = summarizeGhcrFailures(results);
+        int imagesProcessed = imagesSucceeded + imagesFailed;
+
+        if (imagesSucceeded == 0) {
+            throw new IOException(failureSummary == null
+                    ? "GitHub GHCR SBOM ingestion failed for all discovered images"
+                    : "GitHub GHCR SBOM ingestion failed for all discovered images. " + failureSummary);
+        }
+
+        return new GithubGhcrIngestionSummary(
+                imagesByAssetIdentifier.size(),
+                imagesProcessed,
+                imagesSucceeded,
+                imagesFailed,
+                componentsIngested,
+                findingsGenerated,
+                failureSummary,
+                results
+        );
+    }
+
+    private String summarizeGhcrFailures(List<GithubGhcrImageIngestionResult> results) {
+        if (results == null || results.isEmpty()) {
+            return null;
+        }
+        List<String> failures = results.stream()
+                .filter(result -> "FAILURE".equalsIgnoreCase(result.status()))
+                .map(result -> {
+                    String repository = result.imageRepository() == null || result.imageRepository().isBlank()
+                            ? result.assetIdentifier()
+                            : result.imageRepository();
+                    String message = result.message() == null || result.message().isBlank()
+                            ? "Unknown error"
+                            : result.message().trim();
+                    return repository + ": " + message;
+                })
+                .toList();
+        if (failures.isEmpty()) {
+            return null;
+        }
+        int previewCount = Math.min(3, failures.size());
+        String preview = String.join(" | ", failures.subList(0, previewCount));
+        if (failures.size() == previewCount) {
+            return preview;
+        }
+        return preview + " | +" + (failures.size() - previewCount) + " more failures";
+    }
+
     @Transactional(readOnly = true)
-    public List<SbomUploadEvidenceResponse> listUploads(Tenant tenant) {
-        return sbomUploadRepository.findByTenantOrderByUploadedAtDesc(tenant).stream()
+    public List<SbomUploadEvidenceResponse> listUploads(Tenant tenant, String sourceSystem) {
+        List<SbomUpload> uploads = sourceSystem == null || sourceSystem.isBlank()
+                ? sbomUploadRepository.findByTenantOrderByUploadedAtDesc(tenant)
+                : sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(
+                        tenant,
+                        sourceSystem.trim());
+        return uploads.stream()
                 .map(upload -> new SbomUploadEvidenceResponse(
                         upload.getId(),
                         upload.getAsset().getId(),
@@ -372,7 +599,8 @@ public class SbomIngestionService {
                 assetIdentifier,
                 content,
                 "github-generated-sbom.json",
-                metadata));
+                metadata,
+                null));
     }
 
     private void recordGithubFetchFailureEvidence(
@@ -445,6 +673,132 @@ public class SbomIngestionService {
         return override.trim();
     }
 
+    private SbomIngestionResponse ingestGithubAttestation(
+            Tenant tenant,
+            String owner,
+            String repo,
+            String imageRepository,
+            String normalizedDigest,
+            String imageTag,
+            String assetName,
+            String assetIdentifier
+    ) throws IOException {
+        GithubApiClient.GithubAttestedSbomResponse response = repo == null || repo.isBlank()
+                ? githubApiClient.fetchAttestedSbomForOwner(owner, normalizedDigest, imageRepository)
+                : githubApiClient.fetchAttestedSbom(owner, repo, normalizedDigest, imageRepository);
+        return ingestGithubAttestedSbom(
+                tenant,
+                owner,
+                repo,
+                imageRepository,
+                normalizedDigest,
+                imageTag,
+                assetName,
+                assetIdentifier,
+                response
+        );
+    }
+
+    private SbomIngestionResponse ingestGithubAttestedSbom(
+            Tenant tenant,
+            String owner,
+            String repo,
+            String imageRepository,
+            String normalizedDigest,
+            String imageTag,
+            String assetName,
+            String assetIdentifier,
+            GithubApiClient.GithubAttestedSbomResponse response
+    ) throws IOException {
+        byte[] content = response.payload();
+        ensurePayloadWithinLimit(content.length);
+
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("ingestionMode", "github-attestation");
+        evidence.put("owner", owner);
+        if (repo != null && !repo.isBlank()) {
+            evidence.put("repo", repo);
+        }
+        evidence.put("imageRepository", imageRepository);
+        evidence.put("imageTag", imageTag);
+        evidence.put("subjectDigest", normalizedDigest);
+        evidence.put("predicateType", response.predicateType());
+        evidence.put("subjectName", response.subjectName());
+        evidence.put("attestationCount", response.attestationCount());
+        evidence.put("apiUrl", response.endpoint());
+        evidence.put("statusCode", response.statusCode());
+        evidence.put("fetchedAt", Instant.now());
+        evidence.put("signatureVerified", false);
+        evidence.put("verificationMode", "unverified-dsse-subject-match");
+
+        IngestionSourceMetadata metadata = new IngestionSourceMetadata(
+                "GITHUB_ATTESTATION",
+                "github",
+                imageRepository,
+                response.endpoint(),
+                response.statusCode(),
+                response.contentType(),
+                response.contentLength(),
+                toJson(evidence));
+
+        return withIngestionLock(lockKey(tenant, assetIdentifier), () -> ingestBytes(
+                tenant,
+                AssetType.CONTAINER_IMAGE,
+                assetName,
+                assetIdentifier,
+                content,
+                "github-attested-sbom.json",
+                metadata,
+                asset -> applyContainerImageMetadata(asset, imageRepository, imageTag, normalizedDigest)
+        ));
+    }
+
+    private void recordGithubAttestationFailureEvidence(
+            Tenant tenant,
+            String owner,
+            String repo,
+            String imageRepository,
+            String imageTag,
+            String normalizedDigest,
+            String assetName,
+            String assetIdentifier,
+            String errorMessage
+    ) {
+        Asset asset = resolveAsset(tenant, AssetType.CONTAINER_IMAGE, assetName, assetIdentifier);
+        asset.setName(assetName);
+        asset.setType(AssetType.CONTAINER_IMAGE);
+        applyContainerImageMetadata(asset, imageRepository, imageTag, normalizedDigest);
+        assetRepository.save(asset);
+
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("ingestionMode", "github-attestation");
+        evidence.put("owner", owner);
+        if (repo != null && !repo.isBlank()) {
+            evidence.put("repo", repo);
+        }
+        evidence.put("imageRepository", imageRepository);
+        evidence.put("imageTag", imageTag);
+        evidence.put("subjectDigest", normalizedDigest);
+        evidence.put("ingestionStatus", "FAILURE");
+        evidence.put("failedAt", Instant.now());
+        evidence.put("errorMessage", errorMessage == null ? "Failed to fetch attested SBOM from GitHub" : errorMessage);
+
+        SbomUpload upload = new SbomUpload();
+        upload.setTenant(tenant);
+        upload.setAsset(asset);
+        upload.setFormat(SbomFormat.UNKNOWN);
+        upload.setStatus(SbomIngestionStatus.FAILURE);
+        upload.setOriginalFilename("github-attested-sbom.json");
+        upload.setIngestionSourceType("GITHUB_ATTESTATION");
+        upload.setIngestionSourceSystem("github");
+        upload.setSourceReference(imageRepository);
+        upload.setContentLengthBytes(0L);
+        upload.setComponentCount(0);
+        upload.setFindingsGenerated(0);
+        upload.setEvidenceJson(toJson(evidence));
+        sbomUploadRepository.save(upload);
+    }
+
     private SbomIngestionResponse ingestBytes(
             Tenant tenant,
             AssetType assetType,
@@ -452,13 +806,17 @@ public class SbomIngestionService {
             String assetIdentifier,
             byte[] content,
             String originalFilename,
-            IngestionSourceMetadata metadata
+            IngestionSourceMetadata metadata,
+            java.util.function.Consumer<Asset> assetCustomizer
     ) throws IOException {
         ensurePayloadWithinLimit(content.length);
         Asset asset = resolveAsset(tenant, assetType, assetName, assetIdentifier);
 
         asset.setName(assetName);
         asset.setType(assetType);
+        if (assetCustomizer != null) {
+            assetCustomizer.accept(asset);
+        }
         assetRepository.save(asset);
         assetLifecycleService.markInventoryIngested(asset);
 
@@ -490,6 +848,28 @@ public class SbomIngestionService {
                 parsedByKey.put(componentKey(parsed.ecosystem(), parsed.packageName(), parsed.version(), parsed.purl()), parsed);
             }
 
+            Map<IdentityGraphService.ComponentIdentityInput, String> componentKeyByIdentityInput = new LinkedHashMap<>();
+            for (ParsedComponent parsed : parsedByKey.values()) {
+                componentKeyByIdentityInput.put(
+                        new IdentityGraphService.ComponentIdentityInput(
+                                parsed.ecosystem(),
+                                parsed.packageName(),
+                                parsed.purl(),
+                                "sbom"
+                        ),
+                        componentKey(parsed.ecosystem(), parsed.packageName(), parsed.version(), parsed.purl())
+                );
+            }
+            Map<String, SoftwareIdentity> softwareIdentityByComponentKey = new HashMap<>();
+            Map<IdentityGraphService.ComponentIdentityInput, SoftwareIdentity> resolvedIdentities =
+                    identityGraphService.resolveFromComponents(componentKeyByIdentityInput.keySet());
+            for (Map.Entry<IdentityGraphService.ComponentIdentityInput, String> entry : componentKeyByIdentityInput.entrySet()) {
+                SoftwareIdentity softwareIdentity = resolvedIdentities.get(entry.getKey());
+                if (softwareIdentity != null) {
+                    softwareIdentityByComponentKey.put(entry.getValue(), softwareIdentity);
+                }
+            }
+
             List<InventoryComponent> existingComponents = inventoryComponentRepository.findByAsset(asset);
             Map<String, InventoryComponent> existingByKey = new HashMap<>();
             for (InventoryComponent existing : existingComponents) {
@@ -517,15 +897,10 @@ public class SbomIngestionService {
                 component.setRetiredAt(null);
                 component.setLastObservedAt(now);
 
-                SoftwareIdentity softwareIdentity = identityGraphService.resolveFromComponent(
-                        parsed.ecosystem(),
-                        parsed.packageName(),
-                        parsed.purl(),
-                        "sbom");
+                SoftwareIdentity softwareIdentity = softwareIdentityByComponentKey.get(key);
                 component.setSoftwareIdentity(softwareIdentity);
                 component.setNormalizedName(resolveNormalizedName(parsed));
                 component.setNormalizedVersion(resolveNormalizedVersion(parsed.version()));
-                component.setSoftwareModelResult(resolveSoftwareModelResult());
                 toPersist.add(component);
             }
 
@@ -540,23 +915,26 @@ public class SbomIngestionService {
                 inventoryComponentRepository.saveAll(toPersist);
             }
 
-            for (InventoryComponent component : toPersist) {
-                if (component.getComponentStatus() == InventoryComponentStatus.ACTIVE) {
+            if (!toPersist.isEmpty()) {
+                Map<java.util.UUID, List<String>> componentCpesById = new LinkedHashMap<>();
+                for (InventoryComponent component : toPersist) {
+                    if (component.getId() == null || component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
+                        componentCpesById.put(component.getId(), List.of());
+                        continue;
+                    }
                     ParsedComponent parsed = parsedByKey.get(componentKey(
                             component.getEcosystem(),
                             component.getPackageName(),
                             component.getVersion(),
                             component.getPurl()
                     ));
-                    inventoryComponentCpeMappingService.syncActiveComponentMappings(
-                            component,
-                            parsed == null ? List.of() : parsed.cpes()
-                    );
-                } else {
-                    inventoryComponentCpeMappingService.clearComponentMappings(component);
+                    componentCpesById.put(component.getId(), parsed == null ? List.of() : parsed.cpes());
                 }
+                inventoryComponentCpeMappingService.syncComponentMappings(toPersist, componentCpesById);
             }
             softwareInventorySyncService.syncFromInventoryDelta(tenant, toPersist, now);
+            entityManager.flush();
+            entityManager.clear();
 
             Set<java.util.UUID> recomputedComponentIds = new LinkedHashSet<>();
             for (InventoryComponent component : toPersist) {
@@ -622,10 +1000,6 @@ public class SbomIngestionService {
             return normalized.substring(1);
         }
         return normalized;
-    }
-
-    private String resolveSoftwareModelResult() {
-        return "UNRESOLVED";
     }
 
     private String sha256(byte[] content) {
@@ -743,6 +1117,78 @@ public class SbomIngestionService {
         }
     }
 
+    private void applyContainerImageMetadata(
+            Asset asset,
+            String imageRepository,
+            String imageTag,
+            String imageDigest
+    ) {
+        if (asset == null) {
+            return;
+        }
+        asset.setImageRepository(imageRepository);
+        asset.setImageTag(imageTag);
+        asset.setImageDigest(imageDigest);
+    }
+
+    private String normalizeContainerRepository(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private String selectPrimaryImageTag(List<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return null;
+        }
+        for (String tag : tags) {
+            String normalizedTag = normalize(tag);
+            if (!normalizedTag.isBlank() && !"latest".equals(normalizedTag)) {
+                return normalizedTag;
+            }
+        }
+        String fallback = normalize(tags.get(0));
+        return fallback.isBlank() ? null : fallback;
+    }
+
+    private String defaultContainerAssetName(String imageRepository) {
+        if (imageRepository == null || imageRepository.isBlank()) {
+            return "container-image";
+        }
+        int slash = imageRepository.lastIndexOf('/');
+        return slash >= 0 && slash < imageRepository.length() - 1
+                ? imageRepository.substring(slash + 1)
+                : imageRepository;
+    }
+
+    private String normalizeDigestToken(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.startsWith("sha256:")) {
+            normalized = "sha256:" + normalized;
+        }
+        String hex = normalized.substring("sha256:".length());
+        if (hex.length() != 64) {
+            return "";
+        }
+        for (int i = 0; i < hex.length(); i++) {
+            char ch = hex.charAt(i);
+            boolean digit = ch >= '0' && ch <= '9';
+            boolean lowerHex = ch >= 'a' && ch <= 'f';
+            if (!digit && !lowerHex) {
+                return "";
+            }
+        }
+        return normalized;
+    }
+
     private Asset resolveAsset(Tenant tenant, AssetType assetType, String assetName, String assetIdentifier) {
         return assetRepository.findByTenantAndIdentifier(tenant, assetIdentifier)
                 .orElseGet(() -> {
@@ -770,6 +1216,49 @@ public class SbomIngestionService {
             Long contentLengthBytes,
             String evidenceJson
     ) {
+    }
+
+    public record GithubGhcrIngestionSummary(
+            int imagesDiscovered,
+            int imagesProcessed,
+            int imagesSucceeded,
+            int imagesFailed,
+            int componentsIngested,
+            int findingsGenerated,
+            String failureSummary,
+            List<GithubGhcrImageIngestionResult> results
+    ) {
+    }
+
+    public record GithubGhcrImageIngestionResult(
+            String imageRepository,
+            String assetIdentifier,
+            String status,
+            Integer componentsIngested,
+            Integer findingsGenerated,
+            String message
+    ) {
+    }
+
+    private record DiscoveredGhcrImage(
+            String imageRepository,
+            String digest,
+            String primaryTag
+    ) {
+        private DiscoveredGhcrImage mergeTags(List<String> tags) {
+            if (primaryTag != null && !primaryTag.isBlank()) {
+                return this;
+            }
+            if (tags == null || tags.isEmpty()) {
+                return this;
+            }
+            for (String tag : tags) {
+                if (tag != null && !tag.isBlank()) {
+                    return new DiscoveredGhcrImage(imageRepository, digest, tag.trim());
+                }
+            }
+            return this;
+        }
     }
 
     @FunctionalInterface

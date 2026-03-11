@@ -5,5 +5,6 @@ public enum ImpactState {
     NOT_IMPACTED,
     FIXED,
     NO_PATCH,
+    UNDER_INVESTIGATION,
     UNKNOWN
 }

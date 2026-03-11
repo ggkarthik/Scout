@@ -130,8 +130,15 @@ public final class CpeUtil {
             return "*";
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (normalized.isBlank() || "-".equals(normalized)) {
+        if (normalized.isBlank()) {
             return "*";
+        }
+        // BLG-001: Preserve '-' (CPE 2.3 NA — not applicable) as distinct from '*' (ANY).
+        // Collapsing NA to ANY loses semantics: NA means the attribute has no applicability
+        // for this product, while ANY means any value matches. Treating them identically
+        // causes false identity matches when vendor/targetSw qualifiers differ.
+        if ("-".equals(normalized)) {
+            return "-";
         }
         return normalized;
     }

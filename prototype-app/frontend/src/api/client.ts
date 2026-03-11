@@ -19,8 +19,10 @@ import {
   PrototypeDataResetResponse,
   RiskPolicy,
   SbomUploadEvidence,
+  SloStatus,
   SyncRun,
   SyncTriggerResponse,
+  VexAssertionRepairSummary,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelDashboardSummary,
@@ -165,6 +167,7 @@ export const api = {
   getOperationalApiReadPath: () => request<OperationalSectionResponse<OperationalDashboard['apiReadPath']>>('/operations/api-read-path'),
   getOperationalFreshnessDrift: () => request<OperationalSectionResponse<OperationalDashboard['freshnessDrift']>>('/operations/freshness-drift'),
   getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
+  getSloStatus: () => request<SloStatus>('/slo/status'),
   listAssets: () => request<Asset[]>('/assets'),
   listInventoryComponents: (
     params?: {
@@ -235,6 +238,7 @@ export const api = {
       name: string;
       owner: string;
       repo: string;
+      path?: string;
       assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
       assetName?: string;
       assetIdentifier?: string;
@@ -246,7 +250,12 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
-  runGithubSbomSource: (sourceId: string) => request<void>(`/github-sbom-sources/${sourceId}/run`, { method: 'POST' }),
+  deleteGithubSbomSource: (sourceId: string) => request<void>(`/github-sbom-sources/${sourceId}`, { method: 'DELETE' }),
+  runGithubSbomSource: (sourceId: string) => request<SyncTriggerResponse>(`/github-sbom-sources/${sourceId}/run`, { method: 'POST' }),
+  queueGithubGhcrRun: (owner: string) => request<SyncTriggerResponse>('/github-sbom-sources/ghcr/run', {
+    method: 'POST',
+    body: JSON.stringify({ owner })
+  }),
   getRiskPolicy: () => request<RiskPolicy>('/risk-policy'),
   updateRiskPolicy: (policy: Partial<RiskPolicy>) => request<RiskPolicy>('/risk-policy', {
     method: 'POST',
@@ -261,13 +270,23 @@ export const api = {
   syncGhsa: () => request<SyncTriggerResponse>('/ingestion/ghsa-sync', { method: 'POST' }),
   syncMicrosoftCsaf: () => request<SyncTriggerResponse>('/ingestion/csaf/microsoft-sync', { method: 'POST' }),
   syncRedhatCsaf: () => request<SyncTriggerResponse>('/ingestion/csaf/redhat-sync', { method: 'POST' }),
+  triggerVexAssertionRepair: () => request<SyncTriggerResponse>('/ingestion/vex-assertion-repair', { method: 'POST' }),
+  triggerVexRolloutBackfill: () => request<SyncTriggerResponse>('/ingestion/vex-rollout-backfill', { method: 'POST' }),
+  getVexAssertionRepairSummary: () => request<VexAssertionRepairSummary>('/ingestion/vex-assertion-repair/summary'),
   ingestAdvisories: (advisories: unknown[]) => request<IngestionResult>('/ingestion/advisories', {
     method: 'POST',
     body: JSON.stringify({ advisories })
   }),
   seedDemo: () => request<IngestionResult>('/demo/seed', { method: 'POST' }),
   listSyncRuns: () => request<SyncRun[]>('/sync-runs'),
-  listSbomUploads: () => request<SbomUploadEvidence[]>('/sbom-uploads'),
+  listSbomUploads: (params?: { sourceSystem?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.sourceSystem && params.sourceSystem.trim().length > 0) {
+      searchParams.set('sourceSystem', params.sourceSystem.trim());
+    }
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<SbomUploadEvidence[]>(`/sbom-uploads${suffix}`);
+  },
   fetchSbomFromEndpoint: (
     payload: {
       assetType: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
@@ -313,6 +332,8 @@ export async function uploadSbom(
 
   const headers = new Headers();
   headers.set('X-API-Key', API_KEY);
+  headers.set('X-Tenant-ID', TENANT_ID);
+  headers.set('X-User-ID', USER_ID);
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
   }

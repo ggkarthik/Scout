@@ -2,6 +2,196 @@ import React from 'react';
 import { IngestionPage, IngestionMode } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
+import { GithubPipelineManager } from '../components/GithubPipelineManager';
+import { api } from '../api/client';
+import { SbomUploadEvidence, SyncRun } from '../types';
+import { ResizableTable } from '../components/ResizableTable';
+
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return 'N/A';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+}
+
+function parseEvidenceJson(value?: string): string {
+  if (!value || !value.trim()) return '{}';
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function uploadStatusClass(value: string): string {
+  return `status-${value.toLowerCase().replace('_', '-')}`;
+}
+
+function humanDuration(startedAt: string, completedAt?: string): string {
+  if (!completedAt) return 'In progress';
+  const seconds = Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000);
+  if (Number.isNaN(seconds) || seconds < 0) return 'n/a';
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function isGithubRunActive(status: string): boolean {
+  const v = status.trim().toUpperCase();
+  return v === 'RUNNING' || v === 'STARTED' || v === 'QUEUED';
+}
+
+function queueLabel(run: SyncRun): string {
+  if (!isGithubRunActive(run.status) || run.queuePosition == null) return '-';
+  return run.queuePosition === 1 ? 'Running now' : `#${run.queuePosition}`;
+}
+
+function InventoryRunQueue() {
+  const [uploads, setUploads] = React.useState<SbomUploadEvidence[]>([]);
+  const [githubRuns, setGithubRuns] = React.useState<SyncRun[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  const refresh = React.useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [uploadRows, runRows] = await Promise.all([
+        api.listSbomUploads(),
+        api.listSyncRuns()
+      ]);
+      setUploads(uploadRows);
+      setGithubRuns(runRows.filter((r) => r.syncType.toUpperCase().includes('GITHUB_')));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { void refresh(); }, [refresh]);
+
+  React.useEffect(() => {
+    if (!githubRuns.some((r) => isGithubRunActive(r.status))) return undefined;
+    const id = window.setInterval(() => { void refresh(); }, 3000);
+    return () => window.clearInterval(id);
+  }, [githubRuns, refresh]);
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h3>Inventory Run Queue</h3>
+        <span className="panel-caption">SBOM upload evidence and GitHub ingestion run history across all inventory sources.</span>
+      </div>
+      <div className="button-row section-actions">
+        <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void refresh()}>
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      {error && <div className="notice error">{error}</div>}
+
+      <h4 className="section-title section-divider">SBOM Upload Evidence</h4>
+      {uploads.length === 0 ? (
+        <div className="empty-state"><p>No SBOM uploads yet. Upload a file or fetch from an endpoint to build evidence history.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <ResizableTable storageKey="inv-queue-uploads-table-widths">
+            <thead>
+              <tr>
+                <th>Uploaded</th>
+                <th>Status</th>
+                <th>Asset</th>
+                <th>Source</th>
+                <th>Format</th>
+                <th>Size</th>
+                <th>Components</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uploads.map((upload) => (
+                <tr key={upload.id}>
+                  <td>{new Date(upload.uploadedAt).toLocaleString()}</td>
+                  <td>
+                    <span className={`status-pill ${uploadStatusClass(upload.status)}`}>
+                      {upload.status.replace('_', ' ')}
+                    </span>
+                  </td>
+                  <td>
+                    <div>{upload.assetName}</div>
+                    <div className="panel-caption mono">{upload.assetIdentifier}</div>
+                  </td>
+                  <td>
+                    <div>{upload.ingestionSourceType ?? 'UNKNOWN'}</div>
+                    <div className="panel-caption">{upload.sourceReference ?? upload.originalFilename}</div>
+                  </td>
+                  <td>{upload.format}</td>
+                  <td>{formatBytes(upload.contentLengthBytes)}</td>
+                  <td>{upload.componentCount ?? 'N/A'}</td>
+                  <td>
+                    <details className="evidence-details">
+                      <summary>View</summary>
+                      <pre>{parseEvidenceJson(upload.evidenceJson)}</pre>
+                    </details>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </ResizableTable>
+        </div>
+      )}
+
+      <h4 className="section-title section-divider">GitHub Ingestion Runs</h4>
+      {githubRuns.length === 0 ? (
+        <div className="empty-state"><p>No GitHub ingestion runs yet. Trigger a GitHub repository or GHCR ingestion to see run history here.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <ResizableTable storageKey="inv-queue-github-runs-table-widths">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Queue</th>
+                <th>Fetched</th>
+                <th>Inserted</th>
+                <th>Updated</th>
+                <th>Failed</th>
+                <th>Started</th>
+                <th>Completed</th>
+                <th>Duration</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {githubRuns.map((run) => (
+                <tr key={run.id}>
+                  <td>{run.syncType}</td>
+                  <td>
+                    <span className={`status-pill ${isGithubRunActive(run.status) ? 'status-open' : 'status-resolved'}`}>
+                      {run.status}
+                    </span>
+                  </td>
+                  <td>{queueLabel(run)}</td>
+                  <td>{run.recordsFetched}</td>
+                  <td>{run.recordsInserted}</td>
+                  <td>{run.recordsUpdated}</td>
+                  <td>{run.recordsFailed ?? 0}</td>
+                  <td>{new Date(run.startedAt).toLocaleString()}</td>
+                  <td>{run.completedAt ? new Date(run.completedAt).toLocaleString() : 'In progress'}</td>
+                  <td>{humanDuration(run.startedAt, run.completedAt)}</td>
+                  <td className="panel-caption">{run.errorMessage || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </ResizableTable>
+        </div>
+      )}
+    </section>
+  );
+}
 
 type ConnectorId =
   | 'sbom-upload'
@@ -16,7 +206,7 @@ type ConnectorId =
   | 'advisory-feed';
 
 type CategoryFilter = 'all' | 'inventory' | 'vulnerability';
-type ConnectView = 'sources' | 'integration-queue';
+type ConnectView = 'sources' | 'vuln-intel-queue' | 'inventory-run-queue';
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -43,8 +233,8 @@ const CONNECTORS: ConnectorDefinition[] = [
   },
   {
     id: 'sbom-github',
-    name: 'GitHub Generated SBOM',
-    summary: 'Fetch `/dependency-graph/sbom` for a single repo or all repos in a GitHub account.',
+    name: 'GitHub SBOM',
+    summary: 'Run repository or GHCR SBOM ingestion and manage reusable GitHub ingestion pipelines.',
     icon: '🐙'
   },
   {
@@ -108,12 +298,30 @@ const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
 ];
 
 function isConnectView(value: string | null): value is ConnectView {
-  return value === 'sources' || value === 'integration-queue';
+  return value === 'sources' || value === 'vuln-intel-queue' || value === 'inventory-run-queue';
 }
 
 function readInitialConnectView(): ConnectView {
   const fromQuery = new URLSearchParams(window.location.search).get(CONNECT_VIEW_QUERY_KEY);
+  if (fromQuery === 'github-pipelines') return 'sources';
+  if (fromQuery === 'integration-queue') return 'vuln-intel-queue';
   return isConnectView(fromQuery) ? fromQuery : 'sources';
+}
+
+function isConnectorId(value: string | null): value is ConnectorId {
+  return CONNECTORS.some((connector) => connector.id === value);
+}
+
+function readInitialConnector(): ConnectorId | null {
+  const params = new URLSearchParams(window.location.search);
+  const source = params.get(CONNECT_SOURCE_QUERY_KEY);
+  if (isConnectorId(source)) {
+    return source;
+  }
+  if (params.get(CONNECT_VIEW_QUERY_KEY) === 'github-pipelines') {
+    return 'sbom-github';
+  }
+  return null;
 }
 
 function writeConnectQuery(connectorId: ConnectorId | null, view: ConnectView): void {
@@ -154,11 +362,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'sbom-github') {
     return (
-      <IngestionPage
-        initialMode={'github' as IngestionMode}
-        hideModeToggle
-        title="GitHub Generated SBOM Connector"
-        caption="Fetch GitHub-generated SBOMs across account repositories and preserve per-repo evidence."
+      <GithubPipelineManager
+        title="GitHub SBOM Connector"
+        caption="Use GitHub as the single anchor for repository SBOM and GHCR image ingestion, reusable pipelines, and ingestion evidence."
       />
     );
   }
@@ -166,8 +372,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="nvd"
+        showQueue={false}
         title="NVD Vulnerability Feed"
-        caption="Run NVD synchronization and monitor NVD-specific sync runs."
+        caption="Trigger NVD synchronization. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -175,8 +382,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="kev"
+        showQueue={false}
         title="CISA KEV Feed"
-        caption="Run KEV ingestion and track known-exploited vulnerability sync activity."
+        caption="Trigger KEV ingestion. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -184,8 +392,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="ghsa"
+        showQueue={false}
         title="GitHub Advisory Database (GHSA)"
-        caption="Run GHSA ingestion and track advisory-package correlation coverage."
+        caption="Trigger GHSA ingestion. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -193,8 +402,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="microsoft-csaf"
+        showQueue={false}
         title="Microsoft CSAF + VEX Feed"
-        caption="Run Microsoft CSAF/VEX ingestion and track source-specific sync runs."
+        caption="Trigger Microsoft CSAF/VEX ingestion. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -202,8 +412,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="redhat-csaf"
+        showQueue={false}
         title="Red Hat CSAF + VEX Feed"
-        caption="Run Red Hat CSAF/VEX ingestion and track source-specific sync runs."
+        caption="Trigger Red Hat CSAF/VEX ingestion. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -211,8 +422,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <SourcesPage
         focusSource="advisories"
+        showQueue={false}
         title="Advisory Import Feed"
-        caption="Seed/import advisory records and maintain normalized vulnerability intelligence."
+        caption="Seed/import advisory records. View run history in Vuln Intel Run Queue."
       />
     );
   }
@@ -237,7 +449,7 @@ export function ConnectPage() {
   const [activeView, setActiveView] = React.useState<ConnectView>(readInitialConnectView);
   const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all');
   const [search, setSearch] = React.useState('');
-  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(null);
+  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(readInitialConnector);
 
   React.useEffect(() => {
     writeConnectQuery(activeConnector, activeView);
@@ -300,16 +512,16 @@ export function ConnectPage() {
         <div className="panel-header">
           <h3>Connect</h3>
           <span className="panel-caption">
-            {activeView === 'sources'
-              ? 'Connect inventory and vulnerability sources. Click any source to open its configuration.'
-              : 'Monitor vulnerability intelligence ingestion jobs and the shared integration queue.'}
+            {activeView === 'sources' && 'Connect inventory and vulnerability sources. Click any source to open its configuration.'}
+              {activeView === 'vuln-intel-queue' && 'NVD, KEV, GHSA, and CSAF/VEX ingestion run history.'}
+              {activeView === 'inventory-run-queue' && 'SBOM upload evidence and GitHub ingestion run history.'}
           </span>
         </div>
       </section>
 
       <section className="panel">
         <div className="connect-filter-bar">
-          {(['sources', 'integration-queue'] as const).map((view) => (
+          {(['sources', 'vuln-intel-queue', 'inventory-run-queue'] as const).map((view) => (
             <button
               key={view}
               type="button"
@@ -322,13 +534,14 @@ export function ConnectPage() {
               }}
             >
               {view === 'sources' && 'Sources'}
-              {view === 'integration-queue' && 'Integration Run Queue'}
+              {view === 'vuln-intel-queue' && 'Vuln Intel Run Queue'}
+              {view === 'inventory-run-queue' && 'Inventory Run Queue'}
             </button>
           ))}
         </div>
       </section>
 
-      {activeView === 'sources' ? (
+      {activeView === 'sources' && (
         <section className="panel connect-catalog-panel">
           <div className="connect-search-row">
             <input
@@ -393,13 +606,17 @@ export function ConnectPage() {
             )}
           </div>
         </section>
-      ) : (
+      )}
+
+      {activeView === 'vuln-intel-queue' && (
         <SourcesPage
-          focusSource="all"
-          title="Integration Queue"
-          caption="NVD, KEV, GHSA, and CSAF/VEX ingestion jobs are processed in a shared queue."
+          focusSource="vuln-only"
+          title="Vuln Intel Run Queue"
+          caption="NVD, KEV, GHSA, and CSAF/VEX ingestion runs."
         />
       )}
+
+      {activeView === 'inventory-run-queue' && <InventoryRunQueue />}
 
       {activeConnector && selectedConnector && (
         <div

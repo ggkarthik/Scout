@@ -1,15 +1,16 @@
 import React from 'react';
 import { api } from '../api/client';
-import { SyncRun } from '../types';
+import { SyncRun, SyncRunSnapshot, VexAssertionRepairSummary } from '../types';
 import { ResizableTable } from '../components/ResizableTable';
 
-type FocusSource = 'all' | 'nvd' | 'kev' | 'ghsa' | 'microsoft-csaf' | 'redhat-csaf' | 'advisories';
+type FocusSource = 'all' | 'vuln-only' | 'nvd' | 'kev' | 'ghsa' | 'github' | 'microsoft-csaf' | 'redhat-csaf' | 'advisories';
 type Props = {
   focusSource?: FocusSource;
   title?: string;
   caption?: string;
   showTriggers?: boolean;
   showQueue?: boolean;
+  refreshSignal?: number;
 };
 
 function humanDuration(startedAt: string, completedAt?: string): string {
@@ -42,18 +43,50 @@ function queuePositionLabel(run: SyncRun): string {
   return run.queuePosition === 1 ? 'Running now' : `#${run.queuePosition}`;
 }
 
+function renderSnapshot(snapshot?: SyncRunSnapshot, emptyLabel = 'No run yet') {
+  if (!snapshot) {
+    return emptyLabel;
+  }
+  return (
+    <>
+      <div>{snapshot.status}</div>
+      <div className="panel-caption">
+        {snapshot.startedAt ? new Date(snapshot.startedAt).toLocaleString() : 'No start time'}
+      </div>
+      {snapshot.errorMessage && (
+        <div className="panel-caption">{snapshot.errorMessage}</div>
+      )}
+    </>
+  );
+}
+
+function deltaLabel(before: number, after: number): string {
+  const delta = after - before;
+  if (delta === 0) {
+    return `${after} (no change)`;
+  }
+  return `${after} (${delta > 0 ? '+' : ''}${delta})`;
+}
+
 export function SourcesPage({
   focusSource = 'all',
   title = 'Source Ingestion',
   caption = 'Ingest NVD/KEV/CSAF/VEX/advisories and normalize vulnerability intelligence',
   showTriggers = true,
-  showQueue = true
+  showQueue = true,
+  refreshSignal = 0
 }: Props) {
   const [syncRuns, setSyncRuns] = React.useState<SyncRun[]>([]);
   const [message, setMessage] = React.useState('');
   const [busy, setBusy] = React.useState<string | null>(null);
   const [loadingRuns, setLoadingRuns] = React.useState(false);
   const [confirmFullSync, setConfirmFullSync] = React.useState(false);
+  const [vexRepairSummary, setVexRepairSummary] = React.useState<VexAssertionRepairSummary | null>(null);
+  const [loadingVexRepairSummary, setLoadingVexRepairSummary] = React.useState(false);
+  const showVexRepairPanel = focusSource === 'all'
+    || focusSource === 'vuln-only'
+    || focusSource === 'microsoft-csaf'
+    || focusSource === 'redhat-csaf';
 
   const refreshRuns = React.useCallback(async () => {
     setLoadingRuns(true);
@@ -67,12 +100,31 @@ export function SourcesPage({
     }
   }, []);
 
+  const refreshVexRepairSummary = React.useCallback(async () => {
+    if (!showVexRepairPanel) {
+      return;
+    }
+    setLoadingVexRepairSummary(true);
+    try {
+      const summary = await api.getVexAssertionRepairSummary();
+      setVexRepairSummary(summary);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingVexRepairSummary(false);
+    }
+  }, [showVexRepairPanel]);
+
   React.useEffect(() => {
     if (!showQueue) {
       return;
     }
     refreshRuns();
-  }, [refreshRuns, showQueue]);
+  }, [refreshRuns, showQueue, refreshSignal]);
+
+  React.useEffect(() => {
+    refreshVexRepairSummary();
+  }, [refreshSignal, refreshVexRepairSummary]);
 
   React.useEffect(() => {
     if (!showQueue) {
@@ -83,9 +135,10 @@ export function SourcesPage({
     }
     const id = window.setInterval(() => {
       refreshRuns();
+      refreshVexRepairSummary();
     }, 3000);
     return () => window.clearInterval(id);
-  }, [syncRuns, refreshRuns]);
+  }, [syncRuns, refreshRuns, refreshVexRepairSummary, showQueue]);
 
   const runAction = async (
     label: string,
@@ -107,6 +160,7 @@ export function SourcesPage({
       if (showQueue) {
         await refreshRuns();
       }
+      await refreshVexRepairSummary();
     } catch (e) {
       setMessage(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -115,6 +169,9 @@ export function SourcesPage({
   };
 
   const visibleRuns = syncRuns.filter((run) => {
+    if (focusSource === 'vuln-only') {
+      return !includesType(run, 'GITHUB_');
+    }
     if (focusSource === 'nvd') {
       return includesType(run, 'NVD');
     }
@@ -124,14 +181,21 @@ export function SourcesPage({
     if (focusSource === 'ghsa') {
       return includesType(run, 'GHSA');
     }
+    if (focusSource === 'github') {
+      return includesType(run, 'GITHUB_');
+    }
     if (focusSource === 'advisories') {
       return includesType(run, 'ADVISORY') || includesType(run, 'RECOMPUTE');
     }
     if (focusSource === 'microsoft-csaf') {
-      return includesType(run, 'CSAF_MICROSOFT');
+      return includesType(run, 'CSAF_MICROSOFT')
+        || includesType(run, 'VEX_ASSERTION_REPAIR')
+        || includesType(run, 'VEX_ROLLOUT_BACKFILL');
     }
     if (focusSource === 'redhat-csaf') {
-      return includesType(run, 'CSAF_REDHAT');
+      return includesType(run, 'CSAF_REDHAT')
+        || includesType(run, 'VEX_ASSERTION_REPAIR')
+        || includesType(run, 'VEX_ROLLOUT_BACKFILL');
     }
     return true;
   });
@@ -197,6 +261,29 @@ export function SourcesPage({
             {busy === 'Red Hat CSAF/VEX Sync' ? 'Running...' : 'Run Red Hat CSAF/VEX Sync'}
           </button>
         )}
+        {showTriggers && showVexRepairPanel && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={
+              busy !== null
+              || (vexRepairSummary != null && (!vexRepairSummary.vexRolloutControlsEnabled || !vexRepairSummary.vexRolloutBackfillEnabled))
+            }
+            onClick={() => runAction('Vendor VEX Backfill', () => api.triggerVexRolloutBackfill())}
+          >
+            {busy === 'Vendor VEX Backfill' ? 'Running...' : 'Run Vendor VEX Backfill'}
+          </button>
+        )}
+        {showTriggers && showVexRepairPanel && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy !== null || (vexRepairSummary != null && !vexRepairSummary.vexRolloutControlsEnabled)}
+            onClick={() => runAction('VEX Assertion Repair', () => api.triggerVexAssertionRepair())}
+          >
+            {busy === 'VEX Assertion Repair' ? 'Running...' : 'Rebuild Persisted VEX State'}
+          </button>
+        )}
         {showTriggers && (focusSource === 'all' || focusSource === 'advisories') && (
           <>
             <button
@@ -210,11 +297,134 @@ export function SourcesPage({
           </>
         )}
         {showQueue && (
-          <button type="button" className="btn btn-secondary" disabled={loadingRuns} onClick={() => refreshRuns()}>
-            {loadingRuns ? 'Refreshing...' : 'Refresh'}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={loadingRuns || loadingVexRepairSummary}
+            onClick={async () => {
+              await refreshRuns();
+              await refreshVexRepairSummary();
+            }}
+          >
+            {loadingRuns || loadingVexRepairSummary ? 'Refreshing...' : 'Refresh'}
           </button>
         )}
       </div>
+      )}
+
+      {showVexRepairPanel && (
+        <div className="section-block">
+          <h4 className="section-title">VEX Rollout Status</h4>
+          <div className="panel-caption">
+            Run vendor CSAF/VEX re-ingest and persisted assertion repair from one place, then compare current VEX coverage and
+            exact-match exposure state without leaving the shared source queue.
+          </div>
+          {vexRepairSummary && (
+            <div className="panel-caption" style={{ marginTop: 8 }}>
+              Controls: {vexRepairSummary.vexRolloutControlsEnabled ? 'enabled' : 'disabled'} | Backfill: {vexRepairSummary.vexRolloutBackfillEnabled ? 'enabled' : 'disabled'} |
+              VEX policy: {vexRepairSummary.vexPolicyEnabled ? 'enabled' : 'disabled'} | Risk modifiers: {vexRepairSummary.vexRiskModifiersEnabled ? 'enabled' : 'disabled'}
+            </div>
+          )}
+          {vexRepairSummary ? (
+            <div className="table-scroll">
+              <ResizableTable storageKey="vex-repair-summary-widths">
+                <thead>
+                  <tr>
+                    <th>VEX-like Targets</th>
+                    <th>Persisted Assertions</th>
+                    <th>Matched Active States</th>
+                    <th>Applicable Awaiting VEX</th>
+                    <th>Source Systems</th>
+                    <th>Latest Backfill Run</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{vexRepairSummary.vexLikeTargetCount}</td>
+                    <td>{vexRepairSummary.persistedAssertionCount}</td>
+                    <td>{vexRepairSummary.activeMatchedComponentCount}</td>
+                    <td>{vexRepairSummary.activeApplicableAwaitingVexCount}</td>
+                    <td>{vexRepairSummary.sourceSystems.length > 0 ? vexRepairSummary.sourceSystems.join(', ') : '-'}</td>
+                    <td>{renderSnapshot(vexRepairSummary.latestBackfillRun, 'No backfill run yet')}</td>
+                  </tr>
+                </tbody>
+              </ResizableTable>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>{loadingVexRepairSummary ? 'Loading VEX repair summary...' : 'No VEX repair summary available yet.'}</p>
+            </div>
+          )}
+          {vexRepairSummary?.latestBackfillComparison && (
+            <div className="table-scroll" style={{ marginTop: 12 }}>
+              <ResizableTable storageKey="vex-rollout-comparison-widths">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Before Backfill</th>
+                    <th>After Backfill</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>VEX-like Targets</td>
+                    <td>{vexRepairSummary.latestBackfillComparison.before.vexLikeTargetCount}</td>
+                    <td>{deltaLabel(
+                      vexRepairSummary.latestBackfillComparison.before.vexLikeTargetCount,
+                      vexRepairSummary.latestBackfillComparison.after.vexLikeTargetCount
+                    )}</td>
+                  </tr>
+                  <tr>
+                    <td>Persisted Assertions</td>
+                    <td>{vexRepairSummary.latestBackfillComparison.before.persistedAssertionCount}</td>
+                    <td>{deltaLabel(
+                      vexRepairSummary.latestBackfillComparison.before.persistedAssertionCount,
+                      vexRepairSummary.latestBackfillComparison.after.persistedAssertionCount
+                    )}</td>
+                  </tr>
+                  <tr>
+                    <td>Matched Active States</td>
+                    <td>{vexRepairSummary.latestBackfillComparison.before.activeMatchedComponentCount}</td>
+                    <td>{deltaLabel(
+                      vexRepairSummary.latestBackfillComparison.before.activeMatchedComponentCount,
+                      vexRepairSummary.latestBackfillComparison.after.activeMatchedComponentCount
+                    )}</td>
+                  </tr>
+                  <tr>
+                    <td>Applicable Awaiting VEX</td>
+                    <td>{vexRepairSummary.latestBackfillComparison.before.activeApplicableAwaitingVexCount}</td>
+                    <td>{deltaLabel(
+                      vexRepairSummary.latestBackfillComparison.before.activeApplicableAwaitingVexCount,
+                      vexRepairSummary.latestBackfillComparison.after.activeApplicableAwaitingVexCount
+                    )}</td>
+                  </tr>
+                </tbody>
+              </ResizableTable>
+            </div>
+          )}
+          {vexRepairSummary && (
+            <div className="table-scroll" style={{ marginTop: 12 }}>
+              <ResizableTable storageKey="vex-rollout-runs-widths">
+                <thead>
+                  <tr>
+                    <th>Microsoft CSAF/VEX</th>
+                    <th>Red Hat CSAF/VEX</th>
+                    <th>Persisted VEX Repair</th>
+                    <th>Summary Generated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{renderSnapshot(vexRepairSummary.latestMicrosoftRun, 'No Microsoft sync yet')}</td>
+                    <td>{renderSnapshot(vexRepairSummary.latestRedhatRun, 'No Red Hat sync yet')}</td>
+                    <td>{renderSnapshot(vexRepairSummary.latestRepairRun, 'No repair run yet')}</td>
+                    <td>{new Date(vexRepairSummary.generatedAt).toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </ResizableTable>
+            </div>
+          )}
+        </div>
       )}
 
       {showTriggers && (focusSource === 'all' || focusSource === 'nvd') && (
@@ -249,6 +459,13 @@ export function SourcesPage({
       {showQueue && (
         <>
           <h4 className="section-title section-divider">Recent Sync Runs</h4>
+          {focusSource === 'github' && (
+            <div className="panel-caption" style={{ marginBottom: 12 }}>
+              GitHub ingestion runs use <span className="mono">Fetched</span> for discovered images or repositories,
+              <span className="mono"> Inserted</span> for ingested components, <span className="mono"> Updated</span> for generated findings,
+              and <span className="mono"> Failed</span> for assets that did not ingest successfully.
+            </div>
+          )}
           {visibleRuns.length === 0 ? (
             <div className="empty-state">
               <p>No sync runs yet for this source. Trigger sync to populate this activity feed.</p>

@@ -44,7 +44,7 @@ const VULNERABILITY_INTEL_PAGE_SIZE = 25;
 const COMPONENTS_PAGE_SIZE = 25;
 const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
   severities: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE', 'UNKNOWN'],
-  sources: ['nvd', 'kev', 'ghsa', 'csaf-microsoft', 'vex-microsoft', 'csaf-redhat', 'vex-redhat', 'advisory'],
+  sources: ['nvd', 'kev', 'ghsa', 'csaf-microsoft', 'csaf-redhat', 'advisory'],
   vulnStatuses: ['KNOWN_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'NOT_AFFECTED', 'UNKNOWN'],
   inKevValues: ['true', 'false']
 };
@@ -167,7 +167,7 @@ const INVENTORY_VIEW_LABELS: Record<InventoryViewKey, string> = {
   subscriptions: 'Subscriptions',
   iam: 'IAM',
   'hosted-technologies': 'Hosted Technologies',
-  sbom: 'SBOM',
+  sbom: 'Repositories',
   'api-endpoints': 'API Endpoints',
   'application-endpoints': 'Application Endpoints',
   'code-repositories': 'Code Repositories',
@@ -180,6 +180,15 @@ function defaultAssetTypeForView(view: InventoryViewKey): 'ALL' | InventoryCompo
     return 'CONTAINER_IMAGE';
   }
   if (
+    view === 'sbom'
+    || view === 'hosted-technologies'
+    || view === 'code-repositories'
+    || view === 'source-mappings'
+    || view === 'developers'
+  ) {
+    return 'APPLICATION';
+  }
+  if (
     view === 'hosts'
     || view === 'kubernetes-clusters'
     || view === 'datastores'
@@ -189,9 +198,6 @@ function defaultAssetTypeForView(view: InventoryViewKey): 'ALL' | InventoryCompo
     || view === 'application-endpoints'
   ) {
     return 'HOST';
-  }
-  if (view === 'hosted-technologies' || view === 'code-repositories' || view === 'source-mappings' || view === 'developers') {
-    return 'APPLICATION';
   }
   return 'ALL';
 }
@@ -887,9 +893,9 @@ export function InventoryPage({ selectedView }: Props) {
             </>
           ) : (
             <>
-              {selectedView === 'sbom' && scopedAssetType === 'ALL' && (
+              {selectedView === 'sbom' && (
                 <div className="panel-caption">
-                  Add <span className="mono">Asset Type = Application</span> to focus the SBOM view on application inventory.
+                  Repository inventory is scoped to application assets. GHCR image SBOMs appear only in <span className="mono">Inventory &gt; Container Images</span>.
                 </div>
               )}
               <div className="findings-filter-shell">
@@ -1046,7 +1052,7 @@ export function InventoryPage({ selectedView }: Props) {
           </h3>
           {selectedView !== 'vulnerability-intelligence' && (
             <span className="panel-caption">
-              SBOM ingestions are persisted as inventory evidence and shown by asset type
+              SBOM ingestions are persisted as inventory evidence and shown in their asset-specific inventory views.
             </span>
           )}
         </div>
@@ -1169,7 +1175,6 @@ export function InventoryPage({ selectedView }: Props) {
                   <th>Normalized Version</th>
                   <th>Ecosystem</th>
                   <th>Software Identity</th>
-                  <th>Software Model Result</th>
                   <th>Component Status</th>
                   <th>Source</th>
                   <th>PURL</th>
@@ -1191,7 +1196,6 @@ export function InventoryPage({ selectedView }: Props) {
                     <td className="mono">{row.normalizedVersion || '-'}</td>
                     <td>{row.ecosystem || '-'}</td>
                     <td>{row.softwareIdentity || '-'}</td>
-                    <td className="mono">{row.softwareModelResult || '-'}</td>
                     <td>
                       <span className={`status-pill ${row.componentStatus === 'ACTIVE' ? 'status-open' : 'status-auto_closed'}`}>
                         {row.componentStatus}

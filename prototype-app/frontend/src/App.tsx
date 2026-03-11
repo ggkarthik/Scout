@@ -76,9 +76,9 @@ const inventoryFlyoutGroups: InventoryFlyoutGroup[] = [
     ]
   },
   {
-    title: 'Software Assets',
+    title: 'Repositories',
     items: [
-      { key: 'sbom', label: 'SBOM' }
+      { key: 'sbom', label: 'Repositories' }
     ]
   }
 ];

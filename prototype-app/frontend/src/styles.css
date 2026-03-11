@@ -1879,6 +1879,28 @@ label {
   grid-template-columns: repeat(3, minmax(220px, 1fr));
 }
 
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-section:last-of-type {
+  border-bottom: none;
+}
+
+.form-section-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
 .secure-input-row {
   display: flex;
   gap: 8px;
@@ -3129,6 +3151,14 @@ th.resizable-header:hover .col-resizer::after,
 .status-auto_closed {
   border-color: color-mix(in srgb, #7b8aa6 45%, transparent);
   color: #7b8aa6;
+}
+
+/* BLG-003/004: UNKNOWN means the engine could not determine applicability —
+   NVD config data absent, or only KEV was present. Render as a neutral amber
+   tone, clearly distinct from both resolved (green) and suppressed (grey). */
+.status-unknown {
+  border-color: color-mix(in srgb, #d88f3d 45%, transparent);
+  color: #d88f3d;
 }
 
 .status-success {
@@ -4428,6 +4458,15 @@ th.resizable-header:hover .col-resizer::after,
   color: var(--critical);
 }
 
+/* BLG-004: KEV row in vendor intel — visually muted to signal it is exploitability
+   context only, not an authoritative applicability source like NVD or VEX. */
+.cve-statement-badge.exploited.kev-context {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border-color: color-mix(in srgb, var(--muted) 30%, transparent);
+  color: var(--muted);
+  font-style: italic;
+}
+
 .cve-patch-badge {
   display: inline-flex;
   padding: 2px 10px;
@@ -5714,4 +5753,21 @@ input[type="range"] {
 .cve-findings-count-hot {
   color: var(--medium);
   font-weight: 600;
+}
+
+/* SLO pass/fail indicators */
+.slo-pass {
+  color: var(--low);
+  font-weight: 600;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.slo-fail {
+  color: var(--critical);
+  font-weight: 600;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }

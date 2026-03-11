@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-07
+Last updated: 2026-03-10
 
 ## Purpose
 
@@ -139,4 +139,4 @@ All of them currently sit on top of `/inventory/components` and `/inventory/comp
 - `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer.
 - The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
 - The inventory UI exposes more conceptual categories than the backend currently models explicitly.
-- The frontend package currently ships only `dev`, `build`, and `preview` scripts; there is no dedicated frontend test or lint script in `package.json`.
+- The frontend package ships `dev`, `build`, `preview`, and `test:unit` scripts. `test:unit` runs Vitest in non-watch mode (`vitest run`). There is no dedicated lint script in `package.json`.

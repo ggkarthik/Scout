@@ -7,7 +7,6 @@ import com.prototype.vulnwatch.domain.RiskPolicy;
 import com.prototype.vulnwatch.domain.VersionScheme;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.util.VersionUtil;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,19 +19,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class ApplicabilityDecisionService {
 
-    private static final int DEFAULT_VEX_NOT_AFFECTED_FRESHNESS_DAYS = 30;
-    private static final int DEFAULT_VEX_FIXED_FRESHNESS_DAYS = 30;
-
     private final ObjectMapper objectMapper;
+    private final VexPolicyService vexPolicyService;
 
     @Value("${app.features.vex-policy-enabled:true}")
     private boolean vexPolicyEnabled = true;
 
-    @Value("${app.vex.no-date-assume-fresh:false}")
-    private boolean vexNoDateAssumeFresh = false;
-
-    public ApplicabilityDecisionService(ObjectMapper objectMapper) {
+    public ApplicabilityDecisionService(ObjectMapper objectMapper, VexPolicyService vexPolicyService) {
         this.objectMapper = objectMapper;
+        this.vexPolicyService = vexPolicyService;
     }
 
     public enum ApplicabilityResult {
@@ -63,6 +58,23 @@ public class ApplicabilityDecisionService {
     }
 
     public ApplicabilityDecision evaluate(InventoryComponent component, VulnerabilityTarget target, RiskPolicy policy) {
+        return evaluateInternal(component, target, policy, true);
+    }
+
+    public ApplicabilityDecision evaluateCorrelation(InventoryComponent component, VulnerabilityTarget target) {
+        return evaluateCorrelation(component, target, null);
+    }
+
+    public ApplicabilityDecision evaluateCorrelation(InventoryComponent component, VulnerabilityTarget target, RiskPolicy policy) {
+        return evaluateInternal(component, target, policy, false);
+    }
+
+    private ApplicabilityDecision evaluateInternal(
+            InventoryComponent component,
+            VulnerabilityTarget target,
+            RiskPolicy policy,
+            boolean includeVexSignals
+    ) {
         Map<String, Object> trace = new LinkedHashMap<>();
         List<Map<String, Object>> checks = new ArrayList<>();
         trace.put("componentVersion", component.getVersion());
@@ -79,11 +91,16 @@ public class ApplicabilityDecisionService {
         trace.put("checks", checks);
 
         VexSignal vexSignal = resolveVexSignal(target);
-        if (vexPolicyEnabled && vexSignal.hasStatus()) {
+        if (includeVexSignals && vexPolicyEnabled && vexSignal.hasStatus()) {
             String normalized = vexSignal.status().trim().toUpperCase(Locale.ROOT);
             String trustTier = vexSignal.trustTier().trim().toUpperCase(Locale.ROOT);
-            VexFreshness freshness = evaluateVexFreshness(normalized, vexSignal.publishedAt(), vexSignal.lastSeenAt(), policy);
-            boolean trustedForSuppression = isTrustedForSuppression(trustTier);
+            VexPolicyService.VexFreshness freshness = vexPolicyService.evaluateFreshness(
+                    normalized,
+                    vexSignal.publishedAt(),
+                    vexSignal.lastSeenAt(),
+                    policy
+            );
+            boolean trustedForSuppression = vexPolicyService.isTrustedForSuppression(trustTier);
             boolean suppressionEligible = trustedForSuppression && freshness.fresh();
 
             trace.put("vexStatus", normalized);
@@ -126,6 +143,7 @@ public class ApplicabilityDecisionService {
                 return new ApplicabilityDecision(ApplicabilityResult.TRUE, "vex_known_affected", trace);
             }
         }
+        trace.put("vexEvaluationMode", includeVexSignals ? "vex-aware" : "correlation-only");
 
         String componentVersion = component.getVersion();
         if (componentVersion == null || componentVersion.isBlank()) {
@@ -272,12 +290,12 @@ public class ApplicabilityDecisionService {
             }
         }
 
-        String inferredProvider = inferProvider(target.getSource());
+        String inferredProvider = vexPolicyService.inferProvider(target.getSource());
         if (!hasText(provider)) {
             provider = inferredProvider;
         }
         if (!hasText(trustTier)) {
-            trustTier = inferTrustTier(provider, target.getSource());
+            trustTier = vexPolicyService.inferTrustTier(provider, target.getSource());
         }
 
         if (hasText(target.getSource()) && target.getSource().toLowerCase().contains("vex")) {
@@ -300,80 +318,6 @@ public class ApplicabilityDecisionService {
         }
     }
 
-    private String inferProvider(String source) {
-        if (!hasText(source)) {
-            return "unknown";
-        }
-        String normalized = source.trim().toLowerCase(Locale.ROOT);
-        if (normalized.contains("microsoft") || normalized.contains("msrc")) {
-            return "microsoft";
-        }
-        if (normalized.contains("redhat") || normalized.contains("red-hat")) {
-            return "redhat";
-        }
-        if (normalized.startsWith("vex-")) {
-            return normalized.substring("vex-".length());
-        }
-        if (normalized.startsWith("csaf-")) {
-            return normalized.substring("csaf-".length());
-        }
-        return "unknown";
-    }
-
-    private String inferTrustTier(String provider, String source) {
-        String normalizedProvider = hasText(provider) ? provider.trim().toLowerCase(Locale.ROOT) : "unknown";
-        if ("microsoft".equals(normalizedProvider) || "redhat".equals(normalizedProvider)) {
-            return "HIGH";
-        }
-        if (hasText(source)) {
-            String normalizedSource = source.trim().toLowerCase(Locale.ROOT);
-            // vex-* sources and csaf-* sources with explicit product status both qualify as VEX signals.
-            if (normalizedSource.contains("vex") || normalizedSource.startsWith("csaf-")) {
-                return "MEDIUM";
-            }
-        }
-        return "UNKNOWN";
-    }
-
-    private VexFreshness evaluateVexFreshness(
-            String normalizedStatus,
-            Instant publishedAt,
-            Instant lastSeenAt,
-            RiskPolicy policy
-    ) {
-        int freshnessDays = freshnessDaysForStatus(normalizedStatus, policy);
-        Instant reference = publishedAt != null ? publishedAt : lastSeenAt;
-        if (reference == null) {
-            boolean fresh = vexNoDateAssumeFresh;
-            return new VexFreshness(
-                    fresh,
-                    null,
-                    freshnessDays,
-                    fresh ? "NO_DATE_ASSUME_FRESH" : "NO_DATE_TREAT_AS_STALE"
-            );
-        }
-        long ageDays = Math.max(0L, Duration.between(reference, Instant.now()).toDays());
-        boolean fresh = ageDays <= freshnessDays;
-        return new VexFreshness(fresh, ageDays, freshnessDays, fresh ? "FRESH" : "STALE");
-    }
-
-    private int freshnessDaysForStatus(String normalizedStatus, RiskPolicy policy) {
-        if (normalizedStatus != null && normalizedStatus.contains("FIXED")) {
-            // VEX FIX #3: FIXED status is permanent - once vendor confirms a fix, it doesn't "un-fix"
-            // Return Integer.MAX_VALUE to effectively make FIXED statements never expire
-            return Integer.MAX_VALUE;
-        }
-        return policy == null ? DEFAULT_VEX_NOT_AFFECTED_FRESHNESS_DAYS : Math.max(1, policy.getVexNotAffectedFreshnessDays());
-    }
-
-    private boolean isTrustedForSuppression(String trustTier) {
-        if (!hasText(trustTier)) {
-            return false;
-        }
-        String normalized = trustTier.trim().toUpperCase(Locale.ROOT);
-        return "HIGH".equals(normalized) || "MEDIUM".equals(normalized);
-    }
-
     private record VexSignal(
             String status,
             String provider,
@@ -390,11 +334,4 @@ public class ApplicabilityDecisionService {
         }
     }
 
-    private record VexFreshness(
-            boolean fresh,
-            Long assertionAgeDays,
-            int freshnessDays,
-            String outcome
-    ) {
-    }
 }

@@ -1,8 +1,11 @@
 package com.prototype.vulnwatch.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.*;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
+import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
@@ -10,6 +13,7 @@ import com.prototype.vulnwatch.service.FindingService;
 import com.prototype.vulnwatch.service.InvestigationService;
 import com.prototype.vulnwatch.service.OrgCveRecordService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.VulnerabilityIntelligenceService;
 import com.prototype.vulnwatch.util.CvssUtil;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +27,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -40,11 +45,14 @@ public class CveDetailController {
     private final OrgCveRecordRepository orgCveRecordRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
+    private final VexAssertionRepository vexAssertionRepository;
     private final InvestigationService investigationService;
     private final ApplicabilityAssessmentService assessmentService;
     private final FindingService findingService;
     private final OrgCveRecordService orgCveRecordService;
     private final TenantService tenantService;
+    private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
+    private final ObjectMapper objectMapper;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -98,6 +106,31 @@ public class CveDetailController {
                 .collect(Collectors.toList()));
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{cveId}/vex-evidence")
+    public ResponseEntity<VexEvidenceResponse> getVexEvidence(
+            @PathVariable String cveId,
+            @RequestParam("componentId") UUID componentId,
+            @RequestHeader("X-Tenant-ID") Long tenantId) {
+
+        Tenant tenant = tenantService.resolveTenant(tenantId);
+        ComponentVulnerabilityState state = componentVulnerabilityStateRepository
+                .findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(tenant.getId(), cveId, componentId)
+                .orElse(null);
+        if (state == null || state.getMatchedVexAssertionId() == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        VexAssertion assertion = vexAssertionRepository.findById(state.getMatchedVexAssertionId())
+                .filter(candidate -> candidate.getVulnerability() != null)
+                .filter(candidate -> Objects.equals(candidate.getVulnerability().getExternalId(), cveId))
+                .orElse(null);
+        if (assertion == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(toVexEvidenceResponse(state, assertion));
     }
 
     /**
@@ -260,7 +293,7 @@ public class CveDetailController {
         } else if (result.alreadyOpenCount() > 0) {
             message = "Findings already open for all selected components. No duplicates created.";
         } else {
-            message = "No eligible components found. Ensure components are correlated and marked as impacted.";
+            message = "No eligible components found. Findings require exact applicable inventory correlation plus confirmed impacted or no-patch evidence.";
         }
         response.setMessage(message);
         return ResponseEntity.ok(response);
@@ -353,13 +386,15 @@ public class CveDetailController {
 
     private CveSummary buildSummary(Vulnerability vulnerability) {
         CveSummary summary = new CveSummary();
+        String description = vulnerabilityIntelligenceService.resolveDisplayDescription(vulnerability);
         summary.setExternalId(vulnerability.getExternalId());
         summary.setTitle(vulnerability.getTitle());
-        summary.setDescription(vulnerability.getDescriptionSnippet());
+        summary.setDescription(description);
         summary.setSeverity(vulnerability.getSeverity());
         summary.setCvssScore(vulnerability.getCvssScore());
         summary.setCvssVector(vulnerability.getCvssVector());
         summary.setEpssScore(vulnerability.getEpssScore());
+        summary.setEpssUpdatedAt(vulnerability.getEpssUpdatedAt());
         summary.setCweIds(vulnerability.getCweIds());
         summary.setPublishedAt(vulnerability.getPublishedAt());
         summary.setModifiedAt(vulnerability.getModifiedAt());
@@ -419,6 +454,7 @@ public class CveDetailController {
     private List<VendorIntelligenceDto> buildVendorIntelligence(Vulnerability vulnerability, List<VulnerabilityTarget> targets) {
         List<VendorIntelligenceDto> rows = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        Map<UUID, String> vexStatusByTargetId = mapVexStatusByTargetId(targets);
 
         for (VulnerabilityTarget t : targets) {
             VendorIntelligenceDto dto = new VendorIntelligenceDto();
@@ -434,7 +470,7 @@ public class CveDetailController {
             dto.setAffectedVersions(affectedVersions);
             dto.setFixedVersion(t.getFixed() != null && !t.getFixed().isBlank() ? t.getFixed() : null);
             dto.setCpe(t.getCpe() != null && !t.getCpe().isBlank() ? t.getCpe() : null);
-            dto.setVexStatus(parseVexStatus(t.getQualifiersJson()));
+            dto.setVexStatus(vexStatusByTargetId.get(t.getId()));
 
             String dedupeKey = src + "|" + nullToEmpty(t.getPackageName()) + "|" + affectedVersions + "|" + nullToEmpty(t.getFixed());
             if (seen.add(dedupeKey)) {
@@ -466,22 +502,67 @@ public class CveDetailController {
         return sb.length() > 0 ? sb.toString() : "All versions";
     }
 
-    private String parseVexStatus(String qualifiersJson) {
-        if (qualifiersJson == null || qualifiersJson.isBlank()) return null;
-        try {
-            int idx = qualifiersJson.indexOf("\"vexStatus\"");
-            if (idx < 0) return null;
-            int colon = qualifiersJson.indexOf(':', idx);
-            if (colon < 0) return null;
-            int start = qualifiersJson.indexOf('"', colon + 1);
-            if (start < 0) return null;
-            int end = qualifiersJson.indexOf('"', start + 1);
-            if (end < 0) return null;
-            String val = qualifiersJson.substring(start + 1, end).trim();
-            return val.isBlank() ? null : val;
-        } catch (Exception e) {
-            return null;
+    private Map<UUID, String> mapVexStatusByTargetId(List<VulnerabilityTarget> targets) {
+        if (targets == null || targets.isEmpty()) {
+            return Map.of();
         }
+        List<UUID> targetIds = targets.stream()
+                .map(VulnerabilityTarget::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (targetIds.isEmpty()) {
+            return Map.of();
+        }
+        return vexAssertionRepository.findByTarget_IdIn(targetIds).stream()
+                .filter(assertion -> assertion.getTarget() != null && assertion.getTarget().getId() != null)
+                .collect(Collectors.toMap(
+                        assertion -> assertion.getTarget().getId(),
+                        VexAssertion::getStatus,
+                        this::preferNonBlank
+                ));
+    }
+
+    private VexEvidenceResponse toVexEvidenceResponse(ComponentVulnerabilityState state, VexAssertion assertion) {
+        VexEvidenceResponse response = new VexEvidenceResponse();
+        response.setComponentId(state.getComponent() == null ? null : state.getComponent().getId());
+        response.setMatchedVexAssertionId(assertion.getId());
+        response.setSourceSystem(assertion.getSourceSystem());
+        response.setProvider(assertion.getProvider());
+        response.setStatus(assertion.getStatus());
+        response.setTrustTier(assertion.getTrustTier());
+        response.setFreshness(assertion.getFreshness());
+        response.setDocumentId(assertion.getDocumentId());
+        response.setPackageName(assertion.getPackageName());
+        response.setNormalizedProductKey(assertion.getNormalizedProductKey());
+        response.setVersionExact(assertion.getVersionExact());
+        response.setVersionStart(assertion.getVersionStart());
+        response.setStartInclusive(assertion.getStartInclusive());
+        response.setVersionEnd(assertion.getVersionEnd());
+        response.setEndInclusive(assertion.getEndInclusive());
+        response.setFixedVersion(assertion.getFixedVersion());
+        response.setPublishedAt(assertion.getPublishedAt());
+        response.setLastSeenAt(assertion.getLastSeenAt());
+        response.setImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
+        response.setImpactReason(state.getImpactReason());
+        response.setImpactReasonDetail(state.getImpactReasonDetail());
+        response.setEvidence(parseEvidenceJson(assertion.getEvidenceJson()));
+        return response;
+    }
+
+    private Map<String, Object> parseEvidenceJson(String evidenceJson) {
+        if (evidenceJson == null || evidenceJson.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(evidenceJson, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception ignored) {
+            return Map.of("raw", evidenceJson);
+        }
+    }
+
+    private String preferNonBlank(String primary, String fallback) {
+        return primary != null && !primary.isBlank() ? primary : fallback;
     }
 
     private String nullToEmpty(String s) {
@@ -538,7 +619,18 @@ public class CveDetailController {
         dto.setPackageName(state.getComponent().getPackageName());
         dto.setVersion(state.getComponent().getVersion());
         dto.setApplicabilityState(state.getApplicabilityState());
+        dto.setApplicabilityReason(state.getApplicabilityReason());
+        dto.setApplicabilityReasonDetail(state.getApplicabilityReasonDetail());
         dto.setImpactState(state.getImpactState());
+        dto.setImpactReason(state.getImpactReason());
+        dto.setImpactReasonDetail(state.getImpactReasonDetail());
+        dto.setVexStatus(state.getVexStatus());
+        dto.setVexProvider(state.getVexProvider());
+        dto.setVexFreshness(state.getVexFreshness());
+        dto.setVexSource(state.getVexSource());
+        dto.setMatchedVexAssertionId(state.getMatchedVexAssertionId());
+        dto.setAnalystDisposition(state.getAnalystDisposition() == null ? null : state.getAnalystDisposition().name());
+        dto.setAnalystReason(state.getAnalystReason());
         dto.setMatchedBy(state.getMatchedBy());
         dto.setEligibleForFinding(state.isEligibleForFinding());
         return dto;
@@ -598,6 +690,8 @@ public class CveDetailController {
         private Double cvssScore;
         private String cvssVector;
         private Double epssScore;
+        /** BLG-016: when the EPSS score was last refreshed from the FIRST.org feed. */
+        private Instant epssUpdatedAt;
         private String cweIds;
         private Instant publishedAt;
         private Instant modifiedAt;
@@ -664,9 +758,46 @@ public class CveDetailController {
         private String packageName;
         private String version;
         private ApplicabilityState applicabilityState;
+        private String applicabilityReason;
+        private String applicabilityReasonDetail;
         private ImpactState impactState;
+        private String impactReason;
+        private String impactReasonDetail;
+        private String vexStatus;
+        private String vexProvider;
+        private String vexFreshness;
+        private String vexSource;
+        private UUID matchedVexAssertionId;
+        private String analystDisposition;
+        private String analystReason;
         private String matchedBy;
         private boolean eligibleForFinding;
+    }
+
+    @Data
+    public static class VexEvidenceResponse {
+        private UUID componentId;
+        private UUID matchedVexAssertionId;
+        private String sourceSystem;
+        private String provider;
+        private String status;
+        private String trustTier;
+        private String freshness;
+        private String documentId;
+        private String packageName;
+        private String normalizedProductKey;
+        private String versionExact;
+        private String versionStart;
+        private Boolean startInclusive;
+        private String versionEnd;
+        private Boolean endInclusive;
+        private String fixedVersion;
+        private Instant publishedAt;
+        private Instant lastSeenAt;
+        private String impactState;
+        private String impactReason;
+        private String impactReasonDetail;
+        private Map<String, Object> evidence;
     }
 
     @Data

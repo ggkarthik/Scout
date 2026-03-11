@@ -25,6 +25,9 @@ import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
+import com.prototype.vulnwatch.domain.VulnerabilityTarget;
+import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
+import com.prototype.vulnwatch.domain.VexAssertion;
 import com.prototype.vulnwatch.repo.ApplicabilityAssessmentRepository;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
@@ -33,7 +36,9 @@ import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.InvestigationRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
+import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -101,6 +106,12 @@ class CveDetailControllerPostgresIntegrationTest {
 
     @Autowired
     private OrgCveRecordRepository orgCveRecordRepository;
+
+    @Autowired
+    private VulnerabilityTargetRepository vulnerabilityTargetRepository;
+
+    @Autowired
+    private VexAssertionRepository vexAssertionRepository;
 
     @Test
     void submitEndpointsUseRealTenantAndPersistWorkflowOnPostgres() throws Exception {
@@ -267,6 +278,71 @@ class CveDetailControllerPostgresIntegrationTest {
                 .andExpect(jsonPath("$.summary.externalId").value(cveId))
                 .andExpect(jsonPath("$.matchedSoftware[0].packageName").value("log4j-core"))
                 .andExpect(jsonPath("$.matchedSoftware[0].impactState").value("IMPACTED"));
+    }
+
+    @Test
+    void getVexEvidenceReturnsMatchedAssertionForComponent() throws Exception {
+        String cveId = "CVE-2099-9904";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        Tenant tenant = tenantService.getDefaultTenant();
+        InventoryComponent component = createComponent(tenant, "vex-evidence");
+
+        VulnerabilityTarget target = new VulnerabilityTarget();
+        target.setVulnerability(vulnerability);
+        target.setTargetType(VulnerabilityTargetType.PURL);
+        target.setSource("vex-microsoft");
+        target.setNormalizedTargetKey("pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0");
+        target.setEcosystem("maven");
+        target.setPackageName("log4j-core");
+        target.setVersionExact("2.17.0");
+        target = vulnerabilityTargetRepository.save(target);
+
+        VexAssertion assertion = new VexAssertion();
+        assertion.setVulnerability(vulnerability);
+        assertion.setTarget(target);
+        assertion.setSourceSystem("vex-microsoft");
+        assertion.setProvider("microsoft");
+        assertion.setDocumentId("msrc-2099-9904");
+        assertion.setStatementKey("affected::log4j-core::2.17.0");
+        assertion.setStatus("AFFECTED");
+        assertion.setTrustTier("HIGH");
+        assertion.setFreshness("FRESH");
+        assertion.setNormalizedProductKey("pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0");
+        assertion.setPackageName("log4j-core");
+        assertion.setVersionExact("2.17.0");
+        assertion.setEvidenceJson("""
+                {"advisoryUrl":"https://example.test/msrc-2099-9904.json","actionStatement":"Patch immediately"}
+                """);
+        assertion.setPublishedAt(Instant.parse("2099-01-01T00:00:00Z"));
+        assertion.setLastSeenAt(Instant.parse("2099-01-02T00:00:00Z"));
+        assertion.touch();
+        assertion = vexAssertionRepository.save(assertion);
+
+        ComponentVulnerabilityState state = new ComponentVulnerabilityState();
+        state.setTenant(tenant);
+        state.setComponent(component);
+        state.setVulnerability(vulnerability);
+        state.setApplicabilityState(ApplicabilityState.APPLICABLE);
+        state.setImpactState(ImpactState.IMPACTED);
+        state.setImpactReason("vex_affected");
+        state.setImpactReasonDetail("Vendor VEX marks the exact installed software version as affected.");
+        state.setMatchedVexAssertionId(assertion.getId());
+        state.setEligibleForFinding(true);
+        state.touch();
+        componentVulnerabilityStateRepository.save(state);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/vex-evidence", cveId)
+                        .param("componentId", component.getId().toString())
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matchedVexAssertionId").value(assertion.getId().toString()))
+                .andExpect(jsonPath("$.status").value("AFFECTED"))
+                .andExpect(jsonPath("$.provider").value("microsoft"))
+                .andExpect(jsonPath("$.evidence.advisoryUrl").value("https://example.test/msrc-2099-9904.json"))
+                .andExpect(jsonPath("$.impactReason").value("vex_affected"));
     }
 
     private Vulnerability createVulnerability(String externalId) {

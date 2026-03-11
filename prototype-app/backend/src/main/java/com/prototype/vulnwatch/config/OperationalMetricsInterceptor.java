@@ -92,6 +92,9 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch/github".equals(path)) {
             return OperationalMetricsService.KEY_SBOM_FETCH_GITHUB;
         }
+        if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch/github/ghcr".equals(path)) {
+            return OperationalMetricsService.KEY_SBOM_FETCH_GITHUB;
+        }
         if ("POST".equalsIgnoreCase(method) && "/api/ingestion/nvd-sync".equals(path)) {
             return OperationalMetricsService.KEY_INGESTION_NVD_SYNC;
         }

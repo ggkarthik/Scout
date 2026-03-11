@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.AdvisoryBatchRequest;
+import com.prototype.vulnwatch.dto.GithubAttestationSbomIngestionRequest;
+import com.prototype.vulnwatch.dto.GithubGhcrSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.IngestionResult;
@@ -10,6 +12,7 @@ import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
@@ -70,10 +73,28 @@ public class IngestionController {
         return sbomIngestionService.ingestFromGithub(tenant, request);
     }
 
-    @GetMapping("/sbom-uploads")
-    public List<SbomUploadEvidenceResponse> listSbomUploads() {
+    @PostMapping("/sbom-fetch/github/attestation")
+    public SbomIngestionResponse fetchSbomFromGithubAttestation(
+            @Valid @RequestBody GithubAttestationSbomIngestionRequest request
+    ) throws IOException {
         Tenant tenant = tenantService.getDefaultTenant();
-        return sbomIngestionService.listUploads(tenant);
+        return sbomIngestionService.ingestFromGithubAttestation(tenant, request);
+    }
+
+    @PostMapping("/sbom-fetch/github/ghcr")
+    public SbomIngestionService.GithubGhcrIngestionSummary fetchSbomFromGithubContainerRegistry(
+            @Valid @RequestBody GithubGhcrSbomIngestionRequest request
+    ) throws IOException {
+        Tenant tenant = tenantService.getDefaultTenant();
+        return sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, request.owner());
+    }
+
+    @GetMapping("/sbom-uploads")
+    public List<SbomUploadEvidenceResponse> listSbomUploads(
+            @RequestParam(required = false) String sourceSystem
+    ) {
+        Tenant tenant = tenantService.getDefaultTenant();
+        return sbomIngestionService.listUploads(tenant, sourceSystem);
     }
 
     @PostMapping("/ingestion/nvd-sync")
@@ -104,6 +125,21 @@ public class IngestionController {
     @PostMapping("/ingestion/csaf/redhat-sync")
     public SyncTriggerResponse syncRedhatCsaf() {
         return vulnerabilityIngestionService.triggerRedhatCsafSync();
+    }
+
+    @PostMapping("/ingestion/vex-assertion-repair")
+    public SyncTriggerResponse repairVexAssertions() {
+        return vulnerabilityIngestionService.triggerVexAssertionRepair();
+    }
+
+    @PostMapping("/ingestion/vex-rollout-backfill")
+    public SyncTriggerResponse runVexRolloutBackfill() {
+        return vulnerabilityIngestionService.triggerVexRolloutBackfill();
+    }
+
+    @GetMapping("/ingestion/vex-assertion-repair/summary")
+    public VexAssertionRepairSummaryResponse getVexAssertionRepairSummary() {
+        return vulnerabilityIngestionService.getVexAssertionRepairSummary();
     }
 
     @PostMapping("/ingestion/advisories")
