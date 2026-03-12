@@ -278,7 +278,9 @@ public class CveDetailController {
                 vulnerability,
                 request.getJustification(),
                 userId,
-                parseComponentIds(request.getComponentIds())
+                parseComponentIds(request.getComponentIds()),
+                parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
+                parseAnalystDispositions(request.getComponentAnalystDispositions())
         );
 
         ManualFindingResponse response = new ManualFindingResponse();
@@ -293,7 +295,7 @@ public class CveDetailController {
         } else if (result.alreadyOpenCount() > 0) {
             message = "Findings already open for all selected components. No duplicates created.";
         } else {
-            message = "No eligible components found. Findings require exact applicable inventory correlation plus confirmed impacted or no-patch evidence.";
+            message = "No eligible components found. Findings require either exact impacted or no-patch evidence, or an analyst override marking the component Applicable and Impacted.";
         }
         response.setMessage(message);
         return ResponseEntity.ok(response);
@@ -523,8 +525,21 @@ public class CveDetailController {
     }
 
     private VexEvidenceResponse toVexEvidenceResponse(ComponentVulnerabilityState state, VexAssertion assertion) {
+        Map<String, Object> evidence = parseEvidenceJson(assertion.getEvidenceJson());
         VexEvidenceResponse response = new VexEvidenceResponse();
         response.setComponentId(state.getComponent() == null ? null : state.getComponent().getId());
+        response.setAssetName(state.getComponent() != null && state.getComponent().getAsset() != null
+                ? state.getComponent().getAsset().getName()
+                : null);
+        response.setAssetIdentifier(state.getComponent() != null && state.getComponent().getAsset() != null
+                ? state.getComponent().getAsset().getIdentifier()
+                : null);
+        response.setEcosystem(state.getComponent() == null ? null : state.getComponent().getEcosystem());
+        response.setInstalledVersion(state.getComponent() == null ? null : state.getComponent().getVersion());
+        response.setMatchedBy(state.getMatchedBy());
+        response.setApplicabilityState(state.getApplicabilityState() == null ? null : state.getApplicabilityState().name());
+        response.setApplicabilityReason(state.getApplicabilityReason());
+        response.setApplicabilityReasonDetail(state.getApplicabilityReasonDetail());
         response.setMatchedVexAssertionId(assertion.getId());
         response.setSourceSystem(assertion.getSourceSystem());
         response.setProvider(assertion.getProvider());
@@ -542,10 +557,14 @@ public class CveDetailController {
         response.setFixedVersion(assertion.getFixedVersion());
         response.setPublishedAt(assertion.getPublishedAt());
         response.setLastSeenAt(assertion.getLastSeenAt());
+        response.setEvidenceUrl(extractEvidenceUrl(evidence));
+        response.setComputedImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
+        response.setComputedImpactReason(state.getImpactReason());
+        response.setComputedImpactReasonDetail(state.getImpactReasonDetail());
         response.setImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
         response.setImpactReason(state.getImpactReason());
         response.setImpactReasonDetail(state.getImpactReasonDetail());
-        response.setEvidence(parseEvidenceJson(assertion.getEvidenceJson()));
+        response.setEvidence(evidence);
         return response;
     }
 
@@ -563,6 +582,19 @@ public class CveDetailController {
 
     private String preferNonBlank(String primary, String fallback) {
         return primary != null && !primary.isBlank() ? primary : fallback;
+    }
+
+    private String extractEvidenceUrl(Map<String, Object> evidence) {
+        if (evidence == null || evidence.isEmpty()) {
+            return null;
+        }
+        for (String key : List.of("advisoryUrl", "documentUrl", "url", "referenceUrl")) {
+            Object value = evidence.get(key);
+            if (value instanceof String text && !text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
     }
 
     private String nullToEmpty(String s) {
@@ -592,6 +624,8 @@ public class CveDetailController {
         dto.setVulnerableConfiguration(assessment.getVulnerableConfiguration());
         dto.setFinalResult(assessment.getFinalResult());
         dto.setConfidenceLevel(assessment.getConfidenceLevel());
+        dto.setJustification(assessment.getJustification());
+        dto.setRecommendedAction(assessment.getRecommendedAction());
         dto.setCreatedAt(assessment.getCreatedAt());
         dto.setCompletedAt(assessment.getCompletedAt());
         return dto;
@@ -621,6 +655,9 @@ public class CveDetailController {
         dto.setApplicabilityState(state.getApplicabilityState());
         dto.setApplicabilityReason(state.getApplicabilityReason());
         dto.setApplicabilityReasonDetail(state.getApplicabilityReasonDetail());
+        dto.setComputedImpactState(state.getImpactState());
+        dto.setComputedImpactReason(state.getImpactReason());
+        dto.setComputedImpactReasonDetail(state.getImpactReasonDetail());
         dto.setImpactState(state.getImpactState());
         dto.setImpactReason(state.getImpactReason());
         dto.setImpactReasonDetail(state.getImpactReasonDetail());
@@ -633,7 +670,43 @@ public class CveDetailController {
         dto.setAnalystReason(state.getAnalystReason());
         dto.setMatchedBy(state.getMatchedBy());
         dto.setEligibleForFinding(state.isEligibleForFinding());
+        dto.setFindingEligibilityReason(resolveFindingEligibilityReason(state));
+        dto.setFindingEligibilityDetail(resolveFindingEligibilityDetail(state));
         return dto;
+    }
+
+    private String resolveFindingEligibilityReason(ComponentVulnerabilityState state) {
+        if (state.isEligibleForFinding()) {
+            return state.getImpactState() == ImpactState.NO_PATCH ? "exact_vex_no_patch" : "exact_vex_affected";
+        }
+        if (state.getApplicabilityState() != ApplicabilityState.APPLICABLE) {
+            return "not_applicable";
+        }
+        return switch (state.getImpactState() == null ? ImpactState.UNKNOWN : state.getImpactState()) {
+            case FIXED -> "vex_fixed";
+            case NOT_IMPACTED -> "vex_not_affected";
+            case UNDER_INVESTIGATION -> "vex_under_investigation";
+            case UNKNOWN -> "awaiting_vex_assessment";
+            default -> "not_finding_eligible";
+        };
+    }
+
+    private String resolveFindingEligibilityDetail(ComponentVulnerabilityState state) {
+        if (state.isEligibleForFinding()) {
+            return state.getImpactState() == ImpactState.NO_PATCH
+                    ? "Exact VEX evidence confirms the installed software is affected and no patch is currently available."
+                    : "Exact VEX evidence confirms the installed software is affected for this asset and version.";
+        }
+        if (state.getApplicabilityState() != ApplicabilityState.APPLICABLE) {
+            return "This component is not currently applicable after inventory correlation, so it cannot create a finding.";
+        }
+        return switch (state.getImpactState() == null ? ImpactState.UNKNOWN : state.getImpactState()) {
+            case FIXED -> "Exact VEX evidence indicates the affected condition is fixed for this installed software/version.";
+            case NOT_IMPACTED -> "Exact VEX evidence indicates this installed software/version is not affected.";
+            case UNDER_INVESTIGATION -> "Vendor VEX has not resolved this software/version beyond under investigation.";
+            case UNKNOWN -> "The component is applicable, but there is no exact VEX assertion proving affected or no-patch for this asset software version.";
+            default -> state.getImpactReasonDetail();
+        };
     }
 
     private String generateReport(Vulnerability vulnerability, OrgCveRecord orgCveRecord, String format) {
@@ -733,6 +806,8 @@ public class CveDetailController {
         private Boolean vulnerableConfiguration;
         private ApplicabilityAssessment.AssessmentResult finalResult;
         private ApplicabilityAssessment.ConfidenceLevel confidenceLevel;
+        private String justification;
+        private String recommendedAction;
         private Instant createdAt;
         private Instant completedAt;
     }
@@ -760,6 +835,9 @@ public class CveDetailController {
         private ApplicabilityState applicabilityState;
         private String applicabilityReason;
         private String applicabilityReasonDetail;
+        private ImpactState computedImpactState;
+        private String computedImpactReason;
+        private String computedImpactReasonDetail;
         private ImpactState impactState;
         private String impactReason;
         private String impactReasonDetail;
@@ -772,11 +850,21 @@ public class CveDetailController {
         private String analystReason;
         private String matchedBy;
         private boolean eligibleForFinding;
+        private String findingEligibilityReason;
+        private String findingEligibilityDetail;
     }
 
     @Data
     public static class VexEvidenceResponse {
         private UUID componentId;
+        private String assetName;
+        private String assetIdentifier;
+        private String ecosystem;
+        private String installedVersion;
+        private String matchedBy;
+        private String applicabilityState;
+        private String applicabilityReason;
+        private String applicabilityReasonDetail;
         private UUID matchedVexAssertionId;
         private String sourceSystem;
         private String provider;
@@ -794,6 +882,10 @@ public class CveDetailController {
         private String fixedVersion;
         private Instant publishedAt;
         private Instant lastSeenAt;
+        private String evidenceUrl;
+        private String computedImpactState;
+        private String computedImpactReason;
+        private String computedImpactReasonDetail;
         private String impactState;
         private String impactReason;
         private String impactReasonDetail;
@@ -811,6 +903,8 @@ public class CveDetailController {
         private FindingStatus status;
         private String justification;
         private List<String> componentIds;
+        private Map<String, String> componentApplicabilityDecisions;
+        private Map<String, String> componentAnalystDispositions;
     }
 
     @Data
@@ -887,6 +981,56 @@ public class CveDetailController {
             } catch (IllegalArgumentException ex) {
                 throw new IllegalArgumentException("Invalid componentId: " + componentId);
             }
+        }
+        return parsed;
+    }
+
+    private Map<UUID, ApplicabilityState> parseApplicabilityDecisions(Map<String, String> decisions) {
+        if (decisions == null || decisions.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, ApplicabilityState> parsed = new HashMap<>();
+        for (Map.Entry<String, String> entry : decisions.entrySet()) {
+            if (!hasText(entry.getKey()) || !hasText(entry.getValue())) {
+                continue;
+            }
+            UUID componentId;
+            try {
+                componentId = UUID.fromString(entry.getKey().trim());
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Invalid componentId: " + entry.getKey());
+            }
+            ApplicabilityState state = switch (entry.getValue().trim().toUpperCase()) {
+                case "APPLICABLE" -> ApplicabilityState.APPLICABLE;
+                case "NOT_APPLICABLE" -> ApplicabilityState.NOT_APPLICABLE;
+                default -> ApplicabilityState.UNKNOWN;
+            };
+            parsed.put(componentId, state);
+        }
+        return parsed;
+    }
+
+    private Map<UUID, AnalystDisposition> parseAnalystDispositions(Map<String, String> decisions) {
+        if (decisions == null || decisions.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, AnalystDisposition> parsed = new HashMap<>();
+        for (Map.Entry<String, String> entry : decisions.entrySet()) {
+            if (!hasText(entry.getKey()) || !hasText(entry.getValue())) {
+                continue;
+            }
+            UUID componentId;
+            try {
+                componentId = UUID.fromString(entry.getKey().trim());
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Invalid componentId: " + entry.getKey());
+            }
+            AnalystDisposition disposition = switch (entry.getValue().trim().toUpperCase()) {
+                case "IMPACTED" -> AnalystDisposition.IMPACTED;
+                case "NOT_IMPACTED" -> AnalystDisposition.NOT_IMPACTED;
+                default -> AnalystDisposition.UNKNOWN;
+            };
+            parsed.put(componentId, disposition);
         }
         return parsed;
     }

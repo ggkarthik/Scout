@@ -662,6 +662,8 @@ export function FindingsPage() {
                     <th>Severity</th>
                     <th>Status</th>
                     <th>Decision</th>
+                    <th>VEX</th>
+                    <th>Impact Reason</th>
                     <th>Risk</th>
                     <th>Confidence</th>
                     <th>Match Method</th>
@@ -696,10 +698,20 @@ export function FindingsPage() {
                       <td>
                         <span className="match-pill">{row.decisionState}</span>
                       </td>
+                      <td>
+                        <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
+                        <div className="panel-caption">
+                          {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
+                        </div>
+                      </td>
+                      <td>{row.impactReason ? formatLabel(row.impactReason) : '-'}</td>
                       <td className="confidence-cell">{row.riskScore.toFixed(2)}</td>
                       <td className="confidence-cell">{(row.confidenceScore * 100).toFixed(1)}%</td>
                       <td>
                         <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
+                        {row.matchedVexAssertionId && (
+                          <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
+                        )}
                       </td>
                       <td>{row.inKev ? 'Yes' : 'No'}</td>
                       <td>{row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-'}</td>

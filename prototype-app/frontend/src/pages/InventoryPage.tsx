@@ -44,7 +44,7 @@ const VULNERABILITY_INTEL_PAGE_SIZE = 25;
 const COMPONENTS_PAGE_SIZE = 25;
 const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
   severities: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE', 'UNKNOWN'],
-  sources: ['nvd', 'kev', 'ghsa', 'csaf-microsoft', 'csaf-redhat', 'advisory'],
+  sources: ['nvd', 'kev', 'ghsa', 'msrc', 'redhat', 'advisory'],
   vulnStatuses: ['KNOWN_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'NOT_AFFECTED', 'UNKNOWN'],
   inKevValues: ['true', 'false']
 };
@@ -145,6 +145,8 @@ const SOURCE_LABELS: Record<string, string> = {
   nvd: 'NVD',
   kev: 'KEV (CISA)',
   ghsa: 'GHSA',
+  msrc: 'MSRC',
+  redhat: 'Red Hat',
   'csaf-microsoft': 'MSRC CSAF',
   'vex-microsoft': 'MSRC VEX',
   'csaf-redhat': 'Red Hat CSAF',
@@ -229,6 +231,22 @@ function formatInventoryLabel(value: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function formatVexCoverage(value?: VulnerabilityIntelRecord['vexCoverage'] | VulnerabilityIntelDetail['vexCoverage']): string {
+  if (!value) {
+    return 'None';
+  }
+  if (value === 'EXACT_MATCH') return 'Exact Match';
+  if (value === 'VENDOR_ONLY') return 'Vendor Only';
+  return formatInventoryLabel(value);
+}
+
+function vexCoverageClass(value?: VulnerabilityIntelRecord['vexCoverage'] | VulnerabilityIntelDetail['vexCoverage']): string {
+  if (value === 'EXACT_MATCH') return 'status-open';
+  if (value === 'MIXED') return 'status-in-progress';
+  if (value === 'VENDOR_ONLY') return 'status-suppressed';
+  return 'status-auto_closed';
+}
+
 function canonicalVulnerabilitySource(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, '-');
   if (normalized === 'microsoft-csaf' || normalized === 'msrc-csaf' || normalized === 'msrc-csaf-advisory') return 'csaf-microsoft';
@@ -239,6 +257,32 @@ function canonicalVulnerabilitySource(value: string): string {
   if (normalized === 'github-advisory') return 'ghsa';
   if (normalized === 'advisories' || normalized === 'vendor-advisory') return 'advisory';
   return normalized;
+}
+
+function vulnerabilitySourceFilterValue(value: string): string {
+  const canonical = canonicalVulnerabilitySource(value);
+  if (canonical === 'csaf-microsoft' || canonical === 'vex-microsoft') return 'msrc';
+  if (canonical === 'csaf-redhat' || canonical === 'vex-redhat') return 'redhat';
+  return canonical;
+}
+
+function expandVulnerabilitySourceFilters(values: string[]): string[] {
+  const expanded = new Set<string>();
+  values.forEach((value) => {
+    const normalized = vulnerabilitySourceFilterValue(value);
+    if (normalized === 'msrc') {
+      expanded.add('csaf-microsoft');
+      expanded.add('vex-microsoft');
+      return;
+    }
+    if (normalized === 'redhat') {
+      expanded.add('csaf-redhat');
+      expanded.add('vex-redhat');
+      return;
+    }
+    expanded.add(normalized);
+  });
+  return Array.from(expanded);
 }
 
 export function InventoryPage({ selectedView }: Props) {
@@ -355,19 +399,19 @@ export function InventoryPage({ selectedView }: Props) {
     DEFAULT_VULNERABILITY_INTEL_FILTERS.sources.forEach((source) => values.add(source));
     vulnerabilityIntelFilterValues.sources.forEach((source) => {
       if (source && source.trim().length > 0) {
-        values.add(canonicalVulnerabilitySource(source));
+        values.add(vulnerabilitySourceFilterValue(source));
       }
     });
     vulnerabilityIntelRows.forEach((record) => {
       record.sources.forEach((source) => {
         if (source && source.trim().length > 0) {
-          values.add(canonicalVulnerabilitySource(source));
+          values.add(vulnerabilitySourceFilterValue(source));
         }
       });
     });
     vulnerabilityIntelSources.forEach((source) => {
       if (source && source.trim().length > 0) {
-        values.add(canonicalVulnerabilitySource(source));
+        values.add(vulnerabilitySourceFilterValue(source));
       }
     });
     return Array.from(values)
@@ -566,7 +610,7 @@ export function InventoryPage({ selectedView }: Props) {
           size: VULNERABILITY_INTEL_PAGE_SIZE,
           query: debouncedVulnerabilityIntelQuery.trim() || undefined,
           severity: vulnerabilityIntelSeverities.length > 0 ? vulnerabilityIntelSeverities : undefined,
-          source: vulnerabilityIntelSources.length > 0 ? vulnerabilityIntelSources : undefined,
+          source: vulnerabilityIntelSources.length > 0 ? expandVulnerabilitySourceFilters(vulnerabilityIntelSources) : undefined,
           vulnStatus: vulnerabilityIntelStatuses.length > 0 ? vulnerabilityIntelStatuses : undefined,
           inKev: vulnerabilityIntelInKevFilter
         });
@@ -602,9 +646,9 @@ export function InventoryPage({ selectedView }: Props) {
                   .map((value) => value.trim().toUpperCase())
               )),
               sources: Array.from(new Set(
-                (availableFilters.sources || [])
+              (availableFilters.sources || [])
                   .filter((value) => value && value.trim().length > 0)
-                  .map((value) => canonicalVulnerabilitySource(value))
+                  .map((value) => vulnerabilitySourceFilterValue(value))
               )),
               vulnStatuses: Array.from(new Set(
                 (availableFilters.vulnStatuses || [])
@@ -1278,6 +1322,16 @@ export function InventoryPage({ selectedView }: Props) {
                   <div><strong>Source Count:</strong> {selectedVulnerabilityIntelDetail.sourceCount}</div>
                   <div><strong>Open Findings:</strong> {selectedVulnerabilityIntelDetail.openFindings}</div>
                   <div><strong>Sources:</strong> {selectedVulnerabilityIntelDetail.sources.map(formatSourceSystem).join(', ') || '-'}</div>
+                  <div>
+                    <strong>VEX Coverage:</strong>{' '}
+                    <span className={`status-pill ${vexCoverageClass(selectedVulnerabilityIntelDetail.vexCoverage)}`}>
+                      {formatVexCoverage(selectedVulnerabilityIntelDetail.vexCoverage)}
+                    </span>
+                  </div>
+                  <div>
+                    <strong>VEX Package Coverage:</strong> {selectedVulnerabilityIntelDetail.vexCoveredPackageCount}/
+                    {selectedVulnerabilityIntelDetail.vexPackageCount}
+                  </div>
                 </div>
                 {selectedVulnerabilityIntelDetail.affectedPackages && selectedVulnerabilityIntelDetail.affectedPackages.length > 0 && (
                   <div className="section-block">
@@ -1292,6 +1346,8 @@ export function InventoryPage({ selectedView }: Props) {
                             <th>Fixed In</th>
                             <th>CPE</th>
                             <th>VEX Status</th>
+                            <th>VEX Source</th>
+                            <th>Provider</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1303,6 +1359,55 @@ export function InventoryPage({ selectedView }: Props) {
                               <td className="mono">{pkg.fixedVersion ?? '-'}</td>
                               <td className="mono">{pkg.cpe ?? '-'}</td>
                               <td>{pkg.vexStatus ?? '-'}</td>
+                              <td>{pkg.vexSource ? formatSourceSystem(pkg.vexSource) : '-'}</td>
+                              <td>{pkg.vexProvider ?? '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </ResizableTable>
+                    </div>
+                  </div>
+                )}
+                {selectedVulnerabilityIntelDetail.vexEvidence && selectedVulnerabilityIntelDetail.vexEvidence.length > 0 && (
+                  <div className="section-block">
+                    <h4 className="section-title">VEX Evidence</h4>
+                    <div className="table-scroll">
+                      <ResizableTable storageKey="inventory-vuln-intel-vex-evidence-widths">
+                        <thead>
+                          <tr>
+                            <th>Package</th>
+                            <th>Ecosystem</th>
+                            <th>Affected Versions</th>
+                            <th>Fixed In</th>
+                            <th>Source</th>
+                            <th>Provider</th>
+                            <th>Status</th>
+                            <th>Trust</th>
+                            <th>Freshness</th>
+                            <th>Document</th>
+                            <th>Evidence</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedVulnerabilityIntelDetail.vexEvidence.map((evidence) => (
+                            <tr key={evidence.assertionId}>
+                              <td className="mono">{evidence.packageName ?? evidence.normalizedProductKey ?? '-'}</td>
+                              <td>{evidence.ecosystem ?? '-'}</td>
+                              <td className="mono">{evidence.affectedVersions ?? '-'}</td>
+                              <td className="mono">{evidence.fixedVersion ?? '-'}</td>
+                              <td>{formatSourceSystem(evidence.sourceSystem)}</td>
+                              <td>{evidence.provider ?? '-'}</td>
+                              <td>{formatInventoryLabel(evidence.status)}</td>
+                              <td>{formatInventoryLabel(evidence.trustTier)}</td>
+                              <td>{formatInventoryLabel(evidence.freshness)}</td>
+                              <td className="mono">{evidence.documentId}</td>
+                              <td className="mono">
+                                {evidence.evidenceUrl ? (
+                                  <a href={evidence.evidenceUrl} target="_blank" rel="noreferrer">
+                                    Open
+                                  </a>
+                                ) : '-'}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

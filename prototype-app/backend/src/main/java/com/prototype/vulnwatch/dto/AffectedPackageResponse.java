@@ -6,6 +6,11 @@ public record AffectedPackageResponse(
         String affectedVersions,
         String fixedVersion,
         String cpe,
-        String vexStatus
+        String vexStatus,
+        String vexSource,
+        String vexProvider,
+        String vexFreshness,
+        String vexDocumentId,
+        String vexEvidenceUrl
 ) {
 }

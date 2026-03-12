@@ -53,6 +53,11 @@ export type Finding = {
   suppressedUntil?: string;
   evidence: string;
   precedenceTrace?: string;
+  vexStatus?: string;
+  vexProvider?: string;
+  vexFreshness?: string;
+  matchedVexAssertionId?: string;
+  impactReason?: string;
   firstObservedAt: string;
   lastObservedAt: string;
   decisionState: 'AFFECTED' | 'NOT_AFFECTED' | 'FIXED' | 'UNDER_INVESTIGATION' | 'NEEDS_REVIEW';
@@ -104,6 +109,12 @@ export type DashboardCsafVexAnalytics = {
   csafPartialFailureRunsLast30Days: number;
   csafNormalizationSuccessRate: number;
   csafPartialFailureRate: number;
+  activeVexCoveragePercent: number;
+  activeVexMatchedStateCount: number;
+  activeApplicableAwaitingVexCount: number;
+  activeVexConfirmedImpactedCount: number;
+  activeVexConfirmedNotAffectedCount: number;
+  activeVexNoPatchCount: number;
   findingsSuppressedByVex: number;
   suppressedByStaleVex: number;
   underInvestigationAging: number;
@@ -135,6 +146,8 @@ export type ApplicableSoftwareRecord = {
   packageName: string;
   version: string;
   applicableCveCount: number;
+  awaitingVexCveCount: number;
+  vexMatchedCveCount: number;
   impactedCveCount: number;
   noPatchCveCount: number;
   lastEvaluatedAt?: string;
@@ -551,6 +564,30 @@ export type AffectedPackage = {
   fixedVersion?: string;
   cpe?: string;
   vexStatus?: string;
+  vexSource?: string;
+  vexProvider?: string;
+  vexFreshness?: string;
+  vexDocumentId?: string;
+  vexEvidenceUrl?: string;
+};
+
+export type VulnerabilityIntelVexEvidence = {
+  assertionId: string;
+  sourceSystem: string;
+  provider: string;
+  status: string;
+  trustTier: string;
+  freshness: string;
+  ecosystem?: string;
+  packageName?: string;
+  affectedVersions?: string;
+  fixedVersion?: string;
+  normalizedProductKey?: string;
+  cpe?: string;
+  documentId: string;
+  evidenceUrl?: string;
+  publishedAt?: string;
+  lastSeenAt?: string;
 };
 
 export type VulnerabilityIntelRecord = {
@@ -569,6 +606,9 @@ export type VulnerabilityIntelRecord = {
   publishedAt?: string;
   lastModifiedAt?: string;
   updatedAt: string;
+  vexCoverage: 'EXACT_MATCH' | 'MIXED' | 'VENDOR_ONLY' | 'NONE';
+  vexCoveredPackageCount: number;
+  vexPackageCount: number;
   affectedPackages: AffectedPackage[];
 };
 
@@ -614,8 +654,12 @@ export type VulnerabilityIntelDetail = {
   sourceCount: number;
   sources: string[];
   openFindings: number;
+  vexCoverage: 'EXACT_MATCH' | 'MIXED' | 'VENDOR_ONLY' | 'NONE';
+  vexCoveredPackageCount: number;
+  vexPackageCount: number;
   observations: VulnerabilityIntelObservation[];
   affectedPackages: AffectedPackage[];
+  vexEvidence: VulnerabilityIntelVexEvidence[];
 };
 
 export type VulnerabilityIntelPage = {

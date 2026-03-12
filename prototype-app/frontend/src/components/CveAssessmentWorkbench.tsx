@@ -1,6 +1,30 @@
 import React from 'react';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import {
+  applicableSoftwareRows,
+  buildFindingDisplayRows,
+  buildSoftwareGroups,
+  computedImpactStateOf,
+  confidenceFromApplicability,
+  deriveAssessmentResult,
+  exactMatchMeta,
+  explainApplicability,
+  explainImpact,
+  hasPersistedVexEvidence,
+  impactBadgeClass,
+  impactLabel,
+  initialApplicabilityDecision,
+  latestByDate,
+  matchBasisLabel,
+  parseCvssVector,
+  priorityFromSeverityAndImpact,
+  type ApplicabilityDecision,
+  type FindingDisplayRow,
+  type ImpactDecision,
+  type SoftwareGroup,
+  vendorStatementFor,
+} from '../features/cve-workbench/assessment-helpers';
+import {
   formatDate,
   formatLabel,
   severityClassName,
@@ -15,7 +39,6 @@ import {
   OrgSpecificCveExposureRecord,
 } from '../features/cve-workbench/types';
 import {
-  AssessmentResult,
   InvestigationPriority,
   InvestigationStatus,
 } from '../features/cve-workbench/workflow';
@@ -23,8 +46,6 @@ import type { VendorIntelligence } from '../features/cve-workbench/types';
 import type { RiskPolicy } from '../types';
 
 type WorkflowStep = 1 | 2 | 3;
-type ApplicabilityDecision = 'APPLICABLE' | 'NOT_APPLICABLE' | 'NEEDS_REVIEW';
-type ImpactDecision = 'IMPACTED' | 'NOT_IMPACTED' | 'UNKNOWN';
 
 type Props = {
   item: OrgSpecificCveExposureRecord;
@@ -36,137 +57,9 @@ type Props = {
   onRefreshDetail: () => Promise<void>;
 };
 
-// --- Helpers ---
-
 const AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
 const PR_LABELS: Record<string, string> = { N: 'None', L: 'Low', H: 'High' };
 const UI_LABELS: Record<string, string> = { N: 'None', R: 'Required' };
-
-function parseCvssVector(vector?: string): Record<string, string> {
-  if (!vector) return {};
-  const result: Record<string, string> = {};
-  for (const part of vector.split('/')) {
-    const [key, value] = part.split(':');
-    if (key && value) result[key] = value;
-  }
-  return result;
-}
-
-function confidenceFromApplicability(state?: string): 'high' | 'medium' | 'low' {
-  if (state === 'APPLICABLE') return 'high';
-  if (state === 'UNKNOWN') return 'medium';
-  return 'low';
-}
-
-function matchBasisLabel(matchedBy?: string): string {
-  if (!matchedBy) return 'Unknown';
-  const n = matchedBy.toLowerCase();
-  if (n.includes('version')) return 'Vendor + Product + Version';
-  if (n.includes('product') && n.includes('vendor')) return 'Vendor + Product';
-  if (n.includes('cpe')) return 'CPE Correlation';
-  if (n.includes('alias')) return 'Product Alias';
-  return formatLabel(matchedBy);
-}
-
-type SoftwareGroup = { software: CveMatchedSoftware; assets: CveMatchedSoftware[] };
-
-function buildSoftwareGroups(software: CveMatchedSoftware[]): SoftwareGroup[] {
-  const groups = new Map<string, SoftwareGroup>();
-  for (const s of software) {
-    const key = `${s.packageName}@${s.version}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.assets.push(s);
-    } else {
-      groups.set(key, { software: s, assets: [s] });
-    }
-  }
-  return Array.from(groups.values());
-}
-
-function impactBadgeClass(state?: string): string {
-  switch ((state ?? '').toUpperCase()) {
-    case 'IMPACTED': return 'impact-impacted';
-    case 'NO_PATCH': return 'impact-no-patch';
-    case 'FIXED': return 'impact-fixed';
-    case 'NOT_IMPACTED': return 'impact-not-impacted';
-    case 'UNDER_INVESTIGATION': return 'impact-unknown';
-    default: return 'impact-unknown';
-  }
-}
-
-function impactLabel(state?: string): string {
-  switch ((state ?? '').toUpperCase()) {
-    case 'IMPACTED': return 'Impacted';
-    case 'NO_PATCH': return 'No Patch';
-    case 'FIXED': return 'Fixed';
-    case 'NOT_IMPACTED': return 'Not Impacted';
-    case 'UNDER_INVESTIGATION': return 'Under Investigation';
-    default: return 'Unknown';
-  }
-}
-
-function explainImpact(software: CveMatchedSoftware): string {
-  return software.impactReasonDetail ?? software.impactReason ?? 'No impact evidence available.';
-}
-
-function explainApplicability(software: CveMatchedSoftware): string {
-  return software.applicabilityReasonDetail ?? software.applicabilityReason ?? 'No applicability evidence available.';
-}
-
-function vendorStatementFor(software: CveMatchedSoftware): string {
-  if (software.vexStatus) return formatLabel(software.vexStatus);
-  if (software.impactState === 'UNKNOWN') return 'Awaiting exact VEX';
-  return 'No exact VEX evidence';
-}
-
-function patchStateFor(software: CveMatchedSoftware): string {
-  if (software.impactState === 'NO_PATCH') return 'No Patch';
-  if (software.impactState === 'FIXED') return 'Fixed';
-  if (software.vexFreshness) return formatLabel(software.vexFreshness);
-  return 'Unknown';
-}
-
-function latestByDate<T extends { updatedAt?: string; completedAt?: string; createdAt: string }>(items: T[]): T | null {
-  if (items.length === 0) return null;
-  return [...items].sort((a, b) => {
-    const at = Date.parse(a.updatedAt ?? a.completedAt ?? a.createdAt);
-    const bt = Date.parse(b.updatedAt ?? b.completedAt ?? b.createdAt);
-    return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at);
-  })[0] ?? null;
-}
-
-function initialApplicabilityDecision(state?: string): ApplicabilityDecision {
-  if (state === 'APPLICABLE') return 'APPLICABLE';
-  if (state === 'NOT_APPLICABLE') return 'NOT_APPLICABLE';
-  return 'NEEDS_REVIEW';
-}
-
-function deriveAssessmentResult(
-  matchedSoftware: CveMatchedSoftware[],
-  applicabilityDecisions: Map<string, ApplicabilityDecision>,
-  impactDecisions: Map<string, ImpactDecision>
-): AssessmentResult {
-  const applicable = matchedSoftware.filter(
-    (s) => applicabilityDecisions.get(s.componentId) === 'APPLICABLE'
-  );
-  if (applicable.length === 0) return 'NOT_AFFECTED';
-  const impacted = applicable.some((s) => impactDecisions.get(s.componentId) === 'IMPACTED');
-  if (impacted) return 'AFFECTED';
-  const allNotImpacted = applicable.every((s) => impactDecisions.get(s.componentId) === 'NOT_IMPACTED');
-  if (allNotImpacted) return 'NOT_AFFECTED';
-  return 'UNDER_INVESTIGATION';
-}
-
-// --- Findings helpers ---
-
-
-function priorityFromSeverityAndImpact(severity: string, impactState: string): string {
-  if (impactState === 'IMPACTED') return severity;
-  if (impactState === 'NO_PATCH') return 'HIGH';
-  if (impactState === 'FIXED' || impactState === 'NOT_IMPACTED') return 'LOW';
-  return 'MEDIUM';
-}
 
 // --- CVE Summary Sidebar (step 1) ---
 
@@ -364,7 +257,7 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
         <div className="cve-source-badges">
           {detail.summary.source && <span className="cve-source-badge">{detail.summary.source}</span>}
           {item.inKev && <span className="cve-source-badge kev">KEV</span>}
-          {detail.signals.exploitAvailable && <span className="cve-source-badge csaf">VEX</span>}
+          {hasPersistedVexEvidence(detail) && <span className="cve-source-badge csaf">VEX</span>}
           {detail.summary.cvssVector && <span className="cve-source-badge">CVSS</span>}
         </div>
       </div>
@@ -452,7 +345,6 @@ function InvestigationContent({
               <tr>
                 <th>Software</th>
                 <th>Version</th>
-                <th>Impact</th>
                 <th>Assets</th>
                 <th>Match Basis</th>
                 <th>Confidence</th>
@@ -476,12 +368,6 @@ function InvestigationContent({
                         </div>
                       </td>
                       <td className="mono">{software.version}</td>
-                      <td>
-                        <span className={`cve-impact-badge ${impactBadgeClass(software.impactState)}`}>
-                          {impactLabel(software.impactState)}
-                        </span>
-                        <div className="panel-caption">{explainImpact(software)}</div>
-                      </td>
                       <td>{assets.length}</td>
                       <td>{matchBasisLabel(software.matchedBy)}</td>
                       <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
@@ -498,14 +384,13 @@ function InvestigationContent({
                     </tr>
                     {isExpanded && (
                       <tr className="cve-assets-expansion-row">
-                        <td colSpan={7}>
+                        <td colSpan={6}>
                           <div className="cve-assets-expansion">
                             <table className="cve-assets-mini-table">
                               <thead>
                                 <tr>
                                   <th>Asset</th>
                                   <th>Identifier</th>
-                                  <th>Impact</th>
                                   <th>Finding</th>
                                 </tr>
                               </thead>
@@ -514,12 +399,6 @@ function InvestigationContent({
                                   <tr key={asset.componentId}>
                                     <td>{asset.assetName ?? <span className="cve-muted">—</span>}</td>
                                     <td className="mono">{asset.assetIdentifier ?? <span className="cve-muted">—</span>}</td>
-                                    <td>
-                                      <span className={`cve-impact-badge ${impactBadgeClass(asset.impactState)}`}>
-                                        {impactLabel(asset.impactState)}
-                                      </span>
-                                      <div className="panel-caption">{explainImpact(asset)}</div>
-                                    </td>
                                     <td>
                                       {asset.eligibleForFinding
                                         ? <span className="cve-finding-eligible-tag">Finding eligible</span>
@@ -731,23 +610,26 @@ function ApplicabilityTable({
               <tr>
                 <th>Applicable Software</th>
                 <th>Asset</th>
-                <th>Vendor Statement / VEX</th>
-                <th>Patch State</th>
-                <th>Impact Decision</th>
+                <th>Exact Match</th>
+                <th>Analyst Disposition</th>
               </tr>
             </thead>
             <tbody>
               {applicableSoftware.map((sw) => {
                 const impact = impactDecisions.get(sw.componentId) ?? 'UNKNOWN';
+                const exactMatchMetaLine = exactMatchMeta(sw);
                 return (
                   <tr key={sw.componentId}>
                     <td>
                       <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
-                      <div className="panel-caption">{explainImpact(sw)}</div>
+                      <div className="panel-caption">{explainApplicability(sw)}</div>
                     </td>
                     <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
                     <td className="cve-decision-table-muted">
                       <div>{vendorStatementFor(sw)}</div>
+                      {exactMatchMetaLine && (
+                        <div className="panel-caption">{exactMatchMetaLine}</div>
+                      )}
                       {sw.matchedVexAssertionId && (
                         <div className="panel-caption">
                           <button
@@ -766,6 +648,12 @@ function ApplicabilityTable({
                           {vexEvidenceByComponent[sw.componentId] && (
                             <>
                               <div>
+                                Asset: {vexEvidenceByComponent[sw.componentId]?.assetName ?? vexEvidenceByComponent[sw.componentId]?.assetIdentifier ?? '—'}
+                              </div>
+                              <div>
+                                Software: {vexEvidenceByComponent[sw.componentId]?.packageName ?? sw.packageName} {vexEvidenceByComponent[sw.componentId]?.installedVersion ?? sw.version ?? ''}
+                              </div>
+                              <div>
                                 {formatLabel(vexEvidenceByComponent[sw.componentId]?.provider)} / {formatLabel(vexEvidenceByComponent[sw.componentId]?.status)}
                               </div>
                               <div>
@@ -774,15 +662,14 @@ function ApplicabilityTable({
                               {vexEvidenceByComponent[sw.componentId]?.documentId && (
                                 <div>Document: {vexEvidenceByComponent[sw.componentId]?.documentId}</div>
                               )}
-                              {typeof vexEvidenceByComponent[sw.componentId]?.evidence?.advisoryUrl === 'string' && (
-                                <div>{String(vexEvidenceByComponent[sw.componentId]?.evidence?.advisoryUrl)}</div>
+                              {vexEvidenceByComponent[sw.componentId]?.evidenceUrl && (
+                                <div>{vexEvidenceByComponent[sw.componentId]?.evidenceUrl}</div>
                               )}
                             </>
                           )}
                         </div>
                       )}
                     </td>
-                    <td><span className="cve-patch-badge">{patchStateFor(sw)}</span></td>
                     <td>
                       <div className="cve-decision-btn-group">
                         <button
@@ -852,9 +739,22 @@ function DecisionSummary({
   const needsReviewCount = matchedSoftware.filter((s) => (applicabilityDecisions.get(s.componentId) ?? 'NEEDS_REVIEW') === 'NEEDS_REVIEW').length;
 
   const applicableSoftware = matchedSoftware.filter((s) => applicabilityDecisions.get(s.componentId) === 'APPLICABLE');
-  const impactedCount = applicableSoftware.filter((s) => impactDecisions.get(s.componentId) === 'IMPACTED').length;
-  const notImpactedCount = applicableSoftware.filter((s) => impactDecisions.get(s.componentId) === 'NOT_IMPACTED').length;
-  const unknownImpactCount = applicableSoftware.filter((s) => (impactDecisions.get(s.componentId) ?? 'UNKNOWN') === 'UNKNOWN').length;
+  const computedImpactedCount = applicableSoftware.filter((s) => {
+    const state = computedImpactStateOf(s);
+    return state === 'IMPACTED' || state === 'NO_PATCH';
+  }).length;
+  const computedNotImpactedCount = applicableSoftware.filter((s) => {
+    const state = computedImpactStateOf(s);
+    return state === 'NOT_IMPACTED' || state === 'FIXED';
+  }).length;
+  const computedUnknownCount = applicableSoftware.filter((s) => {
+    const state = computedImpactStateOf(s);
+    return state === 'UNKNOWN' || state === 'UNDER_INVESTIGATION';
+  }).length;
+  const findingEligibleCount = applicableSoftware.filter((s) => s.eligibleForFinding).length;
+  const analystImpactedCount = applicableSoftware.filter((s) => impactDecisions.get(s.componentId) === 'IMPACTED').length;
+  const analystNotImpactedCount = applicableSoftware.filter((s) => impactDecisions.get(s.componentId) === 'NOT_IMPACTED').length;
+  const analystUnknownCount = applicableSoftware.filter((s) => (impactDecisions.get(s.componentId) ?? 'UNKNOWN') === 'UNKNOWN').length;
 
   const reviewedAt = latestAssessment?.completedAt ?? latestAssessment?.createdAt;
 
@@ -880,18 +780,38 @@ function DecisionSummary({
         </div>
 
         <div className="cve-decision-summary-section">
-          <div className="cve-decision-summary-section-title">Impact</div>
+          <div className="cve-decision-summary-section-title">Computed Impact</div>
           <div className="cve-decision-summary-row">
             <span>Impacted</span>
-            <CountBadge count={impactedCount} variant={impactedCount > 0 ? 'red' : 'grey'} />
+            <CountBadge count={computedImpactedCount} variant={computedImpactedCount > 0 ? 'red' : 'grey'} />
           </div>
           <div className="cve-decision-summary-row">
             <span>Not Impacted</span>
-            <CountBadge count={notImpactedCount} />
+            <CountBadge count={computedNotImpactedCount} />
           </div>
           <div className="cve-decision-summary-row">
             <span>Unknown</span>
-            <CountBadge count={unknownImpactCount} />
+            <CountBadge count={computedUnknownCount} />
+          </div>
+          <div className="cve-decision-summary-row">
+            <span>Finding Eligible</span>
+            <CountBadge count={findingEligibleCount} variant={findingEligibleCount > 0 ? 'green' : 'grey'} />
+          </div>
+        </div>
+
+        <div className="cve-decision-summary-section">
+          <div className="cve-decision-summary-section-title">Analyst Disposition</div>
+          <div className="cve-decision-summary-row">
+            <span>Impacted</span>
+            <CountBadge count={analystImpactedCount} variant={analystImpactedCount > 0 ? 'red' : 'grey'} />
+          </div>
+          <div className="cve-decision-summary-row">
+            <span>Not Impacted</span>
+            <CountBadge count={analystNotImpactedCount} />
+          </div>
+          <div className="cve-decision-summary-row">
+            <span>Unknown</span>
+            <CountBadge count={analystUnknownCount} />
           </div>
         </div>
 
@@ -939,7 +859,7 @@ function DecisionSummary({
 // --- Findings Content (step 3) ---
 
 type FindingsContentProps = {
-  filteredSoftware: CveMatchedSoftware[];
+  filteredSoftware: FindingDisplayRow[];
   selectedIds: Set<string>;
   groupBy: 'ASSET' | 'SOFTWARE';
   showFilter: 'ALL' | 'IMPACTED_ONLY';
@@ -955,8 +875,9 @@ function FindingsContent({
   filteredSoftware, selectedIds, groupBy, showFilter, severity,
   onToggleRow, onSelectAll, onClearAll, onGroupByChange, onShowFilterChange,
 }: FindingsContentProps) {
-  const allSelected = filteredSoftware.length > 0 && filteredSoftware.every((s) => selectedIds.has(s.componentId));
-  const someSelected = filteredSoftware.some((s) => selectedIds.has(s.componentId));
+  const selectableRows = filteredSoftware.filter((row) => row.selectable);
+  const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.software.componentId));
+  const someSelected = selectableRows.some((row) => selectedIds.has(row.software.componentId));
 
   return (
     <div className="cve-findings-selection-panel">
@@ -971,8 +892,8 @@ function FindingsContent({
         <div className="cve-findings-filter-item">
           <label htmlFor="findings-show">Show:</label>
           <select id="findings-show" value={showFilter} onChange={(e) => onShowFilterChange(e.target.value as 'ALL' | 'IMPACTED_ONLY')}>
-            <option value="IMPACTED_ONLY">Impacted only</option>
-            <option value="ALL">All eligible</option>
+            <option value="IMPACTED_ONLY">Finding eligible only</option>
+            <option value="ALL">Show excluded rows</option>
           </select>
         </div>
         <div className="cve-findings-filter-links">
@@ -984,7 +905,7 @@ function FindingsContent({
       <div className="cve-findings-asset-section">
         <div className="cve-findings-asset-section-header">
           <h4>Select Assets for Finding Creation</h4>
-          <p className="panel-caption">Choose which impacted assets should have findings created</p>
+          <p className="panel-caption">Choose which applicable assets should have findings created, including analyst-confirmed impacted overrides.</p>
         </div>
 
         <table className="cve-findings-asset-table">
@@ -996,27 +917,36 @@ function FindingsContent({
                   checked={allSelected}
                   ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                   onChange={() => { if (allSelected) onClearAll(); else onSelectAll(); }}
+                  disabled={selectableRows.length === 0}
                 />
               </th>
               <th>ASSET / CI</th>
               <th>SOFTWARE</th>
               <th>APPLICABILITY</th>
               <th>IMPACT</th>
+              <th>ELIGIBILITY REASON</th>
               <th>PRIORITY</th>
             </tr>
           </thead>
           <tbody>
-            {filteredSoftware.map((sw) => {
+            {filteredSoftware.map((row) => {
+              const sw = row.software;
               const checked = selectedIds.has(sw.componentId);
-              const pri = priorityFromSeverityAndImpact(severity, sw.impactState);
+              const computedImpactState = computedImpactStateOf(sw);
+              const pri = priorityFromSeverityAndImpact(severity, computedImpactState);
               return (
                 <tr
                   key={sw.componentId}
-                  className={`cve-findings-asset-row ${checked ? 'selected' : ''}`}
-                  onClick={() => onToggleRow(sw.componentId)}
+                  className={`cve-findings-asset-row ${checked ? 'selected' : ''}${row.selectable ? '' : ' is-disabled'}`}
+                  onClick={() => { if (row.selectable) onToggleRow(sw.componentId); }}
                 >
                   <td onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={checked} onChange={() => onToggleRow(sw.componentId)} />
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!row.selectable}
+                      onChange={() => { if (row.selectable) onToggleRow(sw.componentId); }}
+                    />
                   </td>
                   <td>
                     <div className="cve-findings-asset-name">
@@ -1029,14 +959,18 @@ function FindingsContent({
                   </td>
                   <td>{sw.packageName} {sw.version}</td>
                   <td>
-                    <span className={`cve-applicability-tag ${sw.applicabilityState === 'APPLICABLE' ? 'applicable' : sw.applicabilityState === 'NOT_APPLICABLE' ? 'not-applicable' : 'unknown'}`}>
-                      {sw.applicabilityState === 'APPLICABLE' ? 'Applicable' : sw.applicabilityState === 'NOT_APPLICABLE' ? 'Not Applicable' : 'Unknown'}
+                    <span className={`cve-applicability-tag ${row.displayApplicability === 'APPLICABLE' ? 'applicable' : row.displayApplicability === 'NOT_APPLICABLE' ? 'not-applicable' : 'unknown'}`}>
+                      {row.displayApplicability === 'APPLICABLE' ? 'Applicable' : row.displayApplicability === 'NOT_APPLICABLE' ? 'Not Applicable' : 'Unknown'}
                     </span>
                   </td>
                   <td>
-                    <span className={`cve-impact-badge ${impactBadgeClass(sw.impactState)}`}>
-                      {impactLabel(sw.impactState)}
+                    <span className={`cve-impact-badge ${impactBadgeClass(row.displayImpact)}`}>
+                      {impactLabel(row.displayImpact)}
                     </span>
+                  </td>
+                  <td>
+                    <strong>{row.eligibilityLabel}</strong>
+                    <div className="panel-caption">{row.eligibilityDetail}</div>
                   </td>
                   <td><span className={severityClassName(pri)}>{formatLabel(pri)}</span></td>
                 </tr>
@@ -1044,8 +978,8 @@ function FindingsContent({
             })}
             {filteredSoftware.length === 0 && (
               <tr>
-                <td colSpan={6} className="cve-findings-empty-row">
-                  No software matches the current filter. Try changing &ldquo;Show&rdquo; to &ldquo;All eligible&rdquo;.
+                <td colSpan={7} className="cve-findings-empty-row">
+                  No finding rows are available. Mark software as Applicable and Impacted, or use exact impacted/no-patch rows, to create findings.
                 </td>
               </tr>
             )}
@@ -1057,7 +991,7 @@ function FindingsContent({
 }
 
 type FindingConfigSidebarProps = {
-  filteredSoftware: CveMatchedSoftware[];
+  filteredSoftware: FindingDisplayRow[];
   selectedIds: Set<string>;
   findingTitle: string;
   findingPriority: string;
@@ -1084,7 +1018,9 @@ function FindingConfigSidebar({
   onFindingTitleChange, onFindingPriorityChange, onAssignmentGroupChange, onTicketTargetChange,
   onDueDateChange, onFindingNotesChange, onCreateFindings, onCreateGrouped, onSaveDraft, onBack,
 }: FindingConfigSidebarProps) {
-  const selectedSoftware = filteredSoftware.filter((s) => selectedIds.has(s.componentId));
+  const selectedSoftware = filteredSoftware
+    .map((row) => row.software)
+    .filter((software) => selectedIds.has(software.componentId));
   const selectedCount = selectedSoftware.length;
   const softwareFamilies = new Set(selectedSoftware.map((s) => s.packageName)).size;
 
@@ -1251,6 +1187,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
 
     const assess = latestAssessment as CveApplicabilityAssessment | null;
     setAssessmentId(assess?.id ?? null);
+    setAnalystRationale(assess?.justification ?? '');
 
     // Initialize per-row applicability decisions from existing state
     const initialApplicability = new Map<string, ApplicabilityDecision>();
@@ -1264,9 +1201,9 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     for (const sw of detail.matchedSoftware) {
       if (sw.applicabilityState === 'APPLICABLE') {
         const seededDecision = sw.analystDisposition
-          ?? (sw.impactState === 'IMPACTED' || sw.impactState === 'NO_PATCH'
+          ?? (computedImpactStateOf(sw) === 'IMPACTED' || computedImpactStateOf(sw) === 'NO_PATCH'
             ? 'IMPACTED'
-            : sw.impactState === 'NOT_IMPACTED' || sw.impactState === 'FIXED'
+            : computedImpactStateOf(sw) === 'NOT_IMPACTED' || computedImpactStateOf(sw) === 'FIXED'
               ? 'NOT_IMPACTED'
               : 'UNKNOWN');
         initialImpact.set(sw.componentId, seededDecision);
@@ -1275,7 +1212,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     setImpactDecisions(initialImpact);
 
     // Pre-select all eligible software for finding creation
-    const eligible = detail.matchedSoftware.filter((s) => s.eligibleForFinding);
+    const eligible = detail.matchedSoftware.filter((s) => s.eligibleForFinding && s.analystDisposition !== 'NOT_IMPACTED');
     setSelectedFindingIds(new Set(eligible.map((s) => s.componentId)));
     setExpandedEvidenceComponentId(null);
     setVexEvidenceByComponent({});
@@ -1313,22 +1250,19 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     [detail]
   );
 
-  const eligibleSoftware = React.useMemo(
-    () => (detail?.matchedSoftware ?? []).filter((r) => r.eligibleForFinding),
-    [detail]
+  const currentApplicableSoftware = React.useMemo(
+    () => applicableSoftwareRows(detail?.matchedSoftware ?? [], applicabilityDecisions),
+    [detail, applicabilityDecisions]
   );
 
-  const filteredFindingSoftware = React.useMemo(() => {
-    // Always exclude components the analyst has explicitly marked Not Impacted in this session
-    const notImpactedByAnalyst = (s: CveMatchedSoftware) =>
-      impactDecisions.get(s.componentId) === 'NOT_IMPACTED';
-    if (findingShowFilter === 'IMPACTED_ONLY') {
-      return eligibleSoftware.filter(
-        (s) => !notImpactedByAnalyst(s) && (s.impactState === 'IMPACTED' || s.impactState === 'NO_PATCH')
-      );
-    }
-    return eligibleSoftware.filter((s) => !notImpactedByAnalyst(s));
-  }, [eligibleSoftware, findingShowFilter, impactDecisions]);
+  const filteredFindingSoftware = React.useMemo<FindingDisplayRow[]>(() => {
+    return buildFindingDisplayRows(
+      currentApplicableSoftware,
+      applicabilityDecisions,
+      impactDecisions,
+      findingShowFilter
+    );
+  }, [currentApplicableSoftware, applicabilityDecisions, impactDecisions, findingShowFilter]);
 
   const cvssFields = React.useMemo(() => parseCvssVector(detail?.summary.cvssVector), [detail]);
 
@@ -1357,13 +1291,11 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
       for (const vi of intel) {
         const vexNormalized = vi.vexStatus?.toUpperCase();
         const statementClass =
-          detail.signals.exploitAvailable ? 'exploited'
-          : vexNormalized === 'NOT_AFFECTED' || vexNormalized === 'FIXED' ? 'resolved'
+          vexNormalized === 'NOT_AFFECTED' || vexNormalized === 'FIXED' ? 'resolved'
           : vexNormalized === 'UNDER_INVESTIGATION' ? 'under-investigation'
           : 'affected';
         const statement =
-          detail.signals.exploitAvailable ? 'Exploited'
-          : vi.vexStatus ? formatLabel(vi.vexStatus)
+          vi.vexStatus ? formatLabel(vi.vexStatus)
           : 'Affected';
         rows.push({
           source: vi.source,
@@ -1381,8 +1313,8 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
       // Fallback when backend returns no vendor intelligence records
       rows.push({
         source: detail.summary.source ?? 'ADVISORY',
-        statement: detail.signals.exploitAvailable ? 'Exploited' : 'Affected',
-        statementClass: detail.signals.exploitAvailable ? 'exploited' : 'affected',
+        statement: 'Affected',
+        statementClass: 'affected',
         affectedVersions: detail.signals.patchVersions ? `< ${detail.signals.patchVersions}` : 'See advisory',
         fixedVersion: detail.signals.patchVersions ?? '—',
       });
@@ -1492,7 +1424,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
 
   async function createFindings(): Promise<void> {
     if (selectedFindingIds.size === 0) {
-      setActionError('Select at least one impacted asset or software row before creating findings.');
+      setActionError('Select at least one finding row before creating findings.');
       return;
     }
     setFindingBusy(true);
@@ -1501,6 +1433,8 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
       const result = await cveWorkbenchApi.createManualFindings(item.externalId, {
         justification: findingNotes.trim(),
         componentIds: Array.from(selectedFindingIds),
+        componentApplicabilityDecisions: Object.fromEntries(applicabilityDecisions),
+        componentAnalystDispositions: Object.fromEntries(impactDecisions),
       });
       await onRefreshDetail();
       const parts: string[] = [result.message];
@@ -1525,7 +1459,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
   }
 
   function selectAllFindings(): void {
-    setSelectedFindingIds(new Set(filteredFindingSoftware.map((s) => s.componentId)));
+    setSelectedFindingIds(new Set(filteredFindingSoftware.filter((row) => row.selectable).map((row) => row.software.componentId)));
   }
 
   function clearAllFindings(): void {

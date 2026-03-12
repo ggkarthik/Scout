@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
+import com.prototype.vulnwatch.domain.AnalystDisposition;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.BusinessCriticality;
@@ -839,7 +840,9 @@ public class FindingService {
             Vulnerability vulnerability,
             String justification,
             String createdBy,
-            Collection<UUID> selectedComponentIds
+            Collection<UUID> selectedComponentIds,
+            Map<UUID, ApplicabilityState> applicabilityOverrides,
+            Map<UUID, AnalystDisposition> analystDispositions
     ) {
         if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
             return new ManualFindingCreationResult(0, 0, 0, 0);
@@ -872,7 +875,7 @@ public class FindingService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         List<ComponentVulnerabilityState> eligibleStates = states.stream()
-                .filter(this::isEligibleForManualFinding)
+                .filter(state -> isEligibleForManualFinding(state, applicabilityOverrides, analystDispositions))
                 .filter(state -> state.getComponent() != null && state.getComponent().getId() != null)
                 .filter(state -> selectedIds.isEmpty() || selectedIds.contains(state.getComponent().getId()))
                 .filter(state -> state.getComponent().getAsset() != null)
@@ -892,7 +895,19 @@ public class FindingService {
             eligibleCount++;
             Finding finding = findingsByComponentId.get(component.getId());
             double riskScore = riskScoringService.score(vulnerability, policy, component.getAsset());
-            String evidence = buildManualFindingEvidence(state, normalizedJustification, createdBy);
+            ApplicabilityState effectiveApplicability = effectiveApplicabilityState(state, applicabilityOverrides);
+            AnalystDisposition effectiveDisposition = effectiveAnalystDisposition(state, analystDispositions);
+            boolean analystOverrideApplied = !state.isEligibleForFinding()
+                    && effectiveApplicability == ApplicabilityState.APPLICABLE
+                    && effectiveDisposition == AnalystDisposition.IMPACTED;
+            String evidence = buildManualFindingEvidence(
+                    state,
+                    normalizedJustification,
+                    createdBy,
+                    effectiveApplicability,
+                    effectiveDisposition,
+                    analystOverrideApplied
+            );
 
             if (finding != null) {
                 if (finding.getStatus() == FindingStatus.RESOLVED || finding.getStatus() == FindingStatus.AUTO_CLOSED) {
@@ -944,7 +959,8 @@ public class FindingService {
                         Map.of(
                                 "justification", normalizedJustification,
                                 "matchedBy", finding.getMatchedBy(),
-                                "riskScore", finding.getRiskScore()
+                                "riskScore", finding.getRiskScore(),
+                                "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
                         )
                 );
             }
@@ -957,7 +973,8 @@ public class FindingService {
                         Map.of(
                                 "justification", normalizedJustification,
                                 "matchedBy", finding.getMatchedBy(),
-                                "riskScore", finding.getRiskScore()
+                                "riskScore", finding.getRiskScore(),
+                                "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
                         )
                 );
             }
@@ -1841,6 +1858,7 @@ public class FindingService {
     public FindingResponse toResponse(Finding finding) {
         Vulnerability vulnerability = finding.getVulnerability();
         InventoryComponent component = finding.getComponent();
+        Map<String, Object> evidencePayload = readEvidencePayload(finding.getEvidence());
 
         return new FindingResponse(
                 finding.getId(),
@@ -1862,6 +1880,11 @@ public class FindingService {
                 finding.getSuppressedUntil(),
                 finding.getEvidence(),
                 finding.getPrecedenceTrace(),
+                finding.getVexStatus(),
+                finding.getVexProvider(),
+                finding.getVexFreshness(),
+                finding.getMatchedVexAssertionId(),
+                traceString(evidencePayload, "impactReason"),
                 finding.getFirstObservedAt(),
                 finding.getLastObservedAt(),
                 finding.getDecisionState(),
@@ -2122,13 +2145,47 @@ public class FindingService {
         return (confidenceScore == null ? 0.0 : confidenceScore) >= nonCpeCreateMinConfidence;
     }
 
-    private boolean isEligibleForManualFinding(ComponentVulnerabilityState state) {
+    private boolean isEligibleForManualFinding(
+            ComponentVulnerabilityState state,
+            Map<UUID, ApplicabilityState> applicabilityOverrides,
+            Map<UUID, AnalystDisposition> analystDispositions
+    ) {
         if (state == null) {
             return false;
         }
-        // For manual analyst-driven creation the impact-based flag is sufficient.
-        // The confidence threshold is only a gate for automatic finding generation.
-        return state.isEligibleForFinding();
+        if (state.isEligibleForFinding()) {
+            return true;
+        }
+        ApplicabilityState effectiveApplicability = effectiveApplicabilityState(state, applicabilityOverrides);
+        AnalystDisposition effectiveDisposition = effectiveAnalystDisposition(state, analystDispositions);
+        return effectiveApplicability == ApplicabilityState.APPLICABLE
+                && effectiveDisposition == AnalystDisposition.IMPACTED;
+    }
+
+    private ApplicabilityState effectiveApplicabilityState(
+            ComponentVulnerabilityState state,
+            Map<UUID, ApplicabilityState> applicabilityOverrides
+    ) {
+        if (state == null || state.getComponent() == null || state.getComponent().getId() == null) {
+            return ApplicabilityState.UNKNOWN;
+        }
+        if (applicabilityOverrides == null || applicabilityOverrides.isEmpty()) {
+            return state.getApplicabilityState();
+        }
+        return applicabilityOverrides.getOrDefault(state.getComponent().getId(), state.getApplicabilityState());
+    }
+
+    private AnalystDisposition effectiveAnalystDisposition(
+            ComponentVulnerabilityState state,
+            Map<UUID, AnalystDisposition> analystDispositions
+    ) {
+        if (state == null || state.getComponent() == null || state.getComponent().getId() == null) {
+            return AnalystDisposition.UNKNOWN;
+        }
+        if (analystDispositions == null || analystDispositions.isEmpty()) {
+            return state.getAnalystDisposition();
+        }
+        return analystDispositions.getOrDefault(state.getComponent().getId(), state.getAnalystDisposition());
     }
 
     private boolean isSupportedNonCpeMatch(String matchedBy) {
@@ -2178,7 +2235,10 @@ public class FindingService {
     private String buildManualFindingEvidence(
             ComponentVulnerabilityState state,
             String justification,
-            String createdBy
+            String createdBy,
+            ApplicabilityState effectiveApplicability,
+            AnalystDisposition effectiveDisposition,
+            boolean analystOverrideApplied
     ) {
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("source", "manual-org-cve-review");
@@ -2189,6 +2249,9 @@ public class FindingService {
         evidence.put("applicabilityState", state.getApplicabilityState() == null ? null : state.getApplicabilityState().name());
         evidence.put("impactState", state.getImpactState() == null ? null : state.getImpactState().name());
         evidence.put("impactReason", state.getImpactReason());
+        evidence.put("effectiveApplicabilityState", effectiveApplicability == null ? null : effectiveApplicability.name());
+        evidence.put("effectiveAnalystDisposition", effectiveDisposition == null ? null : effectiveDisposition.name());
+        evidence.put("analystOverrideApplied", analystOverrideApplied);
         evidence.put("lastEvaluatedAt", state.getLastEvaluatedAt());
         if (hasText(state.getTraceJson())) {
             evidence.put("correlationTrace", state.getTraceJson());

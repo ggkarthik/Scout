@@ -154,7 +154,7 @@ public class DashboardService {
     public ApplicableSoftwarePageResponse listApplicableSoftware(Tenant tenant, int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(200, size));
-        long totalItems = componentVulnerabilityStateRepository.countDistinctComponent_IdByTenantAndApplicabilityState(
+        long totalItems = componentVulnerabilityStateRepository.countDistinctActiveComponentIdsByTenantAndApplicabilityState(
                 tenant,
                 ApplicabilityState.APPLICABLE
         );
@@ -178,6 +178,8 @@ public class DashboardService {
                         row.getPackageName(),
                         row.getVersion(),
                         row.getApplicableCount(),
+                        row.getAwaitingVexCount(),
+                        row.getVexMatchedCount(),
                         row.getImpactedCount(),
                         row.getNoPatchCount(),
                         row.getLastEvaluatedAt()
@@ -197,7 +199,7 @@ public class DashboardService {
     public ImpactedCvePageResponse listImpactedCves(Tenant tenant, int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(200, size));
-        long totalItems = componentVulnerabilityStateRepository.countDistinctVulnerability_IdByTenantAndImpactStateIn(
+        long totalItems = componentVulnerabilityStateRepository.countDistinctActiveVulnerabilityIdsByTenantAndImpactStateIn(
                 tenant,
                 FINDING_ELIGIBLE_IMPACT_STATES
         );
@@ -594,6 +596,16 @@ public class DashboardService {
                 ? 0.0
                 : ((double) csafPartialFailureRunsLast30Days * 100.0) / (double) csafRunsLast30Days;
 
+        long activeVexMatchedStateCount = componentVulnerabilityStateRepository.countActiveStatesWithMatchedVexAssertion(tenant);
+        long activeApplicableAwaitingVexCount = componentVulnerabilityStateRepository.countActiveApplicableStatesAwaitingMatchedVexAssertion(tenant);
+        long activeVexConfirmedImpactedCount = componentVulnerabilityStateRepository.countActiveStatesByTenantAndImpactState(tenant, ImpactState.IMPACTED);
+        long activeVexConfirmedNotAffectedCount = componentVulnerabilityStateRepository.countActiveStatesByTenantAndImpactState(tenant, ImpactState.NOT_IMPACTED);
+        long activeVexNoPatchCount = componentVulnerabilityStateRepository.countActiveStatesByTenantAndImpactState(tenant, ImpactState.NO_PATCH);
+        double activeVexCoveragePercent = (activeVexMatchedStateCount + activeApplicableAwaitingVexCount) <= 0L
+                ? 0.0
+                : ((double) activeVexMatchedStateCount * 100.0)
+                / (double) (activeVexMatchedStateCount + activeApplicableAwaitingVexCount);
+
         Map<String, Long> notApplicableCategories = new HashMap<>();
         for (TopFindingMetricResponse category : noiseReduction.categories()) {
             if (category == null || !hasText(category.key())) {
@@ -638,6 +650,12 @@ public class DashboardService {
                 csafPartialFailureRunsLast30Days,
                 csafNormalizationSuccessRate,
                 csafPartialFailureRate,
+                activeVexCoveragePercent,
+                activeVexMatchedStateCount,
+                activeApplicableAwaitingVexCount,
+                activeVexConfirmedImpactedCount,
+                activeVexConfirmedNotAffectedCount,
+                activeVexNoPatchCount,
                 findingsSuppressedByVex,
                 suppressedByStaleVex,
                 underInvestigationAging,

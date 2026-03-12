@@ -12,6 +12,8 @@ public record ApplicableSoftwareRecordResponse(
         String packageName,
         String version,
         long applicableCveCount,
+        long awaitingVexCveCount,
+        long vexMatchedCveCount,
         long impactedCveCount,
         long noPatchCveCount,
         Instant lastEvaluatedAt

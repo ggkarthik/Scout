@@ -208,13 +208,13 @@ export function DashboardPage() {
         <div className="panel-header">
           <h3>Applicable Software</h3>
           <span className="panel-caption">
-            {applicableSoftware ? `${applicableSoftware.totalItems.toLocaleString()} components with at least one applicable CVE` : 'Loading...'}
+            {applicableSoftware ? `${applicableSoftware.totalItems.toLocaleString()} components with at least one inventory-correlated applicable CVE` : 'Loading...'}
           </span>
         </div>
         {!applicableSoftware ? (
           <div className="panel-caption">Loading...</div>
         ) : applicableSoftware.items.length === 0 ? (
-          <div className="panel-caption">No applicable software components found.</div>
+          <div className="panel-caption">No inventory-correlated applicable software components found.</div>
         ) : (
           <div className="table-scroll">
             <table>
@@ -223,7 +223,9 @@ export function DashboardPage() {
                   <th>Software</th>
                   <th>Asset</th>
                   <th>Applicable</th>
-                  <th>Impacted</th>
+                  <th>Awaiting Exact VEX</th>
+                  <th>VEX Matched</th>
+                  <th>Confirmed Impacted</th>
                   <th>No Patch</th>
                   <th>Last Evaluated</th>
                 </tr>
@@ -241,6 +243,8 @@ export function DashboardPage() {
                       <div className="panel-caption mono">{row.assetIdentifier}</div>
                     </td>
                     <td>{row.applicableCveCount.toLocaleString()}</td>
+                    <td>{row.awaitingVexCveCount.toLocaleString()}</td>
+                    <td>{row.vexMatchedCveCount.toLocaleString()}</td>
                     <td>{row.impactedCveCount.toLocaleString()}</td>
                     <td>{row.noPatchCveCount.toLocaleString()}</td>
                     <td>{formatDateTime(row.lastEvaluatedAt)}</td>
@@ -256,13 +260,13 @@ export function DashboardPage() {
         <div className="panel-header">
           <h3>Impacted CVEs</h3>
           <span className="panel-caption">
-            {impactedCves ? `${impactedCves.totalItems.toLocaleString()} CVEs impacted by current inventory and VEX status` : 'Loading...'}
+            {impactedCves ? `${impactedCves.totalItems.toLocaleString()} CVEs confirmed impacted or no-patch by current inventory and exact VEX-backed evaluation` : 'Loading...'}
           </span>
         </div>
         {!impactedCves ? (
           <div className="panel-caption">Loading...</div>
         ) : impactedCves.items.length === 0 ? (
-          <div className="panel-caption">No impacted CVEs found.</div>
+          <div className="panel-caption">No confirmed impacted or no-patch CVEs found.</div>
         ) : (
           <div className="table-scroll">
             <table>
@@ -346,9 +350,9 @@ export function DashboardPage() {
           </div>
 
           <div>
-            <div className="noise-subtitle">Latest 5 Impacted CVEs</div>
+            <div className="noise-subtitle">Latest 5 Confirmed Impacted / No-Patch CVEs</div>
             {latestMap.length === 0 ? (
-              <div className="panel-caption">No recent impacted CVEs available.</div>
+              <div className="panel-caption">No recent confirmed impacted or no-patch CVEs available.</div>
             ) : (
               <div className="table-scroll">
                 <table>
@@ -386,10 +390,34 @@ export function DashboardPage() {
       <section className="panel csaf-vex-analytics-panel">
         <div className="panel-header">
           <h3>CSAF/VEX Quality Analytics</h3>
-          <span className="panel-caption">30-day risk exposure and ingestion quality indicators</span>
+          <span className="panel-caption">30-day risk exposure, exact VEX coverage, and ingestion quality indicators</span>
         </div>
 
         <div className="noise-summary-grid">
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Active VEX Coverage</div>
+            <div className="noise-summary-value">{analytics.activeVexCoveragePercent.toFixed(1)}%</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">VEX Matched States</div>
+            <div className="noise-summary-value">{analytics.activeVexMatchedStateCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Awaiting Exact VEX</div>
+            <div className="noise-summary-value">{analytics.activeApplicableAwaitingVexCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Confirmed Impacted</div>
+            <div className="noise-summary-value">{analytics.activeVexConfirmedImpactedCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Confirmed Not Affected</div>
+            <div className="noise-summary-value">{analytics.activeVexConfirmedNotAffectedCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">No Patch</div>
+            <div className="noise-summary-value">{analytics.activeVexNoPatchCount.toLocaleString()}</div>
+          </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label">CSAF Normalization Success</div>
             <div className="noise-summary-value">{analytics.csafNormalizationSuccessRate.toFixed(1)}%</div>
