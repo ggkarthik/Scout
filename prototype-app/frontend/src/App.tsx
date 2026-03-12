@@ -273,6 +273,7 @@ export default function App() {
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [vulnerabilityIntelFlyoutOpen, setVulnerabilityIntelFlyoutOpen] = React.useState(false);
+  const [initialCveId, setInitialCveId] = React.useState<string | undefined>(undefined);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
   const vulnerabilityIntelFlyoutTimer = React.useRef<number | null>(null);
@@ -649,7 +650,15 @@ export default function App() {
         </header>
 
         {activeTab === 'dashboard' && <DashboardPage />}
-        {activeTab === 'findings' && <FindingsPage />}
+        {activeTab === 'findings' && (
+          <FindingsPage
+            onOpenCveWorkbench={(vulnerabilityId) => {
+              setInitialCveId(vulnerabilityId);
+              setActiveTab('vulnerability-intelligence');
+              setVulnerabilityIntelView('org-cves');
+            }}
+          />
+        )}
         {activeTab === 'operations' && <OperationalDashboardPage selectedView={operationsView} />}
         {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'dashboard' && (
           <VulnerabilityIntelDashboardPage onOpenVulnerabilities={() => setVulnerabilityIntelView('vulnerabilities')} />
@@ -658,7 +667,7 @@ export default function App() {
           <InventoryPage selectedView="vulnerability-intelligence" />
         )}
         {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'org-cves' && (
-          <VulnerabilityIntelOrgCvePage />
+          <VulnerabilityIntelOrgCvePage initialCveId={initialCveId} />
         )}
         {activeTab === 'inventory' && (
           <InventoryPage selectedView={inventoryView} />

@@ -1,4 +1,6 @@
 import React from 'react';
+import { ConfirmDialog } from './ConfirmDialog';
+import { SegmentedControl } from './SegmentedControl';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import {
   applicableSoftwareRows,
@@ -53,6 +55,7 @@ type Props = {
   loading: boolean;
   error: string | null;
   findingGenerationMode: RiskPolicy['findingGenerationMode'];
+  analystId?: string;
   onBack: () => void;
   onRefreshDetail: () => Promise<void>;
 };
@@ -255,7 +258,11 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
       <div>
         <h5>Sources</h5>
         <div className="cve-source-badges">
-          {detail.summary.source && <span className="cve-source-badge">{detail.summary.source}</span>}
+          {detail.summary.source && (
+            detail.summary.sourceUrl
+              ? <a href={detail.summary.sourceUrl} target="_blank" rel="noreferrer" className="cve-source-badge cve-source-badge-link">{detail.summary.source}</a>
+              : <span className="cve-source-badge">{detail.summary.source}</span>
+          )}
           {item.inKev && <span className="cve-source-badge kev">KEV</span>}
           {hasPersistedVexEvidence(detail) && <span className="cve-source-badge csaf">VEX</span>}
           {detail.summary.cvssVector && <span className="cve-source-badge">CVSS</span>}
@@ -329,6 +336,13 @@ function InvestigationContent({
             {overallConfidence.pct > 0 && <span className="cve-confidence-pct">{overallConfidence.pct}%</span>}
           </div>
           <div className="cve-stat-card-sub">Match confidence</div>
+        </div>
+        <div className="cve-stat-card">
+          <div className="cve-stat-card-label">CVSS Score</div>
+          <div className={`cve-stat-card-value cve-cvss-score-value cve-cvss-score-${item.severity.toLowerCase()}`}>
+            {detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : item.cvssScore != null ? item.cvssScore.toFixed(1) : 'N/A'}
+          </div>
+          <div className="cve-stat-card-sub">{formatLabel(item.severity)} severity</div>
         </div>
       </div>
 
@@ -492,6 +506,51 @@ function InvestigationContent({
   );
 }
 
+// --- VEX Evidence Mini-Card ---
+
+function VexEvidenceCard({ evidence }: { evidence: CveVexEvidence }) {
+  const rows: Array<{ key: string; value: React.ReactNode }> = [
+    { key: 'Asset', value: evidence.assetName ?? evidence.assetIdentifier ?? '—' },
+    {
+      key: 'Software',
+      value: [evidence.packageName, evidence.installedVersion].filter(Boolean).join(' ') || '—',
+    },
+    {
+      key: 'Provider',
+      value: `${formatLabel(evidence.provider)} / ${formatLabel(evidence.status)}`,
+    },
+    {
+      key: 'Trust',
+      value: `${formatLabel(evidence.trustTier)} trust · ${formatLabel(evidence.freshness)}`,
+    },
+  ];
+  if (evidence.documentId) {
+    rows.push({ key: 'Document', value: <span className="mono">{evidence.documentId}</span> });
+  }
+  if (evidence.evidenceUrl) {
+    rows.push({
+      key: 'Source',
+      value: (
+        <a href={evidence.evidenceUrl} target="_blank" rel="noreferrer">
+          {evidence.evidenceUrl}
+        </a>
+      ),
+    });
+  }
+  return (
+    <div className="vex-evidence-card">
+      <div className="vex-evidence-grid">
+        {rows.map(({ key, value }) => (
+          <React.Fragment key={key}>
+            <span className="vex-evidence-key">{key}</span>
+            <span className="vex-evidence-val">{value}</span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- Applicability Decision Table (step 2, left panel) ---
 
 type ApplicabilityTableProps = {
@@ -503,6 +562,7 @@ type ApplicabilityTableProps = {
   vexEvidenceErrors: Record<string, string | null>;
   vexEvidenceLoadingComponentId: string | null;
   onApplicabilityDecision: (componentId: string, decision: ApplicabilityDecision) => void;
+  onBulkApplicabilityDecision: (decision: ApplicabilityDecision) => void;
   onImpactDecision: (componentId: string, decision: ImpactDecision) => void;
   onToggleVexEvidence: (componentId: string) => void | Promise<void>;
 };
@@ -516,6 +576,7 @@ function ApplicabilityTable({
   vexEvidenceErrors,
   vexEvidenceLoadingComponentId,
   onApplicabilityDecision,
+  onBulkApplicabilityDecision,
   onImpactDecision,
   onToggleVexEvidence,
 }: ApplicabilityTableProps) {
@@ -534,59 +595,60 @@ function ApplicabilityTable({
         {matchedSoftware.length === 0 ? (
           <div className="cve-intel-empty">No matched software to assess.</div>
         ) : (
-          <table className="cve-decision-table">
-            <thead>
-              <tr>
-                <th>Software</th>
-                <th>Asset</th>
-                <th>Match Basis</th>
-                <th>Confidence</th>
-                <th>Decision</th>
-              </tr>
-            </thead>
-            <tbody>
-              {matchedSoftware.map((sw) => {
-                const conf = confidenceFromApplicability(sw.applicabilityState);
-                const decision = applicabilityDecisions.get(sw.componentId) ?? 'NEEDS_REVIEW';
-                return (
-                  <tr key={sw.componentId}>
-                    <td>
-                      <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
-                      <div className="panel-caption">{explainApplicability(sw)}</div>
-                    </td>
-                    <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
-                    <td className="cve-decision-table-muted">{matchBasisLabel(sw.matchedBy)}</td>
-                    <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
-                    <td>
-                      <div className="cve-decision-btn-group">
-                        <button
-                          type="button"
-                          className={`cve-decision-btn applicable ${decision === 'APPLICABLE' ? 'selected' : ''}`}
-                          onClick={() => onApplicabilityDecision(sw.componentId, 'APPLICABLE')}
-                        >
-                          Applicable
-                        </button>
-                        <button
-                          type="button"
-                          className={`cve-decision-btn not-applicable ${decision === 'NOT_APPLICABLE' ? 'selected' : ''}`}
-                          onClick={() => onApplicabilityDecision(sw.componentId, 'NOT_APPLICABLE')}
-                        >
-                          Not Applicable
-                        </button>
-                        <button
-                          type="button"
-                          className={`cve-decision-btn needs-review ${decision === 'NEEDS_REVIEW' ? 'selected' : ''}`}
-                          onClick={() => onApplicabilityDecision(sw.componentId, 'NEEDS_REVIEW')}
-                        >
-                          Needs Review
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            <div className="cve-bulk-actions">
+              <span className="cve-bulk-actions-label">Mark all:</span>
+              <button type="button" className="btn btn-secondary btn-inline" onClick={() => onBulkApplicabilityDecision('APPLICABLE')}>
+                Applicable
+              </button>
+              <button type="button" className="btn btn-secondary btn-inline" onClick={() => onBulkApplicabilityDecision('NOT_APPLICABLE')}>
+                Not Applicable
+              </button>
+              <button type="button" className="btn btn-secondary btn-inline" onClick={() => onBulkApplicabilityDecision('NEEDS_REVIEW')}>
+                Needs Review
+              </button>
+            </div>
+            <table className="cve-decision-table">
+              <thead>
+                <tr>
+                  <th>Software</th>
+                  <th>Asset</th>
+                  <th>Match Basis</th>
+                  <th>Confidence</th>
+                  <th>Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matchedSoftware.map((sw) => {
+                  const conf = confidenceFromApplicability(sw.applicabilityState);
+                  const decision = applicabilityDecisions.get(sw.componentId) ?? 'NEEDS_REVIEW';
+                  return (
+                    <tr key={sw.componentId}>
+                      <td>
+                        <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
+                        <div className="panel-caption">{explainApplicability(sw)}</div>
+                      </td>
+                      <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
+                      <td className="cve-decision-table-muted">{matchBasisLabel(sw.matchedBy)}</td>
+                      <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
+                      <td>
+                        <SegmentedControl
+                          ariaLabel={`Applicability for ${sw.packageName}`}
+                          value={decision}
+                          onChange={(v) => onApplicabilityDecision(sw.componentId, v as ApplicabilityDecision)}
+                          options={[
+                            { value: 'APPLICABLE', label: 'Applicable', activeClass: 'seg-applicable' },
+                            { value: 'NOT_APPLICABLE', label: 'Not Applicable', activeClass: 'seg-not-applicable' },
+                            { value: 'NEEDS_REVIEW', label: 'Review', activeClass: 'seg-needs-review' },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 
@@ -642,58 +704,30 @@ function ApplicabilityTable({
                         </div>
                       )}
                       {expandedEvidenceComponentId === sw.componentId && (
-                        <div className="panel-caption">
-                          {vexEvidenceLoadingComponentId === sw.componentId && <div>Loading VEX evidence...</div>}
-                          {vexEvidenceErrors[sw.componentId] && <div>{vexEvidenceErrors[sw.componentId]}</div>}
+                        <div>
+                          {vexEvidenceLoadingComponentId === sw.componentId && (
+                            <div className="panel-caption">Loading VEX evidence...</div>
+                          )}
+                          {vexEvidenceErrors[sw.componentId] && (
+                            <div className="panel-caption">{vexEvidenceErrors[sw.componentId]}</div>
+                          )}
                           {vexEvidenceByComponent[sw.componentId] && (
-                            <>
-                              <div>
-                                Asset: {vexEvidenceByComponent[sw.componentId]?.assetName ?? vexEvidenceByComponent[sw.componentId]?.assetIdentifier ?? '—'}
-                              </div>
-                              <div>
-                                Software: {vexEvidenceByComponent[sw.componentId]?.packageName ?? sw.packageName} {vexEvidenceByComponent[sw.componentId]?.installedVersion ?? sw.version ?? ''}
-                              </div>
-                              <div>
-                                {formatLabel(vexEvidenceByComponent[sw.componentId]?.provider)} / {formatLabel(vexEvidenceByComponent[sw.componentId]?.status)}
-                              </div>
-                              <div>
-                                {formatLabel(vexEvidenceByComponent[sw.componentId]?.trustTier)} trust, {formatLabel(vexEvidenceByComponent[sw.componentId]?.freshness)}
-                              </div>
-                              {vexEvidenceByComponent[sw.componentId]?.documentId && (
-                                <div>Document: {vexEvidenceByComponent[sw.componentId]?.documentId}</div>
-                              )}
-                              {vexEvidenceByComponent[sw.componentId]?.evidenceUrl && (
-                                <div>{vexEvidenceByComponent[sw.componentId]?.evidenceUrl}</div>
-                              )}
-                            </>
+                            <VexEvidenceCard evidence={vexEvidenceByComponent[sw.componentId]!} />
                           )}
                         </div>
                       )}
                     </td>
                     <td>
-                      <div className="cve-decision-btn-group">
-                        <button
-                          type="button"
-                          className={`cve-decision-btn impacted ${impact === 'IMPACTED' ? 'selected' : ''}`}
-                          onClick={() => onImpactDecision(sw.componentId, 'IMPACTED')}
-                        >
-                          Impacted
-                        </button>
-                        <button
-                          type="button"
-                          className={`cve-decision-btn not-impacted ${impact === 'NOT_IMPACTED' ? 'selected' : ''}`}
-                          onClick={() => onImpactDecision(sw.componentId, 'NOT_IMPACTED')}
-                        >
-                          Not Impacted
-                        </button>
-                        <button
-                          type="button"
-                          className={`cve-decision-btn unknown-impact ${impact === 'UNKNOWN' ? 'selected' : ''}`}
-                          onClick={() => onImpactDecision(sw.componentId, 'UNKNOWN')}
-                        >
-                          Unknown
-                        </button>
-                      </div>
+                      <SegmentedControl
+                        ariaLabel={`Impact disposition for ${sw.packageName}`}
+                        value={impact}
+                        onChange={(v) => onImpactDecision(sw.componentId, v as ImpactDecision)}
+                        options={[
+                          { value: 'IMPACTED', label: 'Impacted', activeClass: 'seg-impacted' },
+                          { value: 'NOT_IMPACTED', label: 'Not Impacted', activeClass: 'seg-not-impacted' },
+                          { value: 'UNKNOWN', label: 'Unknown' },
+                        ]}
+                      />
                       {sw.analystReason && (
                         <div className="panel-caption">{sw.analystReason}</div>
                       )}
@@ -719,6 +753,7 @@ type DecisionSummaryProps = {
   onAnalystRationaleChange: (v: string) => void;
   latestAssessment: CveApplicabilityAssessment | null;
   saveBusy: boolean;
+  analystId?: string;
   onSave: () => void;
   onProceed: () => void;
   onBack: () => void;
@@ -732,7 +767,7 @@ function CountBadge({ count, variant = 'grey' }: CountBadgeProps) {
 
 function DecisionSummary({
   matchedSoftware, applicabilityDecisions, impactDecisions, analystRationale, onAnalystRationaleChange,
-  latestAssessment, saveBusy, onSave, onProceed, onBack,
+  latestAssessment, saveBusy, analystId, onSave, onProceed, onBack,
 }: DecisionSummaryProps) {
   const applicableCount = matchedSoftware.filter((s) => applicabilityDecisions.get(s.componentId) === 'APPLICABLE').length;
   const notApplicableCount = matchedSoftware.filter((s) => applicabilityDecisions.get(s.componentId) === 'NOT_APPLICABLE').length;
@@ -757,11 +792,33 @@ function DecisionSummary({
   const analystUnknownCount = applicableSoftware.filter((s) => (impactDecisions.get(s.componentId) ?? 'UNKNOWN') === 'UNKNOWN').length;
 
   const reviewedAt = latestAssessment?.completedAt ?? latestAssessment?.createdAt;
+  const assessmentResult = deriveAssessmentResult(matchedSoftware, applicabilityDecisions, impactDecisions);
+
+  const assessmentResultClass: Record<string, string> = {
+    AFFECTED: 'assessment-result-affected',
+    NOT_AFFECTED: 'assessment-result-not-affected',
+    UNDER_INVESTIGATION: 'assessment-result-under-investigation',
+    INCONCLUSIVE: 'assessment-result-inconclusive',
+  };
+
+  const assessmentResultLabel: Record<string, string> = {
+    AFFECTED: 'Affected',
+    NOT_AFFECTED: 'Not Affected',
+    UNDER_INVESTIGATION: 'Under Investigation',
+    INCONCLUSIVE: 'Inconclusive',
+  };
 
   return (
     <aside className="cve-decision-summary-sidebar">
       <div className="cve-decision-summary-card">
         <h4>Decision Summary</h4>
+
+        <div className="assessment-result-banner">
+          <span className="assessment-result-label">Assessment Result</span>
+          <span className={`assessment-result-badge ${assessmentResultClass[assessmentResult] ?? ''}`}>
+            {assessmentResultLabel[assessmentResult] ?? assessmentResult}
+          </span>
+        </div>
 
         <div className="cve-decision-summary-section">
           <div className="cve-decision-summary-section-title">Applicability</div>
@@ -830,7 +887,7 @@ function DecisionSummary({
           <div className="cve-decision-summary-section-title">Audit Metadata</div>
           <div className="cve-audit-row">
             <span>Reviewed by</span>
-            <span>Analyst</span>
+            <span>{analystId ?? 'Current User'}</span>
           </div>
           <div className="cve-audit-row">
             <span>Reviewed at</span>
@@ -1006,9 +1063,9 @@ type FindingConfigSidebarProps = {
   onTicketTargetChange: (v: 'SERVICENOW' | 'JIRA') => void;
   onDueDateChange: (v: string) => void;
   onFindingNotesChange: (v: string) => void;
-  onCreateFindings: () => void;
-  onCreateGrouped: () => void;
-  onSaveDraft: () => void;
+  onRequestCreateFindings: () => void;
+  onRequestCreateGrouped: () => void;
+  onSaveAssessment: () => void;
   onBack: () => void;
 };
 
@@ -1016,7 +1073,7 @@ function FindingConfigSidebar({
   filteredSoftware, selectedIds,
   findingTitle, findingPriority, assignmentGroup, ticketTarget, dueDate, findingNotes, findingBusy,
   onFindingTitleChange, onFindingPriorityChange, onAssignmentGroupChange, onTicketTargetChange,
-  onDueDateChange, onFindingNotesChange, onCreateFindings, onCreateGrouped, onSaveDraft, onBack,
+  onDueDateChange, onFindingNotesChange, onRequestCreateFindings, onRequestCreateGrouped, onSaveAssessment, onBack,
 }: FindingConfigSidebarProps) {
   const selectedSoftware = filteredSoftware
     .map((row) => row.software)
@@ -1111,16 +1168,16 @@ function FindingConfigSidebar({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={onCreateFindings}
+            onClick={onRequestCreateFindings}
             disabled={findingBusy || selectedCount === 0}
           >
             {findingBusy ? 'Creating...' : `Create Findings (${selectedCount})`}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={onCreateGrouped} disabled={findingBusy || selectedCount === 0}>
+          <button type="button" className="btn btn-secondary" onClick={onRequestCreateGrouped} disabled={findingBusy || selectedCount === 0}>
             Create One Grouped Finding
           </button>
-          <button type="button" className="btn btn-secondary" onClick={onSaveDraft} disabled={findingBusy}>
-            Save Draft
+          <button type="button" className="btn btn-secondary" onClick={onSaveAssessment} disabled={findingBusy}>
+            Save Assessment
           </button>
           <button type="button" className="btn btn-secondary" onClick={onBack}>
             Back
@@ -1133,7 +1190,7 @@ function FindingConfigSidebar({
 
 // --- Main Component ---
 
-export function CveAssessmentWorkbench({ item, detail, loading, error, findingGenerationMode, onBack, onRefreshDetail }: Props) {
+export function CveAssessmentWorkbench({ item, detail, loading, error, findingGenerationMode, analystId, onBack, onRefreshDetail }: Props) {
   const [activeStep, setActiveStep] = React.useState<WorkflowStep>(1);
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -1172,6 +1229,24 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
   const [findingShowFilter, setFindingShowFilter] = React.useState<'ALL' | 'IMPACTED_ONLY'>('IMPACTED_ONLY');
   const [findingBusy, setFindingBusy] = React.useState(false);
 
+  // Unsaved-changes guard
+  const seedNotesRef = React.useRef('');
+  const seedRationaleRef = React.useRef('');
+  const [pendingNavAction, setPendingNavAction] = React.useState<(() => void) | null>(null);
+
+  // Finding creation confirmation
+  const [pendingFindingAction, setPendingFindingAction] = React.useState<(() => Promise<void>) | null>(null);
+
+  const isDirty = investigationNotes !== seedNotesRef.current || analystRationale !== seedRationaleRef.current;
+
+  function guardedNav(action: () => void): void {
+    if (isDirty) {
+      setPendingNavAction(() => action);
+    } else {
+      action();
+    }
+  }
+
   // Guard: track which CVE has been initialized so detail refreshes don't overwrite in-flight decisions
   const lastInitializedCveRef = React.useRef<string | null>(null);
 
@@ -1183,11 +1258,15 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
 
     const inv = latestInvestigation as CveInvestigation | null;
     setInvestigationId(inv?.id ?? null);
-    setInvestigationNotes(inv?.notes ?? '');
+    const seedNotes = inv?.notes ?? '';
+    setInvestigationNotes(seedNotes);
+    seedNotesRef.current = seedNotes;
 
     const assess = latestAssessment as CveApplicabilityAssessment | null;
     setAssessmentId(assess?.id ?? null);
-    setAnalystRationale(assess?.justification ?? '');
+    const seedRationale = assess?.justification ?? '';
+    setAnalystRationale(seedRationale);
+    seedRationaleRef.current = seedRationale;
 
     // Initialize per-row applicability decisions from existing state
     const initialApplicability = new Map<string, ApplicabilityDecision>();
@@ -1476,9 +1555,9 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     <div className="cve-assessment-page">
       {/* Breadcrumb */}
       <div className="cve-assessment-breadcrumb">
-        <button type="button" onClick={onBack}>CVE Assessment</button>
+        <button type="button" onClick={() => guardedNav(onBack)}>CVE Assessment</button>
         <span aria-hidden="true">›</span>
-        <button type="button" onClick={() => setActiveStep(1)}>{item.externalId}</button>
+        <button type="button" onClick={() => guardedNav(() => setActiveStep(1))}>{item.externalId}</button>
         {currentBreadcrumbStep && (
           <>
             <span aria-hidden="true">›</span>
@@ -1569,6 +1648,9 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                   vexEvidenceErrors={vexEvidenceErrors}
                   vexEvidenceLoadingComponentId={vexEvidenceLoadingComponentId}
                   onApplicabilityDecision={setApplicabilityDecision}
+                  onBulkApplicabilityDecision={(decision) => {
+                    detail.matchedSoftware.forEach((sw) => setApplicabilityDecision(sw.componentId, decision));
+                  }}
                   onImpactDecision={setImpactDecision}
                   onToggleVexEvidence={toggleVexEvidence}
                 />
@@ -1581,9 +1663,10 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                 onAnalystRationaleChange={setAnalystRationale}
                 latestAssessment={latestAssessment}
                 saveBusy={assessmentBusy}
+                analystId={analystId}
                 onSave={() => saveAssessment(false)}
                 onProceed={() => saveAssessment(true)}
-                onBack={() => setActiveStep(1)}
+                onBack={() => guardedNav(() => setActiveStep(1))}
               />
             </div>
           )}
@@ -1619,9 +1702,9 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                 onTicketTargetChange={setTicketTarget}
                 onDueDateChange={setDueDate}
                 onFindingNotesChange={setFindingNotes}
-                onCreateFindings={createFindings}
-                onCreateGrouped={createFindings}
-                onSaveDraft={() => setActionNotice('Draft saved.')}
+                onRequestCreateFindings={() => setPendingFindingAction(() => createFindings)}
+                onRequestCreateGrouped={() => setPendingFindingAction(() => createFindings)}
+                onSaveAssessment={() => saveAssessment(false)}
                 onBack={() => setActiveStep(2)}
               />
             </div>
@@ -1631,7 +1714,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
           {activeStep === 1 && (
             <div className="cve-assessment-footer">
               <div className="cve-assessment-footer-left">
-                <button type="button" className="btn btn-secondary" onClick={onBack}>← Workbench</button>
+                <button type="button" className="btn btn-secondary" onClick={() => guardedNav(onBack)}>← Workbench</button>
                 <button type="button" className="btn btn-secondary">Mark Deferred</button>
                 <button type="button" className="btn btn-secondary">Export Evidence</button>
               </div>
@@ -1644,6 +1727,36 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
           )}
         </>
       )}
+
+      {/* Unsaved-changes navigation guard */}
+      <ConfirmDialog
+        isOpen={pendingNavAction !== null}
+        title="Unsaved Changes"
+        message="You have unsaved notes or rationale. Navigating away will discard them. Continue?"
+        confirmLabel="Discard & Leave"
+        cancelLabel="Stay"
+        onConfirm={() => {
+          const action = pendingNavAction;
+          setPendingNavAction(null);
+          action?.();
+        }}
+        onCancel={() => setPendingNavAction(null)}
+      />
+
+      {/* Finding creation confirmation */}
+      <ConfirmDialog
+        isOpen={pendingFindingAction !== null}
+        title={`Create ${selectedFindingIds.size} Finding${selectedFindingIds.size === 1 ? '' : 's'}?`}
+        message="This will immediately create findings for the selected assets. Existing open findings for the same components will be reopened rather than duplicated."
+        confirmLabel="Create Findings"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          const action = pendingFindingAction;
+          setPendingFindingAction(null);
+          if (action) void action();
+        }}
+        onCancel={() => setPendingFindingAction(null)}
+      />
     </div>
   );
 }

@@ -6,10 +6,48 @@ import { FilterValueOption, FilterValueSelectCard } from '../components/FilterVa
 import { MultiGroupBy, MultiGroupByOption } from '../components/MultiGroupBy';
 import { ResizableTable } from '../components/ResizableTable';
 import { StatCard } from '../components/StatCard';
+import { ColumnVisibilityToggle, ColumnDef } from '../components/ColumnVisibilityToggle';
 
 const PAGE_SIZE = 25;
 const DEFAULT_MATCH_METHODS: string[] = [];
 const DEFAULT_ACTIVE_FILTERS: FindingFilterKey[] = [];
+
+const FINDINGS_COLUMNS: ColumnDef[] = [
+  { key: 'vulnerability', label: 'Vulnerability', defaultVisible: true },
+  { key: 'asset', label: 'Asset', defaultVisible: true },
+  { key: 'package', label: 'Package', defaultVisible: true },
+  { key: 'severity', label: 'Severity', defaultVisible: true },
+  { key: 'status', label: 'Status', defaultVisible: true },
+  { key: 'decision', label: 'Decision', defaultVisible: true },
+  { key: 'vex', label: 'VEX', defaultVisible: true },
+  { key: 'impact-reason', label: 'Impact Reason', defaultVisible: true },
+  { key: 'risk', label: 'Risk', defaultVisible: true },
+  { key: 'confidence', label: 'Confidence', defaultVisible: true },
+  { key: 'match-method', label: 'Match Method', defaultVisible: true },
+  { key: 'kev', label: 'KEV', defaultVisible: true },
+  { key: 'first-observed', label: 'First Observed', defaultVisible: false },
+  { key: 'last-observed', label: 'Last Observed', defaultVisible: false },
+  { key: 'evidence', label: 'Evidence', defaultVisible: false },
+];
+
+const COL_VIS_STORAGE_KEY = 'findings-column-visibility';
+
+function loadColumnVisibility(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COL_VIS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return new Set(parsed as string[]);
+    }
+  } catch {
+    // ignore
+  }
+  return new Set(FINDINGS_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+}
+
+type FindingsPageProps = {
+  onOpenCveWorkbench?: (vulnerabilityId: string) => void;
+};
 const DEFAULT_MIN_CONFIDENCE = 0.7;
 
 type FindingFilterKey =
@@ -175,7 +213,7 @@ function groupValue(row: Finding, key: string): string {
   return 'unknown';
 }
 
-export function FindingsPage() {
+export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [rows, setRows] = React.useState<Finding[]>([]);
   const [page, setPage] = React.useState(0);
   const [totalItems, setTotalItems] = React.useState(0);
@@ -198,6 +236,12 @@ export function FindingsPage() {
   const [ecosystem, setEcosystem] = React.useState('');
   const [groupBy, setGroupBy] = React.useState<string[]>([]);
   const loadRequestIdRef = React.useRef(0);
+  const [visibleColumns, setVisibleColumns] = React.useState<Set<string>>(loadColumnVisibility);
+
+  function handleColumnVisibilityChange(next: Set<string>): void {
+    setVisibleColumns(next);
+    localStorage.setItem(COL_VIS_STORAGE_KEY, JSON.stringify(Array.from(next)));
+  }
 
   const severityOptions = React.useMemo<FilterValueOption[]>(
     () => filterValues.severities.map((value) => ({ value, label: formatLabel(value), tone: severityTone(value) })),
@@ -394,7 +438,7 @@ export function FindingsPage() {
                     title="Remove filter"
                   >
                     <span>{label}</span>
-                    <span aria-hidden="true">x</span>
+                    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   </button>
                 );
               })}
@@ -495,7 +539,7 @@ export function FindingsPage() {
                   onClick={() => removeFilter('minConfidence')}
                   aria-label="Remove minimum confidence filter"
                 >
-                  x
+                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
                 <input
                   type="range"
@@ -518,7 +562,7 @@ export function FindingsPage() {
                   onClick={() => removeFilter('vulnerabilityId')}
                   aria-label="Remove vulnerability id filter"
                 >
-                  x
+                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
                 <input
                   value={vulnerabilityId}
@@ -539,7 +583,7 @@ export function FindingsPage() {
                   onClick={() => removeFilter('packageName')}
                   aria-label="Remove package filter"
                 >
-                  x
+                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
                 <input
                   value={packageName}
@@ -560,7 +604,7 @@ export function FindingsPage() {
                   onClick={() => removeFilter('ecosystem')}
                   aria-label="Remove ecosystem filter"
                 >
-                  x
+                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
                 <input
                   value={ecosystem}
@@ -603,7 +647,7 @@ export function FindingsPage() {
 
       <div className="stats-grid">
         <StatCard title="Total Findings" value={totalItems} caption="Across all pages matching current filters" />
-        <StatCard title="This Page" value={rows.length} caption={`Page ${totalPages === 0 ? 0 : page + 1} of ${Math.max(totalPages, 1)}`} />
+        <StatCard title="This Page" value={rows.length} caption={totalItems === 0 ? 'No results' : `Page ${page + 1} of ${totalPages}`} />
       </div>
 
       {groupedCards.length > 0 && (
@@ -637,9 +681,16 @@ export function FindingsPage() {
       <section className="panel">
         <div className="panel-header">
           <h3>Correlated Findings</h3>
-          <span className="panel-caption">
-            Showing {totalItems.toLocaleString()} total findings for the current filter set.
-          </span>
+          <div className="panel-header-actions">
+            <span className="panel-caption">
+              Showing {totalItems.toLocaleString()} total findings for the current filter set.
+            </span>
+            <ColumnVisibilityToggle
+              columns={FINDINGS_COLUMNS}
+              visible={visibleColumns}
+              onChange={handleColumnVisibilityChange}
+            />
+          </div>
         </div>
 
         {error && <div className="notice error">Failed to load findings: {error}</div>}
@@ -656,74 +707,114 @@ export function FindingsPage() {
               <ResizableTable storageKey="findings-table-widths">
                 <thead>
                   <tr>
-                    <th>Vulnerability</th>
-                    <th>Asset</th>
-                    <th>Package</th>
-                    <th>Severity</th>
-                    <th>Status</th>
-                    <th>Decision</th>
-                    <th>VEX</th>
-                    <th>Impact Reason</th>
-                    <th>Risk</th>
-                    <th>Confidence</th>
-                    <th>Match Method</th>
-                    <th>KEV</th>
-                    <th>First Observed</th>
-                    <th>Last Observed</th>
-                    <th>Evidence</th>
+                    {visibleColumns.has('vulnerability') && <th>Vulnerability</th>}
+                    {visibleColumns.has('asset') && <th>Asset</th>}
+                    {visibleColumns.has('package') && <th>Package</th>}
+                    {visibleColumns.has('severity') && <th>Severity</th>}
+                    {visibleColumns.has('status') && <th>Status</th>}
+                    {visibleColumns.has('decision') && <th>Decision</th>}
+                    {visibleColumns.has('vex') && <th>VEX</th>}
+                    {visibleColumns.has('impact-reason') && <th>Impact Reason</th>}
+                    {visibleColumns.has('risk') && <th>Risk</th>}
+                    {visibleColumns.has('confidence') && <th>Confidence</th>}
+                    {visibleColumns.has('match-method') && <th>Match Method</th>}
+                    {visibleColumns.has('kev') && <th>KEV</th>}
+                    {visibleColumns.has('first-observed') && <th>First Observed</th>}
+                    {visibleColumns.has('last-observed') && <th>Last Observed</th>}
+                    {visibleColumns.has('evidence') && <th>Evidence</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.id}>
-                      <td className="mono">{row.vulnerabilityId}</td>
-                      <td>
-                        <div>{row.assetName}</div>
-                        <div className="panel-caption">{formatLabel(row.assetType)}</div>
-                      </td>
-                      <td>
-                        <div>{row.packageName}</div>
-                        <div className="panel-caption mono">{row.packageVersion}</div>
-                      </td>
-                      <td>
-                        <span className={`severity-pill severity-${row.severity.toLowerCase()}`}>
-                          {row.severity}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status-pill ${statusClass(row.status)}`}>
-                          {row.status}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="match-pill">{row.decisionState}</span>
-                      </td>
-                      <td>
-                        <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
-                        <div className="panel-caption">
-                          {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
-                        </div>
-                      </td>
-                      <td>{row.impactReason ? formatLabel(row.impactReason) : '-'}</td>
-                      <td className="confidence-cell">{row.riskScore.toFixed(2)}</td>
-                      <td className="confidence-cell">{(row.confidenceScore * 100).toFixed(1)}%</td>
-                      <td>
-                        <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
-                        {row.matchedVexAssertionId && (
-                          <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
-                        )}
-                      </td>
-                      <td>{row.inKev ? 'Yes' : 'No'}</td>
-                      <td>{row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-'}</td>
-                      <td>{row.lastObservedAt ? new Date(row.lastObservedAt).toLocaleString() : '-'}</td>
-                      <td>
-                        {row.evidence ? (
-                          <details className="evidence-details">
-                            <summary>View</summary>
-                            <pre>{row.evidence}</pre>
-                          </details>
-                        ) : '-'}
-                      </td>
+                      {visibleColumns.has('vulnerability') && (
+                        <td className="mono">
+                          {onOpenCveWorkbench ? (
+                            <button
+                              type="button"
+                              className="findings-vuln-link-btn"
+                              onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
+                            >
+                              {row.vulnerabilityId}
+                            </button>
+                          ) : row.vulnerabilityId}
+                        </td>
+                      )}
+                      {visibleColumns.has('asset') && (
+                        <td>
+                          <div>{row.assetName}</div>
+                          <div className="panel-caption">{formatLabel(row.assetType)}</div>
+                        </td>
+                      )}
+                      {visibleColumns.has('package') && (
+                        <td>
+                          <div>{row.packageName}</div>
+                          <div className="panel-caption mono">{row.packageVersion}</div>
+                        </td>
+                      )}
+                      {visibleColumns.has('severity') && (
+                        <td>
+                          <span className={`severity-pill severity-${row.severity.toLowerCase()}`}>
+                            {row.severity}
+                          </span>
+                        </td>
+                      )}
+                      {visibleColumns.has('status') && (
+                        <td>
+                          <span className={`status-pill ${statusClass(row.status)}`}>
+                            {row.status}
+                          </span>
+                        </td>
+                      )}
+                      {visibleColumns.has('decision') && (
+                        <td>
+                          <span className="match-pill">{row.decisionState}</span>
+                        </td>
+                      )}
+                      {visibleColumns.has('vex') && (
+                        <td>
+                          <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
+                          <div className="panel-caption">
+                            {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
+                          </div>
+                        </td>
+                      )}
+                      {visibleColumns.has('impact-reason') && (
+                        <td>{row.impactReason ? formatLabel(row.impactReason) : '-'}</td>
+                      )}
+                      {visibleColumns.has('risk') && (
+                        <td className="confidence-cell">{row.riskScore.toFixed(2)}</td>
+                      )}
+                      {visibleColumns.has('confidence') && (
+                        <td className="confidence-cell">{(row.confidenceScore * 100).toFixed(1)}%</td>
+                      )}
+                      {visibleColumns.has('match-method') && (
+                        <td>
+                          <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
+                          {row.matchedVexAssertionId && (
+                            <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
+                          )}
+                        </td>
+                      )}
+                      {visibleColumns.has('kev') && (
+                        <td>{row.inKev ? 'Yes' : 'No'}</td>
+                      )}
+                      {visibleColumns.has('first-observed') && (
+                        <td>{row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-'}</td>
+                      )}
+                      {visibleColumns.has('last-observed') && (
+                        <td>{row.lastObservedAt ? new Date(row.lastObservedAt).toLocaleString() : '-'}</td>
+                      )}
+                      {visibleColumns.has('evidence') && (
+                        <td>
+                          {row.evidence ? (
+                            <details className="evidence-details">
+                              <summary>View</summary>
+                              <pre>{row.evidence}</pre>
+                            </details>
+                          ) : '-'}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -739,7 +830,7 @@ export function FindingsPage() {
                 Previous
               </button>
               <span className="panel-caption pagination-caption">
-                Page {totalPages === 0 ? 0 : page + 1} of {Math.max(totalPages, 1)}
+                {totalItems === 0 ? 'No results' : `Page ${page + 1} of ${totalPages}`}
               </span>
               <button
                 type="button"
