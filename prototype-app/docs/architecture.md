@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-08
+Last updated: 2026-03-15
 
 ## Why This Fourth Document Exists
 
@@ -26,8 +26,9 @@ Runtime shape:
 
 ### 1. Inventory In
 
-- Users upload or fetch SBOMs, or configure GitHub-generated SBOM pulls.
-- The backend writes `assets`, `sbom_uploads`, `inventory_components`, identity records, `software_inventory_items`, and normalized CPE links.
+**SBOM path:** Users upload or fetch SBOMs, or configure GitHub-generated SBOM pulls. The backend writes `assets`, `sbom_uploads`, `inventory_components`, identity records, `software_inventory_items`, and normalized CPE links.
+
+**ServiceNow CMDB path:** Users configure a live connector (base URL, auth, table names) via `AssetsPage`. The backend paginates ServiceNow Table APIs, resolves or creates `cis` and `ci_alias` rows, normalizes software via `discovery_models` and `software_identities`, upserts `software_instances`, mirrors each CI as an `inventory_component`, and records the run in `sync_runs` with `run_domain=INVENTORY`.
 
 ### 2. Vulnerability Intelligence In
 
@@ -65,8 +66,10 @@ What is actively exposed in the UI today:
 - operational metrics
 - vulnerability intelligence list/detail
 - org-CVE exposure list with CVE workflow drawer
-- inventory component views
-- connector-driven ingestion setup
+- inventory component views (Imported Assets, Hosts, Container Images, Repositories)
+- host asset detail page with CI metadata, aliases, software instances, and findings
+- ServiceNow CMDB live connector setup, connection testing, and live sync trigger
+- Inventory Run Queue showing all host/container/SBOM ingestion run history
 - risk policy and GitHub pipeline configuration
 
 What exists in code but is not fully surfaced or is still transitional:

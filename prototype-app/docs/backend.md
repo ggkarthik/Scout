@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-03-08
+Last updated: 2026-03-15
 
 ## Purpose
 
@@ -93,7 +93,15 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `GET /api/inventory/components/filters`
 - `GET /api/assets`
 - `POST /api/assets/cmdb-sync`
+- `GET /api/assets/hosts/{assetId}` — host CI detail with aliases, software instances, and findings
 - `GET /api/sbom-uploads`
+
+### ServiceNow CMDB Connector
+
+- `GET /api/connectors/servicenow-cmdb` — retrieve saved connector config for the default tenant
+- `PUT /api/connectors/servicenow-cmdb` — create or update connector config (URL, auth type, tables, sync schedule)
+- `POST /api/connectors/servicenow-cmdb/test` — save config then run a live connection test against all three ServiceNow tables
+- `POST /api/connectors/servicenow-cmdb/sync` — enqueue a live CMDB inventory pull via `ServiceNowCmdbSyncService`
 
 ### Vulnerability Intelligence
 
@@ -201,7 +209,24 @@ Observed `matchedBy` evidence values are CPE-based, such as:
 - `cpe-indexed-direct+version`
 - `cpe-indexed-fallback+version`
 
-### 4. CVE Workflow Layer
+### 4. ServiceNow CMDB Host Inventory Ingestion
+
+`ServiceNowCmdbSyncService` drives live host inventory pulls from ServiceNow Table APIs:
+
+1. reads connector config from `servicenow_cmdb_configs` via `ServiceNowCmdbConfigService`
+2. paginates the install table (`cmdb_sam_sw_install`) using the configured page size, field list, and optional query override
+3. paginates the discovery model table (`cmdb_sam_sw_discovery_model`) and resolves normalized software metadata
+4. resolves or creates CI rows in the `cis` table via `CiResolutionService`, matching by `sys_id` or `cmdb_ci` lookup
+5. upserts CI aliases from hostname/FQDN variants
+6. normalizes software names/publishers via `HostSoftwareNormalizationService`
+7. resolves or creates `SoftwareIdentity` rows via `SoftwareIdentityService`
+8. upserts `SoftwareInstance` rows linking CIs to software identities
+9. mirrors each CI as an `InventoryComponent` via `CmdbIngestionService` and enqueues recomputation
+10. records a `SyncRun` row with `runDomain=INVENTORY` and detailed metadata JSON
+
+`SyncRunHistoryService` writes the `sync_runs` row and is the single point of truth for run lifecycle recording across all inventory run types. The `runDomain` field distinguishes inventory runs (`INVENTORY`) from vulnerability intelligence runs for queue filtering.
+
+### 5. CVE Workflow Layer
 
 The newer CVE workflow APIs add:
 

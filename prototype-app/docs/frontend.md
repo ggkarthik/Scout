@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-10
+Last updated: 2026-03-15
 
 ## Purpose
 
@@ -50,6 +50,8 @@ The client also handles:
 - multipart SBOM uploads
 - org-CVE drill-down calls
 - risk policy, GitHub source, sync run, and prototype reset calls
+- ServiceNow CMDB connector config, connection test, live sync, and sample sync calls
+- host asset detail and host inventory calls
 
 ## Navigation Model
 
@@ -66,6 +68,8 @@ Current top-level sections:
 - Configurations
 
 The active app is organized as a shell, not route-based pages. Most drill-downs happen inline in tables, drawers, and modals.
+
+The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-to-page search input. The theme toggle is an icon-only button (sun/moon SVG) rather than a text label.
 
 ## Main Experiences
 
@@ -104,17 +108,26 @@ The current sidebar exposes four reachable inventory views:
 - Imported Assets
 - Hosts
 - Container Images
-- SBOM
+- SBOM (Repositories)
 
 All of them currently sit on top of `/inventory/components` and `/inventory/components/filters`, with default asset-type filters changing by view. `InventoryPage` contains additional future-oriented view keys, but those are not wired into the current navigation or backed by dedicated backend APIs.
 
+`HostAssetDetailPage` is a dedicated drilldown for a single host asset, reached from the Hosts inventory view. It reads `/api/assets/hosts/{assetId}` for detailed CI metadata, alias list, software instances, and associated findings.
+
 ### Connect
 
-`ConnectPage` is a connector catalog that swaps in focused workflow pages:
+`ConnectPage` is a connector catalog with three top-level views: Sources, Inventory Run Queue, and Vuln Intel Run Queue.
+
+**Sources** swaps in focused workflow pages per connector:
 
 - `IngestionPage` for SBOM upload, endpoint fetch, and GitHub-generated SBOM ingestion
-- `AssetsPage` for CMDB sync payloads
+- `GithubPipelineManager` for reusable GitHub SBOM pipeline configuration and GHCR batch ingestion
+- `AssetsPage` for the full ServiceNow CMDB live connector — base URL, auth (Basic/Bearer), table config, field selection, sync scheduling, connection testing, and live sync trigger
 - `SourcesPage` for NVD, KEV, GHSA, CSAF/VEX, and advisory ingestion runs
+
+**Inventory Run Queue** is `InventoryRunQueuePage`, a shared table of all host/container/SBOM ingestion run history (ServiceNow CMDB, GitHub SBOM, GitHub GHCR), showing type, status, started time, duration, assets, components, findings, and an expandable details panel per run.
+
+**Vuln Intel Run Queue** surfaces `SourcesPage` in queue-only mode for NVD/KEV/GHSA/CSAF run history.
 
 ### Configurations
 
@@ -131,6 +144,8 @@ All of them currently sit on top of `/inventory/components` and `/inventory/comp
 - `ResizableTable` is the default dense data-grid primitive
 - `FilterBuilder` and `FilterValueSelectCard` drive reusable filter UX
 - `StatCard` is used for summary metrics
+- `GithubPipelineManager` is a self-contained GitHub source pipeline editor used inside `ConnectPage`
+- `CveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vuln Intel
 - Most long-running actions surface inline status text instead of global toasts
 
 ## Current Caveats

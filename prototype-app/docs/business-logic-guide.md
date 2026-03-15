@@ -21,8 +21,10 @@
 11. [The Analyst Workflow — Investigations and Assessments](#11-the-analyst-workflow--investigations-and-assessments)
 12. [Keeping Software Inventory Fresh (Asset Lifecycle)](#12-keeping-software-inventory-fresh-asset-lifecycle)
 13. [Automated GitHub Inventory Collection](#13-automated-github-inventory-collection)
-14. [Dashboard Metrics and What They Measure](#14-dashboard-metrics-and-what-they-measure)
-15. [Configurable Thresholds and Policy Levers](#15-configurable-thresholds-and-policy-levers)
+14. [Bringing Host Inventory In (ServiceNow CMDB Ingestion)](#14-bringing-host-inventory-in-servicenow-cmdb-ingestion)
+15. *(renumbered — see 16)*
+16. [Dashboard Metrics and What They Measure](#16-dashboard-metrics-and-what-they-measure)
+17. [Configurable Thresholds and Policy Levers](#17-configurable-thresholds-and-policy-levers)
 
 ---
 
@@ -828,7 +830,62 @@ GitHub can automatically generate an SBOM for any repository using its dependenc
 
 ---
 
-## 14. Dashboard Metrics and What They Measure
+## 14. Bringing Host Inventory In (ServiceNow CMDB Ingestion)
+
+### Summary
+The system can pull host software inventory directly from a ServiceNow instance via the Table API, eliminating the need for manually exported workbook files. The connector fetches installed software rows, resolves host identities, normalizes software product data, and feeds the results into the same inventory pipeline used by SBOM ingestion. The Inventory Run Queue records every pull so analysts can audit what was fetched and when.
+
+### Step-by-Step Logic
+
+#### A. Connector Configuration
+
+1. An administrator opens the ServiceNow CMDB connector in the Connect → Sources view.
+2. They provide the instance base URL, authentication type (Basic Auth or Bearer Token), credentials, and the three ServiceNow table names: install table, discovery model table, and CI lookup table.
+3. Optional: a `sysparm_query` fragment can be added to each table to scope results (e.g., active rows only, or a specific business unit).
+4. Optional: a custom field list can narrow the columns pulled per table to reduce API payload size.
+5. The administrator clicks **Test Connection**. The system saves the config and verifies that all three tables are reachable. The result (SUCCESS or FAILED) plus a message are stored against the config record and shown inline.
+6. Once configured, the connector can be triggered manually (Run Live Sync button) or set to run automatically on a configured interval.
+
+#### B. Live Pull Execution
+
+1. The system reads the saved connector config for this tenant.
+2. It paginates the install table (`cmdb_sam_sw_install` by default) using the configured page size, requesting only the configured fields, and applying the optional query filter.
+3. It paginates the discovery model table (`cmdb_sam_sw_discovery_model` by default) to fetch normalized software product metadata (normalized name, publisher, version hashes, platform).
+4. For each install row, the system resolves the host CI:
+   - First by `installed_on.sys_id` if present on the install row.
+   - Otherwise by CI lookup table query using the hostname.
+   - If a matching CI does not yet exist in the system, a new one is created and linked to a new `assets` row.
+5. Host aliases (FQDN variants, short names) are upserted to allow future cross-source host matching.
+6. For each install row, the system resolves or creates a `SoftwareIdentity`:
+   - It looks up the discovery model row for the install row's `discovery_model` reference.
+   - It normalizes the product name and publisher using the discovery model data.
+   - If a matching software identity exists (by product hash), it is reused; otherwise a new one is created.
+7. A `SoftwareInstance` row is upserted linking the CI to the software identity, storing install date, last scanned, last used, and active/unlicensed flags.
+8. Each CI is mirrored as an `InventoryComponent` in the tenant's component inventory so it participates in the standard CPE correlation and finding pipeline.
+9. Component-scoped vulnerability recomputation is enqueued for new or updated components.
+
+#### C. Run Recording
+
+1. Every pull — whether manual or scheduled — is recorded as a `SyncRun` row with `run_domain=INVENTORY` and `sync_type=SERVICENOW_CMDB`.
+2. The metadata JSON on the run row captures: install rows processed, discovery rows processed, unmatched discovery rows, new CIs created, new aliases created, software instances created/updated, inventory components created/updated, and findings recomputed.
+3. The Inventory Run Queue page (Connect → Inventory Run Queue) surfaces all inventory runs across ServiceNow CMDB, GitHub SBOM, and GHCR ingestion.
+
+#### D. What Happens If the Connector Is Not Configured
+
+- The connector status card shows "Needs Setup" and the credential status shows "Missing".
+- No live pulls will run — neither manual nor scheduled.
+- Sample data sync (bundled workbook export) remains available as a fallback for testing the downstream host inventory and review experience without a live ServiceNow instance.
+
+### Key Rules
+
+- A CI is considered the same host across syncs if its `sys_id` matches; the display name and metadata are updated on each sync.
+- A software identity is considered the same product if its product hash matches, even if the normalized name changes slightly over time.
+- Credentials are stored encrypted. Leaving the credential field blank during a config save preserves the previously saved credential without exposing it.
+- The scheduled auto-sync interval minimum is 5 minutes. The default is 1440 minutes (once daily).
+
+---
+
+## 16. Dashboard Metrics and What They Measure
 
 ### Summary
 The application surfaces two dashboards — the main security dashboard and an operational dashboard for team leads. This section describes exactly what each metric means, how it is calculated, and what business question it answers.
@@ -910,7 +967,7 @@ The application surfaces two dashboards — the main security dashboard and an o
 
 ---
 
-## 15. Configurable Thresholds and Policy Levers
+## 17. Configurable Thresholds and Policy Levers
 
 ### Summary
 Many of the rules described in this document use numeric thresholds or feature flags that can be adjusted without changing code. This section lists every configurable lever, what it does, and its default value. These are the parameters that business stakeholders can propose changes to.
@@ -958,6 +1015,10 @@ Many of the rules described in this document use numeric thresholds or feature f
 | Asset stale-to-inactive days | 30 days | Days without an SBOM before an asset is marked inactive |
 | VEX risk modifiers enabled | true | Whether VEX context modifies the risk score |
 | VEX policy enabled | true | Whether VEX statements can suppress findings |
+
+| ServiceNow CMDB connector enabled | true | Whether live pulls from ServiceNow are allowed |
+| ServiceNow auto-sync interval | 1440 minutes | How often scheduled CMDB pulls run when auto-sync is enabled |
+| ServiceNow page size | 1000 | Rows per Table API page during live pulls |
 
 ### Scheduled Job Timings (Fixed in Code, Requires Deployment to Change)
 

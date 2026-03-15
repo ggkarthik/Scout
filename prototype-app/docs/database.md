@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-03-08
+Last updated: 2026-03-15
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -48,10 +48,34 @@ Global or mostly global intelligence tables include:
 - `inventory_components`
   - tenant asset components, active/retired lifecycle, normalized package fields
 - `software_identities`
+  - canonical normalized software product records; extended by V1030 with `vendor`, `product`, `product_hash`, `purl`, `cpe23`, `vendor_product_id` columns for deterministic CMDB-to-CPE linkage
 - `software_identifiers`
 - `identity_links`
+  - extended by V1030 with `source_type`, `source_id`, `target_type`, `target_id`, `match_rule`, `last_seen_at` for flexible cross-domain identity resolution
 - `software_inventory_items`
   - flattened software inventory projection used by read/reporting paths
+
+### Host Inventory (CMDB)
+
+Added by V1030–V1033:
+
+- `cis`
+  - one row per CMDB Configuration Item per tenant; links to `assets`
+  - stores `sys_id`, `display_name`, `business_criticality`, `environment`, `owner_email`, and sync timestamps
+  - unique index on `(tenant_id, sys_id)`
+- `ci_aliases`
+  - hostname/FQDN variants for a CI; supports fuzzy host resolution
+  - stores `alias_name` and `normalized_alias_name`
+- `discovery_models`
+  - normalized software product metadata rows from `cmdb_sam_sw_discovery_model`
+  - stores `primary_key`, `normalized_product`, `normalized_publisher`, `product_hash`, `version_hash`, `platform`, `normalization_status`
+- `software_instances`
+  - one row per installed software per CI
+  - links `ci_id` and `software_identity_id`
+  - stores install date, last scanned, last used, active/unlicensed flags
+- `servicenow_cmdb_configs`
+  - one config row per `(tenant_id, source_system)`
+  - stores `base_url`, `auth_type`, credential secret (encrypted at rest), table names, field selection overrides, `page_size`, `enabled`, `auto_sync_enabled`, `interval_minutes`, and last test status/timestamp
 
 ### Correlation Inputs
 
@@ -94,6 +118,8 @@ Global or mostly global intelligence tables include:
 ### Operational and Workflow Support
 
 - `sync_runs`
+  - extended by V1029 with `metadata_json` for structured run metrics
+  - `run_domain` column distinguishes `INVENTORY` runs (ServiceNow CMDB, GitHub SBOM/GHCR) from `VULNERABILITY` runs (NVD, KEV, GHSA, CSAF/VEX)
 - `github_sbom_sources`
 - `investigations`
 - `investigation_activities`
@@ -102,8 +128,12 @@ Global or mostly global intelligence tables include:
 
 ## Key Relationships
 
-- `tenants` 1->N inventory, findings, org-CVE, and policy records
+- `tenants` 1->N inventory, findings, org-CVE, policy, and CMDB config records
 - `assets` 1->N `sbom_uploads`, `inventory_components`, `software_inventory_items`, and `findings`
+- `assets` 1->1 `cis` (host assets only)
+- `cis` 1->N `ci_aliases`, `software_instances`
+- `software_identities` 1->N `software_instances`, `software_identifiers`, `identity_links`
+- `discovery_models` resolves into `software_identities` during CMDB ingestion
 - `inventory_components` 1->N `inventory_component_cpe_map`, `component_vulnerability_states`, and `findings`
 - `cpe_dim` 1->N `inventory_component_cpe_map` and `vulnerability_targets`
 - `vulnerabilities` 1->N `vulnerability_targets`, `vulnerability_intel_observations`, `component_vulnerability_states`, `org_cve_records`, and `findings`
