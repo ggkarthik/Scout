@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,7 +34,6 @@ import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,13 +42,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+
+import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
@@ -81,6 +86,9 @@ class SbomUploadPostgresIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private RestTemplate restTemplate;
 
     @Autowired
     private TenantService tenantService;
@@ -115,8 +123,11 @@ class SbomUploadPostgresIntegrationTest {
     @Autowired
     private OrgCveRecordRepository orgCveRecordRepository;
 
+    private MockRestServiceServer server;
+
     @BeforeEach
     void enableAutomaticFindingGeneration() {
+        server = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
         Tenant tenant = tenantService.getDefaultTenant();
         RiskPolicy policy = riskPolicyRepository.findByTenant(tenant)
                 .orElseGet(() -> {
@@ -133,7 +144,7 @@ class SbomUploadPostgresIntegrationTest {
     void sbomReuploadResolvesFindingAndUpdatesExposureOnRealPostgres() throws Exception {
         ingestAdvisory();
 
-        JsonNode initialUpload = uploadSbom(
+        JsonNode initialUpload = fetchSbom(
                 "log4j-core-2.14.1.json",
                 sbomPayload(
                         "2.14.1",
@@ -175,7 +186,7 @@ class SbomUploadPostgresIntegrationTest {
         assertEquals(ApplicabilityState.APPLICABLE, initialExposure.getApplicabilityState());
         assertTrue(initialExposure.getMatchedSoftwareCount() >= 1L);
 
-        JsonNode secondUpload = uploadSbom(
+        JsonNode secondUpload = fetchSbom(
                 "log4j-core-2.17.2.json",
                 sbomPayload(
                         "2.17.2",
@@ -238,22 +249,27 @@ class SbomUploadPostgresIntegrationTest {
                 .andExpect(status().isOk());
     }
 
-    private JsonNode uploadSbom(String filename, String payload) throws Exception {
-        MockMultipartFile file = new MockMultipartFile(
-                "file",
-                filename,
-                MediaType.APPLICATION_JSON_VALUE,
-                payload.getBytes(StandardCharsets.UTF_8));
+    private JsonNode fetchSbom(String filename, String payload) throws Exception {
+        String sourceUrl = "https://example.com/sbom/" + filename;
+        server.expect(once(), requestTo(sourceUrl))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(payload, MediaType.APPLICATION_JSON));
 
-        MvcResult result = mockMvc.perform(multipart("/api/sbom-upload")
-                        .file(file)
-                        .param("assetType", "APPLICATION")
-                        .param("assetName", "postgres-sbom-delta")
-                        .param("assetIdentifier", ASSET_IDENTIFIER)
+        MvcResult result = mockMvc.perform(post("/api/sbom-fetch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "assetType": "APPLICATION",
+                                  "assetName": "postgres-sbom-delta",
+                                  "assetIdentifier": "%s",
+                                  "sourceUrl": "%s"
+                                }
+                                """.formatted(ASSET_IDENTIFIER, sourceUrl))
                         .header("X-API-Key", API_KEY))
                 .andExpect(status().isOk())
                 .andReturn();
 
+        server.verify();
         return objectMapper.readTree(result.getResponse().getContentAsString());
     }
 

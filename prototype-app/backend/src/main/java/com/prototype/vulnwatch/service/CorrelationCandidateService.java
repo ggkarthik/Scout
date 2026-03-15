@@ -2,9 +2,14 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentCpeMap;
+import com.prototype.vulnwatch.domain.IdentityLink;
+import com.prototype.vulnwatch.domain.IdentityMatchRule;
+import com.prototype.vulnwatch.domain.SoftwareInstance;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
+import com.prototype.vulnwatch.repo.IdentityLinkRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
+import com.prototype.vulnwatch.repo.SoftwareInstanceRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.util.IdentityUtil;
 import com.prototype.vulnwatch.util.PurlUtil;
@@ -24,18 +29,24 @@ public class CorrelationCandidateService {
 
     private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
     private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
+    private final SoftwareInstanceRepository softwareInstanceRepository;
+    private final IdentityLinkRepository identityLinkRepository;
 
     public CorrelationCandidateService(
             VulnerabilityTargetRepository vulnerabilityTargetRepository,
-            InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository
+            InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
+            SoftwareInstanceRepository softwareInstanceRepository,
+            IdentityLinkRepository identityLinkRepository
     ) {
         this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
         this.inventoryComponentCpeMapRepository = inventoryComponentCpeMapRepository;
+        this.softwareInstanceRepository = softwareInstanceRepository;
+        this.identityLinkRepository = identityLinkRepository;
     }
 
     public CandidateBundle buildCandidateBundle(List<InventoryComponent> components) {
         if (components == null || components.isEmpty()) {
-            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
         Set<UUID> componentIds = new HashSet<>();
@@ -45,7 +56,7 @@ public class CorrelationCandidateService {
             }
         }
         if (componentIds.isEmpty()) {
-            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+            return new CandidateBundle(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
         List<InventoryComponentCpeMap> mapRows = inventoryComponentCpeMapRepository.findByComponent_IdIn(componentIds);
@@ -114,6 +125,26 @@ public class CorrelationCandidateService {
                         coordKeys
                 ));
 
+        Map<UUID, UUID> componentSoftwareIdentityIds = new HashMap<>();
+        Set<UUID> softwareIdentityIds = new HashSet<>();
+        for (InventoryComponent component : components) {
+            if (component == null
+                    || component.getId() == null
+                    || component.getSoftwareIdentity() == null
+                    || component.getSoftwareIdentity().getId() == null) {
+                continue;
+            }
+            UUID softwareIdentityId = component.getSoftwareIdentity().getId();
+            componentSoftwareIdentityIds.put(component.getId(), softwareIdentityId);
+            softwareIdentityIds.add(softwareIdentityId);
+        }
+
+        Map<UUID, List<VulnerabilityTarget>> identityTargetsBySoftwareIdentityId = softwareIdentityIds.isEmpty()
+                ? Map.of()
+                : groupBySoftwareIdentity(vulnerabilityTargetRepository.findBySoftwareIdentityIds(softwareIdentityIds));
+
+        Map<UUID, IdentityMatchRule> hostMatchRulesByComponentId = loadHostMatchRules(componentIds);
+
         return new CandidateBundle(
                 componentCpeIds,
                 cpeTargetsByCpeId,
@@ -121,7 +152,10 @@ public class CorrelationCandidateService {
                 purlTargetsByKey,
                 componentCoordKeys,
                 coordTargetsByKey,
-                advisoryPackageTargetsByKey
+                advisoryPackageTargetsByKey,
+                componentSoftwareIdentityIds,
+                identityTargetsBySoftwareIdentityId,
+                hostMatchRulesByComponentId
         );
     }
 
@@ -133,6 +167,17 @@ public class CorrelationCandidateService {
         Set<UUID> componentCpeIds = bundle.componentCpeIdsByComponentId().getOrDefault(component.getId(), Set.of());
         List<CandidateMatch> matches = new ArrayList<>();
         Set<UUID> dedupeTargetIds = new HashSet<>();
+
+        UUID softwareIdentityId = bundle.componentSoftwareIdentityIdsByComponentId().get(component.getId());
+        if (softwareIdentityId != null) {
+            IdentityMatchRule matchRule = bundle.hostMatchRulesByComponentId().getOrDefault(component.getId(), IdentityMatchRule.NORMALIZED_KEY);
+            appendIdentityMatches(
+                    bundle.identityTargetsBySoftwareIdentityId().getOrDefault(softwareIdentityId, List.of()),
+                    matchRule,
+                    dedupeTargetIds,
+                    matches
+            );
+        }
 
         List<UUID> orderedCpeIds = componentCpeIds.stream().sorted().toList();
         for (UUID cpeId : orderedCpeIds) {
@@ -184,6 +229,38 @@ public class CorrelationCandidateService {
         return matches;
     }
 
+    private void appendIdentityMatches(
+            List<VulnerabilityTarget> targets,
+            IdentityMatchRule matchRule,
+            Set<UUID> dedupeTargetIds,
+            List<CandidateMatch> matches
+    ) {
+        if (targets == null || targets.isEmpty()) {
+            return;
+        }
+        List<VulnerabilityTarget> orderedTargets = new ArrayList<>(targets);
+        orderedTargets.sort(Comparator.comparing(VulnerabilityTarget::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+        String matchedBy = switch (matchRule) {
+            case HASH -> "identity-hash-indexed+version";
+            case IDENTIFIER -> "identity-identifier-indexed+version";
+            case NORMALIZED_KEY -> "identity-normalized-key+version";
+        };
+        int baseRank = switch (matchRule) {
+            case HASH -> 5;
+            case IDENTIFIER -> 8;
+            case NORMALIZED_KEY -> 12;
+        };
+        for (VulnerabilityTarget target : orderedTargets) {
+            if (target.getId() == null || !dedupeTargetIds.add(target.getId())) {
+                continue;
+            }
+            int rank = baseRank + rankPenalty(target);
+            Map<String, Double> breakdown = confidenceBreakdown(target, matchedBy);
+            double confidence = computeConfidence(matchedBy, breakdown);
+            matches.add(new CandidateMatch(target, matchedBy, rank, confidence, breakdown));
+        }
+    }
+
     private void appendIndexedMatches(
             Set<String> keys,
             Map<String, List<VulnerabilityTarget>> targetsByKey,
@@ -230,6 +307,9 @@ public class CorrelationCandidateService {
 
     private Map<String, Double> confidenceBreakdown(VulnerabilityTarget target, String matchedBy) {
         double base = switch (matcherPrefix(matchedBy)) {
+            case "identity-hash-indexed" -> 0.94;
+            case "identity-identifier-indexed" -> 0.90;
+            case "identity-normalized-key" -> 0.82;
             case "cpe-indexed-direct" -> 0.72;
             case "cpe-indexed-fallback" -> 0.54;
             case "purl-indexed-exact" -> 0.66;
@@ -253,6 +333,9 @@ public class CorrelationCandidateService {
         if ("cpe-indexed-fallback".equals(matcherPrefix(matchedBy))) {
             penalties += 0.05;
         }
+        if ("identity-normalized-key".equals(matcherPrefix(matchedBy))) {
+            penalties += 0.02;
+        }
         if ("coord-indexed-exact".equals(matcherPrefix(matchedBy))) {
             penalties += 0.04;
         }
@@ -270,6 +353,9 @@ public class CorrelationCandidateService {
 
     private double capFor(String matchedBy) {
         return switch (matcherPrefix(matchedBy)) {
+            case "identity-hash-indexed" -> 0.99;
+            case "identity-identifier-indexed" -> 0.97;
+            case "identity-normalized-key" -> 0.90;
             case "cpe-indexed-direct" -> 0.90;
             case "cpe-indexed-fallback" -> 0.76;
             case "purl-indexed-exact" -> 0.84;
@@ -350,6 +436,64 @@ public class CorrelationCandidateService {
         return map;
     }
 
+    private Map<UUID, List<VulnerabilityTarget>> groupBySoftwareIdentity(List<VulnerabilityTarget> targets) {
+        Map<UUID, List<VulnerabilityTarget>> map = new HashMap<>();
+        for (VulnerabilityTarget target : targets) {
+            if (target.getSoftwareIdentity() == null || target.getSoftwareIdentity().getId() == null) {
+                continue;
+            }
+            map.computeIfAbsent(target.getSoftwareIdentity().getId(), ignored -> new ArrayList<>()).add(target);
+        }
+        return map;
+    }
+
+    private Map<UUID, IdentityMatchRule> loadHostMatchRules(Set<UUID> componentIds) {
+        if (componentIds == null || componentIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, UUID> componentIdBySoftwareInstanceId = new HashMap<>();
+        for (SoftwareInstance instance : softwareInstanceRepository.findByInventoryComponent_IdIn(componentIds)) {
+            if (instance.getId() == null
+                    || instance.getInventoryComponent() == null
+                    || instance.getInventoryComponent().getId() == null) {
+                continue;
+            }
+            componentIdBySoftwareInstanceId.put(instance.getId().toString(), instance.getInventoryComponent().getId());
+        }
+        if (componentIdBySoftwareInstanceId.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, IdentityMatchRule> rules = new HashMap<>();
+        List<IdentityLink> links = identityLinkRepository.findBySourceTypeAndSourceIdInAndTargetType(
+                "SOFTWARE_INSTANCE",
+                componentIdBySoftwareInstanceId.keySet(),
+                "SOFTWARE_IDENTITY"
+        );
+        for (IdentityLink link : links) {
+            UUID componentId = componentIdBySoftwareInstanceId.get(link.getSourceId());
+            if (componentId == null || link.getMatchRule() == null) {
+                continue;
+            }
+            rules.merge(componentId, link.getMatchRule(), this::preferredRule);
+        }
+        return rules;
+    }
+
+    private IdentityMatchRule preferredRule(IdentityMatchRule left, IdentityMatchRule right) {
+        return precedence(left) <= precedence(right) ? left : right;
+    }
+
+    private int precedence(IdentityMatchRule rule) {
+        if (rule == null) {
+            return Integer.MAX_VALUE;
+        }
+        return switch (rule) {
+            case HASH -> 0;
+            case IDENTIFIER -> 1;
+            case NORMALIZED_KEY -> 2;
+        };
+    }
+
     public record CandidateBundle(
             Map<UUID, Set<UUID>> componentCpeIdsByComponentId,
             Map<UUID, List<VulnerabilityTarget>> cpeTargetsByCpeId,
@@ -357,7 +501,10 @@ public class CorrelationCandidateService {
             Map<String, List<VulnerabilityTarget>> purlTargetsByNormalizedKey,
             Map<UUID, Set<String>> componentCoordKeysByComponentId,
             Map<String, List<VulnerabilityTarget>> coordTargetsByNormalizedKey,
-            Map<String, List<VulnerabilityTarget>> advisoryPackageTargetsByNormalizedKey
+            Map<String, List<VulnerabilityTarget>> advisoryPackageTargetsByNormalizedKey,
+            Map<UUID, UUID> componentSoftwareIdentityIdsByComponentId,
+            Map<UUID, List<VulnerabilityTarget>> identityTargetsBySoftwareIdentityId,
+            Map<UUID, IdentityMatchRule> hostMatchRulesByComponentId
     ) {
     }
 

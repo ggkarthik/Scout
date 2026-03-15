@@ -15,6 +15,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -49,6 +50,12 @@ public class ApiExceptionHandler {
         Map<String, Object> payload = error("VALIDATION_ERROR", "Validation failed");
         payload.put("fields", fields);
         return payload;
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public Map<String, Object> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
+        return error("METHOD_NOT_ALLOWED", ex.getMessage() == null ? "Request method is not supported" : ex.getMessage());
     }
 
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})

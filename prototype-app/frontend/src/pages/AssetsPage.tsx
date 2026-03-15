@@ -1,333 +1,598 @@
 import React from 'react';
 import { api } from '../api/client';
-import { Asset, CmdbAssetRecord } from '../types';
-import { ResizableTable } from '../components/ResizableTable';
+import type {
+  ServiceNowCmdbAuthType,
+  ServiceNowCmdbConfig,
+  ServiceNowCmdbConfigRequest,
+  ServiceNowCmdbConnectionTest,
+  SyncTriggerResponse
+} from '../types';
 
-const SAMPLE_CMDB_PAYLOAD: CmdbAssetRecord[] = [
-  {
-    assetType: 'APPLICATION',
-    assetName: 'payments-api-prod',
-    assetIdentifier: 'app:payments-api:prod',
-    serviceName: 'payments-api',
-    environment: 'production',
-    ownerTeam: 'payments-platform',
-    ownerEmail: 'payments-platform@example.com',
-    businessCriticality: 'CRITICAL',
-    state: 'ACTIVE'
+const REVIEW_CATEGORY_QUERY_KEY = 'reviewCategory';
+const DEFAULT_INSTALL_FIELDS = [
+  'sys_id',
+  'display_name',
+  'publisher',
+  'version',
+  'install_date',
+  'last_scanned',
+  'last_used',
+  'active_install',
+  'unlicensed_install',
+  'installed_on',
+  'discovery_model'
+].join(',');
+const DEFAULT_DISCOVERY_FIELDS = [
+  'sys_id',
+  'primary_key',
+  'normalized_product',
+  'normalized_publisher',
+  'normalized_version',
+  'product_hash',
+  'version_hash',
+  'full_version',
+  'platform',
+  'language',
+  'normalization_status',
+  'approved',
+  'low_confidence'
+].join(',');
+
+function inventoryHref(view: 'hosts', reviewCategories?: string[]): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', 'inventory');
+  url.searchParams.set('inventoryView', view);
+  url.searchParams.delete(REVIEW_CATEGORY_QUERY_KEY);
+  reviewCategories?.forEach((value) => url.searchParams.append(REVIEW_CATEGORY_QUERY_KEY, value));
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+function connectHref(view: 'inventory-run-queue'): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', 'connect');
+  url.searchParams.set('connectView', view);
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+function defaultForm(): ServiceNowCmdbConfigRequest {
+  return {
+    baseUrl: '',
+    authType: 'BASIC',
+    username: '',
+    credentialSecret: '',
+    installTable: 'cmdb_sam_sw_install',
+    discoveryModelTable: 'cmdb_sam_sw_discovery_model',
+    ciTable: 'cmdb_ci',
+    installQuery: '',
+    discoveryQuery: '',
+    installFields: DEFAULT_INSTALL_FIELDS,
+    discoveryFields: DEFAULT_DISCOVERY_FIELDS,
+    pageSize: 1000,
+    enabled: true,
+    autoSyncEnabled: false,
+    intervalMinutes: 1440
+  };
+}
+
+function formFromConfig(config: ServiceNowCmdbConfig | null): ServiceNowCmdbConfigRequest {
+  if (!config) {
+    return defaultForm();
   }
-];
+  return {
+    baseUrl: config.baseUrl ?? '',
+    authType: config.authType,
+    username: config.username ?? '',
+    credentialSecret: '',
+    installTable: config.installTable ?? 'cmdb_sam_sw_install',
+    discoveryModelTable: config.discoveryModelTable ?? 'cmdb_sam_sw_discovery_model',
+    ciTable: config.ciTable ?? 'cmdb_ci',
+    installQuery: config.installQuery ?? '',
+    discoveryQuery: config.discoveryQuery ?? '',
+    installFields: config.installFields ?? DEFAULT_INSTALL_FIELDS,
+    discoveryFields: config.discoveryFields ?? DEFAULT_DISCOVERY_FIELDS,
+    pageSize: config.pageSize ?? 1000,
+    enabled: config.enabled,
+    autoSyncEnabled: config.autoSyncEnabled,
+    intervalMinutes: config.intervalMinutes ?? 1440
+  };
+}
 
-const SAMPLE_CSV_PAYLOAD = [
-  'assetType,assetName,assetIdentifier,serviceName,environment,ownerTeam,ownerEmail,businessCriticality,state',
-  'APPLICATION,payments-api-prod,app:payments-api:prod,payments-api,production,payments-platform,payments-platform@example.com,CRITICAL,ACTIVE'
-].join('\n');
+function formatTimestamp(value?: string): string {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
 
-type CmdbMode = 'form' | 'csv' | 'json';
+function formatAuthType(value: ServiceNowCmdbAuthType): string {
+  return value === 'BEARER' ? 'Bearer Token' : 'Basic Auth';
+}
 
-function parseCsvRecords(input: string): CmdbAssetRecord[] {
-  const lines = input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+function Tooltip({ text }: { text: string }) {
+  return (
+    <span className="sn-tooltip" title={text} aria-label={text}>
+      ⓘ
+    </span>
+  );
+}
 
-  if (lines.length < 2) {
-    throw new Error('CSV requires a header and at least one data row');
-  }
+type HealthStatus = 'healthy' | 'error' | 'warning' | 'neutral';
 
-  const headers = lines[0].split(',').map((value) => value.trim());
-  const requiredHeaders = ['assetType', 'assetName', 'assetIdentifier'];
-  requiredHeaders.forEach((header) => {
-    if (!headers.includes(header)) {
-      throw new Error(`Missing required CSV header: ${header}`);
-    }
-  });
-
-  const records: CmdbAssetRecord[] = [];
-  for (let i = 1; i < lines.length; i += 1) {
-    const values = lines[i].split(',').map((value) => value.trim());
-    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
-
-    if (!row.assetType || !row.assetName || !row.assetIdentifier) {
-      throw new Error(`Row ${i + 1} is missing assetType/assetName/assetIdentifier`);
-    }
-
-    records.push({
-      assetType: row.assetType as CmdbAssetRecord['assetType'],
-      assetName: row.assetName,
-      assetIdentifier: row.assetIdentifier,
-      serviceName: row.serviceName || undefined,
-      environment: row.environment || undefined,
-      ownerTeam: row.ownerTeam || undefined,
-      ownerEmail: row.ownerEmail || undefined,
-      businessCriticality: (row.businessCriticality || undefined) as CmdbAssetRecord['businessCriticality'],
-      state: (row.state || undefined) as CmdbAssetRecord['state']
-    });
-  }
-
-  return records;
+function healthCardClass(status: HealthStatus): string {
+  return `sn-health-card sn-health-${status}`;
 }
 
 export function AssetsPage() {
-  const [assets, setAssets] = React.useState<Asset[]>([]);
-  const [error, setError] = React.useState('');
-  const [message, setMessage] = React.useState('');
+  const [config, setConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
+  const [form, setForm] = React.useState<ServiceNowCmdbConfigRequest>(defaultForm);
+  const [credentialSecret, setCredentialSecret] = React.useState('');
+  const [testResult, setTestResult] = React.useState<ServiceNowCmdbConnectionTest | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [syncingLive, setSyncingLive] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [liveSyncResult, setLiveSyncResult] = React.useState<SyncTriggerResponse | null>(null);
+  const [showSecret, setShowSecret] = React.useState(false);
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
 
-  const [cmdbMode, setCmdbMode] = React.useState<CmdbMode>('form');
-  const [cmdbJson, setCmdbJson] = React.useState(JSON.stringify(SAMPLE_CMDB_PAYLOAD, null, 2));
-  const [cmdbCsv, setCmdbCsv] = React.useState(SAMPLE_CSV_PAYLOAD);
-
-  const [assetType, setAssetType] = React.useState<CmdbAssetRecord['assetType']>('APPLICATION');
-  const [assetName, setAssetName] = React.useState('');
-  const [assetIdentifier, setAssetIdentifier] = React.useState('');
-  const [serviceName, setServiceName] = React.useState('');
-  const [environment, setEnvironment] = React.useState('');
-  const [ownerTeam, setOwnerTeam] = React.useState('');
-  const [ownerEmail, setOwnerEmail] = React.useState('');
-  const [businessCriticality, setBusinessCriticality] = React.useState<CmdbAssetRecord['businessCriticality']>('MEDIUM');
-  const [assetState, setAssetState] = React.useState<CmdbAssetRecord['state']>('ACTIVE');
-
-  const [imageDigest, setImageDigest] = React.useState('');
-  const [imageTag, setImageTag] = React.useState('');
-  const [imageRepository, setImageRepository] = React.useState('');
-  const [baseImageDigest, setBaseImageDigest] = React.useState('');
-
-  const loadAssets = React.useCallback(async () => {
+  const refresh = React.useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const rows = await api.listAssets();
-      setAssets(rows);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const savedConfig = await api.getServiceNowCmdbConfig();
+      setConfig(savedConfig);
+      setForm(formFromConfig(savedConfig));
+      setCredentialSecret('');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
-    loadAssets();
-  }, [loadAssets]);
+    void refresh();
+  }, [refresh]);
 
-  const buildFormPayload = (): CmdbAssetRecord[] => {
-    if (!assetName.trim()) {
-      throw new Error('Asset Name is required');
-    }
-    if (!assetIdentifier.trim()) {
-      throw new Error('Asset Identifier is required');
-    }
-
-    const record: CmdbAssetRecord = {
-      assetType,
-      assetName: assetName.trim(),
-      assetIdentifier: assetIdentifier.trim(),
-      serviceName: serviceName.trim() || undefined,
-      environment: environment.trim() || undefined,
-      ownerTeam: ownerTeam.trim() || undefined,
-      ownerEmail: ownerEmail.trim() || undefined,
-      businessCriticality,
-      state: assetState
-    };
-
-    if (assetType === 'CONTAINER_IMAGE') {
-      if (imageDigest.trim()) record.imageDigest = imageDigest.trim();
-      if (imageTag.trim()) record.imageTag = imageTag.trim();
-      if (imageRepository.trim()) record.imageRepository = imageRepository.trim();
-      if (baseImageDigest.trim()) record.baseImageDigest = baseImageDigest.trim();
-    }
-
-    return [record];
+  const updateField = <K extends keyof ServiceNowCmdbConfigRequest>(key: K, value: ServiceNowCmdbConfigRequest[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const syncCmdb = async (): Promise<void> => {
+  const saveConnector = async (): Promise<ServiceNowCmdbConfig | null> => {
+    setSaving(true);
     setError('');
-    setMessage('');
-
-    let payload: CmdbAssetRecord[];
     try {
-      if (cmdbMode === 'form') {
-        payload = buildFormPayload();
-      } else if (cmdbMode === 'csv') {
-        payload = parseCsvRecords(cmdbCsv);
-      } else {
-        const parsed = JSON.parse(cmdbJson);
-        if (!Array.isArray(parsed)) {
-          throw new Error('CMDB payload must be a JSON array');
-        }
-        payload = parsed as CmdbAssetRecord[];
-      }
-    } catch (e) {
-      setError(`Invalid payload: ${e instanceof Error ? e.message : String(e)}`);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await api.syncAssetsFromCmdb(payload);
-      setMessage(`${result.message}. Received ${result.received}, inserted ${result.inserted}, updated ${result.updated}.`);
-      await loadAssets();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const payload: ServiceNowCmdbConfigRequest = {
+        ...form,
+        username: form.authType === 'BASIC' ? form.username?.trim() ?? '' : '',
+        credentialSecret: credentialSecret.trim().length > 0 ? credentialSecret.trim() : undefined,
+        installTable: form.installTable.trim(),
+        discoveryModelTable: form.discoveryModelTable.trim(),
+        ciTable: form.ciTable.trim(),
+        installQuery: form.installQuery?.trim() ?? '',
+        discoveryQuery: form.discoveryQuery?.trim() ?? '',
+        installFields: form.installFields?.trim() ?? DEFAULT_INSTALL_FIELDS,
+        discoveryFields: form.discoveryFields?.trim() ?? DEFAULT_DISCOVERY_FIELDS,
+        baseUrl: form.baseUrl.trim(),
+        pageSize: Math.max(1, Number(form.pageSize) || 1000),
+        intervalMinutes: Math.max(5, Number(form.intervalMinutes) || 1440)
+      };
+      const saved = await api.saveServiceNowCmdbConfig(payload);
+      setConfig(saved);
+      setForm(formFromConfig(saved));
+      setCredentialSecret('');
+      return saved;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      return null;
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
+
+  const testConnection = async (): Promise<void> => {
+    setTestResult(null);
+    const saved = await saveConnector();
+    if (!saved) return;
+    setTesting(true);
+    setError('');
+    try {
+      const response = await api.testServiceNowCmdbConnection();
+      setTestResult(response);
+      const refreshed = await api.getServiceNowCmdbConfig();
+      setConfig(refreshed);
+      setForm(formFromConfig(refreshed));
+      setCredentialSecret('');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const queueLiveSync = async (): Promise<void> => {
+    setSyncingLive(true);
+    setError('');
+    setLiveSyncResult(null);
+    try {
+      const saved = await saveConnector();
+      if (!saved) {
+        return;
+      }
+      const result = await api.triggerServiceNowCmdbSync();
+      setLiveSyncResult(result);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setSyncingLive(false);
+    }
+  };
+
+  // Derive health card states
+  const connStatus: HealthStatus = !config?.configured
+    ? 'warning'
+    : config.lastTestStatus === 'SUCCESS'
+      ? 'healthy'
+      : config.lastTestStatus === 'FAILED'
+        ? 'error'
+        : 'warning';
+
+  const connLabel = !config?.configured
+    ? 'Needs Setup'
+    : config.lastTestStatus === 'SUCCESS'
+      ? 'Connected'
+      : config.lastTestStatus === 'FAILED'
+        ? 'Test Failed'
+        : 'Not Tested';
+
+  const credStatus: HealthStatus = config?.hasCredentialSecret ? 'healthy' : 'error';
+  const credLabel = config?.hasCredentialSecret ? 'Credentials Stored' : 'Credentials Missing';
+
+  const syncStatus: HealthStatus = form.autoSyncEnabled ? 'healthy' : 'neutral';
+  const syncLabel = form.autoSyncEnabled ? `Every ${form.intervalMinutes} min` : 'Manual Only';
 
   return (
-    <div className="panel">
+    <section className="panel">
       <div className="panel-header">
-        <h3>Assets & CMDB</h3>
-        <span className="panel-caption">Ingest asset ownership metadata and control lifecycle state</span>
-      </div>
-
-      <div className="section-block">
-        <div className="mode-toggle">
-          <button type="button" className={cmdbMode === 'form' ? 'mode-btn active' : 'mode-btn'} onClick={() => setCmdbMode('form')}>
-            Guided Form
-          </button>
-          <button type="button" className={cmdbMode === 'csv' ? 'mode-btn active' : 'mode-btn'} onClick={() => setCmdbMode('csv')}>
-            CSV Import
-          </button>
-          <button type="button" className={cmdbMode === 'json' ? 'mode-btn active' : 'mode-btn'} onClick={() => setCmdbMode('json')}>
-            Raw JSON
-          </button>
-        </div>
-
-        {cmdbMode === 'form' && (
-          <div className="form-grid ingestion-grid">
-            <label>Asset Type
-              <select value={assetType} onChange={(event) => setAssetType(event.target.value as CmdbAssetRecord['assetType'])}>
-                <option value="APPLICATION">Application</option>
-                <option value="HOST">Host</option>
-                <option value="CONTAINER_IMAGE">Container Image</option>
-              </select>
-            </label>
-            <label>Asset Name
-              <input value={assetName} onChange={(event) => setAssetName(event.target.value)} placeholder="payments-api-prod" />
-            </label>
-            <label>Asset Identifier
-              <input value={assetIdentifier} onChange={(event) => setAssetIdentifier(event.target.value)} placeholder="app:payments-api:prod" className="mono" />
-            </label>
-            <label>Service
-              <input value={serviceName} onChange={(event) => setServiceName(event.target.value)} placeholder="payments-api" />
-            </label>
-            <label>Environment
-              <input value={environment} onChange={(event) => setEnvironment(event.target.value)} placeholder="production" />
-            </label>
-            <label>Owner Team
-              <input value={ownerTeam} onChange={(event) => setOwnerTeam(event.target.value)} placeholder="payments-platform" />
-            </label>
-            <label>Owner Email
-              <input value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} placeholder="team@example.com" />
-            </label>
-            <label>Business Criticality
-              <select value={businessCriticality} onChange={(event) => setBusinessCriticality(event.target.value as CmdbAssetRecord['businessCriticality'])}>
-                <option value="LOW">Low</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="HIGH">High</option>
-                <option value="CRITICAL">Critical</option>
-              </select>
-            </label>
-            <label>Asset State
-              <select value={assetState} onChange={(event) => setAssetState(event.target.value as CmdbAssetRecord['state'])}>
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-                <option value="RETIRED">Retired</option>
-                <option value="DECOMMISSIONED">Decommissioned</option>
-              </select>
-            </label>
-          </div>
-        )}
-
-        {cmdbMode === 'form' && assetType === 'CONTAINER_IMAGE' && (
-          <div className="form-grid ingestion-grid">
-            <label>Image Digest
-              <input value={imageDigest} onChange={(event) => setImageDigest(event.target.value)} placeholder="sha256:abc123..." className="mono" />
-            </label>
-            <label>Image Tag
-              <input value={imageTag} onChange={(event) => setImageTag(event.target.value)} placeholder="v1.2.3" />
-            </label>
-            <label>Image Repository
-              <input value={imageRepository} onChange={(event) => setImageRepository(event.target.value)} placeholder="registry.example.com/payments-api" className="mono" />
-            </label>
-            <label>Base Image Digest
-              <input value={baseImageDigest} onChange={(event) => setBaseImageDigest(event.target.value)} placeholder="sha256:base..." className="mono" />
-            </label>
-          </div>
-        )}
-
-        {cmdbMode === 'csv' && (
-          <>
-            <label>CMDB CSV Payload
-              <textarea rows={8} value={cmdbCsv} onChange={(event) => setCmdbCsv(event.target.value)} className="mono" />
-            </label>
-            <div className="inline-note">Required headers: <span className="mono">assetType, assetName, assetIdentifier</span>.</div>
-          </>
-        )}
-
-        {cmdbMode === 'json' && (
-          <label>CMDB JSON Payload
-            <textarea rows={10} value={cmdbJson} onChange={(event) => setCmdbJson(event.target.value)} className="mono" />
-          </label>
-        )}
-
-        <div className="button-row form-submit-row">
-          <button type="button" className="btn btn-primary" onClick={syncCmdb} disabled={loading}>
-            {loading ? 'Syncing...' : 'Sync CMDB Assets'}
-          </button>
-          {cmdbMode === 'csv' && (
-            <button type="button" className="btn btn-secondary" onClick={() => setCmdbCsv(SAMPLE_CSV_PAYLOAD)}>
-              Reset CSV Sample
-            </button>
-          )}
-          {cmdbMode === 'json' && (
-            <button type="button" className="btn btn-secondary" onClick={() => setCmdbJson(JSON.stringify(SAMPLE_CMDB_PAYLOAD, null, 2))}>
-              Reset JSON Sample
-            </button>
-          )}
+        <div>
+          <h3>ServiceNow CMDB Connector</h3>
+          <span className="panel-caption">
+            Live Table API ingestion from ServiceNow. Configure, test connectivity, then review imported hosts in Inventory.
+          </span>
         </div>
       </div>
 
-      {message && <div className="notice">{message}</div>}
+      {/* ── 3-card health bar ── */}
+      <div className="sn-health-bar">
+        <div className={healthCardClass(connStatus)}>
+          <span className="sn-health-label">Connection Health</span>
+          <span className="sn-health-value">{connLabel}</span>
+          {config?.lastTestedAt ? (
+            <span className="sn-health-meta">Last tested {formatTimestamp(config.lastTestedAt)}</span>
+          ) : (
+            <span className="sn-health-meta">No test run yet</span>
+          )}
+          {!config?.configured && (
+            <a className="sn-health-cta" href="#sn-base-url">Complete Setup ↓</a>
+          )}
+        </div>
+
+        <div className={healthCardClass(credStatus)}>
+          <span className="sn-health-label">Auth &amp; Credentials</span>
+          <span className="sn-health-value">{formatAuthType(form.authType)}</span>
+          <span className={`sn-health-meta ${credStatus === 'error' ? 'sn-health-meta-error' : ''}`}>{credLabel}</span>
+          {!config?.hasCredentialSecret && (
+            <a className="sn-health-cta" href="#sn-credential">Add Credentials ↓</a>
+          )}
+        </div>
+
+        <div className={healthCardClass(syncStatus)}>
+          <span className="sn-health-label">Sync Status</span>
+          <span className="sn-health-value">{syncLabel}</span>
+          <span className="sn-health-meta">
+            {form.autoSyncEnabled ? 'Scheduled ingestion active' : 'Configure in Sync Settings below'}
+          </span>
+        </div>
+      </div>
+
+      {/* Setup banner — only shown when not yet configured */}
+      {!config?.configured && (
+        <div className="notice">
+          This connector is not yet configured. Fill in the Connection section below to enable live ServiceNow API pulls.
+        </div>
+      )}
+
       {error && <div className="notice error">{error}</div>}
 
-      <h4 className="section-title section-divider">Asset Inventory</h4>
-      <div className="table-scroll">
-        <ResizableTable storageKey="assets-cmdb-table-widths">
-          <thead>
-          <tr>
-            <th>Name</th>
-            <th>Identifier</th>
-            <th>Type</th>
-            <th>State</th>
-            <th>Business Criticality</th>
-            <th>Service</th>
-            <th>Environment</th>
-            <th>Owner Team</th>
-            <th>Owner Email</th>
-            <th>Last Inventory</th>
-            <th>Last CMDB Sync</th>
-          </tr>
-          </thead>
-          <tbody>
-          {assets.map((asset) => (
-            <tr key={asset.id}>
-              <td>{asset.name}</td>
-              <td className="mono">{asset.identifier}</td>
-              <td>{asset.type}</td>
-              <td><span className={`status-pill status-${asset.state.toLowerCase()}`}>{asset.state}</span></td>
-              <td>{asset.businessCriticality}</td>
-              <td>{asset.serviceName || '-'}</td>
-              <td>{asset.environment || '-'}</td>
-              <td>{asset.ownerTeam || '-'}</td>
-              <td>{asset.ownerEmail || '-'}</td>
-              <td>{asset.lastInventoryAt ? new Date(asset.lastInventoryAt).toLocaleString() : '-'}</td>
-              <td>{asset.lastCmdbSyncAt ? new Date(asset.lastCmdbSyncAt).toLocaleString() : '-'}</td>
-            </tr>
-          ))}
-          </tbody>
-        </ResizableTable>
+      {/* ── SECTION 1: Connection ── */}
+      <div className="form-section">
+        <h4 className="form-section-title">Connection</h4>
+        <div className="form-grid">
+          <label id="sn-base-url">
+            <span>
+              ServiceNow Base URL <span className="sn-required">*</span>{' '}
+              <Tooltip text="Use the root instance URL. The app will call the Table API under this host." />
+            </span>
+            <input
+              type="url"
+              value={form.baseUrl}
+              onChange={(event) => updateField('baseUrl', event.target.value)}
+              placeholder="https://your-instance.service-now.com"
+            />
+          </label>
+
+          <label>
+            <span>
+              Auth Method <span className="sn-required">*</span>{' '}
+              <Tooltip text="Basic Auth uses username + password. Bearer mode uses a token in the Authorization header." />
+            </span>
+            <select value={form.authType} onChange={(event) => updateField('authType', event.target.value as ServiceNowCmdbAuthType)}>
+              <option value="BASIC">Basic Auth</option>
+              <option value="BEARER">Bearer Token</option>
+            </select>
+          </label>
+
+          <label>
+            <span>
+              Integration Username{form.authType === 'BASIC' ? <> <span className="sn-required">*</span></> : ' (Optional)'}{' '}
+              <Tooltip text={form.authType === 'BASIC' ? 'Use a dedicated read-only ServiceNow integration account.' : 'Optional in Bearer mode. Leave blank if the token is sufficient.'} />
+            </span>
+            <input
+              type="text"
+              value={form.username ?? ''}
+              onChange={(event) => updateField('username', event.target.value)}
+              placeholder={form.authType === 'BEARER' ? 'Optional for audit context' : 'svc-noscan-servicenow'}
+            />
+          </label>
+
+          <label id="sn-credential">
+            <span>
+              {form.authType === 'BEARER' ? 'Bearer Token' : 'Password'} <span className="sn-required">*</span>{' '}
+              <Tooltip text={config?.hasCredentialSecret ? 'A secret is already saved. Enter a new value only to rotate it.' : 'Required before live pulls can work.'} />
+            </span>
+            <div className="secure-input-row">
+              <input
+                type={showSecret ? 'text' : 'password'}
+                value={credentialSecret}
+                onChange={(event) => setCredentialSecret(event.target.value)}
+                placeholder={config?.hasCredentialSecret ? 'Leave blank to keep saved secret' : 'Enter secret'}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-inline"
+                onClick={() => setShowSecret((v) => !v)}
+                aria-label={showSecret ? 'Hide secret' : 'Show secret'}
+              >
+                {showSecret ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {config?.hasCredentialSecret && (
+              <span className="sn-saved-badge">✓ Secret saved — leave blank to keep it</span>
+            )}
+          </label>
+        </div>
       </div>
-    </div>
+
+      {/* ── SECTION 2: Table Configuration ── */}
+      <div className="form-section">
+        <h4 className="form-section-title">Table Configuration</h4>
+        <div className="form-grid">
+          <label>
+            <span>
+              Install Table <span className="sn-required">*</span>{' '}
+              <Tooltip text="ServiceNow table containing installed software rows per host." />
+            </span>
+            <input
+              type="text"
+              value={form.installTable}
+              onChange={(event) => updateField('installTable', event.target.value)}
+              placeholder="cmdb_sam_sw_install"
+            />
+          </label>
+
+          <label>
+            <span>
+              Discovery Model Table <span className="sn-required">*</span>{' '}
+              <Tooltip text="Provides normalized discovery-model metadata for software records." />
+            </span>
+            <input
+              type="text"
+              value={form.discoveryModelTable}
+              onChange={(event) => updateField('discoveryModelTable', event.target.value)}
+              placeholder="cmdb_sam_sw_discovery_model"
+            />
+          </label>
+
+          <label>
+            <span>
+              CI Lookup Table <span className="sn-required">*</span>{' '}
+              <Tooltip text="Used for host lookup and CI resolution when install rows do not carry a direct sys_id." />
+            </span>
+            <input
+              type="text"
+              value={form.ciTable}
+              onChange={(event) => updateField('ciTable', event.target.value)}
+              placeholder="cmdb_ci"
+            />
+          </label>
+
+          <label>
+            <span>
+              Page Size{' '}
+              <Tooltip text="Rows requested per Table API page during live pulls. Reduce if ServiceNow times out." />
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={10000}
+              value={form.pageSize}
+              onChange={(event) => updateField('pageSize', Number(event.target.value))}
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* ── SECTION 3: Sync Settings ── */}
+      <div className="form-section">
+        <h4 className="form-section-title">Sync Settings</h4>
+        <div className="sn-toggle-group">
+          <label className="sn-toggle-row">
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(event) => updateField('enabled', event.target.checked)}
+            />
+            <span>Connector enabled</span>
+            <Tooltip text="When disabled, no live pulls will be triggered." />
+          </label>
+          <label className="sn-toggle-row">
+            <input
+              type="checkbox"
+              checked={form.autoSyncEnabled}
+              onChange={(event) => updateField('autoSyncEnabled', event.target.checked)}
+            />
+            <span>Enable scheduled live sync</span>
+            <Tooltip text="Automatically pulls data from ServiceNow on the configured interval." />
+          </label>
+        </div>
+        {form.autoSyncEnabled && (
+          <div className="form-grid sn-sync-interval-grid">
+            <label>
+              <span>
+                Sync Interval (minutes){' '}
+                <Tooltip text="How often the scheduled sync runs. Minimum 5 minutes." />
+              </span>
+              <input
+                type="number"
+                min={5}
+                value={form.intervalMinutes}
+                onChange={(event) => updateField('intervalMinutes', Number(event.target.value))}
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      {/* ── SECTION 4: Advanced Options (accordion) ── */}
+      <div className="form-section">
+        <button
+          type="button"
+          className="sn-advanced-toggle"
+          onClick={() => setShowAdvanced((v) => !v)}
+          aria-expanded={showAdvanced}
+        >
+          <span className="sn-advanced-toggle-chevron">{showAdvanced ? '▾' : '▸'}</span>
+          <span>Advanced Options</span>
+          <span className="sn-advanced-toggle-hint">Field selection and query overrides for install and discovery tables</span>
+        </button>
+        {showAdvanced && (
+          <div className="form-grid sn-advanced-grid">
+            <label>
+              <span>
+                Install Fields{' '}
+                <Tooltip text="Comma-separated ServiceNow fields pulled from the install table. Defaults to only the fields NoScan ingests." />
+              </span>
+              <textarea
+                rows={4}
+                value={form.installFields ?? ''}
+                onChange={(event) => updateField('installFields', event.target.value)}
+                placeholder={DEFAULT_INSTALL_FIELDS}
+              />
+            </label>
+            <label>
+              <span>
+                Discovery Fields{' '}
+                <Tooltip text="Comma-separated ServiceNow fields pulled from the discovery-model table. Defaults to the deterministic normalization fields." />
+              </span>
+              <textarea
+                rows={4}
+                value={form.discoveryFields ?? ''}
+                onChange={(event) => updateField('discoveryFields', event.target.value)}
+                placeholder={DEFAULT_DISCOVERY_FIELDS}
+              />
+            </label>
+            <label>
+              <span>
+                Install Query Override{' '}
+                <Tooltip text="Optional sysparm_query fragment to scope to active rows or a specific business unit." />
+              </span>
+              <textarea
+                rows={4}
+                value={form.installQuery ?? ''}
+                onChange={(event) => updateField('installQuery', event.target.value)}
+                placeholder="Optional sysparm_query fragment for cmdb_sam_sw_install"
+              />
+            </label>
+            <label>
+              <span>
+                Discovery Query Override{' '}
+                <Tooltip text="Optional sysparm_query fragment to filter discovery-model rows." />
+              </span>
+              <textarea
+                rows={4}
+                value={form.discoveryQuery ?? ''}
+                onChange={(event) => updateField('discoveryQuery', event.target.value)}
+                placeholder="Optional sysparm_query fragment for cmdb_sam_sw_discovery_model"
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      {/* ── Action bar ── */}
+      <div className="button-row section-actions sn-action-bar">
+        <button type="button" className="btn btn-primary" onClick={() => void saveConnector()} disabled={saving || testing}>
+          {saving ? 'Saving...' : 'Save Connector'}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={() => void testConnection()} disabled={testing || saving}>
+          {testing ? 'Testing...' : 'Test Connection'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => void queueLiveSync()}
+          disabled={syncingLive || saving || testing || loading}
+        >
+          {syncingLive ? 'Queueing Live Sync...' : 'Run Live Sync'}
+        </button>
+        <button type="button" className="btn-link" onClick={() => void refresh()} disabled={loading || saving || testing}>
+          {loading ? 'Refreshing...' : '↺ Refresh Setup'}
+        </button>
+        <a className="btn-link sn-queue-link" href={connectHref('inventory-run-queue')}>
+          Open Inventory Run Queue →
+        </a>
+      </div>
+
+      {/* Inline test result — directly below action bar */}
+      {testResult && (
+        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? '' : 'error'}`}>
+          <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
+          {' — '}{testResult.message}
+          <span className="sn-table-checks">
+            <span className={testResult.ciTableReachable ? 'sn-check-ok' : 'sn-check-fail'}>
+              CI {testResult.ciTableReachable ? '✓' : '✗'}
+            </span>
+            <span className={testResult.installTableReachable ? 'sn-check-ok' : 'sn-check-fail'}>
+              Install {testResult.installTableReachable ? '✓' : '✗'}
+            </span>
+            <span className={testResult.discoveryTableReachable ? 'sn-check-ok' : 'sn-check-fail'}>
+              Discovery {testResult.discoveryTableReachable ? '✓' : '✗'}
+            </span>
+          </span>
+        </div>
+      )}
+
+      {liveSyncResult && (
+        <div className="notice">
+          <strong>Live sync queued.</strong> {liveSyncResult.message}. Track progress in{' '}
+          <a href={connectHref('inventory-run-queue')}>Inventory Run Queue</a>.
+        </div>
+      )}
+
+      <div className="button-row section-actions">
+        <a className="btn-link" href={inventoryHref('hosts')}>View Inventory Hosts →</a>
+        <a className="btn-link" href={inventoryHref('hosts', ['NEEDS_REVIEW'])}>View Hosts Needing Review →</a>
+      </div>
+    </section>
   );
 }

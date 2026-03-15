@@ -9,7 +9,7 @@ import {
   FindingFilterValues,
   FindingPage,
   GithubSbomSource,
-  GithubSbomIngestionBatchResponse,
+  HostAssetDetail,
   InventoryComponentRecord,
   InventoryComponentFilterValues,
   InventoryComponentPage,
@@ -18,7 +18,10 @@ import {
   OperationalSectionResponse,
   PrototypeDataResetResponse,
   RiskPolicy,
-  SbomUploadEvidence,
+  IngestionEvidence,
+  ServiceNowCmdbConfig,
+  ServiceNowCmdbConfigRequest,
+  ServiceNowCmdbConnectionTest,
   SloStatus,
   SyncRun,
   SyncTriggerResponse,
@@ -169,12 +172,21 @@ export const api = {
   getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
   getSloStatus: () => request<SloStatus>('/slo/status'),
   listAssets: () => request<Asset[]>('/assets'),
+  getHostAssetDetail: (assetId: string, params?: { sourceSystem?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.sourceSystem && params.sourceSystem.trim().length > 0) {
+      searchParams.set('sourceSystem', params.sourceSystem.trim());
+    }
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<HostAssetDetail>(`/assets/hosts/${encodeURIComponent(assetId)}${suffix}`);
+  },
   listInventoryComponents: (
     params?: {
       assetType?: Array<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>;
       componentStatus?: Array<'ACTIVE' | 'RETIRED'>;
       sourceSystem?: string[];
       ecosystem?: string[];
+      reviewCategory?: string[];
       query?: string;
       page?: number;
       size?: number;
@@ -185,6 +197,7 @@ export const api = {
     params?.componentStatus?.forEach((value) => searchParams.append('componentStatus', value));
     params?.sourceSystem?.forEach((value) => searchParams.append('sourceSystem', value));
     params?.ecosystem?.forEach((value) => searchParams.append('ecosystem', value));
+    params?.reviewCategory?.forEach((value) => searchParams.append('reviewCategory', value));
     if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
     if (params?.page != null) searchParams.set('page', String(params.page));
     if (params?.size != null) searchParams.set('size', String(params.size));
@@ -232,6 +245,17 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ assets })
   }),
+  getServiceNowCmdbConfig: () => request<ServiceNowCmdbConfig>('/connectors/servicenow-cmdb'),
+  saveServiceNowCmdbConfig: (payload: ServiceNowCmdbConfigRequest) => request<ServiceNowCmdbConfig>('/connectors/servicenow-cmdb', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  testServiceNowCmdbConnection: () => request<ServiceNowCmdbConnectionTest>('/connectors/servicenow-cmdb/test', {
+    method: 'POST'
+  }),
+  triggerServiceNowCmdbSync: () => request<SyncTriggerResponse>('/connectors/servicenow-cmdb/sync', {
+    method: 'POST'
+  }),
   listGithubSbomSources: () => request<GithubSbomSource[]>('/github-sbom-sources'),
   createGithubSbomSource: (
     payload: {
@@ -256,6 +280,19 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ owner })
   }),
+  queueGithubRepositoryRun: (
+    payload: {
+      owner: string;
+      repo?: string;
+      includeAllRepos?: boolean;
+      assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
+      assetName?: string;
+      assetIdentifier?: string;
+    }
+  ) => request<SyncTriggerResponse>('/github-sbom-sources/repository/run', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
   getRiskPolicy: () => request<RiskPolicy>('/risk-policy'),
   updateRiskPolicy: (policy: Partial<RiskPolicy>) => request<RiskPolicy>('/risk-policy', {
     method: 'POST',
@@ -278,14 +315,24 @@ export const api = {
     body: JSON.stringify({ advisories })
   }),
   seedDemo: () => request<IngestionResult>('/demo/seed', { method: 'POST' }),
-  listSyncRuns: () => request<SyncRun[]>('/sync-runs'),
-  listSbomUploads: (params?: { sourceSystem?: string }) => {
+  listSyncRuns: (params?: { category?: 'all' | 'inventory' | 'vulnerability' | 'vuln-intel' | 'processing'; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.category && params.category.trim().length > 0) {
+      searchParams.set('category', params.category.trim());
+    }
+    if (params?.limit != null) {
+      searchParams.set('limit', String(params.limit));
+    }
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<SyncRun[]>(`/sync-runs${suffix}`);
+  },
+  listIngestions: (params?: { sourceSystem?: string }) => {
     const searchParams = new URLSearchParams();
     if (params?.sourceSystem && params.sourceSystem.trim().length > 0) {
       searchParams.set('sourceSystem', params.sourceSystem.trim());
     }
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<SbomUploadEvidence[]>(`/sbom-uploads${suffix}`);
+    return request<IngestionEvidence[]>(`/ingestions${suffix}`);
   },
   fetchSbomFromEndpoint: (
     payload: {
@@ -302,50 +349,5 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }
-  ),
-  fetchSbomFromGithub: (
-    payload: {
-      owner: string;
-      repo?: string;
-      includeAllRepos?: boolean;
-      assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
-      assetName?: string;
-      assetIdentifier?: string;
-    }
-  ) => request<GithubSbomIngestionBatchResponse>(
-    '/sbom-fetch/github',
-    {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }
   )
 };
-
-export async function uploadSbom(
-  payload: { assetType: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'; assetName: string; assetIdentifier: string; file: File }
-): Promise<{ assetId: string; sbomUploadId: string; componentsIngested: number; findingsGenerated: number }> {
-  const form = new FormData();
-  form.append('assetType', payload.assetType);
-  form.append('assetName', payload.assetName);
-  form.append('assetIdentifier', payload.assetIdentifier);
-  form.append('file', payload.file);
-
-  const headers = new Headers();
-  headers.set('X-API-Key', API_KEY);
-  headers.set('X-Tenant-ID', TENANT_ID);
-  headers.set('X-User-ID', USER_ID);
-  if (CREATOR_KEY.trim().length > 0) {
-    headers.set('X-Creator-Key', CREATOR_KEY);
-  }
-  const response = await fetch(`${API_BASE}/sbom-upload`, {
-    method: 'POST',
-    headers,
-    body: form
-  });
-
-  if (!response.ok) {
-    throw await parseApiError(response);
-  }
-
-  return response.json();
-}

@@ -31,12 +31,13 @@ public class InventoryController {
             @RequestParam(required = false) List<InventoryComponentStatus> componentStatus,
             @RequestParam(required = false) List<String> sourceSystem,
             @RequestParam(required = false) List<String> ecosystem,
+            @RequestParam(required = false) List<String> reviewCategory,
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size
     ) {
         Tenant tenant = tenantService.getDefaultTenant();
-        return inventoryService.listComponentsPage(tenant, assetType, componentStatus, sourceSystem, ecosystem, query, page, size);
+        return inventoryService.listComponentsPage(tenant, assetType, componentStatus, sourceSystem, ecosystem, reviewCategory, query, page, size);
     }
 
     @GetMapping("/components/filters")

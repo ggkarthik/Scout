@@ -6,6 +6,8 @@ import java.util.UUID;
 public record SyncRunResponse(
         UUID id,
         String syncType,
+        String runDomain,
+        String runClass,
         String status,
         Integer queuePosition,
         int recordsFetched,
@@ -14,6 +16,7 @@ public record SyncRunResponse(
         int recordsFailed,
         Instant startedAt,
         Instant completedAt,
-        String errorMessage
+        String errorMessage,
+        String metadataJson
 ) {
 }

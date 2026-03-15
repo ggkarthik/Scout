@@ -344,6 +344,8 @@ export type SyncTriggerResponse = {
 export type SyncRun = {
   id: string;
   syncType: string;
+  runDomain: 'INVENTORY' | 'VULN_INTEL' | 'PROCESSING';
+  runClass: 'INGESTION' | 'REPAIR' | 'BACKFILL' | 'RECOMPUTE';
   status: string;
   queuePosition?: number;
   recordsFetched: number;
@@ -353,6 +355,7 @@ export type SyncRun = {
   startedAt: string;
   completedAt?: string;
   errorMessage?: string;
+  metadataJson?: string;
 };
 
 export type VexAssertionRepairSummary = {
@@ -394,7 +397,7 @@ export type VexRolloutComparison = {
   after: VexRolloutMetricsSnapshot;
 };
 
-export type SbomUploadEvidence = {
+export type IngestionEvidence = {
   id: string;
   assetId: string;
   assetName: string;
@@ -415,46 +418,6 @@ export type SbomUploadEvidence = {
   componentCount?: number;
   findingsGenerated?: number;
   evidenceJson?: string;
-};
-
-export type GithubRepoIngestionResult = {
-  owner: string;
-  repo: string;
-  assetIdentifier: string;
-  status: 'SUCCESS' | 'FAILURE';
-  componentsIngested?: number;
-  findingsGenerated?: number;
-  message?: string;
-};
-
-export type GithubSbomIngestionBatchResponse = {
-  repositoriesDiscovered: number;
-  repositoriesProcessed: number;
-  repositoriesSucceeded: number;
-  repositoriesFailed: number;
-  componentsIngested: number;
-  findingsGenerated: number;
-  results: GithubRepoIngestionResult[];
-};
-
-export type GithubGhcrImageIngestionResult = {
-  imageRepository: string;
-  assetIdentifier: string;
-  status: 'SUCCESS' | 'FAILURE';
-  componentsIngested?: number;
-  findingsGenerated?: number;
-  message?: string;
-};
-
-export type GithubGhcrIngestionSummary = {
-  imagesDiscovered: number;
-  imagesProcessed: number;
-  imagesSucceeded: number;
-  imagesFailed: number;
-  componentsIngested: number;
-  findingsGenerated: number;
-  failureSummary?: string;
-  results: GithubGhcrImageIngestionResult[];
 };
 
 export type FindingPage = {
@@ -519,6 +482,78 @@ export type Asset = {
   lastCmdbSyncAt?: string;
 };
 
+export type HostAssetSummary = {
+  assetId: string;
+  ciId: string;
+  name: string;
+  identifier: string;
+  sysId: string;
+  environment?: string;
+  ownerEmail?: string;
+  businessCriticality?: string;
+  state?: string;
+  lastInventoryAt?: string;
+  lastCmdbSyncAt?: string;
+  aliasCount: number;
+  installedSoftwareCount: number;
+  openFindingCount: number;
+  totalFindingCount: number;
+  unresolvedReviewCount: number;
+};
+
+export type HostAliasRecord = {
+  id: string;
+  aliasName: string;
+  sourceSystem: string;
+  confidence?: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+};
+
+export type HostSoftwareInstanceRecord = {
+  id: string;
+  inventoryComponentId?: string;
+  displayName: string;
+  publisher?: string;
+  version?: string;
+  normalizedPublisher?: string;
+  normalizedProduct?: string;
+  normalizedVersion?: string;
+  sourceSystem: string;
+  versionEvidence?: string;
+  activeInstall: boolean;
+  unlicensedInstall: boolean;
+  installDate?: string;
+  lastScanned?: string;
+  lastUsed?: string;
+  discoveryModelPrimaryKey?: string;
+  softwareIdentity?: string;
+  cpe23?: string;
+  needsVersionReview: boolean;
+  needsIdentityReview: boolean;
+  needsDiscoveryModelReview: boolean;
+};
+
+export type HostFindingRecord = {
+  id: string;
+  vulnerabilityId?: string;
+  severity?: string;
+  status?: string;
+  decisionState?: string;
+  riskScore?: number;
+  confidenceScore?: number;
+  matchedBy?: string;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+};
+
+export type HostAssetDetail = {
+  host: HostAssetSummary;
+  aliases: HostAliasRecord[];
+  software: HostSoftwareInstanceRecord[];
+  findings: HostFindingRecord[];
+};
+
 export type InventoryComponentRecord = {
   id: string;
   assetId: string;
@@ -528,7 +563,7 @@ export type InventoryComponentRecord = {
   componentStatus: 'ACTIVE' | 'RETIRED';
   ecosystem: string;
   packageName: string;
-  version: string;
+  version?: string;
   normalizedName?: string;
   normalizedVersion?: string;
   purl: string;
@@ -540,6 +575,12 @@ export type InventoryComponentRecord = {
   uploadedAt?: string;
   lastObservedAt: string;
   retiredAt?: string;
+  needsReview: boolean;
+  reviewItemCount: number;
+  reviewMissingVersion: boolean;
+  reviewUnmappedSoftware: boolean;
+  reviewLowConfidenceAlias: boolean;
+  reviewDiscoveryModel: boolean;
 };
 
 export type InventoryComponentPage = {
@@ -724,6 +765,74 @@ export type CmdbAssetSyncResponse = {
   inserted: number;
   updated: number;
   message: string;
+};
+
+export type CmdbInventorySyncResponse = {
+  sourceSystem: string;
+  installRowsProcessed: number;
+  discoveryRowsProcessed: number;
+  unmatchedDiscoveryRows: number;
+  ciCreated: number;
+  ciAliasesCreated: number;
+  softwareInstancesCreated: number;
+  softwareInstancesUpdated: number;
+  inventoryComponentsCreated: number;
+  inventoryComponentsUpdated: number;
+  findingsRecomputed: number;
+  message: string;
+};
+
+export type ServiceNowCmdbAuthType = 'BASIC' | 'BEARER';
+
+export type ServiceNowCmdbConfig = {
+  id?: string;
+  sourceSystem: string;
+  configured: boolean;
+  baseUrl: string;
+  authType: ServiceNowCmdbAuthType;
+  username: string;
+  hasCredentialSecret: boolean;
+  installTable: string;
+  discoveryModelTable: string;
+  ciTable: string;
+  installQuery: string;
+  discoveryQuery: string;
+  installFields: string;
+  discoveryFields: string;
+  pageSize: number;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: number;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+};
+
+export type ServiceNowCmdbConfigRequest = {
+  baseUrl: string;
+  authType: ServiceNowCmdbAuthType;
+  username?: string;
+  credentialSecret?: string;
+  installTable: string;
+  discoveryModelTable: string;
+  ciTable: string;
+  installQuery?: string;
+  discoveryQuery?: string;
+  installFields?: string;
+  discoveryFields?: string;
+  pageSize: number;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: number;
+};
+
+export type ServiceNowCmdbConnectionTest = {
+  status: 'SUCCESS' | 'FAILED';
+  message: string;
+  ciTableReachable: boolean;
+  installTableReachable: boolean;
+  discoveryTableReachable: boolean;
+  testedAt: string;
 };
 
 export type GithubSbomSource = {

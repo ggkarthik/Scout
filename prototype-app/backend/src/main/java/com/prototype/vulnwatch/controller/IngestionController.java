@@ -1,12 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
-import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.AdvisoryBatchRequest;
-import com.prototype.vulnwatch.dto.GithubAttestationSbomIngestionRequest;
-import com.prototype.vulnwatch.dto.GithubGhcrSbomIngestionRequest;
-import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
-import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.IngestionResult;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
@@ -19,14 +14,12 @@ import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api")
@@ -46,17 +39,6 @@ public class IngestionController {
         this.vulnerabilityIngestionService = vulnerabilityIngestionService;
     }
 
-    @PostMapping(value = "/sbom-upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public SbomIngestionResponse uploadSbom(
-            @RequestParam("assetType") AssetType assetType,
-            @RequestParam("assetName") String assetName,
-            @RequestParam("assetIdentifier") String assetIdentifier,
-            @RequestParam("file") MultipartFile file
-    ) throws IOException {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return sbomIngestionService.ingest(tenant, assetType, assetName, assetIdentifier, file);
-    }
-
     @PostMapping("/sbom-fetch")
     public SbomIngestionResponse fetchSbomFromEndpoint(
             @Valid @RequestBody SbomEndpointIngestionRequest request
@@ -65,32 +47,8 @@ public class IngestionController {
         return sbomIngestionService.ingestFromEndpoint(tenant, request);
     }
 
-    @PostMapping("/sbom-fetch/github")
-    public GithubSbomIngestionBatchResponse fetchSbomFromGithub(
-            @Valid @RequestBody GithubSbomIngestionRequest request
-    ) throws IOException {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return sbomIngestionService.ingestFromGithub(tenant, request);
-    }
-
-    @PostMapping("/sbom-fetch/github/attestation")
-    public SbomIngestionResponse fetchSbomFromGithubAttestation(
-            @Valid @RequestBody GithubAttestationSbomIngestionRequest request
-    ) throws IOException {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return sbomIngestionService.ingestFromGithubAttestation(tenant, request);
-    }
-
-    @PostMapping("/sbom-fetch/github/ghcr")
-    public SbomIngestionService.GithubGhcrIngestionSummary fetchSbomFromGithubContainerRegistry(
-            @Valid @RequestBody GithubGhcrSbomIngestionRequest request
-    ) throws IOException {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, request.owner());
-    }
-
-    @GetMapping("/sbom-uploads")
-    public List<SbomUploadEvidenceResponse> listSbomUploads(
+    @GetMapping("/ingestions")
+    public List<SbomUploadEvidenceResponse> listIngestions(
             @RequestParam(required = false) String sourceSystem
     ) {
         Tenant tenant = tenantService.getDefaultTenant();

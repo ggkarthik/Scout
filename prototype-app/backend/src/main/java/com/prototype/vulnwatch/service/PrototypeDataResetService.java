@@ -122,8 +122,12 @@ public class PrototypeDataResetService {
         deletedRows.put("org_cve_records", orgCveRecordRepository.count());
         deletedRows.put("software_inventory_items", softwareInventoryItemRepository.count());
         deletedRows.put("inventory_component_cpe_map", inventoryComponentCpeMapRepository.count());
+        deletedRows.put("software_instances", tableCount("software_instances"));
         deletedRows.put("inventory_components", inventoryComponentRepository.count());
+        deletedRows.put("discovery_models", tableCount("discovery_models"));
         deletedRows.put("sbom_uploads", sbomUploadRepository.count());
+        deletedRows.put("ci_aliases", tableCount("ci_aliases"));
+        deletedRows.put("cis", tableCount("cis"));
         deletedRows.put("assets", assetRepository.count());
         deletedRows.put("vulnerability_intel_summary_sources", vulnerabilityIntelSummarySourceRepository.count());
         deletedRows.put("vulnerability_intel_summary", vulnerabilityIntelSummaryRepository.count());
@@ -146,8 +150,12 @@ public class PrototypeDataResetService {
         truncateOrDeleteTable("org_cve_records");
         truncateOrDeleteTable("software_inventory_items");
         truncateOrDeleteTable("inventory_component_cpe_map");
+        truncateOrDeleteTable("software_instances");
         truncateOrDeleteTable("inventory_components");
+        truncateOrDeleteTable("discovery_models");
         truncateOrDeleteTable("sbom_uploads");
+        truncateOrDeleteTable("ci_aliases");
+        truncateOrDeleteTable("cis");
         truncateOrDeleteTable("assets");
         truncateOrDeleteTable("vulnerability_intel_summary_sources");
         truncateOrDeleteTable("vulnerability_intel_summary");

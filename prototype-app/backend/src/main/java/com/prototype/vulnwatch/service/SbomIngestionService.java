@@ -11,7 +11,6 @@ import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.Tenant;
-import com.prototype.vulnwatch.dto.GithubAttestationSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubRepoIngestionResult;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
@@ -52,7 +51,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class SbomIngestionService {
@@ -108,46 +106,6 @@ public class SbomIngestionService {
         this.maxPayloadBytes = maxPayloadBytes;
         this.allowUserAuthHeader = allowUserAuthHeader;
         this.allowedHostsCsv = allowedHostsCsv;
-    }
-
-    @Transactional
-    public SbomIngestionResponse ingest(
-            Tenant tenant,
-            AssetType assetType,
-            String assetName,
-            String assetIdentifier,
-            MultipartFile file
-    ) throws IOException {
-        byte[] content = file.getBytes();
-        ensurePayloadWithinLimit(content.length);
-        String originalFilename = file.getOriginalFilename() == null ? "sbom.json" : file.getOriginalFilename();
-        String contentType = file.getContentType();
-
-        Map<String, Object> evidence = new LinkedHashMap<>();
-        evidence.put("ingestionMode", "manual-upload");
-        evidence.put("filename", originalFilename);
-        evidence.put("contentType", contentType);
-        evidence.put("sizeBytes", content.length);
-
-        IngestionSourceMetadata metadata = new IngestionSourceMetadata(
-                "MANUAL_UPLOAD",
-                "upload",
-                originalFilename,
-                null,
-                null,
-                contentType,
-                (long) content.length,
-                toJson(evidence));
-
-        return withIngestionLock(lockKey(tenant, assetIdentifier), () -> ingestBytes(
-                tenant,
-                assetType,
-                assetName,
-                assetIdentifier,
-                content,
-                originalFilename,
-                metadata,
-                null));
     }
 
     @Transactional
@@ -304,47 +262,6 @@ public class SbomIngestionService {
                 componentsIngested,
                 findingsGenerated,
                 results);
-    }
-
-    @Transactional
-    public SbomIngestionResponse ingestFromGithubAttestation(
-            Tenant tenant,
-            GithubAttestationSbomIngestionRequest request
-    ) throws IOException {
-        String owner = normalize(request.owner());
-        String repo = normalize(request.repo());
-        String imageRepository = normalizeContainerRepository(request.imageRepository());
-        String normalizedDigest = normalizeDigestToken(request.subjectDigest());
-        if (owner.isBlank()) {
-            throw new IOException("GitHub owner/account is required");
-        }
-        if (imageRepository.isBlank()) {
-            throw new IOException("Image repository is required");
-        }
-        if (normalizedDigest.isBlank()) {
-            throw new IOException("A valid sha256 subject digest is required");
-        }
-
-        String assetName = request.assetName() == null || request.assetName().isBlank()
-                ? defaultContainerAssetName(imageRepository)
-                : request.assetName().trim();
-        String assetIdentifier = request.assetIdentifier() == null || request.assetIdentifier().isBlank()
-                ? imageRepository + "@" + normalizedDigest
-                : request.assetIdentifier().trim();
-        String imageTag = request.imageTag() == null || request.imageTag().isBlank()
-                ? null
-                : request.imageTag().trim();
-
-        return ingestGithubAttestation(
-                tenant,
-                owner,
-                repo,
-                imageRepository,
-                normalizedDigest,
-                imageTag,
-                assetName,
-                assetIdentifier
-        );
     }
 
     @Transactional

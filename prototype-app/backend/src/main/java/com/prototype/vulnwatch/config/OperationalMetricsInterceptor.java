@@ -83,16 +83,18 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         if ("GET".equalsIgnoreCase(method) && "/api/findings".equals(path)) {
             return OperationalMetricsService.KEY_FINDINGS_LIST;
         }
-        if ("POST".equalsIgnoreCase(method) && "/api/sbom-upload".equals(path)) {
-            return OperationalMetricsService.KEY_SBOM_UPLOAD;
-        }
         if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch".equals(path)) {
             return OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT;
         }
-        if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch/github".equals(path)) {
+        if ("POST".equalsIgnoreCase(method) && "/api/github-sbom-sources/repository/run".equals(path)) {
             return OperationalMetricsService.KEY_SBOM_FETCH_GITHUB;
         }
-        if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch/github/ghcr".equals(path)) {
+        if ("POST".equalsIgnoreCase(method) && "/api/github-sbom-sources/ghcr/run".equals(path)) {
+            return OperationalMetricsService.KEY_SBOM_FETCH_GITHUB;
+        }
+        if ("POST".equalsIgnoreCase(method)
+                && path.startsWith("/api/github-sbom-sources/")
+                && path.endsWith("/run")) {
             return OperationalMetricsService.KEY_SBOM_FETCH_GITHUB;
         }
         if ("POST".equalsIgnoreCase(method) && "/api/ingestion/nvd-sync".equals(path)) {

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.AnalystDisposition;
+import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.BusinessCriticality;
 import com.prototype.vulnwatch.domain.CpeDim;
 import com.prototype.vulnwatch.domain.Finding;
@@ -37,6 +39,7 @@ import com.prototype.vulnwatch.util.CpeUtil;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -133,6 +136,53 @@ class FindingServiceCorrelationPostgresIntegrationTest {
         int active = findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
         assertEquals(0, active);
         assertTrue(findingRepository.findByComponent(fixture.component()).isEmpty());
+    }
+
+    @Test
+    void manualModeStillAllowsManualFindingCreationFromWorkbench() {
+        Tenant tenant = tenantService.getDefaultTenant();
+        TestFixture fixture = createAssetAndComponent(
+                tenant,
+                "manual-workbench-pg",
+                "maven",
+                "log4j-core",
+                "2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
+        );
+
+        Vulnerability vulnerability = createVulnerability("CVE-2099-5002", VulnerabilitySource.NVD, "HIGH", 8.4);
+        createCpeTarget(
+                vulnerability,
+                "nvd",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+                "2.0.0",
+                "2.17.1"
+        );
+
+        int active = findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
+        assertEquals(0, active);
+        assertTrue(findingRepository.findByComponent(fixture.component()).isEmpty());
+
+        FindingService.ManualFindingCreationResult result = findingService.createManualFindingsForVulnerability(
+                tenant,
+                vulnerability,
+                "Confirmed manually from CVE workbench",
+                "local-analyst",
+                List.of(fixture.component().getId()),
+                Map.of(fixture.component().getId(), ApplicabilityState.APPLICABLE),
+                Map.of(fixture.component().getId(), AnalystDisposition.IMPACTED)
+        );
+
+        assertEquals(1, result.eligibleComponentCount());
+        assertEquals(1, result.createdCount());
+        assertEquals(0, result.reopenedCount());
+        assertEquals(0, result.alreadyOpenCount());
+
+        List<Finding> findings = findingRepository.findByComponent(fixture.component());
+        assertEquals(1, findings.size());
+        assertEquals(FindingStatus.OPEN, findings.get(0).getStatus());
+        assertEquals(FindingDecisionState.AFFECTED, findings.get(0).getDecisionState());
     }
 
     @Test

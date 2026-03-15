@@ -1,9 +1,7 @@
 import React from 'react';
-import { api, uploadSbom } from '../api/client';
-import { GithubRepoIngestionResult } from '../types';
-import { ResizableTable } from '../components/ResizableTable';
+import { api } from '../api/client';
 
-export type IngestionMode = 'upload' | 'endpoint' | 'github';
+export type IngestionMode = 'endpoint' | 'github';
 type Props = {
   onDone?: () => void;
   initialMode?: IngestionMode;
@@ -15,17 +13,17 @@ const MODE_QUERY_KEY = 'ingestMode';
 
 
 function isMode(value: string | null): value is IngestionMode {
-  return value === 'upload' || value === 'endpoint' || value === 'github';
+  return value === 'endpoint' || value === 'github';
 }
 
 function readModeFromQuery(): IngestionMode {
   const value = new URLSearchParams(window.location.search).get(MODE_QUERY_KEY);
-  return isMode(value) ? value : 'upload';
+  return isMode(value) ? value : 'endpoint';
 }
 
 function writeModeToQuery(mode: IngestionMode): void {
   const url = new URL(window.location.href);
-  if (mode === 'upload') {
+  if (mode === 'endpoint') {
     url.searchParams.delete(MODE_QUERY_KEY);
   } else {
     url.searchParams.set(MODE_QUERY_KEY, mode);
@@ -38,14 +36,13 @@ export function IngestionPage({
   initialMode,
   hideModeToggle = false,
   title = 'SBOM Ingestion',
-  caption = 'Upload files or fetch SBOM JSON from GitHub/tool endpoints with evidence retention'
+  caption = 'Fetch SBOM JSON from authenticated API or GitHub sources with evidence retention'
 }: Props) {
   const [mode, setMode] = React.useState<IngestionMode>(() => initialMode ?? readModeFromQuery());
   const [assetType, setAssetType] = React.useState<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>('APPLICATION');
   const [assetName, setAssetName] = React.useState('');
   const [assetIdentifier, setAssetIdentifier] = React.useState('');
   const [showGithubAssetOverrides, setShowGithubAssetOverrides] = React.useState(false);
-  const [file, setFile] = React.useState<File | null>(null);
 
   const [sourceUrl, setSourceUrl] = React.useState('');
   const [sourceLabel, setSourceLabel] = React.useState('');
@@ -54,7 +51,6 @@ export function IngestionPage({
 
   const [githubOwner, setGithubOwner] = React.useState('');
   const [githubRepo, setGithubRepo] = React.useState('');
-  const [githubRunResults, setGithubRunResults] = React.useState<GithubRepoIngestionResult[]>([]);
 
   const [result, setResult] = React.useState('');
   const [error, setError] = React.useState('');
@@ -94,7 +90,6 @@ export function IngestionPage({
 
     setError('');
     setResult('');
-    setGithubRunResults([]);
     const githubOwnerValue = githubOwner.trim();
     const githubRepoValue = githubRepo.trim();
     if (mode === 'github') {
@@ -113,18 +108,7 @@ export function IngestionPage({
     }
     setLoading(true);
     try {
-      if (mode === 'upload') {
-        if (!file) {
-          throw new Error('Please choose an SBOM file for upload mode');
-        }
-        const response = await uploadSbom({
-          assetType,
-          assetName: assetName.trim(),
-          assetIdentifier: assetIdentifier.trim(),
-          file
-        });
-        setResult(`Ingested successfully. Components: ${response.componentsIngested}`);
-      } else if (mode === 'endpoint') {
+      if (mode === 'endpoint') {
         if (!sourceUrl.trim()) {
           throw new Error('Source URL is required in endpoint mode');
         }
@@ -138,7 +122,7 @@ export function IngestionPage({
         });
         setResult(`Ingested successfully. Components: ${response.componentsIngested}`);
       } else {
-        const response = await api.fetchSbomFromGithub({
+        const response = await api.queueGithubRepositoryRun({
           owner: githubOwnerValue,
           repo: githubRepoValue || undefined,
           includeAllRepos: !githubRepoValue,
@@ -146,11 +130,8 @@ export function IngestionPage({
           assetName: showGithubAssetOverrides && githubRepoValue ? assetName.trim() || undefined : undefined,
           assetIdentifier: showGithubAssetOverrides && githubRepoValue ? assetIdentifier.trim() || undefined : undefined
         });
-        setGithubRunResults(response.results || []);
         setResult(
-          `GitHub ingestion complete. Processed ${response.repositoriesProcessed}/${response.repositoriesDiscovered} repos `
-          + `(success: ${response.repositoriesSucceeded}, failed: ${response.repositoriesFailed}). `
-          + `Components: ${response.componentsIngested}`
+          `GitHub ingestion queued as run ${response.runId}. Track progress in Connect > Inventory Run Queue.`
         );
       }
 
@@ -167,7 +148,6 @@ export function IngestionPage({
   const validateAndAdvance = (): void => {
     setWizardStepError('');
     if (wizardStep === 1) {
-      if (mode === 'upload' && !file) { setWizardStepError('Please select an SBOM file to continue'); return; }
       if (mode === 'endpoint' && !sourceUrl.trim()) { setWizardStepError('SBOM Endpoint URL is required'); return; }
       if (mode === 'github' && !githubOwner.trim()) { setWizardStepError('GitHub Owner is required'); return; }
       setWizardStep(2);
@@ -213,11 +193,6 @@ export function IngestionPage({
           {/* Step 1: Source */}
           {wizardStep === 1 && (
             <div className="wizard-step-body form-grid ingestion-grid">
-              {mode === 'upload' && (
-                <label>SBOM File (CycloneDX or SPDX)
-                  <input type="file" accept="application/json,.json" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-                </label>
-              )}
               {mode === 'endpoint' && (
                 <>
                   <label>SBOM Endpoint URL
@@ -316,15 +291,7 @@ export function IngestionPage({
             <div className="wizard-step-body">
               <table className="wizard-review-table">
                 <tbody>
-                  {(mode === 'upload'
-                    ? [
-                        { label: 'Source', value: 'File Upload' },
-                        { label: 'File', value: file?.name ?? 'Not selected' },
-                        { label: 'Asset Type', value: assetType },
-                        { label: 'Asset Name', value: assetName || '—' },
-                        { label: 'Asset Identifier', value: assetIdentifier || '—' }
-                      ]
-                    : mode === 'endpoint'
+                  {(mode === 'endpoint'
                     ? [
                         { label: 'Source', value: 'API Endpoint' },
                         { label: 'URL', value: sourceUrl || '—' },
@@ -376,9 +343,6 @@ export function IngestionPage({
         /* ── FLAT MODE (standalone page) ── */
         <div className="section-block">
           <div className="mode-toggle">
-            <button type="button" className={mode === 'upload' ? 'mode-btn active' : 'mode-btn'} onClick={() => setMode('upload')}>
-              File Upload
-            </button>
             <button type="button" className={mode === 'endpoint' ? 'mode-btn active' : 'mode-btn'} onClick={() => setMode('endpoint')}>
               API Endpoint
             </button>
@@ -414,12 +378,6 @@ export function IngestionPage({
                 />
               </label>
             </>
-          )}
-
-          {mode === 'upload' && (
-            <label>SBOM File (CycloneDX or SPDX)
-              <input type="file" accept="application/json,.json" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </label>
           )}
 
           {mode === 'endpoint' && (
@@ -478,7 +436,7 @@ export function IngestionPage({
               <div className="inline-note">
                 Default asset classification is <span className="mono">APPLICATION</span>. If repo is empty, the app confirms and ingests all
                 repositories in the owner account. Each repository is normalized into a unique asset using{' '}
-                <span className="mono">github:owner/repo</span>, and org/repo lineage is stored in upload evidence.
+                <span className="mono">github:owner/repo</span>, and org/repo lineage is stored in ingestion evidence.
               </div>
 
               <div className="button-row form-submit-row">
@@ -545,41 +503,6 @@ export function IngestionPage({
 
       {result && <div className="notice">{result}</div>}
       {error && <div className="notice error">{error}</div>}
-      {mode === 'github' && githubRunResults.length > 0 && (
-        <>
-          <h4 className="section-title section-divider">Latest GitHub Repo Processing</h4>
-          <div className="table-scroll">
-            <ResizableTable storageKey="github-latest-run-table-widths">
-              <thead>
-              <tr>
-                <th>Org</th>
-                <th>Repo</th>
-                <th>Status</th>
-                <th>Asset Identifier</th>
-                <th>Components</th>
-                <th>Details</th>
-              </tr>
-              </thead>
-              <tbody>
-              {githubRunResults.map((row) => (
-                <tr key={`${row.owner}/${row.repo}`}>
-                  <td>{row.owner}</td>
-                  <td>{row.repo}</td>
-                  <td>
-                    <span className={`status-pill ${row.status === 'SUCCESS' ? 'status-success' : 'status-failure'}`}>
-                      {row.status}
-                    </span>
-                  </td>
-                  <td className="mono">{row.assetIdentifier}</td>
-                  <td>{row.componentsIngested ?? '-'}</td>
-                  <td>{row.message || '-'}</td>
-                </tr>
-              ))}
-              </tbody>
-            </ResizableTable>
-          </div>
-        </>
-      )}
     </div>
   );
 }

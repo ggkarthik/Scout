@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.GithubGhcrSbomIngestionRequest;
+import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
@@ -50,6 +51,11 @@ public class GithubSbomSourceController {
     @PostMapping("/ghcr/run")
     public SyncTriggerResponse runGhcrOnce(@Valid @RequestBody GithubGhcrSbomIngestionRequest request) {
         return githubSbomSourceService.triggerGhcrRunOnce(request.owner());
+    }
+
+    @PostMapping("/repository/run")
+    public SyncTriggerResponse runRepositoryOnce(@Valid @RequestBody GithubSbomIngestionRequest request) {
+        return githubSbomSourceService.triggerRepositoryRunOnce(request);
     }
 
     @PostMapping("/{id}/run")

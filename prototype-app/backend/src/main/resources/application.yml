@@ -119,6 +119,11 @@ app:
     s3-bucket: ${ARCHIVE_S3_BUCKET:}
     # Local filesystem path (only used when storage-backend=filesystem)
     local-path: ${ARCHIVE_LOCAL_PATH:./data/vulnerability-archives}
+  cmdb:
+    servicenow:
+      base-url: ${CMDB_SERVICENOW_BASE_URL:}
+      username: ${CMDB_SERVICENOW_USERNAME:}
+      password: ${CMDB_SERVICENOW_PASSWORD:}
 
 management:
   endpoints:

@@ -81,6 +81,7 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
     long countByTenant(Tenant tenant);
     long countByTenantAndComponentStatus(Tenant tenant, InventoryComponentStatus status);
     List<InventoryComponent> findByAsset(Asset asset);
+    List<InventoryComponent> findByAsset_IdIn(Collection<UUID> assetIds);
     List<InventoryComponent> findByAssetAndComponentStatus(Asset asset, InventoryComponentStatus status);
     @Query("""
             select c
@@ -92,6 +93,7 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
               and (:componentStatuses is null or c.componentStatus in :componentStatuses)
               and (:normalizedSourceSystems is null or lower(coalesce(u.ingestionSourceSystem, '')) in :normalizedSourceSystems)
               and (:normalizedEcosystems is null or lower(coalesce(c.ecosystem, '')) in :normalizedEcosystems)
+              and (:applyReviewFilters = false or c.asset.type = com.prototype.vulnwatch.domain.AssetType.HOST)
               and (
                 :normalizedQueryPattern is null
                 or lower(coalesce(c.asset.name, '')) like :normalizedQueryPattern
@@ -101,6 +103,83 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
                 or lower(coalesce(s.displayName, '')) like :normalizedQueryPattern
                 or lower(coalesce(c.purl, '')) like :normalizedQueryPattern
               )
+              and (
+                :applyReviewFilters = false
+                or (
+                  (:reviewNeedsAny = true and (
+                    exists(
+                      select 1
+                      from SoftwareInstance si
+                      where si.inventoryComponent = c
+                        and si.activeInstall = true
+                        and (si.version is null or trim(si.version) = '')
+                        and (si.normalizedVersion is null or trim(si.normalizedVersion) = '')
+                    )
+                    or exists(
+                      select 1
+                      from SoftwareInstance si
+                      where si.inventoryComponent = c
+                        and si.activeInstall = true
+                        and si.softwareIdentity is null
+                    )
+                    or exists(
+                      select 1
+                      from SoftwareInstance si
+                      join si.discoveryModel dm
+                      where si.inventoryComponent = c
+                        and si.activeInstall = true
+                        and (
+                          dm.lowConfidence = true
+                          or dm.approved = false
+                          or (dm.normalizationStatus is not null and lower(trim(dm.normalizationStatus)) <> 'approved')
+                        )
+                    )
+                    or exists(
+                      select 1
+                      from CiAlias alias
+                      where alias.ci.asset = c.asset
+                        and alias.confidence is not null
+                        and alias.confidence < :lowConfidenceAliasThreshold
+                        and (u is null or lower(coalesce(alias.sourceSystem, '')) = lower(coalesce(u.ingestionSourceSystem, '')))
+                    )
+                  ))
+                  or (:reviewMissingVersion = true and exists(
+                    select 1
+                    from SoftwareInstance si
+                    where si.inventoryComponent = c
+                      and si.activeInstall = true
+                      and (si.version is null or trim(si.version) = '')
+                      and (si.normalizedVersion is null or trim(si.normalizedVersion) = '')
+                  ))
+                  or (:reviewUnmappedSoftware = true and exists(
+                    select 1
+                    from SoftwareInstance si
+                    where si.inventoryComponent = c
+                      and si.activeInstall = true
+                      and si.softwareIdentity is null
+                  ))
+                  or (:reviewLowConfidenceAlias = true and exists(
+                    select 1
+                    from CiAlias alias
+                    where alias.ci.asset = c.asset
+                      and alias.confidence is not null
+                      and alias.confidence < :lowConfidenceAliasThreshold
+                      and (u is null or lower(coalesce(alias.sourceSystem, '')) = lower(coalesce(u.ingestionSourceSystem, '')))
+                  ))
+                  or (:reviewDiscoveryModel = true and exists(
+                    select 1
+                    from SoftwareInstance si
+                    join si.discoveryModel dm
+                    where si.inventoryComponent = c
+                      and si.activeInstall = true
+                      and (
+                        dm.lowConfidence = true
+                        or dm.approved = false
+                        or (dm.normalizationStatus is not null and lower(trim(dm.normalizationStatus)) <> 'approved')
+                      )
+                  ))
+                )
+              )
             """)
     Page<InventoryComponent> findPageByFilters(
             @Param("tenant") Tenant tenant,
@@ -108,6 +187,13 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
             @Param("componentStatuses") Collection<InventoryComponentStatus> componentStatuses,
             @Param("normalizedSourceSystems") Collection<String> normalizedSourceSystems,
             @Param("normalizedEcosystems") Collection<String> normalizedEcosystems,
+            @Param("applyReviewFilters") boolean applyReviewFilters,
+            @Param("reviewNeedsAny") boolean reviewNeedsAny,
+            @Param("reviewMissingVersion") boolean reviewMissingVersion,
+            @Param("reviewUnmappedSoftware") boolean reviewUnmappedSoftware,
+            @Param("reviewLowConfidenceAlias") boolean reviewLowConfidenceAlias,
+            @Param("reviewDiscoveryModel") boolean reviewDiscoveryModel,
+            @Param("lowConfidenceAliasThreshold") double lowConfidenceAliasThreshold,
             @Param("normalizedQueryPattern") String normalizedQueryPattern,
             Pageable pageable
     );

@@ -25,7 +25,6 @@ public class OperationalMetricsService {
     public static final String KEY_OPERATIONS_FRESHNESS = "operations-freshness-drift";
     public static final String KEY_OPERATIONS_CATALOG = "operations-metric-catalog";
     public static final String KEY_FINDINGS_LIST = "findings-list";
-    public static final String KEY_SBOM_UPLOAD = "sbom-upload";
     public static final String KEY_SBOM_FETCH_ENDPOINT = "sbom-fetch-endpoint";
     public static final String KEY_SBOM_FETCH_GITHUB = "sbom-fetch-github";
     public static final String KEY_INGESTION_NVD_SYNC = "ingestion-nvd-sync";

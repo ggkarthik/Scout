@@ -382,7 +382,6 @@ public class OperationalDashboardService {
                 OperationalMetricsService.KEY_OPERATIONS_FRESHNESS,
                 OperationalMetricsService.KEY_OPERATIONS_CATALOG,
                 OperationalMetricsService.KEY_FINDINGS_LIST,
-                OperationalMetricsService.KEY_SBOM_UPLOAD,
                 OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT,
                 OperationalMetricsService.KEY_SBOM_FETCH_GITHUB,
                 OperationalMetricsService.KEY_INGESTION_NVD_SYNC,
@@ -610,7 +609,6 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_OPERATIONS_FRESHNESS -> "Operations Freshness & Drift";
             case OperationalMetricsService.KEY_OPERATIONS_CATALOG -> "Operations Metric Catalog";
             case OperationalMetricsService.KEY_FINDINGS_LIST -> "Findings List";
-            case OperationalMetricsService.KEY_SBOM_UPLOAD -> "SBOM Upload";
             case OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT -> "SBOM Fetch Endpoint";
             case OperationalMetricsService.KEY_SBOM_FETCH_GITHUB -> "SBOM Fetch GitHub";
             case OperationalMetricsService.KEY_INGESTION_NVD_SYNC -> "NVD Sync Trigger";

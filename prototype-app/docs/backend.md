@@ -109,9 +109,6 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 
 - `POST /api/sbom-upload`
 - `POST /api/sbom-fetch`
-- `POST /api/sbom-fetch/github`
-- `POST /api/sbom-fetch/github/ghcr`
-- `POST /api/sbom-fetch/github/attestation`
 - `POST /api/ingestion/nvd-sync`
 - `POST /api/ingestion/nvd-full-sync`
 - `POST /api/ingestion/kev-sync`
@@ -123,6 +120,8 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `GET /api/github-sbom-sources`
 - `POST /api/github-sbom-sources`
 - `PUT /api/github-sbom-sources/{id}`
+- `POST /api/github-sbom-sources/repository/run`
+- `POST /api/github-sbom-sources/ghcr/run`
 - `POST /api/github-sbom-sources/{id}/run`
 - `POST /api/demo/seed`
 
@@ -159,29 +158,13 @@ The ingestion controllers hand off to `SbomIngestionService` and related service
 
 GitHub-backed SBOM ingestion now supports two modes:
 
-- repository dependency-graph SBOM fetch via `POST /api/sbom-fetch/github`
-- GHCR owner-wide image attestation fetch via `POST /api/sbom-fetch/github/ghcr`
-- GHCR image attestation fetch via `POST /api/sbom-fetch/github/attestation`
+- repository dependency-graph SBOM queueing via `POST /api/github-sbom-sources/repository/run`
+- GHCR owner-wide image attestation queueing via `POST /api/github-sbom-sources/ghcr/run`
+- saved GitHub source execution via `POST /api/github-sbom-sources/{id}/run`
 
 The GHCR batch path enumerates container packages and image versions in GHCR for a GitHub owner,
 looks up each image digest in GitHub artifact attestations, and feeds every discovered SBOM
 through the same parsing and correlation pipeline used for uploaded SBOM files.
-
-The single-image attestation path retrieves GitHub attestation bundles for a repository or owner and image digest,
-extracts the SPDX/CycloneDX predicate from the DSSE payload, and feeds that payload through the
-same parsing and correlation pipeline used for uploaded SBOM files.
-
-Example request for the attestation path:
-
-```json
-{
-  "owner": "ggkarthik",
-  "repo": "P1_Service-Owner-workspace",
-  "imageRepository": "ghcr.io/ggkarthik/p1_service-owner-workspace",
-  "subjectDigest": "sha256:...",
-  "imageTag": "latest"
-}
-```
 
 Current trust model:
 

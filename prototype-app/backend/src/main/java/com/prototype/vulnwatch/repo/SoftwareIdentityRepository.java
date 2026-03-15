@@ -11,4 +11,8 @@ public interface SoftwareIdentityRepository extends JpaRepository<SoftwareIdenti
     Optional<SoftwareIdentity> findByCanonicalKey(String canonicalKey);
 
     List<SoftwareIdentity> findByCanonicalKeyIn(Collection<String> canonicalKeys);
+
+    Optional<SoftwareIdentity> findByProductHash(String productHash);
+
+    Optional<SoftwareIdentity> findByCpe23(String cpe23);
 }

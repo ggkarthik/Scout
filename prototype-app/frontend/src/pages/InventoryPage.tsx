@@ -11,6 +11,7 @@ import { ResizableTable } from '../components/ResizableTable';
 import { StatCard } from '../components/StatCard';
 import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
+import { HostAssetDetailPage, readSelectedHostAssetId, updateSelectedHostAssetId } from './HostAssetDetailPage';
 
 export type InventoryViewKey =
   | 'vulnerability-intelligence'
@@ -38,8 +39,19 @@ type Props = {
   selectedView: InventoryViewKey;
 };
 
-type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'query';
+type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'reviewCategory' | 'query';
 type VulnerabilityIntelFilterKey = 'severity' | 'source' | 'vulnStatus' | 'inKev' | 'query';
+type HostReviewCategory = 'NEEDS_REVIEW' | 'MISSING_VERSION' | 'UNMAPPED_SOFTWARE' | 'LOW_CONFIDENCE_ALIAS' | 'DISCOVERY_MODEL_REVIEW';
+
+const HOST_REVIEW_CATEGORY_QUERY_KEY = 'reviewCategory';
+const HOST_REVIEW_CATEGORIES: HostReviewCategory[] = [
+  'NEEDS_REVIEW',
+  'MISSING_VERSION',
+  'UNMAPPED_SOFTWARE',
+  'LOW_CONFIDENCE_ALIAS',
+  'DISCOVERY_MODEL_REVIEW'
+];
+
 const VULNERABILITY_INTEL_PAGE_SIZE = 25;
 const COMPONENTS_PAGE_SIZE = 25;
 const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
@@ -51,13 +63,14 @@ const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {
 const DEFAULT_COMPONENT_FILTERS: InventoryComponentFilterValues = {
   assetTypes: ['APPLICATION', 'HOST', 'CONTAINER_IMAGE'],
   componentStatuses: ['ACTIVE', 'RETIRED'],
-  sourceSystems: ['upload', 'api', 'github'],
+  sourceSystems: ['api', 'github', 'servicenow'],
   ecosystems: []
 };
 
 const INVENTORY_FILTER_CATEGORIES: FilterBuilderCategory[] = [
   { key: 'inventory', label: 'Inventory' },
-  { key: 'ingestion', label: 'Ingestion' }
+  { key: 'ingestion', label: 'Ingestion' },
+  { key: 'review', label: 'Review' }
 ];
 
 const INVENTORY_FILTER_FIELDS: FilterBuilderField[] = [
@@ -87,6 +100,13 @@ const INVENTORY_FILTER_FIELDS: FilterBuilderField[] = [
     label: 'Source System',
     categoryKey: 'ingestion',
     description: 'Filter records by how the inventory was ingested.',
+    typeLabel: 'Enum property'
+  },
+  {
+    key: 'reviewCategory',
+    label: 'Host Review',
+    categoryKey: 'review',
+    description: 'Filter host inventory rows by deterministic review blockers such as missing version, unmapped software, or low-confidence host alias resolution.',
     typeLabel: 'Enum property'
   },
   {
@@ -154,29 +174,6 @@ const SOURCE_LABELS: Record<string, string> = {
   advisory: 'Advisory'
 };
 
-const INVENTORY_VIEW_LABELS: Record<InventoryViewKey, string> = {
-  'vulnerability-intelligence': 'Vulnerability Intelligence',
-  technologies: 'Technologies',
-  'service-catalog': 'Service Catalog',
-  'cloud-resources': 'Cloud Resources',
-  'imported-assets': 'Imported Assets',
-  hosts: 'Hosts',
-  'kubernetes-clusters': 'Kubernetes Clusters',
-  'container-images': 'Container Images',
-  'secured-image-catalog': 'Secured Image Catalog',
-  'container-registries': 'Container Registries',
-  datastores: 'Datastores',
-  subscriptions: 'Subscriptions',
-  iam: 'IAM',
-  'hosted-technologies': 'Hosted Technologies',
-  sbom: 'Repositories',
-  'api-endpoints': 'API Endpoints',
-  'application-endpoints': 'Application Endpoints',
-  'code-repositories': 'Code Repositories',
-  'source-mappings': 'Source Mappings',
-  developers: 'Developers'
-};
-
 function defaultAssetTypeForView(view: InventoryViewKey): 'ALL' | InventoryComponentRecord['assetType'] {
   if (view === 'container-images' || view === 'secured-image-catalog' || view === 'container-registries') {
     return 'CONTAINER_IMAGE';
@@ -217,9 +214,10 @@ function formatSourceSystem(value: string): string {
 
 function formatInventorySourceSystem(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'upload') return 'File Upload';
+  if (normalized === 'upload') return 'Legacy Upload';
   if (normalized === 'api') return 'API Endpoint';
   if (normalized === 'github') return 'GitHub Generated';
+  if (normalized === 'servicenow') return 'ServiceNow';
   return value;
 }
 
@@ -245,6 +243,41 @@ function vexCoverageClass(value?: VulnerabilityIntelRecord['vexCoverage'] | Vuln
   if (value === 'MIXED') return 'status-in-progress';
   if (value === 'VENDOR_ONLY') return 'status-suppressed';
   return 'status-auto_closed';
+}
+
+function formatHostReviewLabel(value: HostReviewCategory): string {
+  if (value === 'NEEDS_REVIEW') return 'Needs Review';
+  if (value === 'MISSING_VERSION') return 'Missing Version';
+  if (value === 'UNMAPPED_SOFTWARE') return 'Unmapped Identity';
+  if (value === 'LOW_CONFIDENCE_ALIAS') return 'Alias Review';
+  return 'Discovery Review';
+}
+
+function normalizeHostReviewCategory(value: string): HostReviewCategory | null {
+  const normalized = value.trim().toUpperCase().replace(/[-\s]+/g, '_');
+  return HOST_REVIEW_CATEGORIES.includes(normalized as HostReviewCategory)
+    ? normalized as HostReviewCategory
+    : null;
+}
+
+function readSelectedHostReviewCategories(): HostReviewCategory[] {
+  const url = new URL(window.location.href);
+  const rawValues = url.searchParams.getAll(HOST_REVIEW_CATEGORY_QUERY_KEY);
+  if (rawValues.length === 0 && url.searchParams.get('inventoryView') === 'host-review-queue') {
+    return ['NEEDS_REVIEW'];
+  }
+  return Array.from(new Set(
+    rawValues
+      .map(normalizeHostReviewCategory)
+      .filter((value): value is HostReviewCategory => value !== null)
+  ));
+}
+
+function updateSelectedHostReviewCategories(categories: HostReviewCategory[]): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(HOST_REVIEW_CATEGORY_QUERY_KEY);
+  categories.forEach((value) => url.searchParams.append(HOST_REVIEW_CATEGORY_QUERY_KEY, value));
+  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
 }
 
 function canonicalVulnerabilitySource(value: string): string {
@@ -297,7 +330,12 @@ export function InventoryPage({ selectedView }: Props) {
   const [componentStatuses, setComponentStatuses] = React.useState<string[]>([]);
   const [componentSourceSystems, setComponentSourceSystems] = React.useState<string[]>([]);
   const [componentEcosystems, setComponentEcosystems] = React.useState<string[]>([]);
-  const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>([]);
+  const [componentReviewCategories, setComponentReviewCategories] = React.useState<HostReviewCategory[]>(() => (
+    selectedView === 'hosts' ? readSelectedHostReviewCategories() : []
+  ));
+  const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>(() => (
+    selectedView === 'hosts' && readSelectedHostReviewCategories().length > 0 ? ['reviewCategory'] : []
+  ));
   const [vulnerabilityIntelRows, setVulnerabilityIntelRows] = React.useState<VulnerabilityIntelRecord[]>([]);
   const [vulnerabilityIntelPage, setVulnerabilityIntelPage] = React.useState(0);
   const [vulnerabilityIntelTotalItems, setVulnerabilityIntelTotalItems] = React.useState(0);
@@ -313,6 +351,9 @@ export function InventoryPage({ selectedView }: Props) {
     DEFAULT_VULNERABILITY_INTEL_FILTERS
   );
   const [componentFilterValues, setComponentFilterValues] = React.useState<InventoryComponentFilterValues>(DEFAULT_COMPONENT_FILTERS);
+  const [selectedHostAssetId, setSelectedHostAssetId] = React.useState<string | null>(() => (
+    selectedView === 'hosts' ? readSelectedHostAssetId() : null
+  ));
   const [selectedVulnerabilityIntelId, setSelectedVulnerabilityIntelId] = React.useState<string | null>(null);
   const [selectedVulnerabilityIntelDetail, setSelectedVulnerabilityIntelDetail] = React.useState<VulnerabilityIntelDetail | null>(null);
   const [vulnerabilityIntelDetailLoading, setVulnerabilityIntelDetailLoading] = React.useState(false);
@@ -340,6 +381,7 @@ export function InventoryPage({ selectedView }: Props) {
       setSelectedVulnerabilityIntelId(null);
       setSelectedVulnerabilityIntelDetail(null);
     } else {
+      const initialHostReviewCategories = selectedView === 'hosts' ? readSelectedHostReviewCategories() : [];
       setComponentPage(0);
       setComponentQuery('');
       setDebouncedComponentQuery('');
@@ -347,9 +389,34 @@ export function InventoryPage({ selectedView }: Props) {
       setComponentStatuses([]);
       setComponentSourceSystems([]);
       setComponentEcosystems([]);
-      setComponentActiveFilters([]);
+      setComponentReviewCategories(initialHostReviewCategories);
+      setComponentActiveFilters(initialHostReviewCategories.length > 0 ? ['reviewCategory'] : []);
     }
   }, [selectedView]);
+
+  React.useEffect(() => {
+    if (selectedView === 'hosts') {
+      setSelectedHostAssetId(readSelectedHostAssetId());
+      setComponentReviewCategories(readSelectedHostReviewCategories());
+      return;
+    }
+    setSelectedHostAssetId(null);
+    setComponentReviewCategories([]);
+    updateSelectedHostAssetId(null);
+    updateSelectedHostReviewCategories([]);
+  }, [selectedView]);
+
+  React.useEffect(() => {
+    if (selectedView === 'hosts') {
+      updateSelectedHostAssetId(selectedHostAssetId);
+    }
+  }, [selectedHostAssetId, selectedView]);
+
+  React.useEffect(() => {
+    if (selectedView === 'hosts') {
+      updateSelectedHostReviewCategories(componentReviewCategories);
+    }
+  }, [componentReviewCategories, selectedView]);
 
   const vulnerabilityIntelInKevFilter = React.useMemo<boolean | undefined>(() => {
     const hasTrue = vulnerabilityIntelInKevValues.includes('true');
@@ -468,10 +535,16 @@ export function InventoryPage({ selectedView }: Props) {
   }, [vulnerabilityIntelFilterValues.inKevValues, vulnerabilityIntelInKevValues]);
 
   const inventoryFilterFields = React.useMemo<FilterBuilderField[]>(() => (
-    scopedAssetType === 'ALL'
-      ? INVENTORY_FILTER_FIELDS
-      : INVENTORY_FILTER_FIELDS.filter((field) => field.key !== 'assetType')
-  ), [scopedAssetType]);
+    INVENTORY_FILTER_FIELDS.filter((field) => {
+      if (scopedAssetType !== 'ALL' && field.key === 'assetType') {
+        return false;
+      }
+      if (selectedView !== 'hosts' && field.key === 'reviewCategory') {
+        return false;
+      }
+      return true;
+    })
+  ), [scopedAssetType, selectedView]);
 
   const assetTypeOptions = React.useMemo<FilterValueOption[]>(() => {
     const values = new Set<string>(DEFAULT_COMPONENT_FILTERS.assetTypes);
@@ -538,6 +611,18 @@ export function InventoryPage({ selectedView }: Props) {
       }));
   }, [componentFilterValues.ecosystems, componentEcosystems]);
 
+  const hostReviewOptions = React.useMemo<FilterValueOption[]>(() => (
+    HOST_REVIEW_CATEGORIES.map((value) => ({
+      value,
+      label: formatHostReviewLabel(value),
+      tone: value === 'NEEDS_REVIEW' || value === 'MISSING_VERSION'
+        ? 'medium'
+        : value === 'UNMAPPED_SOFTWARE' || value === 'LOW_CONFIDENCE_ALIAS'
+          ? 'neutral'
+          : 'low'
+    }))
+  ), []);
+
   const addVulnerabilityIntelFilter = React.useCallback((key: VulnerabilityIntelFilterKey) => {
     setVulnerabilityIntelActiveFilters((current) => (current.includes(key) ? current : [...current, key]));
   }, []);
@@ -582,6 +667,8 @@ export function InventoryPage({ selectedView }: Props) {
       setComponentSourceSystems([]);
     } else if (key === 'ecosystem') {
       setComponentEcosystems([]);
+    } else if (key === 'reviewCategory') {
+      setComponentReviewCategories([]);
     } else if (key === 'query') {
       setComponentQuery('');
     }
@@ -594,6 +681,7 @@ export function InventoryPage({ selectedView }: Props) {
     setComponentStatuses([]);
     setComponentSourceSystems([]);
     setComponentEcosystems([]);
+    setComponentReviewCategories([]);
     setComponentPage(0);
     setComponentActiveFilters([]);
   }, []);
@@ -693,6 +781,11 @@ export function InventoryPage({ selectedView }: Props) {
             ecosystem: componentActiveFilters.includes('ecosystem') && componentEcosystems.length > 0
               ? componentEcosystems
               : undefined,
+            reviewCategory: selectedView === 'hosts'
+              && componentActiveFilters.includes('reviewCategory')
+              && componentReviewCategories.length > 0
+              ? componentReviewCategories
+              : undefined,
             query: componentActiveFilters.includes('query') ? debouncedComponentQuery.trim() : undefined,
             page: componentPage,
             size: COMPONENTS_PAGE_SIZE
@@ -748,6 +841,7 @@ export function InventoryPage({ selectedView }: Props) {
     componentStatuses,
     componentSourceSystems,
     componentEcosystems,
+    componentReviewCategories,
     selectedView,
     componentPage,
     debouncedComponentQuery,
@@ -766,6 +860,14 @@ export function InventoryPage({ selectedView }: Props) {
   const closeVulnerabilityIntelDetail = React.useCallback((): void => {
     setSelectedVulnerabilityIntelId(null);
     setSelectedVulnerabilityIntelDetail(null);
+  }, []);
+
+  const openHostDetail = React.useCallback((assetId: string): void => {
+    setSelectedHostAssetId(assetId);
+  }, []);
+
+  const closeHostDetail = React.useCallback((): void => {
+    setSelectedHostAssetId(null);
   }, []);
 
   React.useEffect(() => {
@@ -799,9 +901,19 @@ export function InventoryPage({ selectedView }: Props) {
     setSelectedVulnerabilityIntelId(externalId);
   };
 
+  const hostReviewLabels = React.useCallback((row: InventoryComponentRecord): string[] => {
+    const labels: string[] = [];
+    if (row.reviewMissingVersion) labels.push('Missing Version');
+    if (row.reviewUnmappedSoftware) labels.push('Unmapped Identity');
+    if (row.reviewLowConfidenceAlias) labels.push('Alias Review');
+    if (row.reviewDiscoveryModel) labels.push('Discovery Review');
+    return labels;
+  }, []);
+
   const activeCount = rows.filter((row) => row.componentStatus === 'ACTIVE').length;
   const retiredCount = rows.filter((row) => row.componentStatus === 'RETIRED').length;
   const assetCount = new Set(rows.map((row) => row.assetId)).size;
+  const needsReviewCount = rows.filter((row) => row.needsReview).length;
 
   return (
     <div className="page-grid">
@@ -942,6 +1054,12 @@ export function InventoryPage({ selectedView }: Props) {
                   Repository inventory is scoped to application assets. GHCR image SBOMs appear only in <span className="mono">Inventory &gt; Container Images</span>.
                 </div>
               )}
+              {selectedView === 'hosts' && (
+                <div className="panel-caption">
+                  Host inventory is persisted as normalized software components across host assets. When a source already provides trustworthy normalized
+                  inventory, it is retained; otherwise deterministic normalization is applied before the software appears here.
+                </div>
+              )}
               <div className="findings-filter-shell">
                 <div className="findings-filter-builder-row">
                   <FilterBuilder
@@ -961,6 +1079,8 @@ export function InventoryPage({ selectedView }: Props) {
                         label = `Source System${componentSourceSystems.length > 0 ? ` (${componentSourceSystems.length})` : ''}`;
                       } else if (key === 'ecosystem') {
                         label = `Ecosystem${componentEcosystems.length > 0 ? ` (${componentEcosystems.length})` : ''}`;
+                      } else if (key === 'reviewCategory') {
+                        label = `Host Review${componentReviewCategories.length > 0 ? ` (${componentReviewCategories.length})` : ''}`;
                       } else {
                         label = `Inventory Search${componentQuery.trim() ? ' (1)' : ''}`;
                       }
@@ -1033,6 +1153,21 @@ export function InventoryPage({ selectedView }: Props) {
                     />
                   )}
 
+                  {selectedView === 'hosts' && componentActiveFilters.includes('reviewCategory') && (
+                    <FilterValueSelectCard
+                      label="Host Review"
+                      selectedValues={componentReviewCategories}
+                      options={hostReviewOptions}
+                      onChange={(values) => {
+                        setComponentReviewCategories(values
+                          .map(normalizeHostReviewCategory)
+                          .filter((value): value is HostReviewCategory => value !== null));
+                        setComponentPage(0);
+                      }}
+                      onRemove={() => removeComponentFilter('reviewCategory')}
+                    />
+                  )}
+
                   {componentActiveFilters.includes('query') && (
                     <label className="findings-filter-chip findings-filter-text-card">Inventory Search
                       <button
@@ -1084,6 +1219,12 @@ export function InventoryPage({ selectedView }: Props) {
             title="Assets Represented"
             value={assetCount}
           />
+          {selectedView === 'hosts' && (
+            <StatCard
+              title="Rows Needing Review"
+              value={needsReviewCount}
+            />
+          )}
         </div>
       )}
 
@@ -1096,7 +1237,7 @@ export function InventoryPage({ selectedView }: Props) {
           </h3>
           {selectedView !== 'vulnerability-intelligence' && (
             <span className="panel-caption">
-              SBOM ingestions are persisted as inventory evidence and shown in their asset-specific inventory views.
+              Inventory records are normalized and persisted consistently across application, container-image, and host inventory views.
             </span>
           )}
         </div>
@@ -1219,6 +1360,7 @@ export function InventoryPage({ selectedView }: Props) {
                   <th>Normalized Version</th>
                   <th>Ecosystem</th>
                   <th>Software Identity</th>
+                  {selectedView === 'hosts' && <th>Review</th>}
                   <th>Component Status</th>
                   <th>Source</th>
                   <th>PURL</th>
@@ -1228,10 +1370,26 @@ export function InventoryPage({ selectedView }: Props) {
                 </thead>
                 <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className={selectedView === 'hosts' && row.assetId === selectedHostAssetId ? 'table-row-selected' : ''}
+                  >
                     <td>
-                      <div>{row.assetName}</div>
+                      {selectedView === 'hosts' ? (
+                        <button
+                          type="button"
+                          className="btn-link"
+                          onClick={() => openHostDetail(row.assetId)}
+                        >
+                          {row.assetName}
+                        </button>
+                      ) : (
+                        <div>{row.assetName}</div>
+                      )}
                       <div className="panel-caption mono">{row.assetIdentifier}</div>
+                      {selectedView === 'hosts' && (
+                        <div className="panel-caption">Open host detail</div>
+                      )}
                     </td>
                     <td>{formatAssetType(row.assetType)}</td>
                     <td>{row.packageName}</td>
@@ -1240,6 +1398,26 @@ export function InventoryPage({ selectedView }: Props) {
                     <td className="mono">{row.normalizedVersion || '-'}</td>
                     <td>{row.ecosystem || '-'}</td>
                     <td>{row.softwareIdentity || '-'}</td>
+                    {selectedView === 'hosts' && (
+                      <td>
+                        {row.needsReview ? (
+                          <>
+                            <div className="panel-caption">
+                              {row.reviewItemCount} review item{row.reviewItemCount === 1 ? '' : 's'}
+                            </div>
+                            <div className="findings-inline-pill-row">
+                              {hostReviewLabels(row).map((label) => (
+                                <span key={`${row.id}-${label}`} className="status-pill status-in-progress">
+                                  {label}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="status-pill status-suppressed">Clear</span>
+                        )}
+                      </td>
+                    )}
                     <td>
                       <span className={`status-pill ${row.componentStatus === 'ACTIVE' ? 'status-open' : 'status-auto_closed'}`}>
                         {row.componentStatus}
@@ -1283,6 +1461,23 @@ export function InventoryPage({ selectedView }: Props) {
           </>
         )}
       </section>
+
+      {selectedView === 'hosts' && selectedHostAssetId && (
+        <div
+          className="modal-overlay"
+          onClick={closeHostDetail}
+        >
+          <div
+            className="modal-panel modal-panel-wide"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <HostAssetDetailPage
+              assetId={selectedHostAssetId}
+              onClose={closeHostDetail}
+            />
+          </div>
+        </div>
+      )}
 
       {selectedView === 'vulnerability-intelligence' && selectedVulnerabilityIntelId && (
         <div

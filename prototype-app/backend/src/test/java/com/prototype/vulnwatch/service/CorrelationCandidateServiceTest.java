@@ -8,9 +8,13 @@ import static org.mockito.Mockito.when;
 import com.prototype.vulnwatch.domain.CpeDim;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentCpeMap;
+import com.prototype.vulnwatch.domain.IdentityMatchRule;
+import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
+import com.prototype.vulnwatch.repo.IdentityLinkRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
+import com.prototype.vulnwatch.repo.SoftwareInstanceRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.util.List;
 import java.util.Map;
@@ -31,11 +35,19 @@ class CorrelationCandidateServiceTest {
     @Mock
     private InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
 
+    @Mock
+    private SoftwareInstanceRepository softwareInstanceRepository;
+
+    @Mock
+    private IdentityLinkRepository identityLinkRepository;
+
     @Test
     void buildCandidateBundleLoadsTargetsAcrossCpePurlAndCoord() {
         CorrelationCandidateService service = new CorrelationCandidateService(
                 vulnerabilityTargetRepository,
-                inventoryComponentCpeMapRepository
+                inventoryComponentCpeMapRepository,
+                softwareInstanceRepository,
+                identityLinkRepository
         );
         InventoryComponent component = component(UUID.randomUUID());
         UUID cpeId = UUID.randomUUID();
@@ -63,6 +75,12 @@ class CorrelationCandidateServiceTest {
                 eq(VulnerabilityTargetType.COORD),
                 eq(Set.of("maven::log4j", "maven:org.apache.logging.log4j:log4j"))))
                 .thenReturn(List.of());
+        when(vulnerabilityTargetRepository.findByTargetTypeAndNormalizedTargetKeyIn(
+                eq(VulnerabilityTargetType.ADVISORY_PACKAGE),
+                eq(Set.of("maven::log4j", "maven:org.apache.logging.log4j:log4j"))))
+                .thenReturn(List.of());
+        when(softwareInstanceRepository.findByInventoryComponent_IdIn(eq(Set.of(component.getId()))))
+                .thenReturn(List.of());
 
         CorrelationCandidateService.CandidateBundle bundle = service.buildCandidateBundle(List.of(component));
 
@@ -79,7 +97,9 @@ class CorrelationCandidateServiceTest {
     void candidatesForComponentReturnsDeterministicCpeOnlyOrder() {
         CorrelationCandidateService service = new CorrelationCandidateService(
                 vulnerabilityTargetRepository,
-                inventoryComponentCpeMapRepository
+                inventoryComponentCpeMapRepository,
+                softwareInstanceRepository,
+                identityLinkRepository
         );
         InventoryComponent component = component(UUID.randomUUID());
         UUID cpeId = UUID.randomUUID();
@@ -102,6 +122,9 @@ class CorrelationCandidateServiceTest {
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                Map.of(),
+                Map.of(),
+                Map.of(),
                 Map.of()
         );
 
@@ -117,7 +140,9 @@ class CorrelationCandidateServiceTest {
     void candidatesForComponentFallsBackToPurlAndCoordWhenCpeMissing() {
         CorrelationCandidateService service = new CorrelationCandidateService(
                 vulnerabilityTargetRepository,
-                inventoryComponentCpeMapRepository
+                inventoryComponentCpeMapRepository,
+                softwareInstanceRepository,
+                identityLinkRepository
         );
         InventoryComponent component = component(UUID.randomUUID());
 
@@ -137,6 +162,9 @@ class CorrelationCandidateServiceTest {
                 Map.of("pkg:maven/org.apache.logging.log4j/log4j@2.14.1", List.of(purlTarget)),
                 Map.of(component.getId(), Set.of("maven:org.apache.logging.log4j:log4j")),
                 Map.of("maven:org.apache.logging.log4j:log4j", List.of(coordTarget)),
+                Map.of(),
+                Map.of(),
+                Map.of(),
                 Map.of()
         );
 
@@ -145,6 +173,46 @@ class CorrelationCandidateServiceTest {
         assertEquals(2, candidates.size());
         assertEquals("purl-indexed-exact+version", candidates.get(0).matchedBy());
         assertEquals("coord-indexed-exact+version", candidates.get(1).matchedBy());
+    }
+
+    @Test
+    void candidatesForComponentPrefersHostIdentityMatchesAheadOfFallbackKeys() {
+        CorrelationCandidateService service = new CorrelationCandidateService(
+                vulnerabilityTargetRepository,
+                inventoryComponentCpeMapRepository,
+                softwareInstanceRepository,
+                identityLinkRepository
+        );
+        InventoryComponent component = component(UUID.randomUUID());
+        SoftwareIdentity softwareIdentity = new SoftwareIdentity();
+        UUID softwareIdentityId = UUID.randomUUID();
+        ReflectionTestUtils.setField(softwareIdentity, "id", softwareIdentityId);
+        component.setSoftwareIdentity(softwareIdentity);
+
+        VulnerabilityTarget identityTarget = targetForType(
+                VulnerabilityTargetType.COORD,
+                "generic:microsoft:office"
+        );
+        identityTarget.setSoftwareIdentity(softwareIdentity);
+
+        CorrelationCandidateService.CandidateBundle bundle = new CorrelationCandidateService.CandidateBundle(
+                Map.of(),
+                Map.of(),
+                Map.of(component.getId(), Set.of("pkg:generic/microsoft/office@16.0")),
+                Map.of(),
+                Map.of(component.getId(), Set.of("generic:microsoft:office")),
+                Map.of(),
+                Map.of(),
+                Map.of(component.getId(), softwareIdentityId),
+                Map.of(softwareIdentityId, List.of(identityTarget)),
+                Map.of(component.getId(), IdentityMatchRule.HASH)
+        );
+
+        List<CorrelationCandidateService.CandidateMatch> candidates = service.candidatesForComponent(component, bundle);
+
+        assertEquals(1, candidates.size());
+        assertEquals("identity-hash-indexed+version", candidates.get(0).matchedBy());
+        assertTrue(candidates.get(0).confidence() > 0.9);
     }
 
     private InventoryComponent component(UUID id) {

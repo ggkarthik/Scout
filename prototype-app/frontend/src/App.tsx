@@ -190,6 +190,9 @@ function readInitialRoute(): { tab: Tab } {
 
 function readInitialInventoryView(): InventoryViewKey {
   const fromQuery = new URLSearchParams(window.location.search).get(INVENTORY_VIEW_QUERY_KEY);
+  if (fromQuery === 'host-review-queue' || fromQuery === 'host-details') {
+    return 'hosts';
+  }
   return isInventoryView(fromQuery) ? fromQuery : 'sbom';
 }
 
@@ -259,12 +262,30 @@ function matchTabFromInput(value: string, allowedTabs: Tab[]): Tab | null {
   return partial ? partial.key : null;
 }
 
+function SunIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
 export default function App() {
   const initialRoute = React.useMemo(() => readInitialRoute(), []);
   const [activeTab, setActiveTab] = React.useState<Tab>(initialRoute.tab);
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
   const [tabSearch, setTabSearch] = React.useState('');
+  const quickJumpRef = React.useRef<HTMLInputElement>(null);
   const [inventoryView, setInventoryView] = React.useState<InventoryViewKey>(() => readInitialInventoryView());
   const [operationsView, setOperationsView] = React.useState<OperationsViewKey>(() => readInitialOperationsView());
   const [vulnerabilityIntelView, setVulnerabilityIntelView] = React.useState<VulnerabilityIntelViewKey>(() => (
@@ -311,6 +332,18 @@ export default function App() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  React.useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault();
+        quickJumpRef.current?.focus();
+        quickJumpRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
   React.useEffect(() => () => {
@@ -605,6 +638,7 @@ export default function App() {
           <div className="topbar-actions">
             <div className="quick-jump">
               <input
+                ref={quickJumpRef}
                 value={tabSearch}
                 onChange={(event) => setTabSearch(event.target.value)}
                 onKeyDown={(event) => {
@@ -616,6 +650,7 @@ export default function App() {
                 placeholder="Jump to page..."
                 aria-label="Jump to page"
               />
+              {!tabSearch && <span className="quick-jump-kbd">⌘K</span>}
               {tabSearch.trim() && tabSearchSuggestions.length > 0 && (
                 <div className="quick-jump-menu">
                   {tabSearchSuggestions.map((tab) => (
@@ -641,10 +676,12 @@ export default function App() {
               {navOpen ? 'Close Menu' : 'Menu'}
             </button>
             <button
-              className="btn btn-secondary theme-toggle"
+              className="btn btn-secondary theme-icon-btn"
               onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
             >
-              {theme === 'dark' ? 'Light Theme' : 'Dark Theme'}
+              {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
             </button>
           </div>
         </header>

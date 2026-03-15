@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { SyncRun, SyncRunSnapshot, VexAssertionRepairSummary } from '../types';
 import { ResizableTable } from '../components/ResizableTable';
 
-type FocusSource = 'all' | 'vuln-only' | 'nvd' | 'kev' | 'ghsa' | 'github' | 'microsoft-csaf' | 'redhat-csaf' | 'advisories';
+type FocusSource = 'all' | 'vuln-only' | 'processing' | 'nvd' | 'kev' | 'ghsa' | 'github' | 'microsoft-csaf' | 'redhat-csaf' | 'advisories';
 type Props = {
   focusSource?: FocusSource;
   title?: string;
@@ -34,6 +34,17 @@ function isRunning(status: string): boolean {
 
 function includesType(run: SyncRun, needle: string): boolean {
   return run.syncType.toUpperCase().includes(needle.toUpperCase());
+}
+
+function isRunDomain(run: SyncRun, runDomain: SyncRun['runDomain']): boolean {
+  return run.runDomain === runDomain;
+}
+
+function formatRunClass(runClass: SyncRun['runClass']): string {
+  return runClass
+    .split('_')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
+    .join(' ');
 }
 
 function queuePositionLabel(run: SyncRun): string {
@@ -84,24 +95,33 @@ export function SourcesPage({
   const [vexRepairSummary, setVexRepairSummary] = React.useState<VexAssertionRepairSummary | null>(null);
   const [loadingVexRepairSummary, setLoadingVexRepairSummary] = React.useState(false);
   const showVexRepairPanel = focusSource === 'all'
-    || focusSource === 'vuln-only'
     || focusSource === 'microsoft-csaf'
     || focusSource === 'redhat-csaf';
+  const shouldLoadVexRepairSummary = showVexRepairPanel || focusSource === 'processing';
+  const showProcessingTriggers = focusSource === 'processing' || showVexRepairPanel;
 
   const refreshRuns = React.useCallback(async () => {
     setLoadingRuns(true);
     try {
-      const rows = await api.listSyncRuns();
+      const rows = await api.listSyncRuns(
+        focusSource === 'github'
+          ? { category: 'inventory', limit: 50 }
+          : focusSource === 'processing'
+            ? { category: 'processing', limit: 50 }
+          : focusSource === 'all'
+            ? { category: 'all', limit: 25 }
+            : { category: 'vuln-intel', limit: 50 }
+      );
       setSyncRuns(rows);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingRuns(false);
     }
-  }, []);
+  }, [focusSource]);
 
   const refreshVexRepairSummary = React.useCallback(async () => {
-    if (!showVexRepairPanel) {
+    if (!shouldLoadVexRepairSummary) {
       return;
     }
     setLoadingVexRepairSummary(true);
@@ -113,7 +133,7 @@ export function SourcesPage({
     } finally {
       setLoadingVexRepairSummary(false);
     }
-  }, [showVexRepairPanel]);
+  }, [shouldLoadVexRepairSummary]);
 
   React.useEffect(() => {
     if (!showQueue) {
@@ -170,7 +190,10 @@ export function SourcesPage({
 
   const visibleRuns = syncRuns.filter((run) => {
     if (focusSource === 'vuln-only') {
-      return !includesType(run, 'GITHUB_');
+      return isRunDomain(run, 'VULN_INTEL');
+    }
+    if (focusSource === 'processing') {
+      return isRunDomain(run, 'PROCESSING');
     }
     if (focusSource === 'nvd') {
       return includesType(run, 'NVD');
@@ -188,14 +211,10 @@ export function SourcesPage({
       return includesType(run, 'ADVISORY') || includesType(run, 'RECOMPUTE');
     }
     if (focusSource === 'microsoft-csaf') {
-      return includesType(run, 'CSAF_MICROSOFT')
-        || includesType(run, 'VEX_ASSERTION_REPAIR')
-        || includesType(run, 'VEX_ROLLOUT_BACKFILL');
+      return includesType(run, 'CSAF_MICROSOFT');
     }
     if (focusSource === 'redhat-csaf') {
-      return includesType(run, 'CSAF_REDHAT')
-        || includesType(run, 'VEX_ASSERTION_REPAIR')
-        || includesType(run, 'VEX_ROLLOUT_BACKFILL');
+      return includesType(run, 'CSAF_REDHAT');
     }
     return true;
   });
@@ -261,7 +280,7 @@ export function SourcesPage({
             {busy === 'Red Hat CSAF/VEX Sync' ? 'Running...' : 'Run Red Hat CSAF/VEX Sync'}
           </button>
         )}
-        {showTriggers && showVexRepairPanel && (
+        {showTriggers && showProcessingTriggers && (
           <button
             type="button"
             className="btn btn-secondary"
@@ -274,7 +293,7 @@ export function SourcesPage({
             {busy === 'Vendor VEX Backfill' ? 'Running...' : 'Run Vendor VEX Backfill'}
           </button>
         )}
-        {showTriggers && showVexRepairPanel && (
+        {showTriggers && showProcessingTriggers && (
           <button
             type="button"
             className="btn btn-secondary"
@@ -458,7 +477,9 @@ export function SourcesPage({
 
       {showQueue && (
         <>
-          <h4 className="section-title section-divider">Recent Sync Runs</h4>
+          <h4 className="section-title section-divider">
+            {focusSource === 'processing' ? 'Recent Processing Jobs' : 'Recent Sync Runs'}
+          </h4>
           {focusSource === 'github' && (
             <div className="panel-caption" style={{ marginBottom: 12 }}>
               GitHub ingestion runs use <span className="mono">Fetched</span> for discovered images or repositories,
@@ -466,9 +487,16 @@ export function SourcesPage({
               and <span className="mono"> Failed</span> for assets that did not ingest successfully.
             </div>
           )}
+          {focusSource === 'processing' && (
+            <div className="panel-caption" style={{ marginBottom: 12 }}>
+              Processing jobs track internal maintenance work like persisted VEX repair and rollout backfills. They do not represent upstream feed fetches.
+            </div>
+          )}
           {visibleRuns.length === 0 ? (
             <div className="empty-state">
-              <p>No sync runs yet for this source. Trigger sync to populate this activity feed.</p>
+              <p>{focusSource === 'processing'
+                ? 'No processing jobs have been recorded yet.'
+                : 'No sync runs yet for this source. Trigger sync to populate this activity feed.'}</p>
             </div>
           ) : (
             <div className="table-scroll">
@@ -476,6 +504,7 @@ export function SourcesPage({
                 <thead>
                 <tr>
                   <th>Type</th>
+                  <th>Class</th>
                   <th>Status</th>
                   <th>Queue</th>
                   <th>Fetched</th>
@@ -492,6 +521,7 @@ export function SourcesPage({
                 {visibleRuns.map((run) => (
                   <tr key={run.id}>
                     <td>{run.syncType}</td>
+                    <td>{formatRunClass(run.runClass)}</td>
                     <td>
                       <span className={`status-pill ${isRunning(run.status) ? 'status-open' : 'status-resolved'}`}>
                         {run.status}

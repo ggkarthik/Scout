@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
-import { GithubRepoIngestionResult, GithubSbomSource, SyncRun } from '../types';
+import { GithubSbomSource, SyncRun } from '../types';
 import { ResizableTable } from './ResizableTable';
 
 type GithubSourcePath = 'dependency-graph/sbom' | 'ghcr/attestations';
@@ -36,7 +36,7 @@ function isSyncRunTerminal(run?: SyncRun | null): boolean {
 }
 
 function describeQueuedRun(label: string, run: SyncRun): string {
-  return `${label} ${run.status}. Track status in Inventory Run Queue.`;
+  return `${label} ${run.status}. Track status in Connect > Inventory Run Queue.`;
 }
 
 function describeCompletedRun(label: string, run: SyncRun): string {
@@ -44,7 +44,7 @@ function describeCompletedRun(label: string, run: SyncRun): string {
   if (status === 'FAILED') {
     return run.errorMessage
       ? `${label} failed: ${run.errorMessage}`
-      : `${label} failed. Review Inventory Run Queue for details.`;
+      : `${label} failed. Review Connect > Inventory Run Queue for details.`;
   }
   if (status === 'PARTIAL_SUCCESS') {
     return `${label} completed with partial success. Discovered ${run.recordsFetched}, failed ${run.recordsFailed}, components ${run.recordsInserted}, findings ${run.recordsUpdated}.`;
@@ -52,12 +52,26 @@ function describeCompletedRun(label: string, run: SyncRun): string {
   return `${label} completed. Discovered ${run.recordsFetched}, components ${run.recordsInserted}, findings ${run.recordsUpdated}.`;
 }
 
+function pendingGithubRun(runId: string, syncType: SyncRun['syncType'], status: string): SyncRun {
+  return {
+    id: runId,
+    syncType,
+    runDomain: 'INVENTORY',
+    runClass: 'INGESTION',
+    status,
+    recordsFetched: 0,
+    recordsInserted: 0,
+    recordsUpdated: 0,
+    recordsFailed: 0,
+    startedAt: new Date().toISOString()
+  };
+}
+
 export function GithubPipelineManager({
   title = 'GitHub SBOM Ingestion',
-  caption = 'Run repository or GHCR SBOM ingestion on demand and save reusable pipelines. View ingestion history in Inventory Run Queue.'
+  caption = 'Run repository or GHCR SBOM ingestion on demand and save reusable pipelines. View ingestion history in Connect > Inventory Run Queue.'
 }: Props) {
   const [githubSources, setGithubSources] = React.useState<GithubSbomSource[]>([]);
-  const [latestRepoResults, setLatestRepoResults] = React.useState<GithubRepoIngestionResult[]>([]);
   const [activeGithubRunId, setActiveGithubRunId] = React.useState<string | null>(null);
   const [activeGithubRunLabel, setActiveGithubRunLabel] = React.useState('GitHub ingestion');
   const [sourceBusyId, setSourceBusyId] = React.useState<string | null>(null);
@@ -104,7 +118,7 @@ export function GithubPipelineManager({
     const pollRun = async (): Promise<void> => {
       try {
         const [runs] = await Promise.all([
-          api.listSyncRuns(),
+          api.listSyncRuns({ category: 'inventory', limit: 50 }),
           refreshGithubView()
         ]);
         if (cancelled) {
@@ -150,7 +164,6 @@ export function GithubPipelineManager({
     }
 
     setSourceMessage('');
-    setLatestRepoResults([]);
     setActiveGithubRunId(null);
     setSourceBusyId('run-once');
     try {
@@ -158,29 +171,19 @@ export function GithubPipelineManager({
         const run = await api.queueGithubGhcrRun(sourceOwner.trim());
         setActiveGithubRunId(run.runId);
         setActiveGithubRunLabel('GHCR ingestion');
-        setSourceMessage(describeQueuedRun('GHCR ingestion', {
-          id: run.runId,
-          syncType: 'GITHUB_GHCR_SBOM',
-          status: run.status,
-          recordsFetched: 0,
-          recordsInserted: 0,
-          recordsUpdated: 0,
-          recordsFailed: 0,
-          startedAt: new Date().toISOString()
-        }));
+        setSourceMessage(describeQueuedRun('GHCR ingestion', pendingGithubRun(run.runId, 'GITHUB_GHCR_SBOM', run.status)));
         await refreshGithubView();
       } else {
-        const response = await api.fetchSbomFromGithub({
+        const run = await api.queueGithubRepositoryRun({
           owner: sourceOwner.trim(),
           repo: sourceRepo.trim() || undefined,
-          includeAllRepos: !sourceRepo.trim()
+          includeAllRepos: !sourceRepo.trim(),
+          assetType: sourceAssetType
         });
-        setLatestRepoResults(response.results || []);
-        setSourceMessage(
-          `GitHub repository ingestion complete. Processed ${response.repositoriesProcessed}/${response.repositoriesDiscovered} repositories `
-          + `(success: ${response.repositoriesSucceeded}, failed: ${response.repositoriesFailed}). `
-          + `Components: ${response.componentsIngested}, findings: ${response.findingsGenerated}.`
-        );
+        setActiveGithubRunId(run.runId);
+        setActiveGithubRunLabel('GitHub repository ingestion');
+        setSourceMessage(describeQueuedRun('GitHub repository ingestion', pendingGithubRun(run.runId, 'GITHUB_REPOSITORY_SBOM', run.status)));
+        await refreshGithubView();
       }
     } catch (e) {
       setSourceMessage(e instanceof Error ? e.message : String(e));
@@ -228,7 +231,6 @@ export function GithubPipelineManager({
   const runGithubSource = async (id: string): Promise<void> => {
     setSourceBusyId(id);
     setSourceMessage('');
-    setLatestRepoResults([]);
     setActiveGithubRunId(null);
     try {
       const run = await api.runGithubSbomSource(id);
@@ -236,16 +238,14 @@ export function GithubPipelineManager({
       const label = source ? `${source.name} run` : 'GitHub pipeline run';
       setActiveGithubRunId(run.runId);
       setActiveGithubRunLabel(label);
-      setSourceMessage(describeQueuedRun(label, {
-        id: run.runId,
-        syncType: source?.path === 'ghcr/attestations' ? 'GITHUB_GHCR_SBOM' : 'GITHUB_REPOSITORY_SBOM',
-        status: run.status,
-        recordsFetched: 0,
-        recordsInserted: 0,
-        recordsUpdated: 0,
-        recordsFailed: 0,
-        startedAt: new Date().toISOString()
-      }));
+      setSourceMessage(describeQueuedRun(
+        label,
+        pendingGithubRun(
+          run.runId,
+          source?.path === 'ghcr/attestations' ? 'GITHUB_GHCR_SBOM' : 'GITHUB_REPOSITORY_SBOM',
+          run.status
+        )
+      ));
       await refreshGithubView();
     } catch (e) {
       setSourceMessage(e instanceof Error ? e.message : String(e));
@@ -355,42 +355,6 @@ export function GithubPipelineManager({
         </button>
       </div>
       {sourceMessage && <div className="notice">{sourceMessage}</div>}
-
-      {latestRepoResults.length > 0 && (
-        <>
-          <h4 className="section-title section-divider">Latest Repository Processing</h4>
-          <div className="table-scroll">
-            <ResizableTable storageKey="github-latest-repo-processing-table-widths">
-              <thead>
-                <tr>
-                  <th>Owner</th>
-                  <th>Repo</th>
-                  <th>Status</th>
-                  <th>Asset Identifier</th>
-                  <th>Components</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {latestRepoResults.map((row) => (
-                  <tr key={`${row.owner}/${row.repo}`}>
-                    <td>{row.owner}</td>
-                    <td>{row.repo}</td>
-                    <td>
-                      <span className={`status-pill ${row.status === 'SUCCESS' ? 'status-success' : 'status-failure'}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="mono">{row.assetIdentifier}</td>
-                    <td>{row.componentsIngested ?? '-'}</td>
-                    <td>{row.message || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </ResizableTable>
-          </div>
-        </>
-      )}
 
       {githubSources.length === 0 ? (
         <div className="empty-state">

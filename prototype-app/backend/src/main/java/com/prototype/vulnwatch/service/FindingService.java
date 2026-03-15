@@ -29,6 +29,8 @@ import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityConfigExprRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.FlushModeType;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,6 +84,7 @@ public class FindingService {
     private final VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository;
     private final OrgCveRecordService orgCveRecordService;
     private final ObjectMapper objectMapper;
+    private final EntityManager entityManager;
 
     public FindingService(
             FindingRepository findingRepository,
@@ -101,7 +104,8 @@ public class FindingService {
             PrecedenceResolverService precedenceResolverService,
             VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository,
             OrgCveRecordService orgCveRecordService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            EntityManager entityManager
     ) {
         this.findingRepository = findingRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
@@ -121,6 +125,7 @@ public class FindingService {
         this.vulnerabilityConfigExprRepository = vulnerabilityConfigExprRepository;
         this.orgCveRecordService = orgCveRecordService;
         this.objectMapper = objectMapper;
+        this.entityManager = entityManager;
     }
 
     @Transactional
@@ -411,62 +416,69 @@ public class FindingService {
         if (tenantId == null || componentIds == null || componentIds.isEmpty()) {
             return 0;
         }
-        List<InventoryComponent> components = inventoryComponentRepository.findAllById(componentIds).stream()
-                .filter(component -> component.getTenant() != null
-                        && component.getTenant().getId() != null
-                        && tenantId.equals(component.getTenant().getId()))
-                .sorted(Comparator.comparing(InventoryComponent::getId))
-                .toList();
-        if (components.isEmpty()) {
-            return 0;
-        }
-        RiskPolicy policy = riskPolicyService.getOrCreate(components.get(0).getTenant());
-        CorrelationCandidateService.CandidateBundle candidateBundle =
-                correlationCandidateService.buildCandidateBundle(components);
-        Set<UUID> scopedComponentIds = components.stream()
-                .map(InventoryComponent::getId)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Map<UUID, List<Finding>> existingFindingsByComponentId = new HashMap<>();
-        findingRepository.findByComponent_IdIn(scopedComponentIds).forEach(finding -> {
-            if (finding.getComponent() == null || finding.getComponent().getId() == null) {
-                return;
+        FlushModeType previousFlushMode = entityManager.getFlushMode();
+        entityManager.setFlushMode(FlushModeType.COMMIT);
+        try {
+            List<InventoryComponent> components = inventoryComponentRepository.findAllById(componentIds).stream()
+                    .filter(component -> component.getTenant() != null
+                            && component.getTenant().getId() != null
+                            && tenantId.equals(component.getTenant().getId()))
+                    .sorted(Comparator.comparing(InventoryComponent::getId))
+                    .toList();
+            if (components.isEmpty()) {
+                return 0;
             }
-            existingFindingsByComponentId
-                    .computeIfAbsent(finding.getComponent().getId(), ignored -> new ArrayList<>())
-                    .add(finding);
-        });
-        Map<UUID, List<ComponentVulnerabilityState>> existingStatesByComponentId = new HashMap<>();
-        componentVulnerabilityStateRepository.findByComponent_IdIn(scopedComponentIds).forEach(state -> {
-            if (state.getTenant() == null || state.getTenant().getId() == null || !tenantId.equals(state.getTenant().getId())) {
-                return;
+            RiskPolicy policy = riskPolicyService.getOrCreate(components.get(0).getTenant());
+            CorrelationCandidateService.CandidateBundle candidateBundle =
+                    correlationCandidateService.buildCandidateBundle(components);
+            Set<UUID> scopedComponentIds = components.stream()
+                    .map(InventoryComponent::getId)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            Map<UUID, List<Finding>> existingFindingsByComponentId = new HashMap<>();
+            findingRepository.findByComponent_IdIn(scopedComponentIds).forEach(finding -> {
+                if (finding.getComponent() == null || finding.getComponent().getId() == null) {
+                    return;
+                }
+                existingFindingsByComponentId
+                        .computeIfAbsent(finding.getComponent().getId(), ignored -> new ArrayList<>())
+                        .add(finding);
+            });
+            Map<UUID, List<ComponentVulnerabilityState>> existingStatesByComponentId = new HashMap<>();
+            componentVulnerabilityStateRepository.findByComponent_IdIn(scopedComponentIds).forEach(state -> {
+                if (state.getTenant() == null || state.getTenant().getId() == null || !tenantId.equals(state.getTenant().getId())) {
+                    return;
+                }
+                if (state.getComponent() == null || state.getComponent().getId() == null) {
+                    return;
+                }
+                existingStatesByComponentId
+                        .computeIfAbsent(state.getComponent().getId(), ignored -> new ArrayList<>())
+                        .add(state);
+            });
+            Instant now = Instant.now();
+            int total = 0;
+            Set<UUID> touchedVulnerabilityIds = new LinkedHashSet<>();
+            for (InventoryComponent component : components) {
+                ComponentRecomputeResult result = recomputeForComponent(
+                        component.getTenant(),
+                        component,
+                        policy,
+                        now,
+                        candidateBundle,
+                        existingFindingsByComponentId.getOrDefault(component.getId(), List.of()),
+                        existingStatesByComponentId.getOrDefault(component.getId(), List.of())
+                );
+                total += result.activeFindingCount();
+                touchedVulnerabilityIds.addAll(result.touchedVulnerabilityIds());
             }
-            if (state.getComponent() == null || state.getComponent().getId() == null) {
-                return;
+            entityManager.flush();
+            if (!touchedVulnerabilityIds.isEmpty()) {
+                orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, touchedVulnerabilityIds);
             }
-            existingStatesByComponentId
-                    .computeIfAbsent(state.getComponent().getId(), ignored -> new ArrayList<>())
-                    .add(state);
-        });
-        Instant now = Instant.now();
-        int total = 0;
-        Set<UUID> touchedVulnerabilityIds = new LinkedHashSet<>();
-        for (InventoryComponent component : components) {
-            ComponentRecomputeResult result = recomputeForComponent(
-                    component.getTenant(),
-                    component,
-                    policy,
-                    now,
-                    candidateBundle,
-                    existingFindingsByComponentId.getOrDefault(component.getId(), List.of()),
-                    existingStatesByComponentId.getOrDefault(component.getId(), List.of())
-            );
-            total += result.activeFindingCount();
-            touchedVulnerabilityIds.addAll(result.touchedVulnerabilityIds());
+            return total;
+        } finally {
+            entityManager.setFlushMode(previousFlushMode);
         }
-        if (!touchedVulnerabilityIds.isEmpty()) {
-            orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, touchedVulnerabilityIds);
-        }
-        return total;
     }
 
     @Transactional
@@ -2190,7 +2202,8 @@ public class FindingService {
 
     private boolean isSupportedNonCpeMatch(String matchedBy) {
         String normalized = matchedBy == null ? "" : matchedBy.trim().toLowerCase(java.util.Locale.ROOT);
-        return normalized.startsWith("purl-")
+        return normalized.startsWith("identity-")
+                || normalized.startsWith("purl-")
                 || normalized.startsWith("coord-")
                 || normalized.startsWith("advisory-pkg-");
     }

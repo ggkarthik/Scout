@@ -2,6 +2,8 @@ package com.prototype.vulnwatch.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -33,11 +35,11 @@ public class IdentityLink {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
     @JoinColumn(name = "from_identifier_id")
     private SoftwareIdentifier fromIdentifier;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
     @JoinColumn(name = "to_identifier_id")
     private SoftwareIdentifier toIdentifier;
 
@@ -51,6 +53,22 @@ public class IdentityLink {
     private boolean verified = false;
 
     private Double confidence;
+
+    @Column(name = "source_type", length = 80)
+    private String sourceType;
+
+    @Column(name = "source_id", length = 255)
+    private String sourceId;
+
+    @Column(name = "target_type", length = 80)
+    private String targetType;
+
+    @Column(name = "target_id", length = 255)
+    private String targetId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "match_rule", length = 40)
+    private IdentityMatchRule matchRule;
 
     /**
      * BLG-015: When this link was last verified by an automated or manual process.
@@ -72,6 +90,12 @@ public class IdentityLink {
      */
     @Column(length = 500)
     private String provenanceNote;
+
+    @Column(name = "last_seen_at")
+    private Instant lastSeenAt = Instant.now();
+
+    @Column(nullable = false)
+    private Instant updatedAt = Instant.now();
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
@@ -128,6 +152,46 @@ public class IdentityLink {
         this.confidence = confidence;
     }
 
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceId() {
+        return sourceId;
+    }
+
+    public void setSourceId(String sourceId) {
+        this.sourceId = sourceId;
+    }
+
+    public String getTargetType() {
+        return targetType;
+    }
+
+    public void setTargetType(String targetType) {
+        this.targetType = targetType;
+    }
+
+    public String getTargetId() {
+        return targetId;
+    }
+
+    public void setTargetId(String targetId) {
+        this.targetId = targetId;
+    }
+
+    public IdentityMatchRule getMatchRule() {
+        return matchRule;
+    }
+
+    public void setMatchRule(IdentityMatchRule matchRule) {
+        this.matchRule = matchRule;
+    }
+
     public Instant getVerifiedAt() {
         return verifiedAt;
     }
@@ -152,7 +216,28 @@ public class IdentityLink {
         this.provenanceNote = provenanceNote;
     }
 
+    public Instant getLastSeenAt() {
+        return lastSeenAt;
+    }
+
+    public void setLastSeenAt(Instant lastSeenAt) {
+        this.lastSeenAt = lastSeenAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public void touch() {
+        this.updatedAt = Instant.now();
+        this.lastSeenAt = this.updatedAt;
     }
 }

@@ -1,0 +1,405 @@
+package com.prototype.vulnwatch.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.ServiceNowAuthType;
+import com.prototype.vulnwatch.domain.ServiceNowCmdbConfig;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigRequest;
+import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigResponse;
+import com.prototype.vulnwatch.dto.ServiceNowCmdbConnectionTestResponse;
+import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.util.UriComponentsBuilder;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+
+@Service
+public class ServiceNowCmdbConfigService {
+
+    public static final String DEFAULT_INSTALL_FIELDS = String.join(",",
+            "sys_id",
+            "display_name",
+            "publisher",
+            "version",
+            "install_date",
+            "last_scanned",
+            "last_used",
+            "active_install",
+            "unlicensed_install",
+            "installed_on",
+            "discovery_model"
+    );
+
+    public static final String DEFAULT_DISCOVERY_FIELDS = String.join(",",
+            "sys_id",
+            "primary_key",
+            "normalized_product",
+            "normalized_publisher",
+            "normalized_version",
+            "product_hash",
+            "version_hash",
+            "full_version",
+            "platform",
+            "language",
+            "normalization_status",
+            "approved",
+            "low_confidence"
+    );
+
+    private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    @Value("${app.cmdb.servicenow.base-url:}")
+    private String fallbackBaseUrl;
+
+    @Value("${app.cmdb.servicenow.username:}")
+    private String fallbackUsername;
+
+    @Value("${app.cmdb.servicenow.password:}")
+    private String fallbackPassword;
+
+    public ServiceNowCmdbConfigService(
+            ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
+            RestTemplate restTemplate,
+            ObjectMapper objectMapper
+    ) {
+        this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+    }
+
+    @Transactional(readOnly = true)
+    public ServiceNowCmdbConfigResponse get(Tenant tenant) {
+        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(
+                tenant.getId(),
+                "servicenow"
+        ).orElse(null);
+        return toResponse(config);
+    }
+
+    @Transactional
+    public ServiceNowCmdbConfigResponse save(Tenant tenant, ServiceNowCmdbConfigRequest request) {
+        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(
+                tenant.getId(),
+                "servicenow"
+        ).orElseGet(() -> {
+            ServiceNowCmdbConfig created = new ServiceNowCmdbConfig();
+            created.setTenant(tenant);
+            created.setSourceSystem("servicenow");
+            return created;
+        });
+        apply(config, request);
+        config.touch();
+        return toResponse(serviceNowCmdbConfigRepository.save(config));
+    }
+
+    @Transactional
+    public ServiceNowCmdbConnectionTestResponse test(Tenant tenant) {
+        ServiceNowRuntimeConfig runtimeConfig = resolveRuntimeConfig(tenant).orElseThrow(
+                () -> new ResponseStatusException(BAD_REQUEST, "ServiceNow CMDB connector is not configured yet")
+        );
+        validate(runtimeConfig);
+
+        Instant testedAt = Instant.now();
+        ProbeResult ciProbe = probeTable(runtimeConfig, runtimeConfig.ciTable(), "sys_id");
+        ProbeResult installProbe = probeTable(runtimeConfig, runtimeConfig.installTable(), "sys_id");
+        ProbeResult discoveryProbe = probeTable(runtimeConfig, runtimeConfig.discoveryModelTable(), "sys_id");
+        boolean success = ciProbe.success() && installProbe.success() && discoveryProbe.success();
+        String message = success
+                ? "ServiceNow CMDB connection succeeded. Required tables are reachable."
+                : joinMessages(ciProbe, installProbe, discoveryProbe);
+
+        serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow").ifPresent(config -> {
+            config.setLastTestStatus(success ? "SUCCESS" : "FAILED");
+            config.setLastTestMessage(message);
+            config.setLastTestedAt(testedAt);
+            config.touch();
+            serviceNowCmdbConfigRepository.save(config);
+        });
+
+        return new ServiceNowCmdbConnectionTestResponse(
+                success ? "SUCCESS" : "FAILED",
+                message,
+                ciProbe.success(),
+                installProbe.success(),
+                discoveryProbe.success(),
+                testedAt
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<ServiceNowRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
+        Optional<ServiceNowCmdbConfig> saved = serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(
+                tenant.getId(),
+                "servicenow"
+        );
+        if (saved.isPresent()) {
+            ServiceNowCmdbConfig config = saved.get();
+            return Optional.of(new ServiceNowRuntimeConfig(
+                    trimToNull(config.getBaseUrl()),
+                    config.getAuthType() == null ? ServiceNowAuthType.BASIC : config.getAuthType(),
+                    trimToNull(config.getUsername()),
+                    trimToNull(config.getCredentialSecret()),
+                    defaultIfBlank(config.getInstallTable(), "cmdb_sam_sw_install"),
+                    defaultIfBlank(config.getDiscoveryModelTable(), "cmdb_sam_sw_discovery_model"),
+                    defaultIfBlank(config.getCiTable(), "cmdb_ci"),
+                    trimToNull(config.getInstallQuery()),
+                    trimToNull(config.getDiscoveryQuery()),
+                    defaultIfBlank(config.getInstallFields(), DEFAULT_INSTALL_FIELDS),
+                    defaultIfBlank(config.getDiscoveryFields(), DEFAULT_DISCOVERY_FIELDS),
+                    config.getPageSize() == null ? 1000 : Math.max(1, Math.min(10_000, config.getPageSize())),
+                    config.isEnabled(),
+                    config.isAutoSyncEnabled(),
+                    config.getIntervalMinutes() == null ? 1440 : Math.max(5, config.getIntervalMinutes())
+            ));
+        }
+        if (!hasText(fallbackBaseUrl)) {
+            return Optional.empty();
+        }
+        return Optional.of(new ServiceNowRuntimeConfig(
+                trimToNull(fallbackBaseUrl),
+                ServiceNowAuthType.BASIC,
+                trimToNull(fallbackUsername),
+                trimToNull(fallbackPassword),
+                "cmdb_sam_sw_install",
+                "cmdb_sam_sw_discovery_model",
+                "cmdb_ci",
+                null,
+                null,
+                DEFAULT_INSTALL_FIELDS,
+                DEFAULT_DISCOVERY_FIELDS,
+                1000,
+                true,
+                false,
+                1440
+        ));
+    }
+
+    private void apply(ServiceNowCmdbConfig config, ServiceNowCmdbConfigRequest request) {
+        ServiceNowAuthType authType = parseAuthType(request.authType());
+        config.setBaseUrl(trimToNull(request.baseUrl()));
+        config.setAuthType(authType);
+        config.setUsername(trimToNull(request.username()));
+        if (hasText(request.credentialSecret())) {
+            config.setCredentialSecret(request.credentialSecret().trim());
+        }
+        config.setInstallTable(defaultIfBlank(request.installTable(), "cmdb_sam_sw_install"));
+        config.setDiscoveryModelTable(defaultIfBlank(request.discoveryModelTable(), "cmdb_sam_sw_discovery_model"));
+        config.setCiTable(defaultIfBlank(request.ciTable(), "cmdb_ci"));
+        config.setInstallQuery(trimToNull(request.installQuery()));
+        config.setDiscoveryQuery(trimToNull(request.discoveryQuery()));
+        config.setInstallFields(defaultIfBlank(request.installFields(), DEFAULT_INSTALL_FIELDS));
+        config.setDiscoveryFields(defaultIfBlank(request.discoveryFields(), DEFAULT_DISCOVERY_FIELDS));
+        config.setPageSize(request.pageSize() == null ? 1000 : Math.max(1, Math.min(10_000, request.pageSize())));
+        config.setEnabled(request.enabled() == null || request.enabled());
+        config.setAutoSyncEnabled(request.autoSyncEnabled() != null && request.autoSyncEnabled());
+        config.setIntervalMinutes(request.intervalMinutes() == null ? 1440 : Math.max(5, request.intervalMinutes()));
+
+        ServiceNowRuntimeConfig runtimeConfig = new ServiceNowRuntimeConfig(
+                config.getBaseUrl(),
+                config.getAuthType(),
+                config.getUsername(),
+                config.getCredentialSecret(),
+                config.getInstallTable(),
+                config.getDiscoveryModelTable(),
+                config.getCiTable(),
+                config.getInstallQuery(),
+                config.getDiscoveryQuery(),
+                config.getInstallFields(),
+                config.getDiscoveryFields(),
+                config.getPageSize(),
+                config.isEnabled(),
+                config.isAutoSyncEnabled(),
+                config.getIntervalMinutes()
+        );
+        validate(runtimeConfig);
+    }
+
+    private ProbeResult probeTable(ServiceNowRuntimeConfig config, String tableName, String fields) {
+        try {
+            String uri = UriComponentsBuilder.fromHttpUrl(config.baseUrl())
+                    .path("/api/now/table/{tableName}")
+                    .queryParam("sysparm_fields", fields)
+                    .queryParam("sysparm_limit", Math.max(1, Math.min(5, config.pageSize())))
+                    .queryParam("sysparm_display_value", "false")
+                    .buildAndExpand(tableName)
+                    .toUriString();
+            HttpHeaders headers = buildHeaders(config);
+            ResponseEntity<String> response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return new ProbeResult(false, tableName + " returned HTTP " + response.getStatusCode().value());
+            }
+            JsonNode root = objectMapper.readTree(response.getBody() == null ? "{}" : response.getBody());
+            if (!root.has("result")) {
+                return new ProbeResult(false, tableName + " did not return a ServiceNow result payload");
+            }
+            return new ProbeResult(true, tableName + " reachable");
+        } catch (Exception e) {
+            return new ProbeResult(false, tableName + " failed: " + e.getMessage());
+        }
+    }
+
+    private HttpHeaders buildHeaders(ServiceNowRuntimeConfig config) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        if (config.authType() == ServiceNowAuthType.BEARER) {
+            headers.setBearerAuth(config.credentialSecret());
+        } else {
+            headers.setBasicAuth(
+                    config.username(),
+                    config.credentialSecret() == null ? "" : config.credentialSecret(),
+                    StandardCharsets.UTF_8
+            );
+        }
+        return headers;
+    }
+
+    private void validate(ServiceNowRuntimeConfig config) {
+        if (!hasText(config.baseUrl())) {
+            throw new ResponseStatusException(BAD_REQUEST, "ServiceNow base URL is required");
+        }
+        if (config.authType() == ServiceNowAuthType.BASIC && !hasText(config.username())) {
+            throw new ResponseStatusException(BAD_REQUEST, "ServiceNow username is required for basic auth");
+        }
+        if (!hasText(config.credentialSecret())) {
+            throw new ResponseStatusException(BAD_REQUEST, "ServiceNow password or token is required");
+        }
+        if (!hasText(config.installTable())) {
+            throw new ResponseStatusException(BAD_REQUEST, "Install table is required");
+        }
+        if (!hasText(config.discoveryModelTable())) {
+            throw new ResponseStatusException(BAD_REQUEST, "Discovery model table is required");
+        }
+        if (!hasText(config.ciTable())) {
+            throw new ResponseStatusException(BAD_REQUEST, "CI lookup table is required");
+        }
+    }
+
+    private ServiceNowCmdbConfigResponse toResponse(ServiceNowCmdbConfig config) {
+        if (config == null) {
+            return new ServiceNowCmdbConfigResponse(
+                    null,
+                    "servicenow",
+                    false,
+                    "",
+                    ServiceNowAuthType.BASIC.name(),
+                    "",
+                    false,
+                    "cmdb_sam_sw_install",
+                    "cmdb_sam_sw_discovery_model",
+                    "cmdb_ci",
+                    "",
+                    "",
+                    DEFAULT_INSTALL_FIELDS,
+                    DEFAULT_DISCOVERY_FIELDS,
+                    1000,
+                    true,
+                    false,
+                    1440,
+                    null,
+                    null,
+                    null
+            );
+        }
+        return new ServiceNowCmdbConfigResponse(
+                config.getId(),
+                config.getSourceSystem(),
+                hasText(config.getBaseUrl()) && hasText(config.getCredentialSecret()),
+                defaultIfBlank(config.getBaseUrl(), ""),
+                (config.getAuthType() == null ? ServiceNowAuthType.BASIC : config.getAuthType()).name(),
+                defaultIfBlank(config.getUsername(), ""),
+                hasText(config.getCredentialSecret()),
+                defaultIfBlank(config.getInstallTable(), "cmdb_sam_sw_install"),
+                defaultIfBlank(config.getDiscoveryModelTable(), "cmdb_sam_sw_discovery_model"),
+                defaultIfBlank(config.getCiTable(), "cmdb_ci"),
+                defaultIfBlank(config.getInstallQuery(), ""),
+                defaultIfBlank(config.getDiscoveryQuery(), ""),
+                defaultIfBlank(config.getInstallFields(), DEFAULT_INSTALL_FIELDS),
+                defaultIfBlank(config.getDiscoveryFields(), DEFAULT_DISCOVERY_FIELDS),
+                config.getPageSize() == null ? 1000 : config.getPageSize(),
+                config.isEnabled(),
+                config.isAutoSyncEnabled(),
+                config.getIntervalMinutes() == null ? 1440 : config.getIntervalMinutes(),
+                config.getLastTestStatus(),
+                config.getLastTestMessage(),
+                config.getLastTestedAt()
+        );
+    }
+
+    private ServiceNowAuthType parseAuthType(String value) {
+        if (!hasText(value)) {
+            return ServiceNowAuthType.BASIC;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        try {
+            return ServiceNowAuthType.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            throw new ResponseStatusException(BAD_REQUEST, "Unsupported ServiceNow auth type: " + value);
+        }
+    }
+
+    private String joinMessages(ProbeResult ciProbe, ProbeResult installProbe, ProbeResult discoveryProbe) {
+        return String.join(
+                " ",
+                List.of(ciProbe.message(), installProbe.message(), discoveryProbe.message()).stream()
+                        .filter(this::hasText)
+                        .toList()
+        );
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String defaultIfBlank(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
+    }
+
+    public record ServiceNowRuntimeConfig(
+            String baseUrl,
+            ServiceNowAuthType authType,
+            String username,
+            String credentialSecret,
+            String installTable,
+            String discoveryModelTable,
+            String ciTable,
+            String installQuery,
+            String discoveryQuery,
+            String installFields,
+            String discoveryFields,
+            Integer pageSize,
+            boolean enabled,
+            boolean autoSyncEnabled,
+            Integer intervalMinutes
+    ) {
+    }
+
+    private record ProbeResult(
+            boolean success,
+            String message
+    ) {
+    }
+}

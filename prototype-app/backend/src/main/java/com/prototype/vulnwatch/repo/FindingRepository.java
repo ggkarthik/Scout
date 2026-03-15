@@ -32,6 +32,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     List<Finding> findByStatusAndSuppressedUntilBefore(FindingStatus status, Instant before);
     List<Finding> findByAsset(Asset asset);
     List<Finding> findByAssetAndStatus(Asset asset, FindingStatus status);
+    List<Finding> findByAsset_IdIn(Collection<UUID> assetIds);
     List<Finding> findByComponent(InventoryComponent component);
     List<Finding> findByComponent_IdIn(Collection<UUID> componentIds);
     List<Finding> findByTenant_IdAndVulnerability_Id(UUID tenantId, UUID vulnerabilityId);

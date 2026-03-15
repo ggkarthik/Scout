@@ -57,7 +57,7 @@ public class InventoryComponent {
     @Column(nullable = false)
     private String packageName;
 
-    @Column(nullable = false)
+    @Column
     private String version;
 
     @Column(name = "normalized_name", length = 500)

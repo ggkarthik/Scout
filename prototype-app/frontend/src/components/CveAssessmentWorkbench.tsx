@@ -64,6 +64,14 @@ const AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Loc
 const PR_LABELS: Record<string, string> = { N: 'None', L: 'Low', H: 'High' };
 const UI_LABELS: Record<string, string> = { N: 'None', R: 'Required' };
 
+function formatAssetType(value?: string): string {
+  if (!value) return 'Unknown';
+  if (value === 'CONTAINER_IMAGE') return 'Container Image';
+  if (value === 'APPLICATION') return 'Application';
+  if (value === 'HOST') return 'Host';
+  return formatLabel(value);
+}
+
 // --- CVE Summary Sidebar (step 1) ---
 
 type SidebarProps = {
@@ -349,7 +357,7 @@ function InvestigationContent({
       <div className="cve-intel-section">
         <div className="cve-intel-section-header">
           <h4>Matched Software</h4>
-          <p>Software identified in your environment that may be affected</p>
+          <p>Software identified across applications, hosts, container images, and future asset types in a single workbench</p>
         </div>
         {softwareGroups.length === 0 ? (
           <div className="cve-intel-empty">No software inventory is currently correlated to this CVE.</div>
@@ -403,6 +411,7 @@ function InvestigationContent({
                             <table className="cve-assets-mini-table">
                               <thead>
                                 <tr>
+                                  <th>Type</th>
                                   <th>Asset</th>
                                   <th>Identifier</th>
                                   <th>Finding</th>
@@ -411,6 +420,7 @@ function InvestigationContent({
                               <tbody>
                                 {assets.map((asset) => (
                                   <tr key={asset.componentId}>
+                                    <td>{formatAssetType(asset.assetType)}</td>
                                     <td>{asset.assetName ?? <span className="cve-muted">—</span>}</td>
                                     <td className="mono">{asset.assetIdentifier ?? <span className="cve-muted">—</span>}</td>
                                     <td>
@@ -510,6 +520,7 @@ function InvestigationContent({
 
 function VexEvidenceCard({ evidence }: { evidence: CveVexEvidence }) {
   const rows: Array<{ key: string; value: React.ReactNode }> = [
+    { key: 'Asset Type', value: formatAssetType(evidence.assetType) },
     { key: 'Asset', value: evidence.assetName ?? evidence.assetIdentifier ?? '—' },
     {
       key: 'Software',
@@ -590,7 +601,7 @@ function ApplicabilityTable({
       <div className="cve-decision-section">
         <div className="cve-decision-section-header">
           <h4>Applicability Assessment</h4>
-          <p>Determine if the matched software is truly relevant to your environment</p>
+          <p>Determine if the matched software is truly relevant across all correlated asset types</p>
         </div>
         {matchedSoftware.length === 0 ? (
           <div className="cve-intel-empty">No matched software to assess.</div>
@@ -612,6 +623,7 @@ function ApplicabilityTable({
               <thead>
                 <tr>
                   <th>Software</th>
+                  <th>Asset Type</th>
                   <th>Asset</th>
                   <th>Match Basis</th>
                   <th>Confidence</th>
@@ -628,6 +640,7 @@ function ApplicabilityTable({
                         <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
                         <div className="panel-caption">{explainApplicability(sw)}</div>
                       </td>
+                      <td className="cve-decision-table-muted">{formatAssetType(sw.assetType)}</td>
                       <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
                       <td className="cve-decision-table-muted">{matchBasisLabel(sw.matchedBy)}</td>
                       <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
@@ -662,7 +675,7 @@ function ApplicabilityTable({
             </svg>
             <h4>Impact Assessment</h4>
           </div>
-          <p>Only applicable software shown. Analyst disposition is captured here, but computed impact stays server-driven from exact VEX evidence.</p>
+          <p>Only applicable software shown. Analyst disposition is captured here for any asset type, while computed impact stays server-driven from exact VEX evidence.</p>
         </div>
         {applicableSoftware.length === 0 ? (
           <div className="cve-intel-empty">Mark software as Applicable above to assess impact.</div>
@@ -671,6 +684,7 @@ function ApplicabilityTable({
             <thead>
               <tr>
                 <th>Applicable Software</th>
+                <th>Asset Type</th>
                 <th>Asset</th>
                 <th>Exact Match</th>
                 <th>Analyst Disposition</th>
@@ -686,6 +700,7 @@ function ApplicabilityTable({
                       <strong>{sw.packageName}</strong> <span className="cve-decision-table-muted">{sw.version}</span>
                       <div className="panel-caption">{explainApplicability(sw)}</div>
                     </td>
+                    <td className="cve-decision-table-muted">{formatAssetType(sw.assetType)}</td>
                     <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
                     <td className="cve-decision-table-muted">
                       <div>{vendorStatementFor(sw)}</div>
@@ -1013,6 +1028,7 @@ function FindingsContent({
                       </svg>
                       <span className="mono">{sw.assetName ?? sw.assetIdentifier ?? sw.componentId}</span>
                     </div>
+                    <div className="panel-caption">{formatAssetType(sw.assetType)}</div>
                   </td>
                   <td>{sw.packageName} {sw.version}</td>
                   <td>
@@ -1050,6 +1066,7 @@ function FindingsContent({
 type FindingConfigSidebarProps = {
   filteredSoftware: FindingDisplayRow[];
   selectedIds: Set<string>;
+  findingGenerationMode: RiskPolicy['findingGenerationMode'];
   findingTitle: string;
   findingPriority: string;
   assignmentGroup: string;
@@ -1071,6 +1088,7 @@ type FindingConfigSidebarProps = {
 
 function FindingConfigSidebar({
   filteredSoftware, selectedIds,
+  findingGenerationMode,
   findingTitle, findingPriority, assignmentGroup, ticketTarget, dueDate, findingNotes, findingBusy,
   onFindingTitleChange, onFindingPriorityChange, onAssignmentGroupChange, onTicketTargetChange,
   onDueDateChange, onFindingNotesChange, onRequestCreateFindings, onRequestCreateGrouped, onSaveAssessment, onBack,
@@ -1085,6 +1103,12 @@ function FindingConfigSidebar({
     <aside className="cve-decision-summary-sidebar">
       <div className="cve-decision-summary-card">
         <h4>Finding Configuration</h4>
+
+        {findingGenerationMode === 'MANUAL' && (
+          <div className="notice">
+            Org CVE Finding Generation is set to manual. Findings are only created from this workbench after analyst review; inventory recompute will not auto-open them.
+          </div>
+        )}
 
         <div className="cve-form-field">
           <label htmlFor="finding-title">Finding Title</label>
@@ -1171,10 +1195,14 @@ function FindingConfigSidebar({
             onClick={onRequestCreateFindings}
             disabled={findingBusy || selectedCount === 0}
           >
-            {findingBusy ? 'Creating...' : `Create Findings (${selectedCount})`}
+            {findingBusy
+              ? 'Creating...'
+              : findingGenerationMode === 'MANUAL'
+                ? `Create Manual Findings (${selectedCount})`
+                : `Create Findings (${selectedCount})`}
           </button>
           <button type="button" className="btn btn-secondary" onClick={onRequestCreateGrouped} disabled={findingBusy || selectedCount === 0}>
-            Create One Grouped Finding
+            {findingGenerationMode === 'MANUAL' ? 'Create One Manual Grouped Finding' : 'Create One Grouped Finding'}
           </button>
           <button type="button" className="btn btn-secondary" onClick={onSaveAssessment} disabled={findingBusy}>
             Save Assessment
@@ -1689,6 +1717,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
               <FindingConfigSidebar
                 filteredSoftware={filteredFindingSoftware}
                 selectedIds={selectedFindingIds}
+                findingGenerationMode={findingGenerationMode}
                 findingTitle={findingTitle}
                 findingPriority={findingPriority}
                 assignmentGroup={assignmentGroup}

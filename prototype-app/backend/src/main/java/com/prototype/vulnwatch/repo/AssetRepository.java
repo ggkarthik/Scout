@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,6 +16,7 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByTenant(Tenant tenant);
     long countByTenant(Tenant tenant);
     Optional<Asset> findByTenantAndIdentifier(Tenant tenant, String identifier);
+    List<Asset> findByTenant_IdAndIdentifierIn(UUID tenantId, Collection<String> identifiers);
     Optional<Asset> findByIdentifier(String identifier);
     List<Asset> findByState(AssetState state);
 

@@ -534,6 +534,11 @@ public class CveDetailController {
         response.setAssetIdentifier(state.getComponent() != null && state.getComponent().getAsset() != null
                 ? state.getComponent().getAsset().getIdentifier()
                 : null);
+        response.setAssetType(state.getComponent() != null
+                && state.getComponent().getAsset() != null
+                && state.getComponent().getAsset().getType() != null
+                ? state.getComponent().getAsset().getType().name()
+                : null);
         response.setEcosystem(state.getComponent() == null ? null : state.getComponent().getEcosystem());
         response.setInstalledVersion(state.getComponent() == null ? null : state.getComponent().getVersion());
         response.setMatchedBy(state.getMatchedBy());
@@ -649,6 +654,9 @@ public class CveDetailController {
         dto.setAssetId(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getId());
         dto.setAssetName(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getName());
         dto.setAssetIdentifier(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getIdentifier());
+        dto.setAssetType(state.getComponent().getAsset() != null && state.getComponent().getAsset().getType() != null
+                ? state.getComponent().getAsset().getType().name()
+                : null);
         dto.setEcosystem(state.getComponent().getEcosystem());
         dto.setPackageName(state.getComponent().getPackageName());
         dto.setVersion(state.getComponent().getVersion());
@@ -829,6 +837,7 @@ public class CveDetailController {
         private UUID assetId;
         private String assetName;
         private String assetIdentifier;
+        private String assetType;
         private String ecosystem;
         private String packageName;
         private String version;
@@ -859,6 +868,7 @@ public class CveDetailController {
         private UUID componentId;
         private String assetName;
         private String assetIdentifier;
+        private String assetType;
         private String ecosystem;
         private String installedVersion;
         private String matchedBy;

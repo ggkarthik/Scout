@@ -23,6 +23,12 @@ public record InventoryComponentResponse(
         String sourceReference,
         Instant uploadedAt,
         Instant lastObservedAt,
-        Instant retiredAt
+        Instant retiredAt,
+        boolean needsReview,
+        int reviewItemCount,
+        boolean reviewMissingVersion,
+        boolean reviewUnmappedSoftware,
+        boolean reviewLowConfidenceAlias,
+        boolean reviewDiscoveryModel
 ) {
 }

@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.GithubIngestionFrequency;
 import com.prototype.vulnwatch.domain.GithubSbomSource;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -39,6 +41,7 @@ public class GithubSbomSourceService {
     private final TenantService tenantService;
     private final TaskExecutor ingestionExecutor;
     private final TransactionTemplate transactionTemplate;
+    private final ObjectMapper objectMapper;
 
     public GithubSbomSourceService(
             GithubSbomSourceRepository githubSbomSourceRepository,
@@ -46,7 +49,8 @@ public class GithubSbomSourceService {
             SbomIngestionService sbomIngestionService,
             TenantService tenantService,
             TaskExecutor ingestionExecutor,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate,
+            ObjectMapper objectMapper
     ) {
         this.githubSbomSourceRepository = githubSbomSourceRepository;
         this.syncRunRepository = syncRunRepository;
@@ -54,6 +58,7 @@ public class GithubSbomSourceService {
         this.tenantService = tenantService;
         this.ingestionExecutor = ingestionExecutor;
         this.transactionTemplate = transactionTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -105,6 +110,16 @@ public class GithubSbomSourceService {
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub GHCR ingestion queued");
     }
 
+    public SyncTriggerResponse triggerRepositoryRunOnce(GithubSbomIngestionRequest request) {
+        String normalizedOwner = request.owner() == null ? "" : request.owner().trim();
+        if (normalizedOwner.isBlank()) {
+            throw new IllegalArgumentException("GitHub owner is required");
+        }
+        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM));
+        ingestionExecutor.execute(() -> executeRepositoryRunOnce(run.getId(), request));
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub repository ingestion queued");
+    }
+
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSources() {
         List<GithubSbomSource> sources = githubSbomSourceRepository.findByEnabledTrueOrderByCreatedAtAsc();
@@ -151,7 +166,18 @@ public class GithubSbomSourceService {
         try {
             SbomIngestionService.GithubGhcrIngestionSummary summary =
                     sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, owner);
-            completeStandaloneGhcrRun(runId, summary);
+            completeStandaloneGhcrRun(runId, owner, summary);
+        } catch (Exception e) {
+            failStandaloneRun(runId, e.getMessage());
+        }
+    }
+
+    public void executeRepositoryRunOnce(UUID runId, GithubSbomIngestionRequest request) {
+        markStandaloneRunRunning(runId);
+        Tenant tenant = tenantService.getDefaultTenant();
+        try {
+            var summary = sbomIngestionService.ingestFromGithub(tenant, request);
+            completeStandaloneRepositoryRun(runId, request, summary);
         } catch (Exception e) {
             failStandaloneRun(runId, e.getMessage());
         }
@@ -282,7 +308,11 @@ public class GithubSbomSourceService {
                 source.setLastRunAt(Instant.now());
                 source.touch();
                 githubSbomSourceRepository.save(source);
-                completeRun(run, "failed", 0, 0, 0, 0, "GitHub SBOM source is disabled");
+                completeRun(run, "failed", 0, 0, 0, 0, "GitHub SBOM source is disabled", Map.of(
+                        "sourceSystem", "github",
+                        "syncType", run.getSyncType(),
+                        "state", "failed"
+                ));
                 return null;
             }
 
@@ -324,7 +354,16 @@ public class GithubSbomSourceService {
                     summary.componentsIngested(),
                     summary.findingsGenerated(),
                     summary.imagesFailed(),
-                    errorMessage);
+                    errorMessage,
+                    Map.of(
+                            "sourceSystem", "github",
+                            "assetType", "CONTAINER_IMAGE",
+                            "assetsDiscovered", summary.imagesDiscovered(),
+                            "assetsIngested", summary.imagesProcessed(),
+                            "assetsFailed", summary.imagesFailed(),
+                            "componentsIngested", summary.componentsIngested(),
+                            "findingsGenerated", summary.findingsGenerated()
+                    ));
         });
     }
 
@@ -352,7 +391,17 @@ public class GithubSbomSourceService {
                     summary.componentsIngested(),
                     summary.findingsGenerated(),
                     summary.repositoriesFailed(),
-                    errorMessage);
+                    errorMessage,
+                    Map.of(
+                            "sourceSystem", "github",
+                            "assetType", source.getAssetType().name(),
+                            "assetsDiscovered", summary.repositoriesDiscovered(),
+                            "assetsIngested", summary.repositoriesProcessed(),
+                            "assetsFailed", summary.repositoriesFailed(),
+                            "componentsIngested", summary.componentsIngested(),
+                            "findingsGenerated", summary.findingsGenerated(),
+                            "scope", source.getOwner() + "/" + source.getRepo()
+                    ));
         });
     }
 
@@ -366,7 +415,11 @@ public class GithubSbomSourceService {
             source.setLastRunAt(Instant.now());
             source.touch();
             githubSbomSourceRepository.save(source);
-            completeRun(run, "failed", 0, 0, 0, 0, errorMessage);
+            completeRun(run, "failed", 0, 0, 0, 0, errorMessage, Map.of(
+                    "sourceSystem", "github",
+                    "syncType", run.getSyncType(),
+                    "state", "failed"
+            ));
         });
     }
 
@@ -374,7 +427,7 @@ public class GithubSbomSourceService {
         transactionTemplate.executeWithoutResult(status -> markRunRunning(requireRun(runId)));
     }
 
-    private void completeStandaloneGhcrRun(UUID runId, SbomIngestionService.GithubGhcrIngestionSummary summary) {
+    private void completeStandaloneGhcrRun(UUID runId, String owner, SbomIngestionService.GithubGhcrIngestionSummary summary) {
         transactionTemplate.executeWithoutResult(status -> completeRun(
                 requireRun(runId),
                 summary.imagesFailed() > 0 ? "partial_success" : "completed",
@@ -382,17 +435,65 @@ public class GithubSbomSourceService {
                 summary.componentsIngested(),
                 summary.findingsGenerated(),
                 summary.imagesFailed(),
-                buildGhcrFailureMessage(summary)));
+                buildGhcrFailureMessage(summary),
+                Map.of(
+                        "sourceSystem", "github",
+                        "assetType", "CONTAINER_IMAGE",
+                        "assetsDiscovered", summary.imagesDiscovered(),
+                        "assetsIngested", summary.imagesProcessed(),
+                        "assetsFailed", summary.imagesFailed(),
+                        "componentsIngested", summary.componentsIngested(),
+                        "findingsGenerated", summary.findingsGenerated(),
+                        "scope", "ghcr.io/" + owner.toLowerCase(Locale.ROOT)
+                )));
+    }
+
+    private void completeStandaloneRepositoryRun(
+            UUID runId,
+            GithubSbomIngestionRequest request,
+            com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse summary
+    ) {
+        String owner = request.owner() == null ? "" : request.owner().trim();
+        String repo = request.repo() == null ? "" : request.repo().trim();
+        String errorMessage = summary.repositoriesFailed() > 0
+                ? "Failed " + summary.repositoriesFailed() + " of " + summary.repositoriesProcessed() + " repositories"
+                : null;
+        String scope = repo.isBlank() ? owner : owner + "/" + repo;
+        transactionTemplate.executeWithoutResult(status -> completeRun(
+                requireRun(runId),
+                summary.repositoriesFailed() > 0 ? "partial_success" : "completed",
+                summary.repositoriesDiscovered(),
+                summary.componentsIngested(),
+                summary.findingsGenerated(),
+                summary.repositoriesFailed(),
+                errorMessage,
+                Map.of(
+                        "sourceSystem", "github",
+                        "assetType", (request.assetType() == null ? AssetType.APPLICATION : request.assetType()).name(),
+                        "assetsDiscovered", summary.repositoriesDiscovered(),
+                        "assetsIngested", summary.repositoriesProcessed(),
+                        "assetsFailed", summary.repositoriesFailed(),
+                        "componentsIngested", summary.componentsIngested(),
+                        "findingsGenerated", summary.findingsGenerated(),
+                        "scope", scope
+                )));
     }
 
     private void failStandaloneRun(UUID runId, String errorMessage) {
-        transactionTemplate.executeWithoutResult(status -> completeRun(requireRun(runId), "failed", 0, 0, 0, 0, errorMessage));
+        transactionTemplate.executeWithoutResult(status -> completeRun(requireRun(runId), "failed", 0, 0, 0, 0, errorMessage, Map.of(
+                "sourceSystem", "github",
+                "state", "failed"
+        )));
     }
 
     private SyncRun createQueuedRun(String syncType) {
         SyncRun run = new SyncRun();
         run.setSyncType(syncType);
         run.setStatus("queued");
+        run.setMetadataJson(toJson(Map.of(
+                "sourceSystem", "github",
+                "syncType", syncType
+        )));
         return syncRunRepository.save(run);
     }
 
@@ -403,6 +504,11 @@ public class GithubSbomSourceService {
 
     private void markRunRunning(SyncRun run) {
         run.setStatus("running");
+        run.setMetadataJson(toJson(Map.of(
+                "sourceSystem", "github",
+                "syncType", run.getSyncType(),
+                "state", "running"
+        )));
         syncRunRepository.save(run);
     }
 
@@ -413,7 +519,8 @@ public class GithubSbomSourceService {
             int inserted,
             int updated,
             int failed,
-            String error
+            String error,
+            Map<String, Object> metadata
     ) {
         run.setStatus(status);
         run.setRecordsFetched(fetched);
@@ -422,7 +529,18 @@ public class GithubSbomSourceService {
         run.setRecordsFailed(failed);
         run.setErrorMessage(error);
         run.setCompletedAt(Instant.now());
+        if (metadata != null && !metadata.isEmpty()) {
+            run.setMetadataJson(toJson(metadata));
+        }
         syncRunRepository.save(run);
+    }
+
+    private String toJson(Map<String, Object> value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to serialize sync run metadata", e);
+        }
     }
 
     private String buildGhcrFailureMessage(SbomIngestionService.GithubGhcrIngestionSummary summary) {

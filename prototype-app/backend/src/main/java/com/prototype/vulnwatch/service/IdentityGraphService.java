@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +29,8 @@ public class IdentityGraphService {
     private final SoftwareIdentityRepository softwareIdentityRepository;
     private final SoftwareIdentifierRepository softwareIdentifierRepository;
     private final IdentityLinkRepository identityLinkRepository;
+    private final ConcurrentMap<String, SoftwareIdentifier> identifierCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, IdentityLink> linkCache = new ConcurrentHashMap<>();
 
     public IdentityGraphService(
             SoftwareIdentityRepository softwareIdentityRepository,
@@ -162,11 +166,25 @@ public class IdentityGraphService {
             double confidence
     ) {
         String normalized = IdentityUtil.normalize(normalizedValue);
-        if (normalized.isBlank()) {
+        if (identity == null || identity.getId() == null || idType == null || normalized.isBlank()) {
             return null;
         }
         String sourceValue = source == null || source.isBlank() ? "system" : source.toLowerCase(Locale.ROOT);
-        return softwareIdentifierRepository
+        String cacheKey = identifierCacheKey(identity, idType, normalized);
+        SoftwareIdentifier cached = identifierCache.get(cacheKey);
+        if (cached != null) {
+            cached.setRawValue(rawValue);
+            cached.setSource(sourceValue);
+            cached.setVerified(cached.isVerified() || verified);
+            cached.setConfidence(max(cached.getConfidence(), confidence));
+            cached.touch();
+            cached = softwareIdentifierRepository.save(cached);
+            if (cached != null) {
+                identifierCache.put(cacheKey, cached);
+            }
+            return cached;
+        }
+        SoftwareIdentifier identifier = softwareIdentifierRepository
                 .findBySoftwareIdentityAndIdTypeAndNormalizedValue(identity, idType, normalized)
                 .map(existing -> {
                     existing.setRawValue(rawValue);
@@ -187,6 +205,10 @@ public class IdentityGraphService {
                     created.setConfidence(confidence);
                     return softwareIdentifierRepository.save(created);
                 });
+        if (identifier != null) {
+            identifierCache.put(cacheKey, identifier);
+        }
+        return identifier;
     }
 
     private void linkIdentifiers(
@@ -222,7 +244,23 @@ public class IdentityGraphService {
         }
         String sourceValue = source == null || source.isBlank() ? "system" : source.toLowerCase(Locale.ROOT);
         Instant now = Instant.now();
-        identityLinkRepository
+        String cacheKey = linkCacheKey(from, to, linkType, sourceValue);
+        IdentityLink cached = linkCache.get(cacheKey);
+        if (cached != null) {
+            if (!cached.isVerified() && verified) {
+                cached.setVerified(true);
+                cached.setVerifiedAt(now);
+                cached.setVerifiedBy(sourceValue);
+            }
+            cached.setConfidence(max(cached.getConfidence(), confidence));
+            cached.setProvenanceNote(provenanceNote);
+            cached = identityLinkRepository.save(cached);
+            if (cached != null) {
+                linkCache.put(cacheKey, cached);
+            }
+            return;
+        }
+        IdentityLink link = identityLinkRepository
                 .findByFromIdentifierAndToIdentifierAndLinkTypeAndSource(from, to, linkType, sourceValue)
                 .map(existing -> {
                     if (!existing.isVerified() && verified) {
@@ -231,23 +269,27 @@ public class IdentityGraphService {
                         existing.setVerifiedBy(sourceValue);
                     }
                     existing.setConfidence(max(existing.getConfidence(), confidence));
+                    existing.setProvenanceNote(provenanceNote);
                     return identityLinkRepository.save(existing);
                 })
                 .orElseGet(() -> {
-                    IdentityLink link = new IdentityLink();
-                    link.setFromIdentifier(from);
-                    link.setToIdentifier(to);
-                    link.setLinkType(linkType);
-                    link.setSource(sourceValue);
-                    link.setVerified(verified);
-                    link.setConfidence(confidence);
-                    link.setProvenanceNote(provenanceNote);
+                    IdentityLink created = new IdentityLink();
+                    created.setFromIdentifier(from);
+                    created.setToIdentifier(to);
+                    created.setLinkType(linkType);
+                    created.setSource(sourceValue);
+                    created.setVerified(verified);
+                    created.setConfidence(confidence);
+                    created.setProvenanceNote(provenanceNote);
                     if (verified) {
-                        link.setVerifiedAt(now);
-                        link.setVerifiedBy(sourceValue);
+                        created.setVerifiedAt(now);
+                        created.setVerifiedBy(sourceValue);
                     }
-                    return identityLinkRepository.save(link);
+                    return identityLinkRepository.save(created);
                 });
+        if (link != null) {
+            linkCache.put(cacheKey, link);
+        }
     }
 
     private SoftwareIdentity upsertIdentity(String canonicalKey, String displayName) {
@@ -346,6 +388,14 @@ public class IdentityGraphService {
             return next;
         }
         return Math.max(existing, next);
+    }
+
+    private String identifierCacheKey(SoftwareIdentity identity, IdentifierType type, String normalizedValue) {
+        return identity.getId() + "::" + type.name() + "::" + normalizedValue;
+    }
+
+    private String linkCacheKey(SoftwareIdentifier from, SoftwareIdentifier to, String linkType, String source) {
+        return from.getId() + "::" + to.getId() + "::" + linkType + "::" + source;
     }
 
     public record ComponentIdentityInput(
