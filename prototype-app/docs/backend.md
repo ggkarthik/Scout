@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-03-15
+Last updated: 2026-03-17
 
 ## Purpose
 
@@ -133,6 +133,20 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `POST /api/github-sbom-sources/{id}/run`
 - `POST /api/demo/seed`
 
+### EOL (End-of-Life)
+
+- `GET /api/eol/status/summary` — EOL/near-EOL/supported/unknown counts for active inventory
+- `GET /api/eol/status/components` — paged component list with EOL status; `filter` param: `eol | near-eol | ok | unknown`
+- `GET /api/eol/products` — full EOL product catalog (slugs + CPE/PURL identifiers)
+- `GET /api/eol/products/{slug}/releases` — all release cycles for a product slug
+- `POST /api/eol/mappings/confirm` — manually confirm or override an EOL slug mapping for a normalized product key
+- `GET /api/eol/mappings/unresolved` — software identities with no EOL slug mapping (up to 200, for analyst review)
+- `POST /api/eol/admin/refresh/catalog` — trigger stage 1: catalog refresh
+- `POST /api/eol/admin/refresh/releases` — trigger stage 2: release data refresh
+- `POST /api/eol/admin/refresh/mappings` — trigger stage 3: slug resolution
+- `POST /api/eol/admin/refresh/denormalize` — trigger stage 4: denormalization
+- `POST /api/eol/admin/refresh/full` — trigger all 4 stages in sequence
+
 ### CVE Drill-Down and Archive Operations
 
 - `GET /api/cve-detail/{cveId}`
@@ -238,6 +252,17 @@ The newer CVE workflow APIs add:
 
 These APIs depend on `X-Tenant-ID` and `X-User-ID`, and are currently consumed by the org-CVE drawer in the frontend.
 
+### 5. EOL Pipeline
+
+`EolRefreshService` runs a 4-stage pipeline to track software end-of-life status:
+
+1. **Catalog refresh** — calls `EolApiClient.fetchAllProducts()` and batch-upserts product slugs, CPE/PURL identifiers into `eol_product_catalog` (100-row JDBC batches, `ON CONFLICT (slug) DO UPDATE`)
+2. **Release data refresh** — fetches release cycles per tracked slug using `If-Modified-Since` headers to avoid redundant downloads; upserts into `eol_releases`; computes `support_phase` (`active | lts | extended | eol | discontinued`) per cycle
+3. **Slug resolution** — `EolSlugResolverService.resolveAll()` maps `SoftwareIdentity` rows to EOL slugs in-memory; writes or updates `software_eol_mapping` rows
+4. **Denormalization** — two set-based `UPDATE ... FROM (SELECT DISTINCT ON ...)` statements write EOL status onto `inventory_components` and `software_instances`; then calls `OrgCveRecordService.refreshForTenant()` to refresh EOL-related counts in `org_cve_records`
+
+All stages record a `SyncRun` row with `run_domain` matching the stage name. Each stage is also callable on-demand from the Connect UI via `POST /api/eol/admin/refresh/*`.
+
 ## Scheduling and Async Execution
 
 Scheduled jobs currently defined in code:
@@ -250,6 +275,12 @@ Scheduled jobs currently defined in code:
 - every `5` minutes: run enabled GitHub SBOM sources
 - every `15` minutes: reopen expired suppressions
 - hourly: auto-close findings by policy
+- `02:00` Sunday: EOL catalog refresh (stage 1 — `EolRefreshService.fullCatalogRefresh`)
+- `03:00` Sunday: EOL release data refresh (stage 2 — `EolRefreshService.releaseDataRefresh`)
+- `03:30` Sunday: EOL slug mapping resolution (stage 3 — `EolRefreshService.resolveInstanceMappings`)
+- `04:00` Sunday: EOL denormalization (stage 4 — `EolRefreshService.denormalizeEolStatus`)
+
+All four EOL jobs are configurable via `app.eol.*-cron` properties and can be disabled entirely with `app.eol.enabled=false`. Each job writes a `SyncRun` row for queue visibility.
 
 Executors:
 
@@ -261,6 +292,7 @@ Executors:
 
 - Security: `APP_API_KEY`, `APP_CREATOR_KEY`
 - Feature flags: `FEATURE_VEX_POLICY_ENABLED`, `FEATURE_VEX_RISK_MODIFIERS_ENABLED`, `FEATURE_SOFTWARE_MODEL_ENABLED`
+- EOL: `app.eol.enabled` (default `true`), `app.eol.catalog-refresh-cron`, `app.eol.release-refresh-cron`, `app.eol.resolve-mappings-cron`, `app.eol.denormalize-cron`
 - NVD: `NVD_API_KEY`, `NVD_API_KEY_FILE`, `NVD_*`
 - GitHub: `GITHUB_API_TOKEN`, `GITHUB_API_TOKEN_FILE`, `GITHUB_*`
 - SBOM fetch: `SBOM_FETCH_MAX_PAYLOAD_BYTES`, `SBOM_FETCH_ALLOWED_HOSTS`, `SBOM_FETCH_ALLOW_USER_AUTH_HEADER`

@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-15
+Last updated: 2026-03-17
 
 ## Why This Fourth Document Exists
 
@@ -57,11 +57,22 @@ Runtime shape:
 
 - Scheduled jobs keep external feeds fresh, expire suppressions, auto-close findings by policy, and age stale assets inactive.
 
+### 7. EOL Pipeline
+
+A 4-stage weekly pipeline tracks software end-of-life status for all active inventory:
+
+1. **Catalog refresh** — fetches all product slugs and CPE/PURL identifiers from endoflife.date into `eol_product_catalog`
+2. **Release data refresh** — conditionally fetches release cycles for tracked slugs (respects `If-Modified-Since`) into `eol_releases`
+3. **Slug resolution** — maps `SoftwareIdentity` rows to EOL slugs via `EolSlugResolverService` into `software_eol_mapping`
+4. **Denormalization** — set-based `DISTINCT ON` update writes `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, and `latest_supported_version` onto both `inventory_components` and `software_instances`; then refreshes `org_cve_records` EOL counts
+
+Each stage can also be triggered manually from the Connect UI via `/api/eol/admin/refresh/*`. Near-EOL threshold is 90 days.
+
 ## Current Product Surface
 
 What is actively exposed in the UI today:
 
-- dashboard metrics
+- dashboard metrics (with EOL risk widget)
 - findings management
 - operational metrics
 - vulnerability intelligence list/detail
@@ -71,6 +82,8 @@ What is actively exposed in the UI today:
 - ServiceNow CMDB live connector setup, connection testing, and live sync trigger
 - Inventory Run Queue showing all host/container/SBOM ingestion run history
 - risk policy and GitHub pipeline configuration
+- End-of-Life component tracking (EolPage) with filter tabs, CSV export, and unresolved-mapping review
+- EOL source panel in Connect UI for manual pipeline stage triggers
 
 What exists in code but is not fully surfaced or is still transitional:
 
@@ -135,6 +148,7 @@ Important built-in jobs:
 - GitHub SBOM source execution every `5` minutes
 - suppression expiry reopening every `15` minutes
 - hourly policy-based auto-close sweep
+- weekly EOL pipeline (Sunday): catalog `02:00`, releases `03:00`, slug resolution `03:30`, denormalization `04:00`
 
 ## Documentation Boundaries
 

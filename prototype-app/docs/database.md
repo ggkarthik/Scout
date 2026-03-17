@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-03-15
+Last updated: 2026-03-17
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -115,6 +115,29 @@ Added by V1030–V1033:
 - `finding_comments`
 - `risk_policies`
 
+### End-of-Life Tracking
+
+Added by V1034–V1042:
+
+- `eol_product_catalog`
+  - one row per endoflife.date product slug
+  - stores `slug`, `display_name`, `cpe_vendor`, `cpe_product`, `purl_type`, `purl_namespace`, `aliases`, `last_modified`, `last_fetched_at`
+  - unique index on `slug`
+- `eol_releases`
+  - one row per release cycle per product slug
+  - stores `product_slug`, `cycle`, `release_date`, `eol_date`, `eol_boolean`, `support_end_date`, `extended_support_date`, `security_support_date`, `latest_version`, `latest_release_date`, `lts`, `is_eol`, `eoas`, `eoes`, `discontinued`, `official_source_url`, `support_phase`
+  - unique index on `(product_slug, cycle)`
+- `software_eol_mapping`
+  - maps a `software_identity_id` (or `normalized_key` string) to an EOL slug
+  - stores `normalized_key`, `eol_slug`, `match_confidence`, `match_method`, `confirmed`, `software_identity_id`
+  - `confirmed = true` for analyst-reviewed mappings; `match_method = MANUAL` for those set via the UI
+
+EOL denormalized columns added to `inventory_components` and `software_instances` (V1036, V1038–V1041):
+- `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, `latest_supported_version`, `eol_checked_at`
+
+EOL summary columns added to `org_cve_records` (V1040):
+- `eol_component_count`, `near_eol_component_count` (or equivalent rollup fields)
+
 ### Operational and Workflow Support
 
 - `sync_runs`
@@ -165,6 +188,14 @@ The current backend writes two important projection tables before or alongside f
 - `org_cve_records` for tenant/CVE rollups
 
 This is a major change from the older documentation set and is now the correct place to look for current applicability and org-CVE exposure state.
+
+### EOL Pipeline
+
+1. batch-upsert product slugs into `eol_product_catalog` (stage 1)
+2. conditional fetch and upsert release cycles into `eol_releases` (stage 2)
+3. in-memory slug resolution writes `software_eol_mapping` rows (stage 3)
+4. set-based `UPDATE ... FROM (SELECT DISTINCT ON (...))` denormalizes EOL status onto `inventory_components` and `software_instances` (stage 4)
+5. `org_cve_records` EOL counts refreshed after denormalization
 
 ### Workflow Operations
 

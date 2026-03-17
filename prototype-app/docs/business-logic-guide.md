@@ -25,6 +25,7 @@
 15. *(renumbered — see 16)*
 16. [Dashboard Metrics and What They Measure](#16-dashboard-metrics-and-what-they-measure)
 17. [Configurable Thresholds and Policy Levers](#17-configurable-thresholds-and-policy-levers)
+18. [Tracking When Software Goes End-of-Life (EOL Pipeline)](#18-tracking-when-software-goes-end-of-life-eol-pipeline)
 
 ---
 
@@ -1032,3 +1033,121 @@ Many of the rules described in this document use numeric thresholds or feature f
 | GitHub SBOM auto-fetch | Every 5 minutes | Runs configured GitHub SBOM sources that are due |
 | Suppression expiry check | Every 15 minutes | Reopens findings whose suppression has expired |
 | Auto-close sweep | Every hour | Closes findings that have exceeded the auto-close age limit |
+| EOL catalog refresh (stage 1) | Sunday at 02:00 | Fetches all product slugs and CPE/PURL identifiers from endoflife.date |
+| EOL release data refresh (stage 2) | Sunday at 03:00 | Fetches release cycles for tracked slugs (conditional, respects If-Modified-Since) |
+| EOL slug mapping resolution (stage 3) | Sunday at 03:30 | Maps software identities to EOL slugs |
+| EOL denormalization (stage 4) | Sunday at 04:00 | Writes EOL status onto inventory components and software instances; refreshes org-CVE EOL counts |
+
+---
+
+## 18. Tracking When Software Goes End-of-Life (EOL Pipeline)
+
+**Summary:** The EOL pipeline answers "which software in our inventory is no longer supported by its vendor?" It runs weekly, pulling lifecycle data from endoflife.date, mapping it to the software identities already in inventory, and then stamping each component with its lifecycle status.
+
+### Why It Exists
+
+Vulnerability scanners find known CVEs. EOL tracking finds a different risk: software that will stop receiving security patches, even for vulnerabilities that have not been assigned a CVE yet. A component that is past its end-of-life date is a ticking clock regardless of current CVE exposure.
+
+### Stage 1 — Product Catalog Refresh
+
+**What happens:** The system calls the endoflife.date API to get a list of every tracked software product (e.g., "ubuntu", "python", "java", "nginx"). For each product it stores:
+
+- the slug (short identifier used in all further API calls)
+- a human-readable display name
+- a CPE vendor/product pair (if available) for matching against inventory CPEs
+- a PURL type/namespace (if available) for matching against package URLs
+- an aliases list (alternate names the product is known by)
+
+**When it runs:** Sunday at 02:00, or manually via Connect UI.
+
+**What it stores:** `eol_product_catalog`
+
+### Stage 2 — Release Data Refresh
+
+**What happens:** For each product slug that has already been matched to software in the inventory (or has CPE/PURL identifiers), the system fetches all release cycles. A release cycle is one supported version line — e.g., Ubuntu "22.04", Python "3.11", nginx "1.26".
+
+For each cycle it stores:
+
+- the cycle label (e.g., "3.11")
+- the release date
+- the EOL date (when vendor stops patches)
+- whether the cycle is currently EOL
+- extended support, security support, and latest-version metadata
+- a computed **support phase**: `active | lts | extended | eol | discontinued`
+
+The system uses an `If-Modified-Since` header on each fetch so unchanged products are skipped without downloading data.
+
+**When it runs:** Sunday at 03:00, or manually.
+
+**What it stores:** `eol_releases`
+
+### Stage 3 — Slug Mapping Resolution
+
+**What happens:** The system tries to match each `SoftwareIdentity` in the inventory to an endoflife.date product slug. It uses several strategies in order: exact CPE vendor/product match, PURL type/namespace match, and normalized display-name matching against the catalog aliases.
+
+When a match is found it records:
+- the normalized key (vendor::product)
+- the matched slug
+- the match confidence (HIGH / MEDIUM / LOW)
+- the match method (CPE / PURL / NAME / MANUAL)
+- whether an analyst has confirmed the mapping
+
+**Unresolved mappings** (software that could not be matched automatically) are surfaced in the UI so analysts can type the correct slug and confirm it. Confirmed mappings are never overwritten by the automated resolver.
+
+**When it runs:** Sunday at 03:30, or manually.
+
+**What it stores:** `software_eol_mapping`
+
+### Stage 4 — Denormalization
+
+**What happens:** The system applies the mappings to compute a lifecycle status for every active inventory component and every software instance on a host.
+
+For each component/instance that has a resolved slug, the system finds the best matching release cycle by prefix-matching the installed version against the cycle label (e.g., version "3.11.4" matches cycle "3.11"). It then writes:
+
+- `eol_slug` — which product this is
+- `eol_cycle` — which release cycle matched
+- `eol_date` — when that cycle reaches end-of-life
+- `is_eol` — true if the EOL date has passed
+- `eol_support_end_date` — when extended support ends (if applicable)
+- `support_phase` — human-readable phase label
+- `latest_supported_version` — latest patch in that cycle (useful for upgrade targeting)
+
+Components with no resolved slug get no EOL data and appear as "Unknown" in the UI.
+
+Finally, the system refreshes `org_cve_records` to update any EOL-related count columns so the dashboard reflects the latest state.
+
+**When it runs:** Sunday at 04:00, or manually.
+
+**What it stores:** `inventory_components` and `software_instances` (denormalized columns), `org_cve_records` (count refresh)
+
+### EOL Status Classification
+
+The UI classifies each component into one of four buckets:
+
+| Status | Condition |
+|--------|-----------|
+| EOL | `is_eol = true` (EOL date is in the past) |
+| Near EOL | `is_eol = false` AND EOL date is within 90 days |
+| Supported | `is_eol = false` AND (no EOL date OR EOL date is more than 90 days away) |
+| Unknown | No resolved EOL slug |
+
+The 90-day threshold is a constant (`NEAR_EOL_THRESHOLD_DAYS = 90`) shared across backend and frontend.
+
+### Manual Overrides
+
+Analysts can use the End-of-Life page to:
+
+1. Review unresolved mappings (software identities the automated resolver could not match)
+2. Enter the correct endoflife.date slug for a product
+3. Confirm the mapping — confirmed mappings are flagged `MANUAL` and are never overwritten by future automated runs
+
+### Relationship to Vulnerability Findings
+
+EOL status and CVE findings are independent tracks. A component can be:
+
+- **EOL with no known CVEs** — still a risk because future vulnerabilities will not be patched
+- **EOL with open CVEs** — highest risk tier
+- **Supported with open CVEs** — normal CVE workflow applies
+- **Supported with no CVEs** — clean
+
+The EOL page exposes the first two categories. The Findings page and Org-CVE views expose the last two. The dashboard surfaces both together via the EOL risk widget.

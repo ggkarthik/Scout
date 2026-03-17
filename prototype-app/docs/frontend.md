@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-15
+Last updated: 2026-03-17
 
 ## Purpose
 
@@ -52,6 +52,7 @@ The client also handles:
 - risk policy, GitHub source, sync run, and prototype reset calls
 - ServiceNow CMDB connector config, connection test, live sync, and sample sync calls
 - host asset detail and host inventory calls
+- EOL status summary, component statuses, product catalog, release cycles, mapping confirmation, unresolved mappings, and admin refresh triggers
 
 ## Navigation Model
 
@@ -66,6 +67,7 @@ Current top-level sections:
 - Inventory
 - Connect
 - Configurations
+- End-of-Life (tab key: `end-of-life`, nav label: `EOL`)
 
 The active app is organized as a shell, not route-based pages. Most drill-downs happen inline in tables, drawers, and modals.
 
@@ -128,6 +130,25 @@ All of them currently sit on top of `/inventory/components` and `/inventory/comp
 **Inventory Run Queue** is `InventoryRunQueuePage`, a shared table of all host/container/SBOM ingestion run history (ServiceNow CMDB, GitHub SBOM, GitHub GHCR), showing type, status, started time, duration, assets, components, findings, and an expandable details panel per run.
 
 **Vuln Intel Run Queue** surfaces `SourcesPage` in queue-only mode for NVD/KEV/GHSA/CSAF run history.
+
+### End-of-Life
+
+`EolPage` is mounted at `activeTab === 'end-of-life'`. The `DashboardPage` navigation card links directly to this tab via the `onViewEol` prop.
+
+- Loads summary counts from `/eol/status/summary` once (drives filter-tab badges).
+- Loads a paged component list from `/eol/status/components` on filter or page change.
+- Filter tabs: All / EOL / Near EOL ≤90d / Supported / Unknown.
+- Clicking a row with a resolved slug opens `EolDetailDrawer` with full release-cycle detail from `/eol/products/{slug}/releases`.
+- **Unresolved Mappings** panel shows software identities with no EOL slug; analysts can type a slug and confirm it (calls `/eol/mappings/confirm`).
+- **Export CSV** button downloads the current filtered page.
+
+Supporting components:
+
+- `EolBadge` — inline status pill (EOL / Near EOL / Supported / Unknown) with optional click handler
+- `EolDetailDrawer` — slide-over showing release cycle table for a product slug
+- `EolRiskWidget` — summary counts widget used on `DashboardPage`
+- `EolSourcePanel` — Connect UI panel wired to the four admin refresh endpoints (`/eol/admin/refresh/*`)
+- `src/features/cve-workbench/eol-helpers.ts` — shared `NEAR_EOL_DAYS` constant and EOL helper functions used across workbench and EOL views
 
 ### Configurations
 
