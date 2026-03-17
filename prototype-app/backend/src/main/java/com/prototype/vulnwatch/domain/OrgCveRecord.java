@@ -113,6 +113,12 @@ public class OrgCveRecord {
     @Column(name = "unknown_component_count", nullable = false)
     private long unknownComponentCount;
 
+    @Column(name = "eol_component_count", nullable = false)
+    private long eolComponentCount;
+
+    @Column(name = "eos_component_count", nullable = false)
+    private long eosComponentCount;
+
     @Column(name = "review_reason", length = 120)
     private String reviewReason;
 
@@ -318,6 +324,22 @@ public class OrgCveRecord {
 
     public void setUnknownComponentCount(long unknownComponentCount) {
         this.unknownComponentCount = unknownComponentCount;
+    }
+
+    public long getEolComponentCount() {
+        return eolComponentCount;
+    }
+
+    public void setEolComponentCount(long eolComponentCount) {
+        this.eolComponentCount = eolComponentCount;
+    }
+
+    public long getEosComponentCount() {
+        return eosComponentCount;
+    }
+
+    public void setEosComponentCount(long eosComponentCount) {
+        this.eosComponentCount = eosComponentCount;
     }
 
     public String getReviewReason() {

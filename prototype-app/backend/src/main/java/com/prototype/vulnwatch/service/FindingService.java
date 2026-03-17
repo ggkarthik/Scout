@@ -1901,7 +1901,14 @@ public class FindingService {
                 finding.getLastObservedAt(),
                 finding.getDecisionState(),
                 finding.getStatus(),
-                finding.getUpdatedAt());
+                finding.getUpdatedAt(),
+                component.getEolSlug(),
+                component.getEolCycle(),
+                component.getEolDate(),
+                component.getIsEol(),
+                component.getEolDate() != null
+                        ? (int) java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), component.getEolDate())
+                        : null);
     }
 
     private Map<UUID, List<VulnerabilityConfigExpr>> nvdExpressionsByVulnerability(

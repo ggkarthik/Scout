@@ -12,6 +12,7 @@ import { StatCard } from '../components/StatCard';
 import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
 import { HostAssetDetailPage, readSelectedHostAssetId, updateSelectedHostAssetId } from './HostAssetDetailPage';
+import { EolBadge } from '../components/EolBadge';
 
 export type InventoryViewKey =
   | 'vulnerability-intelligence'
@@ -1361,6 +1362,7 @@ export function InventoryPage({ selectedView }: Props) {
                   <th>Ecosystem</th>
                   <th>Software Identity</th>
                   {selectedView === 'hosts' && <th>Review</th>}
+                  <th>EOL Status</th>
                   <th>Component Status</th>
                   <th>Source</th>
                   <th>PURL</th>
@@ -1418,6 +1420,13 @@ export function InventoryPage({ selectedView }: Props) {
                         )}
                       </td>
                     )}
+                    <td>
+                      <EolBadge
+                        isEol={row.isEol}
+                        daysRemaining={row.eolDaysRemaining}
+                        eolDate={row.eolDate}
+                      />
+                    </td>
                     <td>
                       <span className={`status-pill ${row.componentStatus === 'ACTIVE' ? 'status-open' : 'status-auto_closed'}`}>
                         {row.componentStatus}

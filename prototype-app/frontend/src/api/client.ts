@@ -29,7 +29,11 @@ import {
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelDashboardSummary,
-  VulnerabilityIntelPage
+  VulnerabilityIntelPage,
+  EolSummary,
+  EolComponentPage,
+  EolProductCatalog,
+  EolRelease
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
@@ -315,6 +319,27 @@ export const api = {
     body: JSON.stringify({ advisories })
   }),
   seedDemo: () => request<IngestionResult>('/demo/seed', { method: 'POST' }),
+  getEolSummary: () => request<EolSummary>('/eol/status/summary'),
+  getEolComponentStatuses: (params?: { filter?: string; page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.filter) searchParams.set('filter', params.filter);
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<EolComponentPage>(`/eol/status/components${suffix}`);
+  },
+  listEolProducts: () => request<EolProductCatalog[]>('/eol/products'),
+  listEolProductReleases: (slug: string) => request<EolRelease[]>(`/eol/products/${encodeURIComponent(slug)}/releases`),
+  confirmEolMapping: (normalizedKey: string, eolSlug: string) => request<{ status: string }>('/eol/mappings/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ normalizedKey, eolSlug })
+  }),
+  listEolUnresolvedMappings: () => request<Array<{ vendor: string; product: string; displayName: string; normalizedKey: string }>>('/eol/mappings/unresolved'),
+  triggerEolCatalogRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/catalog', { method: 'POST' }),
+  triggerEolReleaseRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/releases', { method: 'POST' }),
+  triggerEolMappingResolve: () => request<SyncTriggerResponse>('/eol/admin/refresh/mappings', { method: 'POST' }),
+  triggerEolDenormalize: () => request<SyncTriggerResponse>('/eol/admin/refresh/denormalize', { method: 'POST' }),
+  triggerEolFullRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/full', { method: 'POST' }),
   listSyncRuns: (params?: { category?: 'all' | 'inventory' | 'vulnerability' | 'vuln-intel' | 'processing'; limit?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.category && params.category.trim().length > 0) {

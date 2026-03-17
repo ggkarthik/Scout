@@ -1,4 +1,7 @@
 import React from 'react';
+import { EolBadge } from './EolBadge';
+import { EolDetailDrawer } from './EolDetailDrawer';
+import { eosDisplay, eolRiskSummary } from '../features/cve-workbench/eol-helpers';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
@@ -39,12 +42,12 @@ import {
   CveMatchedSoftware,
   CveVexEvidence,
   OrgSpecificCveExposureRecord,
+  type VendorIntelligence,
 } from '../features/cve-workbench/types';
 import {
   InvestigationPriority,
   InvestigationStatus,
 } from '../features/cve-workbench/workflow';
-import type { VendorIntelligence } from '../features/cve-workbench/types';
 import type { RiskPolicy } from '../types';
 
 type WorkflowStep = 1 | 2 | 3;
@@ -71,6 +74,7 @@ function formatAssetType(value?: string): string {
   if (value === 'HOST') return 'Host';
   return formatLabel(value);
 }
+
 
 // --- CVE Summary Sidebar (step 1) ---
 
@@ -304,10 +308,11 @@ type InvestigationContentProps = {
   investigationNotes: string;
   autoNote: string;
   onNotesChange: (v: string) => void;
+  onEolClick?: (sw: CveMatchedSoftware) => void;
 };
 
 function InvestigationContent({
-  item, detail, softwareGroups, vendorRows, overallConfidence, investigationNotes, autoNote, onNotesChange,
+  item, detail, softwareGroups, vendorRows, overallConfidence, investigationNotes, autoNote, onNotesChange, onEolClick,
 }: InvestigationContentProps) {
   const [expandedRows, setExpandedRows] = React.useState<Set<string>>(new Set());
 
@@ -352,6 +357,25 @@ function InvestigationContent({
           </div>
           <div className="cve-stat-card-sub">{formatLabel(item.severity)} severity</div>
         </div>
+        {(() => {
+          const { eolCount, nearEolCount, nearEosCount } = eolRiskSummary(detail.matchedSoftware ?? []);
+          const hasRisk = eolCount > 0 || nearEolCount > 0 || nearEosCount > 0;
+          return (
+            <div className="cve-stat-card">
+              <div className="cve-stat-card-label">EOL / EOS Risk</div>
+              <div className="cve-stat-card-value" style={{ fontSize: '1rem' }}>
+                {hasRisk ? (
+                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {eolCount > 0 && <span className="eol-badge eol-badge--eol">{eolCount} EOL</span>}
+                    {nearEolCount > 0 && <span className="eol-badge eol-badge--near-eol">{nearEolCount} near EOL</span>}
+                    {nearEosCount > 0 && <span className="eol-badge eol-badge--near-eol">{nearEosCount} near EOS</span>}
+                  </span>
+                ) : <span className="cve-muted">None</span>}
+              </div>
+              <div className="cve-stat-card-sub">Across matched components</div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="cve-intel-section">
@@ -370,6 +394,8 @@ function InvestigationContent({
                 <th>Assets</th>
                 <th>Match Basis</th>
                 <th>Confidence</th>
+                <th>EOL</th>
+                <th>EOS</th>
                 <th></th>
               </tr>
             </thead>
@@ -394,6 +420,10 @@ function InvestigationContent({
                       <td>{matchBasisLabel(software.matchedBy)}</td>
                       <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
                       <td>
+                        <EolBadge isEol={software.isEol} daysRemaining={software.eolDaysRemaining} eolDate={software.eolDate} onClick={software.eolSlug && onEolClick ? () => onEolClick(software) : undefined} />
+                      </td>
+                      <td>{eosDisplay(software.eolSupportEndDate)}</td>
+                      <td>
                         <button
                           type="button"
                           className={`cve-view-assets-btn${isExpanded ? ' active' : ''}`}
@@ -406,7 +436,7 @@ function InvestigationContent({
                     </tr>
                     {isExpanded && (
                       <tr className="cve-assets-expansion-row">
-                        <td colSpan={6}>
+                        <td colSpan={8}>
                           <div className="cve-assets-expansion">
                             <table className="cve-assets-mini-table">
                               <thead>
@@ -414,6 +444,8 @@ function InvestigationContent({
                                   <th>Type</th>
                                   <th>Asset</th>
                                   <th>Identifier</th>
+                                  <th>EOL</th>
+                                  <th>EOS</th>
                                   <th>Finding</th>
                                 </tr>
                               </thead>
@@ -423,6 +455,8 @@ function InvestigationContent({
                                     <td>{formatAssetType(asset.assetType)}</td>
                                     <td>{asset.assetName ?? <span className="cve-muted">—</span>}</td>
                                     <td className="mono">{asset.assetIdentifier ?? <span className="cve-muted">—</span>}</td>
+                                    <td><EolBadge isEol={asset.isEol} daysRemaining={asset.eolDaysRemaining} eolDate={asset.eolDate} onClick={asset.eolSlug && onEolClick ? () => onEolClick(asset) : undefined} /></td>
+                                    <td>{eosDisplay(asset.eolSupportEndDate)}</td>
                                     <td>
                                       {asset.eligibleForFinding
                                         ? <span className="cve-finding-eligible-tag">Finding eligible</span>
@@ -576,6 +610,7 @@ type ApplicabilityTableProps = {
   onBulkApplicabilityDecision: (decision: ApplicabilityDecision) => void;
   onImpactDecision: (componentId: string, decision: ImpactDecision) => void;
   onToggleVexEvidence: (componentId: string) => void | Promise<void>;
+  onEolClick?: (sw: CveMatchedSoftware) => void;
 };
 
 function ApplicabilityTable({
@@ -590,6 +625,7 @@ function ApplicabilityTable({
   onBulkApplicabilityDecision,
   onImpactDecision,
   onToggleVexEvidence,
+  onEolClick,
 }: ApplicabilityTableProps) {
   const applicableSoftware = matchedSoftware.filter(
     (s) => applicabilityDecisions.get(s.componentId) === 'APPLICABLE'
@@ -627,6 +663,7 @@ function ApplicabilityTable({
                   <th>Asset</th>
                   <th>Match Basis</th>
                   <th>Confidence</th>
+                  <th>EOL</th>
                   <th>Decision</th>
                 </tr>
               </thead>
@@ -644,6 +681,7 @@ function ApplicabilityTable({
                       <td className="cve-decision-table-muted mono">{sw.assetName ?? sw.assetIdentifier ?? '—'}</td>
                       <td className="cve-decision-table-muted">{matchBasisLabel(sw.matchedBy)}</td>
                       <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
+                      <td><EolBadge isEol={sw.isEol} daysRemaining={sw.eolDaysRemaining} eolDate={sw.eolDate} onClick={sw.eolSlug && onEolClick ? () => onEolClick(sw) : undefined} /></td>
                       <td>
                         <SegmentedControl
                           ariaLabel={`Applicability for ${sw.packageName}`}
@@ -687,6 +725,7 @@ function ApplicabilityTable({
                 <th>Asset Type</th>
                 <th>Asset</th>
                 <th>Exact Match</th>
+                <th>EOL</th>
                 <th>Analyst Disposition</th>
               </tr>
             </thead>
@@ -732,6 +771,7 @@ function ApplicabilityTable({
                         </div>
                       )}
                     </td>
+                    <td><EolBadge isEol={sw.isEol} daysRemaining={sw.eolDaysRemaining} eolDate={sw.eolDate} onClick={sw.eolSlug && onEolClick ? () => onEolClick(sw) : undefined} /></td>
                     <td>
                       <SegmentedControl
                         ariaLabel={`Impact disposition for ${sw.packageName}`}
@@ -941,11 +981,12 @@ type FindingsContentProps = {
   onClearAll: () => void;
   onGroupByChange: (v: 'ASSET' | 'SOFTWARE') => void;
   onShowFilterChange: (v: 'ALL' | 'IMPACTED_ONLY') => void;
+  onEolClick?: (sw: CveMatchedSoftware) => void;
 };
 
 function FindingsContent({
   filteredSoftware, selectedIds, groupBy, showFilter, severity,
-  onToggleRow, onSelectAll, onClearAll, onGroupByChange, onShowFilterChange,
+  onToggleRow, onSelectAll, onClearAll, onGroupByChange, onShowFilterChange, onEolClick,
 }: FindingsContentProps) {
   const selectableRows = filteredSoftware.filter((row) => row.selectable);
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.software.componentId));
@@ -996,6 +1037,7 @@ function FindingsContent({
               <th>SOFTWARE</th>
               <th>APPLICABILITY</th>
               <th>IMPACT</th>
+              <th>EOL</th>
               <th>ELIGIBILITY REASON</th>
               <th>PRIORITY</th>
             </tr>
@@ -1041,6 +1083,7 @@ function FindingsContent({
                       {impactLabel(row.displayImpact)}
                     </span>
                   </td>
+                  <td><EolBadge isEol={sw.isEol} daysRemaining={sw.eolDaysRemaining} eolDate={sw.eolDate} onClick={sw.eolSlug && onEolClick ? () => onEolClick(sw) : undefined} /></td>
                   <td>
                     <strong>{row.eligibilityLabel}</strong>
                     <div className="panel-caption">{row.eligibilityDetail}</div>
@@ -1051,7 +1094,7 @@ function FindingsContent({
             })}
             {filteredSoftware.length === 0 && (
               <tr>
-                <td colSpan={7} className="cve-findings-empty-row">
+                <td colSpan={8} className="cve-findings-empty-row">
                   No finding rows are available. Mark software as Applicable and Impacted, or use exact impacted/no-patch rows, to create findings.
                 </td>
               </tr>
@@ -1256,6 +1299,9 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
   const [findingGroupBy, setFindingGroupBy] = React.useState<'ASSET' | 'SOFTWARE'>('ASSET');
   const [findingShowFilter, setFindingShowFilter] = React.useState<'ALL' | 'IMPACTED_ONLY'>('IMPACTED_ONLY');
   const [findingBusy, setFindingBusy] = React.useState(false);
+
+  // EOL detail drawer
+  const [eolDrawer, setEolDrawer] = React.useState<CveMatchedSoftware | null>(null);
 
   // Unsaved-changes guard
   const seedNotesRef = React.useRef('');
@@ -1658,6 +1704,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                   investigationNotes={investigationNotes}
                   autoNote={autoNote}
                   onNotesChange={setInvestigationNotes}
+                  onEolClick={setEolDrawer}
                 />
               </div>
             </div>
@@ -1681,6 +1728,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                   }}
                   onImpactDecision={setImpactDecision}
                   onToggleVexEvidence={toggleVexEvidence}
+                  onEolClick={setEolDrawer}
                 />
               </div>
               <DecisionSummary
@@ -1713,6 +1761,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
                 onClearAll={clearAllFindings}
                 onGroupByChange={setFindingGroupBy}
                 onShowFilterChange={setFindingShowFilter}
+                onEolClick={setEolDrawer}
               />
               <FindingConfigSidebar
                 filteredSoftware={filteredFindingSoftware}
@@ -1786,6 +1835,20 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
         }}
         onCancel={() => setPendingFindingAction(null)}
       />
+
+      {/* EOL detail drawer */}
+      {eolDrawer?.eolSlug && (
+        <EolDetailDrawer
+          slug={eolDrawer.eolSlug}
+          cycle={eolDrawer.eolCycle ?? undefined}
+          packageName={eolDrawer.packageName}
+          version={eolDrawer.version ?? undefined}
+          isEol={eolDrawer.isEol ?? undefined}
+          eolDate={eolDrawer.eolDate ?? undefined}
+          daysRemaining={eolDrawer.eolDaysRemaining ?? undefined}
+          onClose={() => setEolDrawer(null)}
+        />
+      )}
     </div>
   );
 }

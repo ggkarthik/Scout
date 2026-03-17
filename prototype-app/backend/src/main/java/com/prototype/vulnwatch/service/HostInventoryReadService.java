@@ -193,7 +193,14 @@ public class HostInventoryReadService {
                 identity == null ? null : identity.getCpe23(),
                 HostInventoryReviewEvaluator.needsVersionReview(instance),
                 HostInventoryReviewEvaluator.needsIdentityReview(instance),
-                HostInventoryReviewEvaluator.needsDiscoveryModelReview(instance)
+                HostInventoryReviewEvaluator.needsDiscoveryModelReview(instance),
+                instance.getEolSlug(),
+                instance.getEolCycle(),
+                instance.getEolDate(),
+                instance.getIsEol(),
+                instance.getEolDate() != null
+                        ? (int) java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), instance.getEolDate())
+                        : null
         );
     }
 

@@ -42,7 +42,12 @@ public class SyncRunHistoryService {
     private static final String SYNC_TYPE_GITHUB_GHCR_SBOM = "GITHUB_GHCR_SBOM";
     private static final Set<String> PROCESSING_RUN_TYPES = Set.of(
             "VEX_ASSERTION_REPAIR",
-            "VEX_ROLLOUT_BACKFILL"
+            "VEX_ROLLOUT_BACKFILL",
+            "EOL_CATALOG_REFRESH",
+            "EOL_RELEASE_REFRESH",
+            "EOL_MAPPING_RESOLVE",
+            "EOL_DENORMALIZE",
+            "EOL_FULL_REFRESH"
     );
     private static final Duration LEGACY_GITHUB_GROUP_WINDOW = Duration.ofMinutes(2);
     private static final Duration LEGACY_DEDUPE_WINDOW = Duration.ofMinutes(5);

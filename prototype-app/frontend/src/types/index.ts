@@ -63,6 +63,11 @@ export type Finding = {
   decisionState: 'AFFECTED' | 'NOT_AFFECTED' | 'FIXED' | 'UNDER_INVESTIGATION' | 'NEEDS_REVIEW';
   status: 'OPEN' | 'RESOLVED' | 'SUPPRESSED' | 'AUTO_CLOSED';
   updatedAt: string;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
 };
 
 export type Dashboard = {
@@ -532,6 +537,11 @@ export type HostSoftwareInstanceRecord = {
   needsVersionReview: boolean;
   needsIdentityReview: boolean;
   needsDiscoveryModelReview: boolean;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
 };
 
 export type HostFindingRecord = {
@@ -581,6 +591,11 @@ export type InventoryComponentRecord = {
   reviewUnmappedSoftware: boolean;
   reviewLowConfidenceAlias: boolean;
   reviewDiscoveryModel: boolean;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
 };
 
 export type InventoryComponentPage = {
@@ -898,4 +913,61 @@ export type VulnerabilityDetail = {
   lastModifiedAt?: string;
   inKev: boolean;
   relatedOpenFindings: number;
+};
+
+export type EolSummary = {
+  totalTracked: number;
+  eolCount: number;
+  nearEolCount: number;
+  supportedCount: number;
+  unknownCount: number;
+};
+
+export type ComponentEolStatus = {
+  componentId: string;
+  packageName: string;
+  ecosystem: string;
+  version?: string;
+  assetName: string;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
+};
+
+export type EolProductCatalog = {
+  slug: string;
+  displayName?: string;
+  cpeVendor?: string;
+  cpeProduct?: string;
+  purlType?: string;
+  purlNamespace?: string;
+};
+
+export type EolRelease = {
+  cycle: string;
+  releaseDate?: string;
+  eolDate?: string;
+  eolBoolean?: boolean;
+  supportEndDate?: string;
+  extendedSupportDate?: string;
+  securitySupportDate?: string;
+  latestVersion?: string;
+  latestReleaseDate?: string;
+  lts: boolean;
+  isEol: boolean;
+  isEoas?: boolean;
+  isEoes?: boolean;
+  discontinued: boolean;
+  officialSourceUrl?: string;
+  supportPhase?: string;
+};
+
+export type EolComponentPage = {
+  content: ComponentEolStatus[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
 };

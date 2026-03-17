@@ -1,23 +1,11 @@
 import React from 'react';
 import { api } from '../api/client';
 import {
-  ApplicableSoftwarePage,
   Dashboard,
   DashboardCveInventoryMap,
-  ImpactedCvePage
 } from '../types';
 import { StatCard } from '../components/StatCard';
-
-function formatDateTime(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '-';
-  }
-  return parsed.toLocaleString();
-}
+import { EolRiskWidget } from '../components/EolRiskWidget';
 
 function summarizeList(values: string[], maxItems = 3): string {
   if (!values || values.length === 0) {
@@ -43,20 +31,12 @@ function severityClassName(severity?: string): string {
   return 'severity-pill severity-low';
 }
 
-function formatEpss(value?: number): string {
-  if (value == null) {
-    return '-';
-  }
-  if (value <= 1) {
-    return `${(value * 100).toFixed(2)}%`;
-  }
-  return `${value.toFixed(2)}%`;
-}
+type DashboardPageProps = {
+  onViewEol?: () => void;
+};
 
-export function DashboardPage() {
+export function DashboardPage({ onViewEol }: DashboardPageProps) {
   const [data, setData] = React.useState<Dashboard | null>(null);
-  const [applicableSoftware, setApplicableSoftware] = React.useState<ApplicableSoftwarePage | null>(null);
-  const [impactedCves, setImpactedCves] = React.useState<ImpactedCvePage | null>(null);
   const [cveInventoryMap, setCveInventoryMap] = React.useState<DashboardCveInventoryMap | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -66,14 +46,6 @@ export function DashboardPage() {
     api.getDashboard()
       .then(d => { if (active) setData(d); })
       .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
-
-    api.listApplicableSoftware({ page: 0, size: 10 })
-      .then(p => { if (active) setApplicableSoftware(p); })
-      .catch(() => {});
-
-    api.listImpactedCves({ page: 0, size: 10 })
-      .then(p => { if (active) setImpactedCves(p); })
-      .catch(() => {});
 
     api.getCveInventoryMap(5)
       .then(m => { if (active) setCveInventoryMap(m); })
@@ -102,8 +74,6 @@ export function DashboardPage() {
   const securityScore = Math.round(Math.max(0, 100 - (avgRisk / 10) * 100));
   const analytics = data.csafVexAnalytics;
   const correlation = data.correlationEfficiency;
-  const staleTrend = analytics?.staleSuppressionsTrendLast30Days ?? [];
-  const staleTrendMax = Math.max(1, ...staleTrend.map((point) => point.count));
   const topHighRiskMap = cveInventoryMap?.topHighRisk ?? [];
   const latestMap = cveInventoryMap?.latest ?? [];
 
@@ -117,6 +87,8 @@ export function DashboardPage() {
         <StatCard title="High Confidence" value={highConfidenceExposures} caption="Confidence >= 0.80" />
         <StatCard title="Avg Confidence" value={Math.round(avgConfidence * 100)} caption="Percent confidence" />
       </div>
+
+      <EolRiskWidget onViewAll={onViewEol} />
 
       <div className="dashboard-grid">
         <section className="panel">
@@ -202,107 +174,6 @@ export function DashboardPage() {
             <div className="noise-summary-value">{correlation.nonCpeFindingsCreatedLast24Hours.toLocaleString()}</div>
           </div>
         </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Applicable Software</h3>
-          <span className="panel-caption">
-            {applicableSoftware ? `${applicableSoftware.totalItems.toLocaleString()} components with at least one inventory-correlated applicable CVE` : 'Loading...'}
-          </span>
-        </div>
-        {!applicableSoftware ? (
-          <div className="panel-caption">Loading...</div>
-        ) : applicableSoftware.items.length === 0 ? (
-          <div className="panel-caption">No inventory-correlated applicable software components found.</div>
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Software</th>
-                  <th>Asset</th>
-                  <th>Applicable</th>
-                  <th>Awaiting Exact VEX</th>
-                  <th>VEX Matched</th>
-                  <th>Confirmed Impacted</th>
-                  <th>No Patch</th>
-                  <th>Last Evaluated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {applicableSoftware.items.map((row) => (
-                  <tr key={row.componentId}>
-                    <td>
-                      <span className="mono">
-                        {row.ecosystem}:{row.packageName}@{row.version}
-                      </span>
-                    </td>
-                    <td>
-                      {row.assetName}
-                      <div className="panel-caption mono">{row.assetIdentifier}</div>
-                    </td>
-                    <td>{row.applicableCveCount.toLocaleString()}</td>
-                    <td>{row.awaitingVexCveCount.toLocaleString()}</td>
-                    <td>{row.vexMatchedCveCount.toLocaleString()}</td>
-                    <td>{row.impactedCveCount.toLocaleString()}</td>
-                    <td>{row.noPatchCveCount.toLocaleString()}</td>
-                    <td>{formatDateTime(row.lastEvaluatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Impacted CVEs</h3>
-          <span className="panel-caption">
-            {impactedCves ? `${impactedCves.totalItems.toLocaleString()} CVEs confirmed impacted or no-patch by current inventory and exact VEX-backed evaluation` : 'Loading...'}
-          </span>
-        </div>
-        {!impactedCves ? (
-          <div className="panel-caption">Loading...</div>
-        ) : impactedCves.items.length === 0 ? (
-          <div className="panel-caption">No confirmed impacted or no-patch CVEs found.</div>
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>CVE</th>
-                  <th>Severity</th>
-                  <th>CVSS</th>
-                  <th>EPSS</th>
-                  <th>KEV</th>
-                  <th>Impacted Components</th>
-                  <th>Impacted Assets</th>
-                  <th>No Patch</th>
-                  <th>Last Modified</th>
-                </tr>
-              </thead>
-              <tbody>
-                {impactedCves.items.map((row) => (
-                  <tr key={row.vulnerabilityId}>
-                    <td className="mono">{row.externalId}</td>
-                    <td>
-                      <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
-                    </td>
-                    <td>{row.cvssScore == null ? '-' : row.cvssScore.toFixed(1)}</td>
-                    <td>{formatEpss(row.epssScore)}</td>
-                    <td>{row.inKev ? 'Yes' : 'No'}</td>
-                    <td>{row.impactedComponentCount.toLocaleString()}</td>
-                    <td>{row.impactedAssetCount.toLocaleString()}</td>
-                    <td>{row.noPatchComponentCount.toLocaleString()}</td>
-                    <td>{formatDateTime(row.lastModifiedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </section>
 
       <section className="panel">
@@ -461,23 +332,6 @@ export function DashboardPage() {
             )}
           </div>
 
-          <div className="noise-trend">
-            <div className="noise-subtitle">30-Day Stale Suppression Trend</div>
-            <div className="noise-trend-bars" aria-label="30-day stale suppression trend">
-              {staleTrend.map((point) => (
-                <div
-                  key={point.key}
-                  className="noise-trend-bar noise-trend-bar-stale"
-                  title={`${point.key}: ${point.count}`}
-                  style={{ height: `${Math.max(6, (point.count / staleTrendMax) * 100)}%` }}
-                />
-              ))}
-            </div>
-            <div className="noise-trend-footer">
-              <span>{staleTrend[0]?.key ?? '-'}</span>
-              <span>{staleTrend[staleTrend.length - 1]?.key ?? '-'}</span>
-            </div>
-          </div>
         </div>
       </section>
     </div>

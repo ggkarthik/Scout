@@ -15,6 +15,7 @@ import {
   VulnerabilityIntelViewKey
 } from './pages/VulnerabilityIntelDashboardPage';
 import { VulnerabilityIntelOrgCvePage } from './pages/VulnerabilityIntelOrgCvePage';
+import { EolPage } from './pages/EolPage';
 import './styles.css';
 
 type Tab =
@@ -23,6 +24,7 @@ type Tab =
   | 'operations'
   | 'vulnerability-intelligence'
   | 'inventory'
+  | 'end-of-life'
   | 'connect'
   | 'configurations';
 type Theme = 'light' | 'dark';
@@ -34,11 +36,12 @@ const tabs: { key: Tab; label: string; navLabel: string }[] = [
   { key: 'operations', label: 'Operational Dashboard', navLabel: 'Operations' },
   { key: 'vulnerability-intelligence', label: 'Vulnerability Intelligence', navLabel: 'Vuln Intel' },
   { key: 'inventory', label: 'Inventory', navLabel: 'Inventory' },
+  { key: 'end-of-life', label: 'End-of-Life', navLabel: 'EOL' },
   { key: 'connect', label: 'Connect', navLabel: 'Connect' },
   { key: 'configurations', label: 'Configurations', navLabel: 'Config' }
 ];
 
-const primaryNavTabs: Tab[] = ['dashboard', 'findings', 'operations', 'vulnerability-intelligence', 'inventory'];
+const primaryNavTabs: Tab[] = ['dashboard', 'findings', 'operations', 'vulnerability-intelligence', 'inventory', 'end-of-life'];
 const bottomNavTabs: Tab[] = ['connect', 'configurations'];
 
 const INVENTORY_VIEW_QUERY_KEY = 'inventoryView';
@@ -118,6 +121,15 @@ function TabIcon({ tab }: { tab: Tab }) {
         <rect x="4" y="14" width="16" height="6" rx="1.5" />
         <path d="M7.5 7h.01M7.5 17h.01" />
         <path d="M11 7h6M11 17h6" />
+      </svg>
+    );
+  }
+  if (tab === 'end-of-life') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 7v5" />
+        <circle cx="12" cy="16" r="0.8" fill="currentColor" />
       </svg>
     );
   }
@@ -686,7 +698,7 @@ export default function App() {
           </div>
         </header>
 
-        {activeTab === 'dashboard' && <DashboardPage />}
+        {activeTab === 'dashboard' && <DashboardPage onViewEol={() => setActiveTab('end-of-life')} />}
         {activeTab === 'findings' && (
           <FindingsPage
             onOpenCveWorkbench={(vulnerabilityId) => {
@@ -709,6 +721,7 @@ export default function App() {
         {activeTab === 'inventory' && (
           <InventoryPage selectedView={inventoryView} />
         )}
+        {activeTab === 'end-of-life' && <EolPage />}
         {activeTab === 'connect' && <ConnectPage />}
         {activeTab === 'configurations' && <ConfigurationsPage />}
       </main>

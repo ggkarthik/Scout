@@ -22,6 +22,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -40,6 +42,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class CveDetailController {
+
+    private static final double HIGH_EPSS_EXPLOIT_THRESHOLD = 0.7; // probability of exploitation in next 30 days
 
     private final VulnerabilityRepository vulnerabilityRepository;
     private final OrgCveRecordRepository orgCveRecordRepository;
@@ -415,7 +419,7 @@ public class CveDetailController {
 
         // Signal 1: Exploit Available
         boolean exploitAvailable = vulnerability.getInKev() ||
-                (vulnerability.getEpssScore() != null && vulnerability.getEpssScore() > 0.7);
+                (vulnerability.getEpssScore() != null && vulnerability.getEpssScore() > HIGH_EPSS_EXPLOIT_THRESHOLD);
         signals.setExploitAvailable(exploitAvailable);
         signals.setExploitReason(exploitAvailable ?
                 (vulnerability.getInKev() ? "In CISA KEV Catalog" :
@@ -566,9 +570,16 @@ public class CveDetailController {
         response.setComputedImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
         response.setComputedImpactReason(state.getImpactReason());
         response.setComputedImpactReasonDetail(state.getImpactReasonDetail());
-        response.setImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
-        response.setImpactReason(state.getImpactReason());
-        response.setImpactReasonDetail(state.getImpactReasonDetail());
+        // Effective impact shown in VEX evidence panel reflects analyst override when present
+        if (state.getAnalystDisposition() != null) {
+            response.setImpactState(state.getAnalystDisposition().name());
+            response.setImpactReason(state.getAnalystReason());
+            response.setImpactReasonDetail("Analyst override");
+        } else {
+            response.setImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
+            response.setImpactReason(state.getImpactReason());
+            response.setImpactReasonDetail(state.getImpactReasonDetail());
+        }
         response.setEvidence(evidence);
         return response;
     }
@@ -636,18 +647,6 @@ public class CveDetailController {
         return dto;
     }
 
-    private FindingDto toFindingDto(Finding finding) {
-        FindingDto dto = new FindingDto();
-        dto.setId(finding.getId());
-        dto.setCveId(finding.getVulnerability().getExternalId());
-        dto.setTitle(finding.getVulnerability().getTitle());
-        dto.setState(finding.getDecisionState());
-        dto.setStatus(finding.getStatus());
-        dto.setSeverity(finding.getVulnerability().getSeverity());
-        dto.setCreatedAt(finding.getCreatedAt());
-        return dto;
-    }
-
     private MatchedSoftwareDto toMatchedSoftwareDto(ComponentVulnerabilityState state) {
         MatchedSoftwareDto dto = new MatchedSoftwareDto();
         dto.setComponentId(state.getComponent().getId());
@@ -666,9 +665,16 @@ public class CveDetailController {
         dto.setComputedImpactState(state.getImpactState());
         dto.setComputedImpactReason(state.getImpactReason());
         dto.setComputedImpactReasonDetail(state.getImpactReasonDetail());
-        dto.setImpactState(state.getImpactState());
-        dto.setImpactReason(state.getImpactReason());
-        dto.setImpactReasonDetail(state.getImpactReasonDetail());
+        // Effective impact: analyst override takes precedence over VEX-computed state
+        if (state.getAnalystDisposition() != null) {
+            dto.setImpactState(ImpactState.valueOf(state.getAnalystDisposition().name()));
+            dto.setImpactReason(state.getAnalystReason());
+            dto.setImpactReasonDetail("Analyst override");
+        } else {
+            dto.setImpactState(state.getImpactState());
+            dto.setImpactReason(state.getImpactReason());
+            dto.setImpactReasonDetail(state.getImpactReasonDetail());
+        }
         dto.setVexStatus(state.getVexStatus());
         dto.setVexProvider(state.getVexProvider());
         dto.setVexFreshness(state.getVexFreshness());
@@ -680,6 +686,19 @@ public class CveDetailController {
         dto.setEligibleForFinding(state.isEligibleForFinding());
         dto.setFindingEligibilityReason(resolveFindingEligibilityReason(state));
         dto.setFindingEligibilityDetail(resolveFindingEligibilityDetail(state));
+        dto.setEolSlug(state.getComponent().getEolSlug());
+        dto.setEolCycle(state.getComponent().getEolCycle());
+        dto.setEolDate(state.getComponent().getEolDate());
+        dto.setIsEol(state.getComponent().getIsEol());
+        LocalDate eolDate = state.getComponent().getEolDate();
+        if (eolDate != null && !Boolean.TRUE.equals(state.getComponent().getIsEol())) {
+            int daysRemaining = (int) ChronoUnit.DAYS.between(LocalDate.now(), eolDate);
+            if (daysRemaining >= 0) {
+                dto.setEolDaysRemaining(daysRemaining);
+            }
+        }
+        dto.setEolSupportEndDate(state.getComponent().getEolSupportEndDate());
+        dto.setSupportPhase(state.getComponent().getSupportPhase());
         return dto;
     }
 
@@ -718,25 +737,24 @@ public class CveDetailController {
     }
 
     private String generateReport(Vulnerability vulnerability, OrgCveRecord orgCveRecord, String format) {
-        // Simple report generation
-        StringBuilder report = new StringBuilder();
-
         if ("json".equalsIgnoreCase(format)) {
-            report.append("{\n");
-            report.append("  \"cveId\": \"").append(vulnerability.getExternalId()).append("\",\n");
-            report.append("  \"severity\": \"").append(vulnerability.getSeverity()).append("\",\n");
-            report.append("  \"cvssScore\": ").append(vulnerability.getCvssScore()).append(",\n");
-            report.append("  \"description\": \"").append(vulnerability.getDescriptionSnippet()).append("\"\n");
-            report.append("}");
-        } else {
-            // Plain text format
-            report.append("CVE Report: ").append(vulnerability.getExternalId()).append("\n\n");
-            report.append("Severity: ").append(vulnerability.getSeverity()).append("\n");
-            report.append("CVSS Score: ").append(vulnerability.getCvssScore()).append("\n");
-            report.append("Description: ").append(vulnerability.getDescriptionSnippet()).append("\n");
+            try {
+                Map<String, Object> data = new java.util.LinkedHashMap<>();
+                data.put("cveId", vulnerability.getExternalId());
+                data.put("severity", vulnerability.getSeverity());
+                data.put("cvssScore", vulnerability.getCvssScore());
+                data.put("description", vulnerability.getDescriptionSnippet());
+                return objectMapper.writeValueAsString(data);
+            } catch (Exception e) {
+                log.warn("Failed to serialize CVE report as JSON for {}", vulnerability.getExternalId(), e);
+                return "{}";
+            }
         }
-
-        return report.toString();
+        // Plain text format
+        return "CVE Report: " + vulnerability.getExternalId() + "\n\n"
+                + "Severity: " + vulnerability.getSeverity() + "\n"
+                + "CVSS Score: " + vulnerability.getCvssScore() + "\n"
+                + "Description: " + vulnerability.getDescriptionSnippet() + "\n";
     }
 
     // DTOs
@@ -821,17 +839,6 @@ public class CveDetailController {
     }
 
     @Data
-    public static class FindingDto {
-        private UUID id;
-        private String cveId;
-        private String title;
-        private FindingDecisionState state;
-        private FindingStatus status;
-        private String severity;
-        private Instant createdAt;
-    }
-
-    @Data
     public static class MatchedSoftwareDto {
         private UUID componentId;
         private UUID assetId;
@@ -861,6 +868,13 @@ public class CveDetailController {
         private boolean eligibleForFinding;
         private String findingEligibilityReason;
         private String findingEligibilityDetail;
+        private String eolSlug;
+        private String eolCycle;
+        private java.time.LocalDate eolDate;
+        private Boolean isEol;
+        private Integer eolDaysRemaining;
+        private java.time.LocalDate eolSupportEndDate;
+        private String supportPhase;
     }
 
     @Data
@@ -909,8 +923,6 @@ public class CveDetailController {
 
     @Data
     public static class CreateManualFindingRequest {
-        private String title;
-        private FindingStatus status;
         private String justification;
         private List<String> componentIds;
         private Map<String, String> componentApplicabilityDecisions;
@@ -940,7 +952,6 @@ public class CveDetailController {
         private String reason;
         private String justification;
         private Integer duration; // days
-        private Boolean requiresApproval;
     }
 
     @Data

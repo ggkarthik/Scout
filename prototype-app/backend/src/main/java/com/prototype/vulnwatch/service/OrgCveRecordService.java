@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -153,7 +154,7 @@ public class OrgCveRecordService {
 
         Map<UUID, ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow> impactByVulnerability = new HashMap<>();
         componentVulnerabilityStateRepository
-                .findImpactAggregatesByTenantIdAndVulnerabilityIds(tenant.getId(), existingVulnerabilityIds)
+                .findImpactAggregatesByTenantIdAndVulnerabilityIds(tenant.getId(), existingVulnerabilityIds, LocalDate.now().plusDays(EolConstants.NEAR_EOL_THRESHOLD_DAYS))
                 .forEach(row -> {
                     if (row.getVulnerabilityId() != null) {
                         impactByVulnerability.put(row.getVulnerabilityId(), row);
@@ -175,6 +176,7 @@ public class OrgCveRecordService {
                     applicable ? ApplicabilityState.APPLICABLE : ApplicabilityState.NOT_APPLICABLE;
             ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow agg =
                     impactByVulnerability.get(vulnerabilityId);
+            long matchedComponentCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedComponentCount();
             long applicableComponentCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getApplicableComponentCount();
             long matchedAssetCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedAssetCount();
             long noPatchComponentCount = agg == null ? 0 : agg.getNoPatchCount();
@@ -183,8 +185,9 @@ public class OrgCveRecordService {
             long unknownComponentCount = agg == null ? 0 : agg.getUnknownCount();
             long fixedComponentCount = agg == null ? 0 : agg.getFixedCount();
             long notAffectedComponentCount = agg == null ? 0 : agg.getNotImpactedCount();
-            long matchedComponentCount = applicableComponentCount;
-            long matchedSoftwareCount = applicableComponentCount;
+            long eolComponentCount = agg == null ? 0 : agg.getEolCount();
+            long eosComponentCount = agg == null ? 0 : agg.getEosCount();
+            long matchedSoftwareCount = matchedComponentCount;
             ImpactSummary impactSummary = resolveImpact(
                     applicabilityState,
                     agg
@@ -210,7 +213,9 @@ public class OrgCveRecordService {
                     fixedComponentCount,
                     noPatchComponentCount,
                     underInvestigationComponentCount,
-                    unknownComponentCount
+                    unknownComponentCount,
+                    eolComponentCount,
+                    eosComponentCount
             );
 
             OrgCveRecord record = existingByVulnerability.get(vulnerabilityId);
@@ -302,6 +307,8 @@ public class OrgCveRecordService {
         changed |= setIfChanged(record.getNoPatchComponentCount(), snapshot.noPatchComponentCount(), record::setNoPatchComponentCount);
         changed |= setIfChanged(record.getUnderInvestigationComponentCount(), snapshot.underInvestigationComponentCount(), record::setUnderInvestigationComponentCount);
         changed |= setIfChanged(record.getUnknownComponentCount(), snapshot.unknownComponentCount(), record::setUnknownComponentCount);
+        changed |= setIfChanged(record.getEolComponentCount(), snapshot.eolComponentCount(), record::setEolComponentCount);
+        changed |= setIfChanged(record.getEosComponentCount(), snapshot.eosComponentCount(), record::setEosComponentCount);
         return changed;
     }
 
@@ -330,6 +337,8 @@ public class OrgCveRecordService {
         record.setNoPatchComponentCount(0);
         record.setUnderInvestigationComponentCount(0);
         record.setUnknownComponentCount(0);
+        record.setEolComponentCount(0);
+        record.setEosComponentCount(0);
         record.setLastEvaluatedAt(now);
         record.touch();
         return record;
@@ -442,7 +451,9 @@ public class OrgCveRecordService {
             long fixedComponentCount,
             long noPatchComponentCount,
             long underInvestigationComponentCount,
-            long unknownComponentCount
+            long unknownComponentCount,
+            long eolComponentCount,
+            long eosComponentCount
     ) {
     }
 }

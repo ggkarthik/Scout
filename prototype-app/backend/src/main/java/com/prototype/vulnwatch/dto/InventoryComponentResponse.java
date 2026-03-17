@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 public record InventoryComponentResponse(
@@ -29,6 +30,11 @@ public record InventoryComponentResponse(
         boolean reviewMissingVersion,
         boolean reviewUnmappedSoftware,
         boolean reviewLowConfidenceAlias,
-        boolean reviewDiscoveryModel
+        boolean reviewDiscoveryModel,
+        String eolSlug,
+        String eolCycle,
+        LocalDate eolDate,
+        Boolean isEol,
+        Integer eolDaysRemaining
 ) {
 }

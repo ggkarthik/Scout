@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 public record HostSoftwareInstanceResponse(
@@ -24,6 +25,11 @@ public record HostSoftwareInstanceResponse(
         String cpe23,
         boolean needsVersionReview,
         boolean needsIdentityReview,
-        boolean needsDiscoveryModelReview
+        boolean needsDiscoveryModelReview,
+        String eolSlug,
+        String eolCycle,
+        LocalDate eolDate,
+        Boolean isEol,
+        Integer eolDaysRemaining
 ) {
 }

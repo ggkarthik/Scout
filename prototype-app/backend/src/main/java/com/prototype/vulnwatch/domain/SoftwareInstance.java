@@ -11,6 +11,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -95,6 +96,27 @@ public class SoftwareInstance {
 
     @Column(name = "source_system", nullable = false, length = 64)
     private String sourceSystem;
+
+    @Column(name = "eol_slug", length = 200)
+    private String eolSlug;
+
+    @Column(name = "eol_cycle", length = 100)
+    private String eolCycle;
+
+    @Column(name = "eol_date")
+    private LocalDate eolDate;
+
+    @Column(name = "is_eol")
+    private Boolean isEol;
+
+    @Column(name = "eol_support_end_date")
+    private LocalDate eolSupportEndDate;
+
+    @Column(name = "support_phase", length = 30)
+    private String supportPhase;
+
+    @Column(name = "eol_checked_at")
+    private Instant eolCheckedAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
@@ -256,6 +278,62 @@ public class SoftwareInstance {
 
     public void setSourceSystem(String sourceSystem) {
         this.sourceSystem = sourceSystem;
+    }
+
+    public String getEolSlug() {
+        return eolSlug;
+    }
+
+    public void setEolSlug(String eolSlug) {
+        this.eolSlug = eolSlug;
+    }
+
+    public String getEolCycle() {
+        return eolCycle;
+    }
+
+    public void setEolCycle(String eolCycle) {
+        this.eolCycle = eolCycle;
+    }
+
+    public LocalDate getEolDate() {
+        return eolDate;
+    }
+
+    public void setEolDate(LocalDate eolDate) {
+        this.eolDate = eolDate;
+    }
+
+    public Boolean getIsEol() {
+        return isEol;
+    }
+
+    public void setIsEol(Boolean isEol) {
+        this.isEol = isEol;
+    }
+
+    public LocalDate getEolSupportEndDate() {
+        return eolSupportEndDate;
+    }
+
+    public void setEolSupportEndDate(LocalDate eolSupportEndDate) {
+        this.eolSupportEndDate = eolSupportEndDate;
+    }
+
+    public String getSupportPhase() {
+        return supportPhase;
+    }
+
+    public void setSupportPhase(String supportPhase) {
+        this.supportPhase = supportPhase;
+    }
+
+    public Instant getEolCheckedAt() {
+        return eolCheckedAt;
+    }
+
+    public void setEolCheckedAt(Instant eolCheckedAt) {
+        this.eolCheckedAt = eolCheckedAt;
     }
 
     public Instant getCreatedAt() {

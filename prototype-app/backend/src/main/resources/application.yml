@@ -48,7 +48,7 @@ app:
     api-key: ${APP_API_KEY:change-me-in-prod}
     creator-key: ${APP_CREATOR_KEY:}
   cors:
-    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
   sbom-fetch:
     max-payload-bytes: ${SBOM_FETCH_MAX_PAYLOAD_BYTES:5242880}
     allow-user-auth-header: ${SBOM_FETCH_ALLOW_USER_AUTH_HEADER:false}
@@ -119,6 +119,17 @@ app:
     s3-bucket: ${ARCHIVE_S3_BUCKET:}
     # Local filesystem path (only used when storage-backend=filesystem)
     local-path: ${ARCHIVE_LOCAL_PATH:./data/vulnerability-archives}
+  eol:
+    # endoflife.date API integration
+    base-url: ${EOL_BASE_URL:https://endoflife.date/api/v1}
+    enabled: ${EOL_ENABLED:true}
+    min-request-interval-ms: ${EOL_MIN_REQUEST_INTERVAL_MS:200}
+    max-retries: ${EOL_MAX_RETRIES:5}
+    retry-base-backoff-ms: ${EOL_RETRY_BASE_BACKOFF_MS:2000}
+    catalog-refresh-cron: ${EOL_CATALOG_REFRESH_CRON:0 0 2 * * SUN}
+    release-refresh-cron: ${EOL_RELEASE_REFRESH_CRON:0 0 3 * * SUN}
+    resolve-mappings-cron: ${EOL_RESOLVE_MAPPINGS_CRON:0 30 3 * * SUN}
+    denormalize-cron: ${EOL_DENORMALIZE_CRON:0 0 4 * * SUN}
   cmdb:
     servicenow:
       base-url: ${CMDB_SERVICENOW_BASE_URL:}

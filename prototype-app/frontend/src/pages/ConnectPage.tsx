@@ -4,6 +4,7 @@ import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
+import { EolSourcePanel } from '../components/EolSourcePanel';
 
 type ConnectorId =
   | 'sbom-endpoint'
@@ -14,7 +15,8 @@ type ConnectorId =
   | 'ghsa-feed'
   | 'microsoft-csaf-vex'
   | 'redhat-csaf-vex'
-  | 'advisory-feed';
+  | 'advisory-feed'
+  | 'endoflife-date';
 
 type CategoryFilter = 'all' | 'inventory' | 'vulnerability';
 type ConnectView = 'sources' | 'inventory-run-queue' | 'vuln-intel-queue' | 'processing-jobs';
@@ -83,6 +85,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'Advisory Imports',
     summary: 'Import curated advisories for package and product mappings.',
     icon: '🧠'
+  },
+  {
+    id: 'endoflife-date',
+    name: 'endoflife.date EOL Feed',
+    summary: 'Fetch product lifecycle data and resolve end-of-life status across your inventory.',
+    icon: '📅'
   }
 ];
 
@@ -92,7 +100,8 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
   'ghsa-feed',
   'microsoft-csaf-vex',
   'redhat-csaf-vex',
-  'advisory-feed'
+  'advisory-feed',
+  'endoflife-date'
 ];
 
 const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
@@ -223,6 +232,14 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
           caption="Seed/import advisory records. View run history in Vuln Intel Feed Queue."
         />
       );
+  }
+  if (connectorId === 'endoflife-date') {
+    return (
+      <EolSourcePanel
+        title="endoflife.date EOL Feed"
+        caption="Trigger EOL catalog refresh and resolve component lifecycle status. Run history appears in Processing Jobs."
+      />
+    );
   }
   if (connectorId === 'servicenow-cmdb') {
     return <AssetsPage />;

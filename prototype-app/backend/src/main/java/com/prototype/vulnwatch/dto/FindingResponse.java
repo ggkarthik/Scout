@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.dto;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 public record FindingResponse(
@@ -34,6 +35,11 @@ public record FindingResponse(
         Instant lastObservedAt,
         FindingDecisionState decisionState,
         FindingStatus status,
-        Instant updatedAt
+        Instant updatedAt,
+        String eolSlug,
+        String eolCycle,
+        LocalDate eolDate,
+        Boolean isEol,
+        Integer eolDaysRemaining
 ) {
 }

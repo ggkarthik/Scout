@@ -28,6 +28,8 @@ public record OrgSpecificCveExposureRecordResponse(
         long underInvestigationComponentCount,
         long unknownComponentCount,
         long openFindings,
-        Instant lastEvaluatedAt
+        Instant lastEvaluatedAt,
+        long eolComponentCount,
+        long eosComponentCount
 ) {
 }

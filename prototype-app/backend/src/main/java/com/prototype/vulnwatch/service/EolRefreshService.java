@@ -1,0 +1,556 @@
+package com.prototype.vulnwatch.service;
+
+import com.prototype.vulnwatch.client.EolApiClient;
+import com.prototype.vulnwatch.client.EolApiClient.EolCycleData;
+import com.prototype.vulnwatch.client.EolApiClient.EolProductSummary;
+import com.prototype.vulnwatch.client.EolApiClient.EolReleaseFetchResult;
+import com.prototype.vulnwatch.domain.EolProductCatalog;
+import com.prototype.vulnwatch.domain.EolRelease;
+import com.prototype.vulnwatch.domain.SyncRun;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
+import com.prototype.vulnwatch.repo.EolReleaseRepository;
+import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
+import com.prototype.vulnwatch.repo.SyncRunRepository;
+import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.util.CpeUtil;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Scheduled service that keeps EOL data in sync with endoflife.date.
+ *
+ * Jobs (all configurable via application.yml):
+ *  1. fullCatalogRefresh  — Sunday 2am: batch-upserts all product slugs + CPE/PURL/alias metadata
+ *  2. releaseDataRefresh  — Sunday 3am: conditional fetch (If-Modified-Since) per mapped slug
+ *  3. resolveInstanceMappings — Sunday 3:30am: maps SoftwareIdentities to EOL slugs (in-memory)
+ *  4. denormalizeEolStatus — Sunday 4am: set-based UPDATE with DISTINCT ON; writes latest_supported_version
+ */
+@Service
+public class EolRefreshService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(EolRefreshService.class);
+
+    // Batch size for catalog upserts
+    private static final int CATALOG_BATCH_SIZE = 100;
+
+    private static final String CATALOG_UPSERT_SQL = """
+            INSERT INTO eol_product_catalog
+                (slug, display_name, cpe_vendor, cpe_product, purl_type, purl_namespace,
+                 aliases, last_fetched_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, now(), now(), now())
+            ON CONFLICT (slug) DO UPDATE SET
+                display_name    = COALESCE(EXCLUDED.display_name,    eol_product_catalog.display_name),
+                cpe_vendor      = COALESCE(EXCLUDED.cpe_vendor,      eol_product_catalog.cpe_vendor),
+                cpe_product     = COALESCE(EXCLUDED.cpe_product,     eol_product_catalog.cpe_product),
+                purl_type       = COALESCE(EXCLUDED.purl_type,       eol_product_catalog.purl_type),
+                purl_namespace  = COALESCE(EXCLUDED.purl_namespace,  eol_product_catalog.purl_namespace),
+                aliases         = COALESCE(EXCLUDED.aliases,         eol_product_catalog.aliases),
+                last_fetched_at = now(),
+                updated_at      = now()
+            """;
+
+    @Value("${app.eol.enabled:true}")
+    private boolean enabled;
+
+    private final EolApiClient eolApiClient;
+    private final EolProductCatalogRepository catalogRepository;
+    private final EolReleaseRepository releaseRepository;
+    private final SoftwareEolMappingRepository mappingRepository;
+    private final EolSlugResolverService slugResolverService;
+    private final JdbcTemplate jdbcTemplate;
+    private final SyncRunRepository syncRunRepository;
+    private final TaskExecutor ingestionExecutor;
+    private final OrgCveRecordService orgCveRecordService;
+    private final TenantRepository tenantRepository;
+
+    public EolRefreshService(
+            EolApiClient eolApiClient,
+            EolProductCatalogRepository catalogRepository,
+            EolReleaseRepository releaseRepository,
+            SoftwareEolMappingRepository mappingRepository,
+            EolSlugResolverService slugResolverService,
+            JdbcTemplate jdbcTemplate,
+            SyncRunRepository syncRunRepository,
+            @Qualifier("integrationQueueExecutor") TaskExecutor ingestionExecutor,
+            OrgCveRecordService orgCveRecordService,
+            TenantRepository tenantRepository) {
+        this.eolApiClient = eolApiClient;
+        this.catalogRepository = catalogRepository;
+        this.releaseRepository = releaseRepository;
+        this.mappingRepository = mappingRepository;
+        this.slugResolverService = slugResolverService;
+        this.jdbcTemplate = jdbcTemplate;
+        this.syncRunRepository = syncRunRepository;
+        this.ingestionExecutor = ingestionExecutor;
+        this.orgCveRecordService = orgCveRecordService;
+        this.tenantRepository = tenantRepository;
+    }
+
+    // -------------------------------------------------------------------------
+    // Manual trigger methods (for Connect UI)
+    // -------------------------------------------------------------------------
+
+    public SyncTriggerResponse triggerCatalogRefresh() {
+        SyncRun run = startRun("EOL_CATALOG_REFRESH");
+        ingestionExecutor.execute(() -> {
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                int count = runCatalogRefresh();
+                completeRun(run, "completed", count);
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL catalog refresh queued");
+    }
+
+    public SyncTriggerResponse triggerReleaseRefresh() {
+        SyncRun run = startRun("EOL_RELEASE_REFRESH");
+        ingestionExecutor.execute(() -> {
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                int count = runReleaseRefresh();
+                completeRun(run, "completed", count);
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL release data refresh queued");
+    }
+
+    public SyncTriggerResponse triggerMappingResolve() {
+        SyncRun run = startRun("EOL_MAPPING_RESOLVE");
+        ingestionExecutor.execute(() -> {
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                int count = runMappingResolve();
+                completeRun(run, "completed", count);
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL mapping resolution queued");
+    }
+
+    public SyncTriggerResponse triggerDenormalize() {
+        SyncRun run = startRun("EOL_DENORMALIZE");
+        ingestionExecutor.execute(() -> {
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                int count = runDenormalize();
+                completeRun(run, "completed", count);
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
+        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL denormalization queued");
+    }
+
+    public SyncTriggerResponse triggerFullRefresh() {
+        SyncRun run = startRun("EOL_FULL_REFRESH");
+        ingestionExecutor.execute(() -> {
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                int catalogCount  = runCatalogRefresh();
+                int releaseCount  = runReleaseRefresh();
+                int mappingCount  = runMappingResolve();
+                int denormCount   = runDenormalize();
+                completeRun(run, "completed", catalogCount + releaseCount + mappingCount + denormCount);
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
+        return new SyncTriggerResponse(run.getId(), run.getStatus(),
+                "EOL full refresh queued (catalog → releases → mappings → denormalize)");
+    }
+
+    private SyncRun startRun(String type) {
+        SyncRun run = new SyncRun();
+        run.setSyncType(type);
+        run.setStatus("queued");
+        return syncRunRepository.save(run);
+    }
+
+    private void completeRun(SyncRun run, String status, int updated) {
+        run.setStatus(status);
+        run.setRecordsUpdated(updated);
+        run.setCompletedAt(Instant.now());
+        syncRunRepository.save(run);
+    }
+
+    private void completeRun(SyncRun run, String status, String error) {
+        run.setStatus(status);
+        run.setErrorMessage(error);
+        run.setCompletedAt(Instant.now());
+        syncRunRepository.save(run);
+    }
+
+    // -------------------------------------------------------------------------
+    // Job 1: Full catalog refresh — batch JDBC upsert
+    // -------------------------------------------------------------------------
+
+    @Scheduled(cron = "${app.eol.catalog-refresh-cron:0 0 2 * * SUN}")
+    public void fullCatalogRefresh() {
+        if (!enabled) { LOG.debug("EOL refresh disabled; skipping catalog refresh"); return; }
+        try {
+            int count = runCatalogRefresh();
+            LOG.info("EOL catalog refresh complete — upserted {} products", count);
+        } catch (Exception e) {
+            LOG.error("EOL catalog refresh failed", e);
+        }
+    }
+
+    private int runCatalogRefresh() {
+        LOG.info("Starting EOL full catalog refresh");
+        List<EolProductSummary> products = eolApiClient.fetchAllProducts();
+        if (products.isEmpty()) {
+            throw new IllegalStateException("EOL catalog API returned 0 products — possible network or API issue");
+        }
+
+        List<Object[]> params = new ArrayList<>(products.size());
+        for (EolProductSummary product : products) {
+            if (product.slug() == null || product.slug().isBlank()) continue;
+            String[] cpe = extractCpeComponents(product.cpe());
+            String[] purl = extractPurlComponents(product.purl());
+            String aliasesStr = product.aliases() == null || product.aliases().isEmpty()
+                    ? null : String.join(",", product.aliases());
+            params.add(new Object[]{
+                    product.slug(), product.label(),
+                    cpe[0], cpe[1], purl[0], purl[1],
+                    aliasesStr
+            });
+        }
+
+        int total = 0;
+        for (int i = 0; i < params.size(); i += CATALOG_BATCH_SIZE) {
+            List<Object[]> batch = params.subList(i, Math.min(i + CATALOG_BATCH_SIZE, params.size()));
+            int[] counts = jdbcTemplate.batchUpdate(CATALOG_UPSERT_SQL, batch);
+            for (int c : counts) total += Math.max(0, c);
+        }
+        LOG.info("EOL catalog upserted {} / {} products", total, products.size());
+        return total;
+    }
+
+    // -------------------------------------------------------------------------
+    // Job 2: Release data refresh — conditional fetch using Last-Modified
+    // -------------------------------------------------------------------------
+
+    @Scheduled(cron = "${app.eol.release-refresh-cron:0 0 3 * * SUN}")
+    public void releaseDataRefresh() {
+        if (!enabled) { LOG.debug("EOL refresh disabled; skipping release data refresh"); return; }
+        try {
+            int count = runReleaseRefresh();
+            LOG.info("EOL release refresh complete — {} cycles upserted", count);
+        } catch (Exception e) {
+            LOG.error("EOL release data refresh failed", e);
+        }
+    }
+
+    private int runReleaseRefresh() {
+        LOG.info("Starting EOL release data refresh for tracked products");
+        List<String> trackedSlugs = mappingRepository.findDistinctMappedSlugs();
+
+        if (trackedSlugs.isEmpty()) {
+            trackedSlugs = catalogRepository.findSlugsByHasIdentifiers();
+            LOG.info("No mappings yet — fetching release data for {} identified catalog slugs", trackedSlugs.size());
+        }
+
+        Map<String, String> lastModifiedBySlug = catalogRepository.findAll().stream()
+                .filter(c -> c.getLastModified() != null)
+                .collect(Collectors.toMap(
+                        EolProductCatalog::getSlug,
+                        EolProductCatalog::getLastModified,
+                        (a, b) -> a));
+
+        int refreshed = 0;
+        int skipped = 0;
+        int failed = 0;
+
+        for (String slug : trackedSlugs) {
+            try {
+                String ifModifiedSince = lastModifiedBySlug.get(slug);
+                EolReleaseFetchResult result = eolApiClient.fetchProductReleasesConditional(slug, ifModifiedSince);
+                if (result.notModified()) {
+                    skipped++;
+                    continue;
+                }
+                refreshReleasesForSlug(slug, result.cycles());
+                if (result.lastModified() != null) {
+                    updateCatalogLastModified(slug, result.lastModified());
+                }
+                refreshed++;
+            } catch (Exception e) {
+                failed++;
+                LOG.warn("Failed to refresh releases for slug '{}': {}", slug, e.getMessage());
+            }
+        }
+
+        LOG.info("EOL release refresh — refreshed {}, skipped (304) {}, failed {} of {} slugs",
+                refreshed, skipped, failed, trackedSlugs.size());
+        return refreshed;
+    }
+
+    @Transactional
+    void refreshReleasesForSlug(String slug, List<EolCycleData> cycles) {
+        if (cycles == null || cycles.isEmpty()) return;
+
+        for (EolCycleData cycle : cycles) {
+            Optional<EolRelease> existing = releaseRepository.findByProductSlugAndCycle(slug, cycle.cycle());
+            EolRelease release = existing.orElseGet(EolRelease::new);
+
+            release.setProductSlug(slug);
+            release.setCycle(cycle.cycle());
+            release.setReleaseDate(cycle.releaseDate());
+            release.setEolDate(cycle.eolDate());
+            release.setEolBoolean(cycle.eolBoolean());
+            release.setSupportEndDate(cycle.supportEndDate());
+            release.setExtendedSupportDate(cycle.extendedSupportDate());
+            release.setLatestVersion(cycle.latestVersion());
+            release.setLatestReleaseDate(cycle.latestReleaseDate());
+            release.setLts(cycle.lts());
+            release.setEol(cycle.isEol());
+            release.setEoas(cycle.isEoas());
+            release.setEoes(cycle.isEoes());
+            release.setDiscontinued(cycle.discontinued());
+            release.setSecuritySupportDate(cycle.securitySupportDate());
+            release.setOfficialSourceUrl(cycle.officialSourceUrl());
+            release.setSupportPhase(computeSupportPhase(
+                    cycle.discontinued(), cycle.isEol(), cycle.isEoas(), cycle.isEoes(), cycle.lts()));
+            release.touch();
+            releaseRepository.save(release);
+        }
+    }
+
+    private void updateCatalogLastModified(String slug, String lastModified) {
+        jdbcTemplate.update(
+                "UPDATE eol_product_catalog SET last_modified = ?, last_fetched_at = now(), updated_at = now() WHERE slug = ?",
+                lastModified, slug);
+    }
+
+    // -------------------------------------------------------------------------
+    // Job 3: Resolve SoftwareIdentity → EOL slug mappings
+    // -------------------------------------------------------------------------
+
+    @Scheduled(cron = "${app.eol.resolve-mappings-cron:0 30 3 * * SUN}")
+    public void resolveInstanceMappings() {
+        if (!enabled) { LOG.debug("EOL refresh disabled; skipping mapping resolution"); return; }
+        try {
+            int count = runMappingResolve();
+            LOG.info("EOL mapping resolution complete — {} new/updated mappings", count);
+        } catch (Exception e) {
+            LOG.error("EOL mapping resolution failed", e);
+        }
+    }
+
+    private int runMappingResolve() {
+        LOG.info("Starting EOL slug mapping resolution");
+        return slugResolverService.resolveAll();
+    }
+
+    // -------------------------------------------------------------------------
+    // Job 4: Denormalize EOL status — set-based DISTINCT ON rewrite
+    // -------------------------------------------------------------------------
+
+    @Scheduled(cron = "${app.eol.denormalize-cron:0 0 4 * * SUN}")
+    public void denormalizeEolStatus() {
+        if (!enabled) { LOG.debug("EOL refresh disabled; skipping denormalization"); return; }
+        try {
+            int count = runDenormalize();
+            LOG.info("EOL denormalization complete — {} rows updated", count);
+        } catch (Exception e) {
+            LOG.error("EOL denormalization failed", e);
+        }
+    }
+
+    private int runDenormalize() {
+        LOG.info("Starting EOL status denormalization");
+        int instancesUpdated = denormalizeSoftwareInstances();
+        int componentsUpdated = denormalizeInventoryComponents();
+        LOG.info("EOL denormalization — updated {} software_instances, {} inventory_components",
+                instancesUpdated, componentsUpdated);
+        refreshOrgCveEolCounts();
+        return instancesUpdated + componentsUpdated;
+    }
+
+    private void refreshOrgCveEolCounts() {
+        try {
+            List<Tenant> tenants = tenantRepository.findAllByOrderByCreatedAtAsc();
+            for (Tenant tenant : tenants) {
+                int updated = orgCveRecordService.refreshForTenant(tenant);
+                LOG.info("EOL denormalization — refreshed org_cve_records for tenant {}: {} records updated",
+                        tenant.getId(), updated);
+            }
+        } catch (Exception e) {
+            LOG.warn("EOL denormalization — org_cve_records refresh failed: {}", e.getMessage());
+        }
+    }
+
+    // NOTE: software_instances rows are read by HostInventoryReadService (host asset detail view),
+    // not by the CVE correlation path. This denormalization is therefore NOT dead code even though
+    // inventory_components is the primary target for CVE/finding workflows.
+    private int denormalizeSoftwareInstances() {
+        // Set-based update using DISTINCT ON to pick the best-matching cycle per instance.
+        // DISTINCT ON (si2.id) ORDER BY si2.id, r.cycle DESC picks the highest cycle string,
+        // which is the best prefix match for the installed version.
+        String sql = """
+                UPDATE software_instances si
+                SET
+                    eol_slug                 = bc.eol_slug,
+                    eol_cycle                = bc.cycle,
+                    eol_date                 = bc.eol_date,
+                    is_eol                   = bc.is_eol,
+                    eol_support_end_date     = bc.support_end_date,
+                    support_phase            = bc.support_phase,
+                    latest_supported_version = bc.latest_version,
+                    eol_checked_at           = now()
+                FROM (
+                    SELECT DISTINCT ON (si2.id)
+                        si2.id           AS si_id,
+                        m.eol_slug,
+                        r.cycle,
+                        r.eol_date,
+                        r.is_eol,
+                        r.support_end_date,
+                        r.support_phase,
+                        r.latest_version
+                    FROM software_instances si2
+                    JOIN software_eol_mapping m ON m.software_identity_id = si2.software_identity_id
+                    JOIN eol_release r           ON r.product_slug = m.eol_slug
+                                                AND (   si2.normalized_version LIKE r.cycle || '%'
+                                                     OR si2.normalized_version = r.cycle)
+                    WHERE m.eol_slug IS NOT NULL
+                    ORDER BY si2.id, r.cycle DESC
+                ) bc
+                WHERE si.id = bc.si_id
+                """;
+        try {
+            return jdbcTemplate.update(sql);
+        } catch (Exception e) {
+            LOG.warn("software_instances EOL denormalization failed: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    private int denormalizeInventoryComponents() {
+        String sql = """
+                UPDATE inventory_components ic
+                SET
+                    eol_slug                 = bc.eol_slug,
+                    eol_cycle                = bc.cycle,
+                    eol_date                 = bc.eol_date,
+                    is_eol                   = bc.is_eol,
+                    eol_support_end_date     = bc.support_end_date,
+                    support_phase            = bc.support_phase,
+                    latest_supported_version = bc.latest_version,
+                    eol_checked_at           = now()
+                FROM (
+                    SELECT DISTINCT ON (ic2.id)
+                        ic2.id           AS ic_id,
+                        m.eol_slug,
+                        r.cycle,
+                        r.eol_date,
+                        r.is_eol,
+                        r.support_end_date,
+                        r.support_phase,
+                        r.latest_version
+                    FROM inventory_components ic2
+                    JOIN software_eol_mapping m ON m.software_identity_id = ic2.software_identity_id
+                    JOIN eol_release r           ON r.product_slug = m.eol_slug
+                                                AND (   ic2.normalized_version LIKE r.cycle || '%'
+                                                     OR ic2.normalized_version = r.cycle)
+                    WHERE m.eol_slug IS NOT NULL
+                    ORDER BY ic2.id, r.cycle DESC
+                ) bc
+                WHERE ic.id = bc.ic_id
+                """;
+        try {
+            return jdbcTemplate.update(sql);
+        } catch (Exception e) {
+            LOG.warn("inventory_components EOL denormalization failed: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Support phase derivation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Derives a human-readable support phase label from EOL lifecycle flags.
+     *
+     * Phase precedence (highest to lowest):
+     *  discontinued → eol → extended → lts → active
+     *
+     * "eol" is set when isEol=true OR isEoes=true (extended support also ended).
+     * "extended" means active support ended (isEoas=true) but extended is still running.
+     * "lts" means the cycle is long-term-supported and active support has not ended.
+     */
+    static String computeSupportPhase(boolean discontinued, boolean isEol,
+                                       Boolean isEoas, Boolean isEoes, boolean lts) {
+        if (discontinued)                         return "discontinued";
+        if (isEol || Boolean.TRUE.equals(isEoes)) return "eol";
+        if (Boolean.TRUE.equals(isEoas))          return "extended";
+        return lts ? "lts" : "active";
+    }
+
+    // -------------------------------------------------------------------------
+    // CPE / PURL parsing helpers for batch upsert
+    // -------------------------------------------------------------------------
+
+    /** Returns [vendor, product] from a CPE string, or [null, null] if absent or unparseable. */
+    private String[] extractCpeComponents(String cpe) {
+        if (cpe == null || cpe.isBlank()) return new String[]{null, null};
+        try {
+            CpeUtil.ParsedCpe parsed = CpeUtil.parse(cpe + ":*:*:*:*:*:*:*:*:*");
+            return new String[]{
+                    parsed.vendor().isBlank() ? null : parsed.vendor(),
+                    parsed.product().isBlank() ? null : parsed.product()
+            };
+        } catch (Exception e) {
+            return new String[]{null, null};
+        }
+    }
+
+    /** Returns [type, namespace] from a PURL string, or [null, null] if unparseable. */
+    private String[] extractPurlComponents(String purl) {
+        if (purl == null || purl.isBlank()) return new String[]{null, null};
+        try {
+            String stripped = purl.startsWith("pkg:") ? purl.substring(4) : purl;
+            int slashIdx = stripped.indexOf('/');
+            if (slashIdx < 0) {
+                return new String[]{stripped.split("@")[0].toLowerCase(Locale.ROOT), null};
+            }
+            String type = stripped.substring(0, slashIdx).toLowerCase(Locale.ROOT);
+            String remainder = stripped.substring(slashIdx + 1);
+            int nextSlash = remainder.indexOf('/');
+            String namespace = nextSlash > 0
+                    ? remainder.substring(0, nextSlash).toLowerCase(Locale.ROOT)
+                    : remainder.split("@")[0].split("#")[0].toLowerCase(Locale.ROOT);
+            return new String[]{type, namespace.isBlank() ? null : namespace};
+        } catch (Exception e) {
+            LOG.debug("Failed to parse PURL for catalog batch upsert: {}", purl);
+            return new String[]{null, null};
+        }
+    }
+}

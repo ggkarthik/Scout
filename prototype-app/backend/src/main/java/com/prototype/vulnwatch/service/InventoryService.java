@@ -190,7 +190,14 @@ public class InventoryService {
                 reviewSignals.missingVersion(),
                 reviewSignals.unmappedSoftware(),
                 reviewSignals.lowConfidenceAlias(),
-                reviewSignals.discoveryModelReview()
+                reviewSignals.discoveryModelReview(),
+                component.getEolSlug(),
+                component.getEolCycle(),
+                component.getEolDate(),
+                component.getIsEol(),
+                component.getEolDate() != null
+                        ? (int) java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), component.getEolDate())
+                        : null
         );
     }
 

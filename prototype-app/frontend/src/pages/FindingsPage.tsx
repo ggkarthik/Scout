@@ -7,6 +7,7 @@ import { MultiGroupBy, MultiGroupByOption } from '../components/MultiGroupBy';
 import { ResizableTable } from '../components/ResizableTable';
 import { StatCard } from '../components/StatCard';
 import { ColumnVisibilityToggle, ColumnDef } from '../components/ColumnVisibilityToggle';
+import { EolBadge } from '../components/EolBadge';
 
 const PAGE_SIZE = 25;
 const DEFAULT_MATCH_METHODS: string[] = [];
@@ -25,6 +26,7 @@ const FINDINGS_COLUMNS: ColumnDef[] = [
   { key: 'confidence', label: 'Confidence', defaultVisible: true },
   { key: 'match-method', label: 'Match Method', defaultVisible: true },
   { key: 'kev', label: 'KEV', defaultVisible: true },
+  { key: 'eol-status', label: 'EOL Status', defaultVisible: true },
   { key: 'first-observed', label: 'First Observed', defaultVisible: false },
   { key: 'last-observed', label: 'Last Observed', defaultVisible: false },
   { key: 'evidence', label: 'Evidence', defaultVisible: false },
@@ -719,6 +721,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                     {visibleColumns.has('confidence') && <th>Confidence</th>}
                     {visibleColumns.has('match-method') && <th>Match Method</th>}
                     {visibleColumns.has('kev') && <th>KEV</th>}
+                    {visibleColumns.has('eol-status') && <th>EOL Status</th>}
                     {visibleColumns.has('first-observed') && <th>First Observed</th>}
                     {visibleColumns.has('last-observed') && <th>Last Observed</th>}
                     {visibleColumns.has('evidence') && <th>Evidence</th>}
@@ -798,6 +801,15 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                       )}
                       {visibleColumns.has('kev') && (
                         <td>{row.inKev ? 'Yes' : 'No'}</td>
+                      )}
+                      {visibleColumns.has('eol-status') && (
+                        <td>
+                          <EolBadge
+                            isEol={row.isEol}
+                            daysRemaining={row.eolDaysRemaining}
+                            eolDate={row.eolDate}
+                          />
+                        </td>
                       )}
                       {visibleColumns.has('first-observed') && (
                         <td>{row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-'}</td>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { api } from '../api/client';
 import { ResizableTable } from '../components/ResizableTable';
+import { EolBadge } from '../components/EolBadge';
 import type { HostAssetDetail } from '../types';
 
 export const HOST_ASSET_QUERY_KEY = 'hostAssetId';
@@ -132,6 +133,7 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
                 <th>Vendor</th>
                 <th>Version</th>
                 <th>Identity</th>
+                <th>EOL Status</th>
                 <th>Review Flags</th>
                 <th>Observed</th>
               </tr>
@@ -155,6 +157,13 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
                     <td>
                       <div>{software.softwareIdentity ?? '-'}</div>
                       <div className="panel-caption mono">{software.cpe23 ?? '-'}</div>
+                    </td>
+                    <td>
+                      <EolBadge
+                        isEol={software.isEol}
+                        daysRemaining={software.eolDaysRemaining}
+                        eolDate={software.eolDate}
+                      />
                     </td>
                     <td>
                       {flags.length === 0 ? (

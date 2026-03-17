@@ -15,6 +15,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import com.prototype.vulnwatch.util.IdentityUtil;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -81,6 +82,27 @@ public class InventoryComponent {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private InventoryComponentStatus componentStatus = InventoryComponentStatus.ACTIVE;
+
+    @Column(name = "eol_slug", length = 200)
+    private String eolSlug;
+
+    @Column(name = "eol_cycle", length = 100)
+    private String eolCycle;
+
+    @Column(name = "eol_date")
+    private LocalDate eolDate;
+
+    @Column(name = "is_eol")
+    private Boolean isEol;
+
+    @Column(name = "eol_support_end_date")
+    private LocalDate eolSupportEndDate;
+
+    @Column(name = "support_phase", length = 30)
+    private String supportPhase;
+
+    @Column(name = "eol_checked_at")
+    private Instant eolCheckedAt;
 
     @Column(nullable = false)
     private Instant ingestedAt = Instant.now();
@@ -197,6 +219,62 @@ public class InventoryComponent {
 
     public void setComponentDigest(String componentDigest) {
         this.componentDigest = componentDigest;
+    }
+
+    public String getEolSlug() {
+        return eolSlug;
+    }
+
+    public void setEolSlug(String eolSlug) {
+        this.eolSlug = eolSlug;
+    }
+
+    public String getEolCycle() {
+        return eolCycle;
+    }
+
+    public void setEolCycle(String eolCycle) {
+        this.eolCycle = eolCycle;
+    }
+
+    public LocalDate getEolDate() {
+        return eolDate;
+    }
+
+    public void setEolDate(LocalDate eolDate) {
+        this.eolDate = eolDate;
+    }
+
+    public Boolean getIsEol() {
+        return isEol;
+    }
+
+    public void setIsEol(Boolean isEol) {
+        this.isEol = isEol;
+    }
+
+    public LocalDate getEolSupportEndDate() {
+        return eolSupportEndDate;
+    }
+
+    public void setEolSupportEndDate(LocalDate eolSupportEndDate) {
+        this.eolSupportEndDate = eolSupportEndDate;
+    }
+
+    public String getSupportPhase() {
+        return supportPhase;
+    }
+
+    public void setSupportPhase(String supportPhase) {
+        this.supportPhase = supportPhase;
+    }
+
+    public Instant getEolCheckedAt() {
+        return eolCheckedAt;
+    }
+
+    public void setEolCheckedAt(Instant eolCheckedAt) {
+        this.eolCheckedAt = eolCheckedAt;
     }
 
     public Instant getIngestedAt() {
