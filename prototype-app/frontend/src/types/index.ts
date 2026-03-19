@@ -320,6 +320,80 @@ export type OperationalSectionResponse<T> = {
   data: T;
 };
 
+export type OperationalQualityDomainCount = {
+  domain: string;
+  issueCount: number;
+};
+
+export type OperationalQualitySummary = {
+  generatedAt: string;
+  totalIssues: number;
+  criticalIssues: number;
+  affectsActiveFindingsCount: number;
+  newIssuesLast24h: number;
+  domainCounts: OperationalQualityDomainCount[];
+};
+
+export type OperationalQualityIssue = {
+  id: string;
+  issueKey: string;
+  domain: string;
+  issueType: string;
+  severity: string;
+  reasonCode: string;
+  title: string;
+  sourceObjectType: string;
+  sourceObjectId?: string;
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  assetType?: string;
+  sourceSystem?: string;
+  ecosystem?: string;
+  affectsActiveFindings: boolean;
+  affectedAssetCount: number;
+  affectedComponentCount: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+};
+
+export type OperationalQualityDrilldownTarget = {
+  label: string;
+  href: string;
+};
+
+export type OperationalQualitySampleRecord = {
+  label: string;
+  primaryValue: string;
+  secondaryValue?: string;
+};
+
+export type OperationalQualityIssueDetail = OperationalQualityIssue & {
+  whyThisMatters: string;
+  evidenceJson: string;
+  recommendedAction: string;
+  drilldownTargets: OperationalQualityDrilldownTarget[];
+  sampleRecords: OperationalQualitySampleRecord[];
+};
+
+export type OperationalQualityIssuePage = {
+  items: OperationalQualityIssue[];
+  page: number;
+  size: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+export type OperationalQualityFilterValues = {
+  domains: string[];
+  issueTypes: string[];
+  severities: string[];
+  assetTypes: string[];
+  sourceSystems: string[];
+  ecosystems: string[];
+};
+
 export type OperationalDashboard = {
   generatedAt: string;
   executiveHealth: OperationalExecutiveHealth;
@@ -596,6 +670,100 @@ export type InventoryComponentRecord = {
   eolDate?: string;
   isEol?: boolean;
   eolDaysRemaining?: number;
+};
+
+export type SoftwareIdentitySummary = {
+  id: string;
+  displayName: string;
+  canonicalKey: string;
+  vendor?: string;
+  product?: string;
+  normalizedKey: string;
+  assetTypes: string[];
+  ecosystems: string[];
+  sourceSystems: string[];
+  eolSlug?: string;
+  mappingConfirmed: boolean;
+  needsEolMapping: boolean;
+  assetCount: number;
+  componentCount: number;
+  versionCount: number;
+  eolComponentCount: number;
+  nearEolComponentCount: number;
+  unknownEolComponentCount: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  lastObservedAt?: string;
+};
+
+export type SoftwareIdentityPage = {
+  content: SoftwareIdentitySummary[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+};
+
+export type SoftwareIdentityVersion = {
+  version: string;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
+  assetCount: number;
+  componentCount: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  lastObservedAt?: string;
+};
+
+export type SoftwareIdentityAsset = {
+  assetId: string;
+  assetName: string;
+  assetIdentifier: string;
+  assetType: string;
+  componentId: string;
+  packageName: string;
+  ecosystem?: string;
+  version?: string;
+  sourceSystem?: string;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  lastObservedAt?: string;
+};
+
+export type SoftwareIdentityDetail = {
+  id: string;
+  displayName: string;
+  canonicalKey: string;
+  vendor?: string;
+  product?: string;
+  normalizedKey: string;
+  purl?: string;
+  cpe23?: string;
+  assetTypes: string[];
+  ecosystems: string[];
+  sourceSystems: string[];
+  eolSlug?: string;
+  mappingConfirmed: boolean;
+  needsEolMapping: boolean;
+  assetCount: number;
+  componentCount: number;
+  versionCount: number;
+  eolComponentCount: number;
+  nearEolComponentCount: number;
+  unknownEolComponentCount: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  lastObservedAt?: string;
+  versions: SoftwareIdentityVersion[];
+  assets: SoftwareIdentityAsset[];
 };
 
 export type InventoryComponentPage = {
@@ -943,6 +1111,9 @@ export type EolProductCatalog = {
   cpeProduct?: string;
   purlType?: string;
   purlNamespace?: string;
+  aliases?: string[];
+  lastModified?: string;
+  lastFetchedAt?: string;
 };
 
 export type EolRelease = {

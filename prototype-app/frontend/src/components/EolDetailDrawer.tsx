@@ -37,6 +37,7 @@ export function EolDetailDrawer({
   }, [slug]);
 
   const thisRelease = releases?.find(r => r.cycle === cycle);
+  const hasStatusContext = isEol != null || daysRemaining != null || eolDate != null;
 
   return (
     <div className="eol-drawer-overlay" onClick={onClose}>
@@ -59,16 +60,18 @@ export function EolDetailDrawer({
             </div>
             {cycle && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">Matched Cycle</span>
+                <span className="eol-drawer-label">Selected Cycle</span>
                 <span className="eol-drawer-value mono">{cycle}</span>
               </div>
             )}
-            <div className="eol-drawer-row">
-              <span className="eol-drawer-label">Status</span>
-              <span className="eol-drawer-value">
-                <EolBadge isEol={isEol} daysRemaining={daysRemaining} eolDate={eolDate} />
-              </span>
-            </div>
+            {hasStatusContext && (
+              <div className="eol-drawer-row">
+                <span className="eol-drawer-label">Status</span>
+                <span className="eol-drawer-value">
+                  <EolBadge isEol={isEol} daysRemaining={daysRemaining} eolDate={eolDate} />
+                </span>
+              </div>
+            )}
             {eolDate && (
               <div className="eol-drawer-row">
                 <span className="eol-drawer-label">EOL Date</span>

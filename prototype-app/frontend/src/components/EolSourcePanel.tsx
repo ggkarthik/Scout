@@ -48,10 +48,15 @@ const JOBS: JobDef[] = [
 
 export function EolSourcePanel({
   title = 'endoflife.date Feed',
-  caption = 'Fetch product lifecycle data and resolve EOL status across your inventory. Run history appears in Processing Jobs.'
+  caption = 'Run endoflife.date catalog, release, mapping, and denormalization jobs. Browse ingested products in the EOL tab.'
 }: Props) {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
+  const eolCatalogHref = React.useMemo(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', 'end-of-life');
+    return `${url.pathname}?${url.searchParams.toString()}`;
+  }, []);
 
   const runJob = async (job: JobDef): Promise<void> => {
     setBusy(job.key);
@@ -82,8 +87,8 @@ export function EolSourcePanel({
         <h4 className="section-title">How EOL data flows</h4>
         <div className="panel-caption">
           The EOL pipeline has 4 ordered stages. Run <strong>Full EOL Refresh</strong> to execute all stages at once,
-          or trigger individual stages to update only what is needed. Scheduled runs happen automatically every Sunday starting at 2 AM.
-          Run history is visible in <strong>Connect → Processing Jobs</strong>.
+          or trigger individual stages to update only what is needed. Scheduled stages run automatically on Sunday from 2 AM through 4 AM.
+          <strong> Connect → Processing Jobs</strong> currently shows the manual runs launched from this panel.
         </div>
 
         <div className="eol-pipeline-steps">
@@ -112,6 +117,12 @@ export function EolSourcePanel({
             {busy === job.key ? 'Running...' : job.label}
           </button>
         ))}
+        <a
+          href={eolCatalogHref}
+          className="btn btn-secondary"
+        >
+          Open EOL Catalog
+        </a>
       </div>
 
       <div className="eol-job-descriptions">

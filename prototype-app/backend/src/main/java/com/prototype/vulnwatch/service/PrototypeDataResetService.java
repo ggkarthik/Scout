@@ -124,6 +124,8 @@ public class PrototypeDataResetService {
         deletedRows.put("inventory_component_cpe_map", inventoryComponentCpeMapRepository.count());
         deletedRows.put("software_instances", tableCount("software_instances"));
         deletedRows.put("inventory_components", inventoryComponentRepository.count());
+        deletedRows.put("software_identity_summary", tableCount("software_identity_summary"));
+        deletedRows.put("quality_issue_projection", tableCount("quality_issue_projection"));
         deletedRows.put("discovery_models", tableCount("discovery_models"));
         deletedRows.put("sbom_uploads", sbomUploadRepository.count());
         deletedRows.put("ci_aliases", tableCount("ci_aliases"));
@@ -152,6 +154,8 @@ public class PrototypeDataResetService {
         truncateOrDeleteTable("inventory_component_cpe_map");
         truncateOrDeleteTable("software_instances");
         truncateOrDeleteTable("inventory_components");
+        truncateOrDeleteTable("software_identity_summary");
+        truncateOrDeleteTable("quality_issue_projection");
         truncateOrDeleteTable("discovery_models");
         truncateOrDeleteTable("sbom_uploads");
         truncateOrDeleteTable("ci_aliases");

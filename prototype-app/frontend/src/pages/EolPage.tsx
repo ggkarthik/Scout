@@ -1,161 +1,248 @@
 import React from 'react';
 import { api } from '../api/client';
-import { ComponentEolStatus, EolComponentPage, EolSummary } from '../types';
-import { EolBadge } from '../components/EolBadge';
+import { EolProductCatalog } from '../types';
 import { EolDetailDrawer } from '../components/EolDetailDrawer';
-import { NEAR_EOL_DAYS } from '../features/cve-workbench/eol-helpers';
 
-type EolFilter = 'all' | 'eol' | 'near-eol' | 'ok' | 'unknown';
+type UnresolvedMapping = {
+  vendor: string;
+  product: string;
+  displayName: string;
+  normalizedKey: string;
+};
 
 const PAGE_SIZE = 25;
 
-function filterLabel(key: EolFilter, summary: EolSummary | null): string {
-  const counts: Record<EolFilter, number | null> = {
-    all:       summary ? summary.eolCount + summary.nearEolCount + summary.supportedCount + summary.unknownCount : null,
-    eol:       summary ? summary.eolCount : null,
-    'near-eol': summary ? summary.nearEolCount : null,
-    ok:        summary ? summary.supportedCount : null,
-    unknown:   summary ? summary.unknownCount : null,
-  };
-  const labels: Record<EolFilter, string> = {
-    all:       'All',
-    eol:       'EOL',
-    'near-eol': `Near EOL ≤${NEAR_EOL_DAYS}d`,
-    ok:        'Supported',
-    unknown:   'Unknown',
-  };
-  const count = counts[key];
-  return count !== null ? `${labels[key]}  ${count.toLocaleString()}` : labels[key];
+function matchesProduct(product: EolProductCatalog, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+
+  const haystacks = [
+    product.slug,
+    product.displayName,
+    product.cpeVendor,
+    product.cpeProduct,
+    product.purlType,
+    product.purlNamespace,
+    ...(product.aliases ?? [])
+  ];
+
+  return haystacks.some(value => value?.toLowerCase().includes(needle));
+}
+
+function formatAliases(aliases?: string[]): string {
+  if (!aliases || aliases.length === 0) {
+    return '-';
+  }
+  if (aliases.length <= 3) {
+    return aliases.join(', ');
+  }
+  return `${aliases.slice(0, 3).join(', ')} +${aliases.length - 3} more`;
+}
+
+function formatInstant(value?: string): string {
+  if (!value) {
+    return '-';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+}
+
+function formatIdentifier(primary?: string, secondary?: string): string {
+  if (!primary && !secondary) {
+    return '-';
+  }
+  if (primary && secondary) {
+    return `${primary}/${secondary}`;
+  }
+  return primary ?? secondary ?? '-';
 }
 
 export function EolPage() {
-  const [filter, setFilter] = React.useState<EolFilter>('all');
-  const [page, setPage]     = React.useState(0);
-  const [data, setData]     = React.useState<EolComponentPage | null>(null);
-  const [summary, setSummary] = React.useState<EolSummary | null>(null);
+  const [products, setProducts] = React.useState<EolProductCatalog[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError]   = React.useState<string | null>(null);
-  const [drawer, setDrawer] = React.useState<ComponentEolStatus | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState('');
+  const [page, setPage] = React.useState(0);
+  const [drawer, setDrawer] = React.useState<EolProductCatalog | null>(null);
 
-  const [unresolvedList, setUnresolvedList] = React.useState<
-    Array<{ vendor: string; product: string; displayName: string; normalizedKey: string }> | null
-  >(null);
+  const [unresolvedList, setUnresolvedList] = React.useState<UnresolvedMapping[] | null>(null);
   const [confirmSlug, setConfirmSlug] = React.useState<Record<string, string>>({});
   const [unresolvedOpen, setUnresolvedOpen] = React.useState(false);
 
-  // Load summary counts once (drives filter tab badges)
-  React.useEffect(() => {
-    api.getEolSummary()
-      .then(s => setSummary(s))
-      .catch(() => {});
-  }, []);
-
-  // Load table data whenever filter or page changes
-  React.useEffect(() => {
-    let active = true;
+  const loadProducts = React.useCallback(() => {
     setLoading(true);
     setError(null);
-    api.getEolComponentStatuses({ filter: filter === 'all' ? undefined : filter, page, size: PAGE_SIZE })
-      .then(d => { if (active) { setData(d); setLoading(false); } })
-      .catch(e => { if (active) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); } });
-    return () => { active = false; };
-  }, [filter, page]);
+    api.listEolProducts()
+      .then(items => {
+        setProducts(items);
+        setLoading(false);
+      })
+      .catch(e => {
+        setError(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
+  }, []);
 
-  // Load unresolved mappings once
-  React.useEffect(() => {
+  const loadUnresolvedMappings = React.useCallback(() => {
     api.listEolUnresolvedMappings()
       .then(list => setUnresolvedList(list))
       .catch(() => {});
   }, []);
 
-  function handleFilterChange(newFilter: EolFilter) {
-    setFilter(newFilter);
+  React.useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  React.useEffect(() => {
+    loadUnresolvedMappings();
+  }, [loadUnresolvedMappings]);
+
+  React.useEffect(() => {
     setPage(0);
-  }
+  }, [query]);
+
+  const filteredProducts = React.useMemo(
+    () => products.filter(product => matchesProduct(product, query)),
+    [products, query]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const activePage = Math.min(page, totalPages - 1);
+  const pageItems = React.useMemo(
+    () => filteredProducts.slice(activePage * PAGE_SIZE, activePage * PAGE_SIZE + PAGE_SIZE),
+    [activePage, filteredProducts]
+  );
+
+  React.useEffect(() => {
+    if (page !== activePage) {
+      setPage(activePage);
+    }
+  }, [activePage, page]);
+
+  const catalogStats = React.useMemo(() => ({
+    products: products.length,
+    cpeMapped: products.filter(product => Boolean(product.cpeVendor || product.cpeProduct)).length,
+    purlMapped: products.filter(product => Boolean(product.purlType || product.purlNamespace)).length,
+    aliases: products.filter(product => (product.aliases?.length ?? 0) > 0).length,
+    fetched: products.filter(product => Boolean(product.lastFetchedAt)).length
+  }), [products]);
 
   function exportCsv() {
-    if (!data) return;
-    const header = 'Component,Ecosystem,Version,Asset,EOL Slug,Cycle,EOL Date,Status,Days Remaining';
-    const rows = data.content.map(r =>
+    const header = 'Display Name,Slug,CPE Vendor,CPE Product,PURL Type,PURL Namespace,Aliases,Last Modified,Last Fetched At';
+    const rows = filteredProducts.map(product =>
       [
-        r.packageName,
-        r.ecosystem,
-        r.version ?? '',
-        r.assetName,
-        r.eolSlug ?? '',
-        r.eolCycle ?? '',
-        r.eolDate ?? '',
-        r.isEol === true ? 'EOL' : r.isEol === false ? 'Supported' : 'Unknown',
-        r.eolDaysRemaining ?? ''
-      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')
+        product.displayName ?? '',
+        product.slug,
+        product.cpeVendor ?? '',
+        product.cpeProduct ?? '',
+        product.purlType ?? '',
+        product.purlNamespace ?? '',
+        (product.aliases ?? []).join('|'),
+        product.lastModified ?? '',
+        product.lastFetchedAt ?? ''
+      ].map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')
     );
+
     const csv = [header, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = 'eol-components.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'eol-product-catalog.csv';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
     setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
   async function handleConfirmMapping(normalizedKey: string) {
     const slug = confirmSlug[normalizedKey];
-    if (!slug?.trim()) return;
+    if (!slug?.trim()) {
+      return;
+    }
+
     try {
       await api.confirmEolMapping(normalizedKey, slug.trim());
-      setUnresolvedList(prev => prev?.filter(i => i.normalizedKey !== normalizedKey) ?? null);
+      setConfirmSlug(prev => {
+        const next = { ...prev };
+        delete next[normalizedKey];
+        return next;
+      });
+      loadUnresolvedMappings();
     } catch (e) {
       alert(`Failed to confirm mapping: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  const filterKeys: EolFilter[] = ['all', 'eol', 'near-eol', 'ok', 'unknown'];
-
-  const emptyMessages: Record<EolFilter, string> = {
-    all:       'No components in inventory.',
-    eol:       'No end-of-life components found.',
-    'near-eol': 'No components approaching end of life within 90 days.',
-    ok:        'No actively supported components found.',
-    unknown:   'All components have resolved EOL mappings.',
-  };
-
   return (
     <div className="page-grid">
-
-      {/* ── Main panel ── */}
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h3>End-of-Life Components</h3>
+            <h3>End-of-Life Catalog</h3>
             <span className="panel-caption">
-              Inventory components grouped by lifecycle status. Use filters to focus a category.
+              Raw endoflife.date products ingested into VulnWatch. Open a product to inspect its release cycles and source metadata.
             </span>
           </div>
           <button
             type="button"
             className="btn btn-secondary"
             onClick={exportCsv}
-            disabled={!data || data.content.length === 0}
+            disabled={filteredProducts.length === 0}
           >
             Export CSV
           </button>
         </div>
 
-        {/* Category filter tabs with counts */}
-        <div className="eol-filter-tabs">
-          {filterKeys.map(key => (
-            <button
-              key={key}
-              type="button"
-              className={`eol-filter-tab${filter === key ? ' eol-filter-tab--active' : ''} eol-filter-tab--${key === 'near-eol' ? 'near-eol' : key}`}
-              onClick={() => handleFilterChange(key)}
-            >
-              {filterLabel(key, summary)}
-            </button>
-          ))}
+        <div className="ingestion-summary-grid">
+          <div className="summary-card">
+            <strong>Products</strong>
+            <span>{catalogStats.products.toLocaleString()}</span>
+            <span className="panel-caption">Catalog slugs stored from the feed.</span>
+          </div>
+          <div className="summary-card">
+            <strong>CPE Tagged</strong>
+            <span>{catalogStats.cpeMapped.toLocaleString()}</span>
+            <span className="panel-caption">Entries with vendor or product CPE metadata.</span>
+          </div>
+          <div className="summary-card">
+            <strong>PURL Tagged</strong>
+            <span>{catalogStats.purlMapped.toLocaleString()}</span>
+            <span className="panel-caption">Entries with package-url identifiers.</span>
+          </div>
+          <div className="summary-card">
+            <strong>Aliases</strong>
+            <span>{catalogStats.aliases.toLocaleString()}</span>
+            <span className="panel-caption">Products carrying ingested alias hints.</span>
+          </div>
+          <div className="summary-card">
+            <strong>Fetched</strong>
+            <span>{catalogStats.fetched.toLocaleString()}</span>
+            <span className="panel-caption">Entries with recorded fetch timestamps.</span>
+          </div>
+        </div>
+
+        <div className="toolbar eol-catalog-toolbar">
+          <label className="eol-catalog-search">
+            <span className="panel-caption">Search catalog</span>
+            <input
+              type="text"
+              className="filter-input"
+              placeholder="slug, display name, alias, CPE, or PURL"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+            />
+          </label>
+          <span className="panel-caption">
+            {filteredProducts.length.toLocaleString()} matching products
+          </span>
         </div>
 
         {error && (
@@ -172,39 +259,63 @@ export function EolPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Component</th>
-                    <th>Version</th>
-                    <th>Asset</th>
-                    <th>EOL Product</th>
-                    <th>Cycle</th>
-                    <th>EOL Date</th>
-                    <th>Status</th>
+                    <th>Product</th>
+                    <th>Slug</th>
+                    <th>Identifiers</th>
+                    <th>Aliases</th>
+                    <th>Sync Metadata</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {!data || data.content.length === 0 ? (
+                  {pageItems.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '32px 0' }}>
-                        <span className="panel-caption">{emptyMessages[filter]}</span>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '32px 0' }}>
+                        <span className="panel-caption">
+                          {query.trim().length > 0 ? 'No products matched your search.' : 'No EOL products have been ingested yet.'}
+                        </span>
                       </td>
                     </tr>
-                  ) : data.content.map(row => (
-                    <tr key={row.componentId}>
+                  ) : pageItems.map(product => (
+                    <tr key={product.slug}>
                       <td>
-                        <span className="mono">{row.ecosystem}:{row.packageName}</span>
+                        <div>{product.displayName || product.slug}</div>
+                        {product.displayName && product.displayName !== product.slug && (
+                          <span className="panel-caption mono">{product.slug}</span>
+                        )}
                       </td>
-                      <td className="mono">{row.version ?? '-'}</td>
-                      <td>{row.assetName}</td>
-                      <td className="mono">{row.eolSlug ?? '-'}</td>
-                      <td className="mono">{row.eolCycle ?? '-'}</td>
-                      <td>{row.eolDate ?? '-'}</td>
+                      <td className="mono">{product.slug}</td>
                       <td>
-                        <EolBadge
-                          isEol={row.isEol}
-                          daysRemaining={row.eolDaysRemaining}
-                          eolDate={row.eolDate}
-                          onClick={row.eolSlug ? () => setDrawer(row) : undefined}
-                        />
+                        <div className="eol-catalog-meta">
+                          <span className="panel-caption">CPE</span>
+                          <span className="mono">{formatIdentifier(product.cpeVendor, product.cpeProduct)}</span>
+                        </div>
+                        <div className="eol-catalog-meta">
+                          <span className="panel-caption">PURL</span>
+                          <span className="mono">{formatIdentifier(product.purlType, product.purlNamespace)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="eol-catalog-aliases">{formatAliases(product.aliases)}</span>
+                      </td>
+                      <td>
+                        <div className="eol-catalog-meta">
+                          <span className="panel-caption">Last fetched</span>
+                          <span>{formatInstant(product.lastFetchedAt)}</span>
+                        </div>
+                        <div className="eol-catalog-meta">
+                          <span className="panel-caption">Last modified</span>
+                          <span className="mono">{product.lastModified || '-'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setDrawer(product)}
+                        >
+                          View Cycles
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -212,25 +323,25 @@ export function EolPage() {
               </table>
             </div>
 
-            {data && data.totalPages > 1 && (
+            {filteredProducts.length > PAGE_SIZE && (
               <div className="pagination-row">
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  disabled={page === 0}
-                  onClick={() => setPage(p => p - 1)}
+                  disabled={activePage === 0}
+                  onClick={() => setPage(current => current - 1)}
                 >
                   Previous
                 </button>
                 <span className="panel-caption">
-                  Page {data.number + 1} of {data.totalPages}
-                  {' · '}{data.totalElements.toLocaleString()} components
+                  Page {activePage + 1} of {totalPages}
+                  {' · '}{filteredProducts.length.toLocaleString()} products
                 </span>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  disabled={page >= data.totalPages - 1}
-                  onClick={() => setPage(p => p + 1)}
+                  disabled={activePage >= totalPages - 1}
+                  onClick={() => setPage(current => current + 1)}
                 >
                   Next
                 </button>
@@ -240,16 +351,15 @@ export function EolPage() {
         )}
       </section>
 
-      {/* ── Unresolved mappings (collapsible) ── */}
       {unresolvedList && unresolvedList.length > 0 && (
         <section className="panel">
           <button
             type="button"
             className="eol-unresolved-toggle"
-            onClick={() => setUnresolvedOpen(o => !o)}
+            onClick={() => setUnresolvedOpen(open => !open)}
           >
             <span>
-              Unresolved Mappings
+              Mapping Review
               <span className="eol-unresolved-badge">{unresolvedList.length}</span>
             </span>
             <span className="panel-caption">
@@ -260,7 +370,7 @@ export function EolPage() {
           {unresolvedOpen && (
             <>
               <p className="panel-caption" style={{ margin: '0 0 12px' }}>
-                These software identities have no endoflife.date match. Enter the correct slug and confirm to resolve.
+                These normalized software identities still need an endoflife.date slug. Confirming them keeps Org-CVE and matched software EOL signals accurate.
               </p>
               <div className="table-scroll">
                 <table>
@@ -268,6 +378,7 @@ export function EolPage() {
                     <tr>
                       <th>Software</th>
                       <th>Vendor</th>
+                      <th>Normalized Key</th>
                       <th>EOL Slug</th>
                       <th></th>
                     </tr>
@@ -277,14 +388,18 @@ export function EolPage() {
                       <tr key={item.normalizedKey}>
                         <td>{item.displayName}</td>
                         <td className="mono">{item.vendor || '-'}</td>
+                        <td className="mono">{item.normalizedKey}</td>
                         <td>
                           <input
                             type="text"
                             className="filter-input"
                             placeholder="e.g. ubuntu, python, java"
                             value={confirmSlug[item.normalizedKey] ?? ''}
-                            onChange={e => setConfirmSlug(prev => ({ ...prev, [item.normalizedKey]: e.target.value }))}
-                            style={{ width: '160px' }}
+                            onChange={event => setConfirmSlug(prev => ({
+                              ...prev,
+                              [item.normalizedKey]: event.target.value
+                            }))}
+                            style={{ width: '180px' }}
                           />
                         </td>
                         <td>
@@ -307,15 +422,12 @@ export function EolPage() {
         </section>
       )}
 
-      {drawer && drawer.eolSlug && (
+      {drawer && (
         <EolDetailDrawer
-          slug={drawer.eolSlug}
-          cycle={drawer.eolCycle}
-          packageName={`${drawer.ecosystem}:${drawer.packageName}`}
-          version={drawer.version}
-          isEol={drawer.isEol}
-          eolDate={drawer.eolDate}
-          daysRemaining={drawer.eolDaysRemaining}
+          slug={drawer.slug}
+          packageName={drawer.displayName && drawer.displayName !== drawer.slug
+            ? `${drawer.displayName} (${drawer.slug})`
+            : drawer.slug}
           onClose={() => setDrawer(null)}
         />
       )}

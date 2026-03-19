@@ -12,7 +12,9 @@ import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.data.domain.Page;
@@ -32,18 +34,21 @@ public class EolService {
     private final SoftwareEolMappingRepository mappingRepository;
     private final SoftwareIdentityRepository identityRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final EolRefreshService eolRefreshService;
 
     public EolService(
             EolProductCatalogRepository catalogRepository,
             EolReleaseRepository releaseRepository,
             SoftwareEolMappingRepository mappingRepository,
             SoftwareIdentityRepository identityRepository,
-            JdbcTemplate jdbcTemplate) {
+            JdbcTemplate jdbcTemplate,
+            EolRefreshService eolRefreshService) {
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
         this.mappingRepository = mappingRepository;
         this.identityRepository = identityRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.eolRefreshService = eolRefreshService;
     }
 
     // -------------------------------------------------------------------------
@@ -146,6 +151,12 @@ public class EolService {
 
     public List<EolProductCatalogDto> listProducts() {
         return catalogRepository.findAll().stream()
+                .sorted(Comparator.comparing(
+                        (EolProductCatalog catalog) -> catalog.getDisplayName() == null || catalog.getDisplayName().isBlank()
+                                ? catalog.getSlug()
+                                : catalog.getDisplayName(),
+                        String.CASE_INSENSITIVE_ORDER
+                ).thenComparing(EolProductCatalog::getSlug, String.CASE_INSENSITIVE_ORDER))
                 .map(this::toCatalogDto)
                 .toList();
     }
@@ -183,11 +194,13 @@ public class EolService {
         SoftwareEolMapping mapping = existing.orElseGet(SoftwareEolMapping::new);
         mapping.setNormalizedKey(request.normalizedKey());
         mapping.setEolSlug(request.eolSlug());
+        attachIdentityIfUnique(mapping, request.normalizedKey());
         mapping.setMatchConfidence("MANUAL");
         mapping.setMatchMethod("MANUAL");
         mapping.setConfirmed(true);
         mapping.touch();
-        mappingRepository.save(mapping);
+        mappingRepository.saveAndFlush(mapping);
+        eolRefreshService.refreshConfirmedMapping(request.normalizedKey());
     }
 
     public List<SoftwareIdentity> listUnresolvedIdentities() {
@@ -217,7 +230,42 @@ public class EolService {
                 catalog.getCpeVendor(),
                 catalog.getCpeProduct(),
                 catalog.getPurlType(),
-                catalog.getPurlNamespace()
+                catalog.getPurlNamespace(),
+                catalog.getAliasesList(),
+                catalog.getLastModified(),
+                catalog.getLastFetchedAt()
         );
+    }
+
+    private void attachIdentityIfUnique(SoftwareEolMapping mapping, String normalizedKey) {
+        String[] parts = splitNormalizedKey(normalizedKey);
+        if (parts == null) {
+            mapping.setSoftwareIdentityId(null);
+            return;
+        }
+
+        List<SoftwareIdentity> matches = identityRepository.findAllByVendorIgnoreCaseAndProductIgnoreCase(parts[0], parts[1]);
+        if (matches.size() == 1) {
+            mapping.setSoftwareIdentityId(matches.get(0).getId());
+            return;
+        }
+
+        mapping.setSoftwareIdentityId(null);
+    }
+
+    private String[] splitNormalizedKey(String normalizedKey) {
+        if (normalizedKey == null || normalizedKey.isBlank()) {
+            return null;
+        }
+        int separator = normalizedKey.indexOf("::");
+        if (separator < 0) {
+            return null;
+        }
+        String vendor = normalizedKey.substring(0, separator).trim().toLowerCase(Locale.ROOT);
+        String product = normalizedKey.substring(separator + 2).trim().toLowerCase(Locale.ROOT);
+        if (product.isBlank()) {
+            return null;
+        }
+        return new String[]{vendor, product};
     }
 }

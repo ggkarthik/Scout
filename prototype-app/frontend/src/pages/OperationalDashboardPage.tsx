@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
+import { OperationsQualityPage } from './OperationsQualityPage';
 
 type ErrorBoundaryState = { error: Error | null };
 
@@ -55,64 +56,73 @@ import {
 import { StatCard } from '../components/StatCard';
 
 export type OperationsViewKey =
-  | 'overview'
-  | 'ingestion'
-  | 'normalization'
-  | 'correlation'
-  | 'lifecycle'
-  | 'read-path'
-  | 'freshness'
-  | 'catalog'
-  | 'slo';
+  | 'quality'
+  | 'pipeline'
+  | 'platform-health';
 
 export const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string }> = [
-  { key: 'overview', label: 'Dashboard' },
-  { key: 'ingestion', label: 'Ingestion' },
-  { key: 'normalization', label: 'Normalization' },
-  { key: 'correlation', label: 'Correlation' },
-  { key: 'lifecycle', label: 'Noise & Lifecycle' },
-  { key: 'read-path', label: 'API Read-Path' },
-  { key: 'freshness', label: 'Freshness & Drift' },
-  { key: 'catalog', label: 'Metric Catalog' },
-  { key: 'slo', label: 'SLO Status' }
+  { key: 'quality', label: 'Quality' },
+  { key: 'pipeline', label: 'Pipeline' },
+  { key: 'platform-health', label: 'Platform Health' }
 ];
 
 const LEGACY_VIEW_ALIASES: Record<string, OperationsViewKey> = {
-  dashboard: 'overview',
-  'ingestion-efficiency': 'ingestion',
-  'normalization-quality': 'normalization',
-  'correlation-effectiveness': 'correlation',
-  'noise-lifecycle': 'lifecycle',
-  noise: 'lifecycle',
-  'api-read-path': 'read-path',
-  readPath: 'read-path',
-  'freshness-drift': 'freshness',
-  'metric-catalog': 'catalog'
+  dashboard: 'pipeline',
+  overview: 'pipeline',
+  quality: 'quality',
+  pipeline: 'pipeline',
+  'ingestion-efficiency': 'pipeline',
+  ingestion: 'pipeline',
+  'normalization-quality': 'pipeline',
+  normalization: 'pipeline',
+  'correlation-effectiveness': 'pipeline',
+  correlation: 'pipeline',
+  'noise-lifecycle': 'pipeline',
+  noise: 'pipeline',
+  lifecycle: 'pipeline',
+  freshness: 'pipeline',
+  'freshness-drift': 'pipeline',
+  'platform-health': 'platform-health',
+  'api-read-path': 'platform-health',
+  readPath: 'platform-health',
+  'metric-catalog': 'platform-health',
+  catalog: 'platform-health',
+  slo: 'platform-health'
 };
 
 export function normalizeOperationsView(value: string | null | undefined): OperationsViewKey {
   if (!value) {
-    return 'overview';
+    return 'pipeline';
   }
   if (OPERATIONS_NAV_ITEMS.some((item) => item.key === value)) {
     return value as OperationsViewKey;
   }
-  return LEGACY_VIEW_ALIASES[value] ?? 'overview';
+  return LEGACY_VIEW_ALIASES[value] ?? 'pipeline';
 }
 
 type OperationalDashboardPageProps = {
   selectedView: OperationsViewKey;
 };
 
-const SECTION_DESCRIPTIONS: Record<Exclude<OperationsViewKey, 'overview'>, string> = {
-  ingestion: 'SBOM and sync throughput, success rates, and source-by-source run volume.',
-  normalization: 'Coverage of normalized names, versions, identities, and model resolution.',
-  correlation: 'Finding confidence, selected match methods, and workflow mix.',
-  lifecycle: 'False-positive filtering, lifecycle behavior, and reopen patterns.',
-  'read-path': 'API latency, summary-read-model health, and cache behavior.',
-  freshness: 'Source staleness, normalization drift, and fallback drift over time.',
-  catalog: 'Metric definitions tracked by the operations workspace.',
-  slo: 'Service level objective compliance for ingestion, queue depth, and queue staleness.'
+const SECTION_DESCRIPTIONS: Record<OperationsViewKey, string> = {
+  quality: 'Cross-domain quality exceptions routed back into the owner workflows.',
+  pipeline: 'End-to-end pipeline health across ingestion, normalization, correlation, noise, and freshness.',
+  'platform-health': 'API read-path, summary-model readiness, and SLO compliance for the operations stack.'
+};
+
+type PipelinePayload = {
+  overview: OperationalSectionResponse<OperationalExecutiveHealth>;
+  ingestion: OperationalSectionResponse<OperationalIngestionEfficiency>;
+  normalization: OperationalSectionResponse<OperationalNormalizationQuality>;
+  correlation: OperationalSectionResponse<OperationalCorrelationEffectiveness>;
+  lifecycle: OperationalSectionResponse<OperationalNoiseLifecycle>;
+  freshness: OperationalSectionResponse<OperationalFreshnessDrift>;
+};
+
+type PlatformHealthPayload = {
+  readPath: OperationalSectionResponse<OperationalApiReadPath>;
+  slo: SloStatus;
+  catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
 };
 
 function formatPercent(value: number): string {
@@ -599,51 +609,183 @@ function renderSlo(data: SloStatus) {
   );
 }
 
+function renderPipeline(payload: PipelinePayload) {
+  const overview = payload.overview.data;
+  const ingestion = payload.ingestion.data;
+  const normalization = payload.normalization.data;
+  const correlation = payload.correlation.data;
+  const freshness = payload.freshness.data;
+
+  return (
+    <div className="page-grid">
+      {overview ? (
+        <div className="stats-grid">
+          <StatCard title="Ingestion Success (24h)" value={Math.round(overview.ingestionSuccessRateLast24h)} caption="Percent" />
+          <StatCard title="Normalization Coverage" value={Math.round(overview.normalizationCoveragePercent)} caption="Percent" />
+          <StatCard title="Noise Reduction" value={Math.round(overview.correlationNoiseReductionPercent)} caption="Percent filtered" />
+          <StatCard title="Open Findings" value={correlation?.openFindings ?? 0} />
+          <StatCard title="Stale Sources" value={freshness?.staleSourceCount ?? 0} tone={(freshness?.staleSourceCount ?? 0) > 0 ? 'critical' : undefined} />
+        </div>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Pipeline Overview</h3>
+          <span className="panel-caption">{formatGeneratedAt(payload.overview.generatedAt)}</span>
+        </div>
+        <div className="noise-summary-grid">
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">What this view is for</div>
+            <div className="noise-summary-value">{SECTION_DESCRIPTIONS.pipeline}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Use Quality for</div>
+            <div className="noise-summary-value">Investigating exceptions, root-cause queues, and routing into owner workflows.</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Ingestion volume</div>
+            <div className="noise-summary-value">{(ingestion?.recordsFetchedLast24h ?? 0).toLocaleString()} records fetched in the last 24 hours.</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Current confidence</div>
+            <div className="noise-summary-value">{formatPercent(correlation?.highConfidenceAffectedRatePercent ?? 0)} high-confidence affected decisions.</div>
+          </div>
+        </div>
+      </section>
+
+      {renderIngestion(payload.ingestion)}
+      {renderNormalization(payload.normalization)}
+      {renderCorrelation(payload.correlation)}
+      {renderLifecycle(payload.lifecycle)}
+      {renderFreshness(payload.freshness)}
+    </div>
+  );
+}
+
+function renderPlatformHealth(payload: PlatformHealthPayload) {
+  const readPath = payload.readPath.data;
+  const sloItems = payload.slo?.slos ?? [];
+
+  return (
+    <div className="page-grid">
+      {readPath ? (
+        <div className="stats-grid">
+          <StatCard title="Summary Coverage" value={Math.round(readPath.summaryCoveragePercent)} caption="Percent" />
+          <StatCard
+            title="Summary Model"
+            value={readPath.summaryReadModelReady ? 1 : 0}
+            caption={readPath.summaryReadModelReady ? 'Ready' : 'Rebuilding'}
+            tone={readPath.summaryReadModelReady ? undefined : 'critical'}
+          />
+          <StatCard title="Cache Hit Ratio" value={Math.round(readPath.filterCacheHitRatioPercent)} caption="Percent" />
+          <StatCard title="Failing SLOs" value={sloItems.filter((item) => !item.compliant).length} tone={sloItems.some((item) => !item.compliant) ? 'critical' : undefined} />
+        </div>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Platform Health Overview</h3>
+          <span className="panel-caption">{formatGeneratedAt(payload.readPath.generatedAt)}</span>
+        </div>
+        <div className="noise-summary-grid">
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">What this view is for</div>
+            <div className="noise-summary-value">{SECTION_DESCRIPTIONS['platform-health']}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Read-path health</div>
+            <div className="noise-summary-value">{readPath?.summaryReadModelReady ? 'Summary read model is ready for serving UI workflows.' : 'Summary read model is rebuilding or degraded.'}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">SLO status</div>
+            <div className="noise-summary-value">{payload.slo?.overallCompliant ? 'All tracked SLOs are currently compliant.' : 'One or more tracked SLOs are currently failing.'}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Advanced reference</div>
+            <div className="noise-summary-value">Metric Catalog is retained below as reference, not as a separate workflow tab.</div>
+          </div>
+        </div>
+      </section>
+
+      {renderReadPath(payload.readPath)}
+      {renderSlo(payload.slo)}
+      {renderCatalog(payload.catalog)}
+    </div>
+  );
+}
+
 async function loadOperationsView(selectedView: OperationsViewKey): Promise<unknown> {
   switch (selectedView) {
-    case 'overview':
-      return api.getOperationalOverview();
-    case 'ingestion':
-      return api.getOperationalIngestionEfficiency();
-    case 'normalization':
-      return api.getOperationalNormalizationQuality();
-    case 'correlation':
-      return api.getOperationalCorrelationEffectiveness();
-    case 'lifecycle':
-      return api.getOperationalNoiseLifecycle();
-    case 'read-path':
-      return api.getOperationalApiReadPath();
-    case 'freshness':
-      return api.getOperationalFreshnessDrift();
-    case 'catalog':
-      return api.getOperationalMetricCatalog();
-    case 'slo':
-      return api.getSloStatus();
+    case 'quality':
+      return null;
+    case 'pipeline': {
+      const [overview, ingestion, normalization, correlation, lifecycle, freshness] = await Promise.all([
+        api.getOperationalOverview(),
+        api.getOperationalIngestionEfficiency(),
+        api.getOperationalNormalizationQuality(),
+        api.getOperationalCorrelationEffectiveness(),
+        api.getOperationalNoiseLifecycle(),
+        api.getOperationalFreshnessDrift()
+      ]);
+      return {
+        overview,
+        ingestion,
+        normalization,
+        correlation,
+        lifecycle,
+        freshness
+      } satisfies PipelinePayload;
+    }
+    case 'platform-health': {
+      const [readPath, slo, catalog] = await Promise.all([
+        api.getOperationalApiReadPath(),
+        api.getSloStatus(),
+        api.getOperationalMetricCatalog()
+      ]);
+      return {
+        readPath,
+        slo,
+        catalog
+      } satisfies PlatformHealthPayload;
+    }
     default:
-      return api.getOperationalOverview();
+      return loadOperationsView('pipeline');
   }
 }
 
 export function OperationalDashboardPage({ selectedView }: OperationalDashboardPageProps) {
   const normalizedView = normalizeOperationsView(selectedView);
-  const [payload, setPayload] = React.useState<unknown>(null);
+  const [payloadByView, setPayloadByView] = React.useState<Partial<Record<OperationsViewKey, unknown>>>({});
   const [error, setError] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const payload = payloadByView[normalizedView] ?? null;
 
   React.useEffect(() => {
+    if (normalizedView === 'quality') {
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
     let cancelled = false;
-    setPayload(null);
     setError(null);
+    setIsLoading(payloadByView[normalizedView] == null);
 
     const load = async (): Promise<void> => {
       try {
         const response = await loadOperationsView(normalizedView);
         if (!cancelled) {
-          setPayload(response);
+          setPayloadByView((current) => ({
+            ...current,
+            [normalizedView]: response
+          }));
           setError(null);
+          setIsLoading(false);
         }
       } catch (requestError) {
         if (!cancelled) {
           setError(requestError instanceof Error ? requestError.message : String(requestError));
+          setIsLoading(false);
         }
       }
     };
@@ -659,7 +801,38 @@ export function OperationalDashboardPage({ selectedView }: OperationalDashboardP
     };
   }, [normalizedView]);
 
+  if (normalizedView === 'quality') {
+    return (
+      <OperationsSectionErrorBoundary viewKey={normalizedView}>
+        <OperationsQualityPage />
+      </OperationsSectionErrorBoundary>
+    );
+  }
+
   if (error) {
+    if (payload) {
+      let content: React.ReactNode;
+      switch (normalizedView) {
+        case 'pipeline':
+          content = renderPipeline(payload as PipelinePayload);
+          break;
+        case 'platform-health':
+          content = renderPlatformHealth(payload as PlatformHealthPayload);
+          break;
+        default:
+          content = renderPipeline(payload as PipelinePayload);
+      }
+
+      return (
+        <OperationsSectionErrorBoundary viewKey={normalizedView}>
+          <div className="page-grid">
+            <div className="panel">Operational data may be stale: {error}</div>
+            {content}
+          </div>
+        </OperationsSectionErrorBoundary>
+      );
+    }
+
     if (isCreatorAccessError(error)) {
       return (
         <section className="panel">
@@ -697,35 +870,14 @@ export function OperationalDashboardPage({ selectedView }: OperationalDashboardP
 
   let content: React.ReactNode;
   switch (normalizedView) {
-    case 'overview':
-      content = renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
+    case 'pipeline':
+      content = renderPipeline(payload as PipelinePayload);
       break;
-    case 'ingestion':
-      content = renderIngestion(payload as OperationalSectionResponse<OperationalIngestionEfficiency>);
-      break;
-    case 'normalization':
-      content = renderNormalization(payload as OperationalSectionResponse<OperationalNormalizationQuality>);
-      break;
-    case 'correlation':
-      content = renderCorrelation(payload as OperationalSectionResponse<OperationalCorrelationEffectiveness>);
-      break;
-    case 'lifecycle':
-      content = renderLifecycle(payload as OperationalSectionResponse<OperationalNoiseLifecycle>);
-      break;
-    case 'read-path':
-      content = renderReadPath(payload as OperationalSectionResponse<OperationalApiReadPath>);
-      break;
-    case 'freshness':
-      content = renderFreshness(payload as OperationalSectionResponse<OperationalFreshnessDrift>);
-      break;
-    case 'catalog':
-      content = renderCatalog(payload as OperationalSectionResponse<OperationalMetricDefinition[]>);
-      break;
-    case 'slo':
-      content = renderSlo(payload as SloStatus);
+    case 'platform-health':
+      content = renderPlatformHealth(payload as PlatformHealthPayload);
       break;
     default:
-      content = renderOverview(payload as OperationalSectionResponse<OperationalExecutiveHealth>);
+      content = renderPipeline(payload as PipelinePayload);
   }
 
   return (

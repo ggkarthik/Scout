@@ -16,10 +16,10 @@ import { EolBadge } from '../components/EolBadge';
 
 export type InventoryViewKey =
   | 'vulnerability-intelligence'
+  | 'software-identities'
   | 'technologies'
   | 'service-catalog'
   | 'cloud-resources'
-  | 'imported-assets'
   | 'hosts'
   | 'kubernetes-clusters'
   | 'container-images'

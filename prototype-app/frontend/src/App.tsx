@@ -4,6 +4,7 @@ import { ConnectPage } from './pages/ConnectPage';
 import { ConfigurationsPage } from './pages/ConfigurationsPage';
 import { FindingsPage } from './pages/FindingsPage';
 import { InventoryPage, InventoryViewKey } from './pages/InventoryPage';
+import { SoftwareIdentitiesPage } from './pages/SoftwareIdentitiesPage';
 import {
   OperationalDashboardPage,
   OPERATIONS_NAV_ITEMS,
@@ -61,9 +62,9 @@ type InventoryFlyoutGroup = {
 
 const inventoryFlyoutGroups: InventoryFlyoutGroup[] = [
   {
-    title: 'Imported Assets',
+    title: 'Summary',
     items: [
-      { key: 'imported-assets', label: 'Imported Assets' }
+      { key: 'software-identities', label: 'Software Identities' }
     ]
   },
   {
@@ -202,6 +203,9 @@ function readInitialRoute(): { tab: Tab } {
 
 function readInitialInventoryView(): InventoryViewKey {
   const fromQuery = new URLSearchParams(window.location.search).get(INVENTORY_VIEW_QUERY_KEY);
+  if (fromQuery === 'imported-assets') {
+    return 'software-identities';
+  }
   if (fromQuery === 'host-review-queue' || fromQuery === 'host-details') {
     return 'hosts';
   }
@@ -719,7 +723,9 @@ export default function App() {
           <VulnerabilityIntelOrgCvePage initialCveId={initialCveId} />
         )}
         {activeTab === 'inventory' && (
-          <InventoryPage selectedView={inventoryView} />
+          inventoryView === 'software-identities'
+            ? <SoftwareIdentitiesPage />
+            : <InventoryPage selectedView={inventoryView} />
         )}
         {activeTab === 'end-of-life' && <EolPage />}
         {activeTab === 'connect' && <ConnectPage />}

@@ -1,0 +1,30 @@
+package com.prototype.vulnwatch.dto;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+public record SoftwareIdentitySummaryResponse(
+        UUID id,
+        String displayName,
+        String canonicalKey,
+        String vendor,
+        String product,
+        String normalizedKey,
+        List<String> assetTypes,
+        List<String> ecosystems,
+        List<String> sourceSystems,
+        String eolSlug,
+        boolean mappingConfirmed,
+        boolean needsEolMapping,
+        long assetCount,
+        long componentCount,
+        long versionCount,
+        long eolComponentCount,
+        long nearEolComponentCount,
+        long unknownEolComponentCount,
+        long openFindingCount,
+        long openVulnerabilityCount,
+        Instant lastObservedAt
+) {
+}

@@ -89,7 +89,7 @@ const CONNECTORS: ConnectorDefinition[] = [
   {
     id: 'endoflife-date',
     name: 'endoflife.date EOL Feed',
-    summary: 'Fetch product lifecycle data and resolve end-of-life status across your inventory.',
+    summary: 'Run endoflife.date catalog, release, mapping, and denormalization jobs.',
     icon: '📅'
   }
 ];
@@ -237,7 +237,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <EolSourcePanel
         title="endoflife.date EOL Feed"
-        caption="Trigger EOL catalog refresh and resolve component lifecycle status. Run history appears in Processing Jobs."
+        caption="Run EOL catalog, release, mapping, and denormalization jobs. Browse ingested products in the EOL tab."
       />
     );
   }

@@ -53,6 +53,8 @@ public class CmdbIngestionService {
     private final SoftwareInventorySyncService softwareInventorySyncService;
     private final FindingService findingService;
     private final AssetLifecycleService assetLifecycleService;
+    private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
+    private final OperationalQualityProjectionService operationalQualityProjectionService;
     private final ObjectMapper objectMapper;
     private final EntityManager entityManager;
 
@@ -68,6 +70,8 @@ public class CmdbIngestionService {
             SoftwareInventorySyncService softwareInventorySyncService,
             FindingService findingService,
             AssetLifecycleService assetLifecycleService,
+            SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
+            OperationalQualityProjectionService operationalQualityProjectionService,
             ObjectMapper objectMapper,
             EntityManager entityManager
     ) {
@@ -82,6 +86,8 @@ public class CmdbIngestionService {
         this.softwareInventorySyncService = softwareInventorySyncService;
         this.findingService = findingService;
         this.assetLifecycleService = assetLifecycleService;
+        this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
+        this.operationalQualityProjectionService = operationalQualityProjectionService;
         this.objectMapper = objectMapper;
         this.entityManager = entityManager;
     }
@@ -313,6 +319,8 @@ public class CmdbIngestionService {
             int findingsRecomputed = uniqueComponents.isEmpty()
                     ? 0
                     : recomputeTouchedComponents(tenant, uniqueComponents.keySet());
+            softwareIdentitySummaryProjectionService.refreshTenant(tenant);
+            operationalQualityProjectionService.refreshTenant(tenant);
 
             Instant completedAt = Instant.now();
             for (Map.Entry<UUID, SbomUpload> entry : uploadByAssetId.entrySet()) {

@@ -13,6 +13,12 @@ import {
   InventoryComponentRecord,
   InventoryComponentFilterValues,
   InventoryComponentPage,
+  OperationalQualityFilterValues,
+  OperationalQualityIssueDetail,
+  OperationalQualityIssuePage,
+  OperationalQualitySummary,
+  SoftwareIdentityDetail,
+  SoftwareIdentityPage,
   IngestionResult,
   OperationalDashboard,
   OperationalSectionResponse,
@@ -174,6 +180,39 @@ export const api = {
   getOperationalApiReadPath: () => request<OperationalSectionResponse<OperationalDashboard['apiReadPath']>>('/operations/api-read-path'),
   getOperationalFreshnessDrift: () => request<OperationalSectionResponse<OperationalDashboard['freshnessDrift']>>('/operations/freshness-drift'),
   getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
+  getOperationalQualitySummary: () => request<OperationalQualitySummary>('/operations/quality/summary'),
+  listOperationalQualityIssues: (
+    params?: {
+      domain?: string;
+      issueType?: string;
+      severity?: string;
+      affectsActiveFindings?: boolean;
+      assetType?: Array<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>;
+      sourceSystem?: string[];
+      ecosystem?: string[];
+      query?: string;
+      page?: number;
+      size?: number;
+    }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.domain) searchParams.set('domain', params.domain);
+    if (params?.issueType) searchParams.set('issueType', params.issueType);
+    if (params?.severity) searchParams.set('severity', params.severity);
+    if (params?.affectsActiveFindings != null) searchParams.set('affectsActiveFindings', String(params.affectsActiveFindings));
+    params?.assetType?.forEach((value) => searchParams.append('assetType', value));
+    params?.sourceSystem?.forEach((value) => searchParams.append('sourceSystem', value));
+    params?.ecosystem?.forEach((value) => searchParams.append('ecosystem', value));
+    if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<OperationalQualityIssuePage>(`/operations/quality/issues${suffix}`);
+  },
+  getOperationalQualityIssue: (issueId: string) => request<OperationalQualityIssueDetail>(
+    `/operations/quality/issues/${encodeURIComponent(issueId)}`
+  ),
+  getOperationalQualityFilters: () => request<OperationalQualityFilterValues>('/operations/quality/filters'),
   getSloStatus: () => request<SloStatus>('/slo/status'),
   listAssets: () => request<Asset[]>('/assets'),
   getHostAssetDetail: (assetId: string, params?: { sourceSystem?: string }) => {
@@ -209,6 +248,33 @@ export const api = {
     return request<InventoryComponentPage>(`/inventory/components${suffix}`);
   },
   listInventoryComponentFilters: () => request<InventoryComponentFilterValues>('/inventory/components/filters'),
+  listSoftwareIdentities: (
+    params?: {
+      assetType?: Array<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>;
+      sourceSystem?: string[];
+      ecosystem?: string[];
+      lifecycle?: 'eol' | 'near-eol' | 'unknown' | 'supported';
+      mappingState?: 'needs-review' | 'mapped' | 'manual' | 'automatic';
+      query?: string;
+      page?: number;
+      size?: number;
+    }
+  ) => {
+    const searchParams = new URLSearchParams();
+    params?.assetType?.forEach((value) => searchParams.append('assetType', value));
+    params?.sourceSystem?.forEach((value) => searchParams.append('sourceSystem', value));
+    params?.ecosystem?.forEach((value) => searchParams.append('ecosystem', value));
+    if (params?.lifecycle) searchParams.set('lifecycle', params.lifecycle);
+    if (params?.mappingState) searchParams.set('mappingState', params.mappingState);
+    if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<SoftwareIdentityPage>(`/inventory/software-identities${suffix}`);
+  },
+  getSoftwareIdentityDetail: (softwareIdentityId: string) => request<SoftwareIdentityDetail>(
+    `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`
+  ),
   listVulnerabilityIntelligence: (
     params?: {
       page?: number;

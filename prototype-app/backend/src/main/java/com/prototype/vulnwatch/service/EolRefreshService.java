@@ -78,6 +78,8 @@ public class EolRefreshService {
     private final TaskExecutor ingestionExecutor;
     private final OrgCveRecordService orgCveRecordService;
     private final TenantRepository tenantRepository;
+    private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
+    private final OperationalQualityProjectionService operationalQualityProjectionService;
 
     public EolRefreshService(
             EolApiClient eolApiClient,
@@ -89,7 +91,9 @@ public class EolRefreshService {
             SyncRunRepository syncRunRepository,
             @Qualifier("integrationQueueExecutor") TaskExecutor ingestionExecutor,
             OrgCveRecordService orgCveRecordService,
-            TenantRepository tenantRepository) {
+            TenantRepository tenantRepository,
+            SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
+            OperationalQualityProjectionService operationalQualityProjectionService) {
         this.eolApiClient = eolApiClient;
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
@@ -100,6 +104,8 @@ public class EolRefreshService {
         this.ingestionExecutor = ingestionExecutor;
         this.orgCveRecordService = orgCveRecordService;
         this.tenantRepository = tenantRepository;
+        this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
+        this.operationalQualityProjectionService = operationalQualityProjectionService;
     }
 
     // -------------------------------------------------------------------------
@@ -390,6 +396,20 @@ public class EolRefreshService {
         LOG.info("EOL denormalization — updated {} software_instances, {} inventory_components",
                 instancesUpdated, componentsUpdated);
         refreshOrgCveEolCounts();
+        softwareIdentitySummaryProjectionService.refreshAll();
+        operationalQualityProjectionService.refreshAll();
+        return instancesUpdated + componentsUpdated;
+    }
+
+    public int refreshConfirmedMapping(String normalizedKey) {
+        LOG.info("Refreshing EOL projection for confirmed mapping '{}'", normalizedKey);
+        clearSoftwareInstanceProjection(normalizedKey);
+        clearInventoryComponentProjection(normalizedKey);
+        int instancesUpdated = denormalizeSoftwareInstances(normalizedKey);
+        int componentsUpdated = denormalizeInventoryComponents(normalizedKey);
+        refreshOrgCveEolCounts();
+        softwareIdentitySummaryProjectionService.refreshByNormalizedKey(normalizedKey);
+        operationalQualityProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
     }
 
@@ -410,9 +430,15 @@ public class EolRefreshService {
     // not by the CVE correlation path. This denormalization is therefore NOT dead code even though
     // inventory_components is the primary target for CVE/finding workflows.
     private int denormalizeSoftwareInstances() {
+        return denormalizeSoftwareInstances(null);
+    }
+
+    private int denormalizeSoftwareInstances(String normalizedKey) {
         // Set-based update using DISTINCT ON to pick the best-matching cycle per instance.
         // DISTINCT ON (si2.id) ORDER BY si2.id, r.cycle DESC picks the highest cycle string,
         // which is the best prefix match for the installed version.
+        String identityKeyExpr = normalizedKeyExpression("sid");
+        String normalizedKeyFilter = normalizedKey == null ? "" : " AND " + identityKeyExpr + " = ?";
         String sql = """
                 UPDATE software_instances si
                 SET
@@ -435,17 +461,22 @@ public class EolRefreshService {
                         r.support_phase,
                         r.latest_version
                     FROM software_instances si2
-                    JOIN software_eol_mapping m ON m.software_identity_id = si2.software_identity_id
+                    JOIN software_identities sid ON sid.id = si2.software_identity_id
+                    JOIN software_eol_mapping m ON (
+                            m.software_identity_id = si2.software_identity_id
+                            OR (m.software_identity_id IS NULL AND m.normalized_key = %s)
+                    )
                     JOIN eol_release r           ON r.product_slug = m.eol_slug
                                                 AND (   si2.normalized_version LIKE r.cycle || '%'
                                                      OR si2.normalized_version = r.cycle)
                     WHERE m.eol_slug IS NOT NULL
+                    %s
                     ORDER BY si2.id, r.cycle DESC
                 ) bc
                 WHERE si.id = bc.si_id
-                """;
+                """.formatted(identityKeyExpr, normalizedKeyFilter);
         try {
-            return jdbcTemplate.update(sql);
+            return normalizedKey == null ? jdbcTemplate.update(sql) : jdbcTemplate.update(sql, normalizedKey);
         } catch (Exception e) {
             LOG.warn("software_instances EOL denormalization failed: {}", e.getMessage());
             return 0;
@@ -453,6 +484,12 @@ public class EolRefreshService {
     }
 
     private int denormalizeInventoryComponents() {
+        return denormalizeInventoryComponents(null);
+    }
+
+    private int denormalizeInventoryComponents(String normalizedKey) {
+        String identityKeyExpr = normalizedKeyExpression("sid");
+        String normalizedKeyFilter = normalizedKey == null ? "" : " AND " + identityKeyExpr + " = ?";
         String sql = """
                 UPDATE inventory_components ic
                 SET
@@ -475,17 +512,22 @@ public class EolRefreshService {
                         r.support_phase,
                         r.latest_version
                     FROM inventory_components ic2
-                    JOIN software_eol_mapping m ON m.software_identity_id = ic2.software_identity_id
+                    JOIN software_identities sid ON sid.id = ic2.software_identity_id
+                    JOIN software_eol_mapping m ON (
+                            m.software_identity_id = ic2.software_identity_id
+                            OR (m.software_identity_id IS NULL AND m.normalized_key = %s)
+                    )
                     JOIN eol_release r           ON r.product_slug = m.eol_slug
                                                 AND (   ic2.normalized_version LIKE r.cycle || '%'
                                                      OR ic2.normalized_version = r.cycle)
                     WHERE m.eol_slug IS NOT NULL
+                    %s
                     ORDER BY ic2.id, r.cycle DESC
                 ) bc
                 WHERE ic.id = bc.ic_id
-                """;
+                """.formatted(identityKeyExpr, normalizedKeyFilter);
         try {
-            return jdbcTemplate.update(sql);
+            return normalizedKey == null ? jdbcTemplate.update(sql) : jdbcTemplate.update(sql, normalizedKey);
         } catch (Exception e) {
             LOG.warn("inventory_components EOL denormalization failed: {}", e.getMessage());
             return 0;
@@ -552,5 +594,49 @@ public class EolRefreshService {
             LOG.debug("Failed to parse PURL for catalog batch upsert: {}", purl);
             return new String[]{null, null};
         }
+    }
+
+    private int clearSoftwareInstanceProjection(String normalizedKey) {
+        String identityKeyExpr = normalizedKeyExpression("sid");
+        String sql = """
+                UPDATE software_instances si
+                SET
+                    eol_slug                 = NULL,
+                    eol_cycle                = NULL,
+                    eol_date                 = NULL,
+                    is_eol                   = NULL,
+                    eol_support_end_date     = NULL,
+                    support_phase            = NULL,
+                    latest_supported_version = NULL,
+                    eol_checked_at           = now()
+                FROM software_identities sid
+                WHERE si.software_identity_id = sid.id
+                  AND %s = ?
+                """.formatted(identityKeyExpr);
+        return jdbcTemplate.update(sql, normalizedKey);
+    }
+
+    private int clearInventoryComponentProjection(String normalizedKey) {
+        String identityKeyExpr = normalizedKeyExpression("sid");
+        String sql = """
+                UPDATE inventory_components ic
+                SET
+                    eol_slug                 = NULL,
+                    eol_cycle                = NULL,
+                    eol_date                 = NULL,
+                    is_eol                   = NULL,
+                    eol_support_end_date     = NULL,
+                    support_phase            = NULL,
+                    latest_supported_version = NULL,
+                    eol_checked_at           = now()
+                FROM software_identities sid
+                WHERE ic.software_identity_id = sid.id
+                  AND %s = ?
+                """.formatted(identityKeyExpr);
+        return jdbcTemplate.update(sql, normalizedKey);
+    }
+
+    private String normalizedKeyExpression(String alias) {
+        return "lower(coalesce(" + alias + ".vendor, '')) || '::' || lower(coalesce(" + alias + ".product, ''))";
     }
 }
