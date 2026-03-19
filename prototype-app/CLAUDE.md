@@ -71,9 +71,11 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 ### Projection Tables (Central to Read Performance)
 
 - `component_vulnerability_states` — component-level CPE applicability truth
-- `org_cve_records` — tenant/CVE rollup used by Org CVEs UI
+- `org_cve_records` — tenant/CVE rollup used by CVE Assessment Workbench UI
 - `vulnerability_intel_summary` — vuln list read model
 - `software_inventory_items` — flattened software inventory for reporting
+- `software_identity_summary` — per-identity aggregation (asset/component/version counts, EOL breakdown) for Software Identities view
+- `quality_issue_projection` — data quality issues by domain/severity for Operations Quality view
 
 ### Security Model
 
@@ -86,7 +88,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 
 `src/App.tsx` is a sidebar shell with query-param state (`tab`, `inventoryView`, `vulnIntelView`). There is no React Router — all navigation is URL query params. Drill-downs happen in drawers and modals, not separate pages.
 
-Top-level sections: Overview → Findings → Operational Dashboard → Vulnerability Intelligence → Inventory → Connect → Configurations.
+Top-level sections: Overview → Findings → Operational Dashboard (Quality / Pipeline / Platform Health) → Vulnerability Intelligence → Inventory → End-of-Life → Connect → Configurations.
 
 All API calls go through `src/api/client.ts`. Base URL defaults to `http://localhost:8080/api` (via `VITE_API_BASE`). Auth headers are injected on every request.
 
@@ -115,9 +117,9 @@ Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sq
 
 ### Known Limitations
 
-- `POST /api/cve-detail/{cveId}/suppress` persists suppression state via `OrgCveRecordService.suppress()` and returns a `SuppressionResponse`.
+- `POST /api/cve-detail/{cveId}/suppress` persists suppression state via `OrgCveRecordService.suppress()` and returns a `SuppressionResponse`. Suppression expiry is handled by the 15-minute reopen job.
 - Schema is tenant-aware but runtime is effectively single-tenant; most controllers call `TenantService.getDefaultTenant()`.
-- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer.
+- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the CVE Assessment Workbench drawer.
 - GHCR attestation ingestion does not yet perform cryptographic signature verification.
 
 ### GitHub Token

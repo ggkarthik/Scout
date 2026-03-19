@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 ## Purpose
 
@@ -90,8 +90,11 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 ### Operations
 
 - `OperationalDashboardPage`
-- Reads `/operations/dashboard`
-- Intended for creator-level operational metrics and queue/ingestion visibility
+- Has three sub-views accessible via a flyout menu: **Quality**, **Pipeline**, **Platform Health**
+- Quality reads `/operations/quality/summary`, `/operations/quality/issues`, `/operations/quality/filters`, and `/operations/quality/issues/{issueId}`
+- Pipeline reads `/operations/dashboard` for ingestion queue and run history
+- Platform Health reads operational metrics and `/operations/normalization-quality`
+- Sub-view is tracked in the `operationsView` query param
 
 ### Vulnerability Intelligence
 
@@ -99,20 +102,22 @@ There are three distinct views under the Vulnerability Intelligence flyout:
 
 - Dashboard: `VulnerabilityIntelDashboardPage`
 - Vulnerability list/detail: `InventoryPage` in `vulnerability-intelligence` mode using `/vulnerability-intelligence`, `/vulnerability-intelligence/filters`, and `/vulnerability-intelligence/{externalId}`
-- Org CVEs: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/recompute`
+- CVE Assessment Workbench: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/recompute` (flyout label: "CVE Assessment Workbench", view key: `org-cves`)
 
-Org CVEs is the primary place where the current UI exposes CVE drill-down. It opens `OrgCveDetailDrawer`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `OrgCveDetailDrawer`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
 
 ### Inventory
 
-The current sidebar exposes four reachable inventory views:
+The inventory flyout is organized into groups, each with one view:
 
-- Imported Assets
-- Hosts
-- Container Images
-- SBOM (Repositories)
+- **Summary** → Software Identities (`SoftwareIdentitiesPage`, view key `software-identities`)
+- **Infrastructure** → Hosts (`InventoryPage`, view key `hosts`)
+- **Cloud** → Container Images (`InventoryPage`, view key `container-images`)
+- **Repositories** → Repositories (`InventoryPage`, view key `sbom`)
 
-All of them currently sit on top of `/inventory/components` and `/inventory/components/filters`, with default asset-type filters changing by view. `InventoryPage` contains additional future-oriented view keys, but those are not wired into the current navigation or backed by dedicated backend APIs.
+`SoftwareIdentitiesPage` is the primary inventory summary view. It reads `/inventory/software-identities` (paged, with lifecycle and mapping-state filters) and `/inventory/software-identities/{softwareIdentityId}` for detail. It opens `SoftwareIdentityDetailDrawer` for per-identity EOL status, asset coverage, version breakdown, and EOL slug management. The legacy `imported-assets` query param redirects to `software-identities` for backwards URL compatibility.
+
+The Hosts, Container Images, and Repositories views continue to sit on top of `/inventory/components` and `/inventory/components/filters` with default asset-type filters changing by view.
 
 `HostAssetDetailPage` is a dedicated drilldown for a single host asset, reached from the Hosts inventory view. It reads `/api/assets/hosts/{assetId}` for detailed CI metadata, alias list, software instances, and associated findings.
 
@@ -167,12 +172,13 @@ Supporting components:
 - `StatCard` is used for summary metrics
 - `GithubPipelineManager` is a self-contained GitHub source pipeline editor used inside `ConnectPage`
 - `CveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vuln Intel
+- `SoftwareIdentityDetailDrawer` is a slide-over for per-identity detail, EOL status, and slug mapping; used from `SoftwareIdentitiesPage`
 - Most long-running actions surface inline status text instead of global toasts
 
 ## Current Caveats
 
 - There is no route-level page system; deep links depend on query params and mounted shell state.
-- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer.
+- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer (CVE Assessment Workbench).
 - The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
-- The inventory UI exposes more conceptual categories than the backend currently models explicitly.
+- The inventory UI exposes more conceptual categories than the backend currently models explicitly; several filter-based views share the same `/inventory/components` endpoint.
 - The frontend package ships `dev`, `build`, `preview`, and `test:unit` scripts. `test:unit` runs Vitest in non-watch mode (`vitest run`). There is no dedicated lint script in `package.json`.

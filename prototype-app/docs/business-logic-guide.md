@@ -26,6 +26,8 @@
 16. [Dashboard Metrics and What They Measure](#16-dashboard-metrics-and-what-they-measure)
 17. [Configurable Thresholds and Policy Levers](#17-configurable-thresholds-and-policy-levers)
 18. [Tracking When Software Goes End-of-Life (EOL Pipeline)](#18-tracking-when-software-goes-end-of-life-eol-pipeline)
+19. [Your Normalised Software Catalogue (Software Identities View)](#19-your-normalised-software-catalogue-software-identities-view)
+20. [Keeping the Data Trustworthy (Operations Quality Dashboard)](#20-keeping-the-data-trustworthy-operations-quality-dashboard)
 
 ---
 
@@ -1151,3 +1153,123 @@ EOL status and CVE findings are independent tracks. A component can be:
 - **Supported with no CVEs** — clean
 
 The EOL page exposes the first two categories. The Findings page and Org-CVE views expose the last two. The dashboard surfaces both together via the EOL risk widget.
+
+---
+
+## 19. Your Normalised Software Catalogue (Software Identities View)
+
+### Summary
+
+The **Software Identities** view (found under Inventory → Summary) is a unified catalogue of every distinct software product the system has ever seen across all assets. Think of it as the "product master list": one row per software product, showing how many assets it runs on, how many versions are present in your environment, and whether any of those versions are nearing or past end-of-life.
+
+This is useful for answering questions such as: "How broadly is nginx deployed?", "How many different versions of Python are running?", and "Which products have the most EOL instances that we haven't mapped to a lifecycle page yet?"
+
+### Step-by-Step Logic
+
+#### A. What Is a Software Identity?
+
+1. **Every time inventory arrives** (via SBOM upload, GitHub ingestion, or ServiceNow CMDB sync), each software package is normalised into a canonical record called a **Software Identity**. Normalisation means that `OpenSSL 3.0.9`, `openssl 3.0.9`, and `openssl-3.0.9` from different sources all resolve to the same identity row.
+
+2. **A Software Identity stores:**
+   - A normalised name (vendor::product key)
+   - A human-readable display name
+   - Standard identifiers: CPE (Common Platform Enumeration) and PURL (Package URL) where available
+   - Which asset types it has been seen on (APPLICATION, HOST, CONTAINER\_IMAGE, etc.)
+   - Which ecosystems it belongs to (e.g., npm, maven, pypi)
+   - Which source systems contributed it (SBOM upload, GitHub, ServiceNow)
+
+#### B. The Summary Projection
+
+3. **For each Software Identity, the system maintains a summary row** that is updated whenever new inventory arrives. The summary aggregates:
+   - **Asset count** — how many distinct assets this product appears on
+   - **Component count** — total number of inventory components (across all assets and versions)
+   - **Version count** — how many distinct version strings are present in the environment
+   - **EOL component count** — how many of those components are on an EOL release
+   - **Near-EOL component count** — how many are within 90 days of end-of-life
+   - **Unknown lifecycle count** — how many have no lifecycle data at all
+
+4. **Mapping status** — the summary also tracks whether the product has been matched to an endoflife.date lifecycle page (`eol_slug`), whether that match was confirmed by an analyst, and whether any EOL mapping still needs review.
+
+#### C. Filtering and Browsing
+
+5. **The view supports two independent filter dimensions:**
+   - **Lifecycle filter:** All / Has EOL Components / Near EOL / Unknown Lifecycle / Fully Supported
+   - **Mapping filter:** All / Needs EOL Mapping / Manual Overrides / Automatic Mappings / Any Mapped
+
+6. **Clicking a row** opens a detail drawer showing the full version breakdown, EOL status per version, and tools to confirm or override the EOL slug mapping for that product (same workflow as the unresolved-mappings panel on the EOL page).
+
+#### D. Relationship to Other Views
+
+7. **Software Identities is the inventory summary layer.** The Hosts / Container Images / Repositories views show individual component instances. Software Identities shows the normalised product across all of them in one place.
+
+8. **EOL data flows from Software Identities outward.** When the EOL pipeline runs, it matches Software Identity records to EOL slugs, then denormalises the status back down to individual component and software instance records.
+
+---
+
+## 20. Keeping the Data Trustworthy (Operations Quality Dashboard)
+
+### Summary
+
+The **Operations Quality Dashboard** (found under Operations → Quality) tracks data quality issues across the entire system. It surfaces situations where the data the system holds is incomplete, inconsistent, or suspect — before those gaps cause analysts to miss real vulnerabilities or waste time chasing phantom ones.
+
+Think of it as the system's self-audit: it automatically identifies and catalogues problems such as "these 47 components have no CPE identifier and therefore cannot be matched to any CVE", or "this CMDB sync run returned an unusually low number of records compared to last week."
+
+### Step-by-Step Logic
+
+#### A. What Is a Quality Issue?
+
+1. **A quality issue is a structured record** that describes a specific data problem. Each issue has:
+   - **Domain** — which area of the system is affected (e.g., INVENTORY, VULNERABILITY, CORRELATION, EOL)
+   - **Severity** — how serious the problem is (CRITICAL / HIGH / MEDIUM / LOW / INFO)
+   - **Issue type** — a machine-readable category code describing the class of problem
+   - **Reason code** — a more specific explanation of why the issue was raised
+   - **Title and labels** — plain-language description of the problem for analysts
+
+2. **Quality issues are keyed deterministically.** The same underlying problem will produce the same issue key every time it is recomputed, so the system can update rather than duplicate issues. `first_seen_at` and `last_seen_at` track when the problem was first detected and when it was most recently confirmed.
+
+#### B. What Gets Tracked
+
+3. **Inventory coverage gaps:**
+   - Software components with no CPE identifier (cannot be correlated to CVEs)
+   - Software components with no version string (version matching is impossible)
+   - Assets with stale inventory (no SBOM received recently)
+
+4. **Correlation quality:**
+   - CVEs with no vulnerability targets (cannot match anything in inventory)
+   - Components that match many CVEs using fallback methods (low-confidence matches)
+
+5. **EOL mapping gaps:**
+   - Software identities with no EOL slug mapping (lifecycle is unknown for a product that appears across many assets)
+
+6. **Ingestion problems:**
+   - Sync runs that produced unusually low counts vs. recent history
+   - Failed or errored sync runs
+
+#### C. Impact Counts
+
+7. **Each quality issue carries impact counts:**
+   - How many assets are affected
+   - How many components are affected
+   - How many open findings are linked to affected components
+   - How many open CVEs are linked
+   - Whether any active findings are at risk (the `affects_active_findings` flag)
+
+8. **Issues that affect active findings are surfaced first.** These are the quality problems where the gap could be hiding or misrepresenting real vulnerability exposure.
+
+#### D. Filtering and Browsing
+
+9. **The Quality view supports filtering by:** domain, severity, whether active findings are affected, asset type, source system, and ecosystem.
+
+10. **Each issue row expands to a detail panel** showing the evidence behind the issue (structured JSON surfaced as a readable breakdown) and a drilldown list of the specific assets, components, or sync runs involved.
+
+#### E. How Issues Are Computed
+
+11. **Quality issues are computed as a projection** — the system runs periodic recomputation sweeps that re-evaluate the quality rules against the current state of inventory, vulnerability, and EOL data. The projection table is updated in place (same issue key = update, not duplicate).
+
+12. **The projection is read-only for analysts.** Issues are cleared automatically when the underlying problem is resolved (e.g., a component receives a CPE identifier from a new SBOM or the EOL pipeline resolves a mapping). Analysts do not manually close or acknowledge quality issues — they fix the root cause.
+
+#### F. Relationship to Other Views
+
+13. **The Quality view complements the Pipeline and Platform Health views** under the Operations section. Pipeline shows run history and ingestion throughput. Platform Health shows system-wide metrics. Quality shows the semantic health of the data those runs produced.
+
+14. **Quality issues do not block findings.** A component with a quality issue (e.g., missing CPE) simply cannot be matched to CVEs — findings will be absent rather than incorrect. The Quality view makes those gaps visible so they can be remediated.

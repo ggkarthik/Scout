@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 ## Purpose
 
@@ -78,6 +78,11 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `GET /api/dashboard/impacted-cves`
 - `GET /api/dashboard/cve-inventory-map`
 - `GET /api/operations/dashboard`
+- `GET /api/operations/normalization-quality`
+- `GET /api/operations/quality/summary` — quality issue counts by domain/severity
+- `GET /api/operations/quality/issues` — paged quality issue list (filterable by domain, severity, asset type, source system)
+- `GET /api/operations/quality/issues/{issueId}` — single quality issue detail
+- `GET /api/operations/quality/filters` — available filter values for quality issues
 
 ### Findings and Policy
 
@@ -91,6 +96,8 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 
 - `GET /api/inventory/components`
 - `GET /api/inventory/components/filters`
+- `GET /api/inventory/software-identities` — paged software identity summary with lifecycle and mapping-state filters
+- `GET /api/inventory/software-identities/{softwareIdentityId}` — single software identity detail
 - `GET /api/assets`
 - `POST /api/assets/cmdb-sync`
 - `GET /api/assets/hosts/{assetId}` — host CI detail with aliases, software instances, and findings
@@ -303,8 +310,7 @@ Executors:
 ## Current Caveats
 
 - Runtime tenant handling is still effectively single-tenant even though the schema is tenant-aware. Most controllers resolve `TenantService.getDefaultTenant()`.
-- `POST /api/cve-detail/{cveId}/suppress` currently returns a suppression response but does not persist suppression fields. The controller still contains a `TODO` for that write path.
-- Inventory APIs currently expose component pages and filter values only. Older documentation around software-model endpoints no longer matches the codebase.
+- `POST /api/cve-detail/{cveId}/suppress` is fully implemented: persists suppression via `OrgCveRecordService.suppress()` and suppresses related findings via `FindingService.suppressFindingsForVulnerability()`.
 - Flyway owns the PostgreSQL startup path. Remaining schema cleanup is now mostly historical normalization rather than runtime compatibility work.
 - The vulnerability optimization is only partially landed: archive/snippet fields exist, but legacy CVSS/source/status fields are still present on `Vulnerability` for compatibility.
 

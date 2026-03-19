@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 ## Why This Fourth Document Exists
 
@@ -74,10 +74,10 @@ What is actively exposed in the UI today:
 
 - dashboard metrics (with EOL risk widget)
 - findings management
-- operational metrics
+- operational metrics (Quality, Pipeline, Platform Health sub-views)
 - vulnerability intelligence list/detail
-- org-CVE exposure list with CVE workflow drawer
-- inventory component views (Imported Assets, Hosts, Container Images, Repositories)
+- org-CVE exposure list with CVE Assessment Workbench drawer
+- inventory component views (Software Identities, Hosts, Container Images, Repositories)
 - host asset detail page with CI metadata, aliases, software instances, and findings
 - ServiceNow CMDB live connector setup, connection testing, and live sync trigger
 - Inventory Run Queue showing all host/container/SBOM ingestion run history
@@ -118,9 +118,9 @@ The schema evolved through a compatibility-heavy migration period. PostgreSQL an
 
 ## Current Limitations and Risks
 
-### CVE Suppression Is Not Fully Persisted
+### CVE Suppression
 
-`/api/cve-detail/{cveId}/suppress` returns a success payload, but the controller still has a `TODO` instead of persisting suppression state to `org_cve_records` or a dedicated suppression model.
+`/api/cve-detail/{cveId}/suppress` is fully implemented. The controller calls `OrgCveRecordService.suppress()` to persist suppression state and `FindingService.suppressFindingsForVulnerability()` to suppress related findings. Suppression expiry is handled by the every-15-minutes reopen job.
 
 ### Schema Cleanup Is Still Transitional
 

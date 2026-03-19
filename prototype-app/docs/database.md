@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -148,6 +148,29 @@ EOL summary columns added to `org_cve_records` (V1040):
 - `investigation_activities`
 - `investigation_attachments`
 - `applicability_assessments`
+
+### Read-Model Projections (V1043–V1044)
+
+Added to support the Software Identities inventory view and the Operations Quality dashboard:
+
+- `software_identity_summary` (V1043)
+  - one row per `(tenant_id, software_identity_id)`
+  - stores `display_name`, `canonical_key`, `vendor`, `product`, `normalized_key`, `purl`, `cpe23`
+  - aggregates: `asset_count`, `component_count`, `version_count`, `eol_component_count`, `near_eol_component_count`, `unknown_eol_component_count`
+  - EOL fields: `eol_slug`, `mapping_confirmed`, `needs_eol_mapping`, `last_observed_at`, `summary_updated_at`
+  - `asset_types`, `ecosystems`, `source_systems` (arrays) for filtering
+  - indexes on `(tenant_id, component_count DESC)`, `(tenant_id, needs_eol_mapping)`, EOL lifecycle counts, and `normalized_key`
+
+- `quality_issue_projection` (V1044)
+  - one row per `(tenant_id, issue_key)` — deterministic keying allows upsert on recompute
+  - stores `domain`, `issue_type`, `severity`, `reason_code`, `source_object_type`
+  - cross-domain foreign references: `asset_id`, `component_id`, `software_identity_id`, `vulnerability_id`, `sync_run_id`
+  - labels: `title`, `primary_label`, `secondary_label`
+  - filter facets: `asset_type`, `source_system`, `ecosystem`
+  - impact counts: `affects_active_findings`, `affected_asset_count`, `affected_component_count`, `open_finding_count`, `open_vulnerability_count`
+  - structured payloads: `evidence_json`, `drilldown_json`
+  - timestamps: `first_seen_at`, `last_seen_at`, `last_computed_at`
+  - indexes on domain+severity, filter facets, and cross-domain reference columns
 
 ## Key Relationships
 
