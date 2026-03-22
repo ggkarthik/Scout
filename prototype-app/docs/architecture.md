@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-19
+Last updated: 2026-03-22
 
 ## Why This Fourth Document Exists
 
@@ -46,25 +46,48 @@ Runtime shape:
 ### 4. Org-CVE Projection
 
 - Component states are rolled up into `org_cve_records`.
-- The frontend uses this view for the Org CVEs table and drawer workflow.
+- The frontend uses this view for the Org CVEs table and workbench workflow.
+- Freshness is now durable and event-driven inside the monolith: ingest paths enqueue projection deltas, and the background worker refreshes `component_vulnerability_states` and `org_cve_records`.
 
-### 5. Findings and Workflow
+### 5. Dashboard Noise Projection
+
+The executive dashboard no longer calculates noise reduction by re-running correlation-style logic on every read.
+
+- Correlation outcomes are persisted in `component_vulnerability_states`.
+- A tenant-scoped `dashboard_noise_reduction_projection` row is refreshed asynchronously from the durable queue.
+- Reads now combine that projection with lightweight finding-event queries for auto-resolved trends.
+- Platform Health exposes projection readiness, age, failures, and refresh latency so operators can tell whether the dashboard is fresh.
+
+### 6. Delta-Driven Workbench Automation
+
+The workbench no longer relies on foreground full recompute for day-to-day freshness.
+
+- `SOFTWARE_DELTA` is emitted from SBOM and CMDB inventory changes.
+- `CVE_DELTA` is emitted when advisory/target data changes can affect applicability.
+- `CVE_METADATA_DELTA` is emitted for metadata-only changes such as KEV and EPSS.
+- `VEX_DELTA` is emitted for exact vendor impact changes and VEX repair/backfill flows.
+- `LIFECYCLE_DELTA` is emitted for EOL mapping refreshes and lifecycle date rollovers.
+
+The queue worker batches those deltas and updates only the affected scopes. It also enqueues tenant-scoped `NOISE_REDUCTION_REFRESH` events after correlation-affecting work so the dashboard projection stays warm. Manual full recompute still exists as an admin repair tool, but it is no longer the normal analyst path.
+
+### 7. Findings and Workflow
 
 - Findings are created, reopened, resolved, suppressed, or auto-closed according to policy and recomputation logic.
 - Analysts can create investigations, run applicability assessments, and manually create findings from the CVE workflow APIs.
 
-### 6. Operational Maintenance
+### 8. Operational Maintenance
 
 - Scheduled jobs keep external feeds fresh, expire suppressions, auto-close findings by policy, and age stale assets inactive.
 
-### 7. EOL Pipeline
+### 9. EOL Pipeline
 
 A 4-stage weekly pipeline tracks software end-of-life status for all active inventory:
 
 1. **Catalog refresh** — fetches all product slugs and CPE/PURL identifiers from endoflife.date into `eol_product_catalog`
 2. **Release data refresh** — conditionally fetches release cycles for tracked slugs (respects `If-Modified-Since`) into `eol_releases`
 3. **Slug resolution** — maps `SoftwareIdentity` rows to EOL slugs via `EolSlugResolverService` into `software_eol_mapping`
-4. **Denormalization** — set-based `DISTINCT ON` update writes `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, and `latest_supported_version` onto both `inventory_components` and `software_instances`; then refreshes `org_cve_records` EOL counts
+4. **Denormalization** — set-based `DISTINCT ON` update writes `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, and `latest_supported_version` onto both `inventory_components` and `software_instances`, then enqueues lifecycle deltas for scoped org-CVE refresh
+5. **Date sweep** — daily lifecycle sweep catches date-driven EOL/EOS transitions even when no source feed changed
 
 Each stage can also be triggered manually from the Connect UI via `/api/eol/admin/refresh/*`. Near-EOL threshold is 90 days.
 
@@ -109,6 +132,7 @@ The current architecture relies on materialized projection-style tables, not onl
 - `software_inventory_items`
 - `component_vulnerability_states`
 - `org_cve_records`
+- `dashboard_noise_reduction_projection`
 
 Those tables are now central to read performance and workflow UX.
 
@@ -144,7 +168,8 @@ Important built-in jobs:
 
 - daily feed syncs starting at `01:00`
 - stale asset inactivation at `02:05`
-- nightly VEX freshness sweep at `02:30`
+- nightly VEX freshness sweep at `02:30` (queue-driven)
+- lifecycle date sweep at `00:15`
 - GitHub SBOM source execution every `5` minutes
 - suppression expiry reopening every `15` minutes
 - hourly policy-based auto-close sweep

@@ -9,6 +9,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,15 +58,18 @@ public class EpssRefreshService {
     private boolean enabled;
 
     private final VulnerabilityRepository vulnerabilityRepository;
+    private final FindingDeltaQueueService findingDeltaQueueService;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
     public EpssRefreshService(
             VulnerabilityRepository vulnerabilityRepository,
+            FindingDeltaQueueService findingDeltaQueueService,
             RestTemplate restTemplate,
             ObjectMapper objectMapper
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
+        this.findingDeltaQueueService = findingDeltaQueueService;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
     }
@@ -146,18 +152,26 @@ public class EpssRefreshService {
         Instant now = Instant.now();
         int updated = 0;
         List<Vulnerability> toSave = new ArrayList<>();
+        Set<UUID> changedVulnerabilityIds = new java.util.LinkedHashSet<>();
         for (Vulnerability vuln : vulnerabilities) {
             Double score = epssMap.get(vuln.getExternalId().toUpperCase(Locale.ROOT));
             if (score != null) {
+                Double previousScore = vuln.getEpssScore();
                 vuln.setEpssScore(score);
                 vuln.setEpssUpdatedAt(now);
                 vuln.touch();
                 toSave.add(vuln);
+                if (vuln.getId() != null && !Objects.equals(previousScore, score)) {
+                    changedVulnerabilityIds.add(vuln.getId());
+                }
                 updated++;
             }
         }
         if (!toSave.isEmpty()) {
             vulnerabilityRepository.saveAll(toSave);
+        }
+        if (!changedVulnerabilityIds.isEmpty()) {
+            findingDeltaQueueService.enqueueCveMetadataDeltas(changedVulnerabilityIds, "epss-refresh");
         }
         return updated;
     }

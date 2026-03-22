@@ -35,6 +35,12 @@ public class VexAssertionService {
 
     private static final Logger LOG = LoggerFactory.getLogger(VexAssertionService.class);
 
+    public record RefreshResult(
+            int assertionCount,
+            Set<UUID> changedVulnerabilityIds
+    ) {
+    }
+
     private final VexAssertionRepository vexAssertionRepository;
     private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
     private final VulnerabilityIntelObservationRepository vulnerabilityIntelObservationRepository;
@@ -74,8 +80,13 @@ public class VexAssertionService {
 
     @Transactional
     public int refreshAssertionsForVulnerabilityIds(Collection<UUID> vulnerabilityIds) {
+        return refreshAssertionsForVulnerabilityIdsDetailed(vulnerabilityIds).assertionCount();
+    }
+
+    @Transactional
+    public RefreshResult refreshAssertionsForVulnerabilityIdsDetailed(Collection<UUID> vulnerabilityIds) {
         if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
-            return 0;
+            return new RefreshResult(0, Set.of());
         }
         Set<UUID> normalizedIds = new LinkedHashSet<>();
         for (UUID vulnerabilityId : vulnerabilityIds) {
@@ -84,7 +95,7 @@ public class VexAssertionService {
             }
         }
         if (normalizedIds.isEmpty()) {
-            return 0;
+            return new RefreshResult(0, Set.of());
         }
         List<VulnerabilityTarget> targets = vulnerabilityTargetRepository.findAllVexLikeTargetsByVulnerabilityIds(normalizedIds);
         if (targets.isEmpty()) {
@@ -92,25 +103,46 @@ public class VexAssertionService {
             if (!existingAssertions.isEmpty()) {
                 vexAssertionRepository.deleteAllInBatch(existingAssertions);
             }
-            return 0;
+            Set<UUID> deletedIds = existingAssertions.stream()
+                    .map(VexAssertion::getVulnerability)
+                    .filter(Objects::nonNull)
+                    .map(com.prototype.vulnwatch.domain.Vulnerability::getId)
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            return new RefreshResult(0, deletedIds);
         }
-        return synchronizeAssertions(targets);
+        return synchronizeAssertionsDetailed(targets);
     }
 
     @Transactional
     public int refreshAllAssertions() {
+        return refreshAllAssertionsDetailed().assertionCount();
+    }
+
+    @Transactional
+    public RefreshResult refreshAllAssertionsDetailed() {
         List<VulnerabilityTarget> targets = vulnerabilityTargetRepository.findAllVexLikeTargets();
         if (targets.isEmpty()) {
-            long existingCount = vexAssertionRepository.countAllAssertions();
-            if (existingCount > 0) {
+            List<VexAssertion> existingAssertions = vexAssertionRepository.findAll();
+            if (!existingAssertions.isEmpty()) {
                 vexAssertionRepository.deleteAllInBatch();
             }
-            return 0;
+            Set<UUID> deletedIds = existingAssertions.stream()
+                    .map(VexAssertion::getVulnerability)
+                    .filter(Objects::nonNull)
+                    .map(com.prototype.vulnwatch.domain.Vulnerability::getId)
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            return new RefreshResult(0, deletedIds);
         }
-        return synchronizeAssertions(targets);
+        return synchronizeAssertionsDetailed(targets);
     }
 
     private int synchronizeAssertions(List<VulnerabilityTarget> targets) {
+        return synchronizeAssertionsDetailed(targets).assertionCount();
+    }
+
+    private RefreshResult synchronizeAssertionsDetailed(List<VulnerabilityTarget> targets) {
         Set<UUID> vulnerabilityIds = new LinkedHashSet<>();
         for (VulnerabilityTarget target : targets) {
             if (target != null && target.getVulnerability() != null && target.getVulnerability().getId() != null) {
@@ -118,7 +150,7 @@ public class VexAssertionService {
             }
         }
         if (vulnerabilityIds.isEmpty()) {
-            return 0;
+            return new RefreshResult(0, Set.of());
         }
 
         List<VulnerabilityIntelObservation> observations =
@@ -174,7 +206,7 @@ public class VexAssertionService {
         if (!toSave.isEmpty()) {
             vexAssertionRepository.saveAll(toSave);
         }
-        return toSave.size();
+        return new RefreshResult(toSave.size(), Set.copyOf(vulnerabilityIds));
     }
 
     private void apply(

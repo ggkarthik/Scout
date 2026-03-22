@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-03-19
+Last updated: 2026-03-22
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -104,7 +104,7 @@ Added by V1030–V1033:
 
 - `component_vulnerability_states`
   - component-level applicability and impact projection
-  - stores matched method, VEX fields, confidence, eligibility, and trace JSON
+  - stores matched method, selected target source, VEX fields, confidence, eligibility, and trace JSON
 - `org_cve_records`
   - tenant-level rollup for one row per CVE per tenant
   - stores applicability, impact state, matched component count, and software count
@@ -136,10 +136,14 @@ EOL denormalized columns added to `inventory_components` and `software_instances
 - `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, `latest_supported_version`, `eol_checked_at`
 
 EOL summary columns added to `org_cve_records` (V1040):
-- `eol_component_count`, `near_eol_component_count` (or equivalent rollup fields)
+- `eol_component_count`, `eos_component_count`
 
 ### Operational and Workflow Support
 
+- `finding_delta_queue`
+  - durable background projection queue for workbench freshness
+  - stores `event_type`, tenant/component/vulnerability scope, source metadata, dedupe key, retry state, visibility timestamps, completion timestamps, and failure text
+  - active event types are `SOFTWARE_DELTA`, `CVE_DELTA`, `CVE_METADATA_DELTA`, `VEX_DELTA`, `LIFECYCLE_DELTA`, and `NOISE_REDUCTION_REFRESH`
 - `sync_runs`
   - extended by V1029 with `metadata_json` for structured run metrics
   - `run_domain` column distinguishes `INVENTORY` runs (ServiceNow CMDB, GitHub SBOM/GHCR) from `VULNERABILITY` runs (NVD, KEV, GHSA, CSAF/VEX)
@@ -149,7 +153,7 @@ EOL summary columns added to `org_cve_records` (V1040):
 - `investigation_attachments`
 - `applicability_assessments`
 
-### Read-Model Projections (V1043–V1044)
+### Read-Model Projections (V1043–V1045)
 
 Added to support the Software Identities inventory view and the Operations Quality dashboard:
 
@@ -171,6 +175,11 @@ Added to support the Software Identities inventory view and the Operations Quali
   - structured payloads: `evidence_json`, `drilldown_json`
   - timestamps: `first_seen_at`, `last_seen_at`, `last_computed_at`
   - indexes on domain+severity, filter facets, and cross-domain reference columns
+
+- `dashboard_noise_reduction_projection` (V1045)
+  - one row per tenant
+  - stores `never_opened_not_applicable`, `deferred_under_investigation`, `category_counts_json`, and `last_computed_at`
+  - powers the executive dashboard noise-reduction widget without re-running correlation logic on read
 
 ## Key Relationships
 
@@ -202,6 +211,7 @@ Added to support the Software Identities inventory view and the Operations Quali
 3. refresh vulnerability summary projections
 4. upsert targets, rules, and config expressions
 5. enqueue CVE-level recomputation
+6. enqueue tenant-scoped noise-reduction refresh after correlation-affecting work completes
 
 ### Exposure Projection
 
@@ -218,7 +228,8 @@ This is a major change from the older documentation set and is now the correct p
 2. conditional fetch and upsert release cycles into `eol_releases` (stage 2)
 3. in-memory slug resolution writes `software_eol_mapping` rows (stage 3)
 4. set-based `UPDATE ... FROM (SELECT DISTINCT ON (...))` denormalizes EOL status onto `inventory_components` and `software_instances` (stage 4)
-5. `org_cve_records` EOL counts refreshed after denormalization
+5. scoped `LIFECYCLE_DELTA` events refresh `org_cve_records` after denormalization instead of tenant-wide foreground rebuild
+6. daily `EOL_DATE_SWEEP` updates date-driven lifecycle transitions and enqueues `LIFECYCLE_DELTA` even when no feed changed
 
 ### Workflow Operations
 

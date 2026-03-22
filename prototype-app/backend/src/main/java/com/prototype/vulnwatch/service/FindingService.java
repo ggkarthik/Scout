@@ -27,6 +27,7 @@ import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
+import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityConfigExprRepository;
 import jakarta.persistence.EntityManager;
@@ -82,6 +83,7 @@ public class FindingService {
     private final NvdConfigurationDecisionService nvdConfigurationDecisionService;
     private final PrecedenceResolverService precedenceResolverService;
     private final VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository;
+    private final OrgCveRecordRepository orgCveRecordRepository;
     private final OrgCveRecordService orgCveRecordService;
     private final ObjectMapper objectMapper;
     private final EntityManager entityManager;
@@ -103,6 +105,7 @@ public class FindingService {
             NvdConfigurationDecisionService nvdConfigurationDecisionService,
             PrecedenceResolverService precedenceResolverService,
             VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository,
+            OrgCveRecordRepository orgCveRecordRepository,
             OrgCveRecordService orgCveRecordService,
             ObjectMapper objectMapper,
             EntityManager entityManager
@@ -123,6 +126,7 @@ public class FindingService {
         this.nvdConfigurationDecisionService = nvdConfigurationDecisionService;
         this.precedenceResolverService = precedenceResolverService;
         this.vulnerabilityConfigExprRepository = vulnerabilityConfigExprRepository;
+        this.orgCveRecordRepository = orgCveRecordRepository;
         this.orgCveRecordService = orgCveRecordService;
         this.objectMapper = objectMapper;
         this.entityManager = entityManager;
@@ -472,6 +476,7 @@ public class FindingService {
                 touchedVulnerabilityIds.addAll(result.touchedVulnerabilityIds());
             }
             entityManager.flush();
+            // Component recompute is the sole owner of org-CVE projection refresh for this scope.
             if (!touchedVulnerabilityIds.isEmpty()) {
                 orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, touchedVulnerabilityIds);
             }
@@ -486,13 +491,22 @@ public class FindingService {
         if (vulnerabilityId == null) {
             return 0;
         }
-        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(vulnerabilityId);
+        return recomputeOnCveDeltaBatch(List.of(vulnerabilityId));
+    }
+
+    @Transactional
+    public int recomputeOnCveDeltaBatch(Collection<UUID> vulnerabilityIds) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        if (scopedVulnerabilityIds.isEmpty()) {
+            return 0;
+        }
+        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(scopedVulnerabilityIds);
 
         int total = 0;
         for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
             total += recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue());
         }
-        orgCveRecordService.refreshForAllTenants(vulnerabilityId);
+        refreshMetadataForTenantsWithoutComponentRecompute(scopedVulnerabilityIds, componentsByTenant.keySet());
         return total;
     }
 
@@ -506,12 +520,21 @@ public class FindingService {
         if (vulnerabilityId == null) {
             return 0;
         }
-        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(vulnerabilityId);
+        return applyVexDeltaBatch(List.of(vulnerabilityId), sourceKey);
+    }
+
+    @Transactional
+    public int applyVexDeltaBatch(Collection<UUID> vulnerabilityIds, String sourceKey) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        if (scopedVulnerabilityIds.isEmpty()) {
+            return 0;
+        }
+        Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(scopedVulnerabilityIds);
         int total = 0;
         for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
-            total += applyVexDeltaForAffectedComponents(entry.getKey(), vulnerabilityId, entry.getValue());
+            total += recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue());
         }
-        orgCveRecordService.refreshForAllTenants(vulnerabilityId);
+        refreshMetadataForTenantsWithoutComponentRecompute(scopedVulnerabilityIds, componentsByTenant.keySet());
         return total;
     }
 
@@ -520,73 +543,118 @@ public class FindingService {
         if (tenantId == null || vulnerabilityId == null) {
             return 0;
         }
-        Set<UUID> affectedComponentIds = collectAffectedComponentsByTenant(vulnerabilityId).getOrDefault(tenantId, Set.of());
-        int changed = applyVexDeltaForAffectedComponents(tenantId, vulnerabilityId, affectedComponentIds);
-        orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, List.of(vulnerabilityId));
-        return changed;
+        Set<UUID> affectedComponentIds = collectAffectedComponentsByTenant(List.of(vulnerabilityId)).getOrDefault(tenantId, Set.of());
+        if (affectedComponentIds.isEmpty()) {
+            return orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, List.of(vulnerabilityId));
+        }
+        return recomputeOnSoftwareDeltaBatch(tenantId, affectedComponentIds);
     }
 
-    private int applyVexDeltaForAffectedComponents(UUID tenantId, UUID vulnerabilityId, Set<UUID> affectedComponentIds) {
-        if (tenantId == null || vulnerabilityId == null) {
+    @Transactional
+    public int refreshMetadataForVulnerabilityBatch(Collection<UUID> vulnerabilityIds) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        if (scopedVulnerabilityIds.isEmpty()) {
             return 0;
         }
-        if (affectedComponentIds == null || affectedComponentIds.isEmpty()) {
+        int updated = 0;
+        for (UUID tenantId : findTenantIdsForVulnerabilities(scopedVulnerabilityIds)) {
+            updated += orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, scopedVulnerabilityIds);
+        }
+        return updated;
+    }
+
+    private void refreshMetadataForTenantsWithoutComponentRecompute(
+            Collection<UUID> vulnerabilityIds,
+            Collection<UUID> recomputedTenantIds
+    ) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        if (scopedVulnerabilityIds.isEmpty()) {
+            return;
+        }
+        Set<UUID> tenantsNeedingMetadataRefresh = findTenantIdsForVulnerabilities(scopedVulnerabilityIds);
+        if (recomputedTenantIds != null && !recomputedTenantIds.isEmpty()) {
+            tenantsNeedingMetadataRefresh.removeAll(recomputedTenantIds);
+        }
+        for (UUID tenantId : tenantsNeedingMetadataRefresh) {
+            orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, scopedVulnerabilityIds);
+        }
+    }
+
+    @Transactional
+    public int refreshLifecycleForComponents(UUID tenantId, Collection<UUID> componentIds) {
+        if (tenantId == null) {
             return 0;
         }
-
-        Map<UUID, Instant> findingUpdatedAtBefore = findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId).stream()
-                .filter(finding -> finding.getId() != null)
-                .collect(Collectors.toMap(
-                        Finding::getId,
-                        Finding::getUpdatedAt,
-                        (left, right) -> left,
-                        LinkedHashMap::new
-                ));
-
-        recomputeOnSoftwareDeltaBatch(tenantId, affectedComponentIds);
-
-        int changed = 0;
-        for (Finding finding : findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)) {
-            if (finding.getId() == null) {
-                continue;
-            }
-            Instant previousUpdatedAt = findingUpdatedAtBefore.get(finding.getId());
-            if (previousUpdatedAt == null || !Objects.equals(previousUpdatedAt, finding.getUpdatedAt())) {
-                changed++;
-            }
+        List<UUID> scopedComponentIds = normalizeIds(componentIds);
+        if (scopedComponentIds.isEmpty()) {
+            return 0;
         }
-        return changed;
+        Set<UUID> vulnerabilityIds =
+                componentVulnerabilityStateRepository.findDistinctVulnerabilityIdsByTenantIdAndComponentIds(
+                        tenantId,
+                        scopedComponentIds
+                );
+        if (vulnerabilityIds.isEmpty()) {
+            return 0;
+        }
+        return orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, vulnerabilityIds);
     }
 
     private Map<UUID, Set<UUID>> collectAffectedComponentsByTenant(UUID vulnerabilityId) {
-        Map<UUID, Set<UUID>> componentsByTenant = new HashMap<>();
+        return collectAffectedComponentsByTenant(List.of(vulnerabilityId));
+    }
 
-        Set<UUID> cpeIds = vulnerabilityTargetRepository.findDistinctCpeIdsByVulnerabilityAndType(
-                vulnerabilityId,
-                com.prototype.vulnwatch.domain.VulnerabilityTargetType.CPE
-        );
+    private Map<UUID, Set<UUID>> collectAffectedComponentsByTenant(Collection<UUID> vulnerabilityIds) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        Map<UUID, Set<UUID>> componentsByTenant = new HashMap<>();
+        if (scopedVulnerabilityIds.isEmpty()) {
+            return componentsByTenant;
+        }
+
+        Set<UUID> cpeIds = vulnerabilityTargetRepository.findVulnerabilityCpeRows(
+                        scopedVulnerabilityIds,
+                        com.prototype.vulnwatch.domain.VulnerabilityTargetType.CPE
+                ).stream()
+                .map(com.prototype.vulnwatch.repo.VulnerabilityTargetRepository.VulnerabilityCpeRow::getCpeId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!cpeIds.isEmpty()) {
             inventoryComponentCpeMapRepository.findDistinctTenantComponentRowsByCpeIds(cpeIds).forEach(row ->
                     addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
         }
 
-        List<String> purlKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
-                vulnerabilityId,
-                com.prototype.vulnwatch.domain.VulnerabilityTargetType.PURL
-        );
+        Set<String> purlKeys = vulnerabilityTargetRepository
+                .findByVulnerability_IdInAndTargetType(
+                        scopedVulnerabilityIds,
+                        com.prototype.vulnwatch.domain.VulnerabilityTargetType.PURL
+                ).stream()
+                .map(VulnerabilityTarget::getNormalizedTargetKey)
+                .filter(value -> hasText(value))
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!purlKeys.isEmpty()) {
             inventoryComponentRepository.findDistinctTenantComponentRowsByNormalizedPurlIn(purlKeys).forEach(row ->
                     addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
         }
 
-        List<String> coordKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
-                vulnerabilityId,
-                com.prototype.vulnwatch.domain.VulnerabilityTargetType.COORD
-        );
-        List<String> advisoryKeys = vulnerabilityTargetRepository.findDistinctNormalizedKeysByVulnerabilityAndType(
-                vulnerabilityId,
-                com.prototype.vulnwatch.domain.VulnerabilityTargetType.ADVISORY_PACKAGE
-        );
+        Set<String> coordKeys = vulnerabilityTargetRepository
+                .findByVulnerability_IdInAndTargetType(
+                        scopedVulnerabilityIds,
+                        com.prototype.vulnwatch.domain.VulnerabilityTargetType.COORD
+                ).stream()
+                .map(VulnerabilityTarget::getNormalizedTargetKey)
+                .filter(value -> hasText(value))
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> advisoryKeys = vulnerabilityTargetRepository
+                .findByVulnerability_IdInAndTargetType(
+                        scopedVulnerabilityIds,
+                        com.prototype.vulnwatch.domain.VulnerabilityTargetType.ADVISORY_PACKAGE
+                ).stream()
+                .map(VulnerabilityTarget::getNormalizedTargetKey)
+                .filter(value -> hasText(value))
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> allCoordKeys = new HashSet<>(coordKeys);
         allCoordKeys.addAll(advisoryKeys);
         if (!allCoordKeys.isEmpty()) {
@@ -594,7 +662,33 @@ public class FindingService {
                     addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
         }
 
+        componentVulnerabilityStateRepository.findDistinctTenantComponentRowsByVulnerabilityIds(scopedVulnerabilityIds)
+                .forEach(row -> addComponentLookupRow(componentsByTenant, row.getTenantId(), row.getComponentId()));
+
         return componentsByTenant;
+    }
+
+    private Set<UUID> findTenantIdsForVulnerabilities(Collection<UUID> vulnerabilityIds) {
+        List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
+        if (scopedVulnerabilityIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> tenantIds = new LinkedHashSet<>();
+        tenantIds.addAll(componentVulnerabilityStateRepository.findDistinctTenantIdsByVulnerabilityIds(scopedVulnerabilityIds));
+        tenantIds.addAll(orgCveRecordRepository.findDistinctTenantIdsByVulnerabilityIds(scopedVulnerabilityIds));
+        return tenantIds;
+    }
+
+    private List<UUID> normalizeIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new))
+                .stream()
+                .sorted(UUID::compareTo)
+                .toList();
     }
 
     private void addComponentLookupRow(Map<UUID, Set<UUID>> componentsByTenant, UUID tenantId, UUID componentId) {
@@ -1245,6 +1339,7 @@ public class FindingService {
             state.setVexTargetId(null);
             state.setMatchedVexAssertionId(null);
             state.setMatchedBy("not-observed");
+            state.setSelectedTargetSource(null);
             state.setPrecedenceReason("component_not_observed");
             state.setConfidenceScore(0.0);
             state.setEligibleForFinding(false);
@@ -1322,6 +1417,7 @@ public class FindingService {
             state.setVexTargetId(null);
             state.setMatchedVexAssertionId(null);
             state.setMatchedBy("component-inactive");
+            state.setSelectedTargetSource(null);
             state.setPrecedenceReason("component_inactive");
             state.setConfidenceScore(0.0);
             state.setEligibleForFinding(false);
@@ -1743,15 +1839,24 @@ public class FindingService {
         String newVexFreshness = vexOverlay == null ? "UNKNOWN" : defaultString(vexOverlay.freshness(), "UNKNOWN");
         String newVexSource = vexOverlay == null ? null : vexOverlay.source();
         UUID newMatchedVexAssertionId = vexOverlay == null ? null : vexOverlay.assertionId();
+        String newSelectedTargetSource = selected == null || selected.target() == null
+                ? null
+                : selected.target().getSource();
 
         boolean stateChanged = created
                 || state.getApplicabilityState() != impactAssessment.applicabilityState()
                 || state.getImpactState() != impactAssessment.impactState()
+                || !java.util.Objects.equals(state.getApplicabilityReason(), impactAssessment.applicabilityReason())
                 || !java.util.Objects.equals(state.getVexStatus(), newVexStatus)
                 || !java.util.Objects.equals(state.getVexProvider(), newVexProvider)
                 || !java.util.Objects.equals(state.getVexFreshness(), newVexFreshness)
                 || !java.util.Objects.equals(state.getVexSource(), newVexSource)
                 || !java.util.Objects.equals(state.getMatchedVexAssertionId(), newMatchedVexAssertionId)
+                || !java.util.Objects.equals(state.getImpactReason(), impactAssessment.impactReason())
+                || !java.util.Objects.equals(state.getPrecedenceReason(), resolution == null ? "unknown" : resolution.reason())
+                || !java.util.Objects.equals(state.getMatchedBy(), selected == null ? null : selected.matchedBy())
+                || !java.util.Objects.equals(state.getSelectedTargetSource(), newSelectedTargetSource)
+                || !java.util.Objects.equals(state.getConfidenceScore(), selected == null ? null : selected.confidence())
                 || !java.util.Objects.equals(state.getApplicabilityReasonDetail(), impactAssessment.applicabilityReasonDetail())
                 || !java.util.Objects.equals(state.getImpactReasonDetail(), impactAssessment.impactReasonDetail());
         if (!stateChanged) {
@@ -1772,6 +1877,7 @@ public class FindingService {
         state.setVexTargetId(vexOverlay == null ? null : vexOverlay.targetId());
         state.setPrecedenceReason(resolution == null ? "unknown" : resolution.reason());
         state.setMatchedBy(selected == null ? null : selected.matchedBy());
+        state.setSelectedTargetSource(newSelectedTargetSource);
         state.setConfidenceScore(selected == null ? null : selected.confidence());
         state.setEligibleForFinding(impactAssessment.findingEligible());
         state.setLastEvaluatedAt(now);
@@ -1790,6 +1896,7 @@ public class FindingService {
     ) {
         Map<String, Object> trace = new LinkedHashMap<>();
         trace.put("matchedBy", selected == null ? null : selected.matchedBy());
+        trace.put("selectedTargetSource", selected == null || selected.target() == null ? null : selected.target().getSource());
         trace.put("confidence", selected == null ? null : selected.confidence());
         trace.put("precedenceReason", resolution == null ? null : resolution.reason());
         trace.put("applicabilityState", impactAssessment.applicabilityState().name());

@@ -290,4 +290,39 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
     List<TenantComponentLookupRow> findDistinctTenantComponentRowsByCoordKeyIn(
             @Param("coordKeys") Collection<String> coordKeys
     );
+
+    @Query("""
+            select c.id
+            from InventoryComponent c
+            where c.componentStatus = com.prototype.vulnwatch.domain.InventoryComponentStatus.ACTIVE
+              and (
+                c.eolSlug is not null
+                or c.eolDate is not null
+                or c.eolSupportEndDate is not null
+              )
+            """)
+    List<UUID> findActiveLifecycleTrackedIds();
+
+    @Query("""
+            select c.id
+            from InventoryComponent c
+            join c.softwareIdentity sid
+            where c.componentStatus = com.prototype.vulnwatch.domain.InventoryComponentStatus.ACTIVE
+              and lower(concat(coalesce(sid.vendor, ''), '::', coalesce(sid.product, ''))) = :normalizedKey
+            """)
+    List<UUID> findActiveIdsBySoftwareIdentityNormalizedKey(@Param("normalizedKey") String normalizedKey);
+
+    @Query("""
+            select c.id
+            from InventoryComponent c
+            where c.componentStatus = com.prototype.vulnwatch.domain.InventoryComponentStatus.ACTIVE
+              and (
+                (c.eolDate is not null and c.eolDate <= :today and (c.isEol is null or c.isEol = false))
+                or (c.eolSupportEndDate is not null and c.eolSupportEndDate = :eosThreshold)
+              )
+            """)
+    List<UUID> findLifecycleTransitionComponentIds(
+            @Param("today") java.time.LocalDate today,
+            @Param("eosThreshold") java.time.LocalDate eosThreshold
+    );
 }
