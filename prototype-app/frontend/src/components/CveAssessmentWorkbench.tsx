@@ -60,7 +60,7 @@ type Props = {
   findingGenerationMode: RiskPolicy['findingGenerationMode'];
   analystId?: string;
   onBack: () => void;
-  onRefreshDetail: () => Promise<void>;
+  onRefreshDetail: (options?: { includeList?: boolean }) => Promise<void>;
 };
 
 const AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
@@ -79,13 +79,12 @@ function formatAssetType(value?: string): string {
 // --- CVE Summary Sidebar (step 1) ---
 
 type SidebarProps = {
-  item: OrgSpecificCveExposureRecord;
   detail: CveDetail;
   cvssFields: Record<string, string>;
   softwareGroups: SoftwareGroup[];
 };
 
-function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: SidebarProps) {
+function CveSummarySidebar({ detail, cvssFields, softwareGroups }: SidebarProps) {
   // Deduplicate affected products and enrich with version ranges from vendor intelligence
   const affectedProductMap = new Map<string, { ecosystem?: string; versions: string[] }>();
   for (const vi of (detail.vendorIntelligence ?? [])) {
@@ -116,40 +115,15 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
   // Unique CPEs from vendor intelligence
   const cpes = [...new Set((detail.vendorIntelligence ?? []).map((vi) => vi.cpe).filter(Boolean))] as string[];
 
-  const epssScore = detail.summary.epssScore ?? null;
-  const epssUpdatedAt = detail.summary.epssUpdatedAt ?? null;
   const cweIds = detail.summary.cweIds;
 
   return (
     <aside className="cve-summary-sidebar">
 
-      {/* Header: ID + severity + score */}
+      {/* Header: summary only. Detailed exploitability context lives in step 1. */}
       <div className="cve-sidebar-header">
         <h4>CVE Summary</h4>
-        <div className="cve-sidebar-scores">
-          {epssScore != null && (
-            <span
-              className={`cve-score-chip ${epssScore >= 0.5 ? 'cve-score-chip-warn' : ''}`}
-              title={epssUpdatedAt
-                ? `Probability of exploitation in the next 30 days — score refreshed ${new Date(epssUpdatedAt).toLocaleDateString()}`
-                : 'Probability of exploitation in the next 30 days'}
-            >
-              EPSS {(epssScore * 100).toFixed(1)}%
-            </span>
-          )}
-        </div>
       </div>
-
-      {/* KEV warning — exploitability signal only, not an applicability determination */}
-      {item.inKev && (
-        <div className="cve-kev-banner">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14">
-            <path d="M12 3L2 21h20L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-            <path d="M12 9v5M12 17h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          In CISA KEV — actively exploited in the wild. Prioritize review; applicability must still be verified against your inventory.
-        </div>
-      )}
 
       {/* Description */}
       <div>
@@ -275,7 +249,6 @@ function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: Sidebar
               ? <a href={detail.summary.sourceUrl} target="_blank" rel="noreferrer" className="cve-source-badge cve-source-badge-link">{detail.summary.source}</a>
               : <span className="cve-source-badge">{detail.summary.source}</span>
           )}
-          {item.inKev && <span className="cve-source-badge kev">KEV</span>}
           {hasPersistedVexEvidence(detail) && <span className="cve-source-badge csaf">VEX</span>}
           {detail.summary.cvssVector && <span className="cve-source-badge">CVSS</span>}
         </div>
@@ -315,6 +288,11 @@ function InvestigationContent({
   item, detail, softwareGroups, vendorRows, overallConfidence, investigationNotes, autoNote, onNotesChange, onEolClick,
 }: InvestigationContentProps) {
   const [expandedRows, setExpandedRows] = React.useState<Set<string>>(new Set());
+  const epssScore = detail.summary.epssScore ?? null;
+  const epssUpdatedAt = detail.summary.epssUpdatedAt ?? null;
+  const exploitReason = item.inKev
+    ? 'Active exploitation confirmed by the CISA Known Exploited Vulnerabilities catalog.'
+    : detail.signals.exploitReason || 'No known exploits';
 
   function toggleRow(key: string): void {
     setExpandedRows((prev) => {
@@ -376,6 +354,50 @@ function InvestigationContent({
             </div>
           );
         })()}
+      </div>
+
+      <div className="cve-intel-section">
+        <div className="cve-intel-section-header">
+          <h4>Exploitability</h4>
+          <p>KEV and EPSS raise response urgency, but they do not determine whether this CVE applies to your inventory.</p>
+        </div>
+        <div className="cve-exploitability-grid">
+          <div className="cve-exploitability-item">
+            <span className="cve-exploitability-label">KEV Status</span>
+            <div className="cve-exploitability-value">
+              {item.inKev
+                ? <span className="cve-source-badge kev">Actively Exploited (KEV)</span>
+                : <span className="cve-muted">Not listed in CISA KEV</span>}
+            </div>
+            <span className="cve-exploitability-hint">CISA Known Exploited Vulnerabilities catalog signal.</span>
+          </div>
+          <div className="cve-exploitability-item">
+            <span className="cve-exploitability-label">Exploit Signal</span>
+            <div className="cve-exploitability-value">
+              <strong>{exploitReason}</strong>
+            </div>
+            <span className="cve-exploitability-hint">Use this to prioritize urgency, not to decide applicability.</span>
+          </div>
+          <div className="cve-exploitability-item">
+            <span className="cve-exploitability-label">EPSS</span>
+            <div className="cve-exploitability-value">
+              {epssScore != null
+                ? <span className={`cve-score-chip ${epssScore >= 0.5 ? 'cve-score-chip-warn' : ''}`}>EPSS {(epssScore * 100).toFixed(1)}%</span>
+                : <span className="cve-muted">No EPSS score available</span>}
+            </div>
+            <span className="cve-exploitability-hint">FIRST.org probability of exploitation in the next 30 days.</span>
+          </div>
+          <div className="cve-exploitability-item">
+            <span className="cve-exploitability-label">EPSS Refreshed</span>
+            <div className="cve-exploitability-value">
+              <strong>{epssUpdatedAt ? formatDate(epssUpdatedAt) : 'Not available'}</strong>
+            </div>
+            <span className="cve-exploitability-hint">Track freshness before relying on the current EPSS value.</span>
+          </div>
+        </div>
+        <div className="cve-exploitability-note">
+          Document exploit path relevance, compensating controls, and urgency in the investigation notes below.
+        </div>
       </div>
 
       <div className="cve-intel-section">
@@ -537,11 +559,12 @@ function InvestigationContent({
               <span>{autoNote}</span>
             </div>
           )}
+          <div className="panel-caption">Capture exploit path relevance, compensating controls, urgency, and any external references used in triage.</div>
           <textarea
             className="cve-notes-textarea"
             value={investigationNotes}
             onChange={(e) => onNotesChange(e.target.value)}
-            placeholder="Add analyst notes..."
+            placeholder="Document exploit path, urgency, mitigations, and analyst references..."
             rows={4}
           />
         </div>
@@ -1423,6 +1446,11 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     if (!detail || !item) return '';
     const parts: string[] = [];
     const topProducts = softwareGroups.slice(0, 2).map((g) => g.software.packageName).join(', ');
+    if (item.inKev) {
+      parts.push('KEV: This CVE is in the CISA Known Exploited Vulnerabilities catalog, so active exploitation is already confirmed.');
+    } else if (detail.signals.exploitAvailable && detail.signals.exploitReason) {
+      parts.push(`Exploit signal: ${detail.signals.exploitReason}.`);
+    }
     if (topProducts) {
       parts.push(`${detail.signals.softwareCount > 0 ? 'High confidence match' : 'No direct software match'}. ${topProducts} detected with potentially vulnerable versions.`);
     }
@@ -1431,7 +1459,6 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
     } else if (!detail.signals.patchAvailable) {
       parts.push('No patch currently available.');
     }
-    if (item.inKev) parts.push('This CVE is in the CISA KEV catalog — active exploitation confirmed.');
     return parts.join(' ');
   }, [detail, item, softwareGroups]);
 
@@ -1473,20 +1500,8 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
       });
     }
 
-    if (item.inKev) {
-      // BLG-004: KEV signals exploitability, not product applicability. It is NOT an
-      // authoritative source for determining whether your specific version is affected.
-      // Rendered with a distinct style so analysts don't conflate it with NVD/VEX/advisory rows.
-      rows.push({
-        source: 'CISA KEV (exploitability context)',
-        statement: 'Actively Exploited — not an applicability source',
-        statementClass: 'exploited kev-context',
-        affectedVersions: '— (no version data)',
-        fixedVersion: '—',
-      });
-    }
     return rows;
-  }, [detail, item]);
+  }, [detail]);
 
   const overallConfidence = React.useMemo(() => {
     if (!detail) return { label: 'Unknown', cls: '', pct: 0 };
@@ -1526,6 +1541,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
         notes: investigationNotes.trim() || undefined,
       });
       setInvestigationId(saved.id);
+      await onRefreshDetail();
       setActiveStep(2);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -1565,6 +1581,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
         componentAnalystDispositions: componentImpactDecisions,
       });
       setAssessmentId(saved.id);
+      await onRefreshDetail();
 
       if (proceed) setActiveStep(3);
       else setActionNotice('Assessment saved successfully.');
@@ -1589,7 +1606,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
         componentApplicabilityDecisions: Object.fromEntries(applicabilityDecisions),
         componentAnalystDispositions: Object.fromEntries(impactDecisions),
       });
-      await onRefreshDetail();
+      await onRefreshDetail({ includeList: true });
       const parts: string[] = [result.message];
       if (result.createdCount > 0) parts.push(`Created ${result.createdCount}.`);
       if (result.reopenedCount > 0) parts.push(`Reopened ${result.reopenedCount}.`);
@@ -1646,15 +1663,18 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
           <span className="cve-assessment-id">{item.externalId}</span>
           <span className={severityClassName(item.severity)}>{formatLabel(item.severity)}</span>
           {item.cvssScore != null && <span className="cve-score-pill">{item.cvssScore.toFixed(1)}</span>}
-          {item.inKev && <span className="severity-pill severity-critical">KEV</span>}
-          {detail?.signals.exploitAvailable && (
-            <span className="status-pill status-in-progress">
-              {detail.signals.exploitReason || 'Exploit Available'}
+          {item.inKev ? (
+            <span className="severity-pill severity-critical" title="CISA Known Exploited Vulnerabilities catalog">
+              Actively Exploited (KEV)
             </span>
-          )}
+          ) : detail?.signals.exploitAvailable ? (
+            <span className="status-pill status-in-progress">
+              {detail.signals.exploitReason || 'Exploit Signal Present'}
+            </span>
+          ) : null}
         </div>
         <span className="cve-assessment-last-reviewed">
-          Last evaluated {detail?.summary.modifiedAt ? formatDate(detail.summary.modifiedAt) : '-'}
+          Last evaluated {item.lastEvaluatedAt ? formatDate(item.lastEvaluatedAt) : '-'}
         </span>
       </div>
 
@@ -1693,7 +1713,7 @@ export function CveAssessmentWorkbench({ item, detail, loading, error, findingGe
           {/* Step 1 — Investigation */}
           {activeStep === 1 && (
             <div className="cve-assessment-layout">
-              <CveSummarySidebar item={item} detail={detail} cvssFields={cvssFields} softwareGroups={softwareGroups} />
+              <CveSummarySidebar detail={detail} cvssFields={cvssFields} softwareGroups={softwareGroups} />
               <div className="cve-investigation-main">
                 <InvestigationContent
                   item={item}

@@ -53,6 +53,7 @@ import {
   SloStatus,
   TopFindingMetric
 } from '../types';
+import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { StatCard } from '../components/StatCard';
 
 export type OperationsViewKey =
@@ -104,12 +105,6 @@ type OperationalDashboardPageProps = {
   selectedView: OperationsViewKey;
 };
 
-const SECTION_DESCRIPTIONS: Record<OperationsViewKey, string> = {
-  quality: 'Cross-domain quality exceptions routed back into the owner workflows.',
-  pipeline: 'End-to-end pipeline health across ingestion, normalization, correlation, noise, and freshness.',
-  'platform-health': 'API read-path, summary-model readiness, and SLO compliance for the operations stack.'
-};
-
 type PipelinePayload = {
   overview: OperationalSectionResponse<OperationalExecutiveHealth>;
   ingestion: OperationalSectionResponse<OperationalIngestionEfficiency>;
@@ -125,8 +120,71 @@ type PlatformHealthPayload = {
   catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
 };
 
+const METRIC_HELP: Record<string, string> = {
+  'Ingestion Success (24h)': 'Percent of SBOM ingestions and source sync runs that completed successfully in the last 24 hours.',
+  'Projection Refresh P95 (ms)': 'P95 processing time for the background projection refresh worker.',
+  'Normalization Coverage': 'Share of active components with enough normalized identity and version data for reliable matching.',
+  'Noise Reduction': 'Percent of potential findings filtered out before they became analyst backlog.',
+  'Open Critical': 'Count of currently critical findings that need attention.',
+  'Open Findings': 'Count of findings that are currently unresolved.',
+  'Stale Sources': 'Count of sources that are older than the configured freshness threshold.',
+  'SBOM Ingestions (24h)': 'Total SBOM ingestion runs processed in the last 24 hours.',
+  'SBOM / Hour': 'Average SBOM ingestion rate over the last 24 hours.',
+  'SBOM Success Rate': 'Percent of SBOM ingestions that completed successfully.',
+  'Sync Success Rate': 'Percent of source and connector sync runs that completed successfully.',
+  'Queued/Running Sync Jobs': 'Current number of sync jobs that are queued or still running.',
+  'Records Fetched': 'Total source records fetched during the last 24 hours.',
+  'Records Inserted': 'Total new records inserted during the last 24 hours.',
+  'Records Updated': 'Total existing records updated during the last 24 hours.',
+  'Active Components': 'Count of active inventory components currently in scope for matching.',
+  'Name Coverage': 'Share of active components with normalized product naming.',
+  'Version Coverage': 'Share of active components with usable version information.',
+  'Identity Coverage': 'Share of active components linked to a software identity.',
+  'High Confidence Affected': 'Share of open affected findings backed by high-confidence matching evidence.',
+  'Unknown Decision Rate': 'Share of open findings still stuck in an unknown or under-investigation state.',
+  'Filtered Not Applicable': 'Total exposures filtered out as not applicable before or after finding creation.',
+  'Never Opened': 'Filtered exposures that never became findings in the first place.',
+  'Auto Resolved': 'Findings automatically resolved because the underlying evidence no longer supports them.',
+  Deferred: 'Applicable matches deferred because the vendor is still under investigation.',
+  'Filtered Rate': 'Share of potential findings that were filtered out as noise.',
+  'Reopen Rate': 'Share of previously auto-resolved findings that later reopened.',
+  'Summary Coverage': 'Percent of canonical CVEs represented in the summary read model.',
+  'Summary Model': 'Whether the summary read model is ready to serve the UI.',
+  'Cache Hit Ratio': 'Percent of eligible read-path requests served from cache.',
+  'Failing SLOs': 'Count of tracked service-level objectives that are currently failing.',
+  'Canonical CVEs': 'Count of canonical CVEs in the source-of-truth dataset.',
+  'Summary CVEs': 'Count of CVEs currently materialized in the serving summary model.',
+  'Noise Projection': 'Whether the noise-reduction projection is ready to serve dashboard reads.',
+  'Projection Age': 'How long it has been since the noise-reduction projection was last recomputed.',
+  'Projection Last Computed': 'Timestamp of the last completed noise-reduction projection refresh.',
+  'Projection Refresh P95': 'P95 processing time for the background projection refresh worker.',
+  'Projection Refresh Failures': 'Number of failed projection refresh attempts in the current metrics sample.',
+  'Filter Cache State': 'Whether the read-path filter cache is warm and serving requests.',
+  'Filter Cache Hit Ratio': 'Percent of filter-cache eligible requests served from cache.',
+  'Stale Threshold (h)': 'Configured freshness threshold, in hours, before a source is treated as stale.',
+  'Stale Source Count': 'Count of sources that are currently beyond the freshness threshold.',
+  'Normalization Drift (7d)': 'Seven-day change in normalization coverage.',
+  'CPE Fallback Drift (7d)': 'Seven-day change in the share of findings relying on fallback CPE matching.',
+  'SLOs Defined': 'Total number of tracked service-level objectives.',
+  'SLOs Passing': 'Number of tracked service-level objectives currently meeting target.',
+  'SLOs Failing': 'Number of tracked service-level objectives currently breaching target.'
+};
+
 function formatPercent(value: number): string {
   return `${(value ?? 0).toFixed(1)}%`;
+}
+
+function formatAgeSeconds(value?: number): string {
+  if (value == null || value < 0) {
+    return '-';
+  }
+  if (value < 60) {
+    return `${Math.round(value)}s`;
+  }
+  if (value < 3600) {
+    return `${Math.round(value / 60)}m`;
+  }
+  return `${(value / 3600).toFixed(1)}h`;
 }
 
 function isCreatorAccessError(error: string): boolean {
@@ -154,6 +212,19 @@ function MetricDistribution({ title, items = [], emptyLabel }: { title: string; 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function SummaryMetricCard({ label, value }: { label: string; value: React.ReactNode }) {
+  const description = METRIC_HELP[label];
+  return (
+    <div className="noise-summary-item">
+      <div className="metric-label-row">
+        <div className="noise-summary-label">{label}</div>
+        {description ? <MetricInfoIcon label={label} description={description} /> : null}
+      </div>
+      <div className="noise-summary-value">{value}</div>
     </div>
   );
 }
@@ -238,39 +309,6 @@ function EndpointMetricsTable({ rows = [] }: { rows?: OperationalEndpointMetric[
   );
 }
 
-function renderOverview(payload: OperationalSectionResponse<OperationalExecutiveHealth>) {
-  const data = payload.data;
-  if (!data) {
-    return <div className="panel"><div className="panel-header"><h3>Operations Overview</h3></div><div className="panel-caption">No data available.</div></div>;
-  }
-  return (
-    <div className="page-grid">
-      <div className="stats-grid">
-        <StatCard title="Ingestion Success (24h)" value={Math.round(data.ingestionSuccessRateLast24h)} caption="Percent" />
-        <StatCard title="Recompute P95 (ms)" value={Math.round(data.recomputeP95Ms)} />
-        <StatCard title="Normalization Coverage" value={Math.round(data.normalizationCoveragePercent)} caption="Percent" />
-        <StatCard title="Noise Reduction" value={Math.round(data.correlationNoiseReductionPercent)} caption="Percent filtered" />
-        <StatCard title="Open Critical" value={data.openCriticalFindings} tone="critical" />
-      </div>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Operations Overview</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          {Object.entries(SECTION_DESCRIPTIONS).map(([key, description]) => (
-            <div key={key} className="noise-summary-item">
-              <div className="noise-summary-label">{key.split('-').join(' ')}</div>
-              <div className="noise-summary-value">{description}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function renderIngestion(payload: OperationalSectionResponse<OperationalIngestionEfficiency>) {
   const data = payload.data;
   if (!data) {
@@ -284,38 +322,14 @@ function renderIngestion(payload: OperationalSectionResponse<OperationalIngestio
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">SBOM Ingestions (24h)</div>
-            <div className="noise-summary-value">{(data.sbomIngestionsLast24h ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">SBOM / Hour</div>
-            <div className="noise-summary-value">{(data.sbomIngestionsPerHour ?? 0).toFixed(2)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">SBOM Success Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.sbomSuccessRatePercent ?? 0)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Sync Success Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.syncSuccessRatePercent ?? 0)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Pending Delta Events</div>
-            <div className="noise-summary-value">{(data.queueBacklog ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Records Fetched</div>
-            <div className="noise-summary-value">{(data.recordsFetchedLast24h ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Records Inserted</div>
-            <div className="noise-summary-value">{(data.recordsInsertedLast24h ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Records Updated</div>
-            <div className="noise-summary-value">{(data.recordsUpdatedLast24h ?? 0).toLocaleString()}</div>
-          </div>
+          <SummaryMetricCard label="SBOM Ingestions (24h)" value={(data.sbomIngestionsLast24h ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="SBOM / Hour" value={(data.sbomIngestionsPerHour ?? 0).toFixed(2)} />
+          <SummaryMetricCard label="SBOM Success Rate" value={formatPercent(data.sbomSuccessRatePercent ?? 0)} />
+          <SummaryMetricCard label="Sync Success Rate" value={formatPercent(data.syncSuccessRatePercent ?? 0)} />
+          <SummaryMetricCard label="Queued/Running Sync Jobs" value={(data.queueBacklog ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Records Fetched" value={(data.recordsFetchedLast24h ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Records Inserted" value={(data.recordsInsertedLast24h ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Records Updated" value={(data.recordsUpdatedLast24h ?? 0).toLocaleString()} />
         </div>
         <IngestionSourceTable rows={data.sourceBreakdown} />
       </section>
@@ -336,22 +350,10 @@ function renderNormalization(payload: OperationalSectionResponse<OperationalNorm
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Active Components</div>
-            <div className="noise-summary-value">{(data.activeComponents ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Name Coverage</div>
-            <div className="noise-summary-value">{formatPercent(data.normalizedNameCoveragePercent)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Version Coverage</div>
-            <div className="noise-summary-value">{formatPercent(data.normalizedVersionCoveragePercent)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Identity Coverage</div>
-            <div className="noise-summary-value">{formatPercent(data.softwareIdentityCoveragePercent)}</div>
-          </div>
+          <SummaryMetricCard label="Active Components" value={(data.activeComponents ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Name Coverage" value={formatPercent(data.normalizedNameCoveragePercent)} />
+          <SummaryMetricCard label="Version Coverage" value={formatPercent(data.normalizedVersionCoveragePercent)} />
+          <SummaryMetricCard label="Identity Coverage" value={formatPercent(data.softwareIdentityCoveragePercent)} />
         </div>
       </section>
     </div>
@@ -371,18 +373,9 @@ function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrel
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Open Findings</div>
-            <div className="noise-summary-value">{(data.openFindings ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">High Confidence Affected</div>
-            <div className="noise-summary-value">{formatPercent(data.highConfidenceAffectedRatePercent)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Unknown Decision Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.unknownDecisionRatePercent)}</div>
-          </div>
+          <SummaryMetricCard label="Open Findings" value={(data.openFindings ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="High Confidence Affected" value={formatPercent(data.highConfidenceAffectedRatePercent)} />
+          <SummaryMetricCard label="Unknown Decision Rate" value={formatPercent(data.unknownDecisionRatePercent)} />
         </div>
         <div className="noise-panel-grid">
           <MetricDistribution
@@ -419,30 +412,12 @@ function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLif
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Filtered Not Applicable</div>
-            <div className="noise-summary-value">{(data.totalFilteredNotApplicable ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Never Opened</div>
-            <div className="noise-summary-value">{(data.neverOpenedNotApplicable ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Auto Resolved</div>
-            <div className="noise-summary-value">{(data.autoResolvedNotApplicable ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Deferred</div>
-            <div className="noise-summary-value">{(data.deferredUnderInvestigation ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Filtered Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.filteredPercentOfPotential)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Reopen Rate</div>
-            <div className="noise-summary-value">{formatPercent(data.reopenRatePercent)}</div>
-          </div>
+          <SummaryMetricCard label="Filtered Not Applicable" value={(data.totalFilteredNotApplicable ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Never Opened" value={(data.neverOpenedNotApplicable ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Auto Resolved" value={(data.autoResolvedNotApplicable ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Deferred" value={(data.deferredUnderInvestigation ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Filtered Rate" value={formatPercent(data.filteredPercentOfPotential)} />
+          <SummaryMetricCard label="Reopen Rate" value={formatPercent(data.reopenRatePercent)} />
         </div>
         <div className="noise-panel-grid">
           <MetricDistribution
@@ -461,6 +436,11 @@ function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPa
   if (!data) {
     return <div className="panel"><div className="panel-header"><h3>API and Read-Path Performance</h3></div><div className="panel-caption">No data available.</div></div>;
   }
+  const noiseProjectionState = typeof data.noiseProjectionReady === 'boolean'
+    ? (data.noiseProjectionReady ? 'Ready' : 'Refreshing')
+    : 'Unavailable';
+  const noiseProjectionRefreshP95 = data.noiseProjectionRefreshP95Ms ?? 0;
+  const noiseProjectionRefreshFailures = data.noiseProjectionRefreshFailures ?? 0;
   return (
     <div className="page-grid">
       <section className="panel">
@@ -469,30 +449,20 @@ function renderReadPath(payload: OperationalSectionResponse<OperationalApiReadPa
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Canonical CVEs</div>
-            <div className="noise-summary-value">{(data.canonicalCveCount ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Summary CVEs</div>
-            <div className="noise-summary-value">{(data.summaryCveCount ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Summary Coverage</div>
-            <div className="noise-summary-value">{formatPercent(data.summaryCoveragePercent)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Summary Model</div>
-            <div className="noise-summary-value">{data.summaryReadModelReady ? 'Ready' : 'Rebuilding'}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Filter Cache State</div>
-            <div className="noise-summary-value">{data.filterCacheActive ? 'Warm' : 'Cold'}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Filter Cache Hit Ratio</div>
-            <div className="noise-summary-value">{formatPercent(data.filterCacheHitRatioPercent)}</div>
-          </div>
+          <SummaryMetricCard label="Canonical CVEs" value={(data.canonicalCveCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Summary CVEs" value={(data.summaryCveCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Summary Coverage" value={formatPercent(data.summaryCoveragePercent)} />
+          <SummaryMetricCard label="Noise Projection" value={noiseProjectionState} />
+          <SummaryMetricCard label="Projection Age" value={formatAgeSeconds(data.noiseProjectionAgeSeconds)} />
+          <SummaryMetricCard
+            label="Projection Last Computed"
+            value={data.noiseProjectionLastComputedAt ? new Date(data.noiseProjectionLastComputedAt).toLocaleString() : 'Never'}
+          />
+          <SummaryMetricCard label="Projection Refresh P95" value={`${noiseProjectionRefreshP95.toFixed(1)} ms`} />
+          <SummaryMetricCard label="Projection Refresh Failures" value={noiseProjectionRefreshFailures.toLocaleString()} />
+          <SummaryMetricCard label="Summary Model" value={data.summaryReadModelReady ? 'Ready' : 'Rebuilding'} />
+          <SummaryMetricCard label="Filter Cache State" value={data.filterCacheActive ? 'Warm' : 'Cold'} />
+          <SummaryMetricCard label="Filter Cache Hit Ratio" value={formatPercent(data.filterCacheHitRatioPercent)} />
         </div>
         <EndpointMetricsTable rows={data.endpointMetrics ?? []} />
       </section>
@@ -513,22 +483,10 @@ function renderFreshness(payload: OperationalSectionResponse<OperationalFreshnes
           <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
         </div>
         <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Stale Threshold (h)</div>
-            <div className="noise-summary-value">{(data.staleThresholdHours ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Stale Source Count</div>
-            <div className="noise-summary-value">{(data.staleSourceCount ?? 0).toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Normalization Drift (7d)</div>
-            <div className="noise-summary-value">{formatPercent(data.normalizationCoverageDrift7d)}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CPE Fallback Drift (7d)</div>
-            <div className="noise-summary-value">{formatPercent(data.cpeFallbackShareDrift7d)}</div>
-          </div>
+          <SummaryMetricCard label="Stale Threshold (h)" value={(data.staleThresholdHours ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Stale Source Count" value={(data.staleSourceCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Normalization Drift (7d)" value={formatPercent(data.normalizationCoverageDrift7d)} />
+          <SummaryMetricCard label="CPE Fallback Drift (7d)" value={formatPercent(data.cpeFallbackShareDrift7d)} />
         </div>
         <FreshnessTable rows={data.sourceFreshness ?? []} />
       </section>
@@ -574,9 +532,9 @@ function renderSlo(data: SloStatus) {
   return (
     <div className="page-grid">
       <div className="stats-grid">
-        <StatCard title="SLOs Defined" value={slos.length} />
-        <StatCard title="SLOs Passing" value={slos.filter((s) => s.compliant).length} />
-        <StatCard title="SLOs Failing" value={slos.filter((s) => !s.compliant).length} tone={slos.some((s) => !s.compliant) ? 'critical' : undefined} />
+        <StatCard title="SLOs Defined" value={slos.length} description={METRIC_HELP['SLOs Defined']} />
+        <StatCard title="SLOs Passing" value={slos.filter((s) => s.compliant).length} description={METRIC_HELP['SLOs Passing']} />
+        <StatCard title="SLOs Failing" value={slos.filter((s) => !s.compliant).length} tone={slos.some((s) => !s.compliant) ? 'critical' : undefined} description={METRIC_HELP['SLOs Failing']} />
       </div>
 
       <section className="panel">
@@ -611,8 +569,6 @@ function renderSlo(data: SloStatus) {
 
 function renderPipeline(payload: PipelinePayload) {
   const overview = payload.overview.data;
-  const ingestion = payload.ingestion.data;
-  const normalization = payload.normalization.data;
   const correlation = payload.correlation.data;
   const freshness = payload.freshness.data;
 
@@ -620,38 +576,13 @@ function renderPipeline(payload: PipelinePayload) {
     <div className="page-grid">
       {overview ? (
         <div className="stats-grid">
-          <StatCard title="Ingestion Success (24h)" value={Math.round(overview.ingestionSuccessRateLast24h)} caption="Percent" />
-          <StatCard title="Normalization Coverage" value={Math.round(overview.normalizationCoveragePercent)} caption="Percent" />
-          <StatCard title="Noise Reduction" value={Math.round(overview.correlationNoiseReductionPercent)} caption="Percent filtered" />
-          <StatCard title="Open Findings" value={correlation?.openFindings ?? 0} />
-          <StatCard title="Stale Sources" value={freshness?.staleSourceCount ?? 0} tone={(freshness?.staleSourceCount ?? 0) > 0 ? 'critical' : undefined} />
+          <StatCard title="Ingestion Success (24h)" value={Math.round(overview.ingestionSuccessRateLast24h)} caption="Percent" description={METRIC_HELP['Ingestion Success (24h)']} />
+          <StatCard title="Normalization Coverage" value={Math.round(overview.normalizationCoveragePercent)} caption="Percent" description={METRIC_HELP['Normalization Coverage']} />
+          <StatCard title="Noise Reduction" value={Math.round(overview.correlationNoiseReductionPercent)} caption="Percent filtered" description={METRIC_HELP['Noise Reduction']} />
+          <StatCard title="Open Findings" value={correlation?.openFindings ?? 0} description={METRIC_HELP['Open Findings']} />
+          <StatCard title="Stale Sources" value={freshness?.staleSourceCount ?? 0} tone={(freshness?.staleSourceCount ?? 0) > 0 ? 'critical' : undefined} description={METRIC_HELP['Stale Sources']} />
         </div>
       ) : null}
-
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Pipeline Overview</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.overview.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">What this view is for</div>
-            <div className="noise-summary-value">{SECTION_DESCRIPTIONS.pipeline}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Use Quality for</div>
-            <div className="noise-summary-value">Investigating exceptions, root-cause queues, and routing into owner workflows.</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Ingestion volume</div>
-            <div className="noise-summary-value">{(ingestion?.recordsFetchedLast24h ?? 0).toLocaleString()} records fetched in the last 24 hours.</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Current confidence</div>
-            <div className="noise-summary-value">{formatPercent(correlation?.highConfidenceAffectedRatePercent ?? 0)} high-confidence affected decisions.</div>
-          </div>
-        </div>
-      </section>
 
       {renderIngestion(payload.ingestion)}
       {renderNormalization(payload.normalization)}
@@ -670,42 +601,18 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
     <div className="page-grid">
       {readPath ? (
         <div className="stats-grid">
-          <StatCard title="Summary Coverage" value={Math.round(readPath.summaryCoveragePercent)} caption="Percent" />
+          <StatCard title="Summary Coverage" value={Math.round(readPath.summaryCoveragePercent)} caption="Percent" description={METRIC_HELP['Summary Coverage']} />
           <StatCard
             title="Summary Model"
             value={readPath.summaryReadModelReady ? 1 : 0}
             caption={readPath.summaryReadModelReady ? 'Ready' : 'Rebuilding'}
             tone={readPath.summaryReadModelReady ? undefined : 'critical'}
+            description={METRIC_HELP['Summary Model']}
           />
-          <StatCard title="Cache Hit Ratio" value={Math.round(readPath.filterCacheHitRatioPercent)} caption="Percent" />
-          <StatCard title="Failing SLOs" value={sloItems.filter((item) => !item.compliant).length} tone={sloItems.some((item) => !item.compliant) ? 'critical' : undefined} />
+          <StatCard title="Cache Hit Ratio" value={Math.round(readPath.filterCacheHitRatioPercent)} caption="Percent" description={METRIC_HELP['Cache Hit Ratio']} />
+          <StatCard title="Failing SLOs" value={sloItems.filter((item) => !item.compliant).length} tone={sloItems.some((item) => !item.compliant) ? 'critical' : undefined} description={METRIC_HELP['Failing SLOs']} />
         </div>
       ) : null}
-
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Platform Health Overview</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.readPath.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">What this view is for</div>
-            <div className="noise-summary-value">{SECTION_DESCRIPTIONS['platform-health']}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Read-path health</div>
-            <div className="noise-summary-value">{readPath?.summaryReadModelReady ? 'Summary read model is ready for serving UI workflows.' : 'Summary read model is rebuilding or degraded.'}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">SLO status</div>
-            <div className="noise-summary-value">{payload.slo?.overallCompliant ? 'All tracked SLOs are currently compliant.' : 'One or more tracked SLOs are currently failing.'}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Advanced reference</div>
-            <div className="noise-summary-value">Metric Catalog is retained below as reference, not as a separate workflow tab.</div>
-          </div>
-        </div>
-      </section>
 
       {renderReadPath(payload.readPath)}
       {renderSlo(payload.slo)}

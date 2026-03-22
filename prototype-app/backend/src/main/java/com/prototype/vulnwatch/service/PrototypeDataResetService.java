@@ -1,112 +1,65 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.dto.PrototypeDataResetResponse;
-import com.prototype.vulnwatch.repo.AssetRepository;
-import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
-import com.prototype.vulnwatch.repo.CpeDimRepository;
-import com.prototype.vulnwatch.repo.FindingCommentRepository;
-import com.prototype.vulnwatch.repo.FindingEventRepository;
-import com.prototype.vulnwatch.repo.FindingRepository;
-import com.prototype.vulnwatch.repo.IdentityLinkRepository;
-import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
-import com.prototype.vulnwatch.repo.InventoryComponentRepository;
-import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
-import com.prototype.vulnwatch.repo.SbomUploadRepository;
-import com.prototype.vulnwatch.repo.SoftwareIdentifierRepository;
-import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
-import com.prototype.vulnwatch.repo.SoftwareInventoryItemRepository;
-import com.prototype.vulnwatch.repo.SyncRunRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityConfigExprRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityIntelSummaryRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityIntelSummarySourceRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityRuleRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @Service
 public class PrototypeDataResetService {
 
-    private final FindingCommentRepository findingCommentRepository;
-    private final FindingEventRepository findingEventRepository;
-    private final FindingRepository findingRepository;
-    private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
-    private final OrgCveRecordRepository orgCveRecordRepository;
-    private final SoftwareInventoryItemRepository softwareInventoryItemRepository;
-    private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
-    private final InventoryComponentRepository inventoryComponentRepository;
-    private final SbomUploadRepository sbomUploadRepository;
-    private final AssetRepository assetRepository;
-    private final VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository;
-    private final VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository;
-    private final VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository;
-    private final VulnerabilityIntelObservationRepository vulnerabilityIntelObservationRepository;
-    private final VulnerabilityRuleRepository vulnerabilityRuleRepository;
-    private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
-    private final VulnerabilityRepository vulnerabilityRepository;
-    private final IdentityLinkRepository identityLinkRepository;
-    private final SoftwareIdentifierRepository softwareIdentifierRepository;
-    private final SoftwareIdentityRepository softwareIdentityRepository;
-    private final CpeDimRepository cpeDimRepository;
-    private final SyncRunRepository syncRunRepository;
+    private static final List<String> TABLES_TO_CLEAR = List.of(
+            "finding_suggestions",
+            "finding_comments",
+            "finding_events",
+            "finding_delta_queue",
+            "investigation_activities",
+            "investigation_attachments",
+            "investigations",
+            "applicability_assessments",
+            "findings",
+            "component_vulnerability_states",
+            "org_cve_records",
+            "dashboard_noise_reduction_projection",
+            "software_inventory_items",
+            "inventory_component_cpe_map",
+            "software_instances",
+            "inventory_components",
+            "software_identity_summary",
+            "software_eol_mapping",
+            "quality_issue_projection",
+            "discovery_models",
+            "sbom_uploads",
+            "ci_aliases",
+            "cis",
+            "assets",
+            "vex_assertions",
+            "vulnerability_intel_summary_sources",
+            "vulnerability_intel_summary",
+            "vulnerability_config_expr",
+            "vulnerability_intel_observations",
+            "vulnerability_rules",
+            "vulnerability_targets",
+            "vulnerabilities",
+            "identity_links",
+            "software_identifiers",
+            "software_identities",
+            "cpe_dim",
+            "sync_runs"
+    );
+
     private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
     private final JdbcTemplate jdbcTemplate;
 
     public PrototypeDataResetService(
-            FindingCommentRepository findingCommentRepository,
-            FindingEventRepository findingEventRepository,
-            FindingRepository findingRepository,
-            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
-            OrgCveRecordRepository orgCveRecordRepository,
-            SoftwareInventoryItemRepository softwareInventoryItemRepository,
-            InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
-            InventoryComponentRepository inventoryComponentRepository,
-            SbomUploadRepository sbomUploadRepository,
-            AssetRepository assetRepository,
-            VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository,
-            VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository,
-            VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository,
-            VulnerabilityIntelObservationRepository vulnerabilityIntelObservationRepository,
-            VulnerabilityRuleRepository vulnerabilityRuleRepository,
-            VulnerabilityTargetRepository vulnerabilityTargetRepository,
-            VulnerabilityRepository vulnerabilityRepository,
-            IdentityLinkRepository identityLinkRepository,
-            SoftwareIdentifierRepository softwareIdentifierRepository,
-            SoftwareIdentityRepository softwareIdentityRepository,
-            CpeDimRepository cpeDimRepository,
-            SyncRunRepository syncRunRepository,
             VulnerabilityIntelligenceService vulnerabilityIntelligenceService,
             JdbcTemplate jdbcTemplate
     ) {
-        this.findingCommentRepository = findingCommentRepository;
-        this.findingEventRepository = findingEventRepository;
-        this.findingRepository = findingRepository;
-        this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
-        this.orgCveRecordRepository = orgCveRecordRepository;
-        this.softwareInventoryItemRepository = softwareInventoryItemRepository;
-        this.inventoryComponentCpeMapRepository = inventoryComponentCpeMapRepository;
-        this.inventoryComponentRepository = inventoryComponentRepository;
-        this.sbomUploadRepository = sbomUploadRepository;
-        this.assetRepository = assetRepository;
-        this.vulnerabilityIntelSummarySourceRepository = vulnerabilityIntelSummarySourceRepository;
-        this.vulnerabilityIntelSummaryRepository = vulnerabilityIntelSummaryRepository;
-        this.vulnerabilityConfigExprRepository = vulnerabilityConfigExprRepository;
-        this.vulnerabilityIntelObservationRepository = vulnerabilityIntelObservationRepository;
-        this.vulnerabilityRuleRepository = vulnerabilityRuleRepository;
-        this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
-        this.vulnerabilityRepository = vulnerabilityRepository;
-        this.identityLinkRepository = identityLinkRepository;
-        this.softwareIdentifierRepository = softwareIdentifierRepository;
-        this.softwareIdentityRepository = softwareIdentityRepository;
-        this.cpeDimRepository = cpeDimRepository;
-        this.syncRunRepository = syncRunRepository;
         this.vulnerabilityIntelligenceService = vulnerabilityIntelligenceService;
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -114,65 +67,13 @@ public class PrototypeDataResetService {
     @Transactional
     public PrototypeDataResetResponse cleanAll() {
         Map<String, Long> deletedRows = new LinkedHashMap<>();
-        deletedRows.put("finding_suggestions", tableCount("finding_suggestions"));
-        deletedRows.put("finding_comments", findingCommentRepository.count());
-        deletedRows.put("finding_events", findingEventRepository.count());
-        deletedRows.put("findings", findingRepository.count());
-        deletedRows.put("component_vulnerability_state", componentVulnerabilityStateRepository.count());
-        deletedRows.put("org_cve_records", orgCveRecordRepository.count());
-        deletedRows.put("software_inventory_items", softwareInventoryItemRepository.count());
-        deletedRows.put("inventory_component_cpe_map", inventoryComponentCpeMapRepository.count());
-        deletedRows.put("software_instances", tableCount("software_instances"));
-        deletedRows.put("inventory_components", inventoryComponentRepository.count());
-        deletedRows.put("software_identity_summary", tableCount("software_identity_summary"));
-        deletedRows.put("quality_issue_projection", tableCount("quality_issue_projection"));
-        deletedRows.put("discovery_models", tableCount("discovery_models"));
-        deletedRows.put("sbom_uploads", sbomUploadRepository.count());
-        deletedRows.put("ci_aliases", tableCount("ci_aliases"));
-        deletedRows.put("cis", tableCount("cis"));
-        deletedRows.put("assets", assetRepository.count());
-        deletedRows.put("vulnerability_intel_summary_sources", vulnerabilityIntelSummarySourceRepository.count());
-        deletedRows.put("vulnerability_intel_summary", vulnerabilityIntelSummaryRepository.count());
-        deletedRows.put("vulnerability_config_expr", vulnerabilityConfigExprRepository.count());
-        deletedRows.put("vulnerability_intel_observations", vulnerabilityIntelObservationRepository.count());
-        deletedRows.put("vulnerability_rules", vulnerabilityRuleRepository.count());
-        deletedRows.put("vulnerability_targets", vulnerabilityTargetRepository.count());
-        deletedRows.put("vulnerabilities", vulnerabilityRepository.count());
-        deletedRows.put("identity_links", identityLinkRepository.count());
-        deletedRows.put("software_identifiers", softwareIdentifierRepository.count());
-        deletedRows.put("software_identities", softwareIdentityRepository.count());
-        deletedRows.put("cpe_dim", cpeDimRepository.count());
-        deletedRows.put("sync_runs", syncRunRepository.count());
+        for (String tableName : TABLES_TO_CLEAR) {
+            deletedRows.put(tableName, tableCount(tableName));
+        }
 
-        truncateOrDeleteTable("finding_suggestions");
-        truncateOrDeleteTable("finding_comments");
-        truncateOrDeleteTable("finding_events");
-        truncateOrDeleteTable("findings");
-        truncateOrDeleteTable("component_vulnerability_state");
-        truncateOrDeleteTable("org_cve_records");
-        truncateOrDeleteTable("software_inventory_items");
-        truncateOrDeleteTable("inventory_component_cpe_map");
-        truncateOrDeleteTable("software_instances");
-        truncateOrDeleteTable("inventory_components");
-        truncateOrDeleteTable("software_identity_summary");
-        truncateOrDeleteTable("quality_issue_projection");
-        truncateOrDeleteTable("discovery_models");
-        truncateOrDeleteTable("sbom_uploads");
-        truncateOrDeleteTable("ci_aliases");
-        truncateOrDeleteTable("cis");
-        truncateOrDeleteTable("assets");
-        truncateOrDeleteTable("vulnerability_intel_summary_sources");
-        truncateOrDeleteTable("vulnerability_intel_summary");
-        truncateOrDeleteTable("vulnerability_config_expr");
-        truncateOrDeleteTable("vulnerability_intel_observations");
-        truncateOrDeleteTable("vulnerability_rules");
-        truncateOrDeleteTable("vulnerability_targets");
-        truncateOrDeleteTable("vulnerabilities");
-        truncateOrDeleteTable("identity_links");
-        truncateOrDeleteTable("software_identifiers");
-        truncateOrDeleteTable("software_identities");
-        truncateOrDeleteTable("cpe_dim");
-        truncateOrDeleteTable("sync_runs");
+        for (String tableName : TABLES_TO_CLEAR) {
+            truncateOrDeleteTable(tableName);
+        }
 
         vulnerabilityIntelligenceService.resetReadModelCaches();
         return new PrototypeDataResetResponse(deletedRows, Instant.now());
@@ -192,8 +93,12 @@ public class PrototypeDataResetService {
         }
         try {
             jdbcTemplate.execute("truncate table " + tableName);
-        } catch (DataAccessException ignored) {
-            jdbcTemplate.update("delete from " + tableName);
+        } catch (DataAccessException truncateError) {
+            try {
+                jdbcTemplate.update("delete from " + tableName);
+            } catch (DataAccessException deleteError) {
+                throw new IllegalStateException("Failed to reset table " + tableName, deleteError);
+            }
         }
     }
 

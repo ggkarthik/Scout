@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
+import com.prototype.vulnwatch.service.FindingDeltaQueueService;
 import com.prototype.vulnwatch.service.FindingService;
 import com.prototype.vulnwatch.service.InvestigationService;
 import com.prototype.vulnwatch.service.OrgCveRecordService;
@@ -52,6 +53,7 @@ public class CveDetailController {
     private final VexAssertionRepository vexAssertionRepository;
     private final InvestigationService investigationService;
     private final ApplicabilityAssessmentService assessmentService;
+    private final FindingDeltaQueueService findingDeltaQueueService;
     private final FindingService findingService;
     private final OrgCveRecordService orgCveRecordService;
     private final TenantService tenantService;
@@ -295,6 +297,7 @@ public class CveDetailController {
         response.setAlreadyOpenCount(result.alreadyOpenCount());
         String message;
         if (result.createdCount() + result.reopenedCount() > 0) {
+            findingDeltaQueueService.enqueueNoiseReductionRefresh(tenant.getId(), "manual-finding");
             message = "Manual finding workflow completed.";
         } else if (result.alreadyOpenCount() > 0) {
             message = "Findings already open for all selected components. No duplicates created.";
@@ -688,10 +691,12 @@ public class CveDetailController {
         dto.setFindingEligibilityDetail(resolveFindingEligibilityDetail(state));
         dto.setEolSlug(state.getComponent().getEolSlug());
         dto.setEolCycle(state.getComponent().getEolCycle());
-        dto.setEolDate(state.getComponent().getEolDate());
-        dto.setIsEol(state.getComponent().getIsEol());
         LocalDate eolDate = state.getComponent().getEolDate();
-        if (eolDate != null && !Boolean.TRUE.equals(state.getComponent().getIsEol())) {
+        boolean effectiveEol = Boolean.TRUE.equals(state.getComponent().getIsEol())
+                || (eolDate != null && !LocalDate.now().isBefore(eolDate));
+        dto.setEolDate(eolDate);
+        dto.setIsEol(effectiveEol);
+        if (eolDate != null && !effectiveEol) {
             int daysRemaining = (int) ChronoUnit.DAYS.between(LocalDate.now(), eolDate);
             if (daysRemaining >= 0) {
                 dto.setEolDaysRemaining(daysRemaining);

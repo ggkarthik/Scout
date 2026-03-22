@@ -11,12 +11,15 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
+import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.util.CpeUtil;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -76,6 +79,8 @@ public class EolRefreshService {
     private final JdbcTemplate jdbcTemplate;
     private final SyncRunRepository syncRunRepository;
     private final TaskExecutor ingestionExecutor;
+    private final InventoryComponentRepository inventoryComponentRepository;
+    private final FindingDeltaQueueService findingDeltaQueueService;
     private final OrgCveRecordService orgCveRecordService;
     private final TenantRepository tenantRepository;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
@@ -90,6 +95,8 @@ public class EolRefreshService {
             JdbcTemplate jdbcTemplate,
             SyncRunRepository syncRunRepository,
             @Qualifier("integrationQueueExecutor") TaskExecutor ingestionExecutor,
+            InventoryComponentRepository inventoryComponentRepository,
+            FindingDeltaQueueService findingDeltaQueueService,
             OrgCveRecordService orgCveRecordService,
             TenantRepository tenantRepository,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
@@ -102,6 +109,8 @@ public class EolRefreshService {
         this.jdbcTemplate = jdbcTemplate;
         this.syncRunRepository = syncRunRepository;
         this.ingestionExecutor = ingestionExecutor;
+        this.inventoryComponentRepository = inventoryComponentRepository;
+        this.findingDeltaQueueService = findingDeltaQueueService;
         this.orgCveRecordService = orgCveRecordService;
         this.tenantRepository = tenantRepository;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
@@ -395,9 +404,8 @@ public class EolRefreshService {
         int componentsUpdated = denormalizeInventoryComponents();
         LOG.info("EOL denormalization — updated {} software_instances, {} inventory_components",
                 instancesUpdated, componentsUpdated);
-        refreshOrgCveEolCounts();
+        enqueueLifecycleDeltasForTrackedComponents("eol-denormalize");
         softwareIdentitySummaryProjectionService.refreshAll();
-        operationalQualityProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
     }
 
@@ -407,10 +415,69 @@ public class EolRefreshService {
         clearInventoryComponentProjection(normalizedKey);
         int instancesUpdated = denormalizeSoftwareInstances(normalizedKey);
         int componentsUpdated = denormalizeInventoryComponents(normalizedKey);
-        refreshOrgCveEolCounts();
+        enqueueLifecycleDeltasForNormalizedKey(normalizedKey, "eol-confirmed-mapping");
         softwareIdentitySummaryProjectionService.refreshByNormalizedKey(normalizedKey);
-        operationalQualityProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
+    }
+
+    @Scheduled(cron = "${app.eol.lifecycle-date-sweep-cron:0 15 0 * * *}")
+    public void lifecycleDateSweep() {
+        if (!enabled) {
+            LOG.debug("EOL refresh disabled; skipping lifecycle date sweep");
+            return;
+        }
+        SyncRun run = startRun("EOL_DATE_SWEEP");
+        run.setStatus("running");
+        syncRunRepository.save(run);
+        try {
+            int updated = runLifecycleDateSweep();
+            completeRun(run, "completed", updated);
+        } catch (Exception e) {
+            completeRun(run, "failed", e.getMessage());
+        }
+    }
+
+    int runLifecycleDateSweep() {
+        LocalDate today = LocalDate.now();
+        LocalDate eosThreshold = today.plusDays(EolConstants.NEAR_EOL_THRESHOLD_DAYS);
+        List<java.util.UUID> candidateIds = inventoryComponentRepository.findLifecycleTransitionComponentIds(today, eosThreshold);
+        if (candidateIds.isEmpty()) {
+            return 0;
+        }
+
+        Instant now = Instant.now();
+        List<com.prototype.vulnwatch.domain.InventoryComponent> components = inventoryComponentRepository.findAllById(candidateIds);
+        List<com.prototype.vulnwatch.domain.InventoryComponent> changedComponents = new ArrayList<>();
+        Map<java.util.UUID, List<java.util.UUID>> componentIdsByTenant = new LinkedHashMap<>();
+
+        for (com.prototype.vulnwatch.domain.InventoryComponent component : components) {
+            if (component.getTenant() == null || component.getTenant().getId() == null || component.getId() == null) {
+                continue;
+            }
+            componentIdsByTenant
+                    .computeIfAbsent(component.getTenant().getId(), ignored -> new ArrayList<>())
+                    .add(component.getId());
+
+            boolean changed = false;
+            if (component.getEolDate() != null && !today.isBefore(component.getEolDate()) && !Boolean.TRUE.equals(component.getIsEol())) {
+                component.setIsEol(true);
+                changed = true;
+            }
+            if (changed || component.getEolCheckedAt() == null) {
+                component.setEolCheckedAt(now);
+                changed = true;
+            }
+            if (changed) {
+                changedComponents.add(component);
+            }
+        }
+
+        if (!changedComponents.isEmpty()) {
+            inventoryComponentRepository.saveAll(changedComponents);
+        }
+        componentIdsByTenant.forEach((tenantId, componentIds) ->
+                findingDeltaQueueService.enqueueLifecycleDeltas(tenantId, componentIds, "eol-date-sweep"));
+        return candidateIds.size();
     }
 
     private void refreshOrgCveEolCounts() {
@@ -424,6 +491,41 @@ public class EolRefreshService {
         } catch (Exception e) {
             LOG.warn("EOL denormalization — org_cve_records refresh failed: {}", e.getMessage());
         }
+    }
+
+    private void enqueueLifecycleDeltasForTrackedComponents(String sourceTag) {
+        Map<java.util.UUID, List<java.util.UUID>> componentIdsByTenant = inventoryComponentRepository.findAllById(
+                        inventoryComponentRepository.findActiveLifecycleTrackedIds()
+                ).stream()
+                .filter(component -> component.getTenant() != null && component.getTenant().getId() != null && component.getId() != null)
+                .collect(Collectors.groupingBy(
+                        component -> component.getTenant().getId(),
+                        LinkedHashMap::new,
+                        Collectors.mapping(component -> component.getId(), Collectors.toList())
+                ));
+        componentIdsByTenant.forEach((tenantId, componentIds) ->
+                findingDeltaQueueService.enqueueLifecycleDeltas(tenantId, componentIds, sourceTag));
+    }
+
+    private void enqueueLifecycleDeltasForNormalizedKey(String normalizedKey, String sourceTag) {
+        if (normalizedKey == null || normalizedKey.isBlank()) {
+            return;
+        }
+        List<java.util.UUID> componentIds = inventoryComponentRepository.findActiveIdsBySoftwareIdentityNormalizedKey(
+                normalizedKey.trim().toLowerCase(Locale.ROOT)
+        );
+        if (componentIds.isEmpty()) {
+            return;
+        }
+        Map<java.util.UUID, List<java.util.UUID>> componentIdsByTenant = inventoryComponentRepository.findAllById(componentIds).stream()
+                .filter(component -> component.getTenant() != null && component.getTenant().getId() != null && component.getId() != null)
+                .collect(Collectors.groupingBy(
+                        component -> component.getTenant().getId(),
+                        LinkedHashMap::new,
+                        Collectors.mapping(component -> component.getId(), Collectors.toList())
+                ));
+        componentIdsByTenant.forEach((tenantId, ids) ->
+                findingDeltaQueueService.enqueueLifecycleDeltas(tenantId, ids, sourceTag));
     }
 
     // NOTE: software_instances rows are read by HostInventoryReadService (host asset detail view),

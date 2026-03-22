@@ -62,7 +62,7 @@ public class SbomIngestionService {
     private final IdentityGraphService identityGraphService;
     private final InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
     private final SoftwareInventorySyncService softwareInventorySyncService;
-    private final FindingService findingService;
+    private final FindingDeltaQueueService findingDeltaQueueService;
     private final AssetLifecycleService assetLifecycleService;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final OperationalQualityProjectionService operationalQualityProjectionService;
@@ -84,7 +84,7 @@ public class SbomIngestionService {
             IdentityGraphService identityGraphService,
             InventoryComponentCpeMappingService inventoryComponentCpeMappingService,
             SoftwareInventorySyncService softwareInventorySyncService,
-            FindingService findingService,
+            FindingDeltaQueueService findingDeltaQueueService,
             AssetLifecycleService assetLifecycleService,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
             OperationalQualityProjectionService operationalQualityProjectionService,
@@ -102,7 +102,7 @@ public class SbomIngestionService {
         this.identityGraphService = identityGraphService;
         this.inventoryComponentCpeMappingService = inventoryComponentCpeMappingService;
         this.softwareInventorySyncService = softwareInventorySyncService;
-        this.findingService = findingService;
+        this.findingDeltaQueueService = findingDeltaQueueService;
         this.assetLifecycleService = assetLifecycleService;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.operationalQualityProjectionService = operationalQualityProjectionService;
@@ -865,9 +865,12 @@ public class SbomIngestionService {
                     continue;
                 }
             }
-            int findingsGenerated = findingService.recomputeOnSoftwareDeltaBatch(tenant.getId(), recomputedComponentIds);
+            int findingsGenerated = findingDeltaQueueService.enqueueSoftwareDeltas(
+                    tenant.getId(),
+                    recomputedComponentIds,
+                    "sbom-ingestion"
+            );
             softwareIdentitySummaryProjectionService.refreshTenant(tenant);
-            operationalQualityProjectionService.refreshTenant(tenant);
             upload.setFormat(format);
             upload.setComponentCount(components.size());
             upload.setFindingsGenerated(findingsGenerated);

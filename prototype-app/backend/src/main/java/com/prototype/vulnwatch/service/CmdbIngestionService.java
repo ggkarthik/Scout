@@ -51,7 +51,7 @@ public class CmdbIngestionService {
     private final CiResolutionService ciResolutionService;
     private final InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
     private final SoftwareInventorySyncService softwareInventorySyncService;
-    private final FindingService findingService;
+    private final FindingDeltaQueueService findingDeltaQueueService;
     private final AssetLifecycleService assetLifecycleService;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final OperationalQualityProjectionService operationalQualityProjectionService;
@@ -68,7 +68,7 @@ public class CmdbIngestionService {
             CiResolutionService ciResolutionService,
             InventoryComponentCpeMappingService inventoryComponentCpeMappingService,
             SoftwareInventorySyncService softwareInventorySyncService,
-            FindingService findingService,
+            FindingDeltaQueueService findingDeltaQueueService,
             AssetLifecycleService assetLifecycleService,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
             OperationalQualityProjectionService operationalQualityProjectionService,
@@ -84,7 +84,7 @@ public class CmdbIngestionService {
         this.ciResolutionService = ciResolutionService;
         this.inventoryComponentCpeMappingService = inventoryComponentCpeMappingService;
         this.softwareInventorySyncService = softwareInventorySyncService;
-        this.findingService = findingService;
+        this.findingDeltaQueueService = findingDeltaQueueService;
         this.assetLifecycleService = assetLifecycleService;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.operationalQualityProjectionService = operationalQualityProjectionService;
@@ -320,7 +320,6 @@ public class CmdbIngestionService {
                     ? 0
                     : recomputeTouchedComponents(tenant, uniqueComponents.keySet());
             softwareIdentitySummaryProjectionService.refreshTenant(tenant);
-            operationalQualityProjectionService.refreshTenant(tenant);
 
             Instant completedAt = Instant.now();
             for (Map.Entry<UUID, SbomUpload> entry : uploadByAssetId.entrySet()) {
@@ -379,9 +378,10 @@ public class CmdbIngestionService {
         int findingsRecomputed = 0;
         for (int start = 0; start < orderedIds.size(); start += INGEST_FLUSH_INTERVAL) {
             int end = Math.min(start + INGEST_FLUSH_INTERVAL, orderedIds.size());
-            findingsRecomputed += findingService.recomputeOnSoftwareDeltaBatch(
+            findingsRecomputed += findingDeltaQueueService.enqueueSoftwareDeltas(
                     tenant.getId(),
-                    orderedIds.subList(start, end)
+                    orderedIds.subList(start, end),
+                    "cmdb-ingestion"
             );
             entityManager.clear();
         }
