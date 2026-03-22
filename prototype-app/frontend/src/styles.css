@@ -1068,6 +1068,14 @@ a.btn {
   padding: var(--space-3);
 }
 
+.stat-title-row,
+.metric-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .stat-title {
   color: var(--muted);
   font-size: 0.8rem;
@@ -1094,6 +1102,32 @@ a.btn {
 
 .stat-critical .stat-value {
   color: var(--critical);
+}
+
+.metric-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-muted) 78%, var(--panel-solid));
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.metric-info-icon:hover {
+  color: var(--title);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-solid));
+  box-shadow: none;
+  transform: none;
 }
 
 .severity-meter {
@@ -3575,6 +3609,18 @@ th.resizable-header:hover .col-resizer::after,
   line-height: 1.35;
 }
 
+.org-cve-exploitability-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.org-cve-kev-badge {
+  white-space: nowrap;
+}
+
 .org-cve-drawer {
   display: flex;
   flex-direction: column;
@@ -3632,6 +3678,13 @@ th.resizable-header:hover .col-resizer::after,
   margin-top: 12px;
 }
 
+.org-cve-automation-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .org-cve-score-card {
   padding: 12px 14px;
   border-radius: 14px;
@@ -3641,24 +3694,38 @@ th.resizable-header:hover .col-resizer::after,
   gap: 4px;
 }
 
+.org-cve-automation-card {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--panel-solid) 84%, var(--accent-soft)) 0%, var(--panel-solid) 100%);
+  display: grid;
+  gap: 4px;
+}
+
 .org-cve-score-card span,
-.org-cve-score-card small {
+.org-cve-score-card small,
+.org-cve-automation-card span,
+.org-cve-automation-card small {
   color: var(--muted);
 }
 
-.org-cve-score-card strong {
+.org-cve-score-card strong,
+.org-cve-automation-card strong {
   font-size: 1.7rem;
   line-height: 1;
 }
 
-.org-cve-score-card small {
+.org-cve-score-card small,
+.org-cve-automation-card small {
   font-size: 0.82rem;
   line-height: 1.35;
 }
 
 .org-cve-filter-row {
   display: grid;
-  grid-template-columns: minmax(280px, 420px) auto;
+  grid-template-columns: minmax(280px, 420px) minmax(170px, 220px) minmax(170px, 220px) auto;
   align-items: end;
   gap: 12px;
   margin: 12px 0 10px;
@@ -4444,6 +4511,10 @@ a.cve-source-badge-link:hover {
   .cve-stat-cards {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .cve-exploitability-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cve-stat-card {
@@ -4542,6 +4613,54 @@ a.cve-source-badge-link:hover {
 .cve-intel-empty {
   padding: var(--space-4) var(--space-5);
   font-size: 13px;
+  color: var(--muted);
+}
+
+.cve-exploitability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.cve-exploitability-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cve-exploitability-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cve-exploitability-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.cve-exploitability-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.cve-exploitability-note {
+  padding: 0 var(--space-5) var(--space-4);
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--muted);
 }
 
@@ -5258,6 +5377,10 @@ input[type="range"] {
     grid-template-columns: repeat(2, minmax(220px, 1fr));
   }
 
+  .org-cve-automation-status {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
   .vuln-intel-dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -5274,7 +5397,7 @@ input[type="range"] {
   }
 
   .org-cve-filter-row {
-    grid-template-columns: minmax(240px, 1fr) auto;
+    grid-template-columns: minmax(240px, 1fr) repeat(2, minmax(180px, 220px)) auto;
   }
 
   .filter-builder-panel {
@@ -5485,6 +5608,7 @@ input[type="range"] {
   }
 
   .org-cve-hero,
+  .org-cve-automation-status,
   .org-cve-hero-stats,
   .org-cve-action-strip,
   .org-cve-workflow-grid,

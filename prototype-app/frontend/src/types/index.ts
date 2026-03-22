@@ -285,6 +285,11 @@ export type OperationalApiReadPath = {
   canonicalCveCount: number;
   summaryCveCount: number;
   summaryCoveragePercent: number;
+  noiseProjectionReady?: boolean;
+  noiseProjectionLastComputedAt?: string;
+  noiseProjectionAgeSeconds?: number;
+  noiseProjectionRefreshP95Ms?: number;
+  noiseProjectionRefreshFailures?: number;
   filterCacheActive: boolean;
   filterCacheExpiresAt?: string;
   filterCacheHits: number;

@@ -10,6 +10,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingDeltaQueueEntry, Long> {
 
+    interface EventTypeCountRow {
+        String getEventType();
+        long getEntryCount();
+    }
+
     /**
      * Atomically claim up to {@code limit} PENDING entries that are ready to process.
      * SKIP LOCKED ensures concurrent pollers never pick the same row.
@@ -50,6 +55,20 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
 
     @Query("SELECT COUNT(e) FROM FindingDeltaQueueEntry e WHERE e.status = 'PENDING'")
     long countPending();
+
+    @Query("""
+            select e.eventType as eventType, count(e) as entryCount
+            from FindingDeltaQueueEntry e
+            where e.status = 'PENDING'
+            group by e.eventType
+            """)
+    List<EventTypeCountRow> countPendingByEventType();
+
+    @Query("SELECT COUNT(e) FROM FindingDeltaQueueEntry e WHERE e.status = 'FAILED'")
+    long countFailed();
+
+    @Query("SELECT MAX(e.completedAt) FROM FindingDeltaQueueEntry e WHERE e.status = 'DONE'")
+    Instant findLatestCompletedAt();
 
     /**
      * BLG-014: Count PENDING entries whose visible_after is before the given threshold —

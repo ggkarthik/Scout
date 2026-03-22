@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.domain.Vulnerability;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -28,6 +29,20 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
 
     List<OrgCveRecord> findByTenantAndVulnerability_IdIn(Tenant tenant, Collection<UUID> vulnerabilityIds);
 
+    @Query("""
+            select distinct o.tenant.id
+            from OrgCveRecord o
+            where o.vulnerability.id in :vulnerabilityIds
+            """)
+    Set<UUID> findDistinctTenantIdsByVulnerabilityIds(@Param("vulnerabilityIds") Collection<UUID> vulnerabilityIds);
+
+    @Query("""
+            select max(o.lastEvaluatedAt)
+            from OrgCveRecord o
+            where o.tenant = :tenant
+            """)
+    java.time.Instant findLatestLastEvaluatedAt(@Param("tenant") Tenant tenant);
+
     long countByTenant(Tenant tenant);
 
     long countByTenantAndApplicabilityState(Tenant tenant, ApplicabilityState applicabilityState);
@@ -44,6 +59,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     select o
                     from OrgCveRecord o
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -52,6 +68,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
                       case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
                       coalesce(o.cvssScore, 0.0) desc,
                       o.externalId asc
                     """,
@@ -59,6 +77,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     select count(o.id)
                     from OrgCveRecord o
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -66,7 +85,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                     """
     )
-    Page<OrgCveRecord> findExposurePage(@Param("tenant") Tenant tenant, Pageable pageable);
+    Page<OrgCveRecord> findExposurePage(@Param("tenant") Tenant tenant, @Param("inKev") Boolean inKev, Pageable pageable);
 
     @EntityGraph(attributePaths = {"vulnerability"})
     @Query(
@@ -74,6 +93,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     select o
                     from OrgCveRecord o
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -83,6 +103,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
                       case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
                       coalesce(o.cvssScore, 0.0) desc,
                       o.externalId asc
                     """,
@@ -90,6 +112,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     select count(o.id)
                     from OrgCveRecord o
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -101,6 +124,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
     Page<OrgCveRecord> findExposurePageByExternalId(
             @Param("tenant") Tenant tenant,
             @Param("externalId") String externalId,
+            @Param("inKev") Boolean inKev,
             Pageable pageable
     );
 
@@ -111,6 +135,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     from OrgCveRecord o
                     join o.vulnerability v
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -124,7 +149,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
-                      case when o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
                       coalesce(o.cvssScore, 0.0) desc,
                       o.externalId asc
                     """,
@@ -133,6 +160,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     from OrgCveRecord o
                     join o.vulnerability v
                     where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
                       and (
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
@@ -149,6 +177,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
     Page<OrgCveRecord> findExposurePage(
             @Param("tenant") Tenant tenant,
             @Param("queryUpper") String queryUpper,
+            @Param("inKev") Boolean inKev,
             Pageable pageable
     );
 

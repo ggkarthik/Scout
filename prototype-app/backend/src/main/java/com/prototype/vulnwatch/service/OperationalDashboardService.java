@@ -61,6 +61,7 @@ public class OperationalDashboardService {
     private final VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository;
     private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
     private final OperationalMetricsService operationalMetricsService;
+    private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final InventoryComponentRepository inventoryComponentRepository;
     private final FindingRepository findingRepository;
     private final FindingEventRepository findingEventRepository;
@@ -74,6 +75,7 @@ public class OperationalDashboardService {
             VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository,
             VulnerabilityIntelligenceService vulnerabilityIntelligenceService,
             OperationalMetricsService operationalMetricsService,
+            DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
             InventoryComponentRepository inventoryComponentRepository,
             FindingRepository findingRepository,
             FindingEventRepository findingEventRepository,
@@ -86,6 +88,7 @@ public class OperationalDashboardService {
         this.vulnerabilityIntelSummaryRepository = vulnerabilityIntelSummaryRepository;
         this.vulnerabilityIntelligenceService = vulnerabilityIntelligenceService;
         this.operationalMetricsService = operationalMetricsService;
+        this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.findingRepository = findingRepository;
         this.findingEventRepository = findingEventRepository;
@@ -122,8 +125,8 @@ public class OperationalDashboardService {
                 normalizationStats.softwareIdentityCoveragePercent()
         );
 
-        OperationalMetricsService.MetricSnapshot recomputeSnapshot =
-                operationalMetricsService.snapshot(OperationalMetricsService.KEY_INGESTION_RECOMPUTE_FINDINGS);
+        OperationalMetricsService.MetricSnapshot projectionRefreshSnapshot =
+                operationalMetricsService.snapshot(OperationalMetricsService.KEY_NOISE_PROJECTION_REFRESH);
 
         long ingestionAttempts24h = syncRuns24h.size() + uploads24h.size();
         long ingestionSuccesses24h = syncRuns24h.stream()
@@ -134,7 +137,7 @@ public class OperationalDashboardService {
 
         OperationalExecutiveHealthResponse executiveHealth = new OperationalExecutiveHealthResponse(
                 ingestionSuccessRate24h,
-                recomputeSnapshot.p95Ms(),
+                projectionRefreshSnapshot.p95Ms(),
                 normalizationCoveragePercent,
                 noise.filteredPercentOfPotential(),
                 dashboard.openCritical()
@@ -164,7 +167,7 @@ public class OperationalDashboardService {
                 buildAutoResolvedReopenRate(findings, tenant),
                 noise.categories()
         );
-        OperationalApiReadPathResponse apiReadPath = buildApiReadPath();
+        OperationalApiReadPathResponse apiReadPath = buildApiReadPath(tenant);
         OperationalFreshnessDriftResponse freshnessDrift = buildFreshnessDrift(
                 now,
                 tenant,
@@ -358,13 +361,17 @@ public class OperationalDashboardService {
         return percentage(reopened, autoResolvedFindingIds.size());
     }
 
-    private OperationalApiReadPathResponse buildApiReadPath() {
+    private OperationalApiReadPathResponse buildApiReadPath(Tenant tenant) {
         VulnerabilityIntelligenceService.OperationalState state = vulnerabilityIntelligenceService.getOperationalState();
         long canonicalCveCount = vulnerabilityRepository.countByExternalIdStartingWith(CVE_PREFIX);
         long summaryCveCount = vulnerabilityIntelSummaryRepository.countByExternalIdStartingWith(CVE_PREFIX);
         double summaryCoveragePercent = canonicalCveCount <= 0
                 ? 100.0
                 : percentage(summaryCveCount, canonicalCveCount);
+        DashboardNoiseReductionProjectionService.ProjectionSnapshot noiseProjection =
+                dashboardNoiseReductionProjectionService.getProjectionStatus(tenant);
+        OperationalMetricsService.MetricSnapshot noiseProjectionRefreshSnapshot =
+                operationalMetricsService.snapshot(OperationalMetricsService.KEY_NOISE_PROJECTION_REFRESH);
         long totalFilterCalls = state.filterCacheHits() + state.filterCacheMisses();
         double filterCacheHitRatio = percentage(state.filterCacheHits(), totalFilterCalls);
 
@@ -415,6 +422,11 @@ public class OperationalDashboardService {
                 canonicalCveCount,
                 summaryCveCount,
                 summaryCoveragePercent,
+                noiseProjection.ready(),
+                noiseProjection.lastComputedAt(),
+                noiseProjection.ageSeconds(),
+                noiseProjectionRefreshSnapshot.p95Ms(),
+                noiseProjectionRefreshSnapshot.errorCount(),
                 state.filterCacheActive(),
                 state.filterCacheExpiresAt(),
                 state.filterCacheHits(),
@@ -619,6 +631,7 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_INGESTION_CSAF_REDHAT_SYNC -> "CSAF Red Hat Sync Trigger";
             case OperationalMetricsService.KEY_INGESTION_ADVISORIES -> "Advisory Ingest Trigger";
             case OperationalMetricsService.KEY_INGESTION_RECOMPUTE_FINDINGS -> "Recompute Findings Trigger";
+            case OperationalMetricsService.KEY_NOISE_PROJECTION_REFRESH -> "Noise Reduction Projection Refresh";
             default -> key;
         };
     }
@@ -633,9 +646,9 @@ public class OperationalDashboardService {
         ));
         metrics.add(new OperationalMetricDefinitionResponse(
                 "Executive Health",
-                "correlation.recompute_p95_ms",
-                "Recompute Trigger P95 (ms)",
-                "P95 API latency for the manual recompute trigger endpoint."
+                "projection.refresh_p95_ms",
+                "Projection Refresh P95 (ms)",
+                "P95 processing time for the noise-reduction projection refresh worker."
         ));
         metrics.add(new OperationalMetricDefinitionResponse(
                 "Executive Health",
@@ -696,6 +709,30 @@ public class OperationalDashboardService {
                 "api.endpoint_latency",
                 "Endpoint Latency (Avg/P95/P99)",
                 "Per-endpoint API latency and error counts for operationally relevant routes."
+        ));
+        metrics.add(new OperationalMetricDefinitionResponse(
+                "API & Read-Path",
+                "projection.noise_reduction_ready",
+                "Noise Reduction Projection Ready",
+                "Whether the dashboard noise-reduction projection has a current tenant row ready to serve reads."
+        ));
+        metrics.add(new OperationalMetricDefinitionResponse(
+                "API & Read-Path",
+                "projection.noise_reduction_age_seconds",
+                "Noise Reduction Projection Age",
+                "Seconds since the noise-reduction projection was last recomputed for the tenant."
+        ));
+        metrics.add(new OperationalMetricDefinitionResponse(
+                "API & Read-Path",
+                "projection.noise_reduction_refresh_failures",
+                "Noise Reduction Projection Refresh Failures",
+                "Number of failed projection refresh attempts recorded in the in-memory operational metrics sample window."
+        ));
+        metrics.add(new OperationalMetricDefinitionResponse(
+                "API & Read-Path",
+                "projection.noise_reduction_refresh_p95_ms",
+                "Noise Reduction Projection Refresh P95 (ms)",
+                "P95 processing time for the noise-reduction projection refresh worker in the in-memory operational metrics sample window."
         ));
         metrics.add(new OperationalMetricDefinitionResponse(
                 "Data Freshness & Drift",

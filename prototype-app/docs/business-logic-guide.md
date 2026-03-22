@@ -641,44 +641,50 @@ While individual findings track exposure at the component level, the system also
 #### A. What Triggers a Refresh
 
 1. **An org-CVE record is refreshed whenever:**
-   - A new SBOM is ingested and components change.
-   - New vulnerability intelligence arrives (NVD, GHSA, CSAF, KEV, VEX sync).
-   - An analyst completes an applicability assessment.
-   - A VEX assertion is newly ingested.
+   - A new SBOM is ingested and components change, which enqueues a `SOFTWARE_DELTA`.
+   - New vulnerability intelligence arrives (NVD, GHSA, CSAF) and changes target or applicability truth, which enqueues a `CVE_DELTA`.
+   - Vulnerability metadata changes such as KEV or EPSS updates, which enqueue a `CVE_METADATA_DELTA`.
+   - A VEX assertion is newly ingested or repaired, which enqueues a `VEX_DELTA`.
+   - Lifecycle mapping or lifecycle dates change, which enqueue a `LIFECYCLE_DELTA`.
+
+2. **The normal refresh path is now asynchronous.**
+   - Ingest flows commit their data changes and queue rows in the same transaction.
+   - A background worker batches those queue rows and refreshes only the affected projection scope.
+   - Analysts see freshness via the workbench status panel rather than by running a manual recompute as part of normal workflow.
 
 #### B. Applicability State
 
-2. **The org-CVE record's applicability state answers: "Do we have this software?"**
+3. **The org-CVE record's applicability state answers: "Do we have this software?"**
    - **APPLICABLE:** At least one ACTIVE component in inventory matches this CVE — we have the software.
    - **NOT\_APPLICABLE:** No ACTIVE components match — we do not appear to have the software.
 
 #### C. Impact State
 
-3. **The org-CVE record's impact state answers: "Are we actually vulnerable?"**
+4. **The org-CVE record's impact state answers: "Are we actually vulnerable?"**
 
-4. **The system counts, across all matched components:**
+5. **The system counts, across all matched components:**
    - How many are IMPACTED (affected and no remediation applied)
    - How many have NO\_PATCH (affected with no fix available)
    - How many are UNKNOWN (match found but applicability unclear)
    - How many are FIXED (vulnerability patched)
    - How many are NOT\_IMPACTED (confirmed not affected)
 
-5. **Impact state rules:**
+6. **Impact state rules:**
    - If any component is IMPACTED or has NO\_PATCH → org impact state = **IMPACTED**
    - Otherwise, if any component is UNKNOWN → org impact state = **UNKNOWN**
    - Otherwise → org impact state = **NOT\_IMPACTED**
 
-6. **An "impacted" boolean flag** is set to true if the impact state is IMPACTED or NO\_PATCH.
+7. **An "impacted" boolean flag** is set to true if the impact state is IMPACTED or NO\_PATCH.
 
-7. **The impact reason** is a short string explaining why the state was reached (e.g., "vex\_not\_affected," "no\_supported\_match\_in\_software\_inventory").
+8. **The impact reason** is a short string explaining why the state was reached (e.g., "vex\_not\_affected," "no\_supported\_match\_in\_software\_inventory").
 
 #### D. Counts Stored on the Record
 
-8. **matchedComponentCount:** Total number of components that matched this CVE in any state.
+9. **matchedComponentCount:** Total number of components that matched this CVE in any state.
 
-9. **matchedSoftwareCount:** If APPLICABLE, this equals matchedComponentCount. If NOT\_APPLICABLE, this is 0.
+10. **matchedSoftwareCount:** If APPLICABLE, this equals matchedComponentCount. If NOT\_APPLICABLE, this is 0.
 
-10. **Vulnerability metadata copied:** CVSS score, severity, EPSS score, KEV flag, and vulnerability status are denormalised onto the org-CVE record so the UI can display all relevant information without joining multiple tables.
+11. **Vulnerability metadata copied:** CVSS score, severity, EPSS score, KEV flag, and vulnerability status are denormalised onto the org-CVE record so the UI can display all relevant information without joining multiple tables.
 
 ---
 
@@ -923,50 +929,57 @@ The application surfaces two dashboards — the main security dashboard and an o
     - **Deferred under investigation:** Matches where a VEX UNDER\_INVESTIGATION statement prevented finding creation.
     - **Auto-resolved:** Findings that were created but later automatically resolved when the component or asset became inactive or VEX overrode them.
 
-14. **Filtered percentage:** `(filtered matches) ÷ (open findings + filtered matches) × 100`. This is the proportion of correlations that were correctly filtered out. A high percentage indicates the system is working well to reduce noise.
+14. **This metric is now projection-backed, not live recomputed on dashboard read.**
+    - The backend derives it from persisted `component_vulnerability_states`.
+    - It excludes any component/CVE pair that already has a finding.
+    - A tenant-scoped `dashboard_noise_reduction_projection` row is refreshed asynchronously after correlation-affecting work.
+    - Only the auto-resolved totals and 30-day trend remain lightweight read-time queries.
+
+15. **Filtered percentage:** `(filtered matches) ÷ (open findings + filtered matches) × 100`. This is the proportion of correlations that were correctly filtered out. A high percentage indicates the system is working well to reduce noise.
 
 #### E. CPE Coverage and Match Quality
 
-15. **CPE-eligible active components:** Components that have at least one CPE identifier and can be matched by the highest-quality method.
-16. **CPE-ineligible active components:** Components with no CPE identifier — can only be matched by lower-confidence PURL/Coordinate methods.
-17. **CPE coverage percent:** `CPE-eligible ÷ total active components × 100`. Higher is better.
-18. **Among OPEN findings matched by CPE:**
+16. **CPE-eligible active components:** Components that have at least one CPE identifier and can be matched by the highest-quality method.
+17. **CPE-ineligible active components:** Components with no CPE identifier — can only be matched by lower-confidence PURL/Coordinate methods.
+18. **CPE coverage percent:** `CPE-eligible ÷ total active components × 100`. Higher is better.
+19. **Among OPEN findings matched by CPE:**
     - CPE-direct share: what fraction used the most precise CPE matching.
     - CPE-fallback share: what fraction used broader CPE matching.
     - Average CPE confidence score.
-19. **New findings in last 24 hours:** Split into CPE-matched and non-CPE-matched, to track recent ingestion activity.
+20. **New findings in last 24 hours:** Split into CPE-matched and non-CPE-matched, to track recent ingestion activity.
 
 #### F. VEX / CSAF Health
 
-20. **CSAF sync statistics (last 30 days):** How many sync runs completed successfully vs. had errors. Success rate percentage.
-21. **Findings suppressed by VEX:** How many findings were filtered out because a vendor said NOT\_AFFECTED or FIXED.
-22. **Findings suppressed by stale VEX:** How many were previously suppressed by VEX but the statement has now expired.
-23. **VEX coverage by provider:** Which vendors are providing VEX data and how many OPEN findings they cover.
-24. **Under-investigation aging:** Count of findings that have been in UNDER\_INVESTIGATION state for more than 14 days without resolution.
+21. **CSAF sync statistics (last 30 days):** How many sync runs completed successfully vs. had errors. Success rate percentage.
+22. **Findings suppressed by VEX:** How many findings were filtered out because a vendor said NOT\_AFFECTED or FIXED.
+23. **Findings suppressed by stale VEX:** How many were previously suppressed by VEX but the statement has now expired.
+24. **VEX coverage by provider:** Which vendors are providing VEX data and how many OPEN findings they cover.
+25. **Under-investigation aging:** Count of findings that have been in UNDER\_INVESTIGATION state for more than 14 days without resolution.
 
 #### G. Applicable Software List
 
-25. **A paginated list of software packages that are confirmed as applicable** (i.e., they match at least one CVE). For each:
+26. **A paginated list of software packages that are confirmed as applicable** (i.e., they match at least one CVE). For each:
     - Ecosystem, package name, version.
     - Count of applicable CVEs.
     - Count of IMPACTED vs. NO\_PATCH vs. UNKNOWN.
 
 #### H. Impacted CVE List
 
-26. **A paginated list of CVEs for which at least one component is confirmed IMPACTED.** For each:
+27. **A paginated list of CVEs for which at least one component is confirmed IMPACTED.** For each:
     - CVE ID, severity, CVSS, EPSS, KEV flag.
     - How many components and how many assets are impacted.
     - How many components have no patch available.
 
 #### I. CVE-Inventory Map
 
-27. **A diagnostic view** showing which specific CPE identifiers or package URLs in inventory are linked to the highest-risk or most recently updated CVEs. Used to understand the breadth of a specific CVE's impact across the environment.
+28. **A diagnostic view** showing which specific CPE identifiers or package URLs in inventory are linked to the highest-risk or most recently updated CVEs. Used to understand the breadth of a specific CVE's impact across the environment.
 
 #### J. Operational Dashboard (Team Lead View)
 
-28. **Ingestion health:** Sync run history, success/failure counts for each feed type.
-29. **Queue depth:** How many correlation tasks are queued or in progress.
-30. **GitHub source status:** Last run time, status, and error messages for each configured GitHub SBOM source.
+29. **Ingestion health:** Sync run history, success/failure counts for each feed type.
+30. **Queue depth:** Pipeline currently shows queued/running sync jobs, not durable delta-queue depth.
+31. **Platform Health now includes projection telemetry:** noise-projection readiness, age, refresh failures, and projection refresh p95 help operators tell whether executive dashboard reads are fresh.
+32. **GitHub source status:** Last run time, status, and error messages for each configured GitHub SBOM source.
 
 ---
 
@@ -1031,14 +1044,15 @@ Many of the rules described in this document use numeric thresholds or feature f
 | GHSA sync | Daily at 01:15 | Downloads last 7 days of GitHub advisories |
 | Microsoft + Red Hat CSAF/VEX sync | Daily at 01:45 | Downloads vendor security advisories and VEX statements |
 | Mark stale assets inactive | Daily at 02:05 | Transitions assets with no SBOM for 30+ days to INACTIVE |
-| VEX freshness recompute sweep | Daily at 02:30 | Rechecks all findings against current VEX freshness |
+| VEX freshness sweep | Daily at 02:30 | Enqueues software deltas for components whose previously fresh VEX evidence may have gone stale |
+| Lifecycle date sweep | Daily at 00:15 | Catches EOL/EOS transitions caused only by the date rolling forward |
 | GitHub SBOM auto-fetch | Every 5 minutes | Runs configured GitHub SBOM sources that are due |
 | Suppression expiry check | Every 15 minutes | Reopens findings whose suppression has expired |
 | Auto-close sweep | Every hour | Closes findings that have exceeded the auto-close age limit |
 | EOL catalog refresh (stage 1) | Sunday at 02:00 | Fetches all product slugs and CPE/PURL identifiers from endoflife.date |
 | EOL release data refresh (stage 2) | Sunday at 03:00 | Fetches release cycles for tracked slugs (conditional, respects If-Modified-Since) |
 | EOL slug mapping resolution (stage 3) | Sunday at 03:30 | Maps software identities to EOL slugs |
-| EOL denormalization (stage 4) | Sunday at 04:00 | Writes EOL status onto inventory components and software instances; refreshes org-CVE EOL counts |
+| EOL denormalization (stage 4) | Sunday at 04:00 | Writes EOL status onto inventory components and software instances; enqueues lifecycle deltas for scoped org-CVE refresh |
 
 ---
 
@@ -1116,7 +1130,7 @@ For each component/instance that has a resolved slug, the system finds the best 
 
 Components with no resolved slug get no EOL data and appear as "Unknown" in the UI.
 
-Finally, the system refreshes `org_cve_records` to update any EOL-related count columns so the dashboard reflects the latest state.
+Finally, the system enqueues `LIFECYCLE_DELTA` events so only the affected `org_cve_records` are refreshed in the background. A separate daily lifecycle sweep catches components that become EOL or enter the EOS window because the calendar date changed, even if no new endoflife.date data arrived.
 
 **When it runs:** Sunday at 04:00, or manually.
 

@@ -65,6 +65,7 @@ public class DashboardService {
     private final FindingRepository findingRepository;
     private final FindingEventRepository findingEventRepository;
     private final FindingService findingService;
+    private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final SyncRunRepository syncRunRepository;
     private final ObjectMapper objectMapper;
 
@@ -76,6 +77,7 @@ public class DashboardService {
             FindingRepository findingRepository,
             FindingEventRepository findingEventRepository,
             FindingService findingService,
+            DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
             SyncRunRepository syncRunRepository,
             ObjectMapper objectMapper
     ) {
@@ -86,6 +88,7 @@ public class DashboardService {
         this.findingRepository = findingRepository;
         this.findingEventRepository = findingEventRepository;
         this.findingService = findingService;
+        this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.syncRunRepository = syncRunRepository;
         this.objectMapper = objectMapper;
     }
@@ -530,7 +533,8 @@ public class DashboardService {
     }
 
     private DashboardNoiseReductionResponse buildNoiseReduction(Tenant tenant, long openFindings) {
-        FindingService.NotApplicableProjection projection = findingService.projectNotApplicableByCorrelation(tenant);
+        DashboardNoiseReductionProjectionService.ProjectionSnapshot projection =
+                dashboardNoiseReductionProjectionService.getTenantProjection(tenant);
         long neverOpenedNotApplicable = projection.neverOpenedNotApplicable();
         long deferredUnderInvestigation = projection.deferredUnderInvestigation();
         long autoResolvedNotApplicable = findingRepository.countByTenantAndStatusAndDecisionStateWithEvent(
@@ -545,7 +549,7 @@ public class DashboardService {
                 ? 0
                 : (double) totalFilteredNotApplicable * 100.0 / (double) potentialFindingsWithoutCorrelation;
 
-        Map<String, Long> categoryCounts = new HashMap<>(projection.categories());
+        Map<String, Long> categoryCounts = new HashMap<>(projection.categoryCounts());
         if (autoResolvedNotApplicable > 0) {
             categoryCounts.merge("Auto-Resolved (No Longer Observed)", autoResolvedNotApplicable, Long::sum);
         }

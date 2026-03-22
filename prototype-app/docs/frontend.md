@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-19
+Last updated: 2026-03-22
 
 ## Purpose
 
@@ -94,6 +94,8 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 - Quality reads `/operations/quality/summary`, `/operations/quality/issues`, `/operations/quality/filters`, and `/operations/quality/issues/{issueId}`
 - Pipeline reads `/operations/dashboard` for ingestion queue and run history
 - Platform Health reads operational metrics and `/operations/normalization-quality`
+- the Platform Health summary now includes noise-projection readiness, age, refresh failures, and projection refresh p95
+- the Pipeline view label `Queued/Running Sync Jobs` now refers to sync backlog, not durable delta-queue depth
 - Sub-view is tracked in the `operationsView` query param
 
 ### Vulnerability Intelligence
@@ -102,9 +104,17 @@ There are three distinct views under the Vulnerability Intelligence flyout:
 
 - Dashboard: `VulnerabilityIntelDashboardPage`
 - Vulnerability list/detail: `InventoryPage` in `vulnerability-intelligence` mode using `/vulnerability-intelligence`, `/vulnerability-intelligence/filters`, and `/vulnerability-intelligence/{externalId}`
-- CVE Assessment Workbench: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/recompute` (flyout label: "CVE Assessment Workbench", view key: `org-cves`)
+- CVE Assessment Workbench: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/status` (flyout label: "CVE Assessment Workbench", view key: `org-cves`)
 
-CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `OrgCveDetailDrawer`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `CveAssessmentWorkbench`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+
+Current workbench behavior:
+
+- analysts no longer use a foreground "Recompute Review Queue" button as the normal workflow
+- the page shows queue/projection freshness from `/vulnerability-intelligence/org-cves/status`
+- it polls every 10 seconds only while queue work is pending and the tab is visible
+- when queue work drains or projection freshness advances, it reloads the list and keeps the selected CVE detail in sync
+- after manual finding creation, it refreshes both detail and the current list page so row counts stay current while the drawer is still open
 
 ### Inventory
 

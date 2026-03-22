@@ -1,13 +1,17 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.FindingDeltaQueueEntry;
+import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingDeltaQueueEntryRepository;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,17 +32,34 @@ import org.springframework.transaction.annotation.Transactional;
 public class FindingDeltaQueueService {
 
     private static final Logger LOG = LoggerFactory.getLogger(FindingDeltaQueueService.class);
-    private static final int POLL_BATCH_SIZE = 20;
+    static final String SOFTWARE_DELTA = "SOFTWARE_DELTA";
+    static final String CVE_DELTA = "CVE_DELTA";
+    static final String CVE_METADATA_DELTA = "CVE_METADATA_DELTA";
+    static final String VEX_DELTA = "VEX_DELTA";
+    static final String LIFECYCLE_DELTA = "LIFECYCLE_DELTA";
+    static final String NOISE_REDUCTION_REFRESH = "NOISE_REDUCTION_REFRESH";
+
+    private static final int POLL_BATCH_SIZE = 100;
+    private static final int SOFTWARE_BATCH_SIZE = 250;
+    private static final int CVE_BATCH_SIZE = 100;
+    private static final int CVE_METADATA_BATCH_SIZE = 250;
+    private static final int LIFECYCLE_BATCH_SIZE = 500;
 
     private final FindingDeltaQueueEntryRepository repository;
+    private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final FindingService findingService;
+    private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
 
     public FindingDeltaQueueService(
             FindingDeltaQueueEntryRepository repository,
-            FindingService findingService
+            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
+            FindingService findingService,
+            DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService
     ) {
         this.repository = repository;
+        this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.findingService = findingService;
+        this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
     }
 
     // -------------------------------------------------------------------------
@@ -54,7 +75,7 @@ public class FindingDeltaQueueService {
         for (UUID componentId : sortedUniqueIds(componentIds)) {
             String key = "software:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
             int inserted = repository.insertIfNotDuplicate(
-                    "SOFTWARE_DELTA", tenantId, componentId, null, null, normalizeTag(sourceTag), key);
+                    SOFTWARE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
             queued += inserted;
         }
         return queued;
@@ -69,7 +90,22 @@ public class FindingDeltaQueueService {
         for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
             String key = "cve:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
             int inserted = repository.insertIfNotDuplicate(
-                    "CVE_DELTA", null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
+                    CVE_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
+            queued += inserted;
+        }
+        return queued;
+    }
+
+    @Transactional
+    public int enqueueCveMetadataDeltas(Collection<UUID> vulnerabilityIds, String sourceTag) {
+        if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
+            return 0;
+        }
+        int queued = 0;
+        for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
+            String key = "cve-metadata:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
+            int inserted = repository.insertIfNotDuplicate(
+                    CVE_METADATA_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
             queued += inserted;
         }
         return queued;
@@ -86,10 +122,41 @@ public class FindingDeltaQueueService {
             String normalizedTag      = normalizeTag(sourceTag);
             String key = "vex:" + vulnerabilityId + ":" + normalizedSourceKey + ":" + normalizedTag;
             int inserted = repository.insertIfNotDuplicate(
-                    "VEX_DELTA", null, null, vulnerabilityId, normalizedSourceKey, normalizedTag, key);
+                    VEX_DELTA, null, null, vulnerabilityId, normalizedSourceKey, normalizedTag, key);
             queued += inserted;
         }
         return queued;
+    }
+
+    @Transactional
+    public int enqueueLifecycleDeltas(UUID tenantId, Collection<UUID> componentIds, String sourceTag) {
+        if (tenantId == null || componentIds == null || componentIds.isEmpty()) {
+            return 0;
+        }
+        int queued = 0;
+        for (UUID componentId : sortedUniqueIds(componentIds)) {
+            String key = "lifecycle:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
+            int inserted = repository.insertIfNotDuplicate(
+                    LIFECYCLE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
+            queued += inserted;
+        }
+        return queued;
+    }
+
+    @Transactional
+    public int enqueueNoiseReductionRefresh(UUID tenantId, String sourceTag) {
+        if (tenantId == null) {
+            return 0;
+        }
+        return repository.insertIfNotDuplicate(
+                NOISE_REDUCTION_REFRESH,
+                tenantId,
+                null,
+                null,
+                null,
+                normalizeTag(sourceTag),
+                "noise:" + tenantId
+        );
     }
 
     public long queueDepth() {
@@ -107,9 +174,7 @@ public class FindingDeltaQueueService {
             return;
         }
         LOG.debug("Delta queue: claimed {} entries for processing", claimed.size());
-        for (FindingDeltaQueueEntry entry : claimed) {
-            processEntry(entry);
-        }
+        processClaimedBatch(claimed);
     }
 
     // -------------------------------------------------------------------------
@@ -133,15 +198,166 @@ public class FindingDeltaQueueService {
     }
 
     // Not @Transactional — manages its own sub-transactions via findingService
-    void processEntry(FindingDeltaQueueEntry entry) {
+    void processClaimedBatch(List<FindingDeltaQueueEntry> claimed) {
+        Map<String, List<FindingDeltaQueueEntry>> byType = claimed.stream()
+                .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getEventType, java.util.LinkedHashMap::new, Collectors.toList()));
+        byType.forEach((eventType, entries) -> {
+            switch (eventType) {
+                case SOFTWARE_DELTA -> processSoftwareEntries(entries);
+                case CVE_DELTA -> processVulnerabilityEntries(entries, CVE_BATCH_SIZE, ids -> findingService.recomputeOnCveDeltaBatch(ids));
+                case CVE_METADATA_DELTA -> processVulnerabilityEntries(entries, CVE_METADATA_BATCH_SIZE, ids -> findingService.refreshMetadataForVulnerabilityBatch(ids));
+                case VEX_DELTA -> processVexEntries(entries);
+                case LIFECYCLE_DELTA -> processLifecycleEntries(entries);
+                case NOISE_REDUCTION_REFRESH -> processNoiseReductionEntries(entries);
+                default -> entries.forEach(this::processEntryIndividually);
+            }
+        });
+    }
+
+    private void processSoftwareEntries(List<FindingDeltaQueueEntry> entries) {
+        Map<UUID, List<FindingDeltaQueueEntry>> byTenant = entries.stream()
+                .filter(entry -> entry.getTenantId() != null && entry.getComponentId() != null)
+                .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getTenantId, java.util.LinkedHashMap::new, Collectors.toList()));
+        byTenant.values().forEach(tenantEntries -> processComponentEntries(tenantEntries, SOFTWARE_BATCH_SIZE, false));
+        entries.stream()
+                .filter(entry -> entry.getTenantId() == null || entry.getComponentId() == null)
+                .forEach(entry -> markDone(entry.getId(), 0));
+    }
+
+    private void processLifecycleEntries(List<FindingDeltaQueueEntry> entries) {
+        Map<UUID, List<FindingDeltaQueueEntry>> byTenant = entries.stream()
+                .filter(entry -> entry.getTenantId() != null && entry.getComponentId() != null)
+                .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getTenantId, java.util.LinkedHashMap::new, Collectors.toList()));
+        byTenant.values().forEach(tenantEntries -> processComponentEntries(tenantEntries, LIFECYCLE_BATCH_SIZE, true));
+        entries.stream()
+                .filter(entry -> entry.getTenantId() == null || entry.getComponentId() == null)
+                .forEach(entry -> markDone(entry.getId(), 0));
+    }
+
+    private void processComponentEntries(
+            List<FindingDeltaQueueEntry> entries,
+            int batchSize,
+            boolean lifecycleOnly
+    ) {
+        UUID tenantId = entries.get(0).getTenantId();
+        for (List<FindingDeltaQueueEntry> chunk : chunk(entries, batchSize)) {
+            try {
+                List<UUID> componentIds = chunk.stream()
+                        .map(FindingDeltaQueueEntry::getComponentId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList();
+                int affected = lifecycleOnly
+                        ? findingService.refreshLifecycleForComponents(tenantId, componentIds)
+                        : findingService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
+                markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
+                if (!lifecycleOnly) {
+                    enqueueNoiseReductionRefresh(tenantId, "software-delta");
+                }
+            } catch (RuntimeException ex) {
+                LOG.warn("Failed processing {} component delta entries for tenant {}: {}",
+                        lifecycleOnly ? "lifecycle" : "software", tenantId, ex.getMessage(), ex);
+                markFailedOrRetry(chunk, ex.getMessage());
+            }
+        }
+    }
+
+    private void processVulnerabilityEntries(
+            List<FindingDeltaQueueEntry> entries,
+            int batchSize,
+            java.util.function.Function<Collection<UUID>, Integer> processor
+    ) {
+        List<FindingDeltaQueueEntry> validEntries = entries.stream()
+                .filter(entry -> entry.getVulnerabilityId() != null)
+                .toList();
+        for (List<FindingDeltaQueueEntry> chunk : chunk(validEntries, batchSize)) {
+            try {
+                List<UUID> vulnerabilityIds = chunk.stream()
+                        .map(FindingDeltaQueueEntry::getVulnerabilityId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList();
+                int affected = processor.apply(vulnerabilityIds);
+                markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
+                enqueueNoiseReductionRefreshForTenants(
+                        componentVulnerabilityStateRepository.findDistinctTenantIdsByVulnerabilityIds(vulnerabilityIds),
+                        "vulnerability-delta"
+                );
+            } catch (RuntimeException ex) {
+                LOG.warn("Failed processing vulnerability delta entries type={}: {}",
+                        validEntries.isEmpty() ? "unknown" : validEntries.get(0).getEventType(), ex.getMessage(), ex);
+                markFailedOrRetry(chunk, ex.getMessage());
+            }
+        }
+        entries.stream()
+                .filter(entry -> entry.getVulnerabilityId() == null)
+                .forEach(entry -> markDone(entry.getId(), 0));
+    }
+
+    private void processVexEntries(List<FindingDeltaQueueEntry> entries) {
+        Map<String, List<FindingDeltaQueueEntry>> bySourceKey = entries.stream()
+                .collect(Collectors.groupingBy(entry -> normalizeTag(entry.getSourceKey()), java.util.LinkedHashMap::new, Collectors.toList()));
+        bySourceKey.forEach((sourceKey, sourceEntries) -> {
+            List<FindingDeltaQueueEntry> validEntries = sourceEntries.stream()
+                    .filter(entry -> entry.getVulnerabilityId() != null)
+                    .toList();
+            for (List<FindingDeltaQueueEntry> chunk : chunk(validEntries, CVE_BATCH_SIZE)) {
+                try {
+                    List<UUID> vulnerabilityIds = chunk.stream()
+                            .map(FindingDeltaQueueEntry::getVulnerabilityId)
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .toList();
+                    int affected = findingService.applyVexDeltaBatch(vulnerabilityIds, sourceKey);
+                    markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
+                    enqueueNoiseReductionRefreshForTenants(
+                            componentVulnerabilityStateRepository.findDistinctTenantIdsByVulnerabilityIds(vulnerabilityIds),
+                            "vex-delta"
+                    );
+                } catch (RuntimeException ex) {
+                    LOG.warn("Failed processing VEX delta entries sourceKey={}: {}", sourceKey, ex.getMessage(), ex);
+                    markFailedOrRetry(chunk, ex.getMessage());
+                }
+            }
+            sourceEntries.stream()
+                    .filter(entry -> entry.getVulnerabilityId() == null)
+                    .forEach(entry -> markDone(entry.getId(), 0));
+        });
+    }
+
+    private void processNoiseReductionEntries(List<FindingDeltaQueueEntry> entries) {
+        Map<UUID, List<FindingDeltaQueueEntry>> byTenant = entries.stream()
+                .filter(entry -> entry.getTenantId() != null)
+                .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getTenantId, java.util.LinkedHashMap::new, Collectors.toList()));
+        byTenant.forEach((tenantId, tenantEntries) -> {
+            try {
+                int refreshed = dashboardNoiseReductionProjectionService.refreshTenant(tenantId);
+                markDone(tenantEntries.stream().map(FindingDeltaQueueEntry::getId).toList(), refreshed);
+            } catch (RuntimeException ex) {
+                LOG.warn("Failed processing noise reduction refresh for tenant {}: {}", tenantId, ex.getMessage(), ex);
+                markFailedOrRetry(tenantEntries, ex.getMessage());
+            }
+        });
+        entries.stream()
+                .filter(entry -> entry.getTenantId() == null)
+                .forEach(entry -> markDone(entry.getId(), 0));
+    }
+
+    void processEntryIndividually(FindingDeltaQueueEntry entry) {
         try {
             int affected = switch (entry.getEventType()) {
-                case "SOFTWARE_DELTA" -> findingService.recomputeOnSoftwareDelta(
+                case SOFTWARE_DELTA -> findingService.recomputeOnSoftwareDelta(
                         entry.getTenantId(), entry.getComponentId());
-                case "CVE_DELTA"      -> findingService.recomputeOnCveDelta(
+                case CVE_DELTA -> findingService.recomputeOnCveDelta(
                         entry.getVulnerabilityId());
-                case "VEX_DELTA"      -> findingService.applyVexDeltaForVulnerability(
+                case CVE_METADATA_DELTA -> findingService.refreshMetadataForVulnerabilityBatch(
+                        entry.getVulnerabilityId() == null ? List.of() : List.of(entry.getVulnerabilityId()));
+                case VEX_DELTA -> findingService.applyVexDeltaForVulnerability(
                         entry.getVulnerabilityId(), entry.getSourceKey());
+                case LIFECYCLE_DELTA -> findingService.refreshLifecycleForComponents(
+                        entry.getTenantId(),
+                        entry.getComponentId() == null ? List.of() : List.of(entry.getComponentId()));
+                case NOISE_REDUCTION_REFRESH -> dashboardNoiseReductionProjectionService.refreshTenant(entry.getTenantId());
                 default -> {
                     LOG.warn("Unknown delta event type '{}' for entry id={}", entry.getEventType(), entry.getId());
                     yield 0;
@@ -157,12 +373,20 @@ public class FindingDeltaQueueService {
 
     @Transactional
     void markDone(Long id, int affected) {
-        repository.findById(id).ifPresent(e -> {
-            e.setStatus("DONE");
-            e.setCompletedAt(Instant.now());
-            repository.save(e);
-            LOG.debug("Delta entry id={} type={} marked DONE, affected={}", id, e.getEventType(), affected);
-        });
+        markDone(List.of(id), affected);
+    }
+
+    @Transactional
+    void markDone(Collection<Long> ids, int affected) {
+        Instant completedAt = Instant.now();
+        for (Long id : ids) {
+            repository.findById(id).ifPresent(e -> {
+                e.setStatus("DONE");
+                e.setCompletedAt(completedAt);
+                repository.save(e);
+                LOG.debug("Delta entry id={} type={} marked DONE, affected={}", id, e.getEventType(), affected);
+            });
+        }
     }
 
     @Transactional
@@ -185,6 +409,11 @@ public class FindingDeltaQueueService {
         });
     }
 
+    void markFailedOrRetry(List<FindingDeltaQueueEntry> entries, String errorMessage) {
+        entries.forEach(entry ->
+                markFailedOrRetry(entry.getId(), entry.getAttemptCount(), entry.getMaxAttempts(), errorMessage));
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -198,10 +427,31 @@ public class FindingDeltaQueueService {
                 .toList();
     }
 
+    private <T> List<List<T>> chunk(List<T> entries, int chunkSize) {
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        List<List<T>> chunks = new java.util.ArrayList<>();
+        for (int start = 0; start < entries.size(); start += chunkSize) {
+            int end = Math.min(start + chunkSize, entries.size());
+            chunks.add(entries.subList(start, end));
+        }
+        return chunks;
+    }
+
     private static String normalizeTag(String value) {
         if (value == null || value.isBlank()) {
             return "default";
         }
         return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void enqueueNoiseReductionRefreshForTenants(Collection<UUID> tenantIds, String sourceTag) {
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            return;
+        }
+        for (UUID tenantId : tenantIds) {
+            enqueueNoiseReductionRefresh(tenantId, sourceTag);
+        }
     }
 }

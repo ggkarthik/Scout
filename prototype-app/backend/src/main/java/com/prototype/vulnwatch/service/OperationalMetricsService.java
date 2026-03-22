@@ -35,6 +35,7 @@ public class OperationalMetricsService {
     public static final String KEY_INGESTION_CSAF_REDHAT_SYNC = "ingestion-csaf-redhat-sync";
     public static final String KEY_INGESTION_ADVISORIES = "ingestion-advisories";
     public static final String KEY_INGESTION_RECOMPUTE_FINDINGS = "ingestion-recompute-findings";
+    public static final String KEY_NOISE_PROJECTION_REFRESH = "noise-reduction-projection-refresh";
     private static final int MAX_SAMPLES_PER_KEY = 500;
 
     private final Map<String, ArrayDeque<Sample>> samplesByKey = new HashMap<>();
