@@ -13,6 +13,8 @@ import com.prototype.vulnwatch.controller.OperationalDashboardController;
 import com.prototype.vulnwatch.dto.OperationalDashboardResponse;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
+import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.TenantService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,12 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @MockBean
     private OperationalDashboardService operationalDashboardService;
+
+    @MockBean
+    private OperationalQualityReadService operationalQualityReadService;
+
+    @MockBean
+    private TenantService tenantService;
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;

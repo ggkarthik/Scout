@@ -119,7 +119,7 @@ class VexAssertionServiceTest {
         );
 
         when(vulnerabilityTargetRepository.findAllVexLikeTargets()).thenReturn(List.of());
-        when(vexAssertionRepository.countAllAssertions()).thenReturn(3L);
+        when(vexAssertionRepository.findAll()).thenReturn(List.of(new VexAssertion()));
 
         int refreshed = service.refreshAllAssertions();
 

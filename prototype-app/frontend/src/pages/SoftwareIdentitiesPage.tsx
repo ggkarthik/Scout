@@ -6,6 +6,8 @@ import {
   SoftwareIdentitySummary
 } from '../types';
 import { SoftwareIdentityDetailDrawer } from '../components/SoftwareIdentityDetailDrawer';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 const PAGE_SIZE = 25;
 const SOFTWARE_IDENTITY_QUERY_KEY = 'softwareIdentityId';
@@ -33,17 +35,11 @@ type MappingNotice = {
 };
 
 function readSelectedSoftwareIdentityId(): string | null {
-  return new URLSearchParams(window.location.search).get(SOFTWARE_IDENTITY_QUERY_KEY);
+  return readQueryParam(SOFTWARE_IDENTITY_QUERY_KEY);
 }
 
 function updateSelectedSoftwareIdentityId(softwareIdentityId: string | null): void {
-  const url = new URL(window.location.href);
-  if (softwareIdentityId) {
-    url.searchParams.set(SOFTWARE_IDENTITY_QUERY_KEY, softwareIdentityId);
-  } else {
-    url.searchParams.delete(SOFTWARE_IDENTITY_QUERY_KEY);
-  }
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [SOFTWARE_IDENTITY_QUERY_KEY]: softwareIdentityId });
 }
 
 function formatLabel(value: string): string {
@@ -131,7 +127,6 @@ export function SoftwareIdentitiesPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
-  const [debouncedQuery, setDebouncedQuery] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [assetType, setAssetType] = React.useState('');
   const [sourceSystem, setSourceSystem] = React.useState('');
@@ -145,11 +140,7 @@ export function SoftwareIdentitiesPage() {
   const [mappingDrafts, setMappingDrafts] = React.useState<Record<string, string>>({});
   const [mappingBusyId, setMappingBusyId] = React.useState<string | null>(null);
   const [mappingNotice, setMappingNotice] = React.useState<MappingNotice | null>(null);
-
-  React.useEffect(() => {
-    const timeout = window.setTimeout(() => setDebouncedQuery(query), 300);
-    return () => window.clearTimeout(timeout);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query);
 
   React.useEffect(() => {
     const handlePopState = (): void => {
@@ -206,7 +197,6 @@ export function SoftwareIdentitiesPage() {
 
   function clearFilters() {
     setQuery('');
-    setDebouncedQuery('');
     setAssetType('');
     setSourceSystem('');
     setEcosystem('');
@@ -275,9 +265,6 @@ export function SoftwareIdentitiesPage() {
         <div className="panel-header">
           <div>
             <h3>Software Identities</h3>
-            <span className="panel-caption">
-              Canonical software records normalized across host, SBOM, and image inventory. Use this view to understand software footprint, lifecycle, open exposure, and unresolved EOL mappings across sources.
-            </span>
           </div>
         </div>
 

@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
+import com.prototype.vulnwatch.service.EpssTrendService;
 import com.prototype.vulnwatch.service.FindingDeltaQueueService;
 import com.prototype.vulnwatch.service.FindingService;
 import com.prototype.vulnwatch.service.InvestigationService;
@@ -58,6 +59,7 @@ public class CveDetailController {
     private final OrgCveRecordService orgCveRecordService;
     private final TenantService tenantService;
     private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
+    private final EpssTrendService epssTrendService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -395,7 +397,7 @@ public class CveDetailController {
 
     private CveSummary buildSummary(Vulnerability vulnerability) {
         CveSummary summary = new CveSummary();
-        String description = vulnerabilityIntelligenceService.resolveDisplayDescription(vulnerability);
+        String description = vulnerabilityIntelligenceService.resolveDetailDescription(vulnerability);
         summary.setExternalId(vulnerability.getExternalId());
         summary.setTitle(vulnerability.getTitle());
         summary.setDescription(description);
@@ -403,6 +405,13 @@ public class CveDetailController {
         summary.setCvssScore(vulnerability.getCvssScore());
         summary.setCvssVector(vulnerability.getCvssVector());
         summary.setEpssScore(vulnerability.getEpssScore());
+        summary.setEpssSevenDayDelta(
+                epssTrendService.fetchSevenDayDelta(
+                        vulnerability.getExternalId(),
+                        vulnerability.getEpssScore(),
+                        vulnerability.getEpssUpdatedAt()
+                )
+        );
         summary.setEpssUpdatedAt(vulnerability.getEpssUpdatedAt());
         summary.setCweIds(vulnerability.getCweIds());
         summary.setPublishedAt(vulnerability.getPublishedAt());
@@ -794,6 +803,7 @@ public class CveDetailController {
         private Double cvssScore;
         private String cvssVector;
         private Double epssScore;
+        private Double epssSevenDayDelta;
         /** BLG-016: when the EPSS score was last refreshed from the FIRST.org feed. */
         private Instant epssUpdatedAt;
         private String cweIds;

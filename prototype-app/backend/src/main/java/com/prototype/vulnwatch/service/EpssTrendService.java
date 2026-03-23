@@ -1,0 +1,100 @@
+package com.prototype.vulnwatch.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
+
+@Service
+public class EpssTrendService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(EpssTrendService.class);
+
+    @Value("${app.epss.base-url:https://api.first.org/data/v1/epss}")
+    private String epssBaseUrl;
+
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    public EpssTrendService(RestTemplate restTemplate, ObjectMapper objectMapper) {
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+    }
+
+    public Double fetchSevenDayDelta(String cveId, Double currentScore, Instant scoreUpdatedAt) {
+        if (currentScore == null || cveId == null || cveId.isBlank()) {
+            return null;
+        }
+        LocalDate currentScoreDate = scoreUpdatedAt == null
+                ? LocalDate.now(ZoneOffset.UTC)
+                : LocalDate.ofInstant(scoreUpdatedAt, ZoneOffset.UTC);
+        Double historicalScore = fetchScoreForDate(cveId, currentScoreDate.minusDays(7));
+        if (historicalScore == null) {
+            return null;
+        }
+        return currentScore - historicalScore;
+    }
+
+    private Double fetchScoreForDate(String cveId, LocalDate date) {
+        String normalizedCveId = cveId.trim().toUpperCase(Locale.ROOT);
+        String url = UriComponentsBuilder.fromHttpUrl(epssBaseUrl)
+                .queryParam("cve", normalizedCveId)
+                .queryParam("date", date)
+                .build()
+                .toUriString();
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+            headers.set("User-Agent", "vulnwatch-backend/1.0");
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class
+            );
+            return parseScore(response.getBody(), normalizedCveId);
+        } catch (Exception e) {
+            LOG.debug("Unable to fetch EPSS history for {} on {}: {}", normalizedCveId, date, e.getMessage());
+            return null;
+        }
+    }
+
+    private Double parseScore(String payload, String cveId) {
+        if (payload == null || payload.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode data = objectMapper.readTree(payload).path("data");
+            if (!data.isArray()) {
+                return null;
+            }
+            for (JsonNode entry : data) {
+                if (!cveId.equals(entry.path("cve").asText("").toUpperCase(Locale.ROOT))) {
+                    continue;
+                }
+                String value = entry.path("epss").asText("");
+                if (value.isBlank()) {
+                    return null;
+                }
+                return Double.parseDouble(value);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to parse EPSS history payload for {}: {}", cveId, e.getMessage());
+        }
+        return null;
+    }
+}
