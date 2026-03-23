@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
+import { buildPathWithQueryParams } from '../utils/queryState';
 
 type Props = {
   title?: string;
@@ -53,9 +54,7 @@ export function EolSourcePanel({
   const [busy, setBusy] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
   const eolCatalogHref = React.useMemo(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', 'end-of-life');
-    return `${url.pathname}?${url.searchParams.toString()}`;
+    return buildPathWithQueryParams({ tab: 'end-of-life' });
   }, []);
 
   const runJob = async (job: JobDef): Promise<void> => {

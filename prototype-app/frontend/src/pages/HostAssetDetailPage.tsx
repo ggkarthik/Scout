@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { ResizableTable } from '../components/ResizableTable';
 import { EolBadge } from '../components/EolBadge';
 import type { HostAssetDetail } from '../types';
+import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 export const HOST_ASSET_QUERY_KEY = 'hostAssetId';
 
@@ -31,17 +32,11 @@ function statusClass(value?: string): string {
 }
 
 export function readSelectedHostAssetId(): string | null {
-  return new URLSearchParams(window.location.search).get(HOST_ASSET_QUERY_KEY);
+  return readQueryParam(HOST_ASSET_QUERY_KEY);
 }
 
 export function updateSelectedHostAssetId(assetId: string | null): void {
-  const url = new URL(window.location.href);
-  if (assetId) {
-    url.searchParams.set(HOST_ASSET_QUERY_KEY, assetId);
-  } else {
-    url.searchParams.delete(HOST_ASSET_QUERY_KEY);
-  }
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [HOST_ASSET_QUERY_KEY]: assetId });
 }
 
 type HostDetailSectionsProps = {

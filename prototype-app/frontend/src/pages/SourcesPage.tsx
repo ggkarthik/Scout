@@ -8,6 +8,7 @@ type Props = {
   focusSource?: FocusSource;
   title?: string;
   caption?: string;
+  hideHeader?: boolean;
   showTriggers?: boolean;
   showQueue?: boolean;
   refreshSignal?: number;
@@ -83,6 +84,7 @@ export function SourcesPage({
   focusSource = 'all',
   title = 'Source Ingestion',
   caption = 'Ingest NVD/KEV/CSAF/VEX/advisories and normalize vulnerability intelligence',
+  hideHeader = false,
   showTriggers = true,
   showQueue = true,
   refreshSignal = 0
@@ -94,11 +96,12 @@ export function SourcesPage({
   const [confirmFullSync, setConfirmFullSync] = React.useState(false);
   const [vexRepairSummary, setVexRepairSummary] = React.useState<VexAssertionRepairSummary | null>(null);
   const [loadingVexRepairSummary, setLoadingVexRepairSummary] = React.useState(false);
-  const showVexRepairPanel = focusSource === 'all'
-    || focusSource === 'microsoft-csaf'
-    || focusSource === 'redhat-csaf';
-  const shouldLoadVexRepairSummary = showVexRepairPanel || focusSource === 'processing';
-  const showProcessingTriggers = focusSource === 'processing' || showVexRepairPanel;
+  const showConnectorStatus = !showQueue && (focusSource === 'microsoft-csaf' || focusSource === 'redhat-csaf');
+  const showVexRepairPanel = focusSource === 'processing';
+  const shouldLoadVexRepairSummary = showVexRepairPanel;
+  const showProcessingTriggers = focusSource === 'processing';
+  const shouldLoadRuns = showQueue || showConnectorStatus;
+  const showNvdConnectorHero = showTriggers && focusSource === 'nvd' && !showQueue;
 
   const refreshRuns = React.useCallback(async () => {
     setLoadingRuns(true);
@@ -136,18 +139,18 @@ export function SourcesPage({
   }, [shouldLoadVexRepairSummary]);
 
   React.useEffect(() => {
-    if (!showQueue) {
+    if (!shouldLoadRuns) {
       return;
     }
     refreshRuns();
-  }, [refreshRuns, showQueue, refreshSignal]);
+  }, [refreshRuns, shouldLoadRuns, refreshSignal]);
 
   React.useEffect(() => {
     refreshVexRepairSummary();
   }, [refreshSignal, refreshVexRepairSummary]);
 
   React.useEffect(() => {
-    if (!showQueue) {
+    if (!shouldLoadRuns) {
       return undefined;
     }
     if (!syncRuns.some((run) => isRunning(run.status))) {
@@ -158,7 +161,7 @@ export function SourcesPage({
       refreshVexRepairSummary();
     }, 3000);
     return () => window.clearInterval(id);
-  }, [syncRuns, refreshRuns, refreshVexRepairSummary, showQueue]);
+  }, [syncRuns, refreshRuns, refreshVexRepairSummary, shouldLoadRuns]);
 
   const runAction = async (
     label: string,
@@ -177,7 +180,7 @@ export function SourcesPage({
       } else {
         setMessage(`${label} completed`);
       }
-      if (showQueue) {
+      if (shouldLoadRuns) {
         await refreshRuns();
       }
       await refreshVexRepairSummary();
@@ -218,17 +221,37 @@ export function SourcesPage({
     }
     return true;
   });
+  const orderedVisibleRuns = [...visibleRuns].sort(
+    (left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+  );
+  const latestConnectorRun = showConnectorStatus ? orderedVisibleRuns[0] : undefined;
+  const connectorRunLabel = focusSource === 'microsoft-csaf' ? 'Latest Microsoft CSAF/VEX sync' : 'Latest Red Hat CSAF/VEX sync';
+
+  const renderSyncRunSummary = (run?: SyncRun, emptyLabel = 'No run yet') => {
+    if (!run) {
+      return emptyLabel;
+    }
+    return (
+      <>
+        <div>{run.status}</div>
+        <div className="panel-caption">{new Date(run.startedAt).toLocaleString()}</div>
+        {run.errorMessage && <div className="panel-caption">{run.errorMessage}</div>}
+      </>
+    );
+  };
 
   return (
     <div className="panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
-        <span className="panel-caption">{caption}</span>
-      </div>
+      {!hideHeader && (
+        <div className="panel-header">
+          <h3>{title}</h3>
+          <span className="panel-caption">{caption}</span>
+        </div>
+      )}
 
       {(showTriggers || showQueue) && (
       <div className="button-row section-actions">
-        {showTriggers && (focusSource === 'all' || focusSource === 'nvd') && (
+        {showTriggers && !showNvdConnectorHero && (focusSource === 'all' || focusSource === 'nvd') && (
           <>
             <button
               type="button"
@@ -331,12 +354,49 @@ export function SourcesPage({
       </div>
       )}
 
+      {showNvdConnectorHero && (
+        <div className="source-focus-hero">
+          <div className="source-focus-hero-copy">
+            <span className="source-focus-kicker">Recommended</span>
+            <h4 className="source-focus-title">Routine CVE Delta Sync</h4>
+            <p className="source-focus-description">
+              Pull the latest NVD changes from the last 24 hours and refresh normalized vulnerability intelligence without
+              running the full upstream corpus again.
+            </p>
+            <div className="source-focus-pill-row">
+              <span className="status-pill status-success">24h Delta</span>
+              <span className="status-pill status-warning">Lower DB Load</span>
+            </div>
+          </div>
+          <div className="source-focus-hero-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy !== null}
+              onClick={() => runAction('NVD Sync', () => api.syncNvd())}
+            >
+              {busy === 'NVD Sync' ? 'Running...' : 'Run 24h Sync'}
+            </button>
+            <span className="panel-caption">Best for daily refreshes and repeat validation.</span>
+          </div>
+        </div>
+      )}
+
+      {showConnectorStatus && (
+        <div className="connector-status-grid section-block">
+          <div className="connector-status-card">
+            <div className="connector-status-label">{connectorRunLabel}</div>
+            <div className="connector-status-value">{renderSyncRunSummary(latestConnectorRun, 'No sync run recorded yet.')}</div>
+          </div>
+        </div>
+      )}
+
       {showVexRepairPanel && (
         <div className="section-block">
-          <h4 className="section-title">VEX Rollout Status</h4>
+          <h4 className="section-title">Shared VEX Maintenance</h4>
           <div className="panel-caption">
-            Run vendor CSAF/VEX re-ingest and persisted assertion repair from one place, then compare current VEX coverage and
-            exact-match exposure state without leaving the shared source queue.
+            Run vendor CSAF/VEX backfill and persisted assertion repair from one place, then compare current VEX coverage,
+            rollout impact, and latest cross-vendor maintenance activity.
           </div>
           {vexRepairSummary && (
             <div className="panel-caption" style={{ marginTop: 8 }}>
@@ -448,28 +508,34 @@ export function SourcesPage({
 
       {showTriggers && (focusSource === 'all' || focusSource === 'nvd') && (
         <div className="section-block">
-        <h4 className="section-title">Danger Zone</h4>
-        <div className="panel-caption">
-          NVD Full Sync ingests the full upstream vulnerability corpus. Use it for first-time baseline or data reset recovery.
-        </div>
-        <div className="bulk-selection-row">
-          <label className="bulk-checkbox">
-            <input
-              type="checkbox"
-              checked={confirmFullSync}
-              onChange={(event) => setConfirmFullSync(event.target.checked)}
-            />
-            <span>I understand this can take longer and increase DB load.</span>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busy !== null || !confirmFullSync}
-            onClick={() => runAction('NVD Full Sync', () => api.syncNvdFull())}
-          >
-            {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}
-          </button>
-        </div>
+          <div className="sync-danger-card">
+            <div className="sync-danger-copy">
+              <span className="sync-danger-kicker">Danger Zone</span>
+              <h4 className="sync-danger-title">Run NVD Full Corpus Sync</h4>
+              <div className="panel-caption">
+                Use this for first-time baseline setup or after prototype-reset recovery. It ingests the full upstream
+                vulnerability corpus and can noticeably increase DB load.
+              </div>
+            </div>
+            <div className="sync-danger-controls">
+              <label className="bulk-checkbox sync-danger-checkbox">
+                <input
+                  type="checkbox"
+                  checked={confirmFullSync}
+                  onChange={(event) => setConfirmFullSync(event.target.checked)}
+                />
+                <span>I understand the runtime and database impact.</span>
+              </label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy !== null || !confirmFullSync}
+                onClick={() => runAction('NVD Full Sync', () => api.syncNvdFull())}
+              >
+                {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -492,7 +558,7 @@ export function SourcesPage({
               Processing jobs track internal maintenance work like persisted VEX repair and rollout backfills. They do not represent upstream feed fetches.
             </div>
           )}
-          {visibleRuns.length === 0 ? (
+                {orderedVisibleRuns.length === 0 ? (
             <div className="empty-state">
               <p>{focusSource === 'processing'
                 ? 'No processing jobs have been recorded yet.'
@@ -518,7 +584,7 @@ export function SourcesPage({
                 </tr>
                 </thead>
                 <tbody>
-                {visibleRuns.map((run) => (
+                {orderedVisibleRuns.map((run) => (
                   <tr key={run.id}>
                     <td>{run.syncType}</td>
                     <td>{formatRunClass(run.runClass)}</td>

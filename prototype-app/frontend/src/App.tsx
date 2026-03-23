@@ -3,7 +3,8 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { ConfigurationsPage } from './pages/ConfigurationsPage';
 import { FindingsPage } from './pages/FindingsPage';
-import { InventoryPage, InventoryViewKey } from './pages/InventoryPage';
+import { InventoryPage } from './pages/InventoryPage';
+import type { InventoryViewKey } from './features/inventory/types';
 import { SoftwareIdentitiesPage } from './pages/SoftwareIdentitiesPage';
 import {
   OperationalDashboardPage,
@@ -17,6 +18,11 @@ import {
 } from './pages/VulnerabilityIntelDashboardPage';
 import { VulnerabilityIntelOrgCvePage } from './pages/VulnerabilityIntelOrgCvePage';
 import { EolPage } from './pages/EolPage';
+import {
+  buildPathWithQueryParams,
+  readQueryParam,
+  replaceBrowserQueryParams
+} from './utils/queryState';
 import './styles.css';
 
 type Tab =
@@ -184,9 +190,8 @@ function getInitialTheme(): Theme {
 }
 
 function readInitialRoute(): { tab: Tab } {
-  const params = new URLSearchParams(window.location.search);
-  const rawTab = params.get('tab');
-  const rawInventoryView = params.get(INVENTORY_VIEW_QUERY_KEY);
+  const rawTab = readQueryParam('tab');
+  const rawInventoryView = readQueryParam(INVENTORY_VIEW_QUERY_KEY);
   if (rawTab === 'ingestion' || rawTab === 'sources') {
     return { tab: 'connect' };
   }
@@ -202,7 +207,7 @@ function readInitialRoute(): { tab: Tab } {
 }
 
 function readInitialInventoryView(): InventoryViewKey {
-  const fromQuery = new URLSearchParams(window.location.search).get(INVENTORY_VIEW_QUERY_KEY);
+  const fromQuery = readQueryParam(INVENTORY_VIEW_QUERY_KEY);
   if (fromQuery === 'imported-assets') {
     return 'software-identities';
   }
@@ -213,37 +218,29 @@ function readInitialInventoryView(): InventoryViewKey {
 }
 
 function readInitialOperationsView(): OperationsViewKey {
-  const fromQuery = new URLSearchParams(window.location.search).get(OPERATIONS_VIEW_QUERY_KEY);
+  const fromQuery = readQueryParam(OPERATIONS_VIEW_QUERY_KEY);
   return normalizeOperationsView(fromQuery);
 }
 
 function readInitialVulnerabilityIntelView(): VulnerabilityIntelViewKey {
-  const fromQuery = new URLSearchParams(window.location.search).get(VULN_INTEL_VIEW_QUERY_KEY);
+  const fromQuery = readQueryParam(VULN_INTEL_VIEW_QUERY_KEY);
   return isVulnerabilityIntelView(fromQuery) ? fromQuery : 'dashboard';
 }
 
 function updateTabInUrl(tab: Tab): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set('tab', tab);
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ tab });
 }
 
 function updateInventoryViewInUrl(view: InventoryViewKey): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set(INVENTORY_VIEW_QUERY_KEY, view);
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [INVENTORY_VIEW_QUERY_KEY]: view });
 }
 
 function updateOperationsViewInUrl(view: OperationsViewKey): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set(OPERATIONS_VIEW_QUERY_KEY, view);
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [OPERATIONS_VIEW_QUERY_KEY]: view });
 }
 
 function updateVulnerabilityIntelViewInUrl(view: VulnerabilityIntelViewKey): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set(VULN_INTEL_VIEW_QUERY_KEY, view);
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [VULN_INTEL_VIEW_QUERY_KEY]: view });
 }
 
 function buildAppHref(
@@ -254,18 +251,12 @@ function buildAppHref(
     vulnerabilityIntelView?: VulnerabilityIntelViewKey;
   }
 ): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set('tab', tab);
-  if (options?.inventoryView) {
-    url.searchParams.set(INVENTORY_VIEW_QUERY_KEY, options.inventoryView);
-  }
-  if (options?.operationsView) {
-    url.searchParams.set(OPERATIONS_VIEW_QUERY_KEY, options.operationsView);
-  }
-  if (options?.vulnerabilityIntelView) {
-    url.searchParams.set(VULN_INTEL_VIEW_QUERY_KEY, options.vulnerabilityIntelView);
-  }
-  return `${url.pathname}?${url.searchParams.toString()}`;
+  return buildPathWithQueryParams({
+    tab,
+    [INVENTORY_VIEW_QUERY_KEY]: options?.inventoryView,
+    [OPERATIONS_VIEW_QUERY_KEY]: options?.operationsView,
+    [VULN_INTEL_VIEW_QUERY_KEY]: options?.vulnerabilityIntelView
+  });
 }
 
 function matchTabFromInput(value: string, allowedTabs: Tab[]): Tab | null {

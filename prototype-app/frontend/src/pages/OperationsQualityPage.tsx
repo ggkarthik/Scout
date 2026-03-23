@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   OperationalQualityFilterValues,
   OperationalQualityIssue,
@@ -187,7 +188,6 @@ export function OperationsQualityPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [queryInput, setQueryInput] = React.useState('');
-  const [query, setQuery] = React.useState('');
   const [domain, setDomain] = React.useState('');
   const [issueType, setIssueType] = React.useState('');
   const [severity, setSeverity] = React.useState('');
@@ -197,11 +197,7 @@ export function OperationsQualityPage() {
   const [ecosystem, setEcosystem] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [selectedIssueId, setSelectedIssueId] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const timeout = window.setTimeout(() => setQuery(queryInput.trim()), 300);
-    return () => window.clearTimeout(timeout);
-  }, [queryInput]);
+  const query = useDebouncedValue(queryInput.trim());
 
   React.useEffect(() => {
     setPage(0);
@@ -270,9 +266,6 @@ export function OperationsQualityPage() {
         <div className="panel-header">
           <div>
             <h3>Quality</h3>
-            <span className="panel-caption">
-              One exception workbench for ingestion, normalization, correlation, VEX, EOL, and projection-quality gaps. This page routes you to the owning workflow instead of duplicating repair controls.
-            </span>
           </div>
           {summary && <span className="panel-caption">Last updated {formatInstant(summary.generatedAt)}</span>}
         </div>

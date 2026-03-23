@@ -5,6 +5,7 @@ import { AssetsPage } from './AssetsPage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
+import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 type ConnectorId =
   | 'sbom-endpoint'
@@ -115,7 +116,7 @@ function isConnectView(value: string | null): value is ConnectView {
 }
 
 function readInitialConnectView(): ConnectView {
-  const fromQuery = new URLSearchParams(window.location.search).get(CONNECT_VIEW_QUERY_KEY);
+  const fromQuery = readQueryParam(CONNECT_VIEW_QUERY_KEY);
   if (fromQuery === 'github-pipelines') return 'sources';
   if (fromQuery === 'integration-queue') return 'vuln-intel-queue';
   if (fromQuery === 'inventory-run-queue') return 'inventory-run-queue';
@@ -128,26 +129,21 @@ function isConnectorId(value: string | null): value is ConnectorId {
 }
 
 function readInitialConnector(): ConnectorId | null {
-  const params = new URLSearchParams(window.location.search);
-  const source = params.get(CONNECT_SOURCE_QUERY_KEY);
+  const source = readQueryParam(CONNECT_SOURCE_QUERY_KEY);
   if (isConnectorId(source)) {
     return source;
   }
-  if (params.get(CONNECT_VIEW_QUERY_KEY) === 'github-pipelines') {
+  if (readQueryParam(CONNECT_VIEW_QUERY_KEY) === 'github-pipelines') {
     return 'sbom-github';
   }
   return null;
 }
 
 function writeConnectQuery(connectorId: ConnectorId | null, view: ConnectView): void {
-  const url = new URL(window.location.href);
-  if (connectorId) {
-    url.searchParams.set(CONNECT_SOURCE_QUERY_KEY, connectorId);
-  } else {
-    url.searchParams.delete(CONNECT_SOURCE_QUERY_KEY);
-  }
-  url.searchParams.set(CONNECT_VIEW_QUERY_KEY, view);
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({
+    [CONNECT_SOURCE_QUERY_KEY]: connectorId,
+    [CONNECT_VIEW_QUERY_KEY]: view
+  });
 }
 
 type ConnectorDetailsProps = {
@@ -178,6 +174,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="nvd"
           showQueue={false}
+          hideHeader
           title="NVD Vulnerability Feed"
           caption="Trigger NVD synchronization. View run history in Vuln Intel Feed Queue."
         />
@@ -188,6 +185,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="kev"
           showQueue={false}
+          hideHeader
           title="CISA KEV Feed"
           caption="Trigger KEV ingestion. View run history in Vuln Intel Feed Queue."
         />
@@ -198,6 +196,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="ghsa"
           showQueue={false}
+          hideHeader
           title="GitHub Advisory Database (GHSA)"
           caption="Trigger GHSA ingestion. View run history in Vuln Intel Feed Queue."
         />
@@ -208,8 +207,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="microsoft-csaf"
           showQueue={false}
+          hideHeader
           title="Microsoft CSAF + VEX Feed"
-          caption="Trigger Microsoft CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue and VEX maintenance in Processing Jobs."
+          caption="Trigger Microsoft CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue."
         />
       );
   }
@@ -218,8 +218,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="redhat-csaf"
           showQueue={false}
+          hideHeader
           title="Red Hat CSAF + VEX Feed"
-          caption="Trigger Red Hat CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue and VEX maintenance in Processing Jobs."
+          caption="Trigger Red Hat CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue."
         />
       );
   }
@@ -228,6 +229,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         <SourcesPage
           focusSource="advisories"
           showQueue={false}
+          hideHeader
           title="Advisory Import Feed"
           caption="Seed/import advisory records. View run history in Vuln Intel Feed Queue."
         />

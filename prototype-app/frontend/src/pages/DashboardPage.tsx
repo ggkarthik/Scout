@@ -120,7 +120,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
         <section className="panel security-score-panel">
           <div className="panel-header">
             <h3>Security Score</h3>
-            <span className="panel-caption">Derived from open exposure risk</span>
           </div>
           <div className="score-gauge-wrap">
             <div className="score-gauge" style={{ ['--score' as string]: `${securityScore}` }}>
@@ -139,7 +138,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
       <section className="panel csaf-vex-analytics-panel">
         <div className="panel-header">
           <h3>Correlation Efficiency</h3>
-          <span className="panel-caption">Coverage, match quality, and finding generation across correlation methods</span>
         </div>
 
         <div className="noise-summary-grid">
@@ -261,7 +259,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
       <section className="panel csaf-vex-analytics-panel">
         <div className="panel-header">
           <h3>CSAF/VEX Quality Analytics</h3>
-          <span className="panel-caption">30-day risk exposure, exact VEX coverage, and ingestion quality indicators</span>
         </div>
 
         <div className="noise-summary-grid">
