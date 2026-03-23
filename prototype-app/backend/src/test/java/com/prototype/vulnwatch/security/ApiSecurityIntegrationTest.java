@@ -16,6 +16,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
+import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.TenantService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,9 @@ class ApiSecurityIntegrationTest {
 
     @MockBean
     private OperationalDashboardService operationalDashboardService;
+
+    @MockBean
+    private OperationalQualityReadService operationalQualityReadService;
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;

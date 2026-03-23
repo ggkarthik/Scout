@@ -7,6 +7,7 @@ import type {
   ServiceNowCmdbConnectionTest,
   SyncTriggerResponse
 } from '../types';
+import { buildPathWithQueryParams } from '../utils/queryState';
 
 const REVIEW_CATEGORY_QUERY_KEY = 'reviewCategory';
 const DEFAULT_INSTALL_FIELDS = [
@@ -39,19 +40,18 @@ const DEFAULT_DISCOVERY_FIELDS = [
 ].join(',');
 
 function inventoryHref(view: 'hosts', reviewCategories?: string[]): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set('tab', 'inventory');
-  url.searchParams.set('inventoryView', view);
-  url.searchParams.delete(REVIEW_CATEGORY_QUERY_KEY);
-  reviewCategories?.forEach((value) => url.searchParams.append(REVIEW_CATEGORY_QUERY_KEY, value));
-  return `${url.pathname}?${url.searchParams.toString()}`;
+  return buildPathWithQueryParams({
+    tab: 'inventory',
+    inventoryView: view,
+    [REVIEW_CATEGORY_QUERY_KEY]: reviewCategories
+  });
 }
 
 function connectHref(view: 'inventory-run-queue'): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set('tab', 'connect');
-  url.searchParams.set('connectView', view);
-  return `${url.pathname}?${url.searchParams.toString()}`;
+  return buildPathWithQueryParams({
+    tab: 'connect',
+    connectView: view
+  });
 }
 
 function defaultForm(): ServiceNowCmdbConfigRequest {

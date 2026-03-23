@@ -187,9 +187,6 @@ export function EolPage() {
         <div className="panel-header">
           <div>
             <h3>End-of-Life Catalog</h3>
-            <span className="panel-caption">
-              Raw endoflife.date products ingested into VulnWatch. Open a product to inspect its release cycles and source metadata.
-            </span>
           </div>
           <button
             type="button"
@@ -205,27 +202,22 @@ export function EolPage() {
           <div className="summary-card">
             <strong>Products</strong>
             <span>{catalogStats.products.toLocaleString()}</span>
-            <span className="panel-caption">Catalog slugs stored from the feed.</span>
           </div>
           <div className="summary-card">
             <strong>CPE Tagged</strong>
             <span>{catalogStats.cpeMapped.toLocaleString()}</span>
-            <span className="panel-caption">Entries with vendor or product CPE metadata.</span>
           </div>
           <div className="summary-card">
             <strong>PURL Tagged</strong>
             <span>{catalogStats.purlMapped.toLocaleString()}</span>
-            <span className="panel-caption">Entries with package-url identifiers.</span>
           </div>
           <div className="summary-card">
             <strong>Aliases</strong>
             <span>{catalogStats.aliases.toLocaleString()}</span>
-            <span className="panel-caption">Products carrying ingested alias hints.</span>
           </div>
           <div className="summary-card">
             <strong>Fetched</strong>
             <span>{catalogStats.fetched.toLocaleString()}</span>
-            <span className="panel-caption">Entries with recorded fetch timestamps.</span>
           </div>
         </div>
 
@@ -369,9 +361,6 @@ export function EolPage() {
 
           {unresolvedOpen && (
             <>
-              <p className="panel-caption" style={{ margin: '0 0 12px' }}>
-                These normalized software identities still need an endoflife.date slug. Confirming them keeps Org-CVE and matched software EOL signals accurate.
-              </p>
               <div className="table-scroll">
                 <table>
                   <thead>

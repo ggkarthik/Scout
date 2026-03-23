@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Tenant;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -82,7 +83,7 @@ public class DashboardNoiseReductionProjectionService {
             params.addValue("neverOpenedNotApplicable", neverOpenedNotApplicable)
                     .addValue("deferredUnderInvestigation", deferredUnderInvestigation)
                     .addValue("categoryCountsJson", categoryCountsJson)
-                    .addValue("lastComputedAt", computedAt);
+                    .addValue("lastComputedAt", toSqlTimestamp(computedAt));
 
             jdbcTemplate.update("""
                     INSERT INTO dashboard_noise_reduction_projection (
@@ -254,6 +255,10 @@ public class DashboardNoiseReductionProjectionService {
         } catch (Exception ex) {
             return "{}";
         }
+    }
+
+    private Timestamp toSqlTimestamp(Instant value) {
+        return value == null ? null : Timestamp.from(value);
     }
 
     public record ProjectionSnapshot(

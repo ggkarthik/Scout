@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
+import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 export type IngestionMode = 'endpoint' | 'github';
 type Props = {
@@ -17,18 +18,12 @@ function isMode(value: string | null): value is IngestionMode {
 }
 
 function readModeFromQuery(): IngestionMode {
-  const value = new URLSearchParams(window.location.search).get(MODE_QUERY_KEY);
+  const value = readQueryParam(MODE_QUERY_KEY);
   return isMode(value) ? value : 'endpoint';
 }
 
 function writeModeToQuery(mode: IngestionMode): void {
-  const url = new URL(window.location.href);
-  if (mode === 'endpoint') {
-    url.searchParams.delete(MODE_QUERY_KEY);
-  } else {
-    url.searchParams.set(MODE_QUERY_KEY, mode);
-  }
-  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+  replaceBrowserQueryParams({ [MODE_QUERY_KEY]: mode === 'endpoint' ? null : mode });
 }
 
 export function IngestionPage({
