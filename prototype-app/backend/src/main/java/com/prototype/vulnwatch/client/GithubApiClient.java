@@ -632,12 +632,18 @@ public class GithubApiClient {
                 if (digest.isBlank()) {
                     continue;
                 }
+                List<String> tags = extractContainerTags(entry);
+                if (!hasCanonicalTag(tags)) {
+                    // Skip untagged platform-specific sub-manifests and OCI referrer entries
+                    // (cosign attestation containers are tagged sha256-{digest} with no human tag)
+                    continue;
+                }
                 versions.add(new GithubContainerImageVersionRef(
                         owner,
                         packageName,
                         buildGhcrImageRepository(owner, packageName),
                         digest,
-                        extractContainerTags(entry)));
+                        tags));
             }
             if (root.size() < 100) {
                 break;
@@ -1110,6 +1116,15 @@ public class GithubApiClient {
         List<String> values = new ArrayList<>(tags);
         Collections.sort(values);
         return values;
+    }
+
+    private boolean hasCanonicalTag(List<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return false;
+        }
+        // OCI referrer entries (cosign/attest) use tags of the form sha256-{64-hex-chars}
+        // These are internal attestation storage artifacts, not canonical image tags
+        return tags.stream().anyMatch(tag -> !tag.startsWith("sha256-") || tag.length() != 71);
     }
 
     private String normalizeDigest(String value) {

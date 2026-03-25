@@ -77,6 +77,15 @@ public class NvdApiClient {
     ) {
     }
 
+    public record NvdQueryFilters(
+            String cpeName,
+            boolean isVulnerable,
+            boolean hasKev,
+            String cvssV3Severity,
+            String cvssV4Severity
+    ) {
+    }
+
     private record CvssSelection(
             JsonNode metric,
             JsonNode cvssData,
@@ -128,7 +137,11 @@ public class NvdApiClient {
     }
 
     public boolean hasApiKey() {
-        return resolvedApiKey != null && !resolvedApiKey.isBlank();
+        return hasApiKey(null);
+    }
+
+    public boolean hasApiKey(String apiKeyOverride) {
+        return !resolveRequestApiKey(apiKeyOverride).isBlank();
     }
 
     public int resultsPerPage() {
@@ -136,12 +149,26 @@ public class NvdApiClient {
     }
 
     public NvdPage fetchPage(int startIndex, Instant startInclusive, Instant endExclusive) {
-        String uri = buildUri(startIndex, startInclusive, endExclusive);
-        String body = fetchRaw(uri);
+        return fetchPage(startIndex, startInclusive, endExclusive, null, null);
+    }
+
+    public NvdPage fetchPage(int startIndex, Instant startInclusive, Instant endExclusive, String apiKeyOverride) {
+        return fetchPage(startIndex, startInclusive, endExclusive, null, apiKeyOverride);
+    }
+
+    public NvdPage fetchPage(
+            int startIndex,
+            Instant startInclusive,
+            Instant endExclusive,
+            NvdQueryFilters filters,
+            String apiKeyOverride
+    ) {
+        String uri = buildUri(startIndex, startInclusive, endExclusive, filters);
+        String body = fetchRaw(uri, apiKeyOverride);
         return parsePage(body, startIndex);
     }
 
-    private String buildUri(int startIndex, Instant startInclusive, Instant endExclusive) {
+    private String buildUri(int startIndex, Instant startInclusive, Instant endExclusive, NvdQueryFilters filters) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(baseUrl)
                 .queryParam("startIndex", Math.max(0, startIndex))
                 .queryParam("resultsPerPage", resultsPerPage());
@@ -152,18 +179,36 @@ public class NvdApiClient {
         if (endExclusive != null) {
             builder.queryParam("lastModEndDate", REQUEST_TIME_FORMATTER.format(endExclusive));
         }
+        if (filters != null) {
+            if (hasText(filters.cpeName())) {
+                builder.queryParam("cpeName", filters.cpeName().trim());
+            }
+            if (filters.isVulnerable()) {
+                builder.queryParam("isVulnerable");
+            }
+            if (filters.hasKev()) {
+                builder.queryParam("hasKev");
+            }
+            if (hasText(filters.cvssV3Severity())) {
+                builder.queryParam("cvssV3Severity", filters.cvssV3Severity().trim());
+            }
+            if (hasText(filters.cvssV4Severity())) {
+                builder.queryParam("cvssV4Severity", filters.cvssV4Severity().trim());
+            }
+        }
         return builder.build().toUriString();
     }
 
-    private String fetchRaw(String uri) {
+    private String fetchRaw(String uri, String apiKeyOverride) {
         int attempts = Math.max(1, maxRetries);
         Exception lastError = null;
+        String requestApiKey = resolveRequestApiKey(apiKeyOverride);
 
         for (int attempt = 1; attempt <= attempts; attempt++) {
             enforceRateLimitWindow();
             HttpHeaders headers = new HttpHeaders();
-            if (hasApiKey()) {
-                headers.add("apiKey", resolvedApiKey);
+            if (!requestApiKey.isBlank()) {
+                headers.add("apiKey", requestApiKey);
             }
 
             try {
@@ -510,6 +555,17 @@ public class NvdApiClient {
             return fileValue;
         }
         return apiKey == null ? "" : apiKey.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String resolveRequestApiKey(String apiKeyOverride) {
+        if (apiKeyOverride != null && !apiKeyOverride.isBlank()) {
+            return apiKeyOverride.trim();
+        }
+        return resolvedApiKey == null ? "" : resolvedApiKey.trim();
     }
 
     private String readApiKeyFromFile(String pathValue) {

@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.config;
 import com.prototype.vulnwatch.service.TenantService;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.Filter;
+import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -11,6 +12,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * BLG-007: Replaces Spring Boot's auto-configured DataSource with a
@@ -44,6 +49,34 @@ public class TenantIsolationConfig {
     @Primary
     public DataSource dataSource(HikariDataSource hikariDataSource) {
         return new TenantAwareDataSource(hikariDataSource);
+    }
+
+    /**
+     * Unscoped JdbcTemplate for admin-only flows that must clear data across
+     * all tenants and global tables.
+     */
+    @Bean(name = "prototypeResetJdbcTemplate")
+    public JdbcTemplate prototypeResetJdbcTemplate(HikariDataSource hikariDataSource) {
+        return new JdbcTemplate(hikariDataSource);
+    }
+
+    /**
+     * Dedicated transaction manager for prototype reset operations that should
+     * bypass the tenant-aware datasource wrapper.
+     */
+    @Bean(name = "prototypeResetTransactionManager")
+    public PlatformTransactionManager prototypeResetTransactionManager(HikariDataSource hikariDataSource) {
+        return new DataSourceTransactionManager(hikariDataSource);
+    }
+
+    /**
+     * Keep the application's default JPA transaction manager available under the
+     * conventional bean name expected by the rest of the service layer.
+     */
+    @Bean(name = "transactionManager")
+    @Primary
+    public PlatformTransactionManager transactionManager(EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.AdvisoryBatchRequest;
 import com.prototype.vulnwatch.dto.IngestionResult;
+import com.prototype.vulnwatch.dto.NvdFullSyncRequest;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
@@ -61,8 +62,8 @@ public class IngestionController {
     }
 
     @PostMapping("/ingestion/nvd-full-sync")
-    public SyncTriggerResponse syncNvdFull() {
-        return vulnerabilityIngestionService.triggerNvdFullSync();
+    public SyncTriggerResponse syncNvdFull(@RequestBody(required = false) NvdFullSyncRequest request) {
+        return vulnerabilityIngestionService.triggerNvdFullSync(request == null ? null : request.apiKey());
     }
 
     @PostMapping("/ingestion/kev-sync")

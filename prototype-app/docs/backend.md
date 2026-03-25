@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-03-22
+Last updated: 2026-03-26
 
 ## Purpose
 
@@ -195,6 +195,15 @@ GitHub-backed SBOM ingestion now supports two modes:
 The GHCR batch path enumerates container packages and image versions in GHCR for a GitHub owner,
 looks up each image digest in GitHub artifact attestations, and feeds every discovered SBOM
 through the same parsing and correlation pipeline used for uploaded SBOM files.
+
+**Canonical-tag filter:** The GitHub Packages API returns every stored version for a package,
+including untagged platform-specific sub-manifests (linux/amd64, linux/arm64 layers inside a
+multi-arch index) and OCI referrer entries created by `actions/attest-sbom` or cosign
+(these are tagged `sha256-{64-hex-chars}` with no human-readable tag). The backend now skips
+any version whose tags are all in the `sha256-{digest}` referrer format or whose tag list is
+empty. Only versions with at least one canonical tag (e.g. `main-*`, `latest`, `v1.2.3`) are
+processed for attestation lookup. This prevents false failure counts from non-image registry
+artifacts.
 
 Current trust model:
 

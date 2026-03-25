@@ -79,7 +79,8 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 
 - `DashboardPage`
 - Reads `/dashboard`, `/dashboard/applicable-software`, `/dashboard/impacted-cves`, and `/dashboard/cve-inventory-map`
-- Focuses on high-level posture, impacted CVEs, and coverage summaries
+- Focuses on risk posture only: high-level exposure counts, severity/risk summaries, and risk-oriented CVE views
+- Does not surface operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels
 
 ### Findings
 
@@ -93,6 +94,7 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 - Has three sub-views accessible via a flyout menu: **Quality**, **Pipeline**, **Platform Health**
 - Quality reads `/operations/quality/summary`, `/operations/quality/issues`, `/operations/quality/filters`, and `/operations/quality/issues/{issueId}`
 - Pipeline reads `/operations/dashboard` for ingestion queue and run history
+- Pipeline includes correlation efficiency diagnostics such as CPE coverage, direct vs fallback share, recent CPE-created findings, and CSAF/VEX quality analytics
 - Platform Health reads operational metrics and `/operations/normalization-quality`
 - the Platform Health summary now includes noise-projection readiness, age, refresh failures, and projection refresh p95
 - the Pipeline view label `Queued/Running Sync Jobs` now refers to sync backlog, not durable delta-queue depth

@@ -90,6 +90,9 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 
 Top-level sections: Overview → Findings → Operational Dashboard (Quality / Pipeline / Platform Health) → Vulnerability Intelligence → Inventory → End-of-Life → Connect → Configurations.
 
+Overview is reserved for risk metrics and risk-focused summaries only. Do not place operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels on Overview; those belong under Operational Dashboard.
+Correlation Efficiency and CSAF/VEX Quality Analytics live under Operations → Pipeline.
+
 All API calls go through `src/api/client.ts`. Base URL defaults to `http://localhost:8080/api` (via `VITE_API_BASE`). Auth headers are injected on every request.
 
 All TypeScript types live in `src/types/index.ts`.

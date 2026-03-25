@@ -46,6 +46,7 @@ type VulnerabilityIntelFilterState = {
   sources: string[];
   statuses: string[];
   inKevValues: string[];
+  affectedPackageQuery: string;
   query: string;
   severityOptions: FilterValueOption[];
   sourceOptions: FilterValueOption[];
@@ -58,6 +59,7 @@ type VulnerabilityIntelFilterState = {
   setSources: (values: string[]) => void;
   setStatuses: (values: string[]) => void;
   setInKevValues: (values: string[]) => void;
+  setAffectedPackageQuery: (value: string) => void;
   setQuery: (value: string) => void;
   setPage: (page: number) => void;
 };
@@ -109,6 +111,9 @@ function vulnerabilityFilterChipLabel(
   }
   if (key === 'inKev') {
     return `KEV${filters.inKevValues.length > 0 ? ` (${filters.inKevValues.length})` : ''}`;
+  }
+  if (key === 'affectedPackage') {
+    return `Affected Package${filters.affectedPackageQuery.trim() ? ' (1)' : ''}`;
   }
   return `Vulnerability Search${filters.query.trim() ? ' (1)' : ''}`;
 }
@@ -201,6 +206,28 @@ export function InventoryFiltersPanel({
                   }}
                   onRemove={() => vulnerabilityIntelFilters.removeFilter('inKev')}
                 />
+              )}
+
+              {vulnerabilityIntelFilters.activeFilters.includes('affectedPackage') && (
+                <label className="findings-filter-chip findings-filter-text-card">Affected Package
+                  <button
+                    type="button"
+                    className="findings-filter-chip-remove"
+                    onClick={() => vulnerabilityIntelFilters.removeFilter('affectedPackage')}
+                    aria-label="Remove Affected Package filter"
+                  >
+                    x
+                  </button>
+                  <input
+                    value={vulnerabilityIntelFilters.affectedPackageQuery}
+                    onChange={(event) => {
+                      vulnerabilityIntelFilters.setAffectedPackageQuery(event.target.value);
+                      vulnerabilityIntelFilters.setPage(0);
+                    }}
+                    placeholder="openssl, log4j, pkg:maven, or cpe:2.3"
+                    className="mono"
+                  />
+                </label>
               )}
 
               {vulnerabilityIntelFilters.activeFilters.includes('query') && (

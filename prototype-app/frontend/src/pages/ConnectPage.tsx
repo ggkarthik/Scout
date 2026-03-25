@@ -54,7 +54,7 @@ const CONNECTORS: ConnectorDefinition[] = [
   {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
-    summary: 'Synchronize CVE records and refresh normalized vulnerability intelligence.',
+    summary: '',
     icon: '🛡️'
   },
   {
@@ -239,7 +239,7 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
     return (
       <EolSourcePanel
         title="endoflife.date EOL Feed"
-        caption="Run EOL catalog, release, mapping, and denormalization jobs. Browse ingested products in the EOL tab."
+        caption=""
       />
     );
   }

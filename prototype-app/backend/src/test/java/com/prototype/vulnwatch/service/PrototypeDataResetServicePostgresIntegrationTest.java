@@ -39,6 +39,14 @@ class PrototypeDataResetServicePostgresIntegrationTest {
         UUID ciId = UUID.randomUUID();
         UUID discoveryModelId = UUID.randomUUID();
         UUID softwareInstanceId = UUID.randomUUID();
+        UUID vulnerabilityId = UUID.randomUUID();
+        UUID eolProductId = UUID.randomUUID();
+        UUID eolReleaseId = UUID.randomUUID();
+        UUID observationId = UUID.randomUUID();
+        UUID sourceContextId = UUID.randomUUID();
+        UUID threatOverlayId = UUID.randomUUID();
+        long investigationId = 1L;
+        long investigationActivityId = 10L;
 
         jdbcTemplate.update(
                 "insert into tenants (id, created_at, name) values (?, ?, ?)",
@@ -134,15 +142,153 @@ class PrototypeDataResetServicePostgresIntegrationTest {
                 Timestamp.from(now),
                 Timestamp.from(now)
         );
+        jdbcTemplate.update(
+                """
+                insert into eol_product_catalog (
+                    id,
+                    slug,
+                    product_name,
+                    display_name,
+                    created_at,
+                    updated_at
+                ) values (?, ?, ?, ?, ?, ?)
+                """,
+                eolProductId,
+                "openssl",
+                "openssl",
+                "OpenSSL",
+                Timestamp.from(now),
+                Timestamp.from(now)
+        );
+        jdbcTemplate.update(
+                """
+                insert into eol_release (
+                    id,
+                    product_slug,
+                    cycle,
+                    release_date,
+                    eol_date,
+                    latest,
+                    latest_release,
+                    is_eol,
+                    created_at,
+                    updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                eolReleaseId,
+                "openssl",
+                "3.0",
+                java.sql.Date.valueOf("2024-01-01"),
+                java.sql.Date.valueOf("2026-01-01"),
+                "3.0.15",
+                "3.0.15",
+                false,
+                Timestamp.from(now),
+                Timestamp.from(now)
+        );
+        jdbcTemplate.update(
+                """
+                insert into vulnerabilities (
+                    id,
+                    source,
+                    published_at,
+                    last_modified_at
+                ) values (?, ?, ?, ?)
+                """,
+                vulnerabilityId,
+                "NVD",
+                Timestamp.from(now),
+                Timestamp.from(now)
+        );
+        jdbcTemplate.update(
+                """
+                insert into vulnerability_intel_observations (
+                    id,
+                    vulnerability_id,
+                    observed_at
+                ) values (?, ?, ?)
+                """,
+                observationId,
+                vulnerabilityId,
+                Timestamp.from(now)
+        );
+        jdbcTemplate.update(
+                """
+                insert into vulnerability_source_context (
+                    id,
+                    vulnerability_id,
+                    observation_id
+                ) values (?, ?, ?)
+                """,
+                sourceContextId,
+                vulnerabilityId,
+                observationId
+        );
+        jdbcTemplate.update(
+                """
+                insert into vulnerability_threat_overlays (
+                    id,
+                    vulnerability_id
+                ) values (?, ?)
+                """,
+                threatOverlayId,
+                vulnerabilityId
+        );
+        jdbcTemplate.update(
+                """
+                insert into investigations (
+                    id,
+                    status,
+                    created_at,
+                    updated_at,
+                    tenant_id,
+                    vulnerability_id
+                ) values (?, ?, ?, ?, ?, ?)
+                """,
+                investigationId,
+                "OPEN",
+                Timestamp.from(now),
+                Timestamp.from(now),
+                tenantId,
+                vulnerabilityId
+        );
+        jdbcTemplate.update(
+                """
+                insert into investigation_activities (
+                    id,
+                    activity_type,
+                    created_at,
+                    investigation_id
+                ) values (?, ?, ?, ?)
+                """,
+                investigationActivityId,
+                "CREATED",
+                Timestamp.from(now),
+                investigationId
+        );
 
         PrototypeDataResetResponse response = service.cleanAll();
 
         assertEquals(1L, response.deletedRows().get("software_instances"));
         assertEquals(1L, response.deletedRows().get("discovery_models"));
+        assertEquals(1L, response.deletedRows().get("investigations"));
+        assertEquals(1L, response.deletedRows().get("investigation_activities"));
+        assertEquals(1L, response.deletedRows().get("vulnerability_source_context"));
+        assertEquals(1L, response.deletedRows().get("vulnerability_threat_overlays"));
+        assertEquals(1L, response.deletedRows().get("eol_release"));
+        assertEquals(1L, response.deletedRows().get("eol_product_catalog"));
         assertEquals(0L, tableCount(jdbcTemplate, "software_instances"));
         assertEquals(0L, tableCount(jdbcTemplate, "discovery_models"));
+        assertEquals(0L, tableCount(jdbcTemplate, "investigations"));
+        assertEquals(0L, tableCount(jdbcTemplate, "investigation_activities"));
+        assertEquals(0L, tableCount(jdbcTemplate, "vulnerability_source_context"));
+        assertEquals(0L, tableCount(jdbcTemplate, "vulnerability_threat_overlays"));
+        assertEquals(0L, tableCount(jdbcTemplate, "vulnerability_intel_observations"));
+        assertEquals(0L, tableCount(jdbcTemplate, "vulnerabilities"));
         assertEquals(0L, tableCount(jdbcTemplate, "cis"));
         assertEquals(0L, tableCount(jdbcTemplate, "assets"));
+        assertEquals(0L, tableCount(jdbcTemplate, "eol_release"));
+        assertEquals(0L, tableCount(jdbcTemplate, "eol_product_catalog"));
         verify(vulnerabilityIntelligenceService).resetReadModelCaches();
     }
 
@@ -200,6 +346,76 @@ class PrototypeDataResetServicePostgresIntegrationTest {
                     source_system varchar(64) not null,
                     created_at timestamp with time zone not null,
                     updated_at timestamp with time zone not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table eol_product_catalog (
+                    id uuid primary key,
+                    slug varchar(200) not null unique,
+                    product_name varchar(255) not null,
+                    display_name varchar(255) not null,
+                    created_at timestamp with time zone not null,
+                    updated_at timestamp with time zone not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table eol_release (
+                    id uuid primary key,
+                    product_slug varchar(200) not null references eol_product_catalog(slug) on delete cascade,
+                    cycle varchar(100) not null,
+                    release_date date,
+                    eol_date date,
+                    latest varchar(100),
+                    latest_release varchar(100),
+                    is_eol boolean,
+                    created_at timestamp with time zone not null,
+                    updated_at timestamp with time zone not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table vulnerabilities (
+                    id uuid primary key,
+                    source varchar(32) not null,
+                    published_at timestamp with time zone not null,
+                    last_modified_at timestamp with time zone not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table vulnerability_intel_observations (
+                    id uuid primary key,
+                    vulnerability_id uuid not null references vulnerabilities(id),
+                    observed_at timestamp with time zone not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table vulnerability_source_context (
+                    id uuid primary key,
+                    vulnerability_id uuid not null references vulnerabilities(id),
+                    observation_id uuid not null references vulnerability_intel_observations(id)
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table vulnerability_threat_overlays (
+                    id uuid primary key,
+                    vulnerability_id uuid not null references vulnerabilities(id)
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table investigations (
+                    id bigint primary key,
+                    status varchar(50) not null,
+                    created_at timestamp with time zone not null,
+                    updated_at timestamp with time zone not null,
+                    tenant_id uuid not null references tenants(id),
+                    vulnerability_id uuid not null references vulnerabilities(id)
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table investigation_activities (
+                    id bigint primary key,
+                    activity_type varchar(50) not null,
+                    created_at timestamp with time zone not null,
+                    investigation_id bigint not null references investigations(id)
                 )
                 """);
     }

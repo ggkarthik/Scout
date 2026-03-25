@@ -111,12 +111,13 @@ public class GithubSbomSourceService {
     }
 
     public SyncTriggerResponse triggerRepositoryRunOnce(GithubSbomIngestionRequest request) {
-        String normalizedOwner = request.owner() == null ? "" : request.owner().trim();
+        GithubSbomIngestionRequest normalizedRequest = normalizeRepositoryRequest(request);
+        String normalizedOwner = normalizedRequest.owner() == null ? "" : normalizedRequest.owner().trim();
         if (normalizedOwner.isBlank()) {
             throw new IllegalArgumentException("GitHub owner is required");
         }
         SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM));
-        ingestionExecutor.execute(() -> executeRepositoryRunOnce(run.getId(), request));
+        ingestionExecutor.execute(() -> executeRepositoryRunOnce(run.getId(), normalizedRequest));
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub repository ingestion queued");
     }
 
@@ -149,7 +150,7 @@ public class GithubSbomSourceService {
                         snapshot.owner(),
                         snapshot.repo(),
                         false,
-                        snapshot.assetType(),
+                        AssetType.APPLICATION,
                         snapshot.assetName(),
                         snapshot.assetIdentifier()
                 ));
@@ -223,9 +224,7 @@ public class GithubSbomSourceService {
         source.setOwner(owner);
         source.setRepo(ghcrSource ? "" : repo);
         source.setPath(path);
-        source.setAssetType(request.assetType() == null
-                ? (ghcrSource ? AssetType.CONTAINER_IMAGE : AssetType.APPLICATION)
-                : request.assetType());
+        source.setAssetType(assetTypeForPath(path));
         source.setAssetName(
                 request.assetName() == null || request.assetName().isBlank()
                         ? defaultAssetName
@@ -257,6 +256,21 @@ public class GithubSbomSourceService {
 
     private String defaultGhcrScopeAssetIdentifier(String owner) {
         return "ghcr:" + owner.toLowerCase(Locale.ROOT);
+    }
+
+    private AssetType assetTypeForPath(String path) {
+        return isGhcrSourcePath(path) ? AssetType.CONTAINER_IMAGE : AssetType.APPLICATION;
+    }
+
+    private GithubSbomIngestionRequest normalizeRepositoryRequest(GithubSbomIngestionRequest request) {
+        return new GithubSbomIngestionRequest(
+                request.owner(),
+                request.repo(),
+                request.includeAllRepos(),
+                AssetType.APPLICATION,
+                request.assetName(),
+                request.assetIdentifier()
+        );
     }
 
     private String syncTypeForPath(String path) {
@@ -325,7 +339,7 @@ public class GithubSbomSourceService {
                     source.getOwner(),
                     source.getRepo(),
                     source.getPath(),
-                    source.getAssetType(),
+                    assetTypeForPath(source.getPath()),
                     source.getAssetName(),
                     source.getAssetIdentifier()
             );
@@ -394,7 +408,7 @@ public class GithubSbomSourceService {
                     errorMessage,
                     Map.of(
                             "sourceSystem", "github",
-                            "assetType", source.getAssetType().name(),
+                            "assetType", assetTypeForPath(source.getPath()).name(),
                             "assetsDiscovered", summary.repositoriesDiscovered(),
                             "assetsIngested", summary.repositoriesProcessed(),
                             "assetsFailed", summary.repositoriesFailed(),
@@ -568,7 +582,7 @@ public class GithubSbomSourceService {
                 source.getOwner(),
                 source.getRepo(),
                 source.getPath(),
-                source.getAssetType().name(),
+                assetTypeForPath(source.getPath()).name(),
                 source.getAssetName(),
                 source.getAssetIdentifier(),
                 source.getFrequency().name(),
