@@ -63,6 +63,7 @@ export function InventoryPage({ selectedView }: Props) {
   ));
   const [vulnerabilityIntelPage, setVulnerabilityIntelPage] = React.useState(0);
   const [vulnerabilityIntelQuery, setVulnerabilityIntelQuery] = React.useState('');
+  const [vulnerabilityIntelAffectedPackageQuery, setVulnerabilityIntelAffectedPackageQuery] = React.useState('');
   const [vulnerabilityIntelSeverities, setVulnerabilityIntelSeverities] = React.useState<string[]>([]);
   const [vulnerabilityIntelSources, setVulnerabilityIntelSources] = React.useState<string[]>([]);
   const [vulnerabilityIntelStatuses, setVulnerabilityIntelStatuses] = React.useState<string[]>([]);
@@ -74,6 +75,7 @@ export function InventoryPage({ selectedView }: Props) {
   const [selectedVulnerabilityIntelId, setSelectedVulnerabilityIntelId] = React.useState<string | null>(null);
   const debouncedComponentQuery = useDebouncedValue(componentQuery);
   const debouncedVulnerabilityIntelQuery = useDebouncedValue(vulnerabilityIntelQuery);
+  const debouncedVulnerabilityIntelAffectedPackageQuery = useDebouncedValue(vulnerabilityIntelAffectedPackageQuery);
 
   React.useEffect(() => {
     if (selectedView === 'vulnerability-intelligence') {
@@ -148,7 +150,10 @@ export function InventoryPage({ selectedView }: Props) {
     componentPage,
     debouncedComponentQuery,
     vulnerabilityIntelPage,
-    debouncedVulnerabilityIntelQuery,
+    debouncedVulnerabilityIntelQuery: vulnerabilityIntelActiveFilters.includes('query') ? debouncedVulnerabilityIntelQuery : '',
+    debouncedVulnerabilityIntelAffectedPackageQuery: vulnerabilityIntelActiveFilters.includes('affectedPackage')
+      ? debouncedVulnerabilityIntelAffectedPackageQuery
+      : '',
     vulnerabilityIntelSeverities,
     vulnerabilityIntelSources,
     vulnerabilityIntelStatuses,
@@ -376,6 +381,8 @@ export function InventoryPage({ selectedView }: Props) {
       setVulnerabilityIntelStatuses([]);
     } else if (key === 'inKev') {
       setVulnerabilityIntelInKevValues([]);
+    } else if (key === 'affectedPackage') {
+      setVulnerabilityIntelAffectedPackageQuery('');
     } else if (key === 'query') {
       setVulnerabilityIntelQuery('');
     }
@@ -387,6 +394,7 @@ export function InventoryPage({ selectedView }: Props) {
     setVulnerabilityIntelSources([]);
     setVulnerabilityIntelStatuses([]);
     setVulnerabilityIntelInKevValues([]);
+    setVulnerabilityIntelAffectedPackageQuery('');
     setVulnerabilityIntelQuery('');
     setVulnerabilityIntelPage(0);
     setVulnerabilityIntelActiveFilters([]);
@@ -460,6 +468,7 @@ export function InventoryPage({ selectedView }: Props) {
           sources: vulnerabilityIntelSources,
           statuses: vulnerabilityIntelStatuses,
           inKevValues: vulnerabilityIntelInKevValues,
+          affectedPackageQuery: vulnerabilityIntelAffectedPackageQuery,
           query: vulnerabilityIntelQuery,
           severityOptions,
           sourceOptions,
@@ -472,6 +481,7 @@ export function InventoryPage({ selectedView }: Props) {
           setSources: setVulnerabilityIntelSources,
           setStatuses: setVulnerabilityIntelStatuses,
           setInKevValues: setVulnerabilityIntelInKevValues,
+          setAffectedPackageQuery: setVulnerabilityIntelAffectedPackageQuery,
           setQuery: setVulnerabilityIntelQuery,
           setPage: setVulnerabilityIntelPage
         }}

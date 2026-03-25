@@ -49,7 +49,7 @@ const JOBS: JobDef[] = [
 
 export function EolSourcePanel({
   title = 'endoflife.date Feed',
-  caption = 'Run endoflife.date catalog, release, mapping, and denormalization jobs. Browse ingested products in the EOL tab.'
+  caption = ''
 }: Props) {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
@@ -82,21 +82,6 @@ export function EolSourcePanel({
         <span className="panel-caption">{caption}</span>
       </div>
 
-      <div className="section-block">
-        <h4 className="section-title">How EOL data flows</h4>
-        <div className="panel-caption">
-          The EOL pipeline has 4 ordered stages. Run <strong>Full EOL Refresh</strong> to execute all stages at once,
-          or trigger individual stages to update only what is needed. Scheduled stages run automatically on Sunday from 2 AM through 4 AM.
-          <strong> Connect → Processing Jobs</strong> currently shows the manual runs launched from this panel.
-        </div>
-
-        <div className="eol-pipeline-steps">
-          {['1. Catalog', '2. Releases', '3. Mappings', '4. Denormalize'].map((step) => (
-            <div key={step} className="eol-pipeline-step">{step}</div>
-          ))}
-        </div>
-      </div>
-
       {message && (
         <div className={`notice${message.includes('failed') ? ' error' : ''}`} style={{ margin: '0 0 12px' }}>
           {message}
@@ -124,14 +109,6 @@ export function EolSourcePanel({
         </a>
       </div>
 
-      <div className="eol-job-descriptions">
-        {JOBS.filter((j) => j.key !== 'full').map((job) => (
-          <div key={job.key} className="eol-job-row">
-            <span className="eol-job-label">{job.label}</span>
-            <span className="panel-caption">{job.description}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

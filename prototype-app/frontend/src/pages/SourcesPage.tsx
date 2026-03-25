@@ -1,6 +1,13 @@
 import React from 'react';
 import { api } from '../api/client';
-import { SyncRun, SyncRunSnapshot, VexAssertionRepairSummary } from '../types';
+import {
+  SyncRun,
+  SyncRunSnapshot,
+  VexAssertionRepairSummary,
+  VulnerabilitySourceFilterConfig,
+  VulnerabilitySourceFilterConfigRequest,
+  VulnerabilitySourceSystem
+} from '../types';
 import { ResizableTable } from '../components/ResizableTable';
 
 type FocusSource = 'all' | 'vuln-only' | 'processing' | 'nvd' | 'kev' | 'ghsa' | 'github' | 'microsoft-csaf' | 'redhat-csaf' | 'advisories';
@@ -13,6 +20,37 @@ type Props = {
   showQueue?: boolean;
   refreshSignal?: number;
 };
+
+const NVD_FULL_SYNC_API_KEY_STORAGE_KEY = 'scoutai-nvd-full-sync-api-key';
+const SEVERITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+
+type SourceFilterForm = VulnerabilitySourceFilterConfigRequest;
+
+function isNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.message.includes('[NOT_FOUND]') || error.message.includes('(404)');
+}
+
+function readStoredNvdFullSyncApiKey(): string {
+  try {
+    return window.localStorage.getItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function maskSecret(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Not saved';
+  }
+  if (trimmed.length <= 4) {
+    return '•'.repeat(trimmed.length);
+  }
+  return `${trimmed.slice(0, 2)}${'•'.repeat(Math.max(4, trimmed.length - 4))}${trimmed.slice(-2)}`;
+}
 
 function humanDuration(startedAt: string, completedAt?: string): string {
   if (!completedAt) return 'In progress';
@@ -80,6 +118,120 @@ function deltaLabel(before: number, after: number): string {
   return `${after} (${delta > 0 ? '+' : ''}${delta})`;
 }
 
+function sourceFilterSourceKey(focusSource: FocusSource): VulnerabilitySourceSystem | null {
+  switch (focusSource) {
+    case 'nvd':
+      return 'nvd';
+    case 'kev':
+      return 'kev';
+    case 'ghsa':
+      return 'ghsa';
+    case 'redhat-csaf':
+      return 'redhat';
+    default:
+      return null;
+  }
+}
+
+function defaultSourceFilterForm(sourceSystem: VulnerabilitySourceSystem): SourceFilterForm {
+  switch (sourceSystem) {
+    case 'nvd':
+      return {
+        hasKev: false,
+        cvssV3Severity: '',
+        cvssV4Severity: ''
+      };
+    case 'kev':
+      return {
+        dateAddedFrom: '',
+        dateAddedTo: '',
+        knownRansomwareCampaignUse: false
+      };
+    case 'ghsa':
+      return {
+        severity: ''
+      };
+    case 'redhat':
+      return {
+        severity: '',
+        cvssScore: undefined,
+        cvss3Score: undefined
+      };
+  }
+}
+
+function sourceFilterFormFromConfig(
+  sourceSystem: VulnerabilitySourceSystem,
+  config: VulnerabilitySourceFilterConfig | null
+): SourceFilterForm {
+  if (!config) {
+    return defaultSourceFilterForm(sourceSystem);
+  }
+  switch (config.sourceSystem) {
+    case 'nvd':
+      return {
+        hasKev: config.hasKev,
+        cvssV3Severity: config.cvssV3Severity ?? '',
+        cvssV4Severity: config.cvssV4Severity ?? ''
+      };
+    case 'kev':
+      return {
+        dateAddedFrom: config.dateAddedFrom ?? '',
+        dateAddedTo: config.dateAddedTo ?? '',
+        knownRansomwareCampaignUse: config.knownRansomwareCampaignUse
+      };
+    case 'ghsa':
+      return {
+        severity: config.severity ?? ''
+      };
+    case 'redhat':
+      return {
+        severity: config.severity ?? '',
+        cvssScore: config.cvssScore,
+        cvss3Score: config.cvss3Score
+      };
+  }
+}
+
+function normalizeSourceFilterForm(
+  sourceSystem: VulnerabilitySourceSystem,
+  form: SourceFilterForm
+): VulnerabilitySourceFilterConfigRequest {
+  const trim = (value?: string): string | undefined => {
+    if (value == null) return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+  const numberOrUndefined = (value?: number): number | undefined => (
+    typeof value === 'number' && !Number.isNaN(value) ? value : undefined
+  );
+
+  switch (sourceSystem) {
+    case 'nvd':
+      return {
+        hasKev: form.hasKev === true,
+        cvssV3Severity: trim(form.cvssV3Severity),
+        cvssV4Severity: trim(form.cvssV4Severity)
+      };
+    case 'kev':
+      return {
+        dateAddedFrom: trim(form.dateAddedFrom),
+        dateAddedTo: trim(form.dateAddedTo),
+        knownRansomwareCampaignUse: form.knownRansomwareCampaignUse === true
+      };
+    case 'ghsa':
+      return {
+        severity: trim(form.severity)
+      };
+    case 'redhat':
+      return {
+        severity: trim(form.severity),
+        cvssScore: numberOrUndefined(form.cvssScore),
+        cvss3Score: numberOrUndefined(form.cvss3Score)
+      };
+  }
+}
+
 export function SourcesPage({
   focusSource = 'all',
   title = 'Source Ingestion',
@@ -94,14 +246,28 @@ export function SourcesPage({
   const [busy, setBusy] = React.useState<string | null>(null);
   const [loadingRuns, setLoadingRuns] = React.useState(false);
   const [confirmFullSync, setConfirmFullSync] = React.useState(false);
+  const [nvdFullSyncApiKey, setNvdFullSyncApiKey] = React.useState(readStoredNvdFullSyncApiKey);
+  const [nvdFullSyncApiKeyRequired, setNvdFullSyncApiKeyRequired] = React.useState(false);
   const [vexRepairSummary, setVexRepairSummary] = React.useState<VexAssertionRepairSummary | null>(null);
   const [loadingVexRepairSummary, setLoadingVexRepairSummary] = React.useState(false);
+  const activeSourceFilterKey = sourceFilterSourceKey(focusSource);
+  const [sourceFilters, setSourceFilters] = React.useState<SourceFilterForm>(
+    activeSourceFilterKey == null ? {} : defaultSourceFilterForm(activeSourceFilterKey)
+  );
+  const [sourceFilterConfig, setSourceFilterConfig] = React.useState<VulnerabilitySourceFilterConfig | null>(null);
+  const [loadingSourceFilters, setLoadingSourceFilters] = React.useState(false);
+  const [savingSourceFilters, setSavingSourceFilters] = React.useState(false);
+  const [isDirty, setIsDirty] = React.useState(false);
+  const nvdFullSyncApiKeyInputRef = React.useRef<HTMLInputElement | null>(null);
   const showConnectorStatus = !showQueue && (focusSource === 'microsoft-csaf' || focusSource === 'redhat-csaf');
   const showVexRepairPanel = focusSource === 'processing';
   const shouldLoadVexRepairSummary = showVexRepairPanel;
   const showProcessingTriggers = focusSource === 'processing';
-  const shouldLoadRuns = showQueue || showConnectorStatus;
+  const showNvdStatus = focusSource === 'nvd' && !showQueue;
+  const shouldLoadRuns = showQueue || showConnectorStatus || showNvdStatus;
   const showNvdConnectorHero = showTriggers && focusSource === 'nvd' && !showQueue;
+  const showSourceFilters = showTriggers && !showQueue && activeSourceFilterKey != null;
+  const currentNvdFullSyncApiKey = nvdFullSyncApiKey.trim();
 
   const refreshRuns = React.useCallback(async () => {
     setLoadingRuns(true);
@@ -138,6 +304,31 @@ export function SourcesPage({
     }
   }, [shouldLoadVexRepairSummary]);
 
+  const refreshSourceFilters = React.useCallback(async () => {
+    if (activeSourceFilterKey == null) {
+      setSourceFilterConfig(null);
+      setSourceFilters({});
+      return;
+    }
+    setLoadingSourceFilters(true);
+    try {
+      const config = await api.getVulnerabilitySourceFilterConfig(activeSourceFilterKey);
+      setSourceFilterConfig(config);
+      setSourceFilters(sourceFilterFormFromConfig(activeSourceFilterKey, config));
+      setIsDirty(false);
+    } catch (e) {
+      if (isNotFoundError(e)) {
+        setSourceFilterConfig(null);
+        setSourceFilters(defaultSourceFilterForm(activeSourceFilterKey));
+        setIsDirty(false);
+        return;
+      }
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingSourceFilters(false);
+    }
+  }, [activeSourceFilterKey]);
+
   React.useEffect(() => {
     if (!shouldLoadRuns) {
       return;
@@ -148,6 +339,31 @@ export function SourcesPage({
   React.useEffect(() => {
     refreshVexRepairSummary();
   }, [refreshSignal, refreshVexRepairSummary]);
+
+  React.useEffect(() => {
+    if (!showSourceFilters) {
+      return;
+    }
+    void refreshSourceFilters();
+  }, [showSourceFilters, refreshSourceFilters, refreshSignal]);
+
+  React.useEffect(() => {
+    try {
+      if (!currentNvdFullSyncApiKey) {
+        window.localStorage.removeItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY);
+        return;
+      }
+      window.localStorage.setItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY, currentNvdFullSyncApiKey);
+    } catch {
+      // Browser-only persistence for the full-sync helper.
+    }
+  }, [currentNvdFullSyncApiKey]);
+
+  React.useEffect(() => {
+    if (currentNvdFullSyncApiKey && nvdFullSyncApiKeyRequired) {
+      setNvdFullSyncApiKeyRequired(false);
+    }
+  }, [currentNvdFullSyncApiKey, nvdFullSyncApiKeyRequired]);
 
   React.useEffect(() => {
     if (!shouldLoadRuns) {
@@ -189,6 +405,76 @@ export function SourcesPage({
     } finally {
       setBusy(null);
     }
+  };
+
+  const saveSourceFilters = React.useCallback(async (silent = false): Promise<boolean> => {
+    if (activeSourceFilterKey == null) {
+      return true;
+    }
+    setSavingSourceFilters(true);
+    try {
+      const saved = await api.saveVulnerabilitySourceFilterConfig(
+        activeSourceFilterKey,
+        normalizeSourceFilterForm(activeSourceFilterKey, sourceFilters)
+      );
+      setSourceFilterConfig(saved);
+      setSourceFilters(sourceFilterFormFromConfig(activeSourceFilterKey, saved));
+      setIsDirty(false);
+      if (!silent) {
+        setMessage(`${saved.sourceSystem.toUpperCase()} filters saved.`);
+      }
+      return true;
+    } catch (e) {
+      if (isNotFoundError(e)) {
+        if (!silent) {
+          setMessage('Source filters are not available until the backend is refreshed.');
+        }
+        return silent;
+      }
+      setMessage(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setSavingSourceFilters(false);
+    }
+  }, [activeSourceFilterKey, sourceFilters]);
+
+  const runSourceAction = React.useCallback(async (
+    label: string,
+    fn: () => Promise<{ runId?: string; status?: string; message?: string } | unknown>
+  ): Promise<void> => {
+    if (activeSourceFilterKey != null) {
+      const saved = await saveSourceFilters(true);
+      if (!saved) {
+        return;
+      }
+    }
+    await runAction(label, fn);
+  }, [activeSourceFilterKey, saveSourceFilters]);
+
+  const runNvdFullSync = (): void => {
+    if (!currentNvdFullSyncApiKey) {
+      setNvdFullSyncApiKeyRequired(true);
+      setMessage('Enter an NVD API key before starting the full corpus sync.');
+      window.requestAnimationFrame(() => {
+        nvdFullSyncApiKeyInputRef.current?.focus();
+      });
+      return;
+    }
+    void runSourceAction('NVD Full Sync', () => api.syncNvdFull({ apiKey: currentNvdFullSyncApiKey }));
+  };
+
+  const updateSourceFilterField = <K extends keyof SourceFilterForm>(key: K, value: SourceFilterForm[K]) => {
+    setIsDirty(true);
+    setSourceFilters((current) => {
+      const next = { ...current, [key]: value };
+      if (key === 'cvssV3Severity' && typeof value === 'string' && value.trim().length > 0) {
+        next.cvssV4Severity = '';
+      }
+      if (key === 'cvssV4Severity' && typeof value === 'string' && value.trim().length > 0) {
+        next.cvssV3Severity = '';
+      }
+      return next;
+    });
   };
 
   const visibleRuns = syncRuns.filter((run) => {
@@ -251,24 +537,12 @@ export function SourcesPage({
 
       {(showTriggers || showQueue) && (
       <div className="button-row section-actions">
-        {showTriggers && !showNvdConnectorHero && (focusSource === 'all' || focusSource === 'nvd') && (
-          <>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busy !== null}
-              onClick={() => runAction('NVD Full Sync', () => api.syncNvdFull())}
-            >
-              {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}
-            </button>
-          </>
-        )}
         {showTriggers && (focusSource === 'all' || focusSource === 'kev') && (
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy !== null}
-            onClick={() => runAction('KEV Sync', () => api.syncKev())}
+            disabled={busy !== null || savingSourceFilters}
+            onClick={() => runSourceAction('KEV Sync', () => api.syncKev())}
           >
             {busy === 'KEV Sync' ? 'Running...' : 'Run KEV Sync'}
           </button>
@@ -277,8 +551,8 @@ export function SourcesPage({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy !== null}
-            onClick={() => runAction('GHSA Sync', () => api.syncGhsa())}
+            disabled={busy !== null || savingSourceFilters}
+            onClick={() => runSourceAction('GHSA Sync', () => api.syncGhsa())}
           >
             {busy === 'GHSA Sync' ? 'Running...' : 'Run GHSA Sync'}
           </button>
@@ -297,8 +571,8 @@ export function SourcesPage({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy !== null}
-            onClick={() => runAction('Red Hat CSAF/VEX Sync', () => api.syncRedhatCsaf())}
+            disabled={busy !== null || savingSourceFilters}
+            onClick={() => runSourceAction('Red Hat CSAF/VEX Sync', () => api.syncRedhatCsaf())}
           >
             {busy === 'Red Hat CSAF/VEX Sync' ? 'Running...' : 'Run Red Hat CSAF/VEX Sync'}
           </button>
@@ -338,42 +612,236 @@ export function SourcesPage({
             </button>
           </>
         )}
-        {showQueue && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={loadingRuns || loadingVexRepairSummary}
-            onClick={async () => {
-              await refreshRuns();
-              await refreshVexRepairSummary();
-            }}
-          >
-            {loadingRuns || loadingVexRepairSummary ? 'Refreshing...' : 'Refresh'}
-          </button>
-        )}
       </div>
+      )}
+
+      {showNvdStatus && (
+        <div className="nvd-overview-card">
+          <div className="nvd-overview-meta">
+            <p className="source-focus-description">
+              Pulls CVE data from the National Vulnerability Database — CVSS scores, CPE mappings, and Known Exploited Vulnerability flags.
+              Powers core vulnerability correlation across all your assets.
+            </p>
+            <div className="source-focus-pill-row">
+              <span className="info-badge info-badge-blue">Scheduled daily at 01:00</span>
+              <span className="info-badge info-badge-neutral">Delta sync by default</span>
+            </div>
+          </div>
+          <div className="nvd-overview-status">
+            <span className="connector-status-label">Last Sync</span>
+            {orderedVisibleRuns[0] ? (
+              <>
+                <span className={`status-pill ${isRunning(orderedVisibleRuns[0].status) ? 'status-open' : 'status-resolved'}`}>
+                  {orderedVisibleRuns[0].status}
+                </span>
+                <div className="panel-caption">{new Date(orderedVisibleRuns[0].startedAt).toLocaleString()}</div>
+              </>
+            ) : (
+              <div className="panel-caption">{loadingRuns ? 'Loading...' : 'No sync run recorded yet'}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showSourceFilters && activeSourceFilterKey != null && (
+        <div className="section-block">
+          <div className="source-filter-card">
+            <div>
+              <h4 className="section-title">Sync Configuration</h4>
+              {sourceFilterConfig?.updatedAt && (
+                <div className="panel-caption" style={{ marginTop: 8 }}>
+                  Last saved {new Date(sourceFilterConfig.updatedAt).toLocaleString()}
+                </div>
+              )}
+            </div>
+
+            {loadingSourceFilters ? (
+              <div className="panel-caption">Loading saved filters...</div>
+            ) : (
+              <>
+                {activeSourceFilterKey === 'nvd' && (
+                  <div>
+                    <p className="field-hint" style={{ marginBottom: 12 }}>
+                      Select CVSS v3 <em>or</em> CVSS v4 severity — choosing one automatically clears the other.
+                    </p>
+                    <div className="source-filter-grid">
+                      <label className="source-filter-field">
+                        <span>CVSS v3 Severity</span>
+                        <select
+                          value={sourceFilters.cvssV3Severity ?? ''}
+                          onChange={(event) => updateSourceFilterField('cvssV3Severity', event.target.value)}
+                        >
+                          <option value="">Any</option>
+                          {SEVERITY_OPTIONS.map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="source-filter-field">
+                        <span>CVSS v4 Severity</span>
+                        <select
+                          value={sourceFilters.cvssV4Severity ?? ''}
+                          onChange={(event) => updateSourceFilterField('cvssV4Severity', event.target.value)}
+                        >
+                          <option value="">Any</option>
+                          {SEVERITY_OPTIONS.map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="source-filter-field">
+                        <span>Known Exploitation</span>
+                        <select
+                          value={sourceFilters.hasKev === true ? 'KEV_ONLY' : ''}
+                          onChange={(event) => updateSourceFilterField('hasKev', event.target.value === 'KEV_ONLY')}
+                        >
+                          <option value="">Any</option>
+                          <option value="KEV_ONLY">Known exploited only</option>
+                        </select>
+                        <span className="field-hint">Only returns CVEs already linked to CISA KEV.</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {activeSourceFilterKey === 'kev' && (
+                  <div className="source-filter-grid">
+                    <label className="source-filter-field">
+                      <span>Date Added From</span>
+                      <input
+                        type="date"
+                        value={sourceFilters.dateAddedFrom ?? ''}
+                        onChange={(event) => updateSourceFilterField('dateAddedFrom', event.target.value)}
+                      />
+                    </label>
+
+                    <label className="source-filter-field">
+                      <span>Date Added To</span>
+                      <input
+                        type="date"
+                        value={sourceFilters.dateAddedTo ?? ''}
+                        onChange={(event) => updateSourceFilterField('dateAddedTo', event.target.value)}
+                      />
+                    </label>
+
+                    <label className="source-filter-field">
+                      <span>Known Ransomware Campaign Use</span>
+                      <select
+                        value={sourceFilters.knownRansomwareCampaignUse === true ? 'KNOWN' : ''}
+                        onChange={(event) => updateSourceFilterField('knownRansomwareCampaignUse', event.target.value === 'KNOWN')}
+                      >
+                        <option value="">Any</option>
+                        <option value="KNOWN">Known ransomware campaign use</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                {activeSourceFilterKey === 'ghsa' && (
+                  <div className="source-filter-grid">
+                    <label className="source-filter-field">
+                      <span>Severity</span>
+                      <select
+                        value={sourceFilters.severity ?? ''}
+                        onChange={(event) => updateSourceFilterField('severity', event.target.value)}
+                      >
+                        <option value="">Any</option>
+                        {SEVERITY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                {activeSourceFilterKey === 'redhat' && (
+                  <div className="source-filter-grid">
+                    <label className="source-filter-field">
+                      <span>Severity</span>
+                      <select
+                        value={sourceFilters.severity ?? ''}
+                        onChange={(event) => updateSourceFilterField('severity', event.target.value)}
+                      >
+                        <option value="">Any</option>
+                        {SEVERITY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="source-filter-field">
+                      <span>CVSS Score ≥</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value={sourceFilters.cvssScore ?? ''}
+                        onChange={(event) => updateSourceFilterField(
+                          'cvssScore',
+                          event.target.value === '' ? undefined : Number(event.target.value)
+                        )}
+                        placeholder="7.0"
+                      />
+                    </label>
+
+                    <label className="source-filter-field">
+                      <span>CVSS v3 Score ≥</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value={sourceFilters.cvss3Score ?? ''}
+                        onChange={(event) => updateSourceFilterField(
+                          'cvss3Score',
+                          event.target.value === '' ? undefined : Number(event.target.value)
+                        )}
+                        placeholder="7.0"
+                      />
+                    </label>
+                  </div>
+                )}
+
+                <div className="source-filter-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={savingSourceFilters || busy !== null}
+                    onClick={() => {
+                      void saveSourceFilters();
+                    }}
+                  >
+                    {savingSourceFilters ? 'Saving...' : 'Save Filters'}
+                  </button>
+                  {isDirty && (
+                    <span className="filter-unsaved-indicator">Unsaved changes</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {showNvdConnectorHero && (
         <div className="source-focus-hero">
           <div className="source-focus-hero-copy">
             <span className="source-focus-kicker">Recommended</span>
-            <h4 className="source-focus-title">Routine CVE Delta Sync</h4>
-            <p className="source-focus-description">
-              Pull the latest NVD changes from the last 24 hours and refresh normalized vulnerability intelligence without
-              running the full upstream corpus again.
-            </p>
+            <h4 className="source-focus-title">Sync Latest CVE Changes</h4>
             <div className="source-focus-pill-row">
-              <span className="status-pill status-success">24h Delta</span>
-              <span className="status-pill status-warning">Lower DB Load</span>
+              <span className="info-badge info-badge-blue">24h Delta</span>
+              <span className="info-badge info-badge-amber">Lower DB Load</span>
             </div>
           </div>
           <div className="source-focus-hero-actions">
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy !== null}
-              onClick={() => runAction('NVD Sync', () => api.syncNvd())}
+              disabled={busy !== null || savingSourceFilters}
+              onClick={() => runSourceAction('NVD Sync', () => api.syncNvd())}
             >
               {busy === 'NVD Sync' ? 'Running...' : 'Run 24h Sync'}
             </button>
@@ -507,45 +975,78 @@ export function SourcesPage({
       )}
 
       {showTriggers && (focusSource === 'all' || focusSource === 'nvd') && (
-        <div className="section-block">
-          <div className="sync-danger-card">
-            <div className="sync-danger-copy">
-              <span className="sync-danger-kicker">Danger Zone</span>
-              <h4 className="sync-danger-title">Run NVD Full Corpus Sync</h4>
-              <div className="panel-caption">
-                Use this for first-time baseline setup or after prototype-reset recovery. It ingests the full upstream
-                vulnerability corpus and can noticeably increase DB load.
+        <>
+          <div className="section-block">
+            <div className="nvd-api-key-block">
+              <div className="nvd-api-key-label-row">
+                <span className="connector-status-label">NVD API Key</span>
+                {currentNvdFullSyncApiKey && (
+                  <span className="panel-caption">{maskSecret(currentNvdFullSyncApiKey)}</span>
+                )}
               </div>
-            </div>
-            <div className="sync-danger-controls">
-              <label className="bulk-checkbox sync-danger-checkbox">
-                <input
-                  type="checkbox"
-                  checked={confirmFullSync}
-                  onChange={(event) => setConfirmFullSync(event.target.checked)}
-                />
-                <span>I understand the runtime and database impact.</span>
-              </label>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={busy !== null || !confirmFullSync}
-                onClick={() => runAction('NVD Full Sync', () => api.syncNvdFull())}
-              >
-                {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}
-              </button>
+              <input
+                ref={nvdFullSyncApiKeyInputRef}
+                type="password"
+                value={nvdFullSyncApiKey}
+                onChange={(event) => setNvdFullSyncApiKey(event.target.value)}
+                placeholder="Paste NVD API key (saved locally in your browser)"
+                autoComplete="off"
+              />
+              {nvdFullSyncApiKeyRequired && (
+                <div className="sync-danger-error">An NVD API key is required for the full corpus sync.</div>
+              )}
             </div>
           </div>
-        </div>
+
+          <div className="section-block">
+            <div className="sync-danger-card">
+              <div className="sync-danger-copy">
+                <span className="sync-danger-kicker">Danger Zone</span>
+                <h4 className="sync-danger-title">Run NVD Full Corpus Sync</h4>
+              </div>
+              <div className="sync-danger-actions">
+                <label className="bulk-checkbox sync-danger-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={confirmFullSync}
+                    onChange={(event) => setConfirmFullSync(event.target.checked)}
+                  />
+                  <span className="sync-danger-checkbox-copy">I understand the runtime and database impact.</span>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busy !== null || savingSourceFilters || !confirmFullSync}
+                  onClick={runNvdFullSync}
+                >
+                  {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {message && <div className="notice">{message}</div>}
 
       {showQueue && (
         <>
-          <h4 className="section-title section-divider">
-            {focusSource === 'processing' ? 'Recent Processing Jobs' : 'Recent Sync Runs'}
-          </h4>
+          <div className="section-title-row section-divider">
+            <h4 className="section-title" style={{ margin: 0 }}>
+              {focusSource === 'processing' ? 'Recent Processing Jobs' : 'Recent Sync Runs'}
+            </h4>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loadingRuns || loadingVexRepairSummary}
+              onClick={async () => {
+                await refreshRuns();
+                await refreshVexRepairSummary();
+              }}
+            >
+              {loadingRuns || loadingVexRepairSummary ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
           {focusSource === 'github' && (
             <div className="panel-caption" style={{ marginBottom: 12 }}>
               GitHub ingestion runs use <span className="mono">Fetched</span> for discovered images or repositories,
@@ -562,7 +1063,7 @@ export function SourcesPage({
             <div className="empty-state">
               <p>{focusSource === 'processing'
                 ? 'No processing jobs have been recorded yet.'
-                : 'No sync runs yet for this source. Trigger sync to populate this activity feed.'}</p>
+                : 'No sync runs yet. Run a sync to see results here.'}</p>
             </div>
           ) : (
             <div className="table-scroll">
@@ -570,17 +1071,13 @@ export function SourcesPage({
                 <thead>
                 <tr>
                   <th>Type</th>
-                  <th>Class</th>
+                  <th>Trigger</th>
                   <th>Status</th>
-                  <th>Queue</th>
-                  <th>Fetched</th>
-                  <th>Inserted</th>
-                  <th>Updated</th>
-                  <th>Failed</th>
+                  <th>Queue Pos</th>
+                  <th>Records (F / I / U / E)</th>
                   <th>Started</th>
                   <th>Completed</th>
                   <th>Duration</th>
-                  <th>Error</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -592,16 +1089,15 @@ export function SourcesPage({
                       <span className={`status-pill ${isRunning(run.status) ? 'status-open' : 'status-resolved'}`}>
                         {run.status}
                       </span>
+                      {run.errorMessage && (
+                        <div className="panel-caption" style={{ marginTop: 4, color: 'var(--critical)' }}>{run.errorMessage}</div>
+                      )}
                     </td>
                     <td>{queuePositionLabel(run)}</td>
-                    <td>{run.recordsFetched}</td>
-                    <td>{run.recordsInserted}</td>
-                    <td>{run.recordsUpdated}</td>
-                    <td>{run.recordsFailed ?? 0}</td>
+                    <td className="mono">{run.recordsFetched} / {run.recordsInserted} / {run.recordsUpdated} / {run.recordsFailed ?? 0}</td>
                     <td>{new Date(run.startedAt).toLocaleString()}</td>
                     <td>{run.completedAt ? new Date(run.completedAt).toLocaleString() : 'In progress'}</td>
                     <td>{humanDuration(run.startedAt, run.completedAt)}</td>
-                    <td className="panel-caption">{run.errorMessage || '-'}</td>
                   </tr>
                 ))}
                 </tbody>

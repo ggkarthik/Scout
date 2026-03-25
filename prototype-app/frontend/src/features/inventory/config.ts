@@ -97,6 +97,13 @@ export const VULNERABILITY_INTEL_FILTER_FIELDS: FilterBuilderField[] = [
     typeLabel: 'Boolean property'
   },
   {
+    key: 'affectedPackage',
+    label: 'Affected Package',
+    categoryKey: 'vulnerability',
+    description: 'Filter normalized vulnerability records by affected package name, normalized target key, or CPE.',
+    typeLabel: 'String property'
+  },
+  {
     key: 'source',
     label: 'Source',
     categoryKey: 'source',

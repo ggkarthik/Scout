@@ -1,6 +1,6 @@
 # VulnWatch Prototype
 
-Last updated: 2026-03-19
+Last updated: 2026-03-26
 
 VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection.
 
