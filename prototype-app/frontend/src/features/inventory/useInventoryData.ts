@@ -25,6 +25,7 @@ type UseInventoryDataArgs = {
   debouncedComponentQuery: string;
   vulnerabilityIntelPage: number;
   debouncedVulnerabilityIntelQuery: string;
+  debouncedVulnerabilityIntelAffectedPackageQuery: string;
   vulnerabilityIntelSeverities: string[];
   vulnerabilityIntelSources: string[];
   vulnerabilityIntelStatuses: string[];
@@ -70,6 +71,7 @@ export function useInventoryData({
   debouncedComponentQuery,
   vulnerabilityIntelPage,
   debouncedVulnerabilityIntelQuery,
+  debouncedVulnerabilityIntelAffectedPackageQuery,
   vulnerabilityIntelSeverities,
   vulnerabilityIntelSources,
   vulnerabilityIntelStatuses,
@@ -105,6 +107,7 @@ export function useInventoryData({
           page: vulnerabilityIntelPage,
           size: 25,
           query: debouncedVulnerabilityIntelQuery.trim() || undefined,
+          affectedPackage: debouncedVulnerabilityIntelAffectedPackageQuery.trim() || undefined,
           severity: vulnerabilityIntelSeverities.length > 0 ? vulnerabilityIntelSeverities : undefined,
           source: vulnerabilityIntelSources.length > 0 ? expandVulnerabilitySourceFilters(vulnerabilityIntelSources) : undefined,
           vulnStatus: vulnerabilityIntelStatuses.length > 0 ? vulnerabilityIntelStatuses : undefined,
@@ -258,6 +261,7 @@ export function useInventoryData({
     componentStatuses,
     debouncedComponentQuery,
     debouncedVulnerabilityIntelQuery,
+    debouncedVulnerabilityIntelAffectedPackageQuery,
     expandVulnerabilitySourceFilters,
     normalizeVulnerabilitySource,
     scopedAssetType,

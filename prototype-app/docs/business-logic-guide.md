@@ -897,7 +897,7 @@ The system can pull host software inventory directly from a ServiceNow instance 
 ## 16. Dashboard Metrics and What They Measure
 
 ### Summary
-The application surfaces two dashboards — the main security dashboard and an operational dashboard for team leads. This section describes exactly what each metric means, how it is calculated, and what business question it answers.
+The application surfaces two dashboards — a risk-focused main security dashboard and an operational dashboard for team leads. Overview is intentionally limited to risk metrics and risk-oriented drill-downs. Operational metrics such as noise reduction, CPE coverage, correlation efficiency, freshness, and CSAF/VEX health belong under Operations, not Overview. This section describes exactly what each metric means, how it is calculated, and what business question it answers.
 
 ### Step-by-Step Logic
 
@@ -922,7 +922,7 @@ The application surfaces two dashboards — the main security dashboard and an o
 11. **Top assets at risk:** Which assets have the highest total combined risk score.
 12. **Top vulnerability product identities:** Which CPE vendor names appear most in findings.
 
-#### D. Noise Reduction Analysis
+#### D. Operational Noise Reduction Analysis
 
 13. **The system tracks how many potential exposures it filtered out** — i.e., matches that were found but correctly determined to be non-issues:
     - **Never-opened not-applicable:** Vulnerabilities that matched a component but were immediately ruled out (VEX, version mismatch) before ever becoming a finding.
@@ -937,7 +937,7 @@ The application surfaces two dashboards — the main security dashboard and an o
 
 15. **Filtered percentage:** `(filtered matches) ÷ (open findings + filtered matches) × 100`. This is the proportion of correlations that were correctly filtered out. A high percentage indicates the system is working well to reduce noise.
 
-#### E. CPE Coverage and Match Quality
+#### E. Operational CPE Coverage and Match Quality
 
 16. **CPE-eligible active components:** Components that have at least one CPE identifier and can be matched by the highest-quality method.
 17. **CPE-ineligible active components:** Components with no CPE identifier — can only be matched by lower-confidence PURL/Coordinate methods.
@@ -948,7 +948,7 @@ The application surfaces two dashboards — the main security dashboard and an o
     - Average CPE confidence score.
 20. **New findings in last 24 hours:** Split into CPE-matched and non-CPE-matched, to track recent ingestion activity.
 
-#### F. VEX / CSAF Health
+#### F. Operational VEX / CSAF Health
 
 21. **CSAF sync statistics (last 30 days):** How many sync runs completed successfully vs. had errors. Success rate percentage.
 22. **Findings suppressed by VEX:** How many findings were filtered out because a vendor said NOT\_AFFECTED or FIXED.
@@ -978,6 +978,7 @@ The application surfaces two dashboards — the main security dashboard and an o
 
 29. **Ingestion health:** Sync run history, success/failure counts for each feed type.
 30. **Queue depth:** Pipeline currently shows queued/running sync jobs, not durable delta-queue depth.
+31. **Overview boundary:** Operational diagnostics stay in Operations; the main Overview page is reserved for risk metrics and risk-oriented summaries.
 31. **Platform Health now includes projection telemetry:** noise-projection readiness, age, refresh failures, and projection refresh p95 help operators tell whether executive dashboard reads are fresh.
 32. **GitHub source status:** Last run time, status, and error messages for each configured GitHub SBOM source.
 

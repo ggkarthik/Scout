@@ -32,6 +32,9 @@ import {
   SyncRun,
   SyncTriggerResponse,
   VexAssertionRepairSummary,
+  VulnerabilitySourceFilterConfig,
+  VulnerabilitySourceFilterConfigRequest,
+  VulnerabilitySourceSystem,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelDashboardSummary,
@@ -280,6 +283,7 @@ export const api = {
       page?: number;
       size?: number;
       query?: string;
+      affectedPackage?: string;
       minCvssExclusive?: number;
       severity?: string[];
       source?: string[];
@@ -291,6 +295,9 @@ export const api = {
     if (params?.page != null) searchParams.set('page', String(params.page));
     if (params?.size != null) searchParams.set('size', String(params.size));
     if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
+    if (params?.affectedPackage && params.affectedPackage.trim().length > 0) {
+      searchParams.set('affectedPackage', params.affectedPackage.trim());
+    }
     if (params?.minCvssExclusive != null) searchParams.set('minCvssExclusive', String(params.minCvssExclusive));
     params?.severity?.forEach((value) => searchParams.append('severity', value));
     params?.source?.forEach((value) => searchParams.append('source', value));
@@ -317,6 +324,15 @@ export const api = {
   }),
   getServiceNowCmdbConfig: () => request<ServiceNowCmdbConfig>('/connectors/servicenow-cmdb'),
   saveServiceNowCmdbConfig: (payload: ServiceNowCmdbConfigRequest) => request<ServiceNowCmdbConfig>('/connectors/servicenow-cmdb', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  getVulnerabilitySourceFilterConfig: (sourceSystem: VulnerabilitySourceSystem) =>
+    request<VulnerabilitySourceFilterConfig>(`/connectors/vulnerability-sources/${encodeURIComponent(sourceSystem)}`),
+  saveVulnerabilitySourceFilterConfig: (
+    sourceSystem: VulnerabilitySourceSystem,
+    payload: VulnerabilitySourceFilterConfigRequest
+  ) => request<VulnerabilitySourceFilterConfig>(`/connectors/vulnerability-sources/${encodeURIComponent(sourceSystem)}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
   }),
@@ -372,7 +388,12 @@ export const api = {
     method: 'POST'
   }),
   syncNvd: (lookbackHours = 24) => request<SyncTriggerResponse>(`/ingestion/nvd-sync?lookbackHours=${lookbackHours}`, { method: 'POST' }),
-  syncNvdFull: () => request<SyncTriggerResponse>('/ingestion/nvd-full-sync', { method: 'POST' }),
+  syncNvdFull: (payload?: { apiKey?: string }) => request<SyncTriggerResponse>('/ingestion/nvd-full-sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      apiKey: payload?.apiKey?.trim() || undefined
+    })
+  }),
   syncKev: () => request<SyncTriggerResponse>('/ingestion/kev-sync', { method: 'POST' }),
   syncGhsa: () => request<SyncTriggerResponse>('/ingestion/ghsa-sync', { method: 'POST' }),
   syncMicrosoftCsaf: () => request<SyncTriggerResponse>('/ingestion/csaf/microsoft-sync', { method: 'POST' }),

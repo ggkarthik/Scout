@@ -22,7 +22,7 @@ export type InventoryViewKey =
 
 export type InventoryScopedAssetType = 'ALL' | 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
 export type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'reviewCategory' | 'query';
-export type VulnerabilityIntelFilterKey = 'severity' | 'source' | 'vulnStatus' | 'inKev' | 'query';
+export type VulnerabilityIntelFilterKey = 'severity' | 'source' | 'vulnStatus' | 'inKev' | 'affectedPackage' | 'query';
 export type HostReviewCategory =
   | 'NEEDS_REVIEW'
   | 'MISSING_VERSION'

@@ -72,8 +72,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
   const avgConfidence = data.averageOpenConfidenceScore;
   const highConfidenceExposures = data.highConfidenceOpenFindings;
   const securityScore = Math.round(Math.max(0, 100 - (avgRisk / 10) * 100));
-  const analytics = data.csafVexAnalytics;
-  const correlation = data.correlationEfficiency;
   const topHighRiskMap = cveInventoryMap?.topHighRisk ?? [];
   const latestMap = cveInventoryMap?.latest ?? [];
 
@@ -134,45 +132,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
           </div>
         </section>
       </div>
-
-      <section className="panel csaf-vex-analytics-panel">
-        <div className="panel-header">
-          <h3>Correlation Efficiency</h3>
-        </div>
-
-        <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CPE Coverage (Active Components)</div>
-            <div className="noise-summary-value">{correlation.cpeCoveragePercent.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CPE Eligible Components</div>
-            <div className="noise-summary-value">{correlation.cpeEligibleActiveComponents.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Open Findings via CPE</div>
-            <div className="noise-summary-value">{correlation.openFindingsMatchedByCpe.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Direct vs Fallback</div>
-            <div className="noise-summary-value">
-              {correlation.openFindingsCpeDirect.toLocaleString()} / {correlation.openFindingsCpeFallback.toLocaleString()}
-            </div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Direct Share</div>
-            <div className="noise-summary-value">{correlation.cpeDirectSharePercent.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CPE Created (24h)</div>
-            <div className="noise-summary-value">{correlation.cpeFindingsCreatedLast24Hours.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Other Methods Created (24h)</div>
-            <div className="noise-summary-value">{correlation.nonCpeFindingsCreatedLast24Hours.toLocaleString()}</div>
-          </div>
-        </div>
-      </section>
 
       <section className="panel">
         <div className="panel-header">
@@ -256,81 +215,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
         </div>)}
       </section>
 
-      <section className="panel csaf-vex-analytics-panel">
-        <div className="panel-header">
-          <h3>CSAF/VEX Quality Analytics</h3>
-        </div>
-
-        <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Active VEX Coverage</div>
-            <div className="noise-summary-value">{analytics.activeVexCoveragePercent.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">VEX Matched States</div>
-            <div className="noise-summary-value">{analytics.activeVexMatchedStateCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Awaiting Exact VEX</div>
-            <div className="noise-summary-value">{analytics.activeApplicableAwaitingVexCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Confirmed Impacted</div>
-            <div className="noise-summary-value">{analytics.activeVexConfirmedImpactedCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Confirmed Not Affected</div>
-            <div className="noise-summary-value">{analytics.activeVexConfirmedNotAffectedCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">No Patch</div>
-            <div className="noise-summary-value">{analytics.activeVexNoPatchCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Normalization Success</div>
-            <div className="noise-summary-value">{analytics.csafNormalizationSuccessRate.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Partial Failure</div>
-            <div className="noise-summary-value">{analytics.csafPartialFailureRate.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Suppressed by VEX</div>
-            <div className="noise-summary-value">{analytics.findingsSuppressedByVex.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Suppressed by Stale VEX</div>
-            <div className="noise-summary-value">{analytics.suppressedByStaleVex.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Under Investigation Aging</div>
-            <div className="noise-summary-value">{analytics.underInvestigationAging.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Runs (30d)</div>
-            <div className="noise-summary-value">{analytics.csafRunsLast30Days.toLocaleString()}</div>
-          </div>
-        </div>
-
-        <div className="noise-panel-grid">
-          <div className="noise-categories">
-            <div className="noise-subtitle">VEX Coverage by Provider</div>
-            {analytics.vexCoverageByProvider.length === 0 ? (
-              <div className="panel-caption">No provider-tagged VEX evidence in current exposure set.</div>
-            ) : (
-              <div className="noise-category-list">
-                {analytics.vexCoverageByProvider.map((entry) => (
-                  <div key={entry.key} className="noise-category-row">
-                    <div className="noise-category-key">{entry.key}</div>
-                    <div className="noise-category-count">{entry.count.toLocaleString()}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-        </div>
-      </section>
     </div>
   );
 }

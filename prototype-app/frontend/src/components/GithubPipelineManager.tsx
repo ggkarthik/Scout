@@ -81,10 +81,11 @@ export function GithubPipelineManager({
   const [sourceOwner, setSourceOwner] = React.useState('');
   const [sourceRepo, setSourceRepo] = React.useState('');
   const [sourcePath, setSourcePath] = React.useState<GithubSourcePath>('dependency-graph/sbom');
-  const [sourceAssetType, setSourceAssetType] = React.useState<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>('APPLICATION');
   const [sourceFrequency, setSourceFrequency] = React.useState<'ONCE' | 'INTERVAL'>('ONCE');
   const [sourceIntervalMinutes, setSourceIntervalMinutes] = React.useState('60');
   const [sourceEnabled, setSourceEnabled] = React.useState(true);
+  const sourceAssetType: 'APPLICATION' | 'CONTAINER_IMAGE' =
+    sourcePath === 'ghcr/attestations' ? 'CONTAINER_IMAGE' : 'APPLICATION';
 
   const loadGithubSources = React.useCallback(async () => {
     try {
@@ -102,12 +103,6 @@ export function GithubPipelineManager({
   React.useEffect(() => {
     void refreshGithubView();
   }, [refreshGithubView]);
-
-  React.useEffect(() => {
-    if (sourcePath === 'ghcr/attestations' && sourceAssetType !== 'CONTAINER_IMAGE') {
-      setSourceAssetType('CONTAINER_IMAGE');
-    }
-  }, [sourcePath, sourceAssetType]);
 
   React.useEffect(() => {
     if (!activeGithubRunId) {

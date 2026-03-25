@@ -38,6 +38,7 @@ class OperationsSectionErrorBoundary extends React.Component<
   }
 }
 import {
+  Dashboard,
   OperationalApiReadPath,
   OperationalCorrelationEffectiveness,
   OperationalEndpointMetric,
@@ -112,6 +113,7 @@ type PipelinePayload = {
   correlation: OperationalSectionResponse<OperationalCorrelationEffectiveness>;
   lifecycle: OperationalSectionResponse<OperationalNoiseLifecycle>;
   freshness: OperationalSectionResponse<OperationalFreshnessDrift>;
+  dashboard: Dashboard | null;
 };
 
 type PlatformHealthPayload = {
@@ -140,6 +142,16 @@ const METRIC_HELP: Record<string, string> = {
   'Name Coverage': 'Share of active components with normalized product naming.',
   'Version Coverage': 'Share of active components with usable version information.',
   'Identity Coverage': 'Share of active components linked to a software identity.',
+  'CPE Coverage (Active Components)': 'Share of active components that have at least one CPE identifier available for highest-confidence correlation.',
+  'CPE Eligible Components': 'Active components with at least one CPE identifier and therefore eligible for direct CPE-based matching.',
+  'CPE Ineligible Components': 'Active components with no CPE identifier and therefore limited to lower-confidence fallback matching methods.',
+  'Open Findings via CPE': 'Open findings currently backed by CPE-based correlation methods.',
+  'Direct vs Fallback': 'How many CPE-backed open findings used precise direct matching versus broader fallback matching.',
+  'Direct Share': 'Percent of CPE-backed open findings using direct CPE matching rather than fallback methods.',
+  'Fallback Share': 'Percent of CPE-backed open findings using fallback CPE matching methods.',
+  'Average Open CPE Confidence': 'Average confidence score for currently open findings that were matched through CPE-based correlation.',
+  'CPE Created (24h)': 'New findings created in the last 24 hours through CPE-based correlation.',
+  'Other Methods Created (24h)': 'New findings created in the last 24 hours through non-CPE correlation methods.',
   'High Confidence Affected': 'Share of open affected findings backed by high-confidence matching evidence.',
   'Unknown Decision Rate': 'Share of open findings still stuck in an unknown or under-investigation state.',
   'Filtered Not Applicable': 'Total exposures filtered out as not applicable before or after finding creation.',
@@ -399,6 +411,125 @@ function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrel
   );
 }
 
+function renderCorrelationEfficiency(payload: OperationalSectionResponse<OperationalCorrelationEffectiveness>, dashboard: Dashboard | null) {
+  const data = dashboard?.correlationEfficiency;
+  if (!data) {
+    return null;
+  }
+  return (
+    <div className="page-grid">
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Correlation Efficiency</h3>
+          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
+        </div>
+        <div className="noise-summary-grid">
+          <SummaryMetricCard label="Active Components" value={data.activeComponents.toLocaleString()} />
+          <SummaryMetricCard label="CPE Coverage (Active Components)" value={formatPercent(data.cpeCoveragePercent)} />
+          <SummaryMetricCard label="CPE Eligible Components" value={data.cpeEligibleActiveComponents.toLocaleString()} />
+          <SummaryMetricCard label="CPE Ineligible Components" value={data.cpeIneligibleActiveComponents.toLocaleString()} />
+          <SummaryMetricCard label="Open Findings via CPE" value={data.openFindingsMatchedByCpe.toLocaleString()} />
+          <SummaryMetricCard
+            label="Direct vs Fallback"
+            value={`${data.openFindingsCpeDirect.toLocaleString()} / ${data.openFindingsCpeFallback.toLocaleString()}`}
+          />
+          <SummaryMetricCard label="Direct Share" value={formatPercent(data.cpeDirectSharePercent)} />
+          <SummaryMetricCard label="Fallback Share" value={formatPercent(data.cpeFallbackSharePercent)} />
+          <SummaryMetricCard label="Average Open CPE Confidence" value={`${(data.averageOpenCpeConfidenceScore * 100).toFixed(1)}%`} />
+          <SummaryMetricCard label="CPE Created (24h)" value={data.cpeFindingsCreatedLast24Hours.toLocaleString()} />
+          <SummaryMetricCard label="Other Methods Created (24h)" value={data.nonCpeFindingsCreatedLast24Hours.toLocaleString()} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function renderCsafVexAnalytics(payload: OperationalSectionResponse<OperationalIngestionEfficiency>, dashboard: Dashboard | null) {
+  const data = dashboard?.csafVexAnalytics;
+  if (!data) {
+    return null;
+  }
+  return (
+    <div className="page-grid">
+      <section className="panel">
+        <div className="panel-header">
+          <h3>CSAF/VEX Quality Analytics</h3>
+          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
+        </div>
+
+        <div className="noise-summary-grid">
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Active VEX Coverage</div>
+            <div className="noise-summary-value">{data.activeVexCoveragePercent.toFixed(1)}%</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">VEX Matched States</div>
+            <div className="noise-summary-value">{data.activeVexMatchedStateCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Awaiting Exact VEX</div>
+            <div className="noise-summary-value">{data.activeApplicableAwaitingVexCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Confirmed Impacted</div>
+            <div className="noise-summary-value">{data.activeVexConfirmedImpactedCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Confirmed Not Affected</div>
+            <div className="noise-summary-value">{data.activeVexConfirmedNotAffectedCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">No Patch</div>
+            <div className="noise-summary-value">{data.activeVexNoPatchCount.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">CSAF Normalization Success</div>
+            <div className="noise-summary-value">{data.csafNormalizationSuccessRate.toFixed(1)}%</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">CSAF Partial Failure</div>
+            <div className="noise-summary-value">{data.csafPartialFailureRate.toFixed(1)}%</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Suppressed by VEX</div>
+            <div className="noise-summary-value">{data.findingsSuppressedByVex.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Suppressed by Stale VEX</div>
+            <div className="noise-summary-value">{data.suppressedByStaleVex.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">Under Investigation Aging</div>
+            <div className="noise-summary-value">{data.underInvestigationAging.toLocaleString()}</div>
+          </div>
+          <div className="noise-summary-item">
+            <div className="noise-summary-label">CSAF Runs (30d)</div>
+            <div className="noise-summary-value">{data.csafRunsLast30Days.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div className="noise-panel-grid">
+          <div className="noise-categories">
+            <div className="noise-subtitle">VEX Coverage by Provider</div>
+            {data.vexCoverageByProvider.length === 0 ? (
+              <div className="panel-caption">No provider-tagged VEX evidence in current exposure set.</div>
+            ) : (
+              <div className="noise-category-list">
+                {data.vexCoverageByProvider.map((entry) => (
+                  <div key={entry.key} className="noise-category-row">
+                    <div className="noise-category-key">{entry.key}</div>
+                    <div className="noise-category-count">{entry.count.toLocaleString()}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLifecycle>) {
   const data = payload.data;
   if (!data) {
@@ -585,8 +716,10 @@ function renderPipeline(payload: PipelinePayload) {
       ) : null}
 
       {renderIngestion(payload.ingestion)}
+      {renderCsafVexAnalytics(payload.ingestion, payload.dashboard)}
       {renderNormalization(payload.normalization)}
       {renderCorrelation(payload.correlation)}
+      {renderCorrelationEfficiency(payload.correlation, payload.dashboard)}
       {renderLifecycle(payload.lifecycle)}
       {renderFreshness(payload.freshness)}
     </div>
@@ -626,13 +759,14 @@ async function loadOperationsView(selectedView: OperationsViewKey): Promise<unkn
     case 'quality':
       return null;
     case 'pipeline': {
-      const [overview, ingestion, normalization, correlation, lifecycle, freshness] = await Promise.all([
+      const [overview, ingestion, normalization, correlation, lifecycle, freshness, dashboard] = await Promise.all([
         api.getOperationalOverview(),
         api.getOperationalIngestionEfficiency(),
         api.getOperationalNormalizationQuality(),
         api.getOperationalCorrelationEffectiveness(),
         api.getOperationalNoiseLifecycle(),
-        api.getOperationalFreshnessDrift()
+        api.getOperationalFreshnessDrift(),
+        api.getDashboard().catch(() => null)
       ]);
       return {
         overview,
@@ -640,7 +774,8 @@ async function loadOperationsView(selectedView: OperationsViewKey): Promise<unkn
         normalization,
         correlation,
         lifecycle,
-        freshness
+        freshness,
+        dashboard
       } satisfies PipelinePayload;
     }
     case 'platform-health': {

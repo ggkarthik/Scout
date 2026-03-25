@@ -1023,6 +1023,47 @@ export type ServiceNowCmdbConnectionTest = {
   testedAt: string;
 };
 
+export type VulnerabilitySourceSystem = 'nvd' | 'kev' | 'ghsa' | 'redhat';
+
+export type VulnerabilitySourceFilterConfig = {
+  sourceSystem: VulnerabilitySourceSystem;
+  configured: boolean;
+  cpeName?: string;
+  isVulnerable: boolean;
+  hasKev: boolean;
+  cvssV3Severity?: string;
+  cvssV4Severity?: string;
+  vendorProject?: string;
+  product?: string;
+  dateAddedFrom?: string;
+  dateAddedTo?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  knownRansomwareCampaignUse: boolean;
+  severity?: string;
+  cvssScore?: number;
+  cvss3Score?: number;
+  updatedAt?: string;
+};
+
+export type VulnerabilitySourceFilterConfigRequest = {
+  cpeName?: string;
+  isVulnerable?: boolean;
+  hasKev?: boolean;
+  cvssV3Severity?: string;
+  cvssV4Severity?: string;
+  vendorProject?: string;
+  product?: string;
+  dateAddedFrom?: string;
+  dateAddedTo?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  knownRansomwareCampaignUse?: boolean;
+  severity?: string;
+  cvssScore?: number;
+  cvss3Score?: number;
+};
+
 export type GithubSbomSource = {
   id: string;
   name: string;
