@@ -1,6 +1,6 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 export type IngestionMode = 'endpoint' | 'github';
 type Props = {
@@ -12,18 +12,8 @@ type Props = {
 };
 const MODE_QUERY_KEY = 'ingestMode';
 
-
 function isMode(value: string | null): value is IngestionMode {
   return value === 'endpoint' || value === 'github';
-}
-
-function readModeFromQuery(): IngestionMode {
-  const value = readQueryParam(MODE_QUERY_KEY);
-  return isMode(value) ? value : 'endpoint';
-}
-
-function writeModeToQuery(mode: IngestionMode): void {
-  replaceBrowserQueryParams({ [MODE_QUERY_KEY]: mode === 'endpoint' ? null : mode });
 }
 
 export function IngestionPage({
@@ -33,7 +23,12 @@ export function IngestionPage({
   title = 'SBOM Ingestion',
   caption = 'Fetch SBOM JSON from authenticated API or GitHub sources with evidence retention'
 }: Props) {
-  const [mode, setMode] = React.useState<IngestionMode>(() => initialMode ?? readModeFromQuery());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryMode = React.useMemo<IngestionMode>(() => {
+    const value = searchParams.get(MODE_QUERY_KEY);
+    return isMode(value) ? value : 'endpoint';
+  }, [searchParams]);
+  const mode = initialMode ?? queryMode;
   const [assetType, setAssetType] = React.useState<'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'>('APPLICATION');
   const [assetName, setAssetName] = React.useState('');
   const [assetIdentifier, setAssetIdentifier] = React.useState('');
@@ -57,15 +52,20 @@ export function IngestionPage({
     setError('');
   }, []);
 
-  React.useEffect(() => {
-    if (initialMode && mode !== initialMode) {
-      setMode(initialMode);
+  const setMode = React.useCallback((nextMode: IngestionMode) => {
+    if (initialMode || hideModeToggle) {
       return;
     }
-    if (!hideModeToggle) {
-      writeModeToQuery(mode);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextMode === 'endpoint') {
+      nextSearchParams.delete(MODE_QUERY_KEY);
+    } else {
+      nextSearchParams.set(MODE_QUERY_KEY, nextMode);
     }
-  }, [mode, initialMode, hideModeToggle]);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [hideModeToggle, initialMode, searchParams, setSearchParams]);
 
   const validateCommon = (currentMode: IngestionMode): string | null => {
     if (currentMode === 'github') {

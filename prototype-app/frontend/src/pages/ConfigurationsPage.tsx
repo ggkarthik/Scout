@@ -1,6 +1,8 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { RiskPolicy } from '../types';
+import type { RiskPolicy } from '../features/configurations/types';
+import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 
 type ConfigurationSectionKey =
   | 'risk-score'
@@ -74,6 +76,8 @@ const SECTION_POLICY_FIELDS: Partial<Record<ConfigurationSectionKey, ReadonlyArr
 };
 
 export function ConfigurationsPage() {
+  const queryClient = useQueryClient();
+  const riskPolicyQuery = useRiskPolicyQuery();
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
@@ -89,18 +93,11 @@ export function ConfigurationsPage() {
     [policy]
   );
 
-  const loadPolicy = React.useCallback(async () => {
-    try {
-      const value = await api.getRiskPolicy();
-      setPolicy(value);
-    } catch (e) {
-      setPolicyMessage(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
   React.useEffect(() => {
-    loadPolicy();
-  }, [loadPolicy]);
+    if (riskPolicyQuery.data) {
+      setPolicy(riskPolicyQuery.data);
+    }
+  }, [riskPolicyQuery.data]);
 
   const updatePolicy = (key: keyof RiskPolicy, value: number | boolean | string): void => {
     if (!policy) return;
@@ -117,6 +114,7 @@ export function ConfigurationsPage() {
     setPolicyMessage('');
     try {
       const updated = await api.updateRiskPolicy(policy);
+      queryClient.setQueryData(['risk-policy'], updated);
       setPolicy(updated);
       setPolicyMessage('Configuration saved');
     } catch (e) {
@@ -139,7 +137,7 @@ export function ConfigurationsPage() {
       const result = await api.cleanAllPrototypeData();
       const total = Object.values(result.deletedRows ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
       setResetMessage(`Prototype data reset complete. Deleted ${total} rows.`);
-      await loadPolicy();
+      await riskPolicyQuery.refetch();
     } catch (e) {
       setResetMessage(e instanceof Error ? e.message : String(e));
     } finally {
@@ -148,6 +146,9 @@ export function ConfigurationsPage() {
   };
 
   if (!policy) {
+    if (riskPolicyQuery.error instanceof Error) {
+      return <div className="panel">Failed to load configuration: {riskPolicyQuery.error.message}</div>;
+    }
     return <div className="panel">Loading configuration...</div>;
   }
 

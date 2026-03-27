@@ -1,55 +1,69 @@
-import {
-  ApplicableSoftwarePage,
-  Asset,
-  CmdbAssetRecord,
-  CmdbAssetSyncResponse,
-  DashboardCveInventoryMap,
-  Dashboard,
-  ImpactedCvePage,
+import type {
+  PrototypeDataResetResponse,
+  RiskPolicy
+} from '../features/configurations/types';
+import type {
   FindingFilterValues,
-  FindingPage,
-  GithubSbomSource,
-  HostAssetDetail,
-  InventoryComponentRecord,
-  InventoryComponentFilterValues,
-  InventoryComponentPage,
+  FindingPage
+} from '../features/findings/types';
+import type {
+  ApplicableSoftwarePage,
+  Dashboard,
+  DashboardCveInventoryMap,
+  ImpactedCvePage
+} from '../features/dashboard/types';
+import type {
+  OperationalDashboard,
   OperationalQualityFilterValues,
   OperationalQualityIssueDetail,
   OperationalQualityIssuePage,
   OperationalQualitySummary,
-  SoftwareIdentityDetail,
-  SoftwareIdentityPage,
-  IngestionResult,
-  OperationalDashboard,
   OperationalSectionResponse,
-  PrototypeDataResetResponse,
-  RiskPolicy,
+  SloStatus
+} from '../features/operations/types';
+import type {
+  CmdbAssetRecord,
+  CmdbAssetSyncResponse,
+  GithubSbomSource,
   IngestionEvidence,
+  IngestionResult,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
   ServiceNowCmdbConnectionTest,
-  SloStatus,
   SyncRun,
   SyncTriggerResponse,
   VexAssertionRepairSummary,
   VulnerabilitySourceFilterConfig,
   VulnerabilitySourceFilterConfigRequest,
-  VulnerabilitySourceSystem,
+  VulnerabilitySourceSystem
+} from '../features/connect/types';
+import type {
+  Asset,
+  HostAssetDetail,
+  InventoryComponentFilterValues,
+  InventoryComponentPage
+} from '../features/inventory/api-types';
+import type {
+  VulnerabilityIntelDashboardSummary,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
-  VulnerabilityIntelDashboardSummary,
-  VulnerabilityIntelPage,
-  EolSummary,
+  VulnerabilityIntelPage
+} from '../features/vulnerability-intel/types';
+import type {
   EolComponentPage,
   EolProductCatalog,
-  EolRelease
-} from '../types';
+  EolRelease,
+  EolSummary,
+  UnresolvedEolMapping
+} from '../features/eol/types';
+import type {
+  SoftwareIdentityDetail,
+  SoftwareIdentityPage
+} from '../features/software-identities/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
 const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
-const TENANT_ID = import.meta.env.VITE_TENANT_ID ?? '1';
-const USER_ID = import.meta.env.VITE_USER_ID ?? 'local-analyst';
 
 type ApiErrorPayload = {
   code?: string;
@@ -90,8 +104,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers ?? {});
   headers.set('Content-Type', 'application/json');
   headers.set('X-API-Key', API_KEY);
-  headers.set('X-Tenant-ID', TENANT_ID);
-  headers.set('X-User-ID', USER_ID);
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
   }
@@ -421,7 +433,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ normalizedKey, eolSlug })
   }),
-  listEolUnresolvedMappings: () => request<Array<{ vendor: string; product: string; displayName: string; normalizedKey: string }>>('/eol/mappings/unresolved'),
+  listEolUnresolvedMappings: () => request<UnresolvedEolMapping[]>('/eol/mappings/unresolved'),
   triggerEolCatalogRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/catalog', { method: 'POST' }),
   triggerEolReleaseRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/releases', { method: 'POST' }),
   triggerEolMappingResolve: () => request<SyncTriggerResponse>('/eol/admin/refresh/mappings', { method: 'POST' }),

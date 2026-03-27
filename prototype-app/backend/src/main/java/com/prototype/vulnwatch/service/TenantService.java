@@ -1,9 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
-import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -15,11 +13,9 @@ public class TenantService {
     public static final String DEFAULT_TENANT_NAME = "Default Workspace";
 
     private final TenantRepository tenantRepository;
-    private final AssetRepository assetRepository;
 
-    public TenantService(TenantRepository tenantRepository, AssetRepository assetRepository) {
+    public TenantService(TenantRepository tenantRepository) {
         this.tenantRepository = tenantRepository;
-        this.assetRepository = assetRepository;
     }
 
     @Transactional
@@ -38,12 +34,19 @@ public class TenantService {
                 .orElseGet(this::getDefaultTenant);
     }
 
+    @Transactional(readOnly = true)
+    public Tenant resolveTenantUuid(UUID tenantId) {
+        if (tenantId == null) {
+            return getDefaultTenant();
+        }
+        return tenantRepository.findById(tenantId)
+                .orElseGet(this::getDefaultTenant);
+    }
+
     private Tenant resolveExistingTenantOrCreateDefault() {
         List<Tenant> existingTenants = tenantRepository.findAllByOrderByCreatedAtAsc();
         if (!existingTenants.isEmpty()) {
-            return existingTenants.stream()
-                    .max(Comparator.comparingLong(assetRepository::countByTenant))
-                    .orElse(existingTenants.get(0));
+            return existingTenants.get(0);
         }
 
         Tenant tenant = new Tenant();

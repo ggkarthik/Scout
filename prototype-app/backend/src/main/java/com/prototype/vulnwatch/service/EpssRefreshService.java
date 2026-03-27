@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import java.time.Instant;
@@ -26,7 +30,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 /**
@@ -59,18 +62,21 @@ public class EpssRefreshService {
 
     private final VulnerabilityRepository vulnerabilityRepository;
     private final FindingDeltaQueueService findingDeltaQueueService;
-    private final RestTemplate restTemplate;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
 
     public EpssRefreshService(
             VulnerabilityRepository vulnerabilityRepository,
             FindingDeltaQueueService findingDeltaQueueService,
-            RestTemplate restTemplate,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.findingDeltaQueueService = findingDeltaQueueService;
-        this.restTemplate = restTemplate;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -132,8 +138,21 @@ public class EpssRefreshService {
             HttpHeaders headers = new HttpHeaders();
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
             headers.set("User-Agent", "vulnwatch-backend/1.0");
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class,
+                    "EPSS batch API",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
+            );
             payload = response.getBody();
         } catch (Exception e) {
             LOG.warn("EPSS API request failed for batch of {} CVEs: {}", cveIds.size(), e.getMessage());
@@ -200,5 +219,9 @@ public class EpssRefreshService {
             LOG.warn("Failed to parse EPSS API response: {}", e.getMessage());
         }
         return result;
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("epss", 0L, null, null);
     }
 }

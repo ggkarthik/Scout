@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -24,28 +25,92 @@ public class InvestigationService {
 
     @Transactional(readOnly = true)
     public Investigation getInvestigation(Long tenantId, Long investigationId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return investigationRepository.findByIdAndTenantId(investigationId, tenant.getId())
-                .orElseThrow(() -> new IllegalArgumentException("Investigation not found: " + investigationId));
+        return getInvestigation(resolveTenant(tenantId), investigationId);
+    }
+
+    @Transactional(readOnly = true)
+    public Investigation getInvestigation(UUID tenantId, Long investigationId) {
+        return getInvestigation(resolveTenant(tenantId), investigationId);
     }
 
     @Transactional(readOnly = true)
     public List<Investigation> getInvestigationsByCve(Long tenantId, String cveId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return investigationRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        return getInvestigationsByCve(resolveTenant(tenantId), cveId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Investigation> getInvestigationsByCve(UUID tenantId, String cveId) {
+        return getInvestigationsByCve(resolveTenant(tenantId), cveId);
     }
 
     @Transactional(readOnly = true)
     public Page<Investigation> getInvestigations(Long tenantId, Pageable pageable) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return investigationRepository.findByTenantId(tenant.getId(), pageable);
+        return getInvestigations(resolveTenant(tenantId), pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Investigation> getInvestigations(UUID tenantId, Pageable pageable) {
+        return getInvestigations(resolveTenant(tenantId), pageable);
     }
 
     @Transactional
     public Investigation createInvestigation(Long tenantId, String cveId, Investigation.InvestigationPriority priority, String createdBy) {
+        return createInvestigation(resolveTenant(tenantId), cveId, priority, createdBy);
+    }
+
+    @Transactional
+    public Investigation createInvestigation(UUID tenantId, String cveId, Investigation.InvestigationPriority priority, String createdBy) {
+        return createInvestigation(resolveTenant(tenantId), cveId, priority, createdBy);
+    }
+
+    @Transactional
+    public Investigation updateInvestigation(Long tenantId, Long investigationId, InvestigationUpdateRequest request, String modifiedBy) {
+        Investigation investigation = getInvestigation(tenantId, investigationId);
+        return updateInvestigation(investigation, investigationId, request, modifiedBy);
+    }
+
+    @Transactional
+    public Investigation updateInvestigation(UUID tenantId, Long investigationId, InvestigationUpdateRequest request, String modifiedBy) {
+        Investigation investigation = getInvestigation(tenantId, investigationId);
+        return updateInvestigation(investigation, investigationId, request, modifiedBy);
+    }
+
+    @Transactional
+    public Investigation submitInvestigation(Long tenantId, String cveId, SubmitInvestigationRequest request, String userId) {
+        return submitInvestigation(resolveTenant(tenantId), cveId, request, userId);
+    }
+
+    @Transactional
+    public Investigation submitInvestigation(UUID tenantId, String cveId, SubmitInvestigationRequest request, String userId) {
+        return submitInvestigation(resolveTenant(tenantId), cveId, request, userId);
+    }
+
+    @Transactional
+    public void deleteInvestigation(Long tenantId, Long investigationId) {
+        deleteInvestigation(resolveTenant(tenantId), investigationId);
+    }
+
+    @Transactional
+    public void deleteInvestigation(UUID tenantId, Long investigationId) {
+        deleteInvestigation(resolveTenant(tenantId), investigationId);
+    }
+
+    private Investigation getInvestigation(Tenant tenant, Long investigationId) {
+        return investigationRepository.findByIdAndTenantId(investigationId, tenant.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Investigation not found: " + investigationId));
+    }
+
+    private List<Investigation> getInvestigationsByCve(Tenant tenant, String cveId) {
+        return investigationRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+    }
+
+    private Page<Investigation> getInvestigations(Tenant tenant, Pageable pageable) {
+        return investigationRepository.findByTenantId(tenant.getId(), pageable);
+    }
+
+    private Investigation createInvestigation(Tenant tenant, String cveId, Investigation.InvestigationPriority priority, String createdBy) {
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new IllegalArgumentException("Vulnerability not found: " + cveId));
-        Tenant tenant = tenantService.resolveTenant(tenantId);
 
         Investigation investigation = new Investigation();
         investigation.setVulnerability(vulnerability);
@@ -67,10 +132,7 @@ public class InvestigationService {
         return saved;
     }
 
-    @Transactional
-    public Investigation updateInvestigation(Long tenantId, Long investigationId, InvestigationUpdateRequest request, String modifiedBy) {
-        Investigation investigation = getInvestigation(tenantId, investigationId);
-
+    private Investigation updateInvestigation(Investigation investigation, Long investigationId, InvestigationUpdateRequest request, String modifiedBy) {
         boolean statusChanged = false;
         boolean priorityChanged = false;
         boolean assigned = false;
@@ -151,10 +213,7 @@ public class InvestigationService {
         return saved;
     }
 
-    @Transactional
-    public Investigation submitInvestigation(Long tenantId, String cveId, SubmitInvestigationRequest request, String userId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-
+    private Investigation submitInvestigation(Tenant tenant, String cveId, SubmitInvestigationRequest request, String userId) {
         // Find the most recent non-closed investigation, or create a new one
         List<Investigation> existing = investigationRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
         Investigation investigation = existing.stream()
@@ -188,11 +247,10 @@ public class InvestigationService {
         return investigationRepository.findByIdAndTenantId(saved.getId(), tenant.getId()).orElse(saved);
     }
 
-    @Transactional
-    public void deleteInvestigation(Long tenantId, Long investigationId) {
-        Investigation investigation = getInvestigation(tenantId, investigationId);
+    private void deleteInvestigation(Tenant tenant, Long investigationId) {
+        Investigation investigation = getInvestigation(tenant, investigationId);
         investigationRepository.delete(investigation);
-        log.info("Deleted investigation {} for tenant {}", investigationId, tenantId);
+        log.info("Deleted investigation {} for tenant {}", investigationId, tenant.getId());
     }
 
     private void logActivity(Investigation investigation, InvestigationActivity.ActivityType type,
@@ -202,6 +260,14 @@ public class InvestigationService {
         activity.setDescription(description);
         activity.setPerformedBy(performedBy);
         investigation.addActivity(activity);
+    }
+
+    private Tenant resolveTenant(Long tenantId) {
+        return tenantService.resolveTenant(tenantId);
+    }
+
+    private Tenant resolveTenant(UUID tenantId) {
+        return tenantService.resolveTenantUuid(tenantId);
     }
 
     // DTO for single-call submit (create-or-update)

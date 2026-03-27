@@ -17,7 +17,10 @@ import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +43,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "spring.mvc.throw-exception-if-no-handler-found=true",
         "spring.web.resources.add-mappings=false"
 })
-@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class})
+@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
 class ApiSecurityIntegrationTest {
 
     @Autowired
@@ -48,6 +51,9 @@ class ApiSecurityIntegrationTest {
 
     @MockBean
     private TenantService tenantService;
+
+    @MockBean
+    private WorkspaceService workspaceService;
 
     @MockBean
     private DashboardService dashboardService;
@@ -63,7 +69,11 @@ class ApiSecurityIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        when(tenantService.getDefaultTenant()).thenReturn(new Tenant());
+        Tenant defaultTenant = new Tenant();
+        defaultTenant.setId(1L);
+        defaultTenant.setName("Default Workspace");
+        when(tenantService.getDefaultTenant()).thenReturn(defaultTenant);
+        when(workspaceService.getWorkspace()).thenReturn(defaultTenant);
         when(dashboardService.get(any(Tenant.class))).thenReturn(null);
         when(operationalDashboardService.get()).thenReturn(null);
     }
@@ -107,12 +117,26 @@ class ApiSecurityIntegrationTest {
         mockMvc.perform(get("/api/auth/context")
                         .header("X-API-Key", "test-api-key"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.creator").value(false));
+                .andExpect(jsonPath("$.creator").value(false))
+                .andExpect(jsonPath("$.principal").value("local-analyst"))
+                .andExpect(jsonPath("$.userId").value("local-analyst"))
+                .andExpect(jsonPath("$.tenantId").value("00000000-0000-0000-0000-000000000001"))
+                .andExpect(jsonPath("$.tenantName").value("Default Workspace"));
 
         mockMvc.perform(get("/api/auth/context")
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.creator").value(true));
+                .andExpect(jsonPath("$.creator").value(true))
+                .andExpect(jsonPath("$.principal").value("local-analyst"))
+                .andExpect(jsonPath("$.userId").value("local-analyst"))
+                .andExpect(jsonPath("$.tenantId").value("00000000-0000-0000-0000-000000000001"))
+                .andExpect(jsonPath("$.tenantName").value("Default Workspace"));
+
+        mockMvc.perform(get("/api/me")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.creator").value(false))
+                .andExpect(jsonPath("$.userId").value("local-analyst"));
     }
 }

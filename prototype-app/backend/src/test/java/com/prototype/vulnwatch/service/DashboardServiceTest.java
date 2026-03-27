@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,7 +53,7 @@ class DashboardServiceTest {
     private FindingEventRepository findingEventRepository;
 
     @Mock
-    private FindingService findingService;
+    private FindingQueryService findingQueryService;
 
     @Mock
     private DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
@@ -69,7 +70,7 @@ class DashboardServiceTest {
                 componentVulnerabilityStateRepository,
                 findingRepository,
                 findingEventRepository,
-                findingService,
+                findingQueryService,
                 dashboardNoiseReductionProjectionService,
                 syncRunRepository,
                 new ObjectMapper()
@@ -117,6 +118,6 @@ class DashboardServiceTest {
                 "Auto-Resolved (No Longer Observed)".equals(metric.key()) && metric.count() == 5L));
 
         verify(dashboardNoiseReductionProjectionService).getTenantProjection(tenant);
-        verify(findingService, never()).projectNotApplicableByCorrelation(any(Tenant.class));
+        verifyNoInteractions(findingQueryService);
     }
 }

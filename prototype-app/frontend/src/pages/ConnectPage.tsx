@@ -1,11 +1,11 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { IngestionPage } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
-import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 type ConnectorId =
   | 'sbom-endpoint'
@@ -30,8 +30,6 @@ type ConnectorDefinition = {
 };
 
 const CONNECT_SOURCE_QUERY_KEY = 'connectSource';
-const CONNECT_VIEW_QUERY_KEY = 'connectView';
-
 const CONNECTORS: ConnectorDefinition[] = [
   {
     id: 'sbom-endpoint',
@@ -111,39 +109,16 @@ const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
   'servicenow-cmdb'
 ];
 
-function isConnectView(value: string | null): value is ConnectView {
-  return value === 'sources' || value === 'inventory-run-queue' || value === 'vuln-intel-queue' || value === 'processing-jobs';
-}
-
-function readInitialConnectView(): ConnectView {
-  const fromQuery = readQueryParam(CONNECT_VIEW_QUERY_KEY);
-  if (fromQuery === 'github-pipelines') return 'sources';
-  if (fromQuery === 'integration-queue') return 'vuln-intel-queue';
-  if (fromQuery === 'inventory-run-queue') return 'inventory-run-queue';
-  if (fromQuery === 'processing-jobs') return 'processing-jobs';
-  return isConnectView(fromQuery) ? fromQuery : 'sources';
-}
-
 function isConnectorId(value: string | null): value is ConnectorId {
   return CONNECTORS.some((connector) => connector.id === value);
 }
 
-function readInitialConnector(): ConnectorId | null {
-  const source = readQueryParam(CONNECT_SOURCE_QUERY_KEY);
+function readConnectorFromSearch(searchParams: URLSearchParams): ConnectorId | null {
+  const source = searchParams.get(CONNECT_SOURCE_QUERY_KEY);
   if (isConnectorId(source)) {
     return source;
   }
-  if (readQueryParam(CONNECT_VIEW_QUERY_KEY) === 'github-pipelines') {
-    return 'sbom-github';
-  }
   return null;
-}
-
-function writeConnectQuery(connectorId: ConnectorId | null, view: ConnectView): void {
-  replaceBrowserQueryParams({
-    [CONNECT_SOURCE_QUERY_KEY]: connectorId,
-    [CONNECT_VIEW_QUERY_KEY]: view
-  });
 }
 
 type ConnectorDetailsProps = {
@@ -260,15 +235,37 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   );
 }
 
-export function ConnectPage() {
-  const [activeView, setActiveView] = React.useState<ConnectView>(readInitialConnectView);
+type ConnectPageProps = {
+  initialView?: ConnectView;
+  onViewChange?: (view: ConnectView) => void;
+};
+
+export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all');
   const [search, setSearch] = React.useState('');
-  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(readInitialConnector);
+  const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
 
   React.useEffect(() => {
-    writeConnectQuery(activeConnector, activeView);
-  }, [activeConnector, activeView]);
+    setActiveView(initialView);
+  }, [initialView]);
+
+  React.useEffect(() => {
+    setActiveConnector(readConnectorFromSearch(searchParams));
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (activeConnector) {
+      nextParams.set(CONNECT_SOURCE_QUERY_KEY, activeConnector);
+    } else {
+      nextParams.delete(CONNECT_SOURCE_QUERY_KEY);
+    }
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [activeConnector, searchParams, setSearchParams]);
 
   React.useEffect(() => {
     if (!activeConnector) return;
@@ -344,6 +341,7 @@ export function ConnectPage() {
               className={`connect-filter-btn${activeView === view ? ' active' : ''}`}
               onClick={() => {
                 setActiveView(view);
+                onViewChange?.(view);
                 if (view !== 'sources') {
                   setActiveConnector(null);
                 }

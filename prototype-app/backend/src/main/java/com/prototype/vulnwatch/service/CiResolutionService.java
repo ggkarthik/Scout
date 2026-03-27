@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
@@ -32,7 +36,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
@@ -41,7 +44,8 @@ public class CiResolutionService {
     private final CiRepository ciRepository;
     private final CiAliasRepository ciAliasRepository;
     private final AssetRepository assetRepository;
-    private final RestTemplate restTemplate;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
 
@@ -58,14 +62,16 @@ public class CiResolutionService {
             CiRepository ciRepository,
             CiAliasRepository ciAliasRepository,
             AssetRepository assetRepository,
-            RestTemplate restTemplate,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper,
             ServiceNowCmdbConfigService serviceNowCmdbConfigService
     ) {
         this.ciRepository = ciRepository;
         this.ciAliasRepository = ciAliasRepository;
         this.assetRepository = assetRepository;
-        this.restTemplate = restTemplate;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
     }
@@ -591,7 +597,21 @@ public class CiResolutionService {
                 );
             }
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-            ResponseEntity<String> response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    uri,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class,
+                    "ServiceNow CI lookup",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
+            );
             if (!response.getStatusCode().is2xxSuccessful() || !hasText(response.getBody())) {
                 return null;
             }
@@ -607,6 +627,10 @@ public class CiResolutionService {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("servicenow", 0L, null, null);
     }
 
     private boolean matchesEnvironment(CiAlias alias, String environment) {

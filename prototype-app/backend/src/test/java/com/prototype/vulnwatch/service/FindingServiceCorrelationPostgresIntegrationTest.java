@@ -164,7 +164,7 @@ class FindingServiceCorrelationPostgresIntegrationTest {
         assertEquals(0, active);
         assertTrue(findingRepository.findByComponent(fixture.component()).isEmpty());
 
-        FindingService.ManualFindingCreationResult result = findingService.createManualFindingsForVulnerability(
+        ManualFindingCreationResult result = findingService.createManualFindingsForVulnerability(
                 tenant,
                 vulnerability,
                 "Confirmed manually from CVE workbench",

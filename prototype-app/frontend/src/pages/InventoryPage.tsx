@@ -1,9 +1,7 @@
 import React from 'react';
-import {
-  InventoryComponentRecord
-} from '../types';
+import { useSearchParams } from 'react-router-dom';
+import type { InventoryComponentRecord } from '../features/inventory/api-types';
 import { FilterValueOption } from '../components/FilterValueSelectCard';
-import { readSelectedHostAssetId, updateSelectedHostAssetId } from './HostAssetDetailPage';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   useInventoryData,
@@ -15,7 +13,6 @@ import {
   INVENTORY_FILTER_FIELDS
 } from '../features/inventory/config';
 import {
-  buildHostReviewLabels,
   defaultAssetTypeForView,
   expandVulnerabilitySourceFilters,
   formatAssetType,
@@ -23,18 +20,20 @@ import {
   formatInventoryLabel,
   formatInventorySourceSystem,
   formatSourceSystem,
-  formatVexCoverage,
-  normalizeHostReviewCategory,
-  readSelectedHostReviewCategories,
-  updateSelectedHostReviewCategories,
-  vulnerabilitySourceFilterValue,
-  vexCoverageClass
+  vulnerabilitySourceFilterValue
 } from '../features/inventory/helpers';
 import { InventoryFiltersPanel } from '../features/inventory/InventoryFiltersPanel';
 import { HostInventoryDetailModal } from '../features/inventory/HostInventoryDetailModal';
 import { InventoryResultsPanel } from '../features/inventory/InventoryResultsPanel';
 import { InventorySummaryStats } from '../features/inventory/InventorySummaryStats';
 import { VulnerabilityIntelDetailModal } from '../features/inventory/VulnerabilityIntelDetailModal';
+import {
+  clearHostInventorySearchState,
+  readHostAssetIdFromSearch,
+  readHostReviewCategoriesFromSearch,
+  writeHostAssetIdToSearch,
+  writeHostReviewCategoriesToSearch
+} from '../features/inventory/searchState';
 import {
   HOST_REVIEW_CATEGORIES,
   HostReviewCategory,
@@ -48,18 +47,24 @@ type Props = {
 };
 
 export function InventoryPage({ selectedView }: Props) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const scopedAssetType = defaultAssetTypeForView(selectedView);
+  const selectedHostAssetId = React.useMemo(
+    () => (selectedView === 'hosts' ? readHostAssetIdFromSearch(searchParams) : null),
+    [searchParams, selectedView]
+  );
+  const componentReviewCategories = React.useMemo<HostReviewCategory[]>(
+    () => (selectedView === 'hosts' ? readHostReviewCategoriesFromSearch(searchParams) : []),
+    [searchParams, selectedView]
+  );
   const [componentPage, setComponentPage] = React.useState(0);
   const [componentQuery, setComponentQuery] = React.useState('');
   const [componentAssetTypes, setComponentAssetTypes] = React.useState<string[]>([]);
   const [componentStatuses, setComponentStatuses] = React.useState<string[]>([]);
   const [componentSourceSystems, setComponentSourceSystems] = React.useState<string[]>([]);
   const [componentEcosystems, setComponentEcosystems] = React.useState<string[]>([]);
-  const [componentReviewCategories, setComponentReviewCategories] = React.useState<HostReviewCategory[]>(() => (
-    selectedView === 'hosts' ? readSelectedHostReviewCategories() : []
-  ));
   const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>(() => (
-    selectedView === 'hosts' && readSelectedHostReviewCategories().length > 0 ? ['reviewCategory'] : []
+    selectedView === 'hosts' && readHostReviewCategoriesFromSearch(searchParams).length > 0 ? ['reviewCategory'] : []
   ));
   const [vulnerabilityIntelPage, setVulnerabilityIntelPage] = React.useState(0);
   const [vulnerabilityIntelQuery, setVulnerabilityIntelQuery] = React.useState('');
@@ -69,54 +74,60 @@ export function InventoryPage({ selectedView }: Props) {
   const [vulnerabilityIntelStatuses, setVulnerabilityIntelStatuses] = React.useState<string[]>([]);
   const [vulnerabilityIntelInKevValues, setVulnerabilityIntelInKevValues] = React.useState<string[]>([]);
   const [vulnerabilityIntelActiveFilters, setVulnerabilityIntelActiveFilters] = React.useState<VulnerabilityIntelFilterKey[]>([]);
-  const [selectedHostAssetId, setSelectedHostAssetId] = React.useState<string | null>(() => (
-    selectedView === 'hosts' ? readSelectedHostAssetId() : null
-  ));
   const [selectedVulnerabilityIntelId, setSelectedVulnerabilityIntelId] = React.useState<string | null>(null);
+  const previousSelectedViewRef = React.useRef(selectedView);
   const debouncedComponentQuery = useDebouncedValue(componentQuery);
   const debouncedVulnerabilityIntelQuery = useDebouncedValue(vulnerabilityIntelQuery);
   const debouncedVulnerabilityIntelAffectedPackageQuery = useDebouncedValue(vulnerabilityIntelAffectedPackageQuery);
 
   React.useEffect(() => {
+    if (previousSelectedViewRef.current === selectedView) {
+      return;
+    }
+    previousSelectedViewRef.current = selectedView;
     if (selectedView === 'vulnerability-intelligence') {
       setVulnerabilityIntelPage(0);
       setSelectedVulnerabilityIntelId(null);
     } else {
-      const initialHostReviewCategories = selectedView === 'hosts' ? readSelectedHostReviewCategories() : [];
       setComponentPage(0);
       setComponentQuery('');
       setComponentAssetTypes([]);
       setComponentStatuses([]);
       setComponentSourceSystems([]);
       setComponentEcosystems([]);
-      setComponentReviewCategories(initialHostReviewCategories);
-      setComponentActiveFilters(initialHostReviewCategories.length > 0 ? ['reviewCategory'] : []);
+      setComponentActiveFilters(componentReviewCategories.length > 0 ? ['reviewCategory'] : []);
     }
-  }, [selectedView]);
+  }, [componentReviewCategories.length, selectedView]);
 
   React.useEffect(() => {
-    if (selectedView === 'hosts') {
-      setSelectedHostAssetId(readSelectedHostAssetId());
-      setComponentReviewCategories(readSelectedHostReviewCategories());
+    if (selectedView !== 'hosts') {
       return;
     }
-    setSelectedHostAssetId(null);
-    setComponentReviewCategories([]);
-    updateSelectedHostAssetId(null);
-    updateSelectedHostReviewCategories([]);
-  }, [selectedView]);
+    setComponentActiveFilters((current) => {
+      const hasReviewCategory = current.includes('reviewCategory');
+      if (componentReviewCategories.length === 0 && !hasReviewCategory) {
+        return current;
+      }
+      if (componentReviewCategories.length > 0 && hasReviewCategory) {
+        return current;
+      }
+      const withoutReviewCategory = current.filter((item) => item !== 'reviewCategory');
+      if (componentReviewCategories.length === 0) {
+        return withoutReviewCategory;
+      }
+      return [...withoutReviewCategory, 'reviewCategory'];
+    });
+  }, [componentReviewCategories.length, selectedView]);
 
   React.useEffect(() => {
     if (selectedView === 'hosts') {
-      updateSelectedHostAssetId(selectedHostAssetId);
+      return;
     }
-  }, [selectedHostAssetId, selectedView]);
-
-  React.useEffect(() => {
-    if (selectedView === 'hosts') {
-      updateSelectedHostReviewCategories(componentReviewCategories);
+    const nextSearchParams = clearHostInventorySearchState(searchParams);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
     }
-  }, [componentReviewCategories, selectedView]);
+  }, [searchParams, selectedView, setSearchParams]);
 
   const vulnerabilityIntelInKevFilter = React.useMemo<boolean | undefined>(() => {
     const hasTrue = vulnerabilityIntelInKevValues.includes('true');
@@ -132,7 +143,6 @@ export function InventoryPage({ selectedView }: Props) {
     componentTotalPages,
     componentFilterValues,
     vulnerabilityIntelRows,
-    vulnerabilityIntelTotalItems,
     vulnerabilityIntelTotalPages,
     vulnerabilityIntelFilterValues,
     loading,
@@ -415,12 +425,15 @@ export function InventoryPage({ selectedView }: Props) {
     } else if (key === 'ecosystem') {
       setComponentEcosystems([]);
     } else if (key === 'reviewCategory') {
-      setComponentReviewCategories([]);
+      const nextSearchParams = writeHostReviewCategoriesToSearch(searchParams, []);
+      if (nextSearchParams.toString() !== searchParams.toString()) {
+        setSearchParams(nextSearchParams, { replace: true });
+      }
     } else if (key === 'query') {
       setComponentQuery('');
     }
     setComponentPage(0);
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   const clearComponentFilters = React.useCallback(() => {
     setComponentQuery('');
@@ -428,22 +441,39 @@ export function InventoryPage({ selectedView }: Props) {
     setComponentStatuses([]);
     setComponentSourceSystems([]);
     setComponentEcosystems([]);
-    setComponentReviewCategories([]);
+    if (selectedView === 'hosts') {
+      const nextSearchParams = writeHostReviewCategoriesToSearch(searchParams, []);
+      if (nextSearchParams.toString() !== searchParams.toString()) {
+        setSearchParams(nextSearchParams, { replace: true });
+      }
+    }
     setComponentPage(0);
     setComponentActiveFilters([]);
-  }, []);
+  }, [searchParams, selectedView, setSearchParams]);
 
   const closeVulnerabilityIntelDetail = React.useCallback((): void => {
     setSelectedVulnerabilityIntelId(null);
   }, []);
 
   const openHostDetail = React.useCallback((assetId: string): void => {
-    setSelectedHostAssetId(assetId);
-  }, []);
+    if (selectedView !== 'hosts') {
+      return;
+    }
+    const nextSearchParams = writeHostAssetIdToSearch(searchParams, assetId);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [searchParams, selectedView, setSearchParams]);
 
   const closeHostDetail = React.useCallback((): void => {
-    setSelectedHostAssetId(null);
-  }, []);
+    if (selectedView !== 'hosts') {
+      return;
+    }
+    const nextSearchParams = writeHostAssetIdToSearch(searchParams, null);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [searchParams, selectedView, setSearchParams]);
 
   const openVulnerabilityIntelDetail = (externalId: string): void => {
     setSelectedVulnerabilityIntelId(externalId);
@@ -453,6 +483,15 @@ export function InventoryPage({ selectedView }: Props) {
   const retiredCount = rows.filter((row) => row.componentStatus === 'RETIRED').length;
   const assetCount = new Set(rows.map((row) => row.assetId)).size;
   const needsReviewCount = rows.filter((row) => row.needsReview).length;
+  const setHostReviewCategories = React.useCallback((categories: HostReviewCategory[]) => {
+    if (selectedView !== 'hosts') {
+      return;
+    }
+    const nextSearchParams = writeHostReviewCategoriesToSearch(searchParams, categories);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [searchParams, selectedView, setSearchParams]);
 
   return (
     <div className="page-grid">
@@ -505,7 +544,7 @@ export function InventoryPage({ selectedView }: Props) {
           setStatuses: setComponentStatuses,
           setSourceSystems: setComponentSourceSystems,
           setEcosystems: setComponentEcosystems,
-          setReviewCategories: setComponentReviewCategories,
+          setReviewCategories: setHostReviewCategories,
           setQuery: setComponentQuery,
           setPage: setComponentPage
         }}

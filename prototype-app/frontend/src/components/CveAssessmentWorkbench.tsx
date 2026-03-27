@@ -30,7 +30,7 @@ import {
 import {
   usePendingNavigationGuard
 } from '../features/cve-workbench/hooks/usePendingNavigationGuard';
-import type { RiskPolicy } from '../types';
+import type { RiskPolicy } from '../features/configurations/types';
 
 type WorkflowStep = 1 | 2 | 3;
 

@@ -1,6 +1,10 @@
 import React from 'react';
-import { api } from '../api/client';
-import { EolRelease } from '../types';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from './DataTable';
+import { useEolReleasesQuery } from '../features/eol/queries';
 import { EolBadge } from './EolBadge';
 
 type EolDetailDrawerProps = {
@@ -24,20 +28,48 @@ export function EolDetailDrawer({
   daysRemaining,
   onClose
 }: EolDetailDrawerProps) {
-  const [releases, setReleases] = React.useState<EolRelease[] | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
   const stopPropagation = React.useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
-
-  React.useEffect(() => {
-    let active = true;
-    api.listEolProductReleases(slug)
-      .then(r => { if (active) setReleases(r); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { active = false; };
-  }, [slug]);
+  const releasesQuery = useEolReleasesQuery(slug);
+  const releases = releasesQuery.data;
+  const error = releasesQuery.error instanceof Error ? releasesQuery.error.message : null;
 
   const thisRelease = releases?.find(r => r.cycle === cycle);
   const hasStatusContext = isEol != null || daysRemaining != null || eolDate != null;
+  const releaseColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'cycle', label: 'Cycle', header: 'Cycle', initialSize: 120 },
+    { id: 'eolDate', label: 'EOL Date', header: 'EOL Date', initialSize: 140 },
+    { id: 'supportEnd', label: 'Support End', header: 'Support End', initialSize: 140 },
+    { id: 'latest', label: 'Latest', header: 'Latest', initialSize: 140 },
+    { id: 'lts', label: 'LTS', header: 'LTS', initialSize: 96 },
+    { id: 'status', label: 'Status', header: 'Status', initialSize: 160 }
+  ], []);
+  const releaseRows = React.useMemo<DataTableRow[]>(() => (
+    (releases ?? []).map((release) => ({
+      id: release.cycle,
+      rowProps: {
+        className: release.cycle === cycle ? 'eol-drawer-row-highlight' : undefined
+      },
+      cells: {
+        cycle: { content: <span className="mono">{release.cycle}</span> },
+        eolDate: {
+          content: release.eolDate ?? (
+            release.eolBoolean === true ? 'EOL' : release.eolBoolean === false ? 'Not yet' : '-'
+          )
+        },
+        supportEnd: { content: release.supportEndDate ?? '-' },
+        latest: { content: <span className="mono">{release.latestVersion ?? '-'}</span> },
+        lts: { content: release.lts ? 'LTS' : '-' },
+        status: {
+          content: (
+            <EolBadge
+              isEol={release.isEol}
+              eolDate={release.eolDate}
+            />
+          )
+        }
+      }
+    }))
+  ), [cycle, releases]);
 
   return (
     <div className="eol-drawer-overlay" onClick={onClose}>
@@ -120,37 +152,16 @@ export function EolDetailDrawer({
             <div className="eol-drawer-section-title">All Release Cycles</div>
             {error && <div className="panel-caption">Failed to load cycles: {error}</div>}
             {!releases && !error && <div className="panel-caption">Loading...</div>}
-            {releases && (
+            {releases && releases.length === 0 && (
+              <div className="panel-caption">No release cycles available for this product.</div>
+            )}
+            {releases && releases.length > 0 && (
               <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Cycle</th>
-                      <th>EOL Date</th>
-                      <th>Support End</th>
-                      <th>Latest</th>
-                      <th>LTS</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {releases.map(r => (
-                      <tr key={r.cycle} className={r.cycle === cycle ? 'eol-drawer-row-highlight' : ''}>
-                        <td className="mono">{r.cycle}</td>
-                        <td>{r.eolDate ?? (r.eolBoolean === true ? 'EOL' : r.eolBoolean === false ? 'Not yet' : '-')}</td>
-                        <td>{r.supportEndDate ?? '-'}</td>
-                        <td className="mono">{r.latestVersion ?? '-'}</td>
-                        <td>{r.lts ? 'LTS' : '-'}</td>
-                        <td>
-                          <EolBadge
-                            isEol={r.isEol}
-                            eolDate={r.eolDate}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  storageKey={`eol-release-cycles:${slug}`}
+                  columns={releaseColumns}
+                  rows={releaseRows}
+                />
               </div>
             )}
           </div>

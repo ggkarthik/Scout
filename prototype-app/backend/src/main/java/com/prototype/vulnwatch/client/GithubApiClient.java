@@ -2,6 +2,11 @@ package com.prototype.vulnwatch.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureContext;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,17 +20,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
@@ -84,9 +85,10 @@ public class GithubApiClient {
     ) {
     }
 
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final GithubTokenProvider githubTokenProvider;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
 
     @Value("${app.github.base-url:https://api.github.com}")
     private String baseUrl;
@@ -116,13 +118,15 @@ public class GithubApiClient {
     private Set<String> allowedPackages = Set.of();
 
     public GithubApiClient(
-            RestTemplate restTemplate,
             ObjectMapper objectMapper,
-            GithubTokenProvider githubTokenProvider
+            GithubTokenProvider githubTokenProvider,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory
     ) {
-        this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
         this.githubTokenProvider = githubTokenProvider;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
     }
 
     @PostConstruct
@@ -434,32 +438,6 @@ public class GithubApiClient {
             return true;
         }
         return allowedPackages.contains(owner + "/" + packageName);
-    }
-
-    private boolean isRetriableStatus(HttpStatusCode statusCode) {
-        int status = statusCode.value();
-        return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
-    }
-
-    private void sleepForRetry(int attempt, String retryAfterHeader) {
-        long sleepMs = -1;
-        if (retryAfterHeader != null && !retryAfterHeader.isBlank()) {
-            try {
-                sleepMs = Math.max(0, Long.parseLong(retryAfterHeader.trim()) * 1000L);
-            } catch (NumberFormatException ignored) {
-                sleepMs = -1;
-            }
-        }
-        if (sleepMs < 0) {
-            long base = Math.max(200L, retryBaseBackoffMs);
-            long jitter = ThreadLocalRandom.current().nextLong(200L, 900L);
-            sleepMs = Math.min(15000L, (long) (base * Math.pow(2, Math.max(0, attempt - 1))) + jitter);
-        }
-        try {
-            Thread.sleep(sleepMs);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     private Set<String> parseAllowedRepos() {
@@ -1188,36 +1166,51 @@ public class GithubApiClient {
             Class<T> responseType,
             String operationName
     ) throws IOException {
-        int attempts = Math.max(1, maxRetries);
-        Exception lastError = null;
-        for (int attempt = 1; attempt <= attempts; attempt++) {
-            try {
-                return restTemplate.exchange(
-                        endpoint,
-                        method,
-                        requestEntity,
-                        responseType);
-            } catch (HttpStatusCodeException ex) {
-                lastError = ex;
-                if (ex.getStatusCode().value() == 404) {
-                    throw new GithubNotFoundException(operationName + " request returned 404", ex);
-                }
-                if (ex.getStatusCode().value() == 401 || ex.getStatusCode().value() == 403) {
-                    throw new IOException(formatAuthorizationError(operationName, ex.getStatusCode().value()), ex);
-                }
-                if (!isRetriableStatus(ex.getStatusCode()) || attempt == attempts) {
-                    throw new IOException(operationName + " request failed with status " + ex.getStatusCode().value(), ex);
-                }
-                sleepForRetry(attempt, ex.getResponseHeaders() == null ? null : ex.getResponseHeaders().getFirst("Retry-After"));
-            } catch (Exception ex) {
-                lastError = ex;
-                if (attempt == attempts) {
-                    break;
-                }
-                sleepForRetry(attempt, null);
+        return outboundHttpClient.exchange(
+                endpoint,
+                method,
+                requestEntity,
+                responseType,
+                operationName,
+                outboundPolicy(),
+                context -> classifyFailure(context, operationName)
+        );
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory
+                .forProvider("github", 0L, maxRetries, retryBaseBackoffMs)
+                .withMaxBackoffMs(15000L)
+                .withRetryableStatuses(Set.of(429, 500, 502, 503, 504));
+    }
+
+    private OutboundFailureDecision<IOException> classifyFailure(
+            OutboundFailureContext context,
+            String operationName
+    ) {
+        Integer statusCode = context.statusCodeValue();
+        if (statusCode != null) {
+            if (statusCode == 404) {
+                return OutboundFailureDecision.fail(
+                        new GithubNotFoundException(operationName + " request returned 404", context.error())
+                );
             }
+            if (statusCode == 401 || statusCode == 403) {
+                return OutboundFailureDecision.fail(
+                        new IOException(formatAuthorizationError(operationName, statusCode), context.error())
+                );
+            }
+            return new OutboundFailureDecision<>(
+                    context.policy().isRetryableStatus(statusCode),
+                    context.retryAfterDelayMs(),
+                    new IOException(operationName + " request failed with status " + statusCode, context.error())
+            );
         }
-        throw new IOException("Failed to call " + operationName + " after retries", lastError);
+        return new OutboundFailureDecision<>(
+                true,
+                null,
+                new IOException("Failed to call " + operationName + " after retries", context.error())
+        );
     }
 
     private String formatAuthorizationError(String operationName, int statusCode) {

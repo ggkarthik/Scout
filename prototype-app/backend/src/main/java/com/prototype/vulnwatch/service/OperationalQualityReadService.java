@@ -48,12 +48,12 @@ public class OperationalQualityReadService {
     private static final TypeReference<Map<String, Object>> EVIDENCE_TYPE = new TypeReference<>() { };
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
-    private final OperationalQualityProjectionService projectionService;
+    private final QualityIssueProjectionService projectionService;
     private final ObjectMapper objectMapper;
 
     public OperationalQualityReadService(
             NamedParameterJdbcTemplate jdbcTemplate,
-            OperationalQualityProjectionService projectionService,
+            QualityIssueProjectionService projectionService,
             ObjectMapper objectMapper
     ) {
         this.jdbcTemplate = jdbcTemplate;

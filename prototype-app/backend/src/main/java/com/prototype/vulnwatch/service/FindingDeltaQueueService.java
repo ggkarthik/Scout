@@ -47,18 +47,18 @@ public class FindingDeltaQueueService {
 
     private final FindingDeltaQueueEntryRepository repository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
-    private final FindingService findingService;
+    private final FindingRecomputeService findingRecomputeService;
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
 
     public FindingDeltaQueueService(
             FindingDeltaQueueEntryRepository repository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
-            FindingService findingService,
+            FindingRecomputeService findingRecomputeService,
             DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService
     ) {
         this.repository = repository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
-        this.findingService = findingService;
+        this.findingRecomputeService = findingRecomputeService;
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
     }
 
@@ -197,15 +197,15 @@ public class FindingDeltaQueueService {
         return entries;
     }
 
-    // Not @Transactional — manages its own sub-transactions via findingService
+    // Not @Transactional — manages its own sub-transactions via findingRecomputeService
     void processClaimedBatch(List<FindingDeltaQueueEntry> claimed) {
         Map<String, List<FindingDeltaQueueEntry>> byType = claimed.stream()
                 .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getEventType, java.util.LinkedHashMap::new, Collectors.toList()));
         byType.forEach((eventType, entries) -> {
             switch (eventType) {
                 case SOFTWARE_DELTA -> processSoftwareEntries(entries);
-                case CVE_DELTA -> processVulnerabilityEntries(entries, CVE_BATCH_SIZE, ids -> findingService.recomputeOnCveDeltaBatch(ids));
-                case CVE_METADATA_DELTA -> processVulnerabilityEntries(entries, CVE_METADATA_BATCH_SIZE, ids -> findingService.refreshMetadataForVulnerabilityBatch(ids));
+                case CVE_DELTA -> processVulnerabilityEntries(entries, CVE_BATCH_SIZE, ids -> findingRecomputeService.recomputeOnCveDeltaBatch(ids));
+                case CVE_METADATA_DELTA -> processVulnerabilityEntries(entries, CVE_METADATA_BATCH_SIZE, ids -> findingRecomputeService.refreshMetadataForVulnerabilityBatch(ids));
                 case VEX_DELTA -> processVexEntries(entries);
                 case LIFECYCLE_DELTA -> processLifecycleEntries(entries);
                 case NOISE_REDUCTION_REFRESH -> processNoiseReductionEntries(entries);
@@ -248,8 +248,8 @@ public class FindingDeltaQueueService {
                         .distinct()
                         .toList();
                 int affected = lifecycleOnly
-                        ? findingService.refreshLifecycleForComponents(tenantId, componentIds)
-                        : findingService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
+                        ? findingRecomputeService.refreshLifecycleForComponents(tenantId, componentIds)
+                        : findingRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
                 markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
                 if (!lifecycleOnly) {
                     enqueueNoiseReductionRefresh(tenantId, "software-delta");
@@ -308,7 +308,7 @@ public class FindingDeltaQueueService {
                             .filter(Objects::nonNull)
                             .distinct()
                             .toList();
-                    int affected = findingService.applyVexDeltaBatch(vulnerabilityIds, sourceKey);
+                    int affected = findingRecomputeService.applyVexDeltaBatch(vulnerabilityIds, sourceKey);
                     markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
                     enqueueNoiseReductionRefreshForTenants(
                             componentVulnerabilityStateRepository.findDistinctTenantIdsByVulnerabilityIds(vulnerabilityIds),
@@ -346,15 +346,15 @@ public class FindingDeltaQueueService {
     void processEntryIndividually(FindingDeltaQueueEntry entry) {
         try {
             int affected = switch (entry.getEventType()) {
-                case SOFTWARE_DELTA -> findingService.recomputeOnSoftwareDelta(
+                case SOFTWARE_DELTA -> findingRecomputeService.recomputeOnSoftwareDelta(
                         entry.getTenantId(), entry.getComponentId());
-                case CVE_DELTA -> findingService.recomputeOnCveDelta(
+                case CVE_DELTA -> findingRecomputeService.recomputeOnCveDelta(
                         entry.getVulnerabilityId());
-                case CVE_METADATA_DELTA -> findingService.refreshMetadataForVulnerabilityBatch(
+                case CVE_METADATA_DELTA -> findingRecomputeService.refreshMetadataForVulnerabilityBatch(
                         entry.getVulnerabilityId() == null ? List.of() : List.of(entry.getVulnerabilityId()));
-                case VEX_DELTA -> findingService.applyVexDeltaForVulnerability(
+                case VEX_DELTA -> findingRecomputeService.applyVexDeltaForVulnerability(
                         entry.getVulnerabilityId(), entry.getSourceKey());
-                case LIFECYCLE_DELTA -> findingService.refreshLifecycleForComponents(
+                case LIFECYCLE_DELTA -> findingRecomputeService.refreshLifecycleForComponents(
                         entry.getTenantId(),
                         entry.getComponentId() == null ? List.of() : List.of(entry.getComponentId()));
                 case NOISE_REDUCTION_REFRESH -> dashboardNoiseReductionProjectionService.refreshTenant(entry.getTenantId());

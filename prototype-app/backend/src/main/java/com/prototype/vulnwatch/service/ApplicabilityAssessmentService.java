@@ -32,28 +32,110 @@ public class ApplicabilityAssessmentService {
 
     @Transactional(readOnly = true)
     public ApplicabilityAssessment getAssessment(Long tenantId, Long assessmentId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return assessmentRepository.findByIdAndTenantId(assessmentId, tenant.getId())
-                .orElseThrow(() -> new IllegalArgumentException("Assessment not found: " + assessmentId));
+        return getAssessment(resolveTenant(tenantId), assessmentId);
+    }
+
+    @Transactional(readOnly = true)
+    public ApplicabilityAssessment getAssessment(UUID tenantId, Long assessmentId) {
+        return getAssessment(resolveTenant(tenantId), assessmentId);
     }
 
     @Transactional(readOnly = true)
     public List<ApplicabilityAssessment> getAssessmentsByCve(Long tenantId, String cveId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return assessmentRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        return getAssessmentsByCve(resolveTenant(tenantId), cveId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ApplicabilityAssessment> getAssessmentsByCve(UUID tenantId, String cveId) {
+        return getAssessmentsByCve(resolveTenant(tenantId), cveId);
     }
 
     @Transactional(readOnly = true)
     public Page<ApplicabilityAssessment> getAssessments(Long tenantId, Pageable pageable) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-        return assessmentRepository.findByTenantId(tenant.getId(), pageable);
+        return getAssessments(resolveTenant(tenantId), pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ApplicabilityAssessment> getAssessments(UUID tenantId, Pageable pageable) {
+        return getAssessments(resolveTenant(tenantId), pageable);
     }
 
     @Transactional
     public ApplicabilityAssessment createAssessment(Long tenantId, String cveId, String assessedBy) {
+        return createAssessment(resolveTenant(tenantId), cveId, assessedBy);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment createAssessment(UUID tenantId, String cveId, String assessedBy) {
+        return createAssessment(resolveTenant(tenantId), cveId, assessedBy);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment updateAssessment(Long tenantId, Long assessmentId, AssessmentUpdateRequest request) {
+        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
+        return updateAssessment(assessment, assessmentId, request);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment updateAssessment(UUID tenantId, Long assessmentId, AssessmentUpdateRequest request) {
+        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
+        return updateAssessment(assessment, assessmentId, request);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment completeAssessment(Long tenantId, Long assessmentId,
+                                                     ApplicabilityAssessment.AssessmentResult result,
+                                                     ApplicabilityAssessment.ConfidenceLevel confidence,
+                                                     String justification, String recommendedAction) {
+        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
+        return completeAssessment(assessment, assessmentId, result, confidence, justification, recommendedAction);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment completeAssessment(UUID tenantId, Long assessmentId,
+                                                     ApplicabilityAssessment.AssessmentResult result,
+                                                     ApplicabilityAssessment.ConfidenceLevel confidence,
+                                                     String justification, String recommendedAction) {
+        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
+        return completeAssessment(assessment, assessmentId, result, confidence, justification, recommendedAction);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment submitAssessment(Long tenantId, String cveId, SubmitAssessmentRequest request, String userId) {
+        return submitAssessment(resolveTenant(tenantId), cveId, request, userId);
+    }
+
+    @Transactional
+    public ApplicabilityAssessment submitAssessment(UUID tenantId, String cveId, SubmitAssessmentRequest request, String userId) {
+        return submitAssessment(resolveTenant(tenantId), cveId, request, userId);
+    }
+
+    @Transactional
+    public void deleteAssessment(Long tenantId, Long assessmentId) {
+        deleteAssessment(resolveTenant(tenantId), assessmentId);
+    }
+
+    @Transactional
+    public void deleteAssessment(UUID tenantId, Long assessmentId) {
+        deleteAssessment(resolveTenant(tenantId), assessmentId);
+    }
+
+    private ApplicabilityAssessment getAssessment(Tenant tenant, Long assessmentId) {
+        return assessmentRepository.findByIdAndTenantId(assessmentId, tenant.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found: " + assessmentId));
+    }
+
+    private List<ApplicabilityAssessment> getAssessmentsByCve(Tenant tenant, String cveId) {
+        return assessmentRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+    }
+
+    private Page<ApplicabilityAssessment> getAssessments(Tenant tenant, Pageable pageable) {
+        return assessmentRepository.findByTenantId(tenant.getId(), pageable);
+    }
+
+    private ApplicabilityAssessment createAssessment(Tenant tenant, String cveId, String assessedBy) {
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new IllegalArgumentException("Vulnerability not found: " + cveId));
-        Tenant tenant = tenantService.resolveTenant(tenantId);
 
         ApplicabilityAssessment assessment = new ApplicabilityAssessment();
         assessment.setVulnerability(vulnerability);
@@ -66,10 +148,7 @@ public class ApplicabilityAssessmentService {
         return saved;
     }
 
-    @Transactional
-    public ApplicabilityAssessment updateAssessment(Long tenantId, Long assessmentId, AssessmentUpdateRequest request) {
-        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
-
+    private ApplicabilityAssessment updateAssessment(ApplicabilityAssessment assessment, Long assessmentId, AssessmentUpdateRequest request) {
         // Step 1: Software Detection
         if (request.getSoftwareDetected() != null) {
             assessment.setSoftwareDetected(request.getSoftwareDetected());
@@ -133,13 +212,10 @@ public class ApplicabilityAssessmentService {
         return saved;
     }
 
-    @Transactional
-    public ApplicabilityAssessment completeAssessment(Long tenantId, Long assessmentId,
-                                                     ApplicabilityAssessment.AssessmentResult result,
-                                                     ApplicabilityAssessment.ConfidenceLevel confidence,
-                                                     String justification, String recommendedAction) {
-        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
-
+    private ApplicabilityAssessment completeAssessment(ApplicabilityAssessment assessment, Long assessmentId,
+                                                      ApplicabilityAssessment.AssessmentResult result,
+                                                      ApplicabilityAssessment.ConfidenceLevel confidence,
+                                                      String justification, String recommendedAction) {
         assessment.setStatus(ApplicabilityAssessment.AssessmentStatus.COMPLETED);
         assessment.setFinalResult(result);
         assessment.setConfidenceLevel(confidence);
@@ -153,10 +229,7 @@ public class ApplicabilityAssessmentService {
         return saved;
     }
 
-    @Transactional
-    public ApplicabilityAssessment submitAssessment(Long tenantId, String cveId, SubmitAssessmentRequest request, String userId) {
-        Tenant tenant = tenantService.resolveTenant(tenantId);
-
+    private ApplicabilityAssessment submitAssessment(Tenant tenant, String cveId, SubmitAssessmentRequest request, String userId) {
         // Find existing in-progress assessment or create new
         List<ApplicabilityAssessment> existing = assessmentRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
         ApplicabilityAssessment assessment = existing.stream()
@@ -230,11 +303,18 @@ public class ApplicabilityAssessmentService {
         return assessmentRepository.findByIdAndTenantId(saved.getId(), tenant.getId()).orElse(saved);
     }
 
-    @Transactional
-    public void deleteAssessment(Long tenantId, Long assessmentId) {
-        ApplicabilityAssessment assessment = getAssessment(tenantId, assessmentId);
+    private void deleteAssessment(Tenant tenant, Long assessmentId) {
+        ApplicabilityAssessment assessment = getAssessment(tenant, assessmentId);
         assessmentRepository.delete(assessment);
-        log.info("Deleted assessment {} for tenant {}", assessmentId, tenantId);
+        log.info("Deleted assessment {} for tenant {}", assessmentId, tenant.getId());
+    }
+
+    private Tenant resolveTenant(Long tenantId) {
+        return tenantService.resolveTenant(tenantId);
+    }
+
+    private Tenant resolveTenant(UUID tenantId) {
+        return tenantService.resolveTenantUuid(tenantId);
     }
 
     // DTO for single-call submit (create-or-update-and-complete)

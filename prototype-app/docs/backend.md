@@ -278,7 +278,7 @@ Observed `matchedBy` evidence values are CPE-based, such as:
 9. mirrors each CI as an `InventoryComponent` via `CmdbIngestionService` and enqueues `SOFTWARE_DELTA`
 10. records a `SyncRun` row with `runDomain=INVENTORY` and detailed metadata JSON
 
-`SyncRunHistoryService` writes the `sync_runs` row and is the single point of truth for run lifecycle recording across all inventory run types. The `runDomain` field distinguishes inventory runs (`INVENTORY`) from vulnerability intelligence runs for queue filtering.
+`SyncRunHistoryService` reads persisted `sync_runs` history and is the single point of truth for API history responses across inventory and vulnerability-intelligence run types. Run lifecycle creation/update happens in the owning ingestion services and sync-run helpers, and legacy GitHub inventory evidence is backfilled into `sync_runs` on startup or via the dedicated tool.
 
 ### 5. CVE Workflow Layer
 
@@ -344,7 +344,7 @@ Executors:
 
 ## Current Caveats
 
-- Runtime tenant handling is still effectively single-tenant even though the schema is tenant-aware. Most controllers resolve `TenantService.getDefaultTenant()`.
+- Runtime workspace handling is now explicitly single-workspace. `WorkspaceService` resolves and caches the active workspace at startup, request-scoped tenant context is derived from that cached workspace, and controllers should depend on `WorkspaceService` rather than request-time tenant fallback.
 - `POST /api/cve-detail/{cveId}/suppress` is fully implemented: persists suppression via `OrgCveRecordService.suppress()` and suppresses related findings via `FindingService.suppressFindingsForVulnerability()`.
 - Flyway owns the PostgreSQL startup path. Remaining schema cleanup is now mostly historical normalization rather than runtime compatibility work.
 - The vulnerability optimization is only partially landed: archive/snippet fields exist, but legacy CVSS/source/status fields are still present on `Vulnerability` for compatibility.
