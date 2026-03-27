@@ -1,5 +1,4 @@
 import React from 'react';
-import { api } from '../api/client';
 import { OperationsQualityPage } from './OperationsQualityPage';
 
 type ErrorBoundaryState = { error: Error | null };
@@ -38,11 +37,9 @@ class OperationsSectionErrorBoundary extends React.Component<
   }
 }
 import {
-  Dashboard,
   OperationalApiReadPath,
   OperationalCorrelationEffectiveness,
   OperationalEndpointMetric,
-  OperationalExecutiveHealth,
   OperationalFreshnessDrift,
   OperationalIngestionEfficiency,
   OperationalIngestionSourceMetric,
@@ -51,18 +48,23 @@ import {
   OperationalNormalizationQuality,
   OperationalSectionResponse,
   OperationalSourceFreshness,
-  SloStatus,
-  TopFindingMetric
-} from '../types';
+  SloStatus
+} from '../features/operations/types';
+import type { Dashboard, TopFindingMetric } from '../features/dashboard/types';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { StatCard } from '../components/StatCard';
+import {
+  type PipelinePayload,
+  type PlatformHealthPayload,
+  useOperationsViewQuery
+} from '../features/operations/queries';
 
 export type OperationsViewKey =
   | 'quality'
   | 'pipeline'
   | 'platform-health';
 
-export const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string }> = [
+const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string }> = [
   { key: 'quality', label: 'Quality' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'platform-health', label: 'Platform Health' }
@@ -92,7 +94,7 @@ const LEGACY_VIEW_ALIASES: Record<string, OperationsViewKey> = {
   slo: 'platform-health'
 };
 
-export function normalizeOperationsView(value: string | null | undefined): OperationsViewKey {
+function normalizeOperationsView(value: string | null | undefined): OperationsViewKey {
   if (!value) {
     return 'pipeline';
   }
@@ -104,22 +106,6 @@ export function normalizeOperationsView(value: string | null | undefined): Opera
 
 type OperationalDashboardPageProps = {
   selectedView: OperationsViewKey;
-};
-
-type PipelinePayload = {
-  overview: OperationalSectionResponse<OperationalExecutiveHealth>;
-  ingestion: OperationalSectionResponse<OperationalIngestionEfficiency>;
-  normalization: OperationalSectionResponse<OperationalNormalizationQuality>;
-  correlation: OperationalSectionResponse<OperationalCorrelationEffectiveness>;
-  lifecycle: OperationalSectionResponse<OperationalNoiseLifecycle>;
-  freshness: OperationalSectionResponse<OperationalFreshnessDrift>;
-  dashboard: Dashboard | null;
-};
-
-type PlatformHealthPayload = {
-  readPath: OperationalSectionResponse<OperationalApiReadPath>;
-  slo: SloStatus;
-  catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
 };
 
 const METRIC_HELP: Record<string, string> = {
@@ -754,94 +740,11 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
   );
 }
 
-async function loadOperationsView(selectedView: OperationsViewKey): Promise<unknown> {
-  switch (selectedView) {
-    case 'quality':
-      return null;
-    case 'pipeline': {
-      const [overview, ingestion, normalization, correlation, lifecycle, freshness, dashboard] = await Promise.all([
-        api.getOperationalOverview(),
-        api.getOperationalIngestionEfficiency(),
-        api.getOperationalNormalizationQuality(),
-        api.getOperationalCorrelationEffectiveness(),
-        api.getOperationalNoiseLifecycle(),
-        api.getOperationalFreshnessDrift(),
-        api.getDashboard().catch(() => null)
-      ]);
-      return {
-        overview,
-        ingestion,
-        normalization,
-        correlation,
-        lifecycle,
-        freshness,
-        dashboard
-      } satisfies PipelinePayload;
-    }
-    case 'platform-health': {
-      const [readPath, slo, catalog] = await Promise.all([
-        api.getOperationalApiReadPath(),
-        api.getSloStatus(),
-        api.getOperationalMetricCatalog()
-      ]);
-      return {
-        readPath,
-        slo,
-        catalog
-      } satisfies PlatformHealthPayload;
-    }
-    default:
-      return loadOperationsView('pipeline');
-  }
-}
-
 export function OperationalDashboardPage({ selectedView }: OperationalDashboardPageProps) {
   const normalizedView = normalizeOperationsView(selectedView);
-  const [payloadByView, setPayloadByView] = React.useState<Partial<Record<OperationsViewKey, unknown>>>({});
-  const [error, setError] = React.useState<string | null>(null);
-  const [isLoading, setIsLoading] = React.useState(false);
-  const payload = payloadByView[normalizedView] ?? null;
-
-  React.useEffect(() => {
-    if (normalizedView === 'quality') {
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setError(null);
-    setIsLoading(payloadByView[normalizedView] == null);
-
-    const load = async (): Promise<void> => {
-      try {
-        const response = await loadOperationsView(normalizedView);
-        if (!cancelled) {
-          setPayloadByView((current) => ({
-            ...current,
-            [normalizedView]: response
-          }));
-          setError(null);
-          setIsLoading(false);
-        }
-      } catch (requestError) {
-        if (!cancelled) {
-          setError(requestError instanceof Error ? requestError.message : String(requestError));
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void load();
-    const intervalId = window.setInterval(() => {
-      void load();
-    }, 15000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [normalizedView]);
+  const operationsViewQuery = useOperationsViewQuery(normalizedView);
+  const payload = operationsViewQuery.data ?? null;
+  const error = operationsViewQuery.error instanceof Error ? operationsViewQuery.error.message : null;
 
   if (normalizedView === 'quality') {
     return (

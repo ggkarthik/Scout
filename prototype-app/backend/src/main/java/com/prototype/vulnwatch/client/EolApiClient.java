@@ -2,23 +2,23 @@ package com.prototype.vulnwatch.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureContext;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
 
 /**
  * HTTP client for the endoflife.date v1 API.
@@ -110,13 +110,17 @@ public class EolApiClient {
     @Value("${app.eol.retry-base-backoff-ms:2000}")
     private long retryBaseBackoffMs;
 
-    private volatile long lastRequestAtEpochMs = 0L;
-
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
 
-    public EolApiClient(RestTemplate restTemplate, ObjectMapper objectMapper) {
-        this.restTemplate = restTemplate;
+    public EolApiClient(
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
+            ObjectMapper objectMapper
+    ) {
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -169,65 +173,33 @@ public class EolApiClient {
     // -------------------------------------------------------------------------
 
     private FetchResult fetchRawConditional(String url, String ifModifiedSince) {
-        int attempts = Math.max(1, maxRetries);
-        Exception lastError = null;
-
-        for (int attempt = 1; attempt <= attempts; attempt++) {
-            enforceRateLimitWindow();
-            HttpHeaders headers = new HttpHeaders();
-            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-            headers.set("User-Agent", "vulnwatch-backend/1.0");
-            if (ifModifiedSince != null && !ifModifiedSince.isBlank()) {
-                headers.set(HttpHeaders.IF_MODIFIED_SINCE, ifModifiedSince);
-            }
-
-            try {
-                ResponseEntity<String> response = restTemplate.exchange(
-                        url,
-                        HttpMethod.GET,
-                        new HttpEntity<>(headers),
-                        String.class);
-                rememberRequestTimestamp();
-
-                if (response.getStatusCode().value() == 304) {
-                    LOG.debug("EOL 304 Not Modified: {}", url);
-                    return FetchResult.ofNotModified();
-                }
-
-                String responseBody = response.getBody();
-                if (responseBody == null || responseBody.isBlank()) {
-                    throw new IllegalStateException("EOL API response body is empty for: " + url);
-                }
-                String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
-                return FetchResult.of(responseBody, lastModified);
-
-            } catch (HttpStatusCodeException ex) {
-                rememberRequestTimestamp();
-                lastError = ex;
-                HttpStatusCode status = ex.getStatusCode();
-                if (status.value() == 304) {
-                    return FetchResult.ofNotModified();
-                }
-                if (status.value() == 404) {
-                    throw new RuntimeException("EOL product not found: " + url, ex);
-                }
-                if (!isRetriableStatus(status) || attempt == attempts) {
-                    throw new RuntimeException("EOL API request failed with status " + status + " for: " + url, ex);
-                }
-                LOG.warn("EOL API returned {} on attempt {}/{}, retrying: {}", status, attempt, attempts, url);
-                sleepForRetry(attempt);
-            } catch (Exception ex) {
-                rememberRequestTimestamp();
-                lastError = ex;
-                if (attempt == attempts) {
-                    break;
-                }
-                LOG.warn("EOL API request error on attempt {}/{}: {}", attempt, attempts, ex.getMessage());
-                sleepForRetry(attempt);
-            }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "vulnwatch-backend/1.0");
+        if (ifModifiedSince != null && !ifModifiedSince.isBlank()) {
+            headers.set(HttpHeaders.IF_MODIFIED_SINCE, ifModifiedSince);
         }
-
-        throw new RuntimeException("Failed to fetch EOL API response after " + attempts + " attempts for: " + url, lastError);
+        return outboundHttpClient.execute(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                String.class,
+                "EOL API request",
+                outboundPolicy(),
+                this::classifyFailure,
+                response -> {
+                    if (response.getStatusCode().value() == 304) {
+                        LOG.debug("EOL 304 Not Modified: {}", url);
+                        return FetchResult.ofNotModified();
+                    }
+                    String responseBody = response.getBody();
+                    if (responseBody == null || responseBody.isBlank()) {
+                        throw new IllegalStateException("EOL API response body is empty for: " + url);
+                    }
+                    String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
+                    return FetchResult.of(responseBody, lastModified);
+                }
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -426,37 +398,35 @@ public class EolApiClient {
         return node.asBoolean();
     }
 
-    private boolean isRetriableStatus(HttpStatusCode statusCode) {
-        int code = statusCode.value();
-        return code == 429 || (code >= 500 && code <= 599);
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("eol", minRequestIntervalMs, maxRetries, retryBaseBackoffMs);
     }
 
-    private synchronized void enforceRateLimitWindow() {
-        long minInterval = Math.max(0L, minRequestIntervalMs);
-        if (minInterval == 0) return;
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastRequestAtEpochMs;
-        long waitMs = minInterval - elapsed;
-        if (waitMs > 0) sleep(waitMs);
-    }
-
-    private synchronized void rememberRequestTimestamp() {
-        lastRequestAtEpochMs = System.currentTimeMillis();
-    }
-
-    private void sleepForRetry(int attempt) {
-        long base = Math.max(100L, retryBaseBackoffMs);
-        long exp = base * (1L << Math.min(6, Math.max(0, attempt - 1)));
-        long jitter = ThreadLocalRandom.current().nextLong(150L, 500L);
-        sleep(exp + jitter);
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(Math.max(1L, millis));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting between EOL API requests", e);
+    private OutboundFailureDecision<RuntimeException> classifyFailure(OutboundFailureContext context) {
+        Integer statusCode = context.statusCodeValue();
+        if (statusCode != null) {
+            if (statusCode == 404) {
+                return OutboundFailureDecision.fail(
+                        new RuntimeException("EOL product not found: " + context.endpoint(), context.error())
+                );
+            }
+            RuntimeException terminal = new RuntimeException(
+                    "EOL API request failed with status " + statusCode + " for: " + context.endpoint(),
+                    context.error()
+            );
+            return new OutboundFailureDecision<>(
+                    context.isRetryableByDefault(),
+                    context.retryAfterDelayMs(),
+                    terminal
+            );
         }
+        return new OutboundFailureDecision<>(
+                true,
+                null,
+                new RuntimeException(
+                        "Failed to fetch EOL API response after " + context.maxAttempts() + " attempts for: " + context.endpoint(),
+                        context.error()
+                )
+        );
     }
 }

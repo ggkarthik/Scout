@@ -1,6 +1,6 @@
 package com.prototype.vulnwatch.config;
 
-import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.Filter;
 import jakarta.persistence.EntityManagerFactory;
@@ -84,9 +84,9 @@ public class TenantIsolationConfig {
      * @WebMvcTest slice tests do not try to load it without JPA context available.
      */
     @Bean
-    public FilterRegistrationBean<Filter> tenantResolutionFilter(TenantService tenantService) {
+    public FilterRegistrationBean<Filter> tenantResolutionFilter(WorkspaceService workspaceService) {
         FilterRegistrationBean<Filter> reg = new FilterRegistrationBean<>(
-                new TenantResolutionFilter(tenantService));
+                new TenantResolutionFilter(workspaceService));
         reg.addUrlPatterns("/*");
         reg.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         reg.setName("tenantResolutionFilter");

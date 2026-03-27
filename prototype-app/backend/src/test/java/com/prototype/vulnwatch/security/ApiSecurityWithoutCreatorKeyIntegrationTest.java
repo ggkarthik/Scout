@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.security;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -10,13 +11,17 @@ import com.prototype.vulnwatch.config.SecurityConfig;
 import com.prototype.vulnwatch.controller.ApiExceptionHandler;
 import com.prototype.vulnwatch.controller.AuthContextController;
 import com.prototype.vulnwatch.controller.OperationalDashboardController;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.OperationalDashboardResponse;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "spring.mvc.throw-exception-if-no-handler-found=true",
         "spring.web.resources.add-mappings=false"
 })
-@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class})
+@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
 class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @Autowired
@@ -53,10 +58,18 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     private TenantService tenantService;
 
     @MockBean
+    private WorkspaceService workspaceService;
+
+    @MockBean
     private OperationalMetricsService operationalMetricsService;
 
     @BeforeEach
     void setUp() {
+        Tenant defaultTenant = new Tenant();
+        defaultTenant.setId(1L);
+        defaultTenant.setName("Default Workspace");
+        when(tenantService.getDefaultTenant()).thenReturn(defaultTenant);
+        when(workspaceService.getWorkspace()).thenReturn(defaultTenant);
         when(operationalDashboardService.get()).thenReturn(new OperationalDashboardResponse(
                 Instant.EPOCH,
                 null,
@@ -80,6 +93,10 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     void authContextDefaultsToCreatorWhenCreatorKeyIsNotConfigured() throws Exception {
         mockMvc.perform(get("/api/auth/context").header("X-API-Key", "test-api-key"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.creator").value(true));
+                .andExpect(jsonPath("$.creator").value(true))
+                .andExpect(jsonPath("$.principal").value("local-analyst"))
+                .andExpect(jsonPath("$.userId").value("local-analyst"))
+                .andExpect(jsonPath("$.tenantId").value("00000000-0000-0000-0000-000000000001"))
+                .andExpect(jsonPath("$.tenantName").value("Default Workspace"));
     }
 }

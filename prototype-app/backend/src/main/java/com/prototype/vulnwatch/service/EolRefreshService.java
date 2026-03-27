@@ -84,7 +84,7 @@ public class EolRefreshService {
     private final OrgCveRecordService orgCveRecordService;
     private final TenantRepository tenantRepository;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
-    private final OperationalQualityProjectionService operationalQualityProjectionService;
+    private final QualityIssueProjectionService qualityIssueProjectionService;
 
     public EolRefreshService(
             EolApiClient eolApiClient,
@@ -100,7 +100,7 @@ public class EolRefreshService {
             OrgCveRecordService orgCveRecordService,
             TenantRepository tenantRepository,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
-            OperationalQualityProjectionService operationalQualityProjectionService) {
+            QualityIssueProjectionService qualityIssueProjectionService) {
         this.eolApiClient = eolApiClient;
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
@@ -114,7 +114,7 @@ public class EolRefreshService {
         this.orgCveRecordService = orgCveRecordService;
         this.tenantRepository = tenantRepository;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
-        this.operationalQualityProjectionService = operationalQualityProjectionService;
+        this.qualityIssueProjectionService = qualityIssueProjectionService;
     }
 
     // -------------------------------------------------------------------------

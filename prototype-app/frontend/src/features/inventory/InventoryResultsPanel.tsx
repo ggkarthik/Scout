@@ -1,10 +1,14 @@
 import React from 'react';
-import { ResizableTable } from '../../components/ResizableTable';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../../components/DataTable';
 import { EolBadge } from '../../components/EolBadge';
 import type {
-  InventoryComponentRecord,
-  VulnerabilityIntelRecord
-} from '../../types';
+  InventoryComponentRecord
+} from './api-types';
+import type { VulnerabilityIntelRecord } from '../vulnerability-intel/types';
 import {
   buildHostReviewLabels,
   formatAssetType,
@@ -33,6 +37,38 @@ type Props = {
   onNextVulnerabilityIntelPage: () => void;
 };
 
+const VULNERABILITY_INTEL_COLUMNS: DataTableColumn[] = [
+  { id: 'vulnerabilityId', label: 'Vulnerability ID', header: 'Vulnerability ID', initialSize: 160 },
+  { id: 'description', label: 'Description', header: 'Description', initialSize: 280 },
+  { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
+  { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
+  { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
+  { id: 'affectedPackages', label: 'Affected Packages', header: 'Affected Packages', initialSize: 240 },
+  { id: 'primarySource', label: 'Primary Source', header: 'Primary Source', initialSize: 160 },
+  { id: 'allSources', label: 'All Sources', header: 'All Sources', initialSize: 200 },
+  { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
+  { id: 'published', label: 'Published', header: 'Published', initialSize: 180 },
+  { id: 'lastModified', label: 'Last Modified', header: 'Last Modified', initialSize: 180 }
+];
+
+const COMPONENT_COLUMNS: DataTableColumn[] = [
+  { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 220 },
+  { id: 'assetType', label: 'Asset Type', header: 'Asset Type', initialSize: 120 },
+  { id: 'component', label: 'Component', header: 'Component', initialSize: 180 },
+  { id: 'normalizedName', label: 'Normalized Name', header: 'Normalized Name', initialSize: 180 },
+  { id: 'version', label: 'Version', header: 'Version', initialSize: 140 },
+  { id: 'normalizedVersion', label: 'Normalized Version', header: 'Normalized Version', initialSize: 160 },
+  { id: 'ecosystem', label: 'Ecosystem', header: 'Ecosystem', initialSize: 140 },
+  { id: 'softwareIdentity', label: 'Software Identity', header: 'Software Identity', initialSize: 180 },
+  { id: 'review', label: 'Review', header: 'Review', initialSize: 200 },
+  { id: 'eolStatus', label: 'EOL Status', header: 'EOL Status', initialSize: 160 },
+  { id: 'componentStatus', label: 'Component Status', header: 'Component Status', initialSize: 140 },
+  { id: 'source', label: 'Source', header: 'Source', initialSize: 180 },
+  { id: 'purl', label: 'PURL', header: 'PURL', initialSize: 220 },
+  { id: 'uploaded', label: 'Uploaded', header: 'Uploaded', initialSize: 180 },
+  { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
+];
+
 function formatDateTime(value?: string): string {
   return value ? new Date(value).toLocaleString() : '-';
 }
@@ -49,6 +85,134 @@ function renderAffectedPackages(record: VulnerabilityIntelRecord): string {
   return record.affectedPackages.length > 3
     ? `${summary} +${record.affectedPackages.length - 3} more`
     : summary;
+}
+
+function buildVulnerabilityIntelRows(
+  rows: VulnerabilityIntelRecord[],
+  selectedId: string | null,
+  onOpenDetail: (externalId: string) => void
+): DataTableRow[] {
+  return rows.map((record) => ({
+    id: record.id,
+    rowProps: {
+      className: `table-row-clickable ${selectedId === record.externalId ? 'table-row-selected' : ''}`,
+      onClick: () => onOpenDetail(record.externalId),
+      onKeyDown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpenDetail(record.externalId);
+        }
+      },
+      tabIndex: 0,
+      'aria-label': `Open vulnerability intelligence detail ${record.externalId}`
+    },
+    cells: {
+      vulnerabilityId: {
+        content: <span className="mono">{record.externalId}</span>
+      },
+      description: { content: record.descriptionSnippet || '-' },
+      severity: { content: record.severity || '-' },
+      cvss: { content: record.cvssScore ?? '-' },
+      epss: { content: record.epssScore ?? '-' },
+      affectedPackages: { content: renderAffectedPackages(record) },
+      primarySource: { content: record.sources.length > 0 ? formatSourceSystem(record.sources[0]) : '-' },
+      allSources: { content: record.sources.length > 0 ? record.sources.map(formatSourceSystem).join(', ') : '-' },
+      openFindings: { content: record.openFindings },
+      published: { content: formatDateTime(record.publishedAt) },
+      lastModified: { content: formatDateTime(record.lastModifiedAt) }
+    }
+  }));
+}
+
+function buildComponentRows(
+  selectedView: InventoryViewKey,
+  rows: InventoryComponentRecord[],
+  selectedHostAssetId: string | null,
+  onOpenHostDetail: (assetId: string) => void
+): DataTableRow[] {
+  return rows.map((row) => ({
+    id: row.id,
+    rowProps: {
+      className: selectedView === 'hosts' && row.assetId === selectedHostAssetId ? 'table-row-selected' : undefined
+    },
+    cells: {
+      asset: {
+        content: (
+          <>
+            {selectedView === 'hosts' ? (
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => onOpenHostDetail(row.assetId)}
+              >
+                {row.assetName}
+              </button>
+            ) : (
+              <div>{row.assetName}</div>
+            )}
+            <div className="panel-caption mono">{row.assetIdentifier}</div>
+            {selectedView === 'hosts' && (
+              <div className="panel-caption">Open host detail</div>
+            )}
+          </>
+        )
+      },
+      assetType: { content: formatAssetType(row.assetType) },
+      component: { content: row.packageName },
+      normalizedName: { content: row.normalizedName || '-', props: { className: 'mono' } },
+      version: { content: row.version, props: { className: 'mono' } },
+      normalizedVersion: { content: row.normalizedVersion || '-', props: { className: 'mono' } },
+      ecosystem: { content: row.ecosystem || '-' },
+      softwareIdentity: { content: row.softwareIdentity || '-' },
+      review: {
+        content: row.needsReview ? (
+          <>
+            <div className="panel-caption">
+              {row.reviewItemCount} review item{row.reviewItemCount === 1 ? '' : 's'}
+            </div>
+            <div className="findings-inline-pill-row">
+              {buildHostReviewLabels(row).map((label) => (
+                <span key={`${row.id}-${label}`} className="status-pill status-in-progress">
+                  {label}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <span className="status-pill status-suppressed">Clear</span>
+        )
+      },
+      eolStatus: {
+        content: (
+          <EolBadge
+            isEol={row.isEol}
+            daysRemaining={row.eolDaysRemaining}
+            eolDate={row.eolDate}
+          />
+        )
+      },
+      componentStatus: {
+        content: (
+          <span className={`status-pill ${row.componentStatus === 'ACTIVE' ? 'status-open' : 'status-auto_closed'}`}>
+            {row.componentStatus}
+          </span>
+        )
+      },
+      source: {
+        content: (
+          <>
+            <div>{row.sourceSystem ? formatInventorySourceSystem(row.sourceSystem) : '-'}</div>
+            <div className="panel-caption">
+              {row.sourceReference || row.sourceType || '-'}
+            </div>
+          </>
+        )
+      },
+      purl: { content: row.purl || '-', props: { className: 'mono' } },
+      uploaded: { content: formatDateTime(row.uploadedAt) },
+      lastObserved: { content: formatDateTime(row.lastObservedAt) }
+    }
+  }));
 }
 
 function VulnerabilityIntelTable({
@@ -70,6 +234,11 @@ function VulnerabilityIntelTable({
   onPreviousPage: () => void;
   onNextPage: () => void;
 }) {
+  const tableRows = React.useMemo(
+    () => buildVulnerabilityIntelRows(rows, selectedId, onOpenDetail),
+    [onOpenDetail, rows, selectedId]
+  );
+
   if (loading && rows.length === 0) {
     return <div className="notice">Loading vulnerability intelligence records...</div>;
   }
@@ -87,52 +256,11 @@ function VulnerabilityIntelTable({
   return (
     <>
       <div className="table-scroll">
-        <ResizableTable storageKey="inventory-vulnerability-intel-table-widths">
-          <thead>
-            <tr>
-              <th>Vulnerability ID</th>
-              <th>Description</th>
-              <th>Severity</th>
-              <th>CVSS</th>
-              <th>EPSS</th>
-              <th>Affected Packages</th>
-              <th>Primary Source</th>
-              <th>All Sources</th>
-              <th>Open Findings</th>
-              <th>Published</th>
-              <th>Last Modified</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((record) => (
-              <tr
-                key={record.id}
-                className={`table-row-clickable ${selectedId === record.externalId ? 'table-row-selected' : ''}`}
-                onClick={() => onOpenDetail(record.externalId)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onOpenDetail(record.externalId);
-                  }
-                }}
-                tabIndex={0}
-                aria-label={`Open vulnerability intelligence detail ${record.externalId}`}
-              >
-                <td><span className="mono">{record.externalId}</span></td>
-                <td>{record.descriptionSnippet || '-'}</td>
-                <td>{record.severity || '-'}</td>
-                <td>{record.cvssScore ?? '-'}</td>
-                <td>{record.epssScore ?? '-'}</td>
-                <td>{renderAffectedPackages(record)}</td>
-                <td>{record.sources.length > 0 ? formatSourceSystem(record.sources[0]) : '-'}</td>
-                <td>{record.sources.length > 0 ? record.sources.map(formatSourceSystem).join(', ') : '-'}</td>
-                <td>{record.openFindings}</td>
-                <td>{formatDateTime(record.publishedAt)}</td>
-                <td>{formatDateTime(record.lastModifiedAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </ResizableTable>
+        <DataTable
+          storageKey="inventory-vulnerability-intel-table-widths"
+          columns={VULNERABILITY_INTEL_COLUMNS}
+          rows={tableRows}
+        />
       </div>
       <div className="pagination-row">
         <button
@@ -180,6 +308,15 @@ function ComponentInventoryTable({
   onPreviousPage: () => void;
   onNextPage: () => void;
 }) {
+  const tableColumns = React.useMemo(
+    () => COMPONENT_COLUMNS.filter((column) => selectedView === 'hosts' || column.id !== 'review'),
+    [selectedView]
+  );
+  const tableRows = React.useMemo(
+    () => buildComponentRows(selectedView, rows, selectedHostAssetId, onOpenHostDetail),
+    [onOpenHostDetail, rows, selectedHostAssetId, selectedView]
+  );
+
   if (loading && rows.length === 0) {
     return <div className="notice">Loading inventory records...</div>;
   }
@@ -197,101 +334,11 @@ function ComponentInventoryTable({
   return (
     <>
       <div className="table-scroll">
-        <ResizableTable storageKey="inventory-components-table-widths">
-          <thead>
-            <tr>
-              <th>Asset</th>
-              <th>Asset Type</th>
-              <th>Component</th>
-              <th>Normalized Name</th>
-              <th>Version</th>
-              <th>Normalized Version</th>
-              <th>Ecosystem</th>
-              <th>Software Identity</th>
-              {selectedView === 'hosts' && <th>Review</th>}
-              <th>EOL Status</th>
-              <th>Component Status</th>
-              <th>Source</th>
-              <th>PURL</th>
-              <th>Uploaded</th>
-              <th>Last Observed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                className={selectedView === 'hosts' && row.assetId === selectedHostAssetId ? 'table-row-selected' : ''}
-              >
-                <td>
-                  {selectedView === 'hosts' ? (
-                    <button
-                      type="button"
-                      className="btn-link"
-                      onClick={() => onOpenHostDetail(row.assetId)}
-                    >
-                      {row.assetName}
-                    </button>
-                  ) : (
-                    <div>{row.assetName}</div>
-                  )}
-                  <div className="panel-caption mono">{row.assetIdentifier}</div>
-                  {selectedView === 'hosts' && (
-                    <div className="panel-caption">Open host detail</div>
-                  )}
-                </td>
-                <td>{formatAssetType(row.assetType)}</td>
-                <td>{row.packageName}</td>
-                <td className="mono">{row.normalizedName || '-'}</td>
-                <td className="mono">{row.version}</td>
-                <td className="mono">{row.normalizedVersion || '-'}</td>
-                <td>{row.ecosystem || '-'}</td>
-                <td>{row.softwareIdentity || '-'}</td>
-                {selectedView === 'hosts' && (
-                  <td>
-                    {row.needsReview ? (
-                      <>
-                        <div className="panel-caption">
-                          {row.reviewItemCount} review item{row.reviewItemCount === 1 ? '' : 's'}
-                        </div>
-                        <div className="findings-inline-pill-row">
-                          {buildHostReviewLabels(row).map((label) => (
-                            <span key={`${row.id}-${label}`} className="status-pill status-in-progress">
-                              {label}
-                            </span>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <span className="status-pill status-suppressed">Clear</span>
-                    )}
-                  </td>
-                )}
-                <td>
-                  <EolBadge
-                    isEol={row.isEol}
-                    daysRemaining={row.eolDaysRemaining}
-                    eolDate={row.eolDate}
-                  />
-                </td>
-                <td>
-                  <span className={`status-pill ${row.componentStatus === 'ACTIVE' ? 'status-open' : 'status-auto_closed'}`}>
-                    {row.componentStatus}
-                  </span>
-                </td>
-                <td>
-                  <div>{row.sourceSystem ? formatInventorySourceSystem(row.sourceSystem) : '-'}</div>
-                  <div className="panel-caption">
-                    {row.sourceReference || row.sourceType || '-'}
-                  </div>
-                </td>
-                <td className="mono">{row.purl || '-'}</td>
-                <td>{formatDateTime(row.uploadedAt)}</td>
-                <td>{formatDateTime(row.lastObservedAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </ResizableTable>
+        <DataTable
+          storageKey="inventory-components-table-widths"
+          columns={tableColumns}
+          rows={tableRows}
+        />
       </div>
       <div className="pagination-row">
         <button

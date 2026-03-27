@@ -1,5 +1,8 @@
 package com.prototype.vulnwatch.config;
 
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicyDefaults;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -21,6 +24,35 @@ public class HttpClientConfig {
                 .setConnectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .setReadTimeout(Duration.ofMillis(readTimeoutMs))
                 .build();
+    }
+
+    @Bean
+    public OutboundPolicyDefaults outboundPolicyDefaults(
+            @Value("${app.http.outbound.min-request-interval-ms:0}") long minRequestIntervalMs,
+            @Value("${app.http.outbound.max-retries:3}") int maxRetries,
+            @Value("${app.http.outbound.retry-base-backoff-ms:500}") long retryBaseBackoffMs,
+            @Value("${app.http.outbound.max-backoff-ms:60000}") long maxBackoffMs,
+            @Value("${app.http.outbound.honor-retry-after:true}") boolean honorRetryAfter,
+            @Value("${app.http.outbound.retry-on-network-errors:true}") boolean retryOnNetworkErrors
+    ) {
+        return new OutboundPolicyDefaults(
+                minRequestIntervalMs,
+                maxRetries,
+                retryBaseBackoffMs,
+                maxBackoffMs,
+                honorRetryAfter,
+                retryOnNetworkErrors
+        );
+    }
+
+    @Bean
+    public OutboundPolicyFactory outboundPolicyFactory(OutboundPolicyDefaults outboundPolicyDefaults) {
+        return new OutboundPolicyFactory(outboundPolicyDefaults);
+    }
+
+    @Bean
+    public OutboundHttpClient outboundHttpClient(RestTemplate restTemplate) {
+        return new OutboundHttpClient(restTemplate);
     }
 
     @Bean(name = "ingestionExecutor")

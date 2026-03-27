@@ -1,16 +1,24 @@
 import React from 'react';
-import { api } from '../../api/client';
 import type {
   InventoryComponentFilterValues,
-  InventoryComponentRecord,
+  InventoryComponentRecord
+} from './api-types';
+import type {
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelRecord
-} from '../../types';
+} from '../vulnerability-intel/types';
 import {
   DEFAULT_COMPONENT_FILTERS,
   DEFAULT_VULNERABILITY_INTEL_FILTERS
 } from './config';
+import {
+  useInventoryComponentFiltersQuery,
+  useInventoryComponentsQuery,
+  useVulnerabilityIntelligenceDetailQuery,
+  useVulnerabilityIntelligenceFiltersQuery,
+  useVulnerabilityIntelligenceQuery
+} from './queries';
 
 type UseInventoryDataArgs = {
   selectedView: string;
@@ -79,215 +87,160 @@ export function useInventoryData({
   normalizeVulnerabilitySource,
   expandVulnerabilitySourceFilters
 }: UseInventoryDataArgs): UseInventoryDataResult {
-  const [rows, setRows] = React.useState<InventoryComponentRecord[]>([]);
-  const [componentTotalItems, setComponentTotalItems] = React.useState(0);
-  const [componentTotalPages, setComponentTotalPages] = React.useState(0);
-  const [vulnerabilityIntelRows, setVulnerabilityIntelRows] = React.useState<VulnerabilityIntelRecord[]>([]);
-  const [vulnerabilityIntelTotalItems, setVulnerabilityIntelTotalItems] = React.useState(0);
-  const [vulnerabilityIntelTotalPages, setVulnerabilityIntelTotalPages] = React.useState(0);
-  const [vulnerabilityIntelFilterValues, setVulnerabilityIntelFilterValues] = React.useState<VulnerabilityIntelFilterValues>(
-    DEFAULT_VULNERABILITY_INTEL_FILTERS
-  );
-  const [componentFilterValues, setComponentFilterValues] = React.useState<InventoryComponentFilterValues>(
-    DEFAULT_COMPONENT_FILTERS
-  );
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState('');
-  const loadRequestIdRef = React.useRef(0);
+  const showingVulnerabilityIntel = selectedView === 'vulnerability-intelligence';
+  const assetTypeParam = scopedAssetType === 'ALL'
+    ? (
+      componentActiveFilters.includes('assetType') && componentAssetTypes.length > 0
+        ? componentAssetTypes.filter((value): value is InventoryComponentRecord['assetType'] => (
+          value === 'APPLICATION' || value === 'HOST' || value === 'CONTAINER_IMAGE'
+        ))
+        : undefined
+    )
+    : [scopedAssetType as InventoryComponentRecord['assetType']];
+  const componentStatusParam = componentActiveFilters.includes('componentStatus') && componentStatuses.length > 0
+    ? componentStatuses.filter((value): value is InventoryComponentRecord['componentStatus'] => (
+      value === 'ACTIVE' || value === 'RETIRED'
+    ))
+    : undefined;
+  const inventoryQuery = useInventoryComponentsQuery({
+    assetType: assetTypeParam,
+    componentStatus: componentStatusParam,
+    sourceSystem: componentActiveFilters.includes('sourceSystem') && componentSourceSystems.length > 0
+      ? componentSourceSystems
+      : undefined,
+    ecosystem: componentActiveFilters.includes('ecosystem') && componentEcosystems.length > 0
+      ? componentEcosystems
+      : undefined,
+    reviewCategory: selectedView === 'hosts'
+      && componentActiveFilters.includes('reviewCategory')
+      && componentReviewCategories.length > 0
+      ? componentReviewCategories
+      : undefined,
+    query: componentActiveFilters.includes('query') ? debouncedComponentQuery.trim() : undefined,
+    page: componentPage,
+    size: 25
+  }, !showingVulnerabilityIntel);
+  const componentFiltersQuery = useInventoryComponentFiltersQuery(!showingVulnerabilityIntel);
+  const vulnerabilityIntelQuery = useVulnerabilityIntelligenceQuery({
+    page: vulnerabilityIntelPage,
+    size: 25,
+    query: debouncedVulnerabilityIntelQuery.trim() || undefined,
+    affectedPackage: debouncedVulnerabilityIntelAffectedPackageQuery.trim() || undefined,
+    severity: vulnerabilityIntelSeverities.length > 0 ? vulnerabilityIntelSeverities : undefined,
+    source: vulnerabilityIntelSources.length > 0 ? expandVulnerabilitySourceFilters(vulnerabilityIntelSources) : undefined,
+    vulnStatus: vulnerabilityIntelStatuses.length > 0 ? vulnerabilityIntelStatuses : undefined,
+    inKev: vulnerabilityIntelInKevFilter
+  }, showingVulnerabilityIntel);
+  const vulnerabilityIntelFiltersQuery = useVulnerabilityIntelligenceFiltersQuery(showingVulnerabilityIntel);
+
+  const normalizedVulnerabilityIntelRows = React.useMemo<VulnerabilityIntelRecord[]>(() => (
+    (vulnerabilityIntelQuery.data?.items ?? []).map((record) => ({
+      ...record,
+      sources: Array.from(
+        new Set(
+          (record.sources || [])
+            .filter((source) => source && source.trim().length > 0)
+            .map((source) => normalizeVulnerabilitySource(source))
+        )
+      )
+    }))
+  ), [normalizeVulnerabilitySource, vulnerabilityIntelQuery.data?.items]);
+
+  const componentFilterValues: InventoryComponentFilterValues = React.useMemo(() => {
+    const availableFilters = componentFiltersQuery.data;
+    if (!availableFilters) {
+      return DEFAULT_COMPONENT_FILTERS;
+    }
+    return {
+      assetTypes: Array.from(new Set(
+        (availableFilters.assetTypes || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toUpperCase())
+      )),
+      componentStatuses: Array.from(new Set(
+        (availableFilters.componentStatuses || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toUpperCase())
+      )),
+      sourceSystems: Array.from(new Set(
+        (availableFilters.sourceSystems || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toLowerCase())
+      )),
+      ecosystems: Array.from(new Set(
+        (availableFilters.ecosystems || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toLowerCase())
+      ))
+    };
+  }, [componentFiltersQuery.data]);
+
+  const vulnerabilityIntelFilterValues: VulnerabilityIntelFilterValues = React.useMemo(() => {
+    const availableFilters = vulnerabilityIntelFiltersQuery.data;
+    if (!availableFilters) {
+      return DEFAULT_VULNERABILITY_INTEL_FILTERS;
+    }
+    return {
+      severities: Array.from(new Set(
+        (availableFilters.severities || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toUpperCase())
+      )),
+      sources: Array.from(new Set(
+        (availableFilters.sources || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => normalizeVulnerabilitySource(value))
+      )),
+      vulnStatuses: Array.from(new Set(
+        (availableFilters.vulnStatuses || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toUpperCase())
+      )),
+      inKevValues: Array.from(new Set(
+        (availableFilters.inKevValues || [])
+          .filter((value) => value && value.trim().length > 0)
+          .map((value) => value.trim().toLowerCase())
+      ))
+    };
+  }, [normalizeVulnerabilitySource, vulnerabilityIntelFiltersQuery.data]);
 
   const refreshInventory = React.useCallback(async () => {
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-    setLoading(true);
-    setError('');
-
-    try {
-      if (selectedView === 'vulnerability-intelligence') {
-        const response = await api.listVulnerabilityIntelligence({
-          page: vulnerabilityIntelPage,
-          size: 25,
-          query: debouncedVulnerabilityIntelQuery.trim() || undefined,
-          affectedPackage: debouncedVulnerabilityIntelAffectedPackageQuery.trim() || undefined,
-          severity: vulnerabilityIntelSeverities.length > 0 ? vulnerabilityIntelSeverities : undefined,
-          source: vulnerabilityIntelSources.length > 0 ? expandVulnerabilitySourceFilters(vulnerabilityIntelSources) : undefined,
-          vulnStatus: vulnerabilityIntelStatuses.length > 0 ? vulnerabilityIntelStatuses : undefined,
-          inKev: vulnerabilityIntelInKevFilter
-        });
-        if (requestId !== loadRequestIdRef.current) {
-          return;
-        }
-
-        const normalizedRows = response.items.map((record) => ({
-          ...record,
-          sources: Array.from(
-            new Set(
-              (record.sources || [])
-                .filter((source) => source && source.trim().length > 0)
-                .map((source) => normalizeVulnerabilitySource(source))
-            )
-          )
-        }));
-
-        setVulnerabilityIntelRows(normalizedRows);
-        setVulnerabilityIntelTotalItems(response.totalItems);
-        setVulnerabilityIntelTotalPages(response.totalPages);
-        setRows([]);
-        setComponentTotalItems(0);
-        setComponentTotalPages(0);
-
-        void api.listVulnerabilityIntelligenceFilters()
-          .then((availableFilters) => {
-            if (requestId !== loadRequestIdRef.current) {
-              return;
-            }
-            setVulnerabilityIntelFilterValues({
-              severities: Array.from(new Set(
-                (availableFilters.severities || [])
-                  .filter((value) => value && value.trim().length > 0)
-                  .map((value) => value.trim().toUpperCase())
-              )),
-              sources: Array.from(new Set(
-                (availableFilters.sources || [])
-                  .filter((value) => value && value.trim().length > 0)
-                  .map((value) => normalizeVulnerabilitySource(value))
-              )),
-              vulnStatuses: Array.from(new Set(
-                (availableFilters.vulnStatuses || [])
-                  .filter((value) => value && value.trim().length > 0)
-                  .map((value) => value.trim().toUpperCase())
-              )),
-              inKevValues: Array.from(new Set(
-                (availableFilters.inKevValues || [])
-                  .filter((value) => value && value.trim().length > 0)
-                  .map((value) => value.trim().toLowerCase())
-              ))
-            });
-          })
-          .catch(() => {
-            if (requestId !== loadRequestIdRef.current) {
-              return;
-            }
-            setVulnerabilityIntelFilterValues(DEFAULT_VULNERABILITY_INTEL_FILTERS);
-          });
-
-        return;
-      }
-
-      const assetTypeParam = scopedAssetType === 'ALL'
-        ? (
-          componentActiveFilters.includes('assetType') && componentAssetTypes.length > 0
-            ? componentAssetTypes.filter((value): value is InventoryComponentRecord['assetType'] => (
-              value === 'APPLICATION' || value === 'HOST' || value === 'CONTAINER_IMAGE'
-            ))
-            : undefined
-        )
-        : [scopedAssetType as InventoryComponentRecord['assetType']];
-      const componentStatusParam = componentActiveFilters.includes('componentStatus') && componentStatuses.length > 0
-        ? componentStatuses.filter((value): value is InventoryComponentRecord['componentStatus'] => (
-          value === 'ACTIVE' || value === 'RETIRED'
-        ))
-        : undefined;
-
-      const [data, availableFilters] = await Promise.all([
-        api.listInventoryComponents({
-          assetType: assetTypeParam,
-          componentStatus: componentStatusParam,
-          sourceSystem: componentActiveFilters.includes('sourceSystem') && componentSourceSystems.length > 0
-            ? componentSourceSystems
-            : undefined,
-          ecosystem: componentActiveFilters.includes('ecosystem') && componentEcosystems.length > 0
-            ? componentEcosystems
-            : undefined,
-          reviewCategory: selectedView === 'hosts'
-            && componentActiveFilters.includes('reviewCategory')
-            && componentReviewCategories.length > 0
-            ? componentReviewCategories
-            : undefined,
-          query: componentActiveFilters.includes('query') ? debouncedComponentQuery.trim() : undefined,
-          page: componentPage,
-          size: 25
-        }),
-        api.listInventoryComponentFilters().catch(() => DEFAULT_COMPONENT_FILTERS)
+    if (showingVulnerabilityIntel) {
+      await Promise.all([
+        vulnerabilityIntelQuery.refetch(),
+        vulnerabilityIntelFiltersQuery.refetch()
       ]);
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-
-      setComponentFilterValues({
-        assetTypes: Array.from(new Set(
-          (availableFilters.assetTypes || [])
-            .filter((value) => value && value.trim().length > 0)
-            .map((value) => value.trim().toUpperCase())
-        )),
-        componentStatuses: Array.from(new Set(
-          (availableFilters.componentStatuses || [])
-            .filter((value) => value && value.trim().length > 0)
-            .map((value) => value.trim().toUpperCase())
-        )),
-        sourceSystems: Array.from(new Set(
-          (availableFilters.sourceSystems || [])
-            .filter((value) => value && value.trim().length > 0)
-            .map((value) => value.trim().toLowerCase())
-        )),
-        ecosystems: Array.from(new Set(
-          (availableFilters.ecosystems || [])
-            .filter((value) => value && value.trim().length > 0)
-            .map((value) => value.trim().toLowerCase())
-        ))
-      });
-      setRows(data.items);
-      setComponentTotalItems(data.totalItems);
-      setComponentTotalPages(data.totalPages);
-      setVulnerabilityIntelRows([]);
-      setVulnerabilityIntelTotalItems(0);
-      setVulnerabilityIntelTotalPages(0);
-    } catch (requestError) {
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      if (requestId === loadRequestIdRef.current) {
-        setLoading(false);
-      }
+      return;
     }
+    await Promise.all([
+      inventoryQuery.refetch(),
+      componentFiltersQuery.refetch()
+    ]);
   }, [
-    componentActiveFilters,
-    componentAssetTypes,
-    componentEcosystems,
-    componentPage,
-    componentReviewCategories,
-    componentSourceSystems,
-    componentStatuses,
-    debouncedComponentQuery,
-    debouncedVulnerabilityIntelQuery,
-    debouncedVulnerabilityIntelAffectedPackageQuery,
-    expandVulnerabilitySourceFilters,
-    normalizeVulnerabilitySource,
-    scopedAssetType,
-    selectedView,
-    vulnerabilityIntelInKevFilter,
-    vulnerabilityIntelPage,
-    vulnerabilityIntelSeverities,
-    vulnerabilityIntelSources,
-    vulnerabilityIntelStatuses
+    componentFiltersQuery,
+    inventoryQuery,
+    showingVulnerabilityIntel,
+    vulnerabilityIntelFiltersQuery,
+    vulnerabilityIntelQuery
   ]);
 
-  React.useEffect(() => {
-    void refreshInventory();
-  }, [refreshInventory]);
-
   return {
-    rows,
-    componentTotalItems,
-    componentTotalPages,
+    rows: showingVulnerabilityIntel ? [] : (inventoryQuery.data?.items ?? []),
+    componentTotalItems: showingVulnerabilityIntel ? 0 : (inventoryQuery.data?.totalItems ?? 0),
+    componentTotalPages: showingVulnerabilityIntel ? 0 : (inventoryQuery.data?.totalPages ?? 0),
     componentFilterValues,
-    vulnerabilityIntelRows,
-    vulnerabilityIntelTotalItems,
-    vulnerabilityIntelTotalPages,
+    vulnerabilityIntelRows: showingVulnerabilityIntel ? normalizedVulnerabilityIntelRows : [],
+    vulnerabilityIntelTotalItems: showingVulnerabilityIntel ? (vulnerabilityIntelQuery.data?.totalItems ?? 0) : 0,
+    vulnerabilityIntelTotalPages: showingVulnerabilityIntel ? (vulnerabilityIntelQuery.data?.totalPages ?? 0) : 0,
     vulnerabilityIntelFilterValues,
-    loading,
-    error,
+    loading: showingVulnerabilityIntel
+      ? vulnerabilityIntelQuery.isLoading || vulnerabilityIntelQuery.isFetching || vulnerabilityIntelFiltersQuery.isLoading
+      : inventoryQuery.isLoading || inventoryQuery.isFetching || componentFiltersQuery.isLoading,
+    error: (
+      showingVulnerabilityIntel ? vulnerabilityIntelQuery.error : inventoryQuery.error
+    ) instanceof Error
+      ? String((showingVulnerabilityIntel ? vulnerabilityIntelQuery.error : inventoryQuery.error) as Error)
+      : '',
     refreshInventory
   };
 }
@@ -296,43 +249,13 @@ export function useVulnerabilityIntelDetail({
   selectedView,
   selectedVulnerabilityIntelId
 }: UseVulnerabilityIntelDetailArgs): UseVulnerabilityIntelDetailResult {
-  const [selectedVulnerabilityIntelDetail, setSelectedVulnerabilityIntelDetail] = React.useState<VulnerabilityIntelDetail | null>(null);
-  const [vulnerabilityIntelDetailLoading, setVulnerabilityIntelDetailLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    if (selectedView !== 'vulnerability-intelligence' || !selectedVulnerabilityIntelId) {
-      setSelectedVulnerabilityIntelDetail(null);
-      setVulnerabilityIntelDetailLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setVulnerabilityIntelDetailLoading(true);
-
-    api.getVulnerabilityIntelligenceDetail(selectedVulnerabilityIntelId)
-      .then((detail) => {
-        if (!cancelled) {
-          setSelectedVulnerabilityIntelDetail(detail);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSelectedVulnerabilityIntelDetail(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setVulnerabilityIntelDetailLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedView, selectedVulnerabilityIntelId]);
+  const detailQuery = useVulnerabilityIntelligenceDetailQuery(
+    selectedVulnerabilityIntelId,
+    selectedView === 'vulnerability-intelligence'
+  );
 
   return {
-    selectedVulnerabilityIntelDetail,
-    vulnerabilityIntelDetailLoading
+    selectedVulnerabilityIntelDetail: detailQuery.data ?? null,
+    vulnerabilityIntelDetailLoading: detailQuery.isLoading || detailQuery.isFetching
   };
 }

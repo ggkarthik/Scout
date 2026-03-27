@@ -1,72 +1,67 @@
 import React from 'react';
-import { DashboardPage } from './pages/DashboardPage';
-import { ConnectPage } from './pages/ConnectPage';
-import { ConfigurationsPage } from './pages/ConfigurationsPage';
-import { FindingsPage } from './pages/FindingsPage';
-import { InventoryPage } from './pages/InventoryPage';
+import { Navigate, Routes, Route, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { InventoryViewKey } from './features/inventory/types';
-import { SoftwareIdentitiesPage } from './pages/SoftwareIdentitiesPage';
+import type { ConnectRouteView, VulnerabilityIntelRouteView, AppTab } from './app/routes';
 import {
-  OperationalDashboardPage,
-  OPERATIONS_NAV_ITEMS,
-  OperationsViewKey,
-  normalizeOperationsView
-} from './pages/OperationalDashboardPage';
-import {
-  VulnerabilityIntelDashboardPage,
-  VulnerabilityIntelViewKey
-} from './pages/VulnerabilityIntelDashboardPage';
-import { VulnerabilityIntelOrgCvePage } from './pages/VulnerabilityIntelOrgCvePage';
-import { EolPage } from './pages/EolPage';
-import {
-  buildPathWithQueryParams,
-  readQueryParam,
-  replaceBrowserQueryParams
-} from './utils/queryState';
-import './styles.css';
+  activeTabForPath,
+  buildLegacyCompatiblePath,
+  normalizeConnectRouteView,
+  normalizeInventoryRouteView,
+  normalizeOperationsRouteView,
+  pathForConnectView,
+  pathForInventoryView,
+  pathForOperationsView,
+  pathForTab,
+  pathForVulnerabilityIntelView,
+  titleForTab
+} from './app/routes';
+import { ActorProvider } from './features/auth/provider';
+import './styles/index.css';
 
-type Tab =
-  | 'dashboard'
-  | 'findings'
-  | 'operations'
-  | 'vulnerability-intelligence'
-  | 'inventory'
-  | 'end-of-life'
-  | 'connect'
-  | 'configurations';
+const DashboardPage = React.lazy(async () => ({
+  default: (await import('./pages/DashboardPage')).DashboardPage
+}));
+const FindingsPage = React.lazy(async () => ({
+  default: (await import('./pages/FindingsPage')).FindingsPage
+}));
+const OperationalDashboardPage = React.lazy(async () => ({
+  default: (await import('./pages/OperationalDashboardPage')).OperationalDashboardPage
+}));
+const VulnerabilityIntelDashboardPage = React.lazy(async () => ({
+  default: (await import('./pages/VulnerabilityIntelDashboardPage')).VulnerabilityIntelDashboardPage
+}));
+const VulnerabilityIntelOrgCvePage = React.lazy(async () => ({
+  default: (await import('./pages/VulnerabilityIntelOrgCvePage')).VulnerabilityIntelOrgCvePage
+}));
+const InventoryPage = React.lazy(async () => ({
+  default: (await import('./pages/InventoryPage')).InventoryPage
+}));
+const SoftwareIdentitiesPage = React.lazy(async () => ({
+  default: (await import('./pages/SoftwareIdentitiesPage')).SoftwareIdentitiesPage
+}));
+const EolPage = React.lazy(async () => ({
+  default: (await import('./pages/EolPage')).EolPage
+}));
+const ConnectPage = React.lazy(async () => ({
+  default: (await import('./pages/ConnectPage')).ConnectPage
+}));
+const ConfigurationsPage = React.lazy(async () => ({
+  default: (await import('./pages/ConfigurationsPage')).ConfigurationsPage
+}));
+
 type Theme = 'light' | 'dark';
+
 const THEME_STORAGE_KEY = 'scoutai-theme';
-
-const tabs: { key: Tab; label: string; navLabel: string }[] = [
-  { key: 'dashboard', label: 'Overview', navLabel: 'Overview' },
-  { key: 'findings', label: 'Findings', navLabel: 'Findings' },
-  { key: 'operations', label: 'Operational Dashboard', navLabel: 'Operations' },
-  { key: 'vulnerability-intelligence', label: 'Vulnerability Intelligence', navLabel: 'Vuln Intel' },
-  { key: 'inventory', label: 'Inventory', navLabel: 'Inventory' },
-  { key: 'end-of-life', label: 'End-of-Life', navLabel: 'EOL' },
-  { key: 'connect', label: 'Connect', navLabel: 'Connect' },
-  { key: 'configurations', label: 'Configurations', navLabel: 'Config' }
+const PRIMARY_NAV_TABS: AppTab[] = [
+  'dashboard',
+  'findings',
+  'operations',
+  'vulnerability-intelligence',
+  'inventory',
+  'end-of-life'
 ];
-
-const primaryNavTabs: Tab[] = ['dashboard', 'findings', 'operations', 'vulnerability-intelligence', 'inventory', 'end-of-life'];
-const bottomNavTabs: Tab[] = ['connect', 'configurations'];
-
-const INVENTORY_VIEW_QUERY_KEY = 'inventoryView';
-const OPERATIONS_VIEW_QUERY_KEY = 'operationsView';
-const VULN_INTEL_VIEW_QUERY_KEY = 'vulnIntelView';
-
-const vulnerabilityIntelNavItems: Array<{ key: VulnerabilityIntelViewKey; label: string }> = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'vulnerabilities', label: 'Vulnerabilities' },
-  { key: 'org-cves', label: 'CVE Assessment Workbench' }
-];
-
-type InventoryFlyoutGroup = {
-  title: string;
-  items: Array<{ key: InventoryViewKey; label: string }>;
-};
-
-const inventoryFlyoutGroups: InventoryFlyoutGroup[] = [
+const BOTTOM_NAV_TABS: AppTab[] = ['connect', 'configurations'];
+const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: InventoryViewKey; label: string }> }> = [
   {
     title: 'Summary',
     items: [
@@ -92,8 +87,26 @@ const inventoryFlyoutGroups: InventoryFlyoutGroup[] = [
     ]
   }
 ];
+const OPERATIONS_NAV_ITEMS = [
+  { key: 'quality', label: 'Quality' },
+  { key: 'pipeline', label: 'Pipeline' },
+  { key: 'platform-health', label: 'Platform Health' }
+] as const;
+const VULNERABILITY_INTEL_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'vulnerabilities', label: 'Vulnerabilities' },
+  { key: 'org-cves', label: 'CVE Assessment Workbench' }
+];
 
-function TabIcon({ tab }: { tab: Tab }) {
+function getInitialTheme(): Theme {
+  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  if (saved === 'light' || saved === 'dark') {
+    return saved;
+  }
+  return 'dark';
+}
+
+function TabIcon({ tab }: { tab: AppTab }) {
   if (tab === 'dashboard') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -165,110 +178,6 @@ function TabIcon({ tab }: { tab: Tab }) {
   );
 }
 
-function isTab(value: string | null): value is Tab {
-  return tabs.some((tab) => tab.key === value);
-}
-
-function isInventoryView(value: string | null): value is InventoryViewKey {
-  return inventoryFlyoutGroups.some((group) => group.items.some((item) => item.key === value));
-}
-
-function isOperationsView(value: string | null): value is OperationsViewKey {
-  return OPERATIONS_NAV_ITEMS.some((item) => item.key === value);
-}
-
-function isVulnerabilityIntelView(value: string | null): value is VulnerabilityIntelViewKey {
-  return vulnerabilityIntelNavItems.some((item) => item.key === value);
-}
-
-function getInitialTheme(): Theme {
-  const saved = localStorage.getItem(THEME_STORAGE_KEY);
-  if (saved === 'light' || saved === 'dark') {
-    return saved;
-  }
-  return 'dark';
-}
-
-function readInitialRoute(): { tab: Tab } {
-  const rawTab = readQueryParam('tab');
-  const rawInventoryView = readQueryParam(INVENTORY_VIEW_QUERY_KEY);
-  if (rawTab === 'ingestion' || rawTab === 'sources') {
-    return { tab: 'connect' };
-  }
-  if (rawTab === 'configurations') {
-    return { tab: 'configurations' };
-  }
-  if (rawTab === 'assets') {
-    return { tab: 'inventory' };
-  }
-  return {
-    tab: isTab(rawTab) ? rawTab : 'dashboard'
-  };
-}
-
-function readInitialInventoryView(): InventoryViewKey {
-  const fromQuery = readQueryParam(INVENTORY_VIEW_QUERY_KEY);
-  if (fromQuery === 'imported-assets') {
-    return 'software-identities';
-  }
-  if (fromQuery === 'host-review-queue' || fromQuery === 'host-details') {
-    return 'hosts';
-  }
-  return isInventoryView(fromQuery) ? fromQuery : 'sbom';
-}
-
-function readInitialOperationsView(): OperationsViewKey {
-  const fromQuery = readQueryParam(OPERATIONS_VIEW_QUERY_KEY);
-  return normalizeOperationsView(fromQuery);
-}
-
-function readInitialVulnerabilityIntelView(): VulnerabilityIntelViewKey {
-  const fromQuery = readQueryParam(VULN_INTEL_VIEW_QUERY_KEY);
-  return isVulnerabilityIntelView(fromQuery) ? fromQuery : 'dashboard';
-}
-
-function updateTabInUrl(tab: Tab): void {
-  replaceBrowserQueryParams({ tab });
-}
-
-function updateInventoryViewInUrl(view: InventoryViewKey): void {
-  replaceBrowserQueryParams({ [INVENTORY_VIEW_QUERY_KEY]: view });
-}
-
-function updateOperationsViewInUrl(view: OperationsViewKey): void {
-  replaceBrowserQueryParams({ [OPERATIONS_VIEW_QUERY_KEY]: view });
-}
-
-function updateVulnerabilityIntelViewInUrl(view: VulnerabilityIntelViewKey): void {
-  replaceBrowserQueryParams({ [VULN_INTEL_VIEW_QUERY_KEY]: view });
-}
-
-function buildAppHref(
-  tab: Tab,
-  options?: {
-    inventoryView?: InventoryViewKey;
-    operationsView?: OperationsViewKey;
-    vulnerabilityIntelView?: VulnerabilityIntelViewKey;
-  }
-): string {
-  return buildPathWithQueryParams({
-    tab,
-    [INVENTORY_VIEW_QUERY_KEY]: options?.inventoryView,
-    [OPERATIONS_VIEW_QUERY_KEY]: options?.operationsView,
-    [VULN_INTEL_VIEW_QUERY_KEY]: options?.vulnerabilityIntelView
-  });
-}
-
-function matchTabFromInput(value: string, allowedTabs: Tab[]): Tab | null {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  const allowed = tabs.filter((tab) => allowedTabs.includes(tab.key));
-  const exact = allowed.find((tab) => tab.label.toLowerCase() === normalized || tab.key.toLowerCase() === normalized);
-  if (exact) return exact.key;
-  const partial = allowed.find((tab) => tab.label.toLowerCase().includes(normalized));
-  return partial ? partial.key : null;
-}
-
 function SunIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -286,25 +195,128 @@ function MoonIcon() {
   );
 }
 
+function LegacyQueryRedirect() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    if (location.pathname !== '/') {
+      return;
+    }
+    const nextPath = buildLegacyCompatiblePath(location.search);
+    if (nextPath && nextPath !== `${location.pathname}${location.search}`) {
+      navigate(nextPath, { replace: true });
+    }
+  }, [location.pathname, location.search, navigate]);
+
+  return null;
+}
+
+function DashboardRoute() {
+  const navigate = useNavigate();
+  return <DashboardPage onViewEol={() => navigate('/end-of-life')} />;
+}
+
+function FindingsRoute() {
+  const navigate = useNavigate();
+  return (
+    <FindingsPage
+      onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnerabilityIntelView('org-cves', vulnerabilityId))}
+    />
+  );
+}
+
+function OperationsRoute() {
+  const params = useParams<{ operationsView?: string }>();
+  return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} />;
+}
+
+function VulnerabilityIntelDashboardRoute() {
+  const navigate = useNavigate();
+  return (
+    <VulnerabilityIntelDashboardPage
+      onOpenVulnerabilities={() => navigate(pathForVulnerabilityIntelView('vulnerabilities'))}
+    />
+  );
+}
+
+function VulnerabilityIntelWorkbenchRoute() {
+  const navigate = useNavigate();
+  const params = useParams<{ cveId?: string }>();
+  return (
+    <VulnerabilityIntelOrgCvePage
+      initialCveId={params.cveId}
+      onSelectedCveChange={(cveId) => navigate(pathForVulnerabilityIntelView('org-cves', cveId), { replace: true })}
+    />
+  );
+}
+
+function InventoryRoute() {
+  const params = useParams<{ inventoryView?: string }>();
+  const selectedView = normalizeInventoryRouteView(params.inventoryView);
+  if (selectedView === 'software-identities') {
+    return <SoftwareIdentitiesPage />;
+  }
+  return <InventoryPage selectedView={selectedView} />;
+}
+
+function ConnectRoute() {
+  const navigate = useNavigate();
+  const params = useParams<{ connectView?: string }>();
+  return (
+    <ConnectPage
+      initialView={normalizeConnectRouteView(params.connectView)}
+      onViewChange={(view: ConnectRouteView) => navigate(pathForConnectView(view), { replace: true })}
+    />
+  );
+}
+
+function matchTabFromInput(value: string, allowedTabs: AppTab[]): AppTab | null {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  const labels = allowedTabs.map((tab) => ({ key: tab, label: titleForTab(tab) }));
+  const exact = labels.find((tab) => tab.label.toLowerCase() === normalized || tab.key.toLowerCase() === normalized);
+  if (exact) return exact.key;
+  const partial = labels.find((tab) => tab.label.toLowerCase().includes(normalized));
+  return partial ? partial.key : null;
+}
+
+function routeLoadingFallback() {
+  return (
+    <div className="page-grid">
+      <section className="panel">
+        <div className="notice">Loading page...</div>
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
-  const initialRoute = React.useMemo(() => readInitialRoute(), []);
-  const [activeTab, setActiveTab] = React.useState<Tab>(initialRoute.tab);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
   const [tabSearch, setTabSearch] = React.useState('');
   const quickJumpRef = React.useRef<HTMLInputElement>(null);
-  const [inventoryView, setInventoryView] = React.useState<InventoryViewKey>(() => readInitialInventoryView());
-  const [operationsView, setOperationsView] = React.useState<OperationsViewKey>(() => readInitialOperationsView());
-  const [vulnerabilityIntelView, setVulnerabilityIntelView] = React.useState<VulnerabilityIntelViewKey>(() => (
-    readInitialVulnerabilityIntelView()
-  ));
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [vulnerabilityIntelFlyoutOpen, setVulnerabilityIntelFlyoutOpen] = React.useState(false);
-  const [initialCveId, setInitialCveId] = React.useState<string | undefined>(undefined);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
   const vulnerabilityIntelFlyoutTimer = React.useRef<number | null>(null);
+
+  const activeTab = activeTabForPath(location.pathname);
+  const activeTitle = titleForTab(activeTab);
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
+  const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
+  const activeVulnerabilityIntelView = pathSegments[1] === 'vulnerabilities'
+    ? 'vulnerabilities'
+    : pathSegments[1] === 'org-cves'
+      ? 'org-cves'
+      : 'dashboard';
+  const tabSearchSuggestions = [...PRIMARY_NAV_TABS, ...BOTTOM_NAV_TABS]
+    .filter((tab) => titleForTab(tab).toLowerCase().includes(tabSearch.trim().toLowerCase()));
 
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -312,34 +324,8 @@ export default function App() {
   }, [theme]);
 
   React.useEffect(() => {
-    updateTabInUrl(activeTab);
     setNavOpen(false);
-  }, [activeTab]);
-
-  React.useEffect(() => {
-    updateInventoryViewInUrl(inventoryView);
-  }, [inventoryView]);
-
-  React.useEffect(() => {
-    updateOperationsViewInUrl(operationsView);
-  }, [operationsView]);
-
-  React.useEffect(() => {
-    updateVulnerabilityIntelViewInUrl(vulnerabilityIntelView);
-  }, [vulnerabilityIntelView]);
-
-  React.useEffect(() => {
-    const handlePopState = (): void => {
-      const route = readInitialRoute();
-      setActiveTab(route.tab);
-      setInventoryView(readInitialInventoryView());
-      setOperationsView(readInitialOperationsView());
-      setVulnerabilityIntelView(readInitialVulnerabilityIntelView());
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [location.pathname]);
 
   React.useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent): void => {
@@ -364,12 +350,6 @@ export default function App() {
       window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
     }
   }, []);
-
-  const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
-  const visiblePrimaryTabs = primaryNavTabs;
-  const tabSearchSuggestions = tabs
-    .filter((tab) => visiblePrimaryTabs.includes(tab.key) || bottomNavTabs.includes(tab.key))
-    .filter((tab) => tab.label.toLowerCase().includes(tabSearch.trim().toLowerCase()));
 
   const openInventoryFlyout = (): void => {
     if (inventoryFlyoutTimer.current != null) {
@@ -407,38 +387,6 @@ export default function App() {
     }, 180);
   };
 
-  const applyTabSearch = (): void => {
-    const next = matchTabFromInput(tabSearch, [...visiblePrimaryTabs, ...bottomNavTabs]);
-    if (!next) return;
-    setActiveTab(next);
-    setTabSearch('');
-  };
-
-  const renderNavButton = (tab: Tab): React.ReactNode => (
-    <button
-      key={tab}
-      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
-      onClick={() => {
-        setActiveTab(tab);
-        setNavOpen(false);
-        if (tab !== 'inventory') {
-          setInventoryFlyoutOpen(false);
-        }
-        if (tab !== 'operations') {
-          setOperationsFlyoutOpen(false);
-        }
-        if (tab !== 'vulnerability-intelligence') {
-          setVulnerabilityIntelFlyoutOpen(false);
-        }
-      }}
-    >
-      <span className="nav-icon">
-        <TabIcon tab={tab} />
-      </span>
-      <span className="nav-label">{tabs.find((entry) => entry.key === tab)?.navLabel ?? tab}</span>
-    </button>
-  );
-
   const openVulnerabilityIntelFlyout = (): void => {
     if (vulnerabilityIntelFlyoutTimer.current != null) {
       window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
@@ -457,273 +405,284 @@ export default function App() {
     }, 180);
   };
 
+  const navigateToTab = (tab: AppTab): void => {
+    navigate(pathForTab(tab));
+    if (tab !== 'inventory') {
+      setInventoryFlyoutOpen(false);
+    }
+    if (tab !== 'operations') {
+      setOperationsFlyoutOpen(false);
+    }
+    if (tab !== 'vulnerability-intelligence') {
+      setVulnerabilityIntelFlyoutOpen(false);
+    }
+  };
+
+  const applyTabSearch = (): void => {
+    const next = matchTabFromInput(tabSearch, [...PRIMARY_NAV_TABS, ...BOTTOM_NAV_TABS]);
+    if (!next) return;
+    navigateToTab(next);
+    setTabSearch('');
+  };
+
+  const renderNavButton = (tab: AppTab): React.ReactNode => (
+    <button
+      key={tab}
+      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
+      onClick={() => navigateToTab(tab)}
+    >
+      <span className="nav-icon">
+        <TabIcon tab={tab} />
+      </span>
+      <span className="nav-label">{titleForTab(tab)}</span>
+    </button>
+  );
+
   return (
-    <div className="app-shell">
-      <aside className={navOpen ? 'sidebar open' : 'sidebar'}>
-        <div className="brand-block compact">
-          <div className="brand-mark">SA</div>
-          <div className="brand">Scout.ai</div>
-        </div>
+    <ActorProvider>
+      <LegacyQueryRedirect />
+      <div className="app-shell">
+        <aside className={navOpen ? 'sidebar open' : 'sidebar'}>
+          <div className="brand-block compact">
+            <div className="brand-mark">SA</div>
+            <div className="brand">Scout.ai</div>
+          </div>
 
-        <div className="nav-main-section">
-          {visiblePrimaryTabs.map((tab) => {
-            if (tab === 'operations') {
-              return (
-                <div
-                  key={tab}
-                  className="operations-nav-wrap"
-                  onMouseEnter={openOperationsFlyout}
-                  onMouseLeave={closeOperationsFlyoutWithDelay}
-                >
-                  <button
-                    className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
-                    onClick={() => {
-                      setActiveTab('operations');
-                      setNavOpen(false);
-                      setInventoryFlyoutOpen(false);
-                      setVulnerabilityIntelFlyoutOpen(false);
-                      setOperationsFlyoutOpen((open) => !open);
-                    }}
-                  >
-                    <span className="nav-icon">
-                      <TabIcon tab="operations" />
-                    </span>
-                    <span className="nav-label">Operations</span>
-                  </button>
-
-                  {operationsFlyoutOpen && (
-                    <div
-                      className="operations-flyout"
-                      onMouseEnter={openOperationsFlyout}
-                      onMouseLeave={closeOperationsFlyoutWithDelay}
-                    >
-                      <div className="operations-flyout-header">
-                        <span>Operations</span>
-                        <span aria-hidden="true">→</span>
-                      </div>
-                      <div className="operations-flyout-items">
-                        {OPERATIONS_NAV_ITEMS.map((item) => (
-                          <a
-                            key={item.key}
-                            href={buildAppHref('operations', { operationsView: item.key })}
-                            className={operationsView === item.key ? 'operations-flyout-item active' : 'operations-flyout-item'}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              setActiveTab('operations');
-                              setOperationsView(item.key);
-                              setOperationsFlyoutOpen(false);
-                            }}
-                          >
-                            <span>{item.label}</span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-            if (tab === 'vulnerability-intelligence') {
-              return (
-                <div
-                  key={tab}
-                  className="vuln-intel-nav-wrap"
-                  onMouseEnter={openVulnerabilityIntelFlyout}
-                  onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
-                >
-                  <button
-                    className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
-                    onClick={() => {
-                      setActiveTab('vulnerability-intelligence');
-                      setNavOpen(false);
-                      setInventoryFlyoutOpen(false);
-                      setOperationsFlyoutOpen(false);
-                      setVulnerabilityIntelFlyoutOpen((open) => !open);
-                    }}
-                  >
-                    <span className="nav-icon">
-                      <TabIcon tab="vulnerability-intelligence" />
-                    </span>
-                    <span className="nav-label">Vuln Intel</span>
-                  </button>
-
-                  {vulnerabilityIntelFlyoutOpen && (
-                    <div
-                      className="vuln-intel-flyout"
-                      onMouseEnter={openVulnerabilityIntelFlyout}
-                      onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
-                    >
-                      <div className="vuln-intel-flyout-header">
-                        <span>Vulnerability Intel</span>
-                        <span aria-hidden="true">→</span>
-                      </div>
-                      <div className="vuln-intel-flyout-items">
-                        {vulnerabilityIntelNavItems.map((item) => (
-                          <button
-                            key={item.key}
-                            type="button"
-                            className={vulnerabilityIntelView === item.key ? 'vuln-intel-flyout-item active' : 'vuln-intel-flyout-item'}
-                            onClick={() => {
-                              setActiveTab('vulnerability-intelligence');
-                              setVulnerabilityIntelView(item.key);
-                              setVulnerabilityIntelFlyoutOpen(false);
-                            }}
-                          >
-                            <span>{item.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-            if (tab !== 'inventory') {
-              return renderNavButton(tab);
-            }
-            return (
-              <div
-                key={tab}
-                className="inventory-nav-wrap"
-                onMouseEnter={openInventoryFlyout}
-                onMouseLeave={closeInventoryFlyoutWithDelay}
-              >
-                {renderNavButton(tab)}
-                {inventoryFlyoutOpen && (
+          <div className="nav-main-section">
+            {PRIMARY_NAV_TABS.map((tab) => {
+              if (tab === 'operations') {
+                return (
                   <div
-                    className="inventory-flyout"
-                    onMouseEnter={openInventoryFlyout}
-                    onMouseLeave={closeInventoryFlyoutWithDelay}
+                    key={tab}
+                    className="operations-nav-wrap"
+                    onMouseEnter={openOperationsFlyout}
+                    onMouseLeave={closeOperationsFlyoutWithDelay}
                   >
-                    <div className="inventory-flyout-header">
-                      <span>Inventory</span>
-                      <span aria-hidden="true">→</span>
-                    </div>
-                    <div className="inventory-flyout-scroll">
-                      {inventoryFlyoutGroups.map((group) => (
-                        <div key={group.title} className="inventory-flyout-group">
-                          <div className="inventory-flyout-group-title">{group.title}</div>
-                          <div className="inventory-flyout-items">
-                            {group.items.map((item) => (
-                              <button
-                                key={item.key}
-                                type="button"
-                                className={inventoryView === item.key ? 'inventory-flyout-item active' : 'inventory-flyout-item'}
-                                onClick={() => {
-                                  setInventoryView(item.key);
-                                  setActiveTab('inventory');
-                                  setInventoryFlyoutOpen(false);
-                                  setOperationsFlyoutOpen(false);
-                                  setVulnerabilityIntelFlyoutOpen(false);
-                                }}
-                              >
-                                <span>{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
+                    <button
+                      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
+                      onClick={() => {
+                        navigate(pathForOperationsView(activeOperationsView));
+                        setOperationsFlyoutOpen((open) => !open);
+                      }}
+                    >
+                      <span className="nav-icon">
+                        <TabIcon tab="operations" />
+                      </span>
+                      <span className="nav-label">Operations</span>
+                    </button>
+
+                    {operationsFlyoutOpen && (
+                      <div
+                        className="operations-flyout"
+                        onMouseEnter={openOperationsFlyout}
+                        onMouseLeave={closeOperationsFlyoutWithDelay}
+                      >
+                        <div className="operations-flyout-header">
+                          <span>Operations</span>
+                          <span aria-hidden="true">→</span>
                         </div>
-                      ))}
+                        <div className="operations-flyout-items">
+                          {OPERATIONS_NAV_ITEMS.map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              className={activeOperationsView === item.key ? 'operations-flyout-item active' : 'operations-flyout-item'}
+                              onClick={() => {
+                                navigate(pathForOperationsView(item.key));
+                                setOperationsFlyoutOpen(false);
+                              }}
+                            >
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              if (tab === 'vulnerability-intelligence') {
+                return (
+                  <div
+                    key={tab}
+                    className="vuln-intel-nav-wrap"
+                    onMouseEnter={openVulnerabilityIntelFlyout}
+                    onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
+                  >
+                    <button
+                      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
+                      onClick={() => {
+                        navigate(pathForVulnerabilityIntelView(activeVulnerabilityIntelView));
+                        setVulnerabilityIntelFlyoutOpen((open) => !open);
+                      }}
+                    >
+                      <span className="nav-icon">
+                        <TabIcon tab="vulnerability-intelligence" />
+                      </span>
+                      <span className="nav-label">Vuln Intel</span>
+                    </button>
+
+                    {vulnerabilityIntelFlyoutOpen && (
+                      <div
+                        className="vuln-intel-flyout"
+                        onMouseEnter={openVulnerabilityIntelFlyout}
+                        onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
+                      >
+                        <div className="vuln-intel-flyout-header">
+                          <span>Vulnerability Intel</span>
+                          <span aria-hidden="true">→</span>
+                        </div>
+                        <div className="vuln-intel-flyout-items">
+                          {VULNERABILITY_INTEL_NAV_ITEMS.map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              className={activeVulnerabilityIntelView === item.key ? 'vuln-intel-flyout-item active' : 'vuln-intel-flyout-item'}
+                              onClick={() => {
+                                navigate(pathForVulnerabilityIntelView(item.key));
+                                setVulnerabilityIntelFlyoutOpen(false);
+                              }}
+                            >
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              if (tab !== 'inventory') {
+                return renderNavButton(tab);
+              }
+              return (
+                <div
+                  key={tab}
+                  className="inventory-nav-wrap"
+                  onMouseEnter={openInventoryFlyout}
+                  onMouseLeave={closeInventoryFlyoutWithDelay}
+                >
+                  {renderNavButton(tab)}
+                  {inventoryFlyoutOpen && (
+                    <div
+                      className="inventory-flyout"
+                      onMouseEnter={openInventoryFlyout}
+                      onMouseLeave={closeInventoryFlyoutWithDelay}
+                    >
+                      <div className="inventory-flyout-header">
+                        <span>Inventory</span>
+                        <span aria-hidden="true">→</span>
+                      </div>
+                      <div className="inventory-flyout-scroll">
+                        {INVENTORY_FLYOUT_GROUPS.map((group) => (
+                          <div key={group.title} className="inventory-flyout-group">
+                            <div className="inventory-flyout-group-title">{group.title}</div>
+                            <div className="inventory-flyout-items">
+                              {group.items.map((item) => (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  className={activeInventoryView === item.key ? 'inventory-flyout-item active' : 'inventory-flyout-item'}
+                                  onClick={() => {
+                                    navigate(pathForInventoryView(item.key));
+                                    setInventoryFlyoutOpen(false);
+                                  }}
+                                >
+                                  <span>{item.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="nav-bottom-section">
+            {BOTTOM_NAV_TABS.map((tab) => renderNavButton(tab))}
+          </div>
+        </aside>
+
+        <main className="content">
+          <header className="topbar">
+            <div className="topbar-copy">
+              <div className="eyebrow">Enterprise Vulnerability Operations</div>
+              <h1>{activeTitle}</h1>
+            </div>
+            <div className="topbar-actions">
+              <div className="quick-jump">
+                <input
+                  ref={quickJumpRef}
+                  value={tabSearch}
+                  onChange={(event) => setTabSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      applyTabSearch();
+                    }
+                  }}
+                  placeholder="Jump to page..."
+                  aria-label="Jump to page"
+                />
+                {!tabSearch && <span className="quick-jump-kbd">⌘K</span>}
+                {tabSearch.trim() && tabSearchSuggestions.length > 0 && (
+                  <div className="quick-jump-menu">
+                    {tabSearchSuggestions.map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className="quick-jump-item"
+                        onClick={() => {
+                          navigateToTab(tab);
+                          setTabSearch('');
+                        }}
+                      >
+                        {titleForTab(tab)}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-
-        <div className="nav-bottom-section">
-          {bottomNavTabs.map((tab) => renderNavButton(tab))}
-        </div>
-      </aside>
-
-      <main className="content">
-        <header className="topbar">
-          <div className="topbar-copy">
-            <div className="eyebrow">Enterprise Vulnerability Operations</div>
-            <h1>{activeTabMeta.label}</h1>
-          </div>
-          <div className="topbar-actions">
-            <div className="quick-jump">
-              <input
-                ref={quickJumpRef}
-                value={tabSearch}
-                onChange={(event) => setTabSearch(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    applyTabSearch();
-                  }
-                }}
-                placeholder="Jump to page..."
-                aria-label="Jump to page"
-              />
-              {!tabSearch && <span className="quick-jump-kbd">⌘K</span>}
-              {tabSearch.trim() && tabSearchSuggestions.length > 0 && (
-                <div className="quick-jump-menu">
-                  {tabSearchSuggestions.map((tab) => (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className="quick-jump-item"
-                      onClick={() => {
-                        setActiveTab(tab.key);
-                        setTabSearch('');
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                className="btn btn-secondary nav-toggle"
+                onClick={() => setNavOpen((current) => !current)}
+              >
+                {navOpen ? 'Close Menu' : 'Menu'}
+              </button>
+              <button
+                className="btn btn-secondary theme-icon-btn"
+                onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              >
+                {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+              </button>
             </div>
-            <button
-              className="btn btn-secondary nav-toggle"
-              onClick={() => setNavOpen((current) => !current)}
-            >
-              {navOpen ? 'Close Menu' : 'Menu'}
-            </button>
-            <button
-              className="btn btn-secondary theme-icon-btn"
-              onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
-            >
-              {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-            </button>
-          </div>
-        </header>
+          </header>
 
-        {activeTab === 'dashboard' && <DashboardPage onViewEol={() => setActiveTab('end-of-life')} />}
-        {activeTab === 'findings' && (
-          <FindingsPage
-            onOpenCveWorkbench={(vulnerabilityId) => {
-              setInitialCveId(vulnerabilityId);
-              setActiveTab('vulnerability-intelligence');
-              setVulnerabilityIntelView('org-cves');
-            }}
-          />
-        )}
-        {activeTab === 'operations' && <OperationalDashboardPage selectedView={operationsView} />}
-        {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'dashboard' && (
-          <VulnerabilityIntelDashboardPage onOpenVulnerabilities={() => setVulnerabilityIntelView('vulnerabilities')} />
-        )}
-        {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'vulnerabilities' && (
-          <InventoryPage selectedView="vulnerability-intelligence" />
-        )}
-        {activeTab === 'vulnerability-intelligence' && vulnerabilityIntelView === 'org-cves' && (
-          <VulnerabilityIntelOrgCvePage initialCveId={initialCveId} />
-        )}
-        {activeTab === 'inventory' && (
-          inventoryView === 'software-identities'
-            ? <SoftwareIdentitiesPage />
-            : <InventoryPage selectedView={inventoryView} />
-        )}
-        {activeTab === 'end-of-life' && <EolPage />}
-        {activeTab === 'connect' && <ConnectPage />}
-        {activeTab === 'configurations' && <ConfigurationsPage />}
-      </main>
+          <React.Suspense fallback={routeLoadingFallback()}>
+            <Routes>
+              <Route path="/" element={<DashboardRoute />} />
+              <Route path="/findings" element={<FindingsRoute />} />
+              <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
+              <Route path="/vulnerability-intelligence" element={<VulnerabilityIntelDashboardRoute />} />
+              <Route path="/vulnerability-intelligence/vulnerabilities" element={<InventoryPage selectedView="vulnerability-intelligence" />} />
+              <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<VulnerabilityIntelWorkbenchRoute />} />
+              <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
+              <Route path="/end-of-life" element={<EolPage />} />
+              <Route path="/connect/:connectView?" element={<ConnectRoute />} />
+              <Route path="/configurations" element={<ConfigurationsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </React.Suspense>
+        </main>
 
-      {navOpen && <button type="button" className="mobile-nav-backdrop" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
-    </div>
+        {navOpen && <button type="button" className="mobile-nav-backdrop" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
+      </div>
+    </ActorProvider>
   );
 }

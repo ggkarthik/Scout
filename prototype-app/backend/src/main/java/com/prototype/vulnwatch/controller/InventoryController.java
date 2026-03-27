@@ -11,7 +11,7 @@ import com.prototype.vulnwatch.service.InventoryService;
 import com.prototype.vulnwatch.service.SoftwareIdentityReadService;
 import java.util.List;
 import java.util.UUID;
-import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,16 +22,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/inventory")
 public class InventoryController {
 
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final InventoryService inventoryService;
     private final SoftwareIdentityReadService softwareIdentityReadService;
 
     public InventoryController(
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             InventoryService inventoryService,
             SoftwareIdentityReadService softwareIdentityReadService
     ) {
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.inventoryService = inventoryService;
         this.softwareIdentityReadService = softwareIdentityReadService;
     }
@@ -47,13 +47,13 @@ public class InventoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size
     ) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return inventoryService.listComponentsPage(tenant, assetType, componentStatus, sourceSystem, ecosystem, reviewCategory, query, page, size);
     }
 
     @GetMapping("/components/filters")
     public InventoryComponentFilterValuesResponse componentFilters() {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return inventoryService.listComponentFilterValues(tenant);
     }
 
@@ -68,13 +68,13 @@ public class InventoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size
     ) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return softwareIdentityReadService.listPage(tenant, assetType, sourceSystem, ecosystem, query, lifecycle, mappingState, page, size);
     }
 
     @GetMapping("/software-identities/{softwareIdentityId}")
     public SoftwareIdentityDetailResponse getSoftwareIdentity(@PathVariable UUID softwareIdentityId) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return softwareIdentityReadService.getDetail(tenant, softwareIdentityId);
     }
 }

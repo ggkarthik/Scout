@@ -1,13 +1,17 @@
 import React from 'react';
-import { api } from '../api/client';
-import { Finding, FindingFilterValues } from '../types';
+import type { Finding, FindingFilterValues } from '../features/findings/types';
 import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
 import { MultiGroupBy, MultiGroupByOption } from '../components/MultiGroupBy';
-import { ResizableTable } from '../components/ResizableTable';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
 import { StatCard } from '../components/StatCard';
 import { ColumnVisibilityToggle, ColumnDef } from '../components/ColumnVisibilityToggle';
 import { EolBadge } from '../components/EolBadge';
+import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
 
 const PAGE_SIZE = 25;
 const DEFAULT_MATCH_METHODS: string[] = [];
@@ -216,14 +220,7 @@ function groupValue(row: Finding, key: string): string {
 }
 
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
-  const [rows, setRows] = React.useState<Finding[]>([]);
   const [page, setPage] = React.useState(0);
-  const [totalItems, setTotalItems] = React.useState(0);
-  const [totalPages, setTotalPages] = React.useState(0);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState('');
-
-  const [filterValues, setFilterValues] = React.useState<FindingFilterValues>(DEFAULT_FILTER_VALUES);
   const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(DEFAULT_ACTIVE_FILTERS);
   const [severities, setSeverities] = React.useState<string[]>([]);
   const [statuses, setStatuses] = React.useState<string[]>([]);
@@ -237,8 +234,142 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [packageName, setPackageName] = React.useState('');
   const [ecosystem, setEcosystem] = React.useState('');
   const [groupBy, setGroupBy] = React.useState<string[]>([]);
-  const loadRequestIdRef = React.useRef(0);
   const [visibleColumns, setVisibleColumns] = React.useState<Set<string>>(loadColumnVisibility);
+  const findingFiltersQuery = useFindingFiltersQuery();
+  const filterValues: FindingFilterValues = findingFiltersQuery.data ?? DEFAULT_FILTER_VALUES;
+  const findingsQuery = useFindingsQuery({
+    page,
+    size: PAGE_SIZE,
+    severity: activeFilters.includes('severity') && severities.length > 0 ? severities : undefined,
+    status: activeFilters.includes('status') && statuses.length > 0 ? statuses : undefined,
+    decisionState: activeFilters.includes('decisionState') && decisionStates.length > 0 ? decisionStates : undefined,
+    matchMethod: activeFilters.includes('matchMethod') && matchMethods.length > 0 ? matchMethods : undefined,
+    vexStatus: activeFilters.includes('vexStatus') && vexStatuses.length > 0 ? vexStatuses : undefined,
+    vexFreshness: activeFilters.includes('vexFreshness') && vexFreshness.length > 0 ? vexFreshness : undefined,
+    vexProvider: activeFilters.includes('vexProvider') && vexProviders.length > 0 ? vexProviders : undefined,
+    minConfidence: activeFilters.includes('minConfidence') ? minConfidence : undefined,
+    vulnerabilityId: activeFilters.includes('vulnerabilityId') ? vulnerabilityId : undefined,
+    packageName: activeFilters.includes('packageName') ? packageName : undefined,
+    ecosystem: activeFilters.includes('ecosystem') ? ecosystem : undefined
+  });
+  const rows = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data?.items]);
+  const totalItems = findingsQuery.data?.totalItems ?? 0;
+  const totalPages = findingsQuery.data?.totalPages ?? 0;
+  const loading = findingsQuery.isLoading || findingsQuery.isFetching;
+  const error = findingsQuery.error instanceof Error ? findingsQuery.error.message : '';
+  const tableColumns = React.useMemo<DataTableColumn[]>(() => {
+    const columns: DataTableColumn[] = [];
+    if (visibleColumns.has('vulnerability')) columns.push({ id: 'vulnerability', label: 'Vulnerability', header: 'Vulnerability', initialSize: 160 });
+    if (visibleColumns.has('asset')) columns.push({ id: 'asset', label: 'Asset', header: 'Asset', initialSize: 180 });
+    if (visibleColumns.has('package')) columns.push({ id: 'package', label: 'Package', header: 'Package', initialSize: 180 });
+    if (visibleColumns.has('severity')) columns.push({ id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 });
+    if (visibleColumns.has('status')) columns.push({ id: 'status', label: 'Status', header: 'Status', initialSize: 140 });
+    if (visibleColumns.has('decision')) columns.push({ id: 'decision', label: 'Decision', header: 'Decision', initialSize: 140 });
+    if (visibleColumns.has('vex')) columns.push({ id: 'vex', label: 'VEX', header: 'VEX', initialSize: 180 });
+    if (visibleColumns.has('impact-reason')) columns.push({ id: 'impactReason', label: 'Impact Reason', header: 'Impact Reason', initialSize: 160 });
+    if (visibleColumns.has('risk')) columns.push({ id: 'risk', label: 'Risk', header: 'Risk', initialSize: 100 });
+    if (visibleColumns.has('confidence')) columns.push({ id: 'confidence', label: 'Confidence', header: 'Confidence', initialSize: 120 });
+    if (visibleColumns.has('match-method')) columns.push({ id: 'matchMethod', label: 'Match Method', header: 'Match Method', initialSize: 180 });
+    if (visibleColumns.has('kev')) columns.push({ id: 'kev', label: 'KEV', header: 'KEV', initialSize: 80 });
+    if (visibleColumns.has('eol-status')) columns.push({ id: 'eolStatus', label: 'EOL Status', header: 'EOL Status', initialSize: 160 });
+    if (visibleColumns.has('first-observed')) columns.push({ id: 'firstObserved', label: 'First Observed', header: 'First Observed', initialSize: 180 });
+    if (visibleColumns.has('last-observed')) columns.push({ id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 });
+    if (visibleColumns.has('evidence')) columns.push({ id: 'evidence', label: 'Evidence', header: 'Evidence', initialSize: 220 });
+    return columns;
+  }, [visibleColumns]);
+  const tableRows = React.useMemo<DataTableRow[]>(() => (
+    rows.map((row) => ({
+      id: row.id,
+      cells: {
+        vulnerability: {
+          content: onOpenCveWorkbench ? (
+            <button
+              type="button"
+              className="findings-vuln-link-btn"
+              onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
+            >
+              {row.vulnerabilityId}
+            </button>
+          ) : row.vulnerabilityId,
+          props: { className: 'mono' }
+        },
+        asset: {
+          content: (
+            <>
+              <div>{row.assetName}</div>
+              <div className="panel-caption">{formatLabel(row.assetType)}</div>
+            </>
+          )
+        },
+        package: {
+          content: (
+            <>
+              <div>{row.packageName}</div>
+              <div className="panel-caption mono">{row.packageVersion}</div>
+            </>
+          )
+        },
+        severity: {
+          content: (
+            <span className={`severity-pill severity-${row.severity.toLowerCase()}`}>
+              {row.severity}
+            </span>
+          )
+        },
+        status: {
+          content: (
+            <span className={`status-pill ${statusClass(row.status)}`}>
+              {row.status}
+            </span>
+          )
+        },
+        decision: { content: <span className="match-pill">{row.decisionState}</span> },
+        vex: {
+          content: (
+            <>
+              <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
+              <div className="panel-caption">
+                {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
+              </div>
+            </>
+          )
+        },
+        impactReason: { content: row.impactReason ? formatLabel(row.impactReason) : '-' },
+        risk: { content: row.riskScore.toFixed(2), props: { className: 'confidence-cell' } },
+        confidence: { content: `${(row.confidenceScore * 100).toFixed(1)}%`, props: { className: 'confidence-cell' } },
+        matchMethod: {
+          content: (
+            <>
+              <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
+              {row.matchedVexAssertionId && (
+                <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
+              )}
+            </>
+          )
+        },
+        kev: { content: row.inKev ? 'Yes' : 'No' },
+        eolStatus: {
+          content: (
+            <EolBadge
+              isEol={row.isEol}
+              daysRemaining={row.eolDaysRemaining}
+              eolDate={row.eolDate}
+            />
+          )
+        },
+        firstObserved: { content: row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-' },
+        lastObserved: { content: row.lastObservedAt ? new Date(row.lastObservedAt).toLocaleString() : '-' },
+        evidence: {
+          content: row.evidence ? (
+            <details className="evidence-details">
+              <summary>View</summary>
+              <pre>{row.evidence}</pre>
+            </details>
+          ) : '-'
+        }
+      }
+    }))
+  ), [onOpenCveWorkbench, rows]);
 
   function handleColumnVisibilityChange(next: Set<string>): void {
     setVisibleColumns(next);
@@ -292,7 +423,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     if (key === 'packageName') setPackageName('');
     if (key === 'ecosystem') setEcosystem('');
     setPage(0);
-  }, [filterValues.matchMethods]);
+  }, []);
 
   const clearFilters = React.useCallback(() => {
     setActiveFilters(DEFAULT_ACTIVE_FILTERS);
@@ -309,84 +440,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setEcosystem('');
     setPage(0);
   }, []);
-
-  const loadFindings = React.useCallback(() => {
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-    setLoading(true);
-    setError('');
-
-    api.listFindings({
-      page,
-      size: PAGE_SIZE,
-      severity: activeFilters.includes('severity') && severities.length > 0 ? severities : undefined,
-      status: activeFilters.includes('status') && statuses.length > 0 ? statuses : undefined,
-      decisionState: activeFilters.includes('decisionState') && decisionStates.length > 0 ? decisionStates : undefined,
-      matchMethod: activeFilters.includes('matchMethod') && matchMethods.length > 0 ? matchMethods : undefined,
-      vexStatus: activeFilters.includes('vexStatus') && vexStatuses.length > 0 ? vexStatuses : undefined,
-      vexFreshness: activeFilters.includes('vexFreshness') && vexFreshness.length > 0 ? vexFreshness : undefined,
-      vexProvider: activeFilters.includes('vexProvider') && vexProviders.length > 0 ? vexProviders : undefined,
-      minConfidence: activeFilters.includes('minConfidence') ? minConfidence : undefined,
-      vulnerabilityId: activeFilters.includes('vulnerabilityId') ? vulnerabilityId : undefined,
-      packageName: activeFilters.includes('packageName') ? packageName : undefined,
-      ecosystem: activeFilters.includes('ecosystem') ? ecosystem : undefined
-    })
-      .then((response) => {
-        if (loadRequestIdRef.current !== requestId) return;
-        setRows(response.items);
-        setTotalItems(response.totalItems);
-        setTotalPages(response.totalPages);
-      })
-      .catch((requestError) => {
-        if (loadRequestIdRef.current !== requestId) return;
-        setRows([]);
-        setTotalItems(0);
-        setTotalPages(0);
-        setError(requestError instanceof Error ? requestError.message : String(requestError));
-      })
-      .finally(() => {
-        if (loadRequestIdRef.current === requestId) {
-          setLoading(false);
-        }
-      });
-  }, [
-    page,
-    activeFilters,
-    severities,
-    statuses,
-    decisionStates,
-    matchMethods,
-    vexStatuses,
-    vexFreshness,
-    vexProviders,
-    minConfidence,
-    vulnerabilityId,
-    packageName,
-    ecosystem
-  ]);
-
-  React.useEffect(() => {
-    api.listFindingFilters()
-      .then((values) => {
-        setFilterValues({
-          severities: values.severities,
-          statuses: values.statuses,
-          decisionStates: values.decisionStates,
-          matchMethods: values.matchMethods,
-          vexStatuses: values.vexStatuses,
-          vexFreshness: values.vexFreshness,
-          vexProviders: values.vexProviders
-        });
-      })
-      .catch(() => {
-        setFilterValues(DEFAULT_FILTER_VALUES);
-        setMatchMethods(DEFAULT_MATCH_METHODS);
-      });
-  }, []);
-
-  React.useEffect(() => {
-    loadFindings();
-  }, [loadFindings]);
 
   const groupedCards = React.useMemo(() => {
     return groupBy
@@ -639,7 +692,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
               <button className="btn btn-secondary btn-inline" type="button" onClick={clearFilters}>
                 Clear Filters
               </button>
-              <button className="btn btn-secondary btn-inline" type="button" onClick={loadFindings} disabled={loading}>
+              <button className="btn btn-secondary btn-inline" type="button" onClick={() => void findingsQuery.refetch()} disabled={loading}>
                 {loading ? 'Refreshing...' : 'Refresh Findings'}
               </button>
             </div>
@@ -706,131 +759,12 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         ) : (
           <>
             <div className="table-scroll">
-              <ResizableTable storageKey="findings-table-widths">
-                <thead>
-                  <tr>
-                    {visibleColumns.has('vulnerability') && <th>Vulnerability</th>}
-                    {visibleColumns.has('asset') && <th>Asset</th>}
-                    {visibleColumns.has('package') && <th>Package</th>}
-                    {visibleColumns.has('severity') && <th>Severity</th>}
-                    {visibleColumns.has('status') && <th>Status</th>}
-                    {visibleColumns.has('decision') && <th>Decision</th>}
-                    {visibleColumns.has('vex') && <th>VEX</th>}
-                    {visibleColumns.has('impact-reason') && <th>Impact Reason</th>}
-                    {visibleColumns.has('risk') && <th>Risk</th>}
-                    {visibleColumns.has('confidence') && <th>Confidence</th>}
-                    {visibleColumns.has('match-method') && <th>Match Method</th>}
-                    {visibleColumns.has('kev') && <th>KEV</th>}
-                    {visibleColumns.has('eol-status') && <th>EOL Status</th>}
-                    {visibleColumns.has('first-observed') && <th>First Observed</th>}
-                    {visibleColumns.has('last-observed') && <th>Last Observed</th>}
-                    {visibleColumns.has('evidence') && <th>Evidence</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id}>
-                      {visibleColumns.has('vulnerability') && (
-                        <td className="mono">
-                          {onOpenCveWorkbench ? (
-                            <button
-                              type="button"
-                              className="findings-vuln-link-btn"
-                              onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
-                            >
-                              {row.vulnerabilityId}
-                            </button>
-                          ) : row.vulnerabilityId}
-                        </td>
-                      )}
-                      {visibleColumns.has('asset') && (
-                        <td>
-                          <div>{row.assetName}</div>
-                          <div className="panel-caption">{formatLabel(row.assetType)}</div>
-                        </td>
-                      )}
-                      {visibleColumns.has('package') && (
-                        <td>
-                          <div>{row.packageName}</div>
-                          <div className="panel-caption mono">{row.packageVersion}</div>
-                        </td>
-                      )}
-                      {visibleColumns.has('severity') && (
-                        <td>
-                          <span className={`severity-pill severity-${row.severity.toLowerCase()}`}>
-                            {row.severity}
-                          </span>
-                        </td>
-                      )}
-                      {visibleColumns.has('status') && (
-                        <td>
-                          <span className={`status-pill ${statusClass(row.status)}`}>
-                            {row.status}
-                          </span>
-                        </td>
-                      )}
-                      {visibleColumns.has('decision') && (
-                        <td>
-                          <span className="match-pill">{row.decisionState}</span>
-                        </td>
-                      )}
-                      {visibleColumns.has('vex') && (
-                        <td>
-                          <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
-                          <div className="panel-caption">
-                            {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
-                          </div>
-                        </td>
-                      )}
-                      {visibleColumns.has('impact-reason') && (
-                        <td>{row.impactReason ? formatLabel(row.impactReason) : '-'}</td>
-                      )}
-                      {visibleColumns.has('risk') && (
-                        <td className="confidence-cell">{row.riskScore.toFixed(2)}</td>
-                      )}
-                      {visibleColumns.has('confidence') && (
-                        <td className="confidence-cell">{(row.confidenceScore * 100).toFixed(1)}%</td>
-                      )}
-                      {visibleColumns.has('match-method') && (
-                        <td>
-                          <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
-                          {row.matchedVexAssertionId && (
-                            <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
-                          )}
-                        </td>
-                      )}
-                      {visibleColumns.has('kev') && (
-                        <td>{row.inKev ? 'Yes' : 'No'}</td>
-                      )}
-                      {visibleColumns.has('eol-status') && (
-                        <td>
-                          <EolBadge
-                            isEol={row.isEol}
-                            daysRemaining={row.eolDaysRemaining}
-                            eolDate={row.eolDate}
-                          />
-                        </td>
-                      )}
-                      {visibleColumns.has('first-observed') && (
-                        <td>{row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-'}</td>
-                      )}
-                      {visibleColumns.has('last-observed') && (
-                        <td>{row.lastObservedAt ? new Date(row.lastObservedAt).toLocaleString() : '-'}</td>
-                      )}
-                      {visibleColumns.has('evidence') && (
-                        <td>
-                          {row.evidence ? (
-                            <details className="evidence-details">
-                              <summary>View</summary>
-                              <pre>{row.evidence}</pre>
-                            </details>
-                          ) : '-'}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </ResizableTable>
+              <DataTable
+                storageKey="findings-table-widths"
+                columns={tableColumns}
+                rows={tableRows}
+                showColumnControls={false}
+              />
             </div>
             <div className="pagination-row">
               <button

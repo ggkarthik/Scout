@@ -102,6 +102,10 @@ public class SyncRun {
         return startedAt;
     }
 
+    public void setStartedAt(Instant startedAt) {
+        this.startedAt = startedAt;
+    }
+
     public Instant getCompletedAt() {
         return completedAt;
     }

@@ -2,6 +2,11 @@ package com.prototype.vulnwatch.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureContext;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.util.CpeUtil;
 import jakarta.annotation.PostConstruct;
 import java.nio.file.Files;
@@ -14,16 +19,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
@@ -99,8 +99,9 @@ public class NvdApiClient {
 
     private static final String NVD_DEFAULT_TITLE = "NVD Vulnerability";
 
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
 
     @Value("${app.nvd.base-url}")
     private String baseUrl;
@@ -123,12 +124,16 @@ public class NvdApiClient {
     @Value("${app.nvd.retry-base-backoff-ms:1000}")
     private long retryBaseBackoffMs;
 
-    private volatile long lastRequestAtEpochMs = 0L;
     private String resolvedApiKey = "";
 
-    public NvdApiClient(ObjectMapper objectMapper, RestTemplate restTemplate) {
+    public NvdApiClient(
+            ObjectMapper objectMapper,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory
+    ) {
         this.objectMapper = objectMapper;
-        this.restTemplate = restTemplate;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
     }
 
     @PostConstruct
@@ -200,47 +205,27 @@ public class NvdApiClient {
     }
 
     private String fetchRaw(String uri, String apiKeyOverride) {
-        int attempts = Math.max(1, maxRetries);
-        Exception lastError = null;
         String requestApiKey = resolveRequestApiKey(apiKeyOverride);
-
-        for (int attempt = 1; attempt <= attempts; attempt++) {
-            enforceRateLimitWindow();
-            HttpHeaders headers = new HttpHeaders();
-            if (!requestApiKey.isBlank()) {
-                headers.add("apiKey", requestApiKey);
-            }
-
-            try {
-                ResponseEntity<String> response = restTemplate.exchange(
-                        uri,
-                        HttpMethod.GET,
-                        new HttpEntity<>(headers),
-                        String.class);
-                rememberRequestTimestamp();
-                String body = response.getBody();
-                if (body == null || body.isBlank()) {
-                    throw new IllegalStateException("NVD response body is empty");
-                }
-                return body;
-            } catch (HttpStatusCodeException ex) {
-                rememberRequestTimestamp();
-                lastError = ex;
-                if (!isRetriableStatus(ex.getStatusCode()) || attempt == attempts) {
-                    throw new RuntimeException("NVD request failed with status " + ex.getStatusCode(), ex);
-                }
-                sleepForRetry(attempt);
-            } catch (Exception ex) {
-                rememberRequestTimestamp();
-                lastError = ex;
-                if (attempt == attempts) {
-                    break;
-                }
-                sleepForRetry(attempt);
-            }
+        HttpHeaders headers = new HttpHeaders();
+        if (!requestApiKey.isBlank()) {
+            headers.add("apiKey", requestApiKey);
         }
-
-        throw new RuntimeException("Failed to fetch NVD response after retries", lastError);
+        return outboundHttpClient.execute(
+                uri,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                String.class,
+                "NVD API request",
+                outboundPolicy(),
+                this::classifyFailure,
+                response -> {
+                    String body = response.getBody();
+                    if (body == null || body.isBlank()) {
+                        throw new IllegalStateException("NVD response body is empty");
+                    }
+                    return body;
+                }
+        );
     }
 
     private NvdPage parsePage(String body, int requestedStartIndex) {
@@ -511,42 +496,25 @@ public class NvdApiClient {
         }
     }
 
-    private boolean isRetriableStatus(HttpStatusCode statusCode) {
-        int code = statusCode.value();
-        return code == 429 || (code >= 500 && code <= 599);
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("nvd", minRequestIntervalMs, maxRetries, retryBaseBackoffMs);
     }
 
-    private synchronized void enforceRateLimitWindow() {
-        long minInterval = Math.max(0L, minRequestIntervalMs);
-        if (minInterval == 0) {
-            return;
+    private OutboundFailureDecision<RuntimeException> classifyFailure(OutboundFailureContext context) {
+        Integer statusCode = context.statusCodeValue();
+        if (statusCode != null) {
+            RuntimeException terminal = new RuntimeException("NVD request failed with status " + statusCode, context.error());
+            return new OutboundFailureDecision<>(
+                    context.isRetryableByDefault(),
+                    context.retryAfterDelayMs(),
+                    terminal
+            );
         }
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastRequestAtEpochMs;
-        long waitMs = minInterval - elapsed;
-        if (waitMs > 0) {
-            sleep(waitMs);
-        }
-    }
-
-    private synchronized void rememberRequestTimestamp() {
-        lastRequestAtEpochMs = System.currentTimeMillis();
-    }
-
-    private void sleepForRetry(int attempt) {
-        long base = Math.max(100L, retryBaseBackoffMs);
-        long exp = base * (1L << Math.min(6, Math.max(0, attempt - 1)));
-        long jitter = ThreadLocalRandom.current().nextLong(150L, 500L);
-        sleep(exp + jitter);
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(Math.max(1L, millis));
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting between NVD requests", interruptedException);
-        }
+        return new OutboundFailureDecision<>(
+                true,
+                null,
+                new RuntimeException("Failed to fetch NVD response after retries", context.error())
+        );
     }
 
     private String resolveApiKey() {

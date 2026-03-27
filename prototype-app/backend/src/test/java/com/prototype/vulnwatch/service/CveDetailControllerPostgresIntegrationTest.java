@@ -36,11 +36,13 @@ import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.InvestigationRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
+import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -112,6 +114,9 @@ class CveDetailControllerPostgresIntegrationTest {
 
     @Autowired
     private VexAssertionRepository vexAssertionRepository;
+
+    @Autowired
+    private TenantRepository tenantRepository;
 
     @Test
     void submitEndpointsUseRealTenantAndPersistWorkflowOnPostgres() throws Exception {
@@ -197,6 +202,56 @@ class CveDetailControllerPostgresIntegrationTest {
 
         assertEquals(Investigation.InvestigationStatus.IN_PROGRESS, investigation.getStatus());
         assertEquals(ApplicabilityAssessment.AssessmentStatus.COMPLETED, assessment.getStatus());
+    }
+
+    @Test
+    void cveDetailUsesActorTenantUuidForInvestigationsAndAssessments() throws Exception {
+        Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
+        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 1L));
+        String cveId = "CVE-2099-9905";
+        Vulnerability vulnerability = createVulnerability(cveId);
+
+        investigationRepository.save(createInvestigation(defaultTenant, vulnerability, Investigation.InvestigationStatus.PENDING_REVIEW, "default-tenant"));
+        investigationRepository.save(createInvestigation(legacyShadowTenant, vulnerability, Investigation.InvestigationStatus.CLOSED, "legacy-shadow"));
+
+        assessmentRepository.save(createAssessment(defaultTenant, vulnerability, ApplicabilityAssessment.AssessmentResult.AFFECTED, "default-tenant"));
+        assessmentRepository.save(createAssessment(legacyShadowTenant, vulnerability, ApplicabilityAssessment.AssessmentResult.NOT_AFFECTED, "legacy-shadow"));
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.investigations[0].status").value("PENDING_REVIEW"))
+                .andExpect(jsonPath("$.investigations[0].notes").value("default-tenant"))
+                .andExpect(jsonPath("$.assessments[0].finalResult").value("AFFECTED"))
+                .andExpect(jsonPath("$.assessments[0].justification").value("default-tenant"));
+    }
+
+    @Test
+    void submitInvestigationPersistsAgainstActorTenantUuidInsteadOfLegacyShadowTenant() throws Exception {
+        Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
+        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 1L));
+        String cveId = "CVE-2099-9906";
+        createVulnerability(cveId);
+
+        mockMvc.perform(post("/api/cve-detail/{cveId}/investigation/submit", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-User-ID", "test-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "priority": "HIGH",
+                                  "notes": "triage on default tenant"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.notes").value("triage on default tenant"));
+
+        assertEquals(1, investigationRepository.findByTenantIdAndCveId(defaultTenant.getId(), cveId).size());
+        assertEquals(0, investigationRepository.findByTenantIdAndCveId(legacyShadowTenant.getId(), cveId).size());
     }
 
     @Test
@@ -383,6 +438,59 @@ class CveDetailControllerPostgresIntegrationTest {
         component.setPurl("pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0");
         component.setComponentStatus(InventoryComponentStatus.ACTIVE);
         return inventoryComponentRepository.save(component);
+    }
+
+    private Tenant createTenant(String name) {
+        return tenantRepository.findByNameIgnoreCase(name).orElseGet(() -> {
+            Tenant tenant = new Tenant();
+            tenant.setName(name);
+            return tenantRepository.save(tenant);
+        });
+    }
+
+    private Tenant createTenantWithId(String name, UUID id) {
+        return tenantRepository.findById(id).orElseGet(() -> {
+            Tenant tenant = new Tenant();
+            tenant.setId(id);
+            tenant.setName(name);
+            return tenantRepository.save(tenant);
+        });
+    }
+
+    private Investigation createInvestigation(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            Investigation.InvestigationStatus status,
+            String notes
+    ) {
+        Investigation investigation = new Investigation();
+        investigation.setTenant(tenant);
+        investigation.setVulnerability(vulnerability);
+        investigation.setStatus(status);
+        investigation.setPriority(Investigation.InvestigationPriority.MEDIUM);
+        investigation.setNotes(notes);
+        investigation.setCreatedBy("test-user");
+        investigation.setModifiedBy("test-user");
+        return investigation;
+    }
+
+    private ApplicabilityAssessment createAssessment(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            ApplicabilityAssessment.AssessmentResult finalResult,
+            String justification
+    ) {
+        ApplicabilityAssessment assessment = new ApplicabilityAssessment();
+        assessment.setTenant(tenant);
+        assessment.setVulnerability(vulnerability);
+        assessment.setStatus(ApplicabilityAssessment.AssessmentStatus.COMPLETED);
+        assessment.setFinalResult(finalResult);
+        assessment.setConfidenceLevel(ApplicabilityAssessment.ConfidenceLevel.HIGH);
+        assessment.setJustification(justification);
+        assessment.setRecommendedAction("test");
+        assessment.setAssessedBy("test-user");
+        assessment.setCompletedAt(Instant.now());
+        return assessment;
     }
 
     private void createOpenFinding(Tenant tenant, InventoryComponent component, Vulnerability vulnerability) {

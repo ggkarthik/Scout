@@ -1,7 +1,7 @@
 import type {
-  InventoryComponentFilterValues,
-  VulnerabilityIntelFilterValues
-} from '../../types';
+  InventoryComponentFilterValues
+} from './api-types';
+import type { VulnerabilityIntelFilterValues } from '../vulnerability-intel/types';
 import type { FilterBuilderCategory, FilterBuilderField } from '../../components/FilterBuilder';
 
 export const DEFAULT_VULNERABILITY_INTEL_FILTERS: VulnerabilityIntelFilterValues = {

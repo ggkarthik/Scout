@@ -29,9 +29,9 @@ class PrototypeDataResetServicePostgresIntegrationTest {
         );
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
         createMinimalSchema(jdbcTemplate);
-        VulnerabilityIntelligenceService vulnerabilityIntelligenceService = mock(VulnerabilityIntelligenceService.class);
+        VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService = mock(VulnerabilityIntelSummaryService.class);
         PrototypeDataResetService service =
-                new PrototypeDataResetService(vulnerabilityIntelligenceService, jdbcTemplate);
+                new PrototypeDataResetService(vulnerabilityIntelSummaryService, jdbcTemplate);
 
         Instant now = Instant.parse("2026-03-23T00:00:00Z");
         UUID tenantId = UUID.randomUUID();
@@ -289,7 +289,7 @@ class PrototypeDataResetServicePostgresIntegrationTest {
         assertEquals(0L, tableCount(jdbcTemplate, "assets"));
         assertEquals(0L, tableCount(jdbcTemplate, "eol_release"));
         assertEquals(0L, tableCount(jdbcTemplate, "eol_product_catalog"));
-        verify(vulnerabilityIntelligenceService).resetReadModelCaches();
+        verify(vulnerabilityIntelSummaryService).resetReadModelCaches();
     }
 
     private void createMinimalSchema(JdbcTemplate jdbcTemplate) {

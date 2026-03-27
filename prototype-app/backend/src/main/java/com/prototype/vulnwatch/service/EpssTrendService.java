@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -16,7 +20,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
@@ -27,11 +30,17 @@ public class EpssTrendService {
     @Value("${app.epss.base-url:https://api.first.org/data/v1/epss}")
     private String epssBaseUrl;
 
-    private final RestTemplate restTemplate;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
 
-    public EpssTrendService(RestTemplate restTemplate, ObjectMapper objectMapper) {
-        this.restTemplate = restTemplate;
+    public EpssTrendService(
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
+            ObjectMapper objectMapper
+    ) {
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -60,11 +69,20 @@ public class EpssTrendService {
             HttpHeaders headers = new HttpHeaders();
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
             headers.set("User-Agent", "vulnwatch-backend/1.0");
-            ResponseEntity<String> response = restTemplate.exchange(
+            ResponseEntity<String> response = outboundHttpClient.exchange(
                     url,
                     HttpMethod.GET,
                     new HttpEntity<>(headers),
-                    String.class
+                    String.class,
+                    "EPSS history API",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
             );
             return parseScore(response.getBody(), normalizedCveId);
         } catch (Exception e) {
@@ -96,5 +114,9 @@ public class EpssTrendService {
             LOG.debug("Unable to parse EPSS history payload for {}: {}", cveId, e.getMessage());
         }
         return null;
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("epss", 0L, null, null);
     }
 }

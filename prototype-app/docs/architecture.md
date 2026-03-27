@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 
 ## Why This Fourth Document Exists
 
@@ -120,9 +120,9 @@ What exists in code but is not fully surfaced or is still transitional:
 
 The backend deliberately centers on deterministic evidence rather than fuzzy package matching. The current production path is CPE-based with version checks and source precedence.
 
-### Tenant-Aware Schema, Single-Tenant Runtime
+### Tenant-Aware Schema, Single-Workspace Runtime
 
-Most tables carry tenant boundaries, but many controllers still resolve one default tenant. The system is multi-tenant in schema design, not yet in runtime behavior.
+Most tables still carry tenant boundaries for schema compatibility, but the live runtime now resolves one cached workspace at startup and uses that same workspace across requests. The system is still tenant-aware in schema design, but it no longer treats tenant selection as a per-request concern.
 
 ### Projection Tables Matter
 

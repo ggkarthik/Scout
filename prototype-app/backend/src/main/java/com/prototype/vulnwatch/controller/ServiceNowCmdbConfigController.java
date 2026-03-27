@@ -7,7 +7,7 @@ import com.prototype.vulnwatch.dto.ServiceNowCmdbConnectionTestResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbSyncService;
-import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,35 +20,35 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/connectors/servicenow-cmdb")
 public class ServiceNowCmdbConfigController {
 
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     private final ServiceNowCmdbSyncService serviceNowCmdbSyncService;
 
     public ServiceNowCmdbConfigController(
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             ServiceNowCmdbConfigService serviceNowCmdbConfigService,
             ServiceNowCmdbSyncService serviceNowCmdbSyncService
     ) {
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
         this.serviceNowCmdbSyncService = serviceNowCmdbSyncService;
     }
 
     @GetMapping
     public ServiceNowCmdbConfigResponse get() {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return serviceNowCmdbConfigService.get(tenant);
     }
 
     @PutMapping
     public ServiceNowCmdbConfigResponse save(@Valid @RequestBody ServiceNowCmdbConfigRequest request) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return serviceNowCmdbConfigService.save(tenant, request);
     }
 
     @PostMapping("/test")
     public ServiceNowCmdbConnectionTestResponse test() {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return serviceNowCmdbConfigService.test(tenant);
     }
 

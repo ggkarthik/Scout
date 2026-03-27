@@ -2,6 +2,9 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,8 +19,10 @@ import com.prototype.vulnwatch.dto.SyncRunResponse;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -38,11 +43,10 @@ class SyncRunHistoryServiceTest {
     private TenantService tenantService;
 
     @Test
-    void synthesizesLegacyGithubRepositoryRunsFromUploadEvidence() {
+    void backfillsLegacyGithubRepositoryRunsAndHistoryReadsPersistedRecords() {
         Tenant tenant = new Tenant();
         tenant.setName("Default Workspace");
         when(tenantService.getDefaultTenant()).thenReturn(tenant);
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of());
         List<SbomUpload> uploads = List.of(
                 githubGeneratedUpload(
@@ -62,13 +66,28 @@ class SyncRunHistoryServiceTest {
         when(sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(tenant, "github"))
                 .thenReturn(uploads);
 
-        SyncRunHistoryService service = new SyncRunHistoryService(
+        AtomicReference<List<SyncRun>> savedRuns = new AtomicReference<>(List.of());
+        when(syncRunRepository.saveAll(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            List<SyncRun> runs = new ArrayList<>((List<SyncRun>) invocation.getArgument(0));
+            savedRuns.set(runs);
+            return runs;
+        });
+
+        LegacyGithubSyncRunBackfillService backfillService = new LegacyGithubSyncRunBackfillService(
                 syncRunRepository,
                 sbomUploadRepository,
                 tenantService,
-                new ObjectMapper());
+                new ObjectMapper(),
+                false
+        );
 
-        List<SyncRunResponse> runs = service.list("inventory", 20);
+        assertEquals(1, backfillService.backfillMissingRuns());
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(savedRuns.get());
+
+        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository);
+        List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
         SyncRunResponse run = runs.get(0);
@@ -78,24 +97,24 @@ class SyncRunHistoryServiceTest {
         assertEquals("partial_success", run.status());
         assertEquals(2, run.recordsFetched());
         assertEquals(788, run.recordsInserted());
+        assertEquals(0, run.recordsUpdated());
         assertEquals(1, run.recordsFailed());
         assertTrue(run.metadataJson().contains("\"legacyReconstructed\":true"));
         assertTrue(run.metadataJson().contains("\"scope\":\"ggkarthik/*\""));
     }
 
     @Test
-    void skipsLegacyGithubRunWhenPersistedSyncRunAlreadyExists() {
+    void skipsLegacyGithubBackfillWhenPersistedSyncRunAlreadyExists() {
         Tenant tenant = new Tenant();
         tenant.setName("Default Workspace");
         SyncRun persistedRun = new SyncRun();
         persistedRun.setSyncType("GITHUB_REPOSITORY_SBOM");
         persistedRun.setStatus("completed");
         persistedRun.setMetadataJson("{\"sourceSystem\":\"github\",\"scope\":\"ggkarthik/microservices-demo-app\"}");
-        ReflectionTestUtils.setField(persistedRun, "startedAt", Instant.parse("2026-03-08T12:15:40Z"));
+        persistedRun.setStartedAt(Instant.parse("2026-03-08T12:15:40Z"));
         persistedRun.setCompletedAt(Instant.parse("2026-03-08T12:16:30Z"));
 
         when(tenantService.getDefaultTenant()).thenReturn(tenant);
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(persistedRun));
         when(sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(tenant, "github"))
                 .thenReturn(List.of(
@@ -107,13 +126,20 @@ class SyncRunHistoryServiceTest {
                                 0,
                                 null)));
 
-        SyncRunHistoryService service = new SyncRunHistoryService(
+        LegacyGithubSyncRunBackfillService backfillService = new LegacyGithubSyncRunBackfillService(
                 syncRunRepository,
                 sbomUploadRepository,
                 tenantService,
-                new ObjectMapper());
+                new ObjectMapper(),
+                false
+        );
 
-        List<SyncRunResponse> runs = service.list("inventory", 20);
+        assertEquals(0, backfillService.backfillMissingRuns());
+        verify(syncRunRepository, never()).saveAll(any());
+
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
+        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository);
+        List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
         assertEquals(persistedRun.getStartedAt(), runs.get(0).startedAt());
@@ -130,11 +156,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of(processingRun));
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(processingRun, feedRun));
 
-        SyncRunHistoryService service = new SyncRunHistoryService(
-                syncRunRepository,
-                sbomUploadRepository,
-                tenantService,
-                new ObjectMapper());
+        SyncRunHistoryService service = new SyncRunHistoryService(syncRunRepository);
 
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
         List<SyncRunResponse> feedRuns = service.list("vuln-intel", 20);
@@ -190,7 +212,7 @@ class SyncRunHistoryServiceTest {
         ReflectionTestUtils.setField(run, "id", UUID.randomUUID());
         run.setSyncType(type);
         run.setStatus(status);
-        ReflectionTestUtils.setField(run, "startedAt", startedAt);
+        run.setStartedAt(startedAt);
         run.setCompletedAt(startedAt.plusSeconds(30));
         return run;
     }

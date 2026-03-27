@@ -1,16 +1,46 @@
 import React from 'react';
-import { api } from '../api/client';
-import { ResizableTable } from '../components/ResizableTable';
+import { useSearchParams } from 'react-router-dom';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
-import type { HostAssetDetail } from '../types';
-import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
-
-export const HOST_ASSET_QUERY_KEY = 'hostAssetId';
+import type { HostAssetDetail } from '../features/inventory/api-types';
+import { useHostAssetDetailQuery } from '../features/inventory/queries';
+import { readHostAssetIdFromSearch } from '../features/inventory/searchState';
 
 type HostAssetDetailPageProps = {
   assetId?: string | null;
   onClose?: () => void;
 };
+
+const ALIAS_COLUMNS: DataTableColumn[] = [
+  { id: 'alias', label: 'Alias', header: 'Alias', initialSize: 220 },
+  { id: 'source', label: 'Source', header: 'Source', initialSize: 160 },
+  { id: 'confidence', label: 'Confidence', header: 'Confidence', initialSize: 120 },
+  { id: 'firstSeen', label: 'First Seen', header: 'First Seen', initialSize: 180 },
+  { id: 'lastSeen', label: 'Last Seen', header: 'Last Seen', initialSize: 180 }
+];
+
+const SOFTWARE_COLUMNS: DataTableColumn[] = [
+  { id: 'software', label: 'Software', header: 'Software', initialSize: 220 },
+  { id: 'vendor', label: 'Vendor', header: 'Vendor', initialSize: 160 },
+  { id: 'version', label: 'Version', header: 'Version', initialSize: 160 },
+  { id: 'identity', label: 'Identity', header: 'Identity', initialSize: 220 },
+  { id: 'eolStatus', label: 'EOL Status', header: 'EOL Status', initialSize: 160 },
+  { id: 'reviewFlags', label: 'Review Flags', header: 'Review Flags', initialSize: 220 },
+  { id: 'observed', label: 'Observed', header: 'Observed', initialSize: 180 }
+];
+
+const FINDING_COLUMNS: DataTableColumn[] = [
+  { id: 'vulnerability', label: 'Vulnerability', header: 'Vulnerability', initialSize: 180 },
+  { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
+  { id: 'status', label: 'Status', header: 'Status', initialSize: 140 },
+  { id: 'decision', label: 'Decision', header: 'Decision', initialSize: 140 },
+  { id: 'risk', label: 'Risk', header: 'Risk', initialSize: 120 },
+  { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
+];
 
 function formatTimestamp(value?: string): string {
   if (!value) {
@@ -31,12 +61,96 @@ function statusClass(value?: string): string {
   return `status-pill status-${(value ?? 'unknown').toLowerCase().replace(/_/g, '-')}`;
 }
 
-export function readSelectedHostAssetId(): string | null {
-  return readQueryParam(HOST_ASSET_QUERY_KEY);
+function buildAliasRows(aliases: HostAssetDetail['aliases']): DataTableRow[] {
+  return aliases.map((alias) => ({
+    id: alias.id,
+    cells: {
+      alias: { content: alias.aliasName, props: { className: 'mono' } },
+      source: { content: alias.sourceSystem },
+      confidence: { content: formatConfidence(alias.confidence) },
+      firstSeen: { content: formatTimestamp(alias.firstSeenAt) },
+      lastSeen: { content: formatTimestamp(alias.lastSeenAt) }
+    }
+  }));
 }
 
-export function updateSelectedHostAssetId(assetId: string | null): void {
-  replaceBrowserQueryParams({ [HOST_ASSET_QUERY_KEY]: assetId });
+function buildSoftwareRows(softwareRows: HostAssetDetail['software']): DataTableRow[] {
+  return softwareRows.map((software) => {
+    const flags = [
+      software.needsVersionReview ? 'Missing version' : null,
+      software.needsIdentityReview ? 'Unmapped identity' : null,
+      software.needsDiscoveryModelReview ? 'Discovery review' : null
+    ].filter((value): value is string => Boolean(value));
+
+    return {
+      id: software.id,
+      cells: {
+        software: {
+          content: (
+            <>
+              <div>{software.displayName}</div>
+              <div className="panel-caption mono">
+                {software.normalizedPublisher}:{software.normalizedProduct}
+              </div>
+            </>
+          )
+        },
+        vendor: { content: software.publisher ?? '-' },
+        version: {
+          content: software.version ?? software.normalizedVersion ?? 'Needs review',
+          props: { className: 'mono' }
+        },
+        identity: {
+          content: (
+            <>
+              <div>{software.softwareIdentity ?? '-'}</div>
+              <div className="panel-caption mono">{software.cpe23 ?? '-'}</div>
+            </>
+          )
+        },
+        eolStatus: {
+          content: (
+            <EolBadge
+              isEol={software.isEol}
+              daysRemaining={software.eolDaysRemaining}
+              eolDate={software.eolDate}
+            />
+          )
+        },
+        reviewFlags: {
+          content: flags.length === 0 ? (
+            <span className="panel-caption">Clear</span>
+          ) : (
+            <div className="host-flag-list">
+              {flags.map((flag) => (
+                <span key={flag} className="host-flag-chip">{flag}</span>
+              ))}
+            </div>
+          )
+        },
+        observed: { content: formatTimestamp(software.lastScanned ?? software.lastUsed ?? software.installDate) }
+      }
+    };
+  });
+}
+
+function buildFindingRows(findings: HostAssetDetail['findings']): DataTableRow[] {
+  return findings.map((finding) => ({
+    id: finding.id,
+    cells: {
+      vulnerability: {
+        content: finding.vulnerabilityId ?? '-',
+        props: { className: 'mono' }
+      },
+      severity: { content: finding.severity ?? '-' },
+      status: {
+        content: <span className={statusClass(finding.status)}>{finding.status ?? 'UNKNOWN'}</span>
+      },
+      decision: { content: finding.decisionState ?? '-' },
+      risk: { content: finding.riskScore?.toFixed(2) ?? '-' },
+      lastObserved: { content: formatTimestamp(finding.lastObservedAt) }
+    }
+  }));
 }
 
 type HostDetailSectionsProps = {
@@ -46,6 +160,10 @@ type HostDetailSectionsProps = {
 };
 
 function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSectionsProps) {
+  const aliasRows = React.useMemo(() => buildAliasRows(hostDetail?.aliases ?? []), [hostDetail]);
+  const softwareRows = React.useMemo(() => buildSoftwareRows(hostDetail?.software ?? []), [hostDetail]);
+  const findingRows = React.useMemo(() => buildFindingRows(hostDetail?.findings ?? []), [hostDetail]);
+
   if (!assetId) {
     return <div className="empty-state"><p>Select a host to load its detail.</p></div>;
   }
@@ -87,128 +205,41 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
       </div>
 
       <h4 className="section-title section-divider">Host Aliases</h4>
-      {hostDetail.aliases.length === 0 ? (
+      {aliasRows.length === 0 ? (
         <div className="empty-state"><p>No aliases were recorded for this host.</p></div>
       ) : (
         <div className="table-scroll">
-          <ResizableTable storageKey="host-detail-aliases-table-widths">
-            <thead>
-              <tr>
-                <th>Alias</th>
-                <th>Source</th>
-                <th>Confidence</th>
-                <th>First Seen</th>
-                <th>Last Seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hostDetail.aliases.map((alias) => (
-                <tr key={alias.id}>
-                  <td className="mono">{alias.aliasName}</td>
-                  <td>{alias.sourceSystem}</td>
-                  <td>{formatConfidence(alias.confidence)}</td>
-                  <td>{formatTimestamp(alias.firstSeenAt)}</td>
-                  <td>{formatTimestamp(alias.lastSeenAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </ResizableTable>
+          <DataTable
+            storageKey="host-detail-aliases-table-widths"
+            columns={ALIAS_COLUMNS}
+            rows={aliasRows}
+          />
         </div>
       )}
 
       <h4 className="section-title section-divider">Installed Software</h4>
-      {hostDetail.software.length === 0 ? (
+      {softwareRows.length === 0 ? (
         <div className="empty-state"><p>No host software has been materialized for this host yet.</p></div>
       ) : (
         <div className="table-scroll">
-          <ResizableTable storageKey="host-detail-software-table-widths">
-            <thead>
-              <tr>
-                <th>Software</th>
-                <th>Vendor</th>
-                <th>Version</th>
-                <th>Identity</th>
-                <th>EOL Status</th>
-                <th>Review Flags</th>
-                <th>Observed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hostDetail.software.map((software) => {
-                const flags = [
-                  software.needsVersionReview ? 'Missing version' : null,
-                  software.needsIdentityReview ? 'Unmapped identity' : null,
-                  software.needsDiscoveryModelReview ? 'Discovery review' : null
-                ].filter(Boolean);
-
-                return (
-                  <tr key={software.id}>
-                    <td>
-                      <div>{software.displayName}</div>
-                      <div className="panel-caption mono">{software.normalizedPublisher}:{software.normalizedProduct}</div>
-                    </td>
-                    <td>{software.publisher ?? '-'}</td>
-                    <td className="mono">{software.version ?? software.normalizedVersion ?? 'Needs review'}</td>
-                    <td>
-                      <div>{software.softwareIdentity ?? '-'}</div>
-                      <div className="panel-caption mono">{software.cpe23 ?? '-'}</div>
-                    </td>
-                    <td>
-                      <EolBadge
-                        isEol={software.isEol}
-                        daysRemaining={software.eolDaysRemaining}
-                        eolDate={software.eolDate}
-                      />
-                    </td>
-                    <td>
-                      {flags.length === 0 ? (
-                        <span className="panel-caption">Clear</span>
-                      ) : (
-                        <div className="host-flag-list">
-                          {flags.map((flag) => (
-                            <span key={flag} className="host-flag-chip">{flag}</span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td>{formatTimestamp(software.lastScanned ?? software.lastUsed ?? software.installDate)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </ResizableTable>
+          <DataTable
+            storageKey="host-detail-software-table-widths"
+            columns={SOFTWARE_COLUMNS}
+            rows={softwareRows}
+          />
         </div>
       )}
 
       <h4 className="section-title section-divider">Host Findings</h4>
-      {hostDetail.findings.length === 0 ? (
+      {findingRows.length === 0 ? (
         <div className="empty-state"><p>No findings are currently attached to this host.</p></div>
       ) : (
         <div className="table-scroll">
-          <ResizableTable storageKey="host-detail-findings-table-widths">
-            <thead>
-              <tr>
-                <th>Vulnerability</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Decision</th>
-                <th>Risk</th>
-                <th>Last Observed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hostDetail.findings.map((finding) => (
-                <tr key={finding.id}>
-                  <td className="mono">{finding.vulnerabilityId ?? '-'}</td>
-                  <td>{finding.severity ?? '-'}</td>
-                  <td><span className={statusClass(finding.status)}>{finding.status ?? 'UNKNOWN'}</span></td>
-                  <td>{finding.decisionState ?? '-'}</td>
-                  <td>{finding.riskScore?.toFixed(2) ?? '-'}</td>
-                  <td>{formatTimestamp(finding.lastObservedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </ResizableTable>
+          <DataTable
+            storageKey="host-detail-findings-table-widths"
+            columns={FINDING_COLUMNS}
+            rows={findingRows}
+          />
         </div>
       )}
     </>
@@ -216,32 +247,12 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
 }
 
 export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPageProps = {}) {
-  const selectedAssetId = assetId ?? readSelectedHostAssetId();
-  const [selectedHost, setSelectedHost] = React.useState<HostAssetDetail | null>(null);
-  const [loadingDetail, setLoadingDetail] = React.useState(false);
-  const [error, setError] = React.useState('');
-
-  const loadDetail = React.useCallback(async (resolvedAssetId: string) => {
-    setLoadingDetail(true);
-    setError('');
-    try {
-      const response = await api.getHostAssetDetail(resolvedAssetId);
-      setSelectedHost(response);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-      setSelectedHost(null);
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    if (!selectedAssetId) {
-      setSelectedHost(null);
-      return;
-    }
-    void loadDetail(selectedAssetId);
-  }, [loadDetail, selectedAssetId]);
+  const [searchParams] = useSearchParams();
+  const selectedAssetId = assetId ?? readHostAssetIdFromSearch(searchParams);
+  const hostDetailQuery = useHostAssetDetailQuery(selectedAssetId);
+  const selectedHost = hostDetailQuery.data ?? null;
+  const loadingDetail = hostDetailQuery.isLoading || hostDetailQuery.isFetching;
+  const error = hostDetailQuery.error instanceof Error ? hostDetailQuery.error.message : '';
 
   return (
     <section className="panel">
@@ -258,7 +269,7 @@ export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPagePro
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => { if (selectedAssetId) void loadDetail(selectedAssetId); }}
+            onClick={() => { if (selectedAssetId) void hostDetailQuery.refetch(); }}
             disabled={loadingDetail || !selectedAssetId}
           >
             {loadingDetail ? 'Refreshing...' : 'Refresh Host'}
@@ -277,7 +288,8 @@ export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPagePro
       </div>
 
       <div className="inline-note">
-        Host drilldown from <span className="mono">Inventory &gt; Hosts</span>. Use this view to inspect aliases, installed software evidence, review blockers, and findings for a single host.
+        Host drilldown from <span className="mono">Inventory &gt; Hosts</span>. Use this view to inspect aliases, installed
+        software evidence, review blockers, and findings for a single host.
       </div>
 
       {error && <div className="notice error">{error}</div>}

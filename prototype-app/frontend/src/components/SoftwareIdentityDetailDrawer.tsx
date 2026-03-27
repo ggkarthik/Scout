@@ -1,11 +1,15 @@
 import React from 'react';
-import { api } from '../api/client';
-import { SoftwareIdentityDetail } from '../types';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from './DataTable';
+import { useSoftwareIdentityDetailQuery } from '../features/software-identities/queries';
+import type { SoftwareIdentityDetail } from '../features/software-identities/types';
 import { EolBadge } from './EolBadge';
 
 type Props = {
   softwareIdentityId: string;
-  refreshNonce?: number;
   onClose: () => void;
 };
 
@@ -37,29 +41,99 @@ function lifecycleLabel(detail: SoftwareIdentityDetail): string {
   return 'Supported';
 }
 
-export function SoftwareIdentityDetailDrawer({ softwareIdentityId, refreshNonce = 0, onClose }: Props) {
-  const [detail, setDetail] = React.useState<SoftwareIdentityDetail | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let active = true;
-    setDetail(null);
-    setError(null);
-    api.getSoftwareIdentityDetail(softwareIdentityId)
-      .then((response) => {
-        if (active) {
-          setDetail(response);
-        }
-      })
-      .catch((e) => {
-        if (active) {
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [refreshNonce, softwareIdentityId]);
+export function SoftwareIdentityDetailDrawer({ softwareIdentityId, onClose }: Props) {
+  const detailQuery = useSoftwareIdentityDetailQuery(softwareIdentityId);
+  const detail = detailQuery.data;
+  const error = detailQuery.error instanceof Error ? detailQuery.error.message : null;
+  const versionColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'version', label: 'Version', header: 'Version', initialSize: 160 },
+    { id: 'lifecycle', label: 'Lifecycle', header: 'Lifecycle', initialSize: 220 },
+    { id: 'footprint', label: 'Footprint', header: 'Footprint', initialSize: 180 },
+    { id: 'exposure', label: 'Open Exposure', header: 'Open Exposure', initialSize: 180 },
+    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
+  ], []);
+  const assetColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 220 },
+    { id: 'component', label: 'Component', header: 'Component', initialSize: 220 },
+    { id: 'source', label: 'Source', header: 'Source', initialSize: 140 },
+    { id: 'lifecycle', label: 'Lifecycle', header: 'Lifecycle', initialSize: 220 },
+    { id: 'exposure', label: 'Open Exposure', header: 'Open Exposure', initialSize: 180 },
+    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
+  ], []);
+  const versionRows = React.useMemo<DataTableRow[]>(() => (
+    (detail?.versions ?? []).map((versionRow, index) => ({
+      id: `${versionRow.version || 'unknown'}-${index}`,
+      cells: {
+        version: { content: <span className="mono">{versionRow.version || '(unknown)'}</span> },
+        lifecycle: {
+          content: (
+            <div className="software-identity-row-stack">
+              <EolBadge
+                isEol={versionRow.isEol}
+                daysRemaining={versionRow.eolDaysRemaining}
+                eolDate={versionRow.eolDate}
+              />
+              <span className="panel-caption mono">
+                {(versionRow.eolSlug || '-')}{versionRow.eolCycle ? ` / ${versionRow.eolCycle}` : ''}
+              </span>
+            </div>
+          )
+        },
+        footprint: {
+          content: `${versionRow.assetCount} assets · ${versionRow.componentCount} components`
+        },
+        exposure: {
+          content: `${versionRow.openVulnerabilityCount} CVEs · ${versionRow.openFindingCount} findings`
+        },
+        lastObserved: { content: formatInstant(versionRow.lastObservedAt) }
+      }
+    }))
+  ), [detail?.versions]);
+  const assetRows = React.useMemo<DataTableRow[]>(() => (
+    (detail?.assets ?? []).map((assetRow) => ({
+      id: assetRow.componentId,
+      cells: {
+        asset: {
+          content: (
+            <>
+              <div>{assetRow.assetName}</div>
+              <div className="panel-caption mono">{assetRow.assetIdentifier}</div>
+              <div className="panel-caption">{assetRow.assetType}</div>
+            </>
+          )
+        },
+        component: {
+          content: (
+            <>
+              <div>{assetRow.packageName}</div>
+              <div className="panel-caption mono">
+                {(assetRow.ecosystem || '-')}{assetRow.version ? `@${assetRow.version}` : ''}
+              </div>
+            </>
+          )
+        },
+        source: { content: assetRow.sourceSystem || '-' },
+        lifecycle: {
+          content: (
+            <div className="software-identity-row-stack">
+              <EolBadge
+                isEol={assetRow.isEol}
+                daysRemaining={assetRow.eolDaysRemaining}
+                eolDate={assetRow.eolDate}
+              />
+              <span className="panel-caption mono">
+                {(assetRow.eolSlug || '-')}{assetRow.eolCycle ? ` / ${assetRow.eolCycle}` : ''}
+              </span>
+            </div>
+          )
+        },
+        exposure: {
+          content: `${assetRow.openVulnerabilityCount} CVEs · ${assetRow.openFindingCount} findings`
+        },
+        lastObserved: { content: formatInstant(assetRow.lastObservedAt) }
+      }
+    }))
+  ), [detail?.assets]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -155,47 +229,17 @@ export function SoftwareIdentityDetailDrawer({ softwareIdentityId, refreshNonce 
                 <h4>Observed Versions</h4>
                 <span className="panel-caption">{detail.versions.length} version rows</span>
               </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Version</th>
-                      <th>Lifecycle</th>
-                      <th>Footprint</th>
-                      <th>Open Exposure</th>
-                      <th>Last Observed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.versions.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} style={{ textAlign: 'center', padding: '24px 0' }}>
-                          <span className="panel-caption">No version rows available.</span>
-                        </td>
-                      </tr>
-                    ) : detail.versions.map((versionRow) => (
-                      <tr key={versionRow.version}>
-                        <td className="mono">{versionRow.version || '(unknown)'}</td>
-                        <td>
-                          <div className="software-identity-row-stack">
-                            <EolBadge
-                              isEol={versionRow.isEol}
-                              daysRemaining={versionRow.eolDaysRemaining}
-                              eolDate={versionRow.eolDate}
-                            />
-                            <span className="panel-caption mono">
-                              {(versionRow.eolSlug || '-')}{versionRow.eolCycle ? ` / ${versionRow.eolCycle}` : ''}
-                            </span>
-                          </div>
-                        </td>
-                        <td>{versionRow.assetCount} assets · {versionRow.componentCount} components</td>
-                        <td>{versionRow.openVulnerabilityCount} CVEs · {versionRow.openFindingCount} findings</td>
-                        <td>{formatInstant(versionRow.lastObservedAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {detail.versions.length === 0 ? (
+                <div className="panel-caption">No version rows available.</div>
+              ) : (
+                <div className="table-scroll">
+                  <DataTable
+                    storageKey={`software-identity-detail-versions:${softwareIdentityId}`}
+                    columns={versionColumns}
+                    rows={versionRows}
+                  />
+                </div>
+              )}
             </section>
 
             <section className="software-identity-drawer-section">
@@ -203,58 +247,17 @@ export function SoftwareIdentityDetailDrawer({ softwareIdentityId, refreshNonce 
                 <h4>Linked Inventory Components</h4>
                 <span className="panel-caption">{detail.assets.length} rows shown</span>
               </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Asset</th>
-                      <th>Component</th>
-                      <th>Source</th>
-                      <th>Lifecycle</th>
-                      <th>Open Exposure</th>
-                      <th>Last Observed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.assets.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} style={{ textAlign: 'center', padding: '24px 0' }}>
-                          <span className="panel-caption">No linked inventory components available.</span>
-                        </td>
-                      </tr>
-                    ) : detail.assets.map((assetRow) => (
-                      <tr key={assetRow.componentId}>
-                        <td>
-                          <div>{assetRow.assetName}</div>
-                          <div className="panel-caption mono">{assetRow.assetIdentifier}</div>
-                          <div className="panel-caption">{assetRow.assetType}</div>
-                        </td>
-                        <td>
-                          <div>{assetRow.packageName}</div>
-                          <div className="panel-caption mono">
-                            {(assetRow.ecosystem || '-')}{assetRow.version ? `@${assetRow.version}` : ''}
-                          </div>
-                        </td>
-                        <td>{assetRow.sourceSystem || '-'}</td>
-                        <td>
-                          <div className="software-identity-row-stack">
-                            <EolBadge
-                              isEol={assetRow.isEol}
-                              daysRemaining={assetRow.eolDaysRemaining}
-                              eolDate={assetRow.eolDate}
-                            />
-                            <span className="panel-caption mono">
-                              {(assetRow.eolSlug || '-')}{assetRow.eolCycle ? ` / ${assetRow.eolCycle}` : ''}
-                            </span>
-                          </div>
-                        </td>
-                        <td>{assetRow.openVulnerabilityCount} CVEs · {assetRow.openFindingCount} findings</td>
-                        <td>{formatInstant(assetRow.lastObservedAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {detail.assets.length === 0 ? (
+                <div className="panel-caption">No linked inventory components available.</div>
+              ) : (
+                <div className="table-scroll">
+                  <DataTable
+                    storageKey={`software-identity-detail-assets:${softwareIdentityId}`}
+                    columns={assetColumns}
+                    rows={assetRows}
+                  />
+                </div>
+              )}
             </section>
           </>
         )}
