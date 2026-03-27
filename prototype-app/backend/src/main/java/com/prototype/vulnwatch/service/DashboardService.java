@@ -64,7 +64,7 @@ public class DashboardService {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final FindingRepository findingRepository;
     private final FindingEventRepository findingEventRepository;
-    private final FindingService findingService;
+    private final FindingQueryService findingQueryService;
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final SyncRunRepository syncRunRepository;
     private final ObjectMapper objectMapper;
@@ -76,7 +76,7 @@ public class DashboardService {
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             FindingRepository findingRepository,
             FindingEventRepository findingEventRepository,
-            FindingService findingService,
+            FindingQueryService findingQueryService,
             DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
             SyncRunRepository syncRunRepository,
             ObjectMapper objectMapper
@@ -87,7 +87,7 @@ public class DashboardService {
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.findingRepository = findingRepository;
         this.findingEventRepository = findingEventRepository;
-        this.findingService = findingService;
+        this.findingQueryService = findingQueryService;
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.syncRunRepository = syncRunRepository;
         this.objectMapper = objectMapper;
@@ -97,8 +97,8 @@ public class DashboardService {
     public DashboardResponse get(Tenant tenant) {
         long assets = assetRepository.countByTenant(tenant);
         long components = inventoryComponentRepository.countByTenantAndComponentStatus(tenant, InventoryComponentStatus.ACTIVE);
-        long openFindings = findingService.countOpen(tenant);
-        long criticalFindings = findingService.countCritical(tenant);
+        long openFindings = findingQueryService.countOpen(tenant);
+        long criticalFindings = findingQueryService.countCritical(tenant);
         long openCritical = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "CRITICAL");
         long openHigh = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "HIGH");
         long openMedium = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "MEDIUM");
@@ -126,7 +126,7 @@ public class DashboardService {
                         tenant,
                         FindingStatus.OPEN,
                         PageRequest.of(0, 5));
-        List<FindingResponse> latest = findingService.listLatestByTenant(tenant, 10);
+        List<FindingResponse> latest = findingQueryService.listLatestByTenant(tenant, 10);
         DashboardNoiseReductionResponse noiseReduction = buildNoiseReduction(tenant, openFindings);
         DashboardCsafVexAnalyticsResponse csafVexAnalytics = buildCsafVexAnalytics(tenant, noiseReduction);
         DashboardCorrelationEfficiencyResponse correlationEfficiency = buildCorrelationEfficiency(tenant, components);

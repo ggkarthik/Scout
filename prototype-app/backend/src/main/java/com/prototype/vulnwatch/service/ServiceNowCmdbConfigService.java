@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.ServiceNowAuthType;
 import com.prototype.vulnwatch.domain.ServiceNowCmdbConfig;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -22,7 +26,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -61,7 +64,8 @@ public class ServiceNowCmdbConfigService {
     );
 
     private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
-    private final RestTemplate restTemplate;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
 
     @Value("${app.cmdb.servicenow.base-url:}")
@@ -75,11 +79,13 @@ public class ServiceNowCmdbConfigService {
 
     public ServiceNowCmdbConfigService(
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
-            RestTemplate restTemplate,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper
     ) {
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
-        this.restTemplate = restTemplate;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -240,7 +246,21 @@ public class ServiceNowCmdbConfigService {
                     .buildAndExpand(tableName)
                     .toUriString();
             HttpHeaders headers = buildHeaders(config);
-            ResponseEntity<String> response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    uri,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class,
+                    "ServiceNow CMDB probe",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
+            );
             if (!response.getStatusCode().is2xxSuccessful()) {
                 return new ProbeResult(false, tableName + " returned HTTP " + response.getStatusCode().value());
             }
@@ -288,6 +308,10 @@ public class ServiceNowCmdbConfigService {
         if (!hasText(config.ciTable())) {
             throw new ResponseStatusException(BAD_REQUEST, "CI lookup table is required");
         }
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("servicenow", 0L, null, null);
     }
 
     private ServiceNowCmdbConfigResponse toResponse(ServiceNowCmdbConfig config) {

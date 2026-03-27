@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicy;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.ServiceNowAuthType;
 import com.prototype.vulnwatch.domain.ServiceNowCmdbConfig;
 import com.prototype.vulnwatch.domain.SyncRun;
@@ -32,7 +36,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
@@ -44,7 +47,8 @@ public class ServiceNowCmdbSyncService {
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     private final SyncRunRepository syncRunRepository;
     private final CmdbIngestionService cmdbIngestionService;
-    private final RestTemplate restTemplate;
+    private final OutboundHttpClient outboundHttpClient;
+    private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
     private final TaskExecutor integrationQueueExecutor;
     private final TransactionTemplate transactionTemplate;
@@ -54,7 +58,8 @@ public class ServiceNowCmdbSyncService {
             ServiceNowCmdbConfigService serviceNowCmdbConfigService,
             SyncRunRepository syncRunRepository,
             CmdbIngestionService cmdbIngestionService,
-            RestTemplate restTemplate,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper,
             @Qualifier("integrationQueueExecutor") TaskExecutor integrationQueueExecutor,
             TransactionTemplate transactionTemplate
@@ -63,7 +68,8 @@ public class ServiceNowCmdbSyncService {
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
         this.syncRunRepository = syncRunRepository;
         this.cmdbIngestionService = cmdbIngestionService;
-        this.restTemplate = restTemplate;
+        this.outboundHttpClient = outboundHttpClient;
+        this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
         this.integrationQueueExecutor = integrationQueueExecutor;
         this.transactionTemplate = transactionTemplate;
@@ -304,11 +310,20 @@ public class ServiceNowCmdbSyncService {
                 builder.queryParam("sysparm_query", query);
             }
             String uri = builder.buildAndExpand(tableName).toUriString();
-            ResponseEntity<String> response = restTemplate.exchange(
+            ResponseEntity<String> response = outboundHttpClient.exchange(
                     uri,
                     HttpMethod.GET,
                     new HttpEntity<>(buildHeaders(config)),
-                    String.class
+                    String.class,
+                    "ServiceNow table API",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
             );
             if (!response.getStatusCode().is2xxSuccessful() || !hasText(response.getBody())) {
                 throw new IllegalStateException("ServiceNow table pull failed for " + tableName + " with HTTP " + response.getStatusCode().value());
@@ -414,6 +429,10 @@ public class ServiceNowCmdbSyncService {
             );
         }
         return headers;
+    }
+
+    private OutboundPolicy outboundPolicy() {
+        return outboundPolicyFactory.forProvider("servicenow", 0L, null, null);
     }
 
     private void copyIfMissing(Map<String, String> row, String key, String value) {

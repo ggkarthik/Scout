@@ -10,8 +10,8 @@ import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
 import com.prototype.vulnwatch.service.SbomIngestionService;
-import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
@@ -26,16 +26,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 public class IngestionController {
 
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final SbomIngestionService sbomIngestionService;
     private final VulnerabilityIngestionService vulnerabilityIngestionService;
 
     public IngestionController(
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             SbomIngestionService sbomIngestionService,
             VulnerabilityIngestionService vulnerabilityIngestionService
     ) {
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.sbomIngestionService = sbomIngestionService;
         this.vulnerabilityIngestionService = vulnerabilityIngestionService;
     }
@@ -44,7 +44,7 @@ public class IngestionController {
     public SbomIngestionResponse fetchSbomFromEndpoint(
             @Valid @RequestBody SbomEndpointIngestionRequest request
     ) throws IOException {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return sbomIngestionService.ingestFromEndpoint(tenant, request);
     }
 
@@ -52,7 +52,7 @@ public class IngestionController {
     public List<SbomUploadEvidenceResponse> listIngestions(
             @RequestParam(required = false) String sourceSystem
     ) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         return sbomIngestionService.listUploads(tenant, sourceSystem);
     }
 

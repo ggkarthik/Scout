@@ -59,7 +59,7 @@ public class OperationalDashboardService {
     private final DashboardService dashboardService;
     private final VulnerabilityRepository vulnerabilityRepository;
     private final VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository;
-    private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
+    private final VulnerabilityIntelQueryService vulnerabilityIntelQueryService;
     private final OperationalMetricsService operationalMetricsService;
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final InventoryComponentRepository inventoryComponentRepository;
@@ -73,7 +73,7 @@ public class OperationalDashboardService {
             DashboardService dashboardService,
             VulnerabilityRepository vulnerabilityRepository,
             VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository,
-            VulnerabilityIntelligenceService vulnerabilityIntelligenceService,
+            VulnerabilityIntelQueryService vulnerabilityIntelQueryService,
             OperationalMetricsService operationalMetricsService,
             DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
             InventoryComponentRepository inventoryComponentRepository,
@@ -86,7 +86,7 @@ public class OperationalDashboardService {
         this.dashboardService = dashboardService;
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.vulnerabilityIntelSummaryRepository = vulnerabilityIntelSummaryRepository;
-        this.vulnerabilityIntelligenceService = vulnerabilityIntelligenceService;
+        this.vulnerabilityIntelQueryService = vulnerabilityIntelQueryService;
         this.operationalMetricsService = operationalMetricsService;
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.inventoryComponentRepository = inventoryComponentRepository;
@@ -362,7 +362,7 @@ public class OperationalDashboardService {
     }
 
     private OperationalApiReadPathResponse buildApiReadPath(Tenant tenant) {
-        VulnerabilityIntelligenceService.OperationalState state = vulnerabilityIntelligenceService.getOperationalState();
+        VulnerabilityIntelligenceService.OperationalState state = vulnerabilityIntelQueryService.getOperationalState();
         long canonicalCveCount = vulnerabilityRepository.countByExternalIdStartingWith(CVE_PREFIX);
         long summaryCveCount = vulnerabilityIntelSummaryRepository.countByExternalIdStartingWith(CVE_PREFIX);
         double summaryCoveragePercent = canonicalCveCount <= 0

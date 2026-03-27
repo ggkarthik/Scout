@@ -1,0 +1,21 @@
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { api } from '../../api/client';
+
+export type SoftwareIdentitiesQueryParams = Parameters<typeof api.listSoftwareIdentities>[0];
+
+export function useSoftwareIdentitiesQuery(params: SoftwareIdentitiesQueryParams, enabled = true) {
+  return useQuery({
+    queryKey: ['software-identities', params],
+    queryFn: () => api.listSoftwareIdentities(params),
+    enabled,
+    placeholderData: keepPreviousData
+  });
+}
+
+export function useSoftwareIdentityDetailQuery(softwareIdentityId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['software-identity-detail', softwareIdentityId],
+    queryFn: () => api.getSoftwareIdentityDetail(softwareIdentityId ?? ''),
+    enabled: enabled && Boolean(softwareIdentityId)
+  });
+}

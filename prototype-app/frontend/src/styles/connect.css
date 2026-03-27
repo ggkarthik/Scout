@@ -1,0 +1,224 @@
+/* ── ServiceNow CMDB Connector redesign ── */
+
+/* 3-card health bar */
+.sn-health-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.sn-health-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-muted);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left-width: 3px;
+}
+
+.sn-health-healthy {
+  border-left-color: var(--accent);
+}
+
+.sn-health-error {
+  border-left-color: var(--critical);
+}
+
+.sn-health-warning {
+  border-left-color: var(--low);
+}
+
+.sn-health-neutral {
+  border-left-color: var(--border-strong);
+}
+
+.sn-health-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sn-health-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sn-health-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.sn-health-meta-error {
+  color: var(--critical);
+}
+
+.sn-health-cta {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.sn-health-cta:hover {
+  text-decoration: underline;
+}
+
+/* Tooltip icon */
+.sn-tooltip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: help;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+
+.sn-tooltip:hover {
+  color: var(--accent);
+}
+
+/* Required field marker */
+.sn-required {
+  color: var(--critical);
+  font-weight: 700;
+}
+
+/* Saved secret badge */
+.sn-saved-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+/* Sync settings toggle group */
+.sn-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sn-toggle-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  color: var(--text) !important;
+  font-size: 0.9rem !important;
+  cursor: pointer;
+}
+
+.sn-toggle-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Sync interval — single narrow column */
+.sn-sync-interval-grid {
+  grid-template-columns: minmax(160px, 280px) !important;
+  margin-top: var(--space-3) !important;
+}
+
+/* Advanced accordion toggle */
+.sn-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: left;
+  font-family: inherit;
+}
+
+.sn-advanced-toggle:hover {
+  color: var(--accent);
+}
+
+.sn-advanced-toggle-chevron {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sn-advanced-toggle-hint {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+/* Advanced grid — full 2-col */
+.sn-advanced-grid {
+  margin-top: var(--space-3);
+}
+
+/* Action bar — push queue link to far right */
+.sn-action-bar {
+  align-items: center;
+}
+
+.sn-queue-link {
+  margin-left: auto;
+}
+
+/* Inline test result table checks */
+.sn-test-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sn-table-checks {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: 8px;
+  font-size: 0.82rem;
+}
+
+.sn-check-ok {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sn-check-fail {
+  color: var(--critical);
+  font-weight: 600;
+}
+
+/* Sample sync stats grid */
+.sn-sample-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.sn-sample-stats strong {
+  color: var(--text);
+}
+
+/* Responsive: stack health bar on narrow viewports */
+@media (max-width: 640px) {
+  .sn-health-bar {
+    grid-template-columns: 1fr;
+  }
+}
+

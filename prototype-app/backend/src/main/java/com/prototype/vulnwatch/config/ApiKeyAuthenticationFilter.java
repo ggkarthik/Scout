@@ -24,6 +24,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private String configuredApiKey;
     @Value("${app.security.creator-key:}")
     private String configuredCreatorKey;
+    @Value("${app.security.default-user-id:local-analyst}")
+    private String configuredDefaultUserId;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -58,12 +60,12 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         boolean creator = !hasText(configuredCreatorKey)
                 || constantTimeEquals(configuredCreatorKey, request.getHeader("X-Creator-Key"));
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-        authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        authorities.add(new SimpleGrantedAuthority("ROLE_OPERATOR"));
         if (creator) {
             authorities.add(new SimpleGrantedAuthority("ROLE_CREATOR"));
         }
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                creator ? "creator-client" : "api-key-client",
+                configuredDefaultUserId,
                 null,
                 authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);

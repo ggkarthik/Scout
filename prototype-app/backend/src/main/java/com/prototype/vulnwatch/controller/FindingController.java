@@ -3,8 +3,8 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
-import com.prototype.vulnwatch.service.FindingService;
-import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.FindingQueryService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,12 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/findings")
 public class FindingController {
 
-    private final TenantService tenantService;
-    private final FindingService findingService;
+    private final WorkspaceService workspaceService;
+    private final FindingQueryService findingQueryService;
 
-    public FindingController(TenantService tenantService, FindingService findingService) {
-        this.tenantService = tenantService;
-        this.findingService = findingService;
+    public FindingController(WorkspaceService workspaceService, FindingQueryService findingQueryService) {
+        this.workspaceService = workspaceService;
+        this.findingQueryService = findingQueryService;
     }
 
     @GetMapping
@@ -39,8 +39,8 @@ public class FindingController {
             @RequestParam(required = false) String packageName,
             @RequestParam(required = false) String ecosystem
     ) {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return findingService.listByTenantPage(
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueryService.listByTenantPage(
                 tenant,
                 page,
                 size,
@@ -60,7 +60,7 @@ public class FindingController {
 
     @GetMapping("/filters")
     public FindingFilterValuesResponse filters() {
-        Tenant tenant = tenantService.getDefaultTenant();
-        return findingService.listAvailableFilters(tenant);
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueryService.listAvailableFilters(tenant);
     }
 }

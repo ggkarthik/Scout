@@ -1,13 +1,19 @@
+import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import {
-  InventoryComponentFilterValues,
-  SoftwareIdentityPage,
-  SoftwareIdentitySummary
-} from '../types';
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
 import { SoftwareIdentityDetailDrawer } from '../components/SoftwareIdentityDetailDrawer';
+import { useInventoryComponentFiltersQuery } from '../features/inventory/queries';
+import {
+  useSoftwareIdentitiesQuery
+} from '../features/software-identities/queries';
+import type { SoftwareIdentitySummary } from '../features/software-identities/types';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { readQueryParam, replaceBrowserQueryParams } from '../utils/queryState';
 
 const PAGE_SIZE = 25;
 const SOFTWARE_IDENTITY_QUERY_KEY = 'softwareIdentityId';
@@ -33,14 +39,6 @@ type MappingNotice = {
   kind: 'error' | 'success';
   message: string;
 };
-
-function readSelectedSoftwareIdentityId(): string | null {
-  return readQueryParam(SOFTWARE_IDENTITY_QUERY_KEY);
-}
-
-function updateSelectedSoftwareIdentityId(softwareIdentityId: string | null): void {
-  replaceBrowserQueryParams({ [SOFTWARE_IDENTITY_QUERY_KEY]: softwareIdentityId });
-}
 
 function formatLabel(value: string): string {
   return value
@@ -122,10 +120,8 @@ function mappingStateLabel(identity: SoftwareIdentitySummary): string {
 }
 
 export function SoftwareIdentitiesPage() {
-  const [pageData, setPageData] = React.useState<SoftwareIdentityPage | null>(null);
-  const [filterValues, setFilterValues] = React.useState<InventoryComponentFilterValues | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [assetType, setAssetType] = React.useState('');
@@ -133,69 +129,44 @@ export function SoftwareIdentitiesPage() {
   const [ecosystem, setEcosystem] = React.useState('');
   const [lifecycle, setLifecycle] = React.useState('');
   const [mappingState, setMappingState] = React.useState('');
-  const [selectedIdentityId, setSelectedIdentityId] = React.useState<string | null>(() => readSelectedSoftwareIdentityId());
-  const [detailRefreshNonce, setDetailRefreshNonce] = React.useState(0);
-  const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [expandedMappingId, setExpandedMappingId] = React.useState<string | null>(null);
   const [mappingDrafts, setMappingDrafts] = React.useState<Record<string, string>>({});
   const [mappingBusyId, setMappingBusyId] = React.useState<string | null>(null);
   const [mappingNotice, setMappingNotice] = React.useState<MappingNotice | null>(null);
   const debouncedQuery = useDebouncedValue(query);
 
-  React.useEffect(() => {
-    const handlePopState = (): void => {
-      setSelectedIdentityId(readSelectedSoftwareIdentityId());
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  React.useEffect(() => {
-    api.listInventoryComponentFilters()
-      .then((response) => setFilterValues(response))
-      .catch(() => {});
-  }, []);
+  const selectedIdentityId = searchParams.get(SOFTWARE_IDENTITY_QUERY_KEY);
+  const filterValuesQuery = useInventoryComponentFiltersQuery();
+  const softwareIdentityQueryParams = React.useMemo(() => ({
+    assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
+    sourceSystem: sourceSystem ? [sourceSystem] : undefined,
+    ecosystem: ecosystem ? [ecosystem] : undefined,
+    lifecycle: lifecycle ? lifecycle as 'eol' | 'near-eol' | 'unknown' | 'supported' : undefined,
+    mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined,
+    query: debouncedQuery || undefined,
+    page,
+    size: PAGE_SIZE
+  }), [assetType, debouncedQuery, ecosystem, lifecycle, mappingState, page, sourceSystem]);
+  const softwareIdentitiesQuery = useSoftwareIdentitiesQuery(softwareIdentityQueryParams);
+  const pageData = softwareIdentitiesQuery.data;
+  const error = softwareIdentitiesQuery.error instanceof Error ? softwareIdentitiesQuery.error.message : null;
+  const loading = softwareIdentitiesQuery.isPending && !pageData;
 
   React.useEffect(() => {
     setPage(0);
   }, [debouncedQuery, assetType, sourceSystem, ecosystem, lifecycle, mappingState]);
 
-  React.useEffect(() => {
-    updateSelectedSoftwareIdentityId(selectedIdentityId);
-  }, [selectedIdentityId]);
+  const updateSelectedIdentityId = React.useCallback((nextIdentityId: string | null): void => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextIdentityId) {
+      nextSearchParams.set(SOFTWARE_IDENTITY_QUERY_KEY, nextIdentityId);
+    } else {
+      nextSearchParams.delete(SOFTWARE_IDENTITY_QUERY_KEY);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
-  React.useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
-    api.listSoftwareIdentities({
-      assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
-      sourceSystem: sourceSystem ? [sourceSystem] : undefined,
-      ecosystem: ecosystem ? [ecosystem] : undefined,
-      lifecycle: lifecycle ? lifecycle as 'eol' | 'near-eol' | 'unknown' | 'supported' : undefined,
-      mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined,
-      query: debouncedQuery || undefined,
-      page,
-      size: PAGE_SIZE
-    })
-      .then((response) => {
-        if (active) {
-          setPageData(response);
-          setLoading(false);
-        }
-      })
-      .catch((e) => {
-        if (active) {
-          setError(e instanceof Error ? e.message : String(e));
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [assetType, debouncedQuery, ecosystem, lifecycle, mappingState, page, refreshNonce, sourceSystem]);
-
-  function clearFilters() {
+  const clearFilters = React.useCallback(() => {
     setQuery('');
     setAssetType('');
     setSourceSystem('');
@@ -203,30 +174,30 @@ export function SoftwareIdentitiesPage() {
     setLifecycle('');
     setMappingState('');
     setPage(0);
-  }
+  }, []);
 
-  function openMappingEditor(identity: SoftwareIdentitySummary) {
+  const openMappingEditor = React.useCallback((identity: SoftwareIdentitySummary) => {
     setExpandedMappingId(identity.id);
     setMappingDrafts((current) => ({
       ...current,
       [identity.id]: current[identity.id] ?? identity.eolSlug ?? ''
     }));
     setMappingNotice(null);
-  }
+  }, []);
 
-  function closeMappingEditor() {
+  const closeMappingEditor = React.useCallback(() => {
     setExpandedMappingId(null);
     setMappingNotice(null);
-  }
+  }, []);
 
-  function updateMappingDraft(identityId: string, value: string) {
+  const updateMappingDraft = React.useCallback((identityId: string, value: string) => {
     setMappingDrafts((current) => ({
       ...current,
       [identityId]: value
     }));
-  }
+  }, []);
 
-  async function confirmMapping(identity: SoftwareIdentitySummary) {
+  const confirmMapping = React.useCallback(async (identity: SoftwareIdentitySummary) => {
     const draft = (mappingDrafts[identity.id] ?? '').trim();
     if (!draft) {
       setMappingNotice({
@@ -236,6 +207,7 @@ export function SoftwareIdentitiesPage() {
       });
       return;
     }
+
     setMappingBusyId(identity.id);
     setMappingNotice(null);
     try {
@@ -246,8 +218,11 @@ export function SoftwareIdentitiesPage() {
         kind: 'success',
         message: `Mapped ${identity.displayName} to ${draft}.`
       });
-      setRefreshNonce((current) => current + 1);
-      setDetailRefreshNonce((current) => current + 1);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['software-identities'] }),
+        queryClient.invalidateQueries({ queryKey: ['software-identity-detail'] }),
+        queryClient.invalidateQueries({ queryKey: ['eol-unresolved-mappings'] })
+      ]);
     } catch (e) {
       setMappingNotice({
         identityId: identity.id,
@@ -257,7 +232,166 @@ export function SoftwareIdentitiesPage() {
     } finally {
       setMappingBusyId(null);
     }
-  }
+  }, [mappingDrafts, queryClient]);
+
+  const identityColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'identity', label: 'Software Identity', header: 'Software Identity', initialSize: 240 },
+    { id: 'vendorProduct', label: 'Vendor / Product', header: 'Vendor / Product', initialSize: 180 },
+    { id: 'footprint', label: 'Footprint', header: 'Footprint', initialSize: 180 },
+    { id: 'sources', label: 'Sources', header: 'Sources', initialSize: 220 },
+    { id: 'lifecycle', label: 'Lifecycle', header: 'Lifecycle', initialSize: 200 },
+    { id: 'exposure', label: 'Open Exposure', header: 'Open Exposure', initialSize: 180 },
+    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 },
+    { id: 'actions', label: 'Actions', header: 'Actions', initialSize: 320 }
+  ], []);
+
+  const identityRows = React.useMemo<DataTableRow[]>(() => (
+    (pageData?.content ?? []).map((identity) => {
+      const lifecycleToneValue = lifecycleTone(identity);
+      const showMappingEditor = expandedMappingId === identity.id;
+      const canConfirmMapping = identity.needsEolMapping && identity.normalizedKey !== '::';
+
+      return {
+        id: identity.id,
+        cells: {
+          identity: {
+            content: (
+              <>
+                <div>{identity.displayName}</div>
+                <div className="panel-caption mono">{identity.canonicalKey}</div>
+                <div className="panel-caption mono">{identity.normalizedKey}</div>
+              </>
+            )
+          },
+          vendorProduct: {
+            content: (
+              <>
+                <div>{identity.vendor || '-'}</div>
+                <div className="panel-caption">{identity.product || '-'}</div>
+              </>
+            )
+          },
+          footprint: {
+            content: (
+              <>
+                <div>{identity.assetCount} assets</div>
+                <div className="panel-caption">{identity.componentCount} components · {identity.versionCount} versions</div>
+              </>
+            )
+          },
+          sources: {
+            content: (
+              <div className="software-identity-row-stack">
+                <span>{joinValues(identity.assetTypes, formatAssetType)}</span>
+                <span className="panel-caption">{joinValues(identity.ecosystems)}</span>
+                <span className="panel-caption">{joinValues(identity.sourceSystems, formatSourceSystem)}</span>
+              </div>
+            )
+          },
+          lifecycle: {
+            content: (
+              <div className="software-identity-row-stack">
+                <span className={lifecycleToneValue.className}>{lifecycleToneValue.label}</span>
+                <span className="panel-caption mono">{identity.eolSlug || 'No mapped slug'}</span>
+                <span className="panel-caption">{mappingStateLabel(identity)}</span>
+              </div>
+            )
+          },
+          exposure: {
+            content: (
+              <>
+                <div>{identity.openVulnerabilityCount} open CVEs</div>
+                <div className="panel-caption">{identity.openFindingCount} open findings</div>
+              </>
+            )
+          },
+          lastObserved: { content: formatInstant(identity.lastObservedAt) },
+          actions: {
+            content: (
+              <div className="software-identity-row-stack">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => updateSelectedIdentityId(identity.id)}
+                >
+                  View Detail
+                </button>
+
+                {identity.needsEolMapping ? (
+                  canConfirmMapping ? (
+                    showMappingEditor ? (
+                      <div className="software-identity-mapping-editor">
+                        <div className="panel-caption mono">{identity.normalizedKey}</div>
+                        <input
+                          type="text"
+                          className="filter-input software-identity-mapping-input"
+                          placeholder="endoflife.date slug"
+                          value={mappingDrafts[identity.id] ?? ''}
+                          onChange={(event) => updateMappingDraft(identity.id, event.target.value)}
+                        />
+                        <div className="button-row">
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={mappingBusyId === identity.id}
+                            onClick={() => void confirmMapping(identity)}
+                          >
+                            {mappingBusyId === identity.id ? 'Confirming...' : 'Confirm Mapping'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled={mappingBusyId === identity.id}
+                            onClick={closeMappingEditor}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => openMappingEditor(identity)}
+                      >
+                        Map EOL
+                      </button>
+                    )
+                  ) : (
+                    <span className="panel-caption">Needs normalized vendor/product first</span>
+                  )
+                ) : (
+                  <span className="panel-caption">
+                    {identity.mappingConfirmed ? 'Manual mapping confirmed' : 'No action needed'}
+                  </span>
+                )}
+
+                {mappingNotice?.identityId === identity.id && (
+                  <span className={mappingNotice.kind === 'error'
+                    ? 'panel-caption software-identity-mapping-error'
+                    : 'panel-caption software-identity-mapping-success'}
+                  >
+                    {mappingNotice.message}
+                  </span>
+                )}
+              </div>
+            )
+          }
+        }
+      };
+    })
+  ), [
+    closeMappingEditor,
+    confirmMapping,
+    expandedMappingId,
+    mappingBusyId,
+    mappingDrafts,
+    mappingNotice,
+    openMappingEditor,
+    pageData?.content,
+    updateMappingDraft,
+    updateSelectedIdentityId
+  ]);
 
   return (
     <div className="page-grid">
@@ -284,7 +418,7 @@ export function SoftwareIdentitiesPage() {
             <span className="panel-caption">Asset Type</span>
             <select className="filter-input" value={assetType} onChange={(event) => setAssetType(event.target.value)}>
               <option value="">All</option>
-              {(filterValues?.assetTypes ?? []).map((value) => (
+              {(filterValuesQuery.data?.assetTypes ?? []).map((value) => (
                 <option key={value} value={value}>{formatAssetType(value)}</option>
               ))}
             </select>
@@ -294,7 +428,7 @@ export function SoftwareIdentitiesPage() {
             <span className="panel-caption">Source</span>
             <select className="filter-input" value={sourceSystem} onChange={(event) => setSourceSystem(event.target.value)}>
               <option value="">All</option>
-              {(filterValues?.sourceSystems ?? []).map((value) => (
+              {(filterValuesQuery.data?.sourceSystems ?? []).map((value) => (
                 <option key={value} value={value}>{formatSourceSystem(value)}</option>
               ))}
             </select>
@@ -304,7 +438,7 @@ export function SoftwareIdentitiesPage() {
             <span className="panel-caption">Ecosystem</span>
             <select className="filter-input" value={ecosystem} onChange={(event) => setEcosystem(event.target.value)}>
               <option value="">All</option>
-              {(filterValues?.ecosystems ?? []).map((value) => (
+              {(filterValuesQuery.data?.ecosystems ?? []).map((value) => (
                 <option key={value} value={value}>{formatLabel(value)}</option>
               ))}
             </select>
@@ -333,7 +467,11 @@ export function SoftwareIdentitiesPage() {
               Clear Filters
             </button>
             <span className="panel-caption">
-              {pageData ? `${pageData.totalElements.toLocaleString()} identities` : 'Loading identities...'}
+              {pageData
+                ? `${pageData.totalElements.toLocaleString()} identities`
+                : error
+                  ? 'Identity results unavailable'
+                  : 'Loading identities...'}
             </span>
           </div>
         </div>
@@ -343,142 +481,19 @@ export function SoftwareIdentitiesPage() {
           <div className="notice">Loading software identities...</div>
         ) : (
           <>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Software Identity</th>
-                    <th>Vendor / Product</th>
-                    <th>Footprint</th>
-                    <th>Sources</th>
-                    <th>Lifecycle</th>
-                    <th>Open Exposure</th>
-                    <th>Last Observed</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!pageData || pageData.content.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '32px 0' }}>
-                        <span className="panel-caption">
-                          No software identities matched the current filters.
-                        </span>
-                      </td>
-                    </tr>
-                  ) : pageData.content.map((identity) => {
-                    const lifecycleToneValue = lifecycleTone(identity);
-                    const showMappingEditor = expandedMappingId === identity.id;
-                    const canConfirmMapping = identity.needsEolMapping && identity.normalizedKey !== '::';
-                    return (
-                      <tr key={identity.id}>
-                        <td>
-                          <div>{identity.displayName}</div>
-                          <div className="panel-caption mono">{identity.canonicalKey}</div>
-                          <div className="panel-caption mono">{identity.normalizedKey}</div>
-                        </td>
-                        <td>
-                          <div>{identity.vendor || '-'}</div>
-                          <div className="panel-caption">{identity.product || '-'}</div>
-                        </td>
-                        <td>
-                          <div>{identity.assetCount} assets</div>
-                          <div className="panel-caption">{identity.componentCount} components · {identity.versionCount} versions</div>
-                        </td>
-                        <td>
-                          <div className="software-identity-row-stack">
-                            <span>{joinValues(identity.assetTypes, formatAssetType)}</span>
-                            <span className="panel-caption">{joinValues(identity.ecosystems)}</span>
-                            <span className="panel-caption">{joinValues(identity.sourceSystems, formatSourceSystem)}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="software-identity-row-stack">
-                            <span className={lifecycleToneValue.className}>{lifecycleToneValue.label}</span>
-                            <span className="panel-caption mono">{identity.eolSlug || 'No mapped slug'}</span>
-                            <span className="panel-caption">{mappingStateLabel(identity)}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <div>{identity.openVulnerabilityCount} open CVEs</div>
-                          <div className="panel-caption">{identity.openFindingCount} open findings</div>
-                        </td>
-                        <td>{formatInstant(identity.lastObservedAt)}</td>
-                        <td>
-                          <div className="software-identity-row-stack">
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              onClick={() => setSelectedIdentityId(identity.id)}
-                            >
-                              View Detail
-                            </button>
-
-                            {identity.needsEolMapping ? (
-                              canConfirmMapping ? (
-                                showMappingEditor ? (
-                                  <div className="software-identity-mapping-editor">
-                                    <div className="panel-caption mono">{identity.normalizedKey}</div>
-                                    <input
-                                      type="text"
-                                      className="filter-input software-identity-mapping-input"
-                                      placeholder="endoflife.date slug"
-                                      value={mappingDrafts[identity.id] ?? ''}
-                                      onChange={(event) => updateMappingDraft(identity.id, event.target.value)}
-                                    />
-                                    <div className="button-row">
-                                      <button
-                                        type="button"
-                                        className="btn btn-secondary"
-                                        disabled={mappingBusyId === identity.id}
-                                        onClick={() => confirmMapping(identity)}
-                                      >
-                                        {mappingBusyId === identity.id ? 'Confirming...' : 'Confirm Mapping'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="btn btn-ghost"
-                                        disabled={mappingBusyId === identity.id}
-                                        onClick={closeMappingEditor}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost"
-                                    onClick={() => openMappingEditor(identity)}
-                                  >
-                                    Map EOL
-                                  </button>
-                                )
-                              ) : (
-                                <span className="panel-caption">Needs normalized vendor/product first</span>
-                              )
-                            ) : (
-                              <span className="panel-caption">
-                                {identity.mappingConfirmed ? 'Manual mapping confirmed' : 'No action needed'}
-                              </span>
-                            )}
-
-                            {mappingNotice?.identityId === identity.id && (
-                              <span className={mappingNotice.kind === 'error'
-                                ? 'panel-caption software-identity-mapping-error'
-                                : 'panel-caption software-identity-mapping-success'}
-                              >
-                                {mappingNotice.message}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {error && !pageData ? null : !pageData || pageData.content.length === 0 ? (
+              <div className="panel-caption" style={{ padding: '32px 0' }}>
+                No software identities matched the current filters.
+              </div>
+            ) : (
+              <div className="table-scroll">
+                <DataTable
+                  storageKey="software-identities-table"
+                  columns={identityColumns}
+                  rows={identityRows}
+                />
+              </div>
+            )}
 
             {pageData && pageData.totalPages > 1 && (
               <div className="pagination-row">
@@ -510,8 +525,7 @@ export function SoftwareIdentitiesPage() {
       {selectedIdentityId && (
         <SoftwareIdentityDetailDrawer
           softwareIdentityId={selectedIdentityId}
-          refreshNonce={detailRefreshNonce}
-          onClose={() => setSelectedIdentityId(null)}
+          onClose={() => updateSelectedIdentityId(null)}
         />
       )}
     </div>

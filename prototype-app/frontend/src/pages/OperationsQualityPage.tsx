@@ -1,13 +1,19 @@
 import React from 'react';
-import { api } from '../api/client';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
-  OperationalQualityFilterValues,
-  OperationalQualityIssue,
-  OperationalQualityIssueDetail,
-  OperationalQualityIssuePage,
-  OperationalQualitySummary
-} from '../types';
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
+import type {
+  OperationalQualityIssue
+} from '../features/operations/types';
+import {
+  useOperationalQualityFiltersQuery,
+  useOperationalQualityIssueDetailQuery,
+  useOperationalQualityIssuesQuery,
+  useOperationalQualitySummaryQuery
+} from '../features/operations/queries';
 
 const PAGE_SIZE = 25;
 
@@ -71,28 +77,9 @@ function DetailDrawer({
   issueId: string;
   onClose: () => void;
 }) {
-  const [detail, setDetail] = React.useState<OperationalQualityIssueDetail | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let active = true;
-    setDetail(null);
-    setError(null);
-    api.getOperationalQualityIssue(issueId)
-      .then((response) => {
-        if (active) {
-          setDetail(response);
-        }
-      })
-      .catch((requestError) => {
-        if (active) {
-          setError(requestError instanceof Error ? requestError.message : String(requestError));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [issueId]);
+  const detailQuery = useOperationalQualityIssueDetailQuery(issueId);
+  const detail = detailQuery.data ?? null;
+  const error = detailQuery.error instanceof Error ? detailQuery.error.message : null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -182,11 +169,6 @@ function DetailDrawer({
 }
 
 export function OperationsQualityPage() {
-  const [summary, setSummary] = React.useState<OperationalQualitySummary | null>(null);
-  const [filters, setFilters] = React.useState<OperationalQualityFilterValues | null>(null);
-  const [pageData, setPageData] = React.useState<OperationalQualityIssuePage | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
   const [queryInput, setQueryInput] = React.useState('');
   const [domain, setDomain] = React.useState('');
   const [issueType, setIssueType] = React.useState('');
@@ -198,67 +180,84 @@ export function OperationsQualityPage() {
   const [page, setPage] = React.useState(0);
   const [selectedIssueId, setSelectedIssueId] = React.useState<string | null>(null);
   const query = useDebouncedValue(queryInput.trim());
+  const summaryQuery = useOperationalQualitySummaryQuery();
+  const filtersQuery = useOperationalQualityFiltersQuery();
+  const issuesQuery = useOperationalQualityIssuesQuery({
+    domain: domain || undefined,
+    issueType: issueType || undefined,
+    severity: severity || undefined,
+    affectsActiveFindings: affectsActiveFindings === 'all'
+      ? undefined
+      : affectsActiveFindings === 'yes',
+    assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
+    sourceSystem: sourceSystem ? [sourceSystem] : undefined,
+    ecosystem: ecosystem ? [ecosystem] : undefined,
+    query: query || undefined,
+    page,
+    size: PAGE_SIZE
+  });
+  const summary = summaryQuery.data ?? null;
+  const filters = filtersQuery.data ?? null;
+  const pageData = issuesQuery.data ?? null;
+  const loading = summaryQuery.isLoading || filtersQuery.isLoading || issuesQuery.isLoading || issuesQuery.isFetching;
+  const error = issuesQuery.error instanceof Error
+    ? issuesQuery.error.message
+    : summaryQuery.error instanceof Error
+      ? summaryQuery.error.message
+      : filtersQuery.error instanceof Error
+        ? filtersQuery.error.message
+        : null;
 
   React.useEffect(() => {
     setPage(0);
   }, [domain, issueType, severity, affectsActiveFindings, assetType, sourceSystem, ecosystem, query]);
 
-  React.useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [summaryResponse, filtersResponse, issuesResponse] = await Promise.all([
-          api.getOperationalQualitySummary(),
-          filters ? Promise.resolve(filters) : api.getOperationalQualityFilters(),
-          api.listOperationalQualityIssues({
-            domain: domain || undefined,
-            issueType: issueType || undefined,
-            severity: severity || undefined,
-            affectsActiveFindings: affectsActiveFindings === 'all'
-              ? undefined
-              : affectsActiveFindings === 'yes',
-            assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
-            sourceSystem: sourceSystem ? [sourceSystem] : undefined,
-            ecosystem: ecosystem ? [ecosystem] : undefined,
-            query: query || undefined,
-            page,
-            size: PAGE_SIZE
-          })
-        ]);
-        if (!active) {
-          return;
-        }
-        setSummary(summaryResponse);
-        setFilters(filtersResponse);
-        setPageData(issuesResponse);
-        setError(null);
-      } catch (requestError) {
-        if (!active) {
-          return;
-        }
-        setError(requestError instanceof Error ? requestError.message : String(requestError));
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+  const issues = React.useMemo(() => pageData?.items ?? [], [pageData?.items]);
+  const issueColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'issue', label: 'Issue', header: 'Issue', initialSize: 240 },
+    { id: 'domain', label: 'Domain', header: 'Domain', initialSize: 140 },
+    { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
+    { id: 'source', label: 'Source / Object', header: 'Source / Object', initialSize: 220 },
+    { id: 'scope', label: 'Affected Scope', header: 'Affected Scope', initialSize: 180 },
+    { id: 'exposure', label: 'Open Findings / Vulns', header: 'Open Findings / Vulns', initialSize: 180 },
+    { id: 'lastSeen', label: 'Last Seen', header: 'Last Seen', initialSize: 180 },
+    { id: 'owner', label: 'Owner', header: 'Owner', initialSize: 140 }
+  ], []);
+  const issueRows = React.useMemo<DataTableRow[]>(() => (
+    issues.map((issue) => ({
+      id: issue.id,
+      rowProps: {
+        className: 'quality-table-row',
+        onClick: () => setSelectedIssueId(issue.id)
+      },
+      cells: {
+        issue: {
+          content: (
+            <button type="button" className="quality-row-button" onClick={() => setSelectedIssueId(issue.id)}>
+              <span>{issue.title}</span>
+              <span className="panel-caption">{issue.primaryLabel || issue.reasonCode}</span>
+            </button>
+          )
+        },
+        domain: { content: formatDomain(issue.domain) },
+        severity: {
+          content: <span className={SEVERITY_CLASS[issue.severity] ?? 'quality-severity'}>{issue.severity}</span>
+        },
+        source: {
+          content: (
+            <div className="software-identity-row-stack">
+              <span>{issue.sourceSystem ? formatLabel(issue.sourceSystem) : issue.sourceObjectType}</span>
+              <span className="panel-caption">{issue.secondaryLabel || issue.sourceObjectId || '-'}</span>
+            </div>
+          )
+        },
+        scope: { content: scopeLabel(issue) },
+        exposure: { content: exposureLabel(issue) },
+        lastSeen: { content: formatInstant(issue.lastSeenAt) },
+        owner: { content: ownerDestination(issue) }
       }
-    };
-
-    void load();
-    const intervalId = window.setInterval(() => {
-      void load();
-    }, 15000);
-
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-  }, [affectsActiveFindings, assetType, domain, ecosystem, filters, issueType, page, query, severity, sourceSystem]);
-
-  const issues = pageData?.items ?? [];
+    }))
+  ), [issues]);
 
   return (
     <div className="page-grid">
@@ -395,44 +394,11 @@ export function OperationsQualityPage() {
         {issues.length > 0 && (
           <>
             <div className="table-scroll">
-              <table className="quality-table">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>Domain</th>
-                    <th>Severity</th>
-                    <th>Source / Object</th>
-                    <th>Affected Scope</th>
-                    <th>Open Findings / Vulns</th>
-                    <th>Last Seen</th>
-                    <th>Owner</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {issues.map((issue) => (
-                    <tr key={issue.id} className="quality-table-row" onClick={() => setSelectedIssueId(issue.id)}>
-                      <td>
-                        <button type="button" className="quality-row-button" onClick={() => setSelectedIssueId(issue.id)}>
-                          <span>{issue.title}</span>
-                          <span className="panel-caption">{issue.primaryLabel || issue.reasonCode}</span>
-                        </button>
-                      </td>
-                      <td>{formatDomain(issue.domain)}</td>
-                      <td><span className={SEVERITY_CLASS[issue.severity] ?? 'quality-severity'}>{issue.severity}</span></td>
-                      <td>
-                        <div className="software-identity-row-stack">
-                          <span>{issue.sourceSystem ? formatLabel(issue.sourceSystem) : issue.sourceObjectType}</span>
-                          <span className="panel-caption">{issue.secondaryLabel || issue.sourceObjectId || '-'}</span>
-                        </div>
-                      </td>
-                      <td>{scopeLabel(issue)}</td>
-                      <td>{exposureLabel(issue)}</td>
-                      <td>{formatInstant(issue.lastSeenAt)}</td>
-                      <td>{ownerDestination(issue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable
+                storageKey="operations-quality-issues"
+                columns={issueColumns}
+                rows={issueRows}
+              />
             </div>
 
             <div className="pagination quality-pagination">

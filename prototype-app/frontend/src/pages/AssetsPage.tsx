@@ -1,13 +1,15 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { pathForConnectView, pathForInventoryView } from '../app/routes';
 import type {
   ServiceNowCmdbAuthType,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
   ServiceNowCmdbConnectionTest,
   SyncTriggerResponse
-} from '../types';
-import { buildPathWithQueryParams } from '../utils/queryState';
+} from '../features/connect/types';
+import { useServiceNowCmdbConfigQuery } from '../features/connect/queries';
 
 const REVIEW_CATEGORY_QUERY_KEY = 'reviewCategory';
 const DEFAULT_INSTALL_FIELDS = [
@@ -40,18 +42,14 @@ const DEFAULT_DISCOVERY_FIELDS = [
 ].join(',');
 
 function inventoryHref(view: 'hosts', reviewCategories?: string[]): string {
-  return buildPathWithQueryParams({
-    tab: 'inventory',
-    inventoryView: view,
-    [REVIEW_CATEGORY_QUERY_KEY]: reviewCategories
-  });
+  const searchParams = new URLSearchParams();
+  reviewCategories?.forEach((value) => searchParams.append(REVIEW_CATEGORY_QUERY_KEY, value));
+  const query = searchParams.toString();
+  return query ? `${pathForInventoryView(view)}?${query}` : pathForInventoryView(view);
 }
 
 function connectHref(view: 'inventory-run-queue'): string {
-  return buildPathWithQueryParams({
-    tab: 'connect',
-    connectView: view
-  });
+  return pathForConnectView(view);
 }
 
 function defaultForm(): ServiceNowCmdbConfigRequest {
@@ -122,11 +120,12 @@ function healthCardClass(status: HealthStatus): string {
 }
 
 export function AssetsPage() {
-  const [config, setConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
+  const queryClient = useQueryClient();
+  const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
+  const config = serviceNowConfigQuery.data ?? null;
   const [form, setForm] = React.useState<ServiceNowCmdbConfigRequest>(defaultForm);
   const [credentialSecret, setCredentialSecret] = React.useState('');
   const [testResult, setTestResult] = React.useState<ServiceNowCmdbConnectionTest | null>(null);
-  const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [syncingLive, setSyncingLive] = React.useState(false);
@@ -135,24 +134,10 @@ export function AssetsPage() {
   const [showSecret, setShowSecret] = React.useState(false);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
 
-  const refresh = React.useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const savedConfig = await api.getServiceNowCmdbConfig();
-      setConfig(savedConfig);
-      setForm(formFromConfig(savedConfig));
-      setCredentialSecret('');
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    setForm(formFromConfig(config));
+    setCredentialSecret('');
+  }, [config]);
 
   const updateField = <K extends keyof ServiceNowCmdbConfigRequest>(key: K, value: ServiceNowCmdbConfigRequest[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -178,7 +163,7 @@ export function AssetsPage() {
         intervalMinutes: Math.max(5, Number(form.intervalMinutes) || 1440)
       };
       const saved = await api.saveServiceNowCmdbConfig(payload);
-      setConfig(saved);
+      queryClient.setQueryData(['service-now-cmdb-config'], saved);
       setForm(formFromConfig(saved));
       setCredentialSecret('');
       return saved;
@@ -200,7 +185,7 @@ export function AssetsPage() {
       const response = await api.testServiceNowCmdbConnection();
       setTestResult(response);
       const refreshed = await api.getServiceNowCmdbConfig();
-      setConfig(refreshed);
+      queryClient.setQueryData(['service-now-cmdb-config'], refreshed);
       setForm(formFromConfig(refreshed));
       setCredentialSecret('');
     } catch (requestError) {
@@ -250,6 +235,12 @@ export function AssetsPage() {
 
   const syncStatus: HealthStatus = form.autoSyncEnabled ? 'healthy' : 'neutral';
   const syncLabel = form.autoSyncEnabled ? `Every ${form.intervalMinutes} min` : 'Manual Only';
+  const queryError = serviceNowConfigQuery.error instanceof Error ? serviceNowConfigQuery.error.message : '';
+  const displayError = error || queryError;
+
+  if (serviceNowConfigQuery.isPending && !config) {
+    return <section className="panel">Loading ServiceNow CMDB connector...</section>;
+  }
 
   return (
     <section className="panel">
@@ -302,7 +293,7 @@ export function AssetsPage() {
         </div>
       )}
 
-      {error && <div className="notice error">{error}</div>}
+      {displayError && <div className="notice error">{displayError}</div>}
 
       {/* ── SECTION 1: Connection ── */}
       <div className="form-section">
@@ -551,12 +542,17 @@ export function AssetsPage() {
           type="button"
           className="btn btn-secondary"
           onClick={() => void queueLiveSync()}
-          disabled={syncingLive || saving || testing || loading}
+          disabled={syncingLive || saving || testing || serviceNowConfigQuery.isFetching}
         >
           {syncingLive ? 'Queueing Live Sync...' : 'Run Live Sync'}
         </button>
-        <button type="button" className="btn-link" onClick={() => void refresh()} disabled={loading || saving || testing}>
-          {loading ? 'Refreshing...' : '↺ Refresh Setup'}
+        <button
+          type="button"
+          className="btn-link"
+          onClick={() => void serviceNowConfigQuery.refetch()}
+          disabled={serviceNowConfigQuery.isFetching || saving || testing}
+        >
+          {serviceNowConfigQuery.isFetching ? 'Refreshing...' : '↺ Refresh Setup'}
         </button>
         <a className="btn-link sn-queue-link" href={connectHref('inventory-run-queue')}>
           Open Inventory Run Queue →

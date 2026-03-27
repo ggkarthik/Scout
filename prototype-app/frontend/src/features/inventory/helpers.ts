@@ -1,17 +1,16 @@
 import type {
-  InventoryComponentRecord,
+  InventoryComponentRecord
+} from './api-types';
+import type {
   VulnerabilityIntelDetail,
   VulnerabilityIntelRecord
-} from '../../types';
-import { readQueryParam, readQueryParams, replaceBrowserQueryParams } from '../../utils/queryState';
+} from '../vulnerability-intel/types';
 import {
   HOST_REVIEW_CATEGORIES,
   HostReviewCategory,
   InventoryScopedAssetType,
   InventoryViewKey
 } from './types';
-
-const HOST_REVIEW_CATEGORY_QUERY_KEY = 'reviewCategory';
 
 const SOURCE_LABELS: Record<string, string> = {
   nvd: 'NVD',
@@ -148,22 +147,6 @@ export function normalizeHostReviewCategory(value: string): HostReviewCategory |
   return HOST_REVIEW_CATEGORIES.includes(normalized as HostReviewCategory)
     ? normalized as HostReviewCategory
     : null;
-}
-
-export function readSelectedHostReviewCategories(): HostReviewCategory[] {
-  const rawValues = readQueryParams(HOST_REVIEW_CATEGORY_QUERY_KEY);
-  if (rawValues.length === 0 && readQueryParam('inventoryView') === 'host-review-queue') {
-    return ['NEEDS_REVIEW'];
-  }
-  return Array.from(new Set(
-    rawValues
-      .map(normalizeHostReviewCategory)
-      .filter((value): value is HostReviewCategory => value !== null)
-  ));
-}
-
-export function updateSelectedHostReviewCategories(categories: HostReviewCategory[]): void {
-  replaceBrowserQueryParams({ [HOST_REVIEW_CATEGORY_QUERY_KEY]: categories });
 }
 
 export function buildHostReviewLabels(row: InventoryComponentRecord): string[] {

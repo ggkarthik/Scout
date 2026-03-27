@@ -1,14 +1,20 @@
+import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { api } from '../api/client';
-import { EolProductCatalog } from '../types';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
 import { EolDetailDrawer } from '../components/EolDetailDrawer';
-
-type UnresolvedMapping = {
-  vendor: string;
-  product: string;
-  displayName: string;
-  normalizedKey: string;
-};
+import {
+  useEolProductsQuery,
+  useEolUnresolvedMappingsQuery
+} from '../features/eol/queries';
+import type {
+  EolProductCatalog,
+  UnresolvedEolMapping
+} from '../features/eol/types';
 
 const PAGE_SIZE = 25;
 
@@ -65,44 +71,21 @@ function formatIdentifier(primary?: string, secondary?: string): string {
 }
 
 export function EolPage() {
-  const [products, setProducts] = React.useState<EolProductCatalog[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const productsQuery = useEolProductsQuery();
+  const unresolvedMappingsQuery = useEolUnresolvedMappingsQuery();
+  const products = React.useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
+  const unresolvedList = React.useMemo(
+    () => unresolvedMappingsQuery.data ?? [],
+    [unresolvedMappingsQuery.data]
+  );
+  const loading = productsQuery.isPending;
+  const error = productsQuery.error instanceof Error ? productsQuery.error.message : null;
   const [query, setQuery] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [drawer, setDrawer] = React.useState<EolProductCatalog | null>(null);
-
-  const [unresolvedList, setUnresolvedList] = React.useState<UnresolvedMapping[] | null>(null);
   const [confirmSlug, setConfirmSlug] = React.useState<Record<string, string>>({});
   const [unresolvedOpen, setUnresolvedOpen] = React.useState(false);
-
-  const loadProducts = React.useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api.listEolProducts()
-      .then(items => {
-        setProducts(items);
-        setLoading(false);
-      })
-      .catch(e => {
-        setError(e instanceof Error ? e.message : String(e));
-        setLoading(false);
-      });
-  }, []);
-
-  const loadUnresolvedMappings = React.useCallback(() => {
-    api.listEolUnresolvedMappings()
-      .then(list => setUnresolvedList(list))
-      .catch(() => {});
-  }, []);
-
-  React.useEffect(() => {
-    loadProducts();
-  }, [loadProducts]);
-
-  React.useEffect(() => {
-    loadUnresolvedMappings();
-  }, [loadUnresolvedMappings]);
 
   React.useEffect(() => {
     setPage(0);
@@ -133,7 +116,79 @@ export function EolPage() {
     aliases: products.filter(product => (product.aliases?.length ?? 0) > 0).length,
     fetched: products.filter(product => Boolean(product.lastFetchedAt)).length
   }), [products]);
-
+  const productColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'product', label: 'Product', header: 'Product', initialSize: 220 },
+    { id: 'slug', label: 'Slug', header: 'Slug', initialSize: 150 },
+    { id: 'identifiers', label: 'Identifiers', header: 'Identifiers', initialSize: 260 },
+    { id: 'aliases', label: 'Aliases', header: 'Aliases', initialSize: 240 },
+    { id: 'syncMetadata', label: 'Sync Metadata', header: 'Sync Metadata', initialSize: 240 },
+    { id: 'actions', label: 'Actions', header: '', initialSize: 140 }
+  ], []);
+  const productRows = React.useMemo<DataTableRow[]>(() => (
+    pageItems.map((product) => ({
+      id: product.slug,
+      cells: {
+        product: {
+          content: (
+            <>
+              <div>{product.displayName || product.slug}</div>
+              {product.displayName && product.displayName !== product.slug && (
+                <span className="panel-caption mono">{product.slug}</span>
+              )}
+            </>
+          )
+        },
+        slug: { content: <span className="mono">{product.slug}</span> },
+        identifiers: {
+          content: (
+            <>
+              <div className="eol-catalog-meta">
+                <span className="panel-caption">CPE</span>
+                <span className="mono">{formatIdentifier(product.cpeVendor, product.cpeProduct)}</span>
+              </div>
+              <div className="eol-catalog-meta">
+                <span className="panel-caption">PURL</span>
+                <span className="mono">{formatIdentifier(product.purlType, product.purlNamespace)}</span>
+              </div>
+            </>
+          )
+        },
+        aliases: { content: <span className="eol-catalog-aliases">{formatAliases(product.aliases)}</span> },
+        syncMetadata: {
+          content: (
+            <>
+              <div className="eol-catalog-meta">
+                <span className="panel-caption">Last fetched</span>
+                <span>{formatInstant(product.lastFetchedAt)}</span>
+              </div>
+              <div className="eol-catalog-meta">
+                <span className="panel-caption">Last modified</span>
+                <span className="mono">{product.lastModified || '-'}</span>
+              </div>
+            </>
+          )
+        },
+        actions: {
+          content: (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setDrawer(product)}
+            >
+              View Cycles
+            </button>
+          )
+        }
+      }
+    }))
+  ), [pageItems]);
+  const unresolvedColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'software', label: 'Software', header: 'Software', initialSize: 220 },
+    { id: 'vendor', label: 'Vendor', header: 'Vendor', initialSize: 140 },
+    { id: 'normalizedKey', label: 'Normalized Key', header: 'Normalized Key', initialSize: 240 },
+    { id: 'eolSlug', label: 'EOL Slug', header: 'EOL Slug', initialSize: 220 },
+    { id: 'actions', label: 'Actions', header: '', initialSize: 120 }
+  ], []);
   function exportCsv() {
     const header = 'Display Name,Slug,CPE Vendor,CPE Product,PURL Type,PURL Namespace,Aliases,Last Modified,Last Fetched At';
     const rows = filteredProducts.map(product =>
@@ -162,7 +217,7 @@ export function EolPage() {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
-  async function handleConfirmMapping(normalizedKey: string) {
+  const handleConfirmMapping = React.useCallback(async (normalizedKey: string) => {
     const slug = confirmSlug[normalizedKey];
     if (!slug?.trim()) {
       return;
@@ -175,11 +230,53 @@ export function EolPage() {
         delete next[normalizedKey];
         return next;
       });
-      loadUnresolvedMappings();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['eol-unresolved-mappings'] }),
+        queryClient.invalidateQueries({ queryKey: ['software-identities'] }),
+        queryClient.invalidateQueries({ queryKey: ['software-identity-detail'] })
+      ]);
     } catch (e) {
       alert(`Failed to confirm mapping: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }
+  }, [confirmSlug, queryClient]);
+
+  const unresolvedRows = React.useMemo<DataTableRow[]>(() => (
+    unresolvedList.slice(0, 50).map((item: UnresolvedEolMapping) => ({
+      id: item.normalizedKey,
+      cells: {
+        software: { content: item.displayName },
+        vendor: { content: <span className="mono">{item.vendor || '-'}</span> },
+        normalizedKey: { content: <span className="mono">{item.normalizedKey}</span> },
+        eolSlug: {
+          content: (
+            <input
+              type="text"
+              className="filter-input"
+              placeholder="e.g. ubuntu, python, java"
+              value={confirmSlug[item.normalizedKey] ?? ''}
+              onChange={event => setConfirmSlug(prev => ({
+                ...prev,
+                [item.normalizedKey]: event.target.value
+              }))}
+              style={{ width: '180px' }}
+            />
+          )
+        },
+        actions: {
+          content: (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!confirmSlug[item.normalizedKey]?.trim()}
+              onClick={() => void handleConfirmMapping(item.normalizedKey)}
+            >
+              Confirm
+            </button>
+          )
+        }
+      }
+    }))
+  ), [confirmSlug, handleConfirmMapping, unresolvedList]);
 
   return (
     <div className="page-grid">
@@ -247,73 +344,19 @@ export function EolPage() {
           <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
         ) : (
           <>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Slug</th>
-                    <th>Identifiers</th>
-                    <th>Aliases</th>
-                    <th>Sync Metadata</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageItems.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '32px 0' }}>
-                        <span className="panel-caption">
-                          {query.trim().length > 0 ? 'No products matched your search.' : 'No EOL products have been ingested yet.'}
-                        </span>
-                      </td>
-                    </tr>
-                  ) : pageItems.map(product => (
-                    <tr key={product.slug}>
-                      <td>
-                        <div>{product.displayName || product.slug}</div>
-                        {product.displayName && product.displayName !== product.slug && (
-                          <span className="panel-caption mono">{product.slug}</span>
-                        )}
-                      </td>
-                      <td className="mono">{product.slug}</td>
-                      <td>
-                        <div className="eol-catalog-meta">
-                          <span className="panel-caption">CPE</span>
-                          <span className="mono">{formatIdentifier(product.cpeVendor, product.cpeProduct)}</span>
-                        </div>
-                        <div className="eol-catalog-meta">
-                          <span className="panel-caption">PURL</span>
-                          <span className="mono">{formatIdentifier(product.purlType, product.purlNamespace)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="eol-catalog-aliases">{formatAliases(product.aliases)}</span>
-                      </td>
-                      <td>
-                        <div className="eol-catalog-meta">
-                          <span className="panel-caption">Last fetched</span>
-                          <span>{formatInstant(product.lastFetchedAt)}</span>
-                        </div>
-                        <div className="eol-catalog-meta">
-                          <span className="panel-caption">Last modified</span>
-                          <span className="mono">{product.lastModified || '-'}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => setDrawer(product)}
-                        >
-                          View Cycles
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {error && products.length === 0 ? null : pageItems.length === 0 ? (
+              <div className="panel-caption" style={{ padding: '32px 0' }}>
+                {query.trim().length > 0 ? 'No products matched your search.' : 'No EOL products have been ingested yet.'}
+              </div>
+            ) : (
+              <div className="table-scroll">
+                <DataTable
+                  storageKey="eol-product-catalog"
+                  columns={productColumns}
+                  rows={productRows}
+                />
+              </div>
+            )}
 
             {filteredProducts.length > PAGE_SIZE && (
               <div className="pagination-row">
@@ -343,7 +386,7 @@ export function EolPage() {
         )}
       </section>
 
-      {unresolvedList && unresolvedList.length > 0 && (
+      {unresolvedList.length > 0 && (
         <section className="panel">
           <button
             type="button"
@@ -360,53 +403,13 @@ export function EolPage() {
           </button>
 
           {unresolvedOpen && (
-            <>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Software</th>
-                      <th>Vendor</th>
-                      <th>Normalized Key</th>
-                      <th>EOL Slug</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {unresolvedList.slice(0, 50).map(item => (
-                      <tr key={item.normalizedKey}>
-                        <td>{item.displayName}</td>
-                        <td className="mono">{item.vendor || '-'}</td>
-                        <td className="mono">{item.normalizedKey}</td>
-                        <td>
-                          <input
-                            type="text"
-                            className="filter-input"
-                            placeholder="e.g. ubuntu, python, java"
-                            value={confirmSlug[item.normalizedKey] ?? ''}
-                            onChange={event => setConfirmSlug(prev => ({
-                              ...prev,
-                              [item.normalizedKey]: event.target.value
-                            }))}
-                            style={{ width: '180px' }}
-                          />
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            disabled={!confirmSlug[item.normalizedKey]?.trim()}
-                            onClick={() => handleConfirmMapping(item.normalizedKey)}
-                          >
-                            Confirm
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+            <div className="table-scroll">
+              <DataTable
+                storageKey="eol-unresolved-mappings"
+                columns={unresolvedColumns}
+                rows={unresolvedRows}
+              />
+            </div>
           )}
         </section>
       )}

@@ -10,6 +10,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicyDefaults;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -30,7 +33,16 @@ class GithubApiClientTest {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final GithubTokenProvider githubTokenProvider = new GithubTokenProvider(Path.of("build/test-github-token-does-not-exist"));
-    private final GithubApiClient client = new GithubApiClient(restTemplate, objectMapper, githubTokenProvider);
+    private final OutboundHttpClient outboundHttpClient = new OutboundHttpClient(restTemplate);
+    private final OutboundPolicyFactory outboundPolicyFactory = new OutboundPolicyFactory(
+            new OutboundPolicyDefaults(0L, 1, 1L, 60000L, true, true)
+    );
+    private final GithubApiClient client = new GithubApiClient(
+            objectMapper,
+            githubTokenProvider,
+            outboundHttpClient,
+            outboundPolicyFactory
+    );
     private MockRestServiceServer server;
 
     @BeforeEach
@@ -403,6 +415,22 @@ class GithubApiClientTest {
 
         assertEquals("GitHub packages API paused because the GitHub API rate limit is nearly exhausted (remaining: 4)",
                 error.getMessage());
+        server.verify();
+    }
+
+    @Test
+    void listContainerPackagesPreservesAuthorizationErrorMapping() {
+        server.expect(requestTo("https://api.github.com/orgs/ggkarthik/packages?package_type=container&per_page=100&page=1"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        IOException error = assertThrows(IOException.class, () -> client.listContainerPackages("ggkarthik"));
+
+        assertEquals(
+                "GitHub packages API request failed with status 403. GHCR discovery requires a GitHub token with at least read:packages access. "
+                        + githubTokenProvider.configurationHint(),
+                error.getMessage()
+        );
         server.verify();
     }
 }

@@ -1,24 +1,15 @@
 import React from 'react';
-import { api } from '../api/client';
-import { EolSummary } from '../types';
+import { useEolSummaryQuery } from '../features/eol/queries';
 
 type EolRiskWidgetProps = {
   onViewAll?: () => void;
 };
 
 export function EolRiskWidget({ onViewAll }: EolRiskWidgetProps) {
-  const [summary, setSummary] = React.useState<EolSummary | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const summaryQuery = useEolSummaryQuery();
+  const summary = summaryQuery.data;
 
-  React.useEffect(() => {
-    let active = true;
-    api.getEolSummary()
-      .then(s => { if (active) setSummary(s); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { active = false; };
-  }, []);
-
-  if (error) {
+  if (summaryQuery.error) {
     return (
       <section className="panel eol-widget">
         <div className="panel-header">

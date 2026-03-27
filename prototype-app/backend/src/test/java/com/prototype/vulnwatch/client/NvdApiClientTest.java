@@ -8,6 +8,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundPolicyDefaults;
+import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -20,7 +23,11 @@ class NvdApiClientTest {
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final NvdApiClient client = new NvdApiClient(objectMapper, restTemplate);
+    private final OutboundHttpClient outboundHttpClient = new OutboundHttpClient(restTemplate);
+    private final OutboundPolicyFactory outboundPolicyFactory = new OutboundPolicyFactory(
+            new OutboundPolicyDefaults(0L, 1, 1L, 60000L, true, true)
+    );
+    private final NvdApiClient client = new NvdApiClient(objectMapper, outboundHttpClient, outboundPolicyFactory);
     private MockRestServiceServer server;
 
     @BeforeEach

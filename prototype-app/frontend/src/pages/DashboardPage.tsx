@@ -1,11 +1,19 @@
 import React from 'react';
-import { api } from '../api/client';
 import {
-  Dashboard,
+  CveInventoryMappingRecord,
   DashboardCveInventoryMap,
-} from '../types';
+} from '../features/dashboard/types';
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRow
+} from '../components/DataTable';
 import { StatCard } from '../components/StatCard';
 import { EolRiskWidget } from '../components/EolRiskWidget';
+import {
+  useDashboardCveInventoryMapQuery,
+  useDashboardSummaryQuery
+} from '../features/dashboard/queries';
 
 function summarizeList(values: string[], maxItems = 3): string {
   if (!values || values.length === 0) {
@@ -35,26 +43,46 @@ type DashboardPageProps = {
   onViewEol?: () => void;
 };
 
+function buildCveInventoryRows(rows: CveInventoryMappingRecord[]): DataTableRow[] {
+  return rows.map((row) => ({
+    id: row.vulnerabilityId,
+    cells: {
+      cve: { content: <span className="mono">{row.externalId}</span> },
+      severity: {
+        content: (
+          <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
+        )
+      },
+      cvss: { content: row.cvssScore == null ? '-' : row.cvssScore.toFixed(1) },
+      identifiers: { content: <span className="mono">{summarizeList(row.matchedIdentifiers)}</span> },
+      mappedSoftware: {
+        content: (
+          <span title={row.mappedSoftware.join(', ')}>
+            {row.mappedSoftwareCount.toLocaleString()} ({summarizeList(row.mappedSoftware, 2)})
+          </span>
+        )
+      }
+    }
+  }));
+}
+
 export function DashboardPage({ onViewEol }: DashboardPageProps) {
-  const [data, setData] = React.useState<Dashboard | null>(null);
-  const [cveInventoryMap, setCveInventoryMap] = React.useState<DashboardCveInventoryMap | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let active = true;
-
-    api.getDashboard()
-      .then(d => { if (active) setData(d); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
-
-    api.getCveInventoryMap(5)
-      .then(m => { if (active) setCveInventoryMap(m); })
-      .catch(() => {});
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const dashboardQuery = useDashboardSummaryQuery();
+  const cveInventoryMapQuery = useDashboardCveInventoryMapQuery(5);
+  const data = dashboardQuery.data ?? null;
+  const cveInventoryMap: DashboardCveInventoryMap | null = cveInventoryMapQuery.data ?? null;
+  const error = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
+  const topHighRiskMap = React.useMemo(() => cveInventoryMap?.topHighRisk ?? [], [cveInventoryMap]);
+  const latestMap = React.useMemo(() => cveInventoryMap?.latest ?? [], [cveInventoryMap]);
+  const cveTableColumns = React.useMemo<DataTableColumn[]>(() => [
+    { id: 'cve', label: 'CVE', header: 'CVE', initialSize: 140 },
+    { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
+    { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 96 },
+    { id: 'identifiers', label: 'Matched Identifiers', header: 'Matched Identifiers', initialSize: 220 },
+    { id: 'mappedSoftware', label: 'Mapped Software', header: 'Mapped Software', initialSize: 240 }
+  ], []);
+  const topHighRiskRows = React.useMemo(() => buildCveInventoryRows(topHighRiskMap), [topHighRiskMap]);
+  const latestRows = React.useMemo(() => buildCveInventoryRows(latestMap), [latestMap]);
 
   if (error) {
     return <div className="panel">Failed to load dashboard: {error}</div>;
@@ -72,8 +100,6 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
   const avgConfidence = data.averageOpenConfidenceScore;
   const highConfidenceExposures = data.highConfidenceOpenFindings;
   const securityScore = Math.round(Math.max(0, 100 - (avgRisk / 10) * 100));
-  const topHighRiskMap = cveInventoryMap?.topHighRisk ?? [];
-  const latestMap = cveInventoryMap?.latest ?? [];
 
   return (
     <div className="page-grid">
@@ -138,7 +164,9 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
           <h3>Top CVE Inventory Mapping</h3>
           <span className="panel-caption">Identifier-level mapping for top high risk and latest impacted CVEs</span>
         </div>
-        {!cveInventoryMap ? (
+        {cveInventoryMapQuery.error && !cveInventoryMap ? (
+          <div className="panel-caption">Failed to load CVE inventory mapping.</div>
+        ) : !cveInventoryMap ? (
           <div className="panel-caption">Loading...</div>
         ) : (<div className="noise-panel-grid">
           <div>
@@ -147,32 +175,11 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
               <div className="panel-caption">No high-risk impacted CVEs available.</div>
             ) : (
               <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>CVE</th>
-                      <th>Severity</th>
-                      <th>CVSS</th>
-                      <th>Matched Identifiers</th>
-                      <th>Mapped Software</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topHighRiskMap.map((row) => (
-                      <tr key={row.vulnerabilityId}>
-                        <td className="mono">{row.externalId}</td>
-                        <td>
-                          <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
-                        </td>
-                        <td>{row.cvssScore == null ? '-' : row.cvssScore.toFixed(1)}</td>
-                        <td className="mono">{summarizeList(row.matchedIdentifiers)}</td>
-                        <td title={row.mappedSoftware.join(', ')}>
-                          {row.mappedSoftwareCount.toLocaleString()} ({summarizeList(row.mappedSoftware, 2)})
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  storageKey="dashboard-top-high-risk-cves"
+                  columns={cveTableColumns}
+                  rows={topHighRiskRows}
+                />
               </div>
             )}
           </div>
@@ -183,32 +190,11 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
               <div className="panel-caption">No recent confirmed impacted or no-patch CVEs available.</div>
             ) : (
               <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>CVE</th>
-                      <th>Severity</th>
-                      <th>CVSS</th>
-                      <th>Matched Identifiers</th>
-                      <th>Mapped Software</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {latestMap.map((row) => (
-                      <tr key={row.vulnerabilityId}>
-                        <td className="mono">{row.externalId}</td>
-                        <td>
-                          <span className={severityClassName(row.severity)}>{row.severity || 'UNKNOWN'}</span>
-                        </td>
-                        <td>{row.cvssScore == null ? '-' : row.cvssScore.toFixed(1)}</td>
-                        <td className="mono">{summarizeList(row.matchedIdentifiers)}</td>
-                        <td title={row.mappedSoftware.join(', ')}>
-                          {row.mappedSoftwareCount.toLocaleString()} ({summarizeList(row.mappedSoftware, 2)})
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  storageKey="dashboard-latest-cves"
+                  columns={cveTableColumns}
+                  rows={latestRows}
+                />
               </div>
             )}
           </div>

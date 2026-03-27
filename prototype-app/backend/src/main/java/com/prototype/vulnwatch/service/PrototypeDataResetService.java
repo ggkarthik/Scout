@@ -62,15 +62,15 @@ public class PrototypeDataResetService {
             "sync_runs"
     );
 
-    private final VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
+    private final VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService;
     private final JdbcTemplate jdbcTemplate;
 
     public PrototypeDataResetService(
-            VulnerabilityIntelligenceService vulnerabilityIntelligenceService,
+            VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService,
             @Qualifier("prototypeResetJdbcTemplate")
             JdbcTemplate jdbcTemplate
     ) {
-        this.vulnerabilityIntelligenceService = vulnerabilityIntelligenceService;
+        this.vulnerabilityIntelSummaryService = vulnerabilityIntelSummaryService;
         this.jdbcTemplate = jdbcTemplate;
     }
 
@@ -143,13 +143,13 @@ public class PrototypeDataResetService {
 
     private void refreshReadModelCachesAfterCommit() {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            vulnerabilityIntelligenceService.resetReadModelCaches();
+            vulnerabilityIntelSummaryService.resetReadModelCaches();
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                vulnerabilityIntelligenceService.resetReadModelCaches();
+                vulnerabilityIntelSummaryService.resetReadModelCaches();
             }
         });
     }

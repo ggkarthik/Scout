@@ -6,7 +6,7 @@ import {
   VULNERABILITY_INTEL_FILTER_CATEGORIES,
   VULNERABILITY_INTEL_FILTER_FIELDS
 } from './config';
-import { formatHostReviewLabel, normalizeHostReviewCategory } from './helpers';
+import { normalizeHostReviewCategory } from './helpers';
 import type {
   HostReviewCategory,
   InventoryComponentFilterKey,

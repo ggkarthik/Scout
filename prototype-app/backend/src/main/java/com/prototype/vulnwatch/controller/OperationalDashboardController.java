@@ -18,7 +18,7 @@ import com.prototype.vulnwatch.dto.OperationalQualityIssuePageResponse;
 import com.prototype.vulnwatch.dto.OperationalQualitySummaryResponse;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
-import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,16 +32,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class OperationalDashboardController {
 
     private final OperationalDashboardService operationalDashboardService;
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final OperationalQualityReadService operationalQualityReadService;
 
     public OperationalDashboardController(
             OperationalDashboardService operationalDashboardService,
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             OperationalQualityReadService operationalQualityReadService
     ) {
         this.operationalDashboardService = operationalDashboardService;
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.operationalQualityReadService = operationalQualityReadService;
     }
 
@@ -134,6 +134,6 @@ public class OperationalDashboardController {
     }
 
     private Tenant defaultTenant() {
-        return tenantService.getDefaultTenant();
+        return workspaceService.getWorkspace();
     }
 }

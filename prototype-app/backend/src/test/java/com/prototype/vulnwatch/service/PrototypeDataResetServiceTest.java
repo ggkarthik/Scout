@@ -26,13 +26,13 @@ class PrototypeDataResetServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
-    private VulnerabilityIntelligenceService vulnerabilityIntelligenceService;
+    private VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService;
 
     private PrototypeDataResetService service;
 
     @BeforeEach
     void setUp() {
-        service = new PrototypeDataResetService(vulnerabilityIntelligenceService, jdbcTemplate);
+        service = new PrototypeDataResetService(vulnerabilityIntelSummaryService, jdbcTemplate);
     }
 
     @Test
@@ -82,6 +82,6 @@ class PrototypeDataResetServiceTest {
         verify(jdbcTemplate).execute("truncate table eol_product_catalog restart identity cascade");
         verify(jdbcTemplate).update("delete from vex_assertions");
         verify(jdbcTemplate, never()).execute("truncate table component_vulnerability_state");
-        verify(vulnerabilityIntelligenceService).resetReadModelCaches();
+        verify(vulnerabilityIntelSummaryService).resetReadModelCaches();
     }
 }
