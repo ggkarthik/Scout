@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Finding, FindingFilterValues } from '../features/findings/types';
 import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
@@ -220,18 +221,36 @@ function groupValue(row: Finding, key: string): string {
 }
 
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
+  const [searchParams] = useSearchParams();
+  const initialVulnerabilityId = React.useMemo(() => searchParams.get('vulnerabilityId')?.trim() ?? '', [searchParams]);
+  const initialPackageName = React.useMemo(() => searchParams.get('packageName')?.trim() ?? '', [searchParams]);
+  const initialStatuses = React.useMemo(
+    () => searchParams.getAll('status').map((value) => value.trim()).filter((value) => value.length > 0),
+    [searchParams]
+  );
+  const initialSeverities = React.useMemo(
+    () => searchParams.getAll('severity').map((value) => value.trim()).filter((value) => value.length > 0),
+    [searchParams]
+  );
   const [page, setPage] = React.useState(0);
-  const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(DEFAULT_ACTIVE_FILTERS);
-  const [severities, setSeverities] = React.useState<string[]>([]);
-  const [statuses, setStatuses] = React.useState<string[]>([]);
+  const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(() => {
+    const filters = new Set<FindingFilterKey>(DEFAULT_ACTIVE_FILTERS);
+    if (initialVulnerabilityId) filters.add('vulnerabilityId');
+    if (initialPackageName) filters.add('packageName');
+    if (initialStatuses.length > 0) filters.add('status');
+    if (initialSeverities.length > 0) filters.add('severity');
+    return Array.from(filters);
+  });
+  const [severities, setSeverities] = React.useState<string[]>(initialSeverities);
+  const [statuses, setStatuses] = React.useState<string[]>(initialStatuses);
   const [decisionStates, setDecisionStates] = React.useState<string[]>([]);
   const [matchMethods, setMatchMethods] = React.useState<string[]>(DEFAULT_MATCH_METHODS);
   const [vexStatuses, setVexStatuses] = React.useState<string[]>([]);
   const [vexFreshness, setVexFreshness] = React.useState<string[]>([]);
   const [vexProviders, setVexProviders] = React.useState<string[]>([]);
   const [minConfidence, setMinConfidence] = React.useState(DEFAULT_MIN_CONFIDENCE);
-  const [vulnerabilityId, setVulnerabilityId] = React.useState('');
-  const [packageName, setPackageName] = React.useState('');
+  const [vulnerabilityId, setVulnerabilityId] = React.useState(initialVulnerabilityId);
+  const [packageName, setPackageName] = React.useState(initialPackageName);
   const [ecosystem, setEcosystem] = React.useState('');
   const [groupBy, setGroupBy] = React.useState<string[]>([]);
   const [visibleColumns, setVisibleColumns] = React.useState<Set<string>>(loadColumnVisibility);
@@ -259,7 +278,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const error = findingsQuery.error instanceof Error ? findingsQuery.error.message : '';
   const tableColumns = React.useMemo<DataTableColumn[]>(() => {
     const columns: DataTableColumn[] = [];
-    if (visibleColumns.has('vulnerability')) columns.push({ id: 'vulnerability', label: 'Vulnerability', header: 'Vulnerability', initialSize: 160 });
+    if (visibleColumns.has('vulnerability')) columns.push({ id: 'vulnerability', label: 'Finding ID', header: 'Finding ID', initialSize: 180 });
     if (visibleColumns.has('asset')) columns.push({ id: 'asset', label: 'Asset', header: 'Asset', initialSize: 180 });
     if (visibleColumns.has('package')) columns.push({ id: 'package', label: 'Package', header: 'Package', initialSize: 180 });
     if (visibleColumns.has('severity')) columns.push({ id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 });
@@ -283,14 +302,22 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       cells: {
         vulnerability: {
           content: onOpenCveWorkbench ? (
-            <button
-              type="button"
-              className="findings-vuln-link-btn"
-              onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
-            >
-              {row.vulnerabilityId}
-            </button>
-          ) : row.vulnerabilityId,
+            <>
+              <div className="mono">{row.displayId || row.id}</div>
+              <button
+                type="button"
+                className="findings-vuln-link-btn"
+                onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
+              >
+                {row.vulnerabilityId}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mono">{row.displayId || row.id}</div>
+              <div>{row.vulnerabilityId}</div>
+            </>
+          ),
           props: { className: 'mono' }
         },
         asset: {

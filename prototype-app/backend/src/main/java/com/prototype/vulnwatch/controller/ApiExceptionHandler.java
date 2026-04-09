@@ -58,9 +58,10 @@ public class ApiExceptionHandler {
         return error("METHOD_NOT_ALLOWED", ex.getMessage() == null ? "Request method is not supported" : ex.getMessage());
     }
 
-    @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class, HttpMessageNotReadableException.class})
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleBadRequest(Exception ex) {
+        log.warn("Bad request while handling API call: {}", ex.getMessage(), ex);
         return error("BAD_REQUEST", ex.getMessage() == null ? "Invalid request" : ex.getMessage());
     }
 

@@ -5,6 +5,7 @@ export type AppTab =
   | 'findings'
   | 'operations'
   | 'vulnerability-intelligence'
+  | 'vuln-repo'
   | 'inventory'
   | 'end-of-life'
   | 'connect'
@@ -119,6 +120,8 @@ export function pathForTab(tab: AppTab): string {
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
     case 'vulnerability-intelligence':
       return '/vulnerability-intelligence';
+    case 'vuln-repo':
+      return '/vuln-repo';
     case 'inventory':
       return `/inventory/${INVENTORY_DEFAULT_VIEW}`;
     case 'end-of-life':
@@ -148,6 +151,43 @@ export function pathForVulnerabilityIntelView(view: VulnerabilityIntelRouteView,
   return cveId ? `/vulnerability-intelligence/org-cves/${encodeURIComponent(cveId)}` : '/vulnerability-intelligence/org-cves';
 }
 
+export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: string | null): string {
+  if (view === 'dashboard') {
+    return '/vuln-repo';
+  }
+  if (view === 'vulnerabilities') {
+    return '/vuln-repo/vulnerabilities';
+  }
+  return cveId ? `/vuln-repo/org-cves/${encodeURIComponent(cveId)}` : '/vuln-repo/org-cves';
+}
+
+export function pathForVulnRepoCveAssets(cveId: string): string {
+  return `/vuln-repo/org-cves/${encodeURIComponent(cveId)}/assets`;
+}
+
+export function pathForVulnRepoCveSoftware(cveId: string): string {
+  return `/vuln-repo/org-cves/${encodeURIComponent(cveId)}/software`;
+}
+
+export function pathForVulnRepoSoftwareAssets(softwareIdentityId: string, software?: string): string {
+  const searchParams = new URLSearchParams();
+  searchParams.set('softwareIdentityId', softwareIdentityId);
+  if (software && software.trim().length > 0) {
+    searchParams.set('software', software.trim());
+  }
+  return `/vuln-repo/software-assets?${searchParams.toString()}`;
+}
+
+export function pathForVulnRepoHostAsset(assetId: string, returnTo?: string): string {
+  const encodedAssetId = encodeURIComponent(assetId);
+  if (!returnTo || returnTo.trim().length === 0) {
+    return `/vuln-repo/host-assets/${encodedAssetId}`;
+  }
+  const searchParams = new URLSearchParams();
+  searchParams.set('returnTo', returnTo.trim());
+  return `/vuln-repo/host-assets/${encodedAssetId}?${searchParams.toString()}`;
+}
+
 export function pathForConnectView(view: ConnectRouteView): string {
   return `/connect/${normalizeConnectRouteView(view)}`;
 }
@@ -156,6 +196,7 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vulnerability-intelligence';
+  if (pathname.startsWith('/vuln-repo')) return 'vuln-repo';
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
   if (pathname.startsWith('/connect')) return 'connect';
@@ -173,6 +214,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Operational Dashboard';
     case 'vulnerability-intelligence':
       return 'Vulnerability Intelligence';
+    case 'vuln-repo':
+      return 'Vulnerability Repository';
     case 'inventory':
       return 'Inventory';
     case 'end-of-life':
@@ -190,10 +233,11 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   const inventoryView = params.get('inventoryView');
   const operationsView = params.get('operationsView');
   const vulnIntelView = params.get('vulnIntelView');
+  const vulnRepoView = params.get('vulnRepoView');
   const connectView = params.get('connectView');
   const cveId = params.get('cveId');
 
-  if (!tab && !inventoryView && !operationsView && !vulnIntelView && !connectView && !cveId) {
+  if (!tab && !inventoryView && !operationsView && !vulnIntelView && !vulnRepoView && !connectView && !cveId) {
     return null;
   }
 
@@ -209,6 +253,13 @@ export function buildLegacyCompatiblePath(search: string): string | null {
         ? 'org-cves'
         : 'dashboard';
     nextPath = pathForVulnerabilityIntelView(normalizedView, cveId);
+  } else if (tab === 'vuln-repo') {
+    const normalizedView = vulnRepoView === 'vulnerabilities'
+      ? 'vulnerabilities'
+      : vulnRepoView === 'org-cves'
+        ? 'org-cves'
+        : 'dashboard';
+    nextPath = pathForVulnRepoView(normalizedView, cveId);
   } else if (tab === 'inventory' || tab === 'assets') {
     nextPath = pathForInventoryView(normalizeInventoryRouteView(inventoryView));
   } else if (tab === 'connect' || tab === 'ingestion' || tab === 'sources') {
@@ -219,7 +270,7 @@ export function buildLegacyCompatiblePath(search: string): string | null {
     nextPath = '/end-of-life';
   }
 
-  ['tab', 'inventoryView', 'operationsView', 'vulnIntelView', 'connectView', 'cveId'].forEach((key) => params.delete(key));
+  ['tab', 'inventoryView', 'operationsView', 'vulnIntelView', 'vulnRepoView', 'connectView', 'cveId'].forEach((key) => params.delete(key));
   const nextSearch = params.toString();
   return nextSearch ? `${nextPath}?${nextSearch}` : nextPath;
 }

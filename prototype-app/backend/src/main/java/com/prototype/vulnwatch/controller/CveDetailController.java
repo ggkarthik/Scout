@@ -1,12 +1,17 @@
 package com.prototype.vulnwatch.controller;
 
+import com.prototype.vulnwatch.dto.CveInvestigationSummaryResponse;
+import com.prototype.vulnwatch.dto.SavedCveInvestigationSummaryResponse;
 import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.Investigation;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
+import com.prototype.vulnwatch.service.CveInvestigationAiSummaryService;
 import com.prototype.vulnwatch.service.CveDetailQueryFacade;
+import com.prototype.vulnwatch.service.CveInvestigationSummaryService;
+import com.prototype.vulnwatch.service.CveInvestigationSummaryPersistenceService;
 import com.prototype.vulnwatch.service.CveWorkflowFacade;
 import com.prototype.vulnwatch.service.InvestigationService;
 import java.time.Instant;
@@ -36,6 +41,9 @@ public class CveDetailController {
 
     private final CveDetailQueryFacade queryFacade;
     private final CveWorkflowFacade workflowFacade;
+    private final CveInvestigationSummaryService summaryService;
+    private final CveInvestigationAiSummaryService aiSummaryService;
+    private final CveInvestigationSummaryPersistenceService summaryPersistenceService;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -161,6 +169,30 @@ public class CveDetailController {
             @PathVariable String cveId,
             @RequestBody ExportRequest request) {
         return queryFacade.exportCveReport(cveId, request);
+    }
+
+    @PostMapping("/{cveId}/investigation-summary")
+    public ResponseEntity<CveInvestigationSummaryResponse> generateInvestigationSummary(
+            @PathVariable String cveId,
+            @RequestBody Map<String, Object> request) {
+        CveInvestigationSummaryResponse summary = summaryService.generateSummary(cveId, request);
+        summaryPersistenceService.saveSummary(cveId, request, summary, "deterministic");
+        return ResponseEntity.ok(summary);
+    }
+
+    @PostMapping("/{cveId}/investigation-ai-summary")
+    public ResponseEntity<CveInvestigationSummaryResponse> generateInvestigationAiSummary(
+            @PathVariable String cveId,
+            @RequestBody Map<String, Object> request) {
+        CveInvestigationSummaryResponse summary = aiSummaryService.generateAiSummary(cveId, request);
+        summaryPersistenceService.saveSummary(cveId, request, summary, "ai");
+        return ResponseEntity.ok(summary);
+    }
+
+    @GetMapping("/{cveId}/saved-investigation-summary")
+    public ResponseEntity<SavedCveInvestigationSummaryResponse> getSavedInvestigationSummary(
+            @PathVariable String cveId) {
+        return ResponseEntity.ok(summaryPersistenceService.getSavedSummary(cveId));
     }
 
     // DTOs

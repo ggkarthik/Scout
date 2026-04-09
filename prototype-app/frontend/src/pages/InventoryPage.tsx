@@ -23,10 +23,10 @@ import {
   vulnerabilitySourceFilterValue
 } from '../features/inventory/helpers';
 import { InventoryFiltersPanel } from '../features/inventory/InventoryFiltersPanel';
-import { HostInventoryDetailModal } from '../features/inventory/HostInventoryDetailModal';
 import { InventoryResultsPanel } from '../features/inventory/InventoryResultsPanel';
 import { InventorySummaryStats } from '../features/inventory/InventorySummaryStats';
 import { VulnerabilityIntelDetailModal } from '../features/inventory/VulnerabilityIntelDetailModal';
+import { HostAssetDetailPage } from './HostAssetDetailPage';
 import {
   clearHostInventorySearchState,
   readHostAssetIdFromSearch,
@@ -49,6 +49,7 @@ type Props = {
 export function InventoryPage({ selectedView }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const scopedAssetType = defaultAssetTypeForView(selectedView);
+  const initialComponentQuery = React.useMemo(() => searchParams.get('query')?.trim() ?? '', [searchParams]);
   const selectedHostAssetId = React.useMemo(
     () => (selectedView === 'hosts' ? readHostAssetIdFromSearch(searchParams) : null),
     [searchParams, selectedView]
@@ -58,14 +59,21 @@ export function InventoryPage({ selectedView }: Props) {
     [searchParams, selectedView]
   );
   const [componentPage, setComponentPage] = React.useState(0);
-  const [componentQuery, setComponentQuery] = React.useState('');
+  const [componentQuery, setComponentQuery] = React.useState(initialComponentQuery);
   const [componentAssetTypes, setComponentAssetTypes] = React.useState<string[]>([]);
   const [componentStatuses, setComponentStatuses] = React.useState<string[]>([]);
   const [componentSourceSystems, setComponentSourceSystems] = React.useState<string[]>([]);
   const [componentEcosystems, setComponentEcosystems] = React.useState<string[]>([]);
-  const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>(() => (
-    selectedView === 'hosts' && readHostReviewCategoriesFromSearch(searchParams).length > 0 ? ['reviewCategory'] : []
-  ));
+  const [componentActiveFilters, setComponentActiveFilters] = React.useState<InventoryComponentFilterKey[]>(() => {
+    const filters: InventoryComponentFilterKey[] = [];
+    if (selectedView === 'hosts' && readHostReviewCategoriesFromSearch(searchParams).length > 0) {
+      filters.push('reviewCategory');
+    }
+    if ((searchParams.get('query')?.trim() ?? '').length > 0) {
+      filters.push('query');
+    }
+    return filters;
+  });
   const [vulnerabilityIntelPage, setVulnerabilityIntelPage] = React.useState(0);
   const [vulnerabilityIntelQuery, setVulnerabilityIntelQuery] = React.useState('');
   const [vulnerabilityIntelAffectedPackageQuery, setVulnerabilityIntelAffectedPackageQuery] = React.useState('');
@@ -103,21 +111,30 @@ export function InventoryPage({ selectedView }: Props) {
     if (selectedView !== 'hosts') {
       return;
     }
+    const urlQuery = searchParams.get('query')?.trim() ?? '';
+    setComponentQuery((current) => (current === urlQuery ? current : urlQuery));
     setComponentActiveFilters((current) => {
       const hasReviewCategory = current.includes('reviewCategory');
-      if (componentReviewCategories.length === 0 && !hasReviewCategory) {
+      const hasQuery = current.includes('query');
+      const shouldHaveQuery = urlQuery.length > 0;
+      if (componentReviewCategories.length === 0 && !hasReviewCategory && hasQuery === shouldHaveQuery) {
         return current;
       }
-      if (componentReviewCategories.length > 0 && hasReviewCategory) {
+      if (componentReviewCategories.length > 0 && hasReviewCategory && hasQuery === shouldHaveQuery) {
         return current;
       }
-      const withoutReviewCategory = current.filter((item) => item !== 'reviewCategory');
-      if (componentReviewCategories.length === 0) {
-        return withoutReviewCategory;
+      const next: InventoryComponentFilterKey[] = current.filter(
+        (item) => item !== 'reviewCategory' && item !== 'query'
+      );
+      if (componentReviewCategories.length > 0) {
+        next.push('reviewCategory');
       }
-      return [...withoutReviewCategory, 'reviewCategory'];
+      if (shouldHaveQuery) {
+        next.push('query');
+      }
+      return next;
     });
-  }, [componentReviewCategories.length, selectedView]);
+  }, [componentReviewCategories.length, searchParams, selectedView]);
 
   React.useEffect(() => {
     if (selectedView === 'hosts') {
@@ -493,6 +510,17 @@ export function InventoryPage({ selectedView }: Props) {
     }
   }, [searchParams, selectedView, setSearchParams]);
 
+  if (selectedView === 'hosts' && selectedHostAssetId) {
+    return (
+      <div className="page-grid">
+        <HostAssetDetailPage
+          assetId={selectedHostAssetId}
+          onClose={closeHostDetail}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="page-grid">
       <InventoryFiltersPanel
@@ -579,11 +607,6 @@ export function InventoryPage({ selectedView }: Props) {
         onNextVulnerabilityIntelPage={() => setVulnerabilityIntelPage((current) => (
           current + 1 < vulnerabilityIntelTotalPages ? current + 1 : current
         ))}
-      />
-
-      <HostInventoryDetailModal
-        assetId={selectedView === 'hosts' ? selectedHostAssetId : null}
-        onClose={closeHostDetail}
       />
 
       <VulnerabilityIntelDetailModal

@@ -83,11 +83,25 @@ export type HostFindingRecord = {
   lastObservedAt?: string;
 };
 
+export type HostApplicableCveRecord = {
+  stateId: string;
+  vulnerabilityId: string;
+  externalId?: string;
+  severity?: string;
+  cvssScore?: number;
+  epssScore?: number;
+  packageName?: string;
+  version?: string;
+  impactState?: string;
+  lastEvaluatedAt?: string;
+};
+
 export type HostAssetDetail = {
   host: HostAssetSummary;
   aliases: HostAliasRecord[];
   software: HostSoftwareInstanceRecord[];
   findings: HostFindingRecord[];
+  applicableCves: HostApplicableCveRecord[];
 };
 
 export type InventoryComponentRecord = {

@@ -19,3 +19,11 @@ export function useSoftwareIdentityDetailQuery(softwareIdentityId: string | null
     enabled: enabled && Boolean(softwareIdentityId)
   });
 }
+
+export function useVulnRepoSoftwareAssetsQuery(softwareIdentityId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['vuln-repo-software-assets', softwareIdentityId],
+    queryFn: () => api.getVulnRepoSoftwareAssets(softwareIdentityId ?? ''),
+    enabled: enabled && Boolean(softwareIdentityId)
+  });
+}

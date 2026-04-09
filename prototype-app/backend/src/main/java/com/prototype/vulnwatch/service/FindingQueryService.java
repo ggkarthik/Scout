@@ -234,7 +234,10 @@ public class FindingQueryService {
 
         return new FindingResponse(
                 finding.getId(),
+                finding.getDisplayId(),
+                component.getId(),
                 finding.getAsset().getName(),
+                finding.getAsset().getIdentifier(),
                 finding.getAsset().getType().name(),
                 component.getPackageName(),
                 component.getVersion(),

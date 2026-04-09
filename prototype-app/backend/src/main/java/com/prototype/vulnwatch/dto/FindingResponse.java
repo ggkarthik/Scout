@@ -8,7 +8,10 @@ import java.util.UUID;
 
 public record FindingResponse(
         UUID id,
+        String displayId,
+        UUID componentId,
         String assetName,
+        String assetIdentifier,
         String assetType,
         String packageName,
         String packageVersion,

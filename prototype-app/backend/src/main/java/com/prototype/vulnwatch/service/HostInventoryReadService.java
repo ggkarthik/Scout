@@ -9,10 +9,12 @@ import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.SoftwareInstance;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.HostAliasResponse;
+import com.prototype.vulnwatch.dto.HostApplicableCveResponse;
 import com.prototype.vulnwatch.dto.HostAssetDetailResponse;
 import com.prototype.vulnwatch.dto.HostAssetSummaryResponse;
 import com.prototype.vulnwatch.dto.HostFindingResponse;
 import com.prototype.vulnwatch.dto.HostSoftwareInstanceResponse;
+import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.CiAliasRepository;
 import com.prototype.vulnwatch.repo.CiRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
@@ -33,17 +35,20 @@ public class HostInventoryReadService {
     private final CiAliasRepository ciAliasRepository;
     private final SoftwareInstanceRepository softwareInstanceRepository;
     private final FindingRepository findingRepository;
+    private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
 
     public HostInventoryReadService(
             CiRepository ciRepository,
             CiAliasRepository ciAliasRepository,
             SoftwareInstanceRepository softwareInstanceRepository,
-            FindingRepository findingRepository
+            FindingRepository findingRepository,
+            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository
     ) {
         this.ciRepository = ciRepository;
         this.ciAliasRepository = ciAliasRepository;
         this.softwareInstanceRepository = softwareInstanceRepository;
         this.findingRepository = findingRepository;
+        this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
     }
 
     @Transactional(readOnly = true)
@@ -62,6 +67,22 @@ public class HostInventoryReadService {
                         .comparing((Finding finding) -> finding.getStatus() == FindingStatus.OPEN).reversed()
                         .thenComparing(Finding::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
                 .toList();
+        List<HostApplicableCveResponse> applicableCves = componentVulnerabilityStateRepository
+                .findHostApplicableCvesByTenantIdAndAssetId(tenant.getId(), ci.getAsset().getId())
+                .stream()
+                .map(row -> new HostApplicableCveResponse(
+                        row.getStateId(),
+                        row.getVulnerabilityId(),
+                        row.getExternalId(),
+                        row.getSeverity(),
+                        row.getCvssScore(),
+                        row.getEpssScore(),
+                        row.getPackageName(),
+                        row.getVersion(),
+                        row.getImpactState() == null ? null : row.getImpactState().name(),
+                        row.getLastEvaluatedAt()
+                ))
+                .toList();
 
         HostAssetSummaryResponse summary = summarizeHost(
                 ci,
@@ -78,7 +99,8 @@ public class HostInventoryReadService {
                 summary,
                 aliases.stream().map(this::toAliasResponse).toList(),
                 software.stream().map(this::toSoftwareResponse).toList(),
-                findings.stream().map(this::toFindingResponse).toList()
+                findings.stream().map(this::toFindingResponse).toList(),
+                applicableCves
         );
     }
 

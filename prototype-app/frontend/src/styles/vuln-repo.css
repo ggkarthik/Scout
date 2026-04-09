@@ -1,0 +1,527 @@
+.vuln-repo-page {
+  display: contents;
+}
+
+.vuln-repo-dashboard-page {
+  display: block;
+}
+
+.vuln-repo-dashboard-shell {
+  display: grid;
+  gap: 24px;
+}
+
+.vuln-repo-dashboard-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.vuln-repo-dashboard-topbar .page-title {
+  margin: 0;
+}
+
+.vuln-repo-dashboard-search {
+  width: min(360px, 100%);
+}
+
+.vuln-repo-dashboard-search .text-input {
+  width: 100%;
+}
+
+.vuln-repo-dashboard-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.vuln-repo-dashboard-metric-card,
+.vuln-repo-dashboard-panel,
+.vuln-repo-dashboard-asset-card,
+.vuln-repo-dashboard-unresolved-item,
+.vuln-repo-dashboard-advisory-item {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 88%, #0f1520);
+}
+
+.vuln-repo-dashboard-metric-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
+  min-height: 156px;
+}
+
+.vuln-repo-dashboard-metric-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  flex-shrink: 0;
+}
+
+.vuln-repo-dashboard-metric-icon--tracked {
+  background: rgba(60, 127, 255, 0.18);
+}
+
+.vuln-repo-dashboard-metric-icon--critical {
+  background: rgba(255, 77, 109, 0.2);
+}
+
+.vuln-repo-dashboard-metric-icon--exploit {
+  background: rgba(245, 158, 11, 0.2);
+}
+
+.vuln-repo-dashboard-metric-value {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--title);
+}
+
+.vuln-repo-dashboard-metric-link {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--title);
+}
+
+.vuln-repo-dashboard-metric-value--critical {
+  color: var(--critical);
+}
+
+.vuln-repo-dashboard-metric-value--warn {
+  color: var(--warn);
+}
+
+.vuln-repo-dashboard-metric-title {
+  margin-top: 10px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.vuln-repo-dashboard-metric-caption {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.vuln-repo-dashboard-metric-caption-link {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.vuln-repo-dashboard-main-grid,
+.vuln-repo-dashboard-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+  gap: 18px;
+}
+
+.vuln-repo-dashboard-side-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.vuln-repo-dashboard-panel {
+  border-radius: 24px;
+  padding: 22px;
+}
+
+.vuln-repo-dashboard-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.vuln-repo-dashboard-panel-header h2 {
+  margin: 0;
+  color: var(--title);
+  font-size: 1.15rem;
+  font-weight: 750;
+}
+
+.vuln-repo-dashboard-panel-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.vuln-repo-dashboard-unresolved-list,
+.vuln-repo-dashboard-software-list,
+.vuln-repo-dashboard-advisory-list {
+  display: grid;
+  gap: 14px;
+}
+
+.vuln-repo-dashboard-unresolved-item,
+.vuln-repo-dashboard-advisory-item {
+  width: 100%;
+  border-radius: 18px;
+  padding: 18px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vuln-repo-dashboard-unresolved-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.vuln-repo-dashboard-unresolved-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.vuln-repo-dashboard-unresolved-copy p,
+.vuln-repo-dashboard-advisory-copy strong,
+.vuln-repo-dashboard-software-copy strong {
+  margin: 0;
+}
+
+.vuln-repo-dashboard-unresolved-copy p {
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.vuln-repo-dashboard-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vuln-repo-severity-pill,
+.vuln-repo-dashboard-tag,
+.vuln-repo-dashboard-asset-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-muted) 74%, transparent);
+  color: var(--text);
+}
+
+.vuln-repo-severity-pill--critical {
+  color: var(--critical);
+  border-color: color-mix(in srgb, var(--critical) 44%, transparent);
+  background: rgba(255, 77, 109, 0.1);
+}
+
+.vuln-repo-severity-pill--high {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 44%, transparent);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.vuln-repo-severity-pill--medium {
+  color: #4994ff;
+  border-color: rgba(73, 148, 255, 0.3);
+  background: rgba(73, 148, 255, 0.12);
+}
+
+.vuln-repo-severity-pill--low {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.vuln-repo-dashboard-tag--warn {
+  color: var(--warn);
+}
+
+.vuln-repo-dashboard-findings-count {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.vuln-repo-dashboard-findings-count strong {
+  color: var(--critical);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.vuln-repo-dashboard-findings-count span {
+  color: var(--muted);
+}
+
+.vuln-repo-dashboard-breakdown-list {
+  display: grid;
+  gap: 14px;
+}
+
+.vuln-repo-dashboard-breakdown-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.vuln-repo-dashboard-breakdown-row > span:first-child {
+  color: var(--text);
+}
+
+.vuln-repo-dashboard-breakdown-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-muted) 80%, transparent);
+  overflow: hidden;
+}
+
+.vuln-repo-inline-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.vuln-repo-inline-bar--critical {
+  background: linear-gradient(90deg, #ff5b78 0%, #ff758f 100%);
+}
+
+.vuln-repo-inline-bar--high {
+  background: linear-gradient(90deg, #d9982e 0%, #f0b74d 100%);
+}
+
+.vuln-repo-inline-bar--medium {
+  background: linear-gradient(90deg, #3279ff 0%, #5fa0ff 100%);
+}
+
+.vuln-repo-inline-bar--low {
+  background: linear-gradient(90deg, #22c884 0%, #6ae0aa 100%);
+}
+
+.vuln-repo-dashboard-count-link {
+  font-size: 0.96rem;
+}
+
+.vuln-repo-dashboard-cve-link {
+  justify-self: start;
+  font-size: 1rem;
+}
+
+.vuln-repo-dashboard-asset-link {
+  white-space: nowrap;
+}
+
+.vuln-repo-dashboard-resolution-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vuln-repo-dashboard-resolution-card {
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-muted) 70%, transparent);
+  padding: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.vuln-repo-dashboard-resolution-card strong {
+  color: var(--critical);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.vuln-repo-dashboard-resolution-card span {
+  color: var(--muted);
+}
+
+.vuln-repo-dashboard-resolution-card--success strong {
+  color: var(--ok);
+}
+
+.vuln-repo-dashboard-resolution-card--info strong {
+  color: #4994ff;
+}
+
+.vuln-repo-dashboard-software-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.vuln-repo-dashboard-software-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.vuln-repo-dashboard-software-copy strong,
+.vuln-repo-dashboard-advisory-copy strong,
+.vuln-repo-dashboard-asset-copy strong {
+  color: var(--title);
+}
+
+.vuln-repo-dashboard-software-copy span,
+.vuln-repo-dashboard-asset-copy span,
+.vuln-repo-dashboard-advisory-copy .panel-caption {
+  color: var(--muted);
+}
+
+.vuln-repo-dashboard-software-copy strong {
+  font-size: 0.96rem;
+  line-height: 1.2;
+}
+
+.vuln-repo-dashboard-software-copy span {
+  font-size: 0.9rem;
+  line-height: 1.15;
+}
+
+.vuln-repo-dashboard-software-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.vuln-repo-dashboard-software-metrics .vuln-repo-dashboard-breakdown-bar {
+  min-width: 60px;
+}
+
+.vuln-repo-dashboard-advisory-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.vuln-repo-dashboard-assets-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vuln-repo-dashboard-asset-card {
+  width: 100%;
+  text-align: left;
+  border-radius: 18px;
+  padding: 18px;
+  cursor: pointer;
+  display: grid;
+  gap: 14px;
+}
+
+.vuln-repo-dashboard-asset-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.vuln-repo-dashboard-asset-count {
+  justify-self: start;
+  color: var(--critical);
+}
+
+.vuln-repo-vulnerabilities-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.vuln-repo-vulnerabilities-layout.is-drawer-open {
+  grid-template-columns: minmax(0, 1.75fr) minmax(320px, 0.9fr);
+}
+
+.vuln-repo-software-drawer {
+  margin-top: 0;
+  min-width: 0;
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+
+.vuln-repo-software-link {
+  font-size: 0.95rem;
+}
+
+.vuln-repo-cve-link {
+  font-size: 0.95rem;
+}
+
+.vuln-repo-summary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(0, 229, 200, 0.08);
+  border: 1px solid rgba(0, 229, 200, 0.24);
+}
+
+.vuln-repo-summary-link:hover {
+  background: rgba(0, 229, 200, 0.14);
+}
+
+.vuln-repo-summary-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.vuln-repo-cve-metadata {
+  display: grid;
+  gap: 12px;
+}
+
+.vuln-repo-summary-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.vuln-repo-summary-shell > section {
+  gap: 14px !important;
+}
+
+.vuln-repo-cve-description {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.vuln-repo-software-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vuln-repo-software-table th,
+.vuln-repo-software-table td {
+  padding: 10px 12px;
+}
+
+@media (max-width: 1100px) {
+  .vuln-repo-dashboard-metric-grid,
+  .vuln-repo-dashboard-main-grid,
+  .vuln-repo-dashboard-lower-grid,
+  .vuln-repo-dashboard-assets-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vuln-repo-dashboard-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .vuln-repo-dashboard-search {
+    width: 100%;
+  }
+
+  .vuln-repo-vulnerabilities-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Navigate, Routes, Route, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { InventoryViewKey } from './features/inventory/types';
-import type { ConnectRouteView, VulnerabilityIntelRouteView, AppTab } from './app/routes';
+import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
   activeTabForPath,
   buildLegacyCompatiblePath,
@@ -13,6 +13,7 @@ import {
   pathForOperationsView,
   pathForTab,
   pathForVulnerabilityIntelView,
+  pathForVulnRepoView,
   titleForTab
 } from './app/routes';
 import { ActorProvider } from './features/auth/provider';
@@ -32,6 +33,27 @@ const VulnerabilityIntelDashboardPage = React.lazy(async () => ({
 }));
 const VulnerabilityIntelOrgCvePage = React.lazy(async () => ({
   default: (await import('./pages/VulnerabilityIntelOrgCvePage')).VulnerabilityIntelOrgCvePage
+}));
+const VulnRepoDashboardPage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoDashboardPage')).VulnRepoDashboardPage
+}));
+const VulnRepoVulnerabilitiesPage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoVulnerabilitiesPage')).VulnRepoVulnerabilitiesPage
+}));
+const VulnRepoOrgCvePage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoOrgCvePage')).VulnRepoOrgCvePage
+}));
+const VulnRepoCveAssetsPage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoCveAssetsPage')).VulnRepoCveAssetsPage
+}));
+const VulnRepoCveSoftwarePage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoCveSoftwarePage')).VulnRepoCveSoftwarePage
+}));
+const VulnRepoSoftwareAssetsPage = React.lazy(async () => ({
+  default: (await import('./pages/VulnRepoSoftwareAssetsPage')).VulnRepoSoftwareAssetsPage
+}));
+const HostAssetDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/HostAssetDetailPage')).HostAssetDetailPage
 }));
 const InventoryPage = React.lazy(async () => ({
   default: (await import('./pages/InventoryPage')).InventoryPage
@@ -57,6 +79,7 @@ const PRIMARY_NAV_TABS: AppTab[] = [
   'findings',
   'operations',
   'vulnerability-intelligence',
+  'vuln-repo',
   'inventory',
   'end-of-life'
 ];
@@ -97,6 +120,10 @@ const VULNERABILITY_INTEL_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; l
   { key: 'vulnerabilities', label: 'Vulnerabilities' },
   { key: 'org-cves', label: 'CVE Assessment Workbench' }
 ];
+const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'vulnerabilities', label: 'Vulnerabilities' }
+];
 
 function getInitialTheme(): Theme {
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -123,6 +150,15 @@ function TabIcon({ tab }: { tab: AppTab }) {
         <circle cx="12" cy="12" r="8.5" />
         <path d="M12 7v5l3 2" />
         <path d="M7.2 16.4c1.3-1.3 3-2.1 4.8-2.1 1.9 0 3.6.8 4.8 2.1" />
+      </svg>
+    );
+  }
+  if (tab === 'vuln-repo') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 4.5h9.8L19.5 8v11.5H6z" />
+        <path d="M15.8 4.5V8h3.7" />
+        <path d="M9 12h7M9 15.5h7" />
       </svg>
     );
   }
@@ -221,7 +257,7 @@ function FindingsRoute() {
   const navigate = useNavigate();
   return (
     <FindingsPage
-      onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnerabilityIntelView('org-cves', vulnerabilityId))}
+      onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnRepoView('org-cves', vulnerabilityId))}
     />
   );
 }
@@ -243,12 +279,62 @@ function VulnerabilityIntelDashboardRoute() {
 function VulnerabilityIntelWorkbenchRoute() {
   const navigate = useNavigate();
   const params = useParams<{ cveId?: string }>();
+  const hasOpenedDirectRecordRef = React.useRef(false);
   return (
     <VulnerabilityIntelOrgCvePage
       initialCveId={params.cveId}
-      onSelectedCveChange={(cveId) => navigate(pathForVulnerabilityIntelView('org-cves', cveId), { replace: true })}
+      onSelectedCveChange={(cveId) => {
+        if (cveId) {
+          hasOpenedDirectRecordRef.current = true;
+          if (params.cveId !== cveId) {
+            navigate(pathForVulnerabilityIntelView('org-cves', cveId), { replace: true });
+          }
+          return;
+        }
+        if (params.cveId && hasOpenedDirectRecordRef.current) {
+          navigate(pathForVulnerabilityIntelView('org-cves'), { replace: true });
+        }
+      }}
     />
   );
+}
+
+function VulnRepoDashboardRoute() {
+  return <VulnRepoDashboardPage />;
+}
+
+function VulnRepoWorkbenchRoute() {
+  const navigate = useNavigate();
+  const params = useParams<{ cveId?: string }>();
+  const hasOpenedDirectRecordRef = React.useRef(false);
+  return (
+    <VulnRepoOrgCvePage
+      initialCveId={params.cveId}
+      onSelectedCveChange={(cveId) => {
+        if (cveId) {
+          hasOpenedDirectRecordRef.current = true;
+          if (params.cveId !== cveId) {
+            navigate(pathForVulnRepoView('org-cves', cveId), { replace: true });
+          }
+          return;
+        }
+        if (params.cveId && hasOpenedDirectRecordRef.current) {
+          navigate(pathForVulnRepoView('org-cves'), { replace: true });
+        }
+      }}
+    />
+  );
+}
+
+function VulnRepoHostAssetRoute() {
+  const params = useParams<{ assetId?: string }>();
+  const assetId = params.assetId ? decodeURIComponent(params.assetId) : null;
+
+  if (!assetId) {
+    return <Navigate to={pathForVulnRepoView('dashboard')} replace />;
+  }
+
+  return <HostAssetDetailPage assetId={assetId} />;
 }
 
 function InventoryRoute() {
@@ -310,9 +396,20 @@ export default function App() {
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
-  const activeVulnerabilityIntelView = pathSegments[1] === 'vulnerabilities'
+  const vulnerabilityIntelSegment = location.pathname.startsWith('/vulnerability-intelligence')
+    ? pathSegments[1]
+    : null;
+  const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
+    ? pathSegments[1]
+    : null;
+  const activeVulnerabilityIntelView = vulnerabilityIntelSegment === 'vulnerabilities'
     ? 'vulnerabilities'
-    : pathSegments[1] === 'org-cves'
+    : vulnerabilityIntelSegment === 'org-cves'
+      ? 'org-cves'
+      : 'dashboard';
+  const activeVulnRepoView = vulnRepoSegment === 'vulnerabilities'
+    ? 'vulnerabilities'
+    : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
       : 'dashboard';
   const tabSearchSuggestions = [...PRIMARY_NAV_TABS, ...BOTTOM_NAV_TABS]
@@ -664,6 +761,21 @@ export default function App() {
             </div>
           </header>
 
+          {activeTab === 'vuln-repo' && (
+            <div className="section-tab-row">
+              {VULN_REPO_NAV_ITEMS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={activeVulnRepoView === item.key ? 'section-tab-btn active' : 'section-tab-btn'}
+                  onClick={() => navigate(pathForVulnRepoView(item.key))}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
               <Route path="/" element={<DashboardRoute />} />
@@ -672,6 +784,13 @@ export default function App() {
               <Route path="/vulnerability-intelligence" element={<VulnerabilityIntelDashboardRoute />} />
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<InventoryPage selectedView="vulnerability-intelligence" />} />
               <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<VulnerabilityIntelWorkbenchRoute />} />
+              <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
+              <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
+              <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
+              <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
+              <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
+              <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
+              <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EolPage />} />
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />
