@@ -140,6 +140,18 @@ public class OrgCveRecord {
     @Column(name = "last_evaluated_at", nullable = false)
     private Instant lastEvaluatedAt = Instant.now();
 
+    @Column(name = "investigation_summary_input_json", length = 200000)
+    private String investigationSummaryInputJson;
+
+    @Column(name = "investigation_summary_output_json", length = 200000)
+    private String investigationSummaryOutputJson;
+
+    @Column(name = "investigation_summary_mode", length = 32)
+    private String investigationSummaryMode;
+
+    @Column(name = "investigation_summary_generated_at")
+    private Instant investigationSummaryGeneratedAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -407,6 +419,38 @@ public class OrgCveRecord {
 
     public void setLastEvaluatedAt(Instant lastEvaluatedAt) {
         this.lastEvaluatedAt = lastEvaluatedAt;
+    }
+
+    public String getInvestigationSummaryInputJson() {
+        return investigationSummaryInputJson;
+    }
+
+    public void setInvestigationSummaryInputJson(String investigationSummaryInputJson) {
+        this.investigationSummaryInputJson = investigationSummaryInputJson;
+    }
+
+    public String getInvestigationSummaryOutputJson() {
+        return investigationSummaryOutputJson;
+    }
+
+    public void setInvestigationSummaryOutputJson(String investigationSummaryOutputJson) {
+        this.investigationSummaryOutputJson = investigationSummaryOutputJson;
+    }
+
+    public String getInvestigationSummaryMode() {
+        return investigationSummaryMode;
+    }
+
+    public void setInvestigationSummaryMode(String investigationSummaryMode) {
+        this.investigationSummaryMode = investigationSummaryMode;
+    }
+
+    public Instant getInvestigationSummaryGeneratedAt() {
+        return investigationSummaryGeneratedAt;
+    }
+
+    public void setInvestigationSummaryGeneratedAt(Instant investigationSummaryGeneratedAt) {
+        this.investigationSummaryGeneratedAt = investigationSummaryGeneratedAt;
     }
 
     public Instant getCreatedAt() {

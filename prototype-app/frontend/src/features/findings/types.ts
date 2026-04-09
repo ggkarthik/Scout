@@ -1,6 +1,9 @@
 export type Finding = {
   id: string;
+  displayId: string;
+  componentId: string;
   assetName: string;
+  assetIdentifier: string;
   assetType: string;
   packageName: string;
   packageVersion: string;

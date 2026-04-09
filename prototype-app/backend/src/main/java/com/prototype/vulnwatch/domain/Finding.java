@@ -42,6 +42,9 @@ public class Finding {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Column(name = "display_id", nullable = false, updatable = false, insertable = false, length = 16)
+    private String displayId;
+
     @ManyToOne(optional = false)
     @JoinColumn(name = "tenant_id")
     private Tenant tenant;
@@ -128,6 +131,10 @@ public class Finding {
 
     public UUID getId() {
         return id;
+    }
+
+    public String getDisplayId() {
+        return displayId;
     }
 
     public Tenant getTenant() {

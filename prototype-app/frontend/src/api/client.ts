@@ -49,6 +49,7 @@ import type {
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelPage
 } from '../features/vulnerability-intel/types';
+import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
 import type {
   EolComponentPage,
   EolProductCatalog,
@@ -58,7 +59,8 @@ import type {
 } from '../features/eol/types';
 import type {
   SoftwareIdentityDetail,
-  SoftwareIdentityPage
+  SoftwareIdentityPage,
+  VulnRepoSoftwareAssetsDetail
 } from '../features/software-identities/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
@@ -130,6 +132,7 @@ export { request as apiRequest };
 
 export const api = {
   getDashboard: () => request<Dashboard>('/dashboard'),
+  getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.page != null) searchParams.set('page', String(params.page));
@@ -289,6 +292,9 @@ export const api = {
   },
   getSoftwareIdentityDetail: (softwareIdentityId: string) => request<SoftwareIdentityDetail>(
     `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`
+  ),
+  getVulnRepoSoftwareAssets: (softwareIdentityId: string) => request<VulnRepoSoftwareAssetsDetail>(
+    `/vuln-repo/software-assets/${encodeURIComponent(softwareIdentityId)}`
   ),
   listVulnerabilityIntelligence: (
     params?: {

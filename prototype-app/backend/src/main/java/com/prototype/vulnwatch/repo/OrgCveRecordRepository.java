@@ -61,6 +61,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
@@ -79,13 +81,20 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
                       )
                     """
     )
-    Page<OrgCveRecord> findExposurePage(@Param("tenant") Tenant tenant, @Param("inKev") Boolean inKev, Pageable pageable);
+    Page<OrgCveRecord> findExposurePage(
+            @Param("tenant") Tenant tenant,
+            @Param("inKev") Boolean inKev,
+            @Param("includeAll") boolean includeAll,
+            Pageable pageable
+    );
 
     @EntityGraph(attributePaths = {"vulnerability"})
     @Query(
@@ -95,6 +104,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
@@ -114,6 +125,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
@@ -125,6 +138,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("tenant") Tenant tenant,
             @Param("externalId") String externalId,
             @Param("inKev") Boolean inKev,
+            @Param("includeAll") boolean includeAll,
             Pageable pageable
     );
 
@@ -137,6 +151,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
@@ -162,6 +178,8 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
                       and (
+                        :includeAll = true
+                        or
                         o.impacted = true
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
                         or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
@@ -178,6 +196,377 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("tenant") Tenant tenant,
             @Param("queryUpper") String queryUpper,
             @Param("inKev") Boolean inKev,
+            @Param("includeAll") boolean includeAll,
+            Pageable pageable
+    );
+
+    @EntityGraph(attributePaths = {"vulnerability"})
+    @Query(
+            value = """
+                    select o
+                    from OrgCveRecord o
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and upper(coalesce(o.severity, 'UNKNOWN')) = :severity
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                    order by
+                      case when o.impacted = true then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
+                      coalesce(o.cvssScore, 0.0) desc,
+                      o.externalId asc
+                    """,
+            countQuery = """
+                    select count(o.id)
+                    from OrgCveRecord o
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and upper(coalesce(o.severity, 'UNKNOWN')) = :severity
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                    """
+    )
+    Page<OrgCveRecord> findExposurePageBySeverity(
+            @Param("tenant") Tenant tenant,
+            @Param("severity") String severity,
+            @Param("inKev") Boolean inKev,
+            @Param("includeAll") boolean includeAll,
+            Pageable pageable
+    );
+
+    @EntityGraph(attributePaths = {"vulnerability"})
+    @Query(
+            value = """
+                    select o
+                    from OrgCveRecord o
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (
+                        o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                    order by
+                      case when o.impacted = true then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
+                      coalesce(o.cvssScore, 0.0) desc,
+                      o.externalId asc
+                    """,
+            countQuery = """
+                    select count(o.id)
+                    from OrgCveRecord o
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (
+                        o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                    """
+    )
+    Page<OrgCveRecord> findExposurePageExploitOnly(
+            @Param("tenant") Tenant tenant,
+            @Param("inKev") Boolean inKev,
+            Pageable pageable
+    );
+
+    @EntityGraph(attributePaths = {"vulnerability"})
+    @Query(
+            value = """
+                    select o
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:externalId is null or o.externalId = :externalId)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (:createdSinceSet = false or o.createdAt >= :createdSince)
+                      and (
+                        :exploitOnly is null
+                        or :exploitOnly = false
+                        or o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        (:softwareIdentityId is null and :softwarePattern is null)
+                        or exists (
+                          select 1
+                          from ComponentVulnerabilityState cvs
+                          join cvs.component ic
+                          left join ic.softwareIdentity sid
+                          where cvs.tenant = o.tenant
+                            and cvs.vulnerability = o.vulnerability
+                            and (
+                              (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
+                              or
+                              (
+                                :softwareIdentityId is null
+                                and
+                                (
+                              upper(coalesce(ic.packageName, '')) like :softwarePattern
+                              or upper(coalesce(ic.normalizedName, '')) like :softwarePattern
+                              or upper(coalesce(sid.displayName, '')) like :softwarePattern
+                              or upper(coalesce(sid.canonicalKey, '')) like :softwarePattern
+                              or upper(coalesce(sid.product, '')) like :softwarePattern
+                              or upper(coalesce(sid.vendor, '')) like :softwarePattern
+                                )
+                              )
+                            )
+                        )
+                      )
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(o.severity) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    order by
+                      case when o.impacted = true then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
+                      coalesce(o.cvssScore, 0.0) desc,
+                      o.externalId asc
+                    """,
+            countQuery = """
+                    select count(o.id)
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:externalId is null or o.externalId = :externalId)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (:createdSinceSet = false or o.createdAt >= :createdSince)
+                      and (
+                        :exploitOnly is null
+                        or :exploitOnly = false
+                        or o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        (:softwareIdentityId is null and :softwarePattern is null)
+                        or exists (
+                          select 1
+                          from ComponentVulnerabilityState cvs
+                          join cvs.component ic
+                          left join ic.softwareIdentity sid
+                          where cvs.tenant = o.tenant
+                            and cvs.vulnerability = o.vulnerability
+                            and (
+                              (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
+                              or
+                              (
+                                :softwareIdentityId is null
+                                and
+                                (
+                              upper(coalesce(ic.packageName, '')) like :softwarePattern
+                              or upper(coalesce(ic.normalizedName, '')) like :softwarePattern
+                              or upper(coalesce(sid.displayName, '')) like :softwarePattern
+                              or upper(coalesce(sid.canonicalKey, '')) like :softwarePattern
+                              or upper(coalesce(sid.product, '')) like :softwarePattern
+                              or upper(coalesce(sid.vendor, '')) like :softwarePattern
+                                )
+                              )
+                            )
+                        )
+                      )
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(o.severity) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    """
+    )
+    Page<OrgCveRecord> findExposurePageFiltered(
+            @Param("tenant") Tenant tenant,
+            @Param("queryPattern") String queryPattern,
+            @Param("externalId") String externalId,
+            @Param("inKev") Boolean inKev,
+            @Param("severity") String severity,
+            @Param("exploitOnly") Boolean exploitOnly,
+            @Param("createdSinceSet") boolean createdSinceSet,
+            @Param("createdSince") java.time.Instant createdSince,
+            @Param("softwareIdentityId") UUID softwareIdentityId,
+            @Param("softwarePattern") String softwarePattern,
+            @Param("includeAll") boolean includeAll,
+            Pageable pageable
+    );
+
+    @EntityGraph(attributePaths = {"vulnerability"})
+    @Query(
+            value = """
+                    select o
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:externalId is null or o.externalId = :externalId)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (:createdSinceSet = false or o.createdAt >= :createdSince)
+                      and (
+                        :exploitOnly is null
+                        or :exploitOnly = false
+                        or o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        (:softwareIdentityId is null and :softwarePattern is null)
+                        or exists (
+                          select 1
+                          from ComponentVulnerabilityState cvs
+                          join cvs.component ic
+                          left join ic.softwareIdentity sid
+                          where cvs.tenant = o.tenant
+                            and cvs.vulnerability = o.vulnerability
+                            and (
+                              (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
+                              or
+                              (
+                                :softwareIdentityId is null
+                                and
+                                (
+                              upper(coalesce(ic.packageName, '')) like :softwarePattern
+                              or upper(coalesce(ic.normalizedName, '')) like :softwarePattern
+                              or upper(coalesce(sid.displayName, '')) like :softwarePattern
+                              or upper(coalesce(sid.canonicalKey, '')) like :softwarePattern
+                              or upper(coalesce(sid.product, '')) like :softwarePattern
+                              or upper(coalesce(sid.vendor, '')) like :softwarePattern
+                                )
+                              )
+                            )
+                        )
+                      )
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(o.severity) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    order by
+                      case when o.impacted = true then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
+                      coalesce(o.cvssScore, 0.0) desc,
+                      o.externalId asc
+                    """,
+            countQuery = """
+                    select count(o.id)
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:externalId is null or o.externalId = :externalId)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (:createdSinceSet = false or o.createdAt >= :createdSince)
+                      and (
+                        :exploitOnly is null
+                        or :exploitOnly = false
+                        or o.inKev = true
+                        or coalesce(o.epssScore, 0.0) >= 0.9
+                      )
+                      and (
+                        (:softwareIdentityId is null and :softwarePattern is null)
+                        or exists (
+                          select 1
+                          from ComponentVulnerabilityState cvs
+                          join cvs.component ic
+                          left join ic.softwareIdentity sid
+                          where cvs.tenant = o.tenant
+                            and cvs.vulnerability = o.vulnerability
+                            and (
+                              (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
+                              or
+                              (
+                                :softwareIdentityId is null
+                                and
+                                (
+                              upper(coalesce(ic.packageName, '')) like :softwarePattern
+                              or upper(coalesce(ic.normalizedName, '')) like :softwarePattern
+                              or upper(coalesce(sid.displayName, '')) like :softwarePattern
+                              or upper(coalesce(sid.canonicalKey, '')) like :softwarePattern
+                              or upper(coalesce(sid.product, '')) like :softwarePattern
+                              or upper(coalesce(sid.vendor, '')) like :softwarePattern
+                                )
+                              )
+                            )
+                        )
+                      )
+                      and (
+                        :includeAll = true
+                        or
+                        o.impacted = true
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
+                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                      )
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(o.severity) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    """
+    )
+    Page<OrgCveRecord> findExposurePageFilteredBroadSoftware(
+            @Param("tenant") Tenant tenant,
+            @Param("queryPattern") String queryPattern,
+            @Param("externalId") String externalId,
+            @Param("inKev") Boolean inKev,
+            @Param("severity") String severity,
+            @Param("exploitOnly") Boolean exploitOnly,
+            @Param("createdSinceSet") boolean createdSinceSet,
+            @Param("createdSince") java.time.Instant createdSince,
+            @Param("softwareIdentityId") UUID softwareIdentityId,
+            @Param("softwarePattern") String softwarePattern,
+            @Param("includeAll") boolean includeAll,
             Pageable pageable
     );
 

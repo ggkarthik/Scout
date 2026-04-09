@@ -177,6 +177,7 @@ public class OrgCveRecordService {
             ComponentVulnerabilityStateRepository.VulnerabilityImpactAggregateRow agg =
                     impactByVulnerability.get(vulnerabilityId);
             long matchedComponentCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedComponentCount();
+            long matchedSoftwareCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedSoftwareCount();
             long applicableComponentCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getApplicableComponentCount();
             long matchedAssetCount = applicabilityAggregate == null ? 0 : applicabilityAggregate.getMatchedAssetCount();
             long noPatchComponentCount = agg == null ? 0 : agg.getNoPatchCount();
@@ -187,7 +188,6 @@ public class OrgCveRecordService {
             long notAffectedComponentCount = agg == null ? 0 : agg.getNotImpactedCount();
             long eolComponentCount = agg == null ? 0 : agg.getEolCount();
             long eosComponentCount = agg == null ? 0 : agg.getEosCount();
-            long matchedSoftwareCount = matchedComponentCount;
             ImpactSummary impactSummary = resolveImpact(
                     applicabilityState,
                     agg

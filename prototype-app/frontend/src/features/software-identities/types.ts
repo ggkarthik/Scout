@@ -91,3 +91,24 @@ export type SoftwareIdentityDetail = {
   versions: SoftwareIdentityVersion[];
   assets: SoftwareIdentityAsset[];
 };
+
+export type VulnRepoSoftwareAsset = {
+  assetId: string;
+  assetName: string;
+  assetIdentifier: string;
+  assetType: string;
+  componentId: string;
+  version?: string;
+  sourceSystem?: string;
+  openCveCount: number;
+  openFindingCount: number;
+  lastObservedAt?: string;
+};
+
+export type VulnRepoSoftwareAssetsDetail = {
+  softwareIdentityId: string;
+  displayName: string;
+  vendor?: string;
+  impactedAssetCount: number;
+  assets: VulnRepoSoftwareAsset[];
+};

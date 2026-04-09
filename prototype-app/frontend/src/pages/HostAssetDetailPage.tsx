@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   DataTable,
   type DataTableColumn,
@@ -14,6 +14,8 @@ type HostAssetDetailPageProps = {
   assetId?: string | null;
   onClose?: () => void;
 };
+
+type HostDetailTab = 'software' | 'applicable-cves' | 'findings' | 'aliases';
 
 const ALIAS_COLUMNS: DataTableColumn[] = [
   { id: 'alias', label: 'Alias', header: 'Alias', initialSize: 220 },
@@ -42,6 +44,17 @@ const FINDING_COLUMNS: DataTableColumn[] = [
   { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
 ];
 
+const APPLICABLE_CVE_COLUMNS: DataTableColumn[] = [
+  { id: 'cve', label: 'CVE', header: 'CVE', initialSize: 180 },
+  { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
+  { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
+  { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
+  { id: 'software', label: 'Matched Software', header: 'Matched Software', initialSize: 220 },
+  { id: 'version', label: 'Version', header: 'Version', initialSize: 160 },
+  { id: 'impact', label: 'Impact', header: 'Impact', initialSize: 140 },
+  { id: 'evaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 }
+];
+
 function formatTimestamp(value?: string): string {
   if (!value) {
     return '-';
@@ -55,6 +68,10 @@ function formatConfidence(value?: number): string {
     return '-';
   }
   return `${Math.round(value * 100)}%`;
+}
+
+function formatCount(value?: number): string {
+  return (value ?? 0).toLocaleString();
 }
 
 function statusClass(value?: string): string {
@@ -153,6 +170,37 @@ function buildFindingRows(findings: HostAssetDetail['findings']): DataTableRow[]
   }));
 }
 
+function formatPercent(value?: number): string {
+  if (value == null) {
+    return '-';
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function buildApplicableCveRows(applicableCves: HostAssetDetail['applicableCves']): DataTableRow[] {
+  return applicableCves.map((cve) => ({
+    id: cve.stateId,
+    cells: {
+      cve: {
+        content: cve.externalId ?? '-',
+        props: { className: 'mono' }
+      },
+      severity: { content: cve.severity ?? '-' },
+      cvss: { content: cve.cvssScore?.toFixed(1) ?? '-' },
+      epss: { content: formatPercent(cve.epssScore) },
+      software: { content: cve.packageName ?? '-' },
+      version: {
+        content: cve.version ?? '-',
+        props: { className: 'mono' }
+      },
+      impact: {
+        content: <span className={statusClass(cve.impactState)}>{cve.impactState ?? 'UNKNOWN'}</span>
+      },
+      evaluated: { content: formatTimestamp(cve.lastEvaluatedAt) }
+    }
+  }));
+}
+
 type HostDetailSectionsProps = {
   assetId: string | null;
   hostDetail: HostAssetDetail | null;
@@ -160,9 +208,30 @@ type HostDetailSectionsProps = {
 };
 
 function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSectionsProps) {
+  const location = useLocation();
+  const [activeTab, setActiveTab] = React.useState<HostDetailTab>('software');
   const aliasRows = React.useMemo(() => buildAliasRows(hostDetail?.aliases ?? []), [hostDetail]);
   const softwareRows = React.useMemo(() => buildSoftwareRows(hostDetail?.software ?? []), [hostDetail]);
   const findingRows = React.useMemo(() => buildFindingRows(hostDetail?.findings ?? []), [hostDetail]);
+  const applicableCveRows = React.useMemo(() => buildApplicableCveRows(hostDetail?.applicableCves ?? []), [hostDetail]);
+
+  React.useEffect(() => {
+    if (!hostDetail || !location.hash) {
+      return;
+    }
+    const targetId = location.hash.replace(/^#/, '');
+    if (!targetId) {
+      return;
+    }
+    if (targetId === 'applicable-cves') {
+      setActiveTab('applicable-cves');
+    } else if (targetId === 'host-findings') {
+      setActiveTab('findings');
+    }
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [hostDetail, location.hash]);
 
   if (!assetId) {
     return <div className="empty-state"><p>Select a host to load its detail.</p></div>;
@@ -176,122 +245,153 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
 
   return (
     <>
-      <div className="host-summary-grid">
-        <div className="summary-card">
-          <strong>Host</strong>
-          <span>{hostDetail.host.name}</span>
-          <span className="panel-caption mono">{hostDetail.host.identifier}</span>
+      <div className="host-hero">
+        <div className="host-hero-ident">
+          <div className="host-hero-icon" aria-hidden="true">🖥</div>
+          <div>
+            <h2 className="host-hero-title">{hostDetail.host.name}</h2>
+            <div className="host-hero-subtitle mono">{hostDetail.host.identifier}</div>
+          </div>
         </div>
-        <div className="summary-card">
-          <strong>System ID</strong>
-          <span className="mono">{hostDetail.host.sysId}</span>
-        </div>
-        <div className="summary-card">
-          <strong>Criticality</strong>
-          <span>{hostDetail.host.businessCriticality ?? '-'}</span>
-        </div>
-        <div className="summary-card">
-          <strong>Environment</strong>
-          <span>{hostDetail.host.environment ?? '-'}</span>
-        </div>
-        <div className="summary-card">
-          <strong>Open Findings</strong>
-          <span>{hostDetail.host.openFindingCount}</span>
-        </div>
-        <div className="summary-card">
-          <strong>Needs Review</strong>
-          <span>{hostDetail.host.unresolvedReviewCount}</span>
+        <div className="host-hero-actions">
+          <button type="button" className="btn btn-secondary">Refresh host</button>
+          <button type="button" className="btn btn-secondary">Edit asset</button>
         </div>
       </div>
 
-      <h4 className="section-title section-divider">Host Aliases</h4>
-      {aliasRows.length === 0 ? (
-        <div className="empty-state"><p>No aliases were recorded for this host.</p></div>
-      ) : (
-        <div className="table-scroll">
-          <DataTable
-            storageKey="host-detail-aliases-table-widths"
-            columns={ALIAS_COLUMNS}
-            rows={aliasRows}
-          />
+      <div className="host-summary-strip">
+        <div className="host-stat-card">
+          <span className="host-stat-label">Criticality</span>
+          <span className="host-stat-pill host-stat-pill-warning">{hostDetail.host.businessCriticality ?? '-'}</span>
         </div>
-      )}
+        <div className="host-stat-card">
+          <span className="host-stat-label">Asset State</span>
+          <span className="host-stat-pill host-stat-pill-success">{hostDetail.host.state ?? 'Active'}</span>
+        </div>
+        <div className="host-stat-card">
+          <span className="host-stat-label">Owner</span>
+          <span className="host-stat-value">{hostDetail.host.ownerEmail ?? '-'}</span>
+        </div>
+        <div className="host-stat-card">
+          <span className="host-stat-label">Environment</span>
+          <span className="host-stat-value">{hostDetail.host.environment ?? '—'}</span>
+        </div>
+        <div className="host-stat-card">
+          <span className="host-stat-label">Open Findings</span>
+          <span className="host-stat-number host-stat-number-danger">{formatCount(hostDetail.host.openFindingCount)}</span>
+        </div>
+        <div className="host-stat-card">
+          <span className="host-stat-label">Needs Review</span>
+          <span className="host-stat-number host-stat-number-warning">{formatCount(hostDetail.host.unresolvedReviewCount)}</span>
+        </div>
+      </div>
 
-      <h4 className="section-title section-divider">Installed Software</h4>
-      {softwareRows.length === 0 ? (
-        <div className="empty-state"><p>No host software has been materialized for this host yet.</p></div>
-      ) : (
-        <div className="table-scroll">
-          <DataTable
-            storageKey="host-detail-software-table-widths"
-            columns={SOFTWARE_COLUMNS}
-            rows={softwareRows}
-          />
-        </div>
-      )}
+      <div className="host-detail-tabs" role="tablist" aria-label="Host detail sections">
+        <button type="button" className={`host-detail-tab ${activeTab === 'software' ? 'active' : ''}`} onClick={() => setActiveTab('software')}>Installed software</button>
+        <button type="button" className={`host-detail-tab ${activeTab === 'applicable-cves' ? 'active' : ''}`} onClick={() => setActiveTab('applicable-cves')}>Applicable CVEs</button>
+        <button type="button" className={`host-detail-tab ${activeTab === 'findings' ? 'active' : ''}`} onClick={() => setActiveTab('findings')}>Created findings</button>
+        <button type="button" className={`host-detail-tab ${activeTab === 'aliases' ? 'active' : ''}`} onClick={() => setActiveTab('aliases')}>Host aliases</button>
+      </div>
 
-      <h4 className="section-title section-divider">Host Findings</h4>
-      {findingRows.length === 0 ? (
-        <div className="empty-state"><p>No findings are currently attached to this host.</p></div>
-      ) : (
-        <div className="table-scroll">
-          <DataTable
-            storageKey="host-detail-findings-table-widths"
-            columns={FINDING_COLUMNS}
-            rows={findingRows}
-          />
-        </div>
-      )}
+      <div className="host-detail-surface">
+        {activeTab === 'aliases' ? (
+          aliasRows.length === 0 ? (
+            <div className="empty-state"><p>No aliases were recorded for this host.</p></div>
+          ) : (
+            <div className="table-scroll">
+              <DataTable
+                storageKey="host-detail-aliases-table-widths"
+                columns={ALIAS_COLUMNS}
+                rows={aliasRows}
+              />
+            </div>
+          )
+        ) : null}
+
+        {activeTab === 'software' ? (
+          softwareRows.length === 0 ? (
+            <div className="empty-state"><p>No host software has been materialized for this host yet.</p></div>
+          ) : (
+            <div className="table-scroll">
+              <DataTable
+                storageKey="host-detail-software-table-widths"
+                columns={SOFTWARE_COLUMNS}
+                rows={softwareRows}
+              />
+            </div>
+          )
+        ) : null}
+
+        {activeTab === 'applicable-cves' ? (
+          applicableCveRows.length === 0 ? (
+            <div id="applicable-cves" className="empty-state"><p>No applicable CVEs are currently correlated to this host.</p></div>
+          ) : (
+            <div id="applicable-cves" className="table-scroll">
+              <DataTable
+                storageKey="host-detail-applicable-cves-table-widths"
+                columns={APPLICABLE_CVE_COLUMNS}
+                rows={applicableCveRows}
+              />
+            </div>
+          )
+        ) : null}
+
+        {activeTab === 'findings' ? (
+          findingRows.length === 0 ? (
+            <div id="host-findings" className="empty-state"><p>No findings are currently attached to this host.</p></div>
+          ) : (
+            <div id="host-findings" className="table-scroll">
+              <DataTable
+                storageKey="host-detail-findings-table-widths"
+                columns={FINDING_COLUMNS}
+                rows={findingRows}
+              />
+            </div>
+          )
+        ) : null}
+      </div>
     </>
   );
 }
 
 export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPageProps = {}) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const selectedAssetId = assetId ?? readHostAssetIdFromSearch(searchParams);
+  const returnTo = searchParams.get('returnTo')?.trim() || (typeof location.state === 'object' && location.state && 'returnTo' in location.state
+    ? String((location.state as { returnTo?: string }).returnTo ?? '').trim()
+    : '');
   const hostDetailQuery = useHostAssetDetailQuery(selectedAssetId);
   const selectedHost = hostDetailQuery.data ?? null;
   const loadingDetail = hostDetailQuery.isLoading || hostDetailQuery.isFetching;
   const error = hostDetailQuery.error instanceof Error ? hostDetailQuery.error.message : '';
+  const handleClose = React.useCallback(() => {
+    if (onClose) {
+      onClose();
+      return;
+    }
+    if (returnTo) {
+      navigate(returnTo);
+      return;
+    }
+    navigate(-1);
+  }, [navigate, onClose, returnTo]);
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>{selectedHost?.host.name ?? 'Host Detail'}</h3>
-          <span className="panel-caption">
-            {selectedHost
-              ? `${selectedHost.host.identifier} · ${selectedHost.host.sysId}`
-              : 'Review aliases, installed software evidence, and findings for the selected host.'}
-          </span>
-        </div>
-        <div className="button-row">
+    <section className="host-detail-page">
+      {(onClose || returnTo) && (
+        <div className="button-row host-detail-close-row">
           <button
             type="button"
-            className="btn btn-secondary"
-            onClick={() => { if (selectedAssetId) void hostDetailQuery.refetch(); }}
-            disabled={loadingDetail || !selectedAssetId}
+            className="modal-close-btn"
+            onClick={handleClose}
+            aria-label="Close host detail"
           >
-            {loadingDetail ? 'Refreshing...' : 'Refresh Host'}
+            x
           </button>
-          {onClose && (
-            <button
-              type="button"
-              className="modal-close-btn"
-              onClick={onClose}
-              aria-label="Close host detail"
-            >
-              x
-            </button>
-          )}
         </div>
-      </div>
-
-      <div className="inline-note">
-        Host drilldown from <span className="mono">Inventory &gt; Hosts</span>. Use this view to inspect aliases, installed
-        software evidence, review blockers, and findings for a single host.
-      </div>
-
+      )}
       {error && <div className="notice error">{error}</div>}
       <HostDetailSections assetId={selectedAssetId} hostDetail={selectedHost} loadingDetail={loadingDetail} />
     </section>

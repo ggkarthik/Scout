@@ -8,6 +8,7 @@ public record OrgSpecificCveExposureRecordResponse(
         UUID vulnerabilityId,
         String externalId,
         String title,
+        String descriptionSnippet,
         String applicability,
         boolean impacted,
         String impactState,
@@ -30,6 +31,9 @@ public record OrgSpecificCveExposureRecordResponse(
         long openFindings,
         Instant lastEvaluatedAt,
         long eolComponentCount,
-        long eosComponentCount
+        long eosComponentCount,
+        boolean hasInvestigationSummary,
+        Instant investigationSummaryGeneratedAt,
+        String investigationSummaryMode
 ) {
 }

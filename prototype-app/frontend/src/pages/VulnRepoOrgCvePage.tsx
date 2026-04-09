@@ -6,8 +6,9 @@ import {
   type DataTableRow
 } from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
-import { CveAssessmentWorkbench } from '../components/CveAssessmentWorkbench';
+import { VulnRepoCveAssessmentWorkbench } from '../components/VulnRepoCveAssessmentWorkbench';
 import {
+  CveDetail,
   OrgCveAutomationStatus,
   OrgSpecificCveExposureRecord
 } from '../features/cve-workbench/types';
@@ -82,15 +83,78 @@ function vexEvidenceCategory(item: OrgSpecificCveExposureRecord): 'VEX_BACKED' |
   return 'NONE';
 }
 
-type VulnerabilityIntelOrgCvePageProps = {
+function buildFallbackRecord(detail: CveDetail, externalId: string): OrgSpecificCveExposureRecord {
+  const matchedSoftwareCount = new Set(
+    detail.matchedSoftware.map((item) => `${item.packageName}|${item.version ?? ''}`)
+  ).size;
+  const matchedAssetCount = new Set(
+    detail.matchedSoftware.map((item) => item.assetId ?? item.assetIdentifier ?? item.componentId)
+  ).size;
+  const applicableComponentCount = detail.matchedSoftware.filter((item) => item.applicabilityState === 'APPLICABLE').length;
+  const impactedComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'IMPACTED').length;
+  const notAffectedComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'NOT_IMPACTED').length;
+  const fixedComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'FIXED').length;
+  const noPatchComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'NO_PATCH').length;
+  const underInvestigationComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'UNDER_INVESTIGATION').length;
+  const unknownComponentCount = detail.matchedSoftware.filter((item) => item.impactState === 'UNKNOWN').length;
+  const severity = detail.summary.severity || 'UNKNOWN';
+  const impactState: OrgSpecificCveExposureRecord['impactState'] = impactedComponentCount > 0
+    ? 'IMPACTED'
+    : noPatchComponentCount > 0
+      ? 'NO_PATCH'
+      : fixedComponentCount > 0
+        ? 'FIXED'
+        : notAffectedComponentCount > 0
+          ? 'NOT_IMPACTED'
+          : underInvestigationComponentCount > 0
+            ? 'UNDER_INVESTIGATION'
+            : 'UNKNOWN';
+  const applicability: OrgSpecificCveExposureRecord['applicability'] = applicableComponentCount > 0
+    ? 'APPLICABLE'
+    : detail.matchedSoftware.length > 0
+      ? 'UNKNOWN'
+      : 'NOT_APPLICABLE';
+
+  return {
+    recordId: `fallback:${externalId}`,
+    vulnerabilityId: externalId,
+    externalId,
+    title: detail.summary.title || externalId,
+    descriptionSnippet: detail.summary.description,
+    applicability,
+    impacted: impactedComponentCount > 0 || noPatchComponentCount > 0,
+    impactState,
+    severity,
+    cvssScore: detail.summary.cvssScore,
+    epssScore: detail.summary.epssScore,
+    inKev: Boolean(detail.summary.inKev),
+    matchedComponentCount: detail.matchedSoftware.length,
+    matchedSoftwareCount,
+    matchedAssetCount,
+    applicableComponentCount,
+    impactedComponentCount,
+    notAffectedComponentCount,
+    fixedComponentCount,
+    noPatchComponentCount,
+    underInvestigationComponentCount,
+    unknownComponentCount,
+    openFindings: 0,
+    lastEvaluatedAt: detail.summary.modifiedAt,
+    eolComponentCount: 0,
+    eosComponentCount: 0,
+    hasInvestigationSummary: false,
+  };
+}
+
+type VulnRepoOrgCvePageProps = {
   initialCveId?: string;
   onSelectedCveChange?: (cveId?: string) => void;
 };
 
-export function VulnerabilityIntelOrgCvePage({
+export function VulnRepoOrgCvePage({
   initialCveId,
   onSelectedCveChange
-}: VulnerabilityIntelOrgCvePageProps = {}) {
+}: VulnRepoOrgCvePageProps = {}) {
   const actor = useActor();
   const queryClient = useQueryClient();
   const [page, setPage] = React.useState(0);
@@ -108,7 +172,8 @@ export function VulnerabilityIntelOrgCvePage({
   });
   const automationStatusQuery = useOrgSpecificCveAutomationStatusQuery();
   const policyQuery = useRiskPolicyQuery();
-  const detailQuery = useCveDetailQuery(selectedRecord?.externalId ?? null);
+  const detailTargetCveId = selectedRecord?.externalId ?? initialCveId ?? null;
+  const detailQuery = useCveDetailQuery(detailTargetCveId);
   const loading = orgCveQuery.isLoading || orgCveQuery.isFetching;
   const error = orgCveQuery.error instanceof Error ? orgCveQuery.error.message : null;
   const summary = orgCveQuery.data?.summary ?? null;
@@ -143,6 +208,18 @@ export function VulnerabilityIntelOrgCvePage({
       openRecord(record);
     }
   }, [initialCveId, items, loading, openRecord]);
+
+  React.useEffect(() => {
+    const requestedCveId = initialCveId;
+    if (!requestedCveId || initialCveHandledRef.current || loading) return;
+    if (selectedRecord?.externalId === requestedCveId) {
+      initialCveHandledRef.current = true;
+      return;
+    }
+    if (!detailQuery.data) return;
+    initialCveHandledRef.current = true;
+    setSelectedRecord(buildFallbackRecord(detailQuery.data, requestedCveId));
+  }, [detailQuery.data, initialCveId, loading, selectedRecord?.externalId]);
 
   React.useEffect(() => {
     setSelectedRecord((current) => {
@@ -292,7 +369,7 @@ export function VulnerabilityIntelOrgCvePage({
 
   if (selectedRecord) {
     return (
-      <CveAssessmentWorkbench
+      <VulnRepoCveAssessmentWorkbench
         item={selectedRecord}
         detail={selectedDetail}
         loading={detailLoading}
