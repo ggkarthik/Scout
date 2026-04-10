@@ -97,7 +97,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component(null);
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-microsoft");
-        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
@@ -128,7 +128,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component("1.0.0");
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-microsoft");
-        target.setQualifiersJson("{\"vexStatus\":\"FIXED\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"FIXED\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
@@ -141,7 +141,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component("1.0.0");
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-redhat");
-        target.setQualifiersJson("{\"vexStatus\":\"UNDER_INVESTIGATION\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"UNDER_INVESTIGATION\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
@@ -154,7 +154,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component("1.0.0");
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-redhat");
-        target.setQualifiersJson("{\"vexStatus\":\"KNOWN_AFFECTED\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"KNOWN_AFFECTED\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
@@ -167,7 +167,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component("1.0.0");
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-microsoft");
-        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluateCorrelation(component, target);
 
@@ -181,7 +181,7 @@ class ApplicabilityDecisionServiceTest {
         InventoryComponent component = component("1.0.0");
         VulnerabilityTarget target = new VulnerabilityTarget();
         target.setSource("vex-unknown");
-        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexTrustTier\":\"LOW\",\"vexPublishedAt\":\"2026-03-01T00:00:00Z\"}");
+        target.setQualifiersJson("{\"vexStatus\":\"NOT_AFFECTED\",\"vexTrustTier\":\"LOW\",\"vexPublishedAt\":\"" + freshVexPublishedAt() + "\"}");
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target);
 
@@ -218,6 +218,10 @@ class ApplicabilityDecisionServiceTest {
         target.setVersionEnd(end);
         target.setEndInclusive(endInclusive);
         return target;
+    }
+
+    private String freshVexPublishedAt() {
+        return Instant.now().minus(Duration.ofDays(7)).toString();
     }
 
     private InventoryComponent component(String version) {

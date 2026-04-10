@@ -16,8 +16,6 @@ import {
   deriveAssessmentResult,
   exactMatchMeta,
   explainApplicability,
-  explainImpact,
-  hasPersistedVexEvidence,
   impactBadgeClass,
   impactLabel,
   initialApplicabilityDecision,
@@ -47,11 +45,8 @@ import {
 } from '../features/cve-workbench/types';
 import {
   InvestigationPriority,
-  InvestigationStatus,
 } from '../features/cve-workbench/workflow';
 import type { Finding } from '../features/findings/types';
-import type { VendorIntelligence } from '../features/cve-workbench/types';
-import type { RiskPolicy } from '../features/configurations/types';
 import type { SoftwareIdentityAsset } from '../features/software-identities/types';
 
 type WorkflowStep = 1 | 2 | 3;
@@ -123,7 +118,6 @@ type Props = {
   detail: CveDetail | null;
   loading: boolean;
   error: string | null;
-  findingGenerationMode: RiskPolicy['findingGenerationMode'];
   analystId?: string;
   onBack: () => void;
   onRefreshDetail: () => Promise<void>;
@@ -796,7 +790,6 @@ function InvestigationCanvas({
   newLogMessage,
   onNewLogMessageChange,
   onAddLogEntry,
-  onContinueToApplicability,
   onClose
 }: {
   isOpen: boolean;
@@ -812,7 +805,6 @@ function InvestigationCanvas({
   newLogMessage: string;
   onNewLogMessageChange: (value: string) => void;
   onAddLogEntry: () => void;
-  onContinueToApplicability?: () => Promise<void> | void;
   onClose: () => void;
 }) {
   const completedCount = runbookTasks.filter((task) => task.state === 'DONE').length;
@@ -1136,22 +1128,6 @@ function InvestigationCanvas({
     onRunTask(taskId);
   }
 
-  const affectedEntityCount = detail.signals.assetCount;
-  const impactedSoftwareCount = detail.signals.softwareCount;
-  const falsePositiveCandidateCount = falsePositiveResults.filter((row) => row.falsePositive).length;
-  const falsePositiveNotImpactedCount = falsePositiveResults.reduce((sum, row) => sum + row.notImpactedAssetCount, 0);
-  const eolRiskCount = eolResults.filter((row) => row.lifecycle.trim().toUpperCase() !== 'SUPPORTED').length;
-  const activeRunbookTaskId = !assetAssessmentRan
-    ? 'review-asset-inventory'
-    : !falsePositiveRan
-      ? 'find-false-positive'
-      : !eolAssessed
-        ? (eolTask?.id ?? 'end-of-life-analysis')
-        : 'summary';
-  const topSoftwareSummary = softwareBreakdown.length > 0
-    ? softwareBreakdown.slice(0, 3).map((entry) => entry.label).join(', ')
-    : 'No impacted software confirmed yet';
-
   const triggerSummary = React.useCallback(() => {
     setSummaryVisible(true);
     onRunTask('generate-summary');
@@ -1161,11 +1137,6 @@ function InvestigationCanvas({
     flushRunbookState();
     onClose();
   }, [flushRunbookState, onClose]);
-
-  const handleContinueToApplicability = React.useCallback(async () => {
-    flushRunbookState();
-    await onContinueToApplicability?.();
-  }, [flushRunbookState, onContinueToApplicability]);
 
   function renderRunbookActions(task: RunbookTask): React.ReactNode {
     if (task.id === 'review-asset-inventory' && assetAssessmentRan) {
@@ -1898,448 +1869,6 @@ function CveOverviewExperience({
   );
 }
 
-// --- CVE Summary Sidebar (step 1) ---
-
-type SidebarProps = {
-  item: OrgSpecificCveExposureRecord;
-  detail: CveDetail;
-  cvssFields: Record<string, string>;
-  softwareGroups: SoftwareGroup[];
-};
-
-function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: SidebarProps) {
-  // Deduplicate affected products and enrich with version ranges from vendor intelligence
-  const affectedProductMap = new Map<string, { ecosystem?: string; versions: string[] }>();
-  for (const vi of (detail.vendorIntelligence ?? [])) {
-    if (!vi.packageName) continue;
-    const key = vi.packageName;
-    const existing = affectedProductMap.get(key);
-    if (existing) {
-      if (vi.affectedVersions && !existing.versions.includes(vi.affectedVersions)) {
-        existing.versions.push(vi.affectedVersions);
-      }
-    } else {
-      affectedProductMap.set(key, {
-        ecosystem: vi.ecosystem ?? undefined,
-        versions: vi.affectedVersions ? [vi.affectedVersions] : [],
-      });
-    }
-  }
-  // Fall back to matched software names if no vendor intelligence
-  if (affectedProductMap.size === 0) {
-    for (const g of softwareGroups.slice(0, 5)) {
-      const key = g.software.packageName;
-      if (!affectedProductMap.has(key)) {
-        affectedProductMap.set(key, { ecosystem: g.software.ecosystem ?? undefined, versions: [] });
-      }
-    }
-  }
-
-  // Unique CPEs from vendor intelligence
-  const cpes = [...new Set((detail.vendorIntelligence ?? []).map((vi) => vi.cpe).filter(Boolean))] as string[];
-
-  const epssScore = detail.summary.epssScore ?? null;
-  const epssUpdatedAt = detail.summary.epssUpdatedAt ?? null;
-  const cweIds = detail.summary.cweIds;
-
-  return (
-    <aside className="cve-summary-sidebar">
-
-      {/* Header: ID + severity + score */}
-      <div className="cve-sidebar-header">
-        <h4>CVE Summary</h4>
-        <div className="cve-sidebar-scores">
-          {epssScore != null && (
-            <span
-              className={`cve-score-chip ${epssScore >= 0.5 ? 'cve-score-chip-warn' : ''}`}
-              title={epssUpdatedAt
-                ? `Probability of exploitation in the next 30 days — score refreshed ${new Date(epssUpdatedAt).toLocaleDateString()}`
-                : 'Probability of exploitation in the next 30 days'}
-            >
-              EPSS {(epssScore * 100).toFixed(1)}%
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* KEV warning — exploitability signal only, not an applicability determination */}
-      {item.inKev && (
-        <div className="cve-kev-banner">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14">
-            <path d="M12 3L2 21h20L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-            <path d="M12 9v5M12 17h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          In CISA KEV — actively exploited in the wild. Prioritize review; applicability must still be verified against your inventory.
-        </div>
-      )}
-
-      {/* Description */}
-      <div>
-        <h5>Description</h5>
-        <p className="cve-summary-description">
-          {detail.summary.description || detail.summary.title || 'No description available.'}
-        </p>
-      </div>
-
-      {/* CWE */}
-      {cweIds && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>Weakness (CWE)</h5>
-            <p className="cve-summary-cwe">{cweIds}</p>
-          </div>
-        </>
-      )}
-
-      {/* Dates */}
-      {(detail.summary.publishedAt || detail.summary.modifiedAt) && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div className="cve-summary-meta-grid">
-            {detail.summary.publishedAt && (
-              <div className="cve-summary-meta-item">
-                <label>Published</label>
-                <span>{formatDate(detail.summary.publishedAt)}</span>
-              </div>
-            )}
-            {detail.summary.modifiedAt && (
-              <div className="cve-summary-meta-item">
-                <label>Updated</label>
-                <span>{formatDate(detail.summary.modifiedAt)}</span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* CVSS breakdown — only when vector present */}
-      {(cvssFields['AV'] || cvssFields['PR'] || cvssFields['UI']) && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>CVSS Details</h5>
-            {cvssFields['AV'] && (
-              <div className="cve-cvss-row">
-                <span>Attack Vector</span>
-                <span>{AV_LABELS[cvssFields['AV']] ?? cvssFields['AV']}</span>
-              </div>
-            )}
-            {cvssFields['PR'] && (
-              <div className="cve-cvss-row">
-                <span>Privileges Required</span>
-                <span>{PR_LABELS[cvssFields['PR']] ?? cvssFields['PR']}</span>
-              </div>
-            )}
-            {cvssFields['UI'] && (
-              <div className="cve-cvss-row">
-                <span>User Interaction</span>
-                <span>{UI_LABELS[cvssFields['UI']] ?? cvssFields['UI']}</span>
-              </div>
-            )}
-            {detail.summary.cvssVector && (
-              <div className="cve-cvss-row cve-cvss-vector-row">
-                <span>Vector</span>
-                <span className="mono cve-cvss-vector-val" title={detail.summary.cvssVector}>
-                  {detail.summary.cvssVector}
-                </span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Affected Products */}
-      {affectedProductMap.size > 0 && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>Affected Products</h5>
-            <ul className="cve-affected-products">
-              {Array.from(affectedProductMap.entries()).map(([name, { ecosystem, versions }]) => (
-                <li key={name} className="cve-affected-product-item">
-                  <div className="cve-affected-product-name">
-                    {ecosystem && <span className="cve-ecosystem-tag">{ecosystem}</span>}
-                    <strong>{name}</strong>
-                  </div>
-                  {versions.length > 0 && (
-                    <div className="cve-affected-product-range mono">{versions.join(', ')}</div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </>
-      )}
-
-      {/* CPE Identifiers */}
-      {cpes.length > 0 && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>CPE Identifiers</h5>
-            <div className="cve-cpe-list">
-              {cpes.map((cpe) => (
-                <div key={cpe} className="cve-cpe-entry" title={cpe}>{cpe}</div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Sources */}
-      <hr className="cve-summary-divider" />
-      <div>
-        <h5>Sources</h5>
-        <div className="cve-source-badges">
-          {detail.summary.source && (
-            detail.summary.sourceUrl
-              ? <a href={detail.summary.sourceUrl} target="_blank" rel="noreferrer" className="cve-source-badge cve-source-badge-link">{detail.summary.source}</a>
-              : <span className="cve-source-badge">{detail.summary.source}</span>
-          )}
-          {item.inKev && <span className="cve-source-badge kev">KEV</span>}
-          {hasPersistedVexEvidence(detail) && <span className="cve-source-badge csaf">VEX</span>}
-          {detail.summary.cvssVector && <span className="cve-source-badge">CVSS</span>}
-        </div>
-      </div>
-
-    </aside>
-  );
-}
-
-// --- Investigation Content (step 1) ---
-
-type VendorRow = {
-  source: string;
-  statement: string;
-  statementClass: string;
-  affectedVersions: string;
-  fixedVersion: string;
-  ecosystem?: string;
-  packageName?: string;
-  cpe?: string;
-  vexStatus?: string;
-};
-
-type InvestigationContentProps = {
-  item: OrgSpecificCveExposureRecord;
-  detail: CveDetail;
-  softwareGroups: SoftwareGroup[];
-  vendorRows: VendorRow[];
-  overallConfidence: { label: string; cls: string; pct: number };
-  investigationNotes: string;
-  autoNote: string;
-  onNotesChange: (v: string) => void;
-};
-
-function InvestigationContent({
-  item, detail, softwareGroups, vendorRows, overallConfidence, investigationNotes, autoNote, onNotesChange,
-}: InvestigationContentProps) {
-  const [expandedRows, setExpandedRows] = React.useState<Set<string>>(new Set());
-
-  function toggleRow(key: string): void {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
-  return (
-    <>
-      <div className="cve-stat-cards">
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Matching Software</div>
-          <div className="cve-stat-card-value">{softwareGroups.length}</div>
-          <div className="cve-stat-card-sub">{softwareGroups.length > 0 ? 'Correlated to inventory' : 'None detected'}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Candidate Assets</div>
-          <div className="cve-stat-card-value">{detail.signals.assetCount}</div>
-          <div className="cve-stat-card-sub">{detail.signals.assetCount > 0 ? 'Assets with matched software' : 'None impacted'}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Open Findings</div>
-          <div className="cve-stat-card-value">{item.openFindings}</div>
-          <div className="cve-stat-card-sub">{formatLabel(item.impactState)}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Confidence</div>
-          <div className={`cve-stat-card-value cve-stat-card-value-composite ${overallConfidence.cls}`}>
-            <span className="cve-confidence-main">{overallConfidence.label}</span>
-            {overallConfidence.pct > 0 && <span className="cve-confidence-pct">{overallConfidence.pct}%</span>}
-          </div>
-          <div className="cve-stat-card-sub">Match confidence</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">CVSS Score</div>
-          <div className={`cve-stat-card-value cve-cvss-score-value cve-cvss-score-${item.severity.toLowerCase()}`}>
-            {detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : item.cvssScore != null ? item.cvssScore.toFixed(1) : 'N/A'}
-          </div>
-          <div className="cve-stat-card-sub">{formatLabel(item.severity)} severity</div>
-        </div>
-      </div>
-
-      <div className="cve-intel-section">
-        <div className="cve-intel-section-header">
-          <h4>Matched Software</h4>
-          <p>Software identified in your environment that may be affected</p>
-        </div>
-        {softwareGroups.length === 0 ? (
-          <div className="cve-intel-empty">No software inventory is currently correlated to this CVE.</div>
-        ) : (
-          <table className="cve-intel-table">
-            <thead>
-              <tr>
-                <th>Software</th>
-                <th>Version</th>
-                <th>Assets</th>
-                <th>Match Basis</th>
-                <th>Confidence</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {softwareGroups.map(({ software, assets }) => {
-                const conf = confidenceFromApplicability(software.applicabilityState);
-                const groupKey = software.version ? `${software.packageName}@${software.version}` : software.packageName;
-                const isExpanded = expandedRows.has(groupKey);
-                return (
-                  <React.Fragment key={groupKey}>
-                    <tr>
-                      <td>
-                        <div className="cve-sw-name-cell">
-                          {software.ecosystem && (
-                            <span className="cve-ecosystem-tag">{software.ecosystem}</span>
-                          )}
-                          <strong>{software.packageName}</strong>
-                        </div>
-                      </td>
-                      <td className="mono">{software.version}</td>
-                      <td>{assets.length}</td>
-                      <td>{matchBasisLabel(software.matchedBy)}</td>
-                      <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
-                      <td>
-                        <button
-                          type="button"
-                          className={`cve-view-assets-btn${isExpanded ? ' active' : ''}`}
-                          onClick={() => toggleRow(groupKey)}
-                          aria-expanded={isExpanded}
-                        >
-                          {isExpanded ? 'Hide Assets ›' : `View Assets (${assets.length}) ›`}
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr className="cve-assets-expansion-row">
-                        <td colSpan={6}>
-                          <div className="cve-assets-expansion">
-                            <table className="cve-assets-mini-table">
-                              <thead>
-                                <tr>
-                                  <th>Asset</th>
-                                  <th>Identifier</th>
-                                  <th>Finding</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {assets.map((asset) => (
-                                  <tr key={asset.componentId}>
-                                    <td>{asset.assetName ?? <span className="cve-muted">—</span>}</td>
-                                    <td className="mono">{asset.assetIdentifier ?? <span className="cve-muted">—</span>}</td>
-                                    <td>
-                                      {asset.eligibleForFinding
-                                        ? <span className="cve-finding-eligible-tag">Finding eligible</span>
-                                        : <span className="cve-muted">—</span>}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="cve-intel-section">
-        <div className="cve-intel-section-header">
-          <h4>Vendor Intelligence</h4>
-          <p>Official statements and patch information</p>
-        </div>
-        {vendorRows.length === 0 ? (
-          <div className="cve-intel-empty">No vendor intelligence data available.</div>
-        ) : (
-          <table className="cve-intel-table">
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Statement</th>
-                <th>Package</th>
-                <th>Affected Versions</th>
-                <th>Fixed In</th>
-                <th>CPE</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vendorRows.map((row, i) => (
-                <tr key={`${row.source}-${i}`}>
-                  <td><strong>{row.source}</strong></td>
-                  <td><span className={`cve-statement-badge ${row.statementClass}`}>{row.statement}</span></td>
-                  <td className="mono">
-                    {row.packageName
-                      ? <>{row.ecosystem ? <span className="cve-ecosystem-tag">{row.ecosystem}</span> : null}{row.packageName}</>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                  <td className="mono">{row.affectedVersions}</td>
-                  <td className="mono">
-                    {row.fixedVersion && row.fixedVersion !== '—'
-                      ? <span className="cve-patch-version">{row.fixedVersion}</span>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                  <td className="mono">
-                    {row.cpe
-                      ? <span className="cve-cpe-cell" title={row.cpe}>{row.cpe.length > 40 ? row.cpe.substring(0, 40) + '…' : row.cpe}</span>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="cve-notes-section">
-        <div className="cve-notes-header"><h4>Investigation Notes</h4></div>
-        <div className="cve-notes-body">
-          {autoNote && (
-            <div className="cve-notes-auto-banner">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              <span>{autoNote}</span>
-            </div>
-          )}
-          <textarea
-            className="cve-notes-textarea"
-            value={investigationNotes}
-            onChange={(e) => onNotesChange(e.target.value)}
-            placeholder="Add analyst notes..."
-            rows={4}
-          />
-        </div>
-      </div>
-    </>
-  );
-}
-
 // --- VEX Evidence Mini-Card ---
 
 function VexEvidenceCard({ evidence }: { evidence: CveVexEvidence }) {
@@ -2751,7 +2280,6 @@ function DecisionSummary({
 
 type FindingsContentProps = {
   filteredSoftware: FindingDisplayRow[];
-  cveId: string;
   selectedIds: Set<string>;
   showFilter: 'ALL' | 'IMPACTED_ONLY';
   searchQuery: string;
@@ -2768,7 +2296,7 @@ type FindingsContentProps = {
 };
 
 function FindingsContent({
-  filteredSoftware, cveId, selectedIds, showFilter, searchQuery, assetTypeFilter, severity, findingIdsByComponentId,
+  filteredSoftware, selectedIds, showFilter, searchQuery, assetTypeFilter, severity, findingIdsByComponentId,
   onToggleRow, onSelectAll, onClearAll, onShowFilterChange, onSearchQueryChange, onAssetTypeFilterChange, onOpenCreatePanel,
 }: FindingsContentProps) {
   const selectableRows = filteredSoftware.filter((row) => row.selectable);
@@ -3151,7 +2679,6 @@ export function VulnRepoCveAssessmentWorkbench({
   detail,
   loading,
   error,
-  findingGenerationMode,
   analystId,
   onBack,
   onRefreshDetail
@@ -3166,8 +2693,7 @@ export function VulnRepoCveAssessmentWorkbench({
   const latestAssessment = React.useMemo(() => latestByDate(detail?.assessments ?? []), [detail]);
 
   // Investigation state
-  const [investigationId, setInvestigationId] = React.useState<number | null>(null);
-  const investigationStatus: InvestigationStatus = 'IN_PROGRESS';
+  const [, setInvestigationId] = React.useState<number | null>(null);
   const investigationPriority: InvestigationPriority = 'MEDIUM';
   const [investigationNotes, setInvestigationNotes] = React.useState('');
   const [investigationBusy, setInvestigationBusy] = React.useState(false);
@@ -3178,7 +2704,7 @@ export function VulnRepoCveAssessmentWorkbench({
   const [newInvestigationLogMessage, setNewInvestigationLogMessage] = React.useState('');
 
   // Applicability state
-  const [assessmentId, setAssessmentId] = React.useState<number | null>(null);
+  const [, setAssessmentId] = React.useState<number | null>(null);
   const [applicabilityDecisions, setApplicabilityDecisions] = React.useState<Map<string, ApplicabilityDecision>>(new Map());
   const [impactDecisions, setImpactDecisions] = React.useState<Map<string, ImpactDecision>>(new Map());
   const [analystRationale, setAnalystRationale] = React.useState('');
@@ -3591,75 +3117,6 @@ export function VulnRepoCveAssessmentWorkbench({
 
   const cvssFields = React.useMemo(() => parseCvssVector(detail?.summary.cvssVector), [detail]);
 
-  const autoNote = React.useMemo(() => {
-    if (!detail || !item) return '';
-    const parts: string[] = [];
-    const topProducts = softwareGroups.slice(0, 2).map((g) => g.software.packageName).join(', ');
-    if (topProducts) {
-      parts.push(`${detail.signals.softwareCount > 0 ? 'High confidence match' : 'No direct software match'}. ${topProducts} detected with potentially vulnerable versions.`);
-    }
-    if (detail.signals.patchAvailable && detail.signals.patchVersions) {
-      parts.push(`Patch available: ${detail.signals.patchVersions}.`);
-    } else if (!detail.signals.patchAvailable) {
-      parts.push('No patch currently available.');
-    }
-    if (item.inKev) parts.push('This CVE is in the CISA KEV catalog — active exploitation confirmed.');
-    return parts.join(' ');
-  }, [detail, item, softwareGroups]);
-
-  const vendorRows = React.useMemo((): VendorRow[] => {
-    if (!detail) return [];
-    const rows: VendorRow[] = [];
-
-    const intel: VendorIntelligence[] = detail.vendorIntelligence ?? [];
-    if (intel.length > 0) {
-      for (const vi of intel) {
-        const vexNormalized = vi.vexStatus?.toUpperCase();
-        const statementClass =
-          vexNormalized === 'NOT_AFFECTED' || vexNormalized === 'FIXED' ? 'resolved'
-          : vexNormalized === 'UNDER_INVESTIGATION' ? 'under-investigation'
-          : 'affected';
-        const statement =
-          vi.vexStatus ? formatLabel(vi.vexStatus)
-          : 'Affected';
-        rows.push({
-          source: vi.source,
-          statement,
-          statementClass,
-          affectedVersions: vi.affectedVersions,
-          fixedVersion: vi.fixedVersion ?? '—',
-          ecosystem: vi.ecosystem ?? undefined,
-          packageName: vi.packageName ?? undefined,
-          cpe: vi.cpe ?? undefined,
-          vexStatus: vi.vexStatus ?? undefined,
-        });
-      }
-    } else {
-      // Fallback when backend returns no vendor intelligence records
-      rows.push({
-        source: detail.summary.source ?? 'ADVISORY',
-        statement: 'Affected',
-        statementClass: 'affected',
-        affectedVersions: detail.signals.patchVersions ? `< ${detail.signals.patchVersions}` : 'See advisory',
-        fixedVersion: detail.signals.patchVersions ?? '—',
-      });
-    }
-
-    if (item.inKev) {
-      // BLG-004: KEV signals exploitability, not product applicability. It is NOT an
-      // authoritative source for determining whether your specific version is affected.
-      // Rendered with a distinct style so analysts don't conflate it with NVD/VEX/advisory rows.
-      rows.push({
-        source: 'CISA KEV (exploitability context)',
-        statement: 'Actively Exploited — not an applicability source',
-        statementClass: 'exploited kev-context',
-        affectedVersions: '— (no version data)',
-        fixedVersion: '—',
-      });
-    }
-    return rows;
-  }, [detail, item]);
-
   const overallConfidence = React.useMemo(() => {
     if (!detail) return { label: 'Unknown', cls: '', pct: 0 };
     const applicable = detail.matchedSoftware.filter((s) => s.applicabilityState === 'APPLICABLE').length;
@@ -3910,7 +3367,6 @@ export function VulnRepoCveAssessmentWorkbench({
             <div className={`cve-findings-workspace${findingConfigOpen ? ' cve-findings-workspace--with-config' : ''}`}>
               <FindingsContent
                 filteredSoftware={filteredFindingSoftware}
-                cveId={item.externalId}
                 selectedIds={selectedFindingIds}
                 showFilter={findingShowFilter}
                 searchQuery={findingSearchQuery}
@@ -4006,12 +3462,6 @@ export function VulnRepoCveAssessmentWorkbench({
           newLogMessage={newInvestigationLogMessage}
           onNewLogMessageChange={setNewInvestigationLogMessage}
           onAddLogEntry={handleAddInvestigationLogEntry}
-          onContinueToApplicability={async () => {
-            const didContinue = await saveInvestigationAndContinue();
-            if (didContinue) {
-              setInvestigationCanvasOpen(false);
-            }
-          }}
           onClose={() => setInvestigationCanvasOpen(false)}
         />
       )}

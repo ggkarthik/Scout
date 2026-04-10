@@ -291,8 +291,6 @@ export function CVEInvestigationSummary({
     [input.affectedAssets]
   );
 
-  const internalAssetCount = Math.max(0, input.affectedAssets.length - externalAssets.length);
-
   const runGenerate = React.useCallback(async (mode: SummaryMode) => {
     setLoading(true);
     setError(null);
