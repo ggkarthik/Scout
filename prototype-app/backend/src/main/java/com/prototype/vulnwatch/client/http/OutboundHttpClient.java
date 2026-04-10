@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.client.http;
 
+import java.net.URI;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
@@ -125,7 +126,7 @@ public class OutboundHttpClient {
             long waitMs = waitTimeMs(state.hasCompletedRequest, state.lastRequestCompletedAtMs, policy.minRequestIntervalMs());
             sleep(waitMs, policy.providerKey(), "request pacing");
             try {
-                return restTemplate.exchange(endpoint, method, requestEntity, responseType);
+                return restTemplate.exchange(URI.create(endpoint), method, requestEntity, responseType);
             } finally {
                 state.lastRequestCompletedAtMs = currentTimeMillis.getAsLong();
                 state.hasCompletedRequest = true;

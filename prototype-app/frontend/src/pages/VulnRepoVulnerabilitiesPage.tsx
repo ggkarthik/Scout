@@ -4,7 +4,7 @@ import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../comp
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForVulnRepoView } from '../app/routes';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
-import { useCveDetailQuery, useOrgSpecificCvesQuery, useSavedInvestigationSummaryQuery } from '../features/cve-workbench/queries';
+import { useCveDetailQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
 
 const PAGE_SIZE = 25;
@@ -127,7 +127,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const [query, setQuery] = React.useState(initialQuery);
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
-  const orgCveQuery = useOrgSpecificCvesQuery({
+  const vulnRepoQuery = useVulnRepoVulnerabilitiesQuery({
     page,
     size: PAGE_SIZE,
     query: query || undefined,
@@ -139,11 +139,11 @@ export function VulnRepoVulnerabilitiesPage() {
     softwareIdentityId: initialSoftwareIdentityId || undefined,
     includeAll: initialIncludeAll || undefined,
   });
-  const items = React.useMemo(() => orgCveQuery.data?.items ?? [], [orgCveQuery.data?.items]);
-  const totalItems = orgCveQuery.data?.totalItems ?? 0;
-  const totalPages = orgCveQuery.data?.totalPages ?? 0;
-  const loading = orgCveQuery.isLoading || orgCveQuery.isFetching;
-  const error = orgCveQuery.error instanceof Error ? orgCveQuery.error.message : '';
+  const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
+  const totalItems = vulnRepoQuery.data?.totalItems ?? 0;
+  const totalPages = vulnRepoQuery.data?.totalPages ?? 0;
+  const loading = vulnRepoQuery.isLoading || vulnRepoQuery.isFetching;
+  const error = vulnRepoQuery.error instanceof Error ? vulnRepoQuery.error.message : '';
   const softwareDetailQuery = useCveDetailQuery(selectedSoftwareRecord?.externalId ?? null);
   const savedSummaryQuery = useSavedInvestigationSummaryQuery(
     drawerMode === 'summary' ? selectedSoftwareRecord?.externalId ?? null : null,
@@ -345,7 +345,7 @@ export function VulnRepoVulnerabilitiesPage() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => void orgCveQuery.refetch()}
+            onClick={() => void vulnRepoQuery.refetch()}
             disabled={loading}
           >
             {loading ? 'Refreshing...' : 'Refresh'}
