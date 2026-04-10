@@ -181,7 +181,6 @@ export function VulnRepoOrgCvePage({
   const summary = orgCveQuery.data?.summary ?? null;
   const items = React.useMemo(() => orgCveQuery.data?.items ?? [], [orgCveQuery.data?.items]);
   const totalPages = orgCveQuery.data?.totalPages ?? 0;
-  const findingGenerationMode = policyQuery.data?.findingGenerationMode ?? 'MANUAL';
   const selectedDetail = detailQuery.data ?? null;
   const detailLoading = detailQuery.isLoading || detailQuery.isFetching;
   const detailError = detailQuery.error instanceof Error ? detailQuery.error.message : null;
@@ -376,7 +375,6 @@ export function VulnRepoOrgCvePage({
         detail={selectedDetail}
         loading={detailLoading}
         error={detailError}
-        findingGenerationMode={findingGenerationMode}
         analystId={actor?.userId ?? undefined}
         onBack={closeDrawer}
         onRefreshDetail={refreshDetail}

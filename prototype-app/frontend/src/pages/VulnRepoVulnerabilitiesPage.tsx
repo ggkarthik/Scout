@@ -256,7 +256,7 @@ export function VulnRepoVulnerabilitiesPage() {
         },
       };
     })
-  ), [items]);
+  ), [items, navigate]);
 
   const applySearch = React.useCallback(() => {
     const parsed = parseCombinedSearchInput(queryInput);
