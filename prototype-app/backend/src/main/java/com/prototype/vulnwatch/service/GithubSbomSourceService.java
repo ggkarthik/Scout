@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.GithubTokenProvider;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.GithubIngestionFrequency;
 import com.prototype.vulnwatch.domain.GithubSbomSource;
@@ -24,6 +25,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 @Service
 public class GithubSbomSourceService {
@@ -39,6 +43,7 @@ public class GithubSbomSourceService {
     private final SyncRunRepository syncRunRepository;
     private final SbomIngestionService sbomIngestionService;
     private final TenantService tenantService;
+    private final GithubTokenProvider githubTokenProvider;
     private final TaskExecutor ingestionExecutor;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
@@ -48,6 +53,7 @@ public class GithubSbomSourceService {
             SyncRunRepository syncRunRepository,
             SbomIngestionService sbomIngestionService,
             TenantService tenantService,
+            GithubTokenProvider githubTokenProvider,
             TaskExecutor ingestionExecutor,
             TransactionTemplate transactionTemplate,
             ObjectMapper objectMapper
@@ -56,6 +62,7 @@ public class GithubSbomSourceService {
         this.syncRunRepository = syncRunRepository;
         this.sbomIngestionService = sbomIngestionService;
         this.tenantService = tenantService;
+        this.githubTokenProvider = githubTokenProvider;
         this.ingestionExecutor = ingestionExecutor;
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
@@ -95,12 +102,14 @@ public class GithubSbomSourceService {
     }
 
     public SyncTriggerResponse trigger(UUID id) {
+        ensureGhcrTokenConfiguredIfNeeded(id);
         ClaimedGithubSourceRun claimed = claimSourceRun(id, false, true);
         ingestionExecutor.execute(() -> executeSource(claimed.sourceId(), claimed.runId()));
         return new SyncTriggerResponse(claimed.runId(), "queued", "GitHub ingestion queued");
     }
 
     public SyncTriggerResponse triggerGhcrRunOnce(String owner) {
+        ensureGhcrTokenConfigured();
         String normalizedOwner = owner == null ? "" : owner.trim();
         if (normalizedOwner.isBlank()) {
             throw new IllegalArgumentException("GitHub owner is required");
@@ -565,6 +574,25 @@ public class GithubSbomSourceService {
             return summary.failureSummary();
         }
         return "Failed " + summary.imagesFailed() + " of " + summary.imagesProcessed() + " images";
+    }
+
+    private void ensureGhcrTokenConfiguredIfNeeded(UUID sourceId) {
+        GithubSbomSource source = githubSbomSourceRepository.findById(sourceId)
+                .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
+        if (isGhcrSourcePath(source.getPath())) {
+            ensureGhcrTokenConfigured();
+        }
+    }
+
+    private void ensureGhcrTokenConfigured() {
+        if (githubTokenProvider.hasToken()) {
+            return;
+        }
+        throw new ResponseStatusException(
+                BAD_REQUEST,
+                "GitHub GHCR discovery requires a GitHub token with at least read:packages access. "
+                        + githubTokenProvider.configurationHint()
+        );
     }
 
     private boolean isSourceInFlight(GithubSbomSource source) {

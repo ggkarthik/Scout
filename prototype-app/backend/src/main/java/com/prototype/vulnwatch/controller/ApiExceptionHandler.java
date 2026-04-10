@@ -10,12 +10,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -75,6 +77,20 @@ public class ApiExceptionHandler {
             log.warn("I/O error while handling API request: {}", message, ex);
         }
         return error("INGESTION_ERROR", ex.getMessage() == null ? "Failed to process ingestion request" : ex.getMessage());
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) {
+            status = HttpStatus.BAD_REQUEST;
+        }
+        String code = status == HttpStatus.NOT_FOUND ? "NOT_FOUND" : "BAD_REQUEST";
+        String message = ex.getReason() == null || ex.getReason().isBlank()
+                ? status.getReasonPhrase()
+                : ex.getReason();
+        log.warn("Response status exception while handling API request: {}", message);
+        return ResponseEntity.status(status).body(error(code, message));
     }
 
     @ExceptionHandler({CannotAcquireLockException.class, PessimisticLockingFailureException.class})

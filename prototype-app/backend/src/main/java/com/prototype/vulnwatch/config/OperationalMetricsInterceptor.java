@@ -50,6 +50,21 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         if ("GET".equalsIgnoreCase(method) && "/api/vulnerability-intelligence/filters".equals(path)) {
             return OperationalMetricsService.KEY_VULN_INTEL_FILTERS;
         }
+        if ("GET".equalsIgnoreCase(method) && "/api/vuln-repo/dashboard".equals(path)) {
+            return OperationalMetricsService.KEY_VULN_REPO_DASHBOARD;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/vuln-repo/vulnerabilities".equals(path)) {
+            return OperationalMetricsService.KEY_VULN_REPO_VULNERABILITIES;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/vuln-repo/org-cves".equals(path)) {
+            return OperationalMetricsService.KEY_VULN_REPO_ORG_CVES;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/vuln-repo/org-cves/status".equals(path)) {
+            return OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_STATUS;
+        }
+        if ("POST".equalsIgnoreCase(method) && "/api/vuln-repo/org-cves/recompute".equals(path)) {
+            return OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_RECOMPUTE;
+        }
         if ("GET".equalsIgnoreCase(method) && "/api/dashboard".equals(path)) {
             return OperationalMetricsService.KEY_DASHBOARD_OVERVIEW;
         }

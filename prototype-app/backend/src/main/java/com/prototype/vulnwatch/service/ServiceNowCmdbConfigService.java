@@ -122,9 +122,14 @@ public class ServiceNowCmdbConfigService {
         validate(runtimeConfig);
 
         Instant testedAt = Instant.now();
-        ProbeResult ciProbe = probeTable(runtimeConfig, runtimeConfig.ciTable(), "sys_id");
-        ProbeResult installProbe = probeTable(runtimeConfig, runtimeConfig.installTable(), "sys_id");
-        ProbeResult discoveryProbe = probeTable(runtimeConfig, runtimeConfig.discoveryModelTable(), "sys_id");
+        ProbeResult ciProbe = probeTable(runtimeConfig, runtimeConfig.ciTable(), null, "sys_id");
+        ProbeResult installProbe = probeTable(runtimeConfig, runtimeConfig.installTable(), runtimeConfig.installQuery(), "sys_id");
+        ProbeResult discoveryProbe = probeTable(
+                runtimeConfig,
+                runtimeConfig.discoveryModelTable(),
+                runtimeConfig.discoveryQuery(),
+                "sys_id"
+        );
         boolean success = ciProbe.success() && installProbe.success() && discoveryProbe.success();
         String message = success
                 ? "ServiceNow CMDB connection succeeded. Required tables are reachable."
@@ -236,13 +241,17 @@ public class ServiceNowCmdbConfigService {
         validate(runtimeConfig);
     }
 
-    private ProbeResult probeTable(ServiceNowRuntimeConfig config, String tableName, String fields) {
+    private ProbeResult probeTable(ServiceNowRuntimeConfig config, String tableName, String query, String fields) {
         try {
+            int probePageSize = Math.max(1, Math.min(25, config.pageSize()));
             String uri = UriComponentsBuilder.fromHttpUrl(config.baseUrl())
                     .path("/api/now/table/{tableName}")
                     .queryParam("sysparm_fields", fields)
-                    .queryParam("sysparm_limit", Math.max(1, Math.min(5, config.pageSize())))
-                    .queryParam("sysparm_display_value", "false")
+                    .queryParam("sysparm_limit", probePageSize)
+                    .queryParam("sysparm_offset", 0)
+                    .queryParam("sysparm_display_value", ServiceNowCmdbSyncService.displayValueModeForTable(config, tableName))
+                    .queryParam("sysparm_exclude_reference_link", "true")
+                    .queryParamIfPresent("sysparm_query", Optional.ofNullable(trimToNull(query)))
                     .buildAndExpand(tableName)
                     .toUriString();
             HttpHeaders headers = buildHeaders(config);
@@ -264,7 +273,11 @@ public class ServiceNowCmdbConfigService {
             if (!response.getStatusCode().is2xxSuccessful()) {
                 return new ProbeResult(false, tableName + " returned HTTP " + response.getStatusCode().value());
             }
-            JsonNode root = objectMapper.readTree(response.getBody() == null ? "{}" : response.getBody());
+            JsonNode root = ServiceNowApiResponseParser.parseJson(
+                    objectMapper,
+                    response,
+                    "ServiceNow table " + tableName
+            );
             if (!root.has("result")) {
                 return new ProbeResult(false, tableName + " did not return a ServiceNow result payload");
             }

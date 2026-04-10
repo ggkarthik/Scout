@@ -44,7 +44,6 @@ import type {
   InventoryComponentPage
 } from '../features/inventory/api-types';
 import type {
-  VulnerabilityIntelDashboardSummary,
   VulnerabilityIntelDetail,
   VulnerabilityIntelFilterValues,
   VulnerabilityIntelPage
@@ -323,13 +322,6 @@ export const api = {
     if (params?.inKev != null) searchParams.set('inKev', String(params.inKev));
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<VulnerabilityIntelPage>(`/vulnerability-intelligence${suffix}`);
-  },
-  getVulnerabilityIntelDashboardSummary: (params?: { minCvssExclusive?: number; criticalLimit?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.minCvssExclusive != null) searchParams.set('minCvssExclusive', String(params.minCvssExclusive));
-    if (params?.criticalLimit != null) searchParams.set('criticalLimit', String(params.criticalLimit));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<VulnerabilityIntelDashboardSummary>(`/vulnerability-intelligence/dashboard-summary${suffix}`);
   },
   listVulnerabilityIntelligenceSources: () => request<string[]>('/vulnerability-intelligence/sources'),
   listVulnerabilityIntelligenceFilters: () => request<VulnerabilityIntelFilterValues>('/vulnerability-intelligence/filters'),
