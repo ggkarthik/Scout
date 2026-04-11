@@ -18,13 +18,17 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.IntConsumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpEntity;
@@ -42,6 +46,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class ServiceNowCmdbSyncService {
 
     public static final String SYNC_TYPE_SERVICENOW_CMDB = "SERVICENOW_CMDB";
+    private static final Logger LOG = LoggerFactory.getLogger(ServiceNowCmdbSyncService.class);
+    private static final int FALLBACK_PAGE_SIZE_MEDIUM = 250;
+    private static final int FALLBACK_PAGE_SIZE_SMALL = 100;
+    private static final int FALLBACK_PAGE_SIZE_MIN = 25;
 
     private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
@@ -293,15 +301,50 @@ public class ServiceNowCmdbSyncService {
             String fields,
             IntConsumer progressCallback
     ) throws Exception {
+        List<Integer> pageSizes = candidatePageSizes(config.pageSize());
+        String displayValueMode = displayValueModeForTable(config, tableName);
+        for (int index = 0; index < pageSizes.size(); index++) {
+            int pageSize = pageSizes.get(index);
+            try {
+                return fetchTableRowsWithPageSize(config, tableName, query, fields, progressCallback, pageSize, displayValueMode);
+            } catch (Exception exception) {
+                boolean hasFallback = index + 1 < pageSizes.size();
+                if (!hasFallback || !shouldRetryWithReducedPageSize(exception)) {
+                    throw exception;
+                }
+                if (progressCallback != null) {
+                    progressCallback.accept(0);
+                }
+                int nextPageSize = pageSizes.get(index + 1);
+                LOG.warn(
+                        "Retrying ServiceNow table {} with reduced page size {} after response parsing failure at page size {}: {}",
+                        tableName,
+                        nextPageSize,
+                        pageSize,
+                        exception.getMessage()
+                );
+            }
+        }
+        throw new IllegalStateException("ServiceNow table fetch retry loop exhausted");
+    }
+
+    private List<Map<String, String>> fetchTableRowsWithPageSize(
+            ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config,
+            String tableName,
+            String query,
+            String fields,
+            IntConsumer progressCallback,
+            int pageSize,
+            String displayValueMode
+    ) throws Exception {
         List<Map<String, String>> rows = new ArrayList<>();
-        int pageSize = config.pageSize() == null ? 1000 : Math.max(1, Math.min(10_000, config.pageSize()));
         int offset = 0;
         while (true) {
             UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(config.baseUrl())
                     .path("/api/now/table/{tableName}")
                     .queryParam("sysparm_limit", pageSize)
                     .queryParam("sysparm_offset", offset)
-                    .queryParam("sysparm_display_value", "all")
+                    .queryParam("sysparm_display_value", displayValueMode)
                     .queryParam("sysparm_exclude_reference_link", "true");
             if (hasText(fields)) {
                 builder.queryParam("sysparm_fields", fields);
@@ -328,7 +371,11 @@ public class ServiceNowCmdbSyncService {
             if (!response.getStatusCode().is2xxSuccessful() || !hasText(response.getBody())) {
                 throw new IllegalStateException("ServiceNow table pull failed for " + tableName + " with HTTP " + response.getStatusCode().value());
             }
-            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode root = ServiceNowApiResponseParser.parseJson(
+                    objectMapper,
+                    response,
+                    "ServiceNow table " + tableName
+            );
             JsonNode result = root.path("result");
             if (!result.isArray()) {
                 throw new IllegalStateException("ServiceNow table " + tableName + " did not return an array result");
@@ -350,6 +397,41 @@ public class ServiceNowCmdbSyncService {
             offset += result.size();
         }
         return rows;
+    }
+
+    static List<Integer> candidatePageSizes(Integer configuredPageSize) {
+        int initial = configuredPageSize == null ? 1000 : Math.max(1, Math.min(10_000, configuredPageSize));
+        Set<Integer> sizes = new LinkedHashSet<>();
+        sizes.add(initial);
+        sizes.add(Math.min(initial, FALLBACK_PAGE_SIZE_MEDIUM));
+        sizes.add(Math.min(initial, FALLBACK_PAGE_SIZE_SMALL));
+        sizes.add(Math.min(initial, FALLBACK_PAGE_SIZE_MIN));
+        return sizes.stream()
+                .filter(size -> size > 0)
+                .toList();
+    }
+
+    static String displayValueModeForTable(
+            ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config,
+            String tableName
+    ) {
+        if (config == null || tableName == null) {
+            return "all";
+        }
+        String normalizedTable = tableName.trim();
+        String installTable = config.installTable() == null ? "" : config.installTable().trim();
+        return normalizedTable.equalsIgnoreCase(installTable) ? "all" : "false";
+    }
+
+    private boolean shouldRetryWithReducedPageSize(Exception exception) {
+        String message = exception.getMessage();
+        if (!hasText(message)) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("returned html instead of json")
+                || normalized.contains("returned invalid json")
+                || normalized.contains("did not return an array result");
     }
 
     private Map<String, Map<String, String>> indexDiscoveryRows(List<Map<String, String>> discoveryRows) {

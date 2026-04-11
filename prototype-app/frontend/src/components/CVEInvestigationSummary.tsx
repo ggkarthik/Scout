@@ -13,15 +13,21 @@ import {
 } from 'docx';
 
 const COLORS = {
-  background: '#0d1b2a',
-  surface: '#162032',
-  accent: '#00e5c8',
-  text: '#e8edf2',
-  muted: '#6b8299',
-  danger: '#ff4d6d',
-  warning: '#f59e0b',
-  success: '#10b981',
-  border: 'rgba(255,255,255,0.08)',
+  background: 'var(--panel-muted)',
+  surface: 'var(--panel-solid)',
+  surfaceMuted: 'color-mix(in srgb, var(--panel-muted) 88%, var(--bg))',
+  accent: 'var(--accent)',
+  accentStrong: 'var(--accent-strong)',
+  text: 'var(--text)',
+  title: 'var(--title)',
+  muted: 'var(--muted)',
+  danger: 'var(--critical)',
+  warning: 'var(--high)',
+  caution: 'var(--medium)',
+  success: 'var(--low)',
+  border: 'var(--border)',
+  borderStrong: 'var(--border-strong)',
+  track: 'var(--track)',
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
@@ -102,7 +108,7 @@ function severityColor(severity: string): string {
   const normalized = severity.toUpperCase();
   if (normalized === 'CRITICAL') return COLORS.danger;
   if (normalized === 'HIGH') return COLORS.warning;
-  if (normalized === 'MEDIUM') return '#facc15';
+  if (normalized === 'MEDIUM') return COLORS.caution;
   return COLORS.success;
 }
 
@@ -110,7 +116,7 @@ function timeframeColor(timeframe: string): string {
   const normalized = timeframe.toLowerCase();
   if (normalized.includes('immediate')) return COLORS.danger;
   if (normalized.includes('short')) return COLORS.warning;
-  if (normalized.includes('medium')) return '#facc15';
+  if (normalized.includes('medium')) return COLORS.caution;
   return COLORS.success;
 }
 
@@ -122,10 +128,18 @@ function formatDateTime(value?: string): string {
 }
 
 function riskMeterGradient(score: number): string {
-  if (score >= 85) return `linear-gradient(90deg, ${COLORS.danger}, #ff7a8f)`;
-  if (score >= 70) return `linear-gradient(90deg, ${COLORS.warning}, #ffd166)`;
-  if (score >= 45) return `linear-gradient(90deg, #facc15, #fde68a)`;
-  return `linear-gradient(90deg, ${COLORS.success}, #6ee7b7)`;
+  if (score >= 85) return `linear-gradient(90deg, ${COLORS.danger}, color-mix(in srgb, ${COLORS.danger} 62%, white))`;
+  if (score >= 70) return `linear-gradient(90deg, ${COLORS.warning}, color-mix(in srgb, ${COLORS.warning} 58%, white))`;
+  if (score >= 45) return `linear-gradient(90deg, ${COLORS.caution}, color-mix(in srgb, ${COLORS.caution} 58%, white))`;
+  return `linear-gradient(90deg, ${COLORS.success}, color-mix(in srgb, ${COLORS.success} 60%, white))`;
+}
+
+function tonedSurface(color: string, strength = 14): string {
+  return `color-mix(in srgb, ${color} ${strength}%, var(--panel-muted))`;
+}
+
+function tonedBorder(color: string, strength = 26): string {
+  return `color-mix(in srgb, ${color} ${strength}%, var(--border))`;
 }
 
 async function generateSummaryRequest(
@@ -277,8 +291,6 @@ export function CVEInvestigationSummary({
     [input.affectedAssets]
   );
 
-  const internalAssetCount = Math.max(0, input.affectedAssets.length - externalAssets.length);
-
   const runGenerate = React.useCallback(async (mode: SummaryMode) => {
     setLoading(true);
     setError(null);
@@ -340,7 +352,7 @@ export function CVEInvestigationSummary({
               style={{
                 height: index === 0 ? 92 : 120,
                 borderRadius: 18,
-                background: `linear-gradient(90deg, ${COLORS.surface}, rgba(0,229,200,0.22), ${COLORS.surface})`,
+                background: `linear-gradient(90deg, ${COLORS.surface}, ${tonedSurface(COLORS.accent, 22)}, ${COLORS.surface})`,
                 backgroundSize: '200% 100%',
                 animation: 'investigationSummaryScan 1.5s linear infinite',
                 border: `1px solid ${COLORS.border}`,
@@ -377,7 +389,7 @@ export function CVEInvestigationSummary({
             margin: 0,
             padding: 16,
             background: COLORS.background,
-            color: COLORS.text,
+            color: COLORS.title,
             borderRadius: 16,
             overflow: 'auto',
             maxHeight: 280,
@@ -397,28 +409,38 @@ export function CVEInvestigationSummary({
             flexWrap: 'wrap',
           }}>
             <div style={{ display: 'grid', gap: 10 }}>
-              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 28, fontWeight: 800, color: COLORS.text }}>
+              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 28, fontWeight: 800, color: COLORS.title }}>
                 {input.summary.cveId}
               </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <span style={pillStyle(severityColor(input.summary.severity), true)}>{input.summary.severity}</span>
-              <span style={pillStyle('#24324a', false)}>CVSS {input.summary.cvssScore ?? '—'}</span>
-              {input.summary.inKev ? <span style={pillStyle(COLORS.warning, false)}>KEV</span> : null}
-              <span style={pillStyle(summaryMode === 'ai' ? COLORS.accent : '#35517a', false)}>
-                {summaryMode === 'ai' ? 'AI Summary' : 'Deterministic Summary'}
-              </span>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <span style={pillStyle(severityColor(input.summary.severity), true)}>{input.summary.severity}</span>
+                <span style={pillStyle(COLORS.text, false, { background: COLORS.background, borderColor: COLORS.border })}>
+                  CVSS {input.summary.cvssScore ?? '—'}
+                </span>
+                {input.summary.inKev ? <span style={pillStyle(COLORS.warning, false)}>KEV</span> : null}
+                <span
+                  style={pillStyle(
+                    summaryMode === 'ai' ? COLORS.accent : COLORS.text,
+                    false,
+                    summaryMode === 'ai'
+                      ? undefined
+                      : { background: COLORS.background, borderColor: COLORS.borderStrong }
+                  )}
+                >
+                  {summaryMode === 'ai' ? 'AI Summary' : 'Deterministic Summary'}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {!readOnly ? (
+                <>
+                  <button type="button" className="btn btn-secondary btn-inline" onClick={() => void runGenerate('deterministic')}>Regenerate</button>
+                  <button type="button" className="btn btn-secondary btn-inline" onClick={() => void runGenerate('ai')}>Generate AI Summary</button>
+                </>
+              ) : null}
+              <button type="button" className="btn btn-primary btn-inline" onClick={() => void exportWordDocument(input, summary)}>Export Word Doc</button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {!readOnly ? (
-              <>
-                <button type="button" className="btn btn-secondary btn-inline" onClick={() => void runGenerate('deterministic')}>Regenerate</button>
-                <button type="button" className="btn btn-secondary btn-inline" onClick={() => void runGenerate('ai')}>Generate AI Summary</button>
-              </>
-            ) : null}
-            <button type="button" className="btn btn-primary btn-inline" onClick={() => void exportWordDocument(input, summary)}>Export Word Doc</button>
-          </div>
-        </div>
 
           <div style={{
             background: COLORS.surface,
@@ -442,10 +464,10 @@ export function CVEInvestigationSummary({
               <div style={sectionTitleStyle}>Impact Analysis</div>
               <div style={{ display: 'grid', gap: 14 }}>
                 <div style={{ fontSize: 14, color: COLORS.muted }}>Risk meter</div>
-                <div style={{ height: 12, borderRadius: 999, background: '#20304b', overflow: 'hidden' }}>
+                <div style={{ height: 12, borderRadius: 999, background: COLORS.track, overflow: 'hidden' }}>
                   <div style={{ width: `${summary.riskAnalysis.score}%`, height: '100%', background: riskMeterGradient(summary.riskAnalysis.score) }} />
                 </div>
-                <div style={{ color: COLORS.text, fontSize: 32, fontWeight: 800 }}>{summary.riskAnalysis.level}</div>
+                <div style={{ color: COLORS.title, fontSize: 32, fontWeight: 800 }}>{summary.riskAnalysis.level}</div>
                 <div style={{ color: COLORS.muted, lineHeight: 1.7 }}>{summary.riskAnalysis.rationale}</div>
               </div>
             </div>
@@ -485,7 +507,9 @@ export function CVEInvestigationSummary({
                         <strong style={{ color: COLORS.text }}>{asset.hostname}</strong>
                         <div style={{ color: COLORS.muted }}>{asset.owner || 'Unassigned'} · {asset.os || 'Unknown OS'}</div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <span style={pillStyle('#23324a', false)}>{asset.environment || 'Unknown environment'}</span>
+                          <span style={pillStyle(COLORS.text, false, { background: COLORS.surfaceMuted, borderColor: COLORS.border })}>
+                            {asset.environment || 'Unknown environment'}
+                          </span>
                           <span style={pillStyle(COLORS.danger, false)}>External Facing</span>
                         </div>
                       </div>
@@ -530,8 +554,8 @@ export function CVEInvestigationSummary({
                   </div>
                   <div style={{ color: COLORS.text }}>{action.detail}</div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={pillStyle('#23324a', false)}>{action.owner}</span>
-                    <span style={pillStyle('#23324a', false)}>{action.type}</span>
+                    <span style={pillStyle(COLORS.text, false, { background: COLORS.surfaceMuted, borderColor: COLORS.border })}>{action.owner}</span>
+                    <span style={pillStyle(COLORS.text, false, { background: COLORS.surfaceMuted, borderColor: COLORS.border })}>{action.type}</span>
                   </div>
                 </div>
               ))}
@@ -574,14 +598,21 @@ export function CVEInvestigationSummary({
   );
 }
 
-function pillStyle(color: string, outline: boolean): React.CSSProperties {
+function pillStyle(
+  color: string,
+  outline: boolean,
+  options?: {
+    background?: string;
+    borderColor?: string;
+  }
+): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
     padding: '6px 12px',
     borderRadius: 999,
-    border: `1px solid ${outline ? color : 'transparent'}`,
-    background: outline ? 'transparent' : 'rgba(255,255,255,0.08)',
+    border: `1px solid ${options?.borderColor ?? (outline ? tonedBorder(color, 42) : tonedBorder(color))}`,
+    background: options?.background ?? (outline ? 'transparent' : tonedSurface(color)),
     color,
     fontWeight: 700,
     fontSize: 13,
@@ -598,7 +629,7 @@ const cardStyle: React.CSSProperties = {
 };
 
 const miniStatStyle: React.CSSProperties = {
-  background: COLORS.surface,
+  background: COLORS.surfaceMuted,
   border: `1px solid ${COLORS.border}`,
   borderRadius: 18,
   padding: 18,
@@ -607,7 +638,7 @@ const miniStatStyle: React.CSSProperties = {
 };
 
 const sectionTitleStyle: React.CSSProperties = {
-  color: COLORS.text,
+  color: COLORS.title,
   fontSize: 14,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',

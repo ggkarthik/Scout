@@ -6,7 +6,9 @@ import {
   type DataTableRow
 } from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
-import { VulnRepoCveAssessmentWorkbench } from '../components/VulnRepoCveAssessmentWorkbench';
+import {
+  VulnRepoCveAssessmentWorkbench,
+} from '../components/VulnRepoCveAssessmentWorkbench';
 import {
   CveDetail,
   OrgCveAutomationStatus,
@@ -22,7 +24,7 @@ import {
 import { useActor } from '../features/auth/context';
 
 const PAGE_SIZE = 25;
-const WORKBENCH_LABEL = 'CVE Assessment Workbench';
+const WORKBENCH_LABEL = 'Vulnerability Investigation';
 const ORG_CVE_COLUMNS: DataTableColumn[] = [
   { id: 'cve', label: 'CVE', header: 'CVE', initialSize: 180 },
   { id: 'title', label: 'Title', header: 'Title', initialSize: 280 },
@@ -179,7 +181,6 @@ export function VulnRepoOrgCvePage({
   const summary = orgCveQuery.data?.summary ?? null;
   const items = React.useMemo(() => orgCveQuery.data?.items ?? [], [orgCveQuery.data?.items]);
   const totalPages = orgCveQuery.data?.totalPages ?? 0;
-  const findingGenerationMode = policyQuery.data?.findingGenerationMode ?? 'MANUAL';
   const selectedDetail = detailQuery.data ?? null;
   const detailLoading = detailQuery.isLoading || detailQuery.isFetching;
   const detailError = detailQuery.error instanceof Error ? detailQuery.error.message : null;
@@ -374,7 +375,6 @@ export function VulnRepoOrgCvePage({
         detail={selectedDetail}
         loading={detailLoading}
         error={detailError}
-        findingGenerationMode={findingGenerationMode}
         analystId={actor?.userId ?? undefined}
         onBack={closeDrawer}
         onRefreshDetail={refreshDetail}
@@ -500,15 +500,15 @@ export function VulnRepoOrgCvePage({
           </div>
         </div>
 
-        {error && <div className="notice error">Failed to load workbench records: {error}</div>}
+        {error && <div className="notice error">Failed to load vulnerability investigation records: {error}</div>}
 
         {loading && items.length === 0 ? (
-          <div className="notice">Loading workbench records...</div>
+          <div className="notice">Loading vulnerability investigation records...</div>
         ) : items.length === 0 ? (
           <div className="empty-state">
             <p>No review-queue CVEs found.</p>
             <p>
-              This workbench only shows CVEs with inventory-correlated applicability or exact VEX-backed impacted and no-patch states. If you have already ingested inventory and vulnerability data, the review queue updates automatically in the background. If filters are active, try clearing them first.
+              This view only shows CVEs with inventory-correlated applicability or exact VEX-backed impacted and no-patch states. If you have already ingested inventory and vulnerability data, the review queue updates automatically in the background. If filters are active, try clearing them first.
             </p>
           </div>
         ) : visibleItems.length === 0 ? (

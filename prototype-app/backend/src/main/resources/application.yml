@@ -29,7 +29,7 @@ spring:
   cache:
     caffeine:
       spec: maximumSize=100,expireAfterWrite=60s
-    cache-names: dashboard,vulnIntelDashboard
+    cache-names: dashboard
   jackson:
     default-property-inclusion: non_null
   servlet:

@@ -12,7 +12,6 @@ import {
   pathForInventoryView,
   pathForOperationsView,
   pathForTab,
-  pathForVulnerabilityIntelView,
   pathForVulnRepoView,
   titleForTab
 } from './app/routes';
@@ -27,12 +26,6 @@ const FindingsPage = React.lazy(async () => ({
 }));
 const OperationalDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/OperationalDashboardPage')).OperationalDashboardPage
-}));
-const VulnerabilityIntelDashboardPage = React.lazy(async () => ({
-  default: (await import('./pages/VulnerabilityIntelDashboardPage')).VulnerabilityIntelDashboardPage
-}));
-const VulnerabilityIntelOrgCvePage = React.lazy(async () => ({
-  default: (await import('./pages/VulnerabilityIntelOrgCvePage')).VulnerabilityIntelOrgCvePage
 }));
 const VulnRepoDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/VulnRepoDashboardPage')).VulnRepoDashboardPage
@@ -78,7 +71,6 @@ const PRIMARY_NAV_TABS: AppTab[] = [
   'dashboard',
   'findings',
   'operations',
-  'vulnerability-intelligence',
   'vuln-repo',
   'inventory',
   'end-of-life'
@@ -115,11 +107,6 @@ const OPERATIONS_NAV_ITEMS = [
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'platform-health', label: 'Platform Health' }
 ] as const;
-const VULNERABILITY_INTEL_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'vulnerabilities', label: 'Vulnerabilities' },
-  { key: 'org-cves', label: 'CVE Assessment Workbench' }
-];
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Vulnerabilities' }
@@ -141,15 +128,6 @@ function TabIcon({ tab }: { tab: AppTab }) {
         <rect x="14" y="3" width="7" height="5" rx="1.5" />
         <rect x="3" y="14" width="7" height="7" rx="1.5" />
         <rect x="14" y="10" width="7" height="11" rx="1.5" />
-      </svg>
-    );
-  }
-  if (tab === 'vulnerability-intelligence') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 7v5l3 2" />
-        <path d="M7.2 16.4c1.3-1.3 3-2.1 4.8-2.1 1.9 0 3.6.8 4.8 2.1" />
       </svg>
     );
   }
@@ -267,36 +245,15 @@ function OperationsRoute() {
   return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} />;
 }
 
-function VulnerabilityIntelDashboardRoute() {
-  const navigate = useNavigate();
-  return (
-    <VulnerabilityIntelDashboardPage
-      onOpenVulnerabilities={() => navigate(pathForVulnerabilityIntelView('vulnerabilities'))}
-    />
-  );
+function LegacyVulnerabilityIntelVulnerabilitiesRoute() {
+  const location = useLocation();
+  return <Navigate to={`${pathForVulnRepoView('vulnerabilities')}${location.search}`} replace />;
 }
 
-function VulnerabilityIntelWorkbenchRoute() {
-  const navigate = useNavigate();
+function LegacyVulnerabilityIntelWorkbenchRoute() {
+  const location = useLocation();
   const params = useParams<{ cveId?: string }>();
-  const hasOpenedDirectRecordRef = React.useRef(false);
-  return (
-    <VulnerabilityIntelOrgCvePage
-      initialCveId={params.cveId}
-      onSelectedCveChange={(cveId) => {
-        if (cveId) {
-          hasOpenedDirectRecordRef.current = true;
-          if (params.cveId !== cveId) {
-            navigate(pathForVulnerabilityIntelView('org-cves', cveId), { replace: true });
-          }
-          return;
-        }
-        if (params.cveId && hasOpenedDirectRecordRef.current) {
-          navigate(pathForVulnerabilityIntelView('org-cves'), { replace: true });
-        }
-      }}
-    />
-  );
+  return <Navigate to={`${pathForVulnRepoView('org-cves', params.cveId)}${location.search}`} replace />;
 }
 
 function VulnRepoDashboardRoute() {
@@ -386,27 +343,17 @@ export default function App() {
   const quickJumpRef = React.useRef<HTMLInputElement>(null);
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
-  const [vulnerabilityIntelFlyoutOpen, setVulnerabilityIntelFlyoutOpen] = React.useState(false);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
-  const vulnerabilityIntelFlyoutTimer = React.useRef<number | null>(null);
 
   const activeTab = activeTabForPath(location.pathname);
   const activeTitle = titleForTab(activeTab);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
-  const vulnerabilityIntelSegment = location.pathname.startsWith('/vulnerability-intelligence')
-    ? pathSegments[1]
-    : null;
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
-  const activeVulnerabilityIntelView = vulnerabilityIntelSegment === 'vulnerabilities'
-    ? 'vulnerabilities'
-    : vulnerabilityIntelSegment === 'org-cves'
-      ? 'org-cves'
-      : 'dashboard';
   const activeVulnRepoView = vulnRepoSegment === 'vulnerabilities'
     ? 'vulnerabilities'
     : vulnRepoSegment === 'org-cves'
@@ -442,9 +389,6 @@ export default function App() {
     }
     if (operationsFlyoutTimer.current != null) {
       window.clearTimeout(operationsFlyoutTimer.current);
-    }
-    if (vulnerabilityIntelFlyoutTimer.current != null) {
-      window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
     }
   }, []);
 
@@ -484,24 +428,6 @@ export default function App() {
     }, 180);
   };
 
-  const openVulnerabilityIntelFlyout = (): void => {
-    if (vulnerabilityIntelFlyoutTimer.current != null) {
-      window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
-      vulnerabilityIntelFlyoutTimer.current = null;
-    }
-    setVulnerabilityIntelFlyoutOpen(true);
-  };
-
-  const closeVulnerabilityIntelFlyoutWithDelay = (): void => {
-    if (vulnerabilityIntelFlyoutTimer.current != null) {
-      window.clearTimeout(vulnerabilityIntelFlyoutTimer.current);
-    }
-    vulnerabilityIntelFlyoutTimer.current = window.setTimeout(() => {
-      setVulnerabilityIntelFlyoutOpen(false);
-      vulnerabilityIntelFlyoutTimer.current = null;
-    }, 180);
-  };
-
   const navigateToTab = (tab: AppTab): void => {
     navigate(pathForTab(tab));
     if (tab !== 'inventory') {
@@ -509,9 +435,6 @@ export default function App() {
     }
     if (tab !== 'operations') {
       setOperationsFlyoutOpen(false);
-    }
-    if (tab !== 'vulnerability-intelligence') {
-      setVulnerabilityIntelFlyoutOpen(false);
     }
   };
 
@@ -587,57 +510,6 @@ export default function App() {
                               onClick={() => {
                                 navigate(pathForOperationsView(item.key));
                                 setOperationsFlyoutOpen(false);
-                              }}
-                            >
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              if (tab === 'vulnerability-intelligence') {
-                return (
-                  <div
-                    key={tab}
-                    className="vuln-intel-nav-wrap"
-                    onMouseEnter={openVulnerabilityIntelFlyout}
-                    onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
-                  >
-                    <button
-                      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
-                      onClick={() => {
-                        navigate(pathForVulnerabilityIntelView(activeVulnerabilityIntelView));
-                        setVulnerabilityIntelFlyoutOpen((open) => !open);
-                      }}
-                    >
-                      <span className="nav-icon">
-                        <TabIcon tab="vulnerability-intelligence" />
-                      </span>
-                      <span className="nav-label">Vuln Intel</span>
-                    </button>
-
-                    {vulnerabilityIntelFlyoutOpen && (
-                      <div
-                        className="vuln-intel-flyout"
-                        onMouseEnter={openVulnerabilityIntelFlyout}
-                        onMouseLeave={closeVulnerabilityIntelFlyoutWithDelay}
-                      >
-                        <div className="vuln-intel-flyout-header">
-                          <span>Vulnerability Intel</span>
-                          <span aria-hidden="true">→</span>
-                        </div>
-                        <div className="vuln-intel-flyout-items">
-                          {VULNERABILITY_INTEL_NAV_ITEMS.map((item) => (
-                            <button
-                              key={item.key}
-                              type="button"
-                              className={activeVulnerabilityIntelView === item.key ? 'vuln-intel-flyout-item active' : 'vuln-intel-flyout-item'}
-                              onClick={() => {
-                                navigate(pathForVulnerabilityIntelView(item.key));
-                                setVulnerabilityIntelFlyoutOpen(false);
                               }}
                             >
                               <span>{item.label}</span>
@@ -781,9 +653,9 @@ export default function App() {
               <Route path="/" element={<DashboardRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
-              <Route path="/vulnerability-intelligence" element={<VulnerabilityIntelDashboardRoute />} />
-              <Route path="/vulnerability-intelligence/vulnerabilities" element={<InventoryPage selectedView="vulnerability-intelligence" />} />
-              <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<VulnerabilityIntelWorkbenchRoute />} />
+              <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+              <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+              <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
               <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
               <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
               <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />

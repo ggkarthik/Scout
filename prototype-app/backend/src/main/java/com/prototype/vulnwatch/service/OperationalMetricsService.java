@@ -14,6 +14,11 @@ public class OperationalMetricsService {
 
     public static final String KEY_VULN_INTEL_LIST = "vulnerability-intelligence-list";
     public static final String KEY_VULN_INTEL_FILTERS = "vulnerability-intelligence-filters";
+    public static final String KEY_VULN_REPO_DASHBOARD = "vuln-repo-dashboard";
+    public static final String KEY_VULN_REPO_VULNERABILITIES = "vuln-repo-vulnerabilities";
+    public static final String KEY_VULN_REPO_ORG_CVES = "vuln-repo-org-cves";
+    public static final String KEY_VULN_REPO_ORG_CVE_STATUS = "vuln-repo-org-cves-status";
+    public static final String KEY_VULN_REPO_ORG_CVE_RECOMPUTE = "vuln-repo-org-cves-recompute";
     public static final String KEY_DASHBOARD_OVERVIEW = "dashboard-overview";
     public static final String KEY_OPERATIONS_DASHBOARD = "operations-dashboard";
     public static final String KEY_OPERATIONS_OVERVIEW = "operations-overview";

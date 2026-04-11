@@ -4,7 +4,6 @@ export type AppTab =
   | 'dashboard'
   | 'findings'
   | 'operations'
-  | 'vulnerability-intelligence'
   | 'vuln-repo'
   | 'inventory'
   | 'end-of-life'
@@ -17,7 +16,6 @@ export type ConnectRouteView = 'sources' | 'inventory-run-queue' | 'vuln-intel-q
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'sbom';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
-export const VULNERABILITY_INTELLIGENCE_DEFAULT_VIEW: VulnerabilityIntelRouteView = 'dashboard';
 export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
 
 const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
@@ -118,8 +116,6 @@ export function pathForTab(tab: AppTab): string {
       return '/findings';
     case 'operations':
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
-    case 'vulnerability-intelligence':
-      return '/vulnerability-intelligence';
     case 'vuln-repo':
       return '/vuln-repo';
     case 'inventory':
@@ -139,16 +135,6 @@ export function pathForInventoryView(view: InventoryViewKey): string {
 
 export function pathForOperationsView(view: OperationsRouteView): string {
   return `/operations/${normalizeOperationsRouteView(view)}`;
-}
-
-export function pathForVulnerabilityIntelView(view: VulnerabilityIntelRouteView, cveId?: string | null): string {
-  if (view === 'dashboard') {
-    return '/vulnerability-intelligence';
-  }
-  if (view === 'vulnerabilities') {
-    return '/vulnerability-intelligence/vulnerabilities';
-  }
-  return cveId ? `/vulnerability-intelligence/org-cves/${encodeURIComponent(cveId)}` : '/vulnerability-intelligence/org-cves';
 }
 
 export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: string | null): string {
@@ -195,7 +181,7 @@ export function pathForConnectView(view: ConnectRouteView): string {
 export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';
-  if (pathname.startsWith('/vulnerability-intelligence')) return 'vulnerability-intelligence';
+  if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
   if (pathname.startsWith('/vuln-repo')) return 'vuln-repo';
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
@@ -212,8 +198,6 @@ export function titleForTab(tab: AppTab): string {
       return 'Findings';
     case 'operations':
       return 'Operational Dashboard';
-    case 'vulnerability-intelligence':
-      return 'Vulnerability Intelligence';
     case 'vuln-repo':
       return 'Vulnerability Repository';
     case 'inventory':
@@ -251,8 +235,8 @@ export function buildLegacyCompatiblePath(search: string): string | null {
       ? 'vulnerabilities'
       : vulnIntelView === 'org-cves'
         ? 'org-cves'
-        : 'dashboard';
-    nextPath = pathForVulnerabilityIntelView(normalizedView, cveId);
+        : 'vulnerabilities';
+    nextPath = pathForVulnRepoView(normalizedView, cveId);
   } else if (tab === 'vuln-repo') {
     const normalizedView = vulnRepoView === 'vulnerabilities'
       ? 'vulnerabilities'

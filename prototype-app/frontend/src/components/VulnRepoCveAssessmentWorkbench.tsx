@@ -16,8 +16,6 @@ import {
   deriveAssessmentResult,
   exactMatchMeta,
   explainApplicability,
-  explainImpact,
-  hasPersistedVexEvidence,
   impactBadgeClass,
   impactLabel,
   initialApplicabilityDecision,
@@ -47,11 +45,8 @@ import {
 } from '../features/cve-workbench/types';
 import {
   InvestigationPriority,
-  InvestigationStatus,
 } from '../features/cve-workbench/workflow';
 import type { Finding } from '../features/findings/types';
-import type { VendorIntelligence } from '../features/cve-workbench/types';
-import type { RiskPolicy } from '../features/configurations/types';
 import type { SoftwareIdentityAsset } from '../features/software-identities/types';
 
 type WorkflowStep = 1 | 2 | 3;
@@ -123,7 +118,6 @@ type Props = {
   detail: CveDetail | null;
   loading: boolean;
   error: string | null;
-  findingGenerationMode: RiskPolicy['findingGenerationMode'];
   analystId?: string;
   onBack: () => void;
   onRefreshDetail: () => Promise<void>;
@@ -221,26 +215,6 @@ function HeroMetric({
       <div className="cve-hero-metric-label">{label}</div>
       {sublabel && <div className="cve-hero-metric-sublabel">{sublabel}</div>}
     </div>
-  );
-}
-
-function ActionTile({
-  title,
-  subtitle,
-  tone,
-  onClick
-}: {
-  title: string;
-  subtitle: string;
-  tone: 'investigation' | 'applicability' | 'finding' | 'notify' | 'insight';
-  onClick?: () => void;
-}) {
-  return (
-    <button type="button" className={`cve-action-tile ${tone}`} onClick={onClick} disabled={!onClick}>
-      <div className="cve-action-tile-icon" aria-hidden="true" />
-      <div className="cve-action-tile-title">{title}</div>
-      <div className="cve-action-tile-subtitle">{subtitle}</div>
-    </button>
   );
 }
 
@@ -1154,6 +1128,305 @@ function InvestigationCanvas({
     onRunTask(taskId);
   }
 
+  const triggerSummary = React.useCallback(() => {
+    setSummaryVisible(true);
+    onRunTask('generate-summary');
+  }, [onRunTask]);
+
+  const closeCanvas = React.useCallback(() => {
+    flushRunbookState();
+    onClose();
+  }, [flushRunbookState, onClose]);
+
+  function renderRunbookActions(task: RunbookTask): React.ReactNode {
+    if (task.id === 'review-asset-inventory' && assetAssessmentRan) {
+      return (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => setAssetResultsExpanded((current) => !current)}
+          >
+            {assetResultsExpanded ? 'Hide Results' : 'View Results'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => {
+              setAssetResultsExpanded(true);
+              onOpenAssetList();
+            }}
+          >
+            View All
+          </button>
+        </>
+      );
+    }
+    if (isEolTask(task.id) && (eolAssessed || task.state === 'DONE')) {
+      return (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => {
+              if (!eolExpanded) {
+                showEolResults();
+                return;
+              }
+              setEolExpanded(false);
+            }}
+          >
+            {eolExpanded ? 'Hide Results' : 'View Results'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={runEolAnalysis}
+          >
+            Run Again
+          </button>
+        </>
+      );
+    }
+    if (task.id === 'find-false-positive' && falsePositiveRan) {
+      return (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => setFalsePositiveResultsExpanded((current) => !current)}
+          >
+            {falsePositiveResultsExpanded ? 'Hide Results' : 'View Results'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={runFalsePositiveAssessment}
+          >
+            Run Again
+          </button>
+        </>
+      );
+    }
+    if (task.state === 'DONE') {
+      return <button type="button" className="btn btn-secondary btn-inline" disabled>Done</button>;
+    }
+    return (
+      <button type="button" className="btn btn-secondary btn-inline" onClick={() => handleRunbookAction(task.id)}>
+        Run
+      </button>
+    );
+  }
+
+  const assessmentPanel = (
+    <div className="investigation-assessment-panel">
+      <div className="investigation-assessment-header">
+        <div>
+          <h5>Assessment Criteria</h5>
+          <div className="panel-caption">
+            Start with the software already matched to this CVE, then add extra vendor or version criteria if needed.
+          </div>
+        </div>
+        <button type="button" className="btn btn-secondary btn-inline" onClick={addAssetCriterion}>Add Software</button>
+      </div>
+      <div className="investigation-assessment-criteria-list">
+        {assetCriteria.map((criterion) => (
+          <div key={criterion.id} className="investigation-assessment-criteria-row">
+            <span className={`investigation-criteria-badge${criterion.matched ? ' matched' : ''}`}>
+              {criterion.matched ? 'Matched' : 'Added'}
+            </span>
+            <input
+              type="text"
+              value={criterion.software}
+              onChange={(event) => updateAssetCriterion(criterion.id, 'software', event.target.value)}
+              placeholder="Software"
+            />
+            <input
+              type="text"
+              value={criterion.version}
+              onChange={(event) => updateAssetCriterion(criterion.id, 'version', event.target.value)}
+              placeholder="Version"
+            />
+            <input
+              type="text"
+              value={criterion.vendor}
+              onChange={(event) => updateAssetCriterion(criterion.id, 'vendor', event.target.value)}
+              placeholder="Vendor"
+            />
+            <button type="button" className="btn btn-secondary btn-inline" onClick={() => removeAssetCriterion(criterion.id)}>
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="investigation-assessment-actions">
+        <button type="button" className="btn btn-primary" onClick={runAssetInventoryAssessment}>
+          Run Assessment
+        </button>
+        {assetAssessmentRan && (
+          <div className="investigation-assessment-total">
+            <strong>{assetResults.length}</strong>
+            <span>Total assets matched</span>
+          </div>
+        )}
+      </div>
+
+      {assetAssessmentRan && (
+        <div className="investigation-asset-preview">
+          <div className="investigation-asset-summary-grid">
+            <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList({ scope: 'external-facing' })}>
+              <span>External Facing Assets</span>
+              <strong>{externalFacingCount}</strong>
+            </button>
+            <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList()}>
+              <span>Total Assets</span>
+              <strong>{totalAssetCount}</strong>
+            </button>
+            <div className="investigation-summary-card investigation-summary-card-wheel">
+              <span>Assets by OS</span>
+              <div className="investigation-os-wheel">
+                <div className="investigation-os-wheel-chart" style={{ backgroundImage: osWheelStops }} />
+                <div className="investigation-os-wheel-legend">
+                  {osBreakdown.map((entry) => (
+                    <button key={entry.label} type="button" className="btn-link investigation-summary-link" onClick={() => onOpenAssetList({ os: entry.label })}>
+                      {entry.label} {entry.count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList({ scope: 'critical' })}>
+              <span>Critical Assets</span>
+              <strong>{criticalAssetCount}</strong>
+            </button>
+          </div>
+          <div className="investigation-software-bar-panel">
+            <div className="investigation-software-bar-header">
+              <h5>Assets Matched by Software</h5>
+            </div>
+            <div className="investigation-software-bars">
+              {softwareBreakdown.map((entry) => {
+                const pct = totalAssetCount > 0 ? Math.max(12, Math.round((entry.count / totalAssetCount) * 100)) : 0;
+                return (
+                  <div key={entry.label} className="investigation-software-bar-row">
+                    <span>{entry.label}</span>
+                    <button type="button" className="btn-link investigation-summary-link" onClick={() => onOpenAssetList({ software: entry.label })}>
+                      {entry.count}
+                    </button>
+                    <div className="investigation-software-bar-track">
+                      <div className="investigation-software-bar-fill" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const falsePositiveDetails = falsePositiveRan && falsePositiveResultsExpanded ? (
+    falsePositiveResults.length === 0 ? (
+      <div className="panel-caption">No matched software is available for false-positive validation.</div>
+    ) : (
+      <div className="investigation-false-positive-table-wrap">
+        <table className="investigation-false-positive-table">
+          <thead>
+            <tr>
+              <th>Software</th>
+              <th>Version</th>
+              <th>False Positive</th>
+              <th>Assets Not Impacted</th>
+              <th>Vendor Guidance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {falsePositiveResults.map((row) => (
+              <tr key={row.id}>
+                <td><strong>{row.software}</strong></td>
+                <td className="mono">{row.version}</td>
+                <td>
+                  <strong className={row.falsePositive ? 'false-positive-yes' : 'false-positive-no'}>{row.statusLabel}</strong>
+                  <div className="panel-caption">{row.statusDetail}</div>
+                </td>
+                <td>
+                  <strong>{row.notImpactedAssetCount}</strong>
+                </td>
+                <td>{row.vendorGuidance}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  ) : null;
+
+  const eolDetails = eolAssessed ? (
+    <div className="investigation-eol-table-wrap">
+      <table className="investigation-eol-table">
+        <thead>
+          <tr>
+            <th>Software</th>
+            <th>Vendor</th>
+            <th>Version</th>
+            <th>Lifecycle</th>
+            <th>End of Support</th>
+            <th>End of Life</th>
+            <th>Recommended Upgrade</th>
+          </tr>
+        </thead>
+        <tbody>
+          {eolResults.map((row) => (
+            <tr key={row.id}>
+              <td><strong>{row.software}</strong></td>
+              <td>{row.vendor}</td>
+              <td className="mono">{row.version}</td>
+              <td>{row.lifecycle}</td>
+              <td>{row.endOfSupport}</td>
+              <td>{row.endOfLife}</td>
+              <td>{row.recommendedUpgrade}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : null;
+
+  const logPanel = (
+    <section className="investigation-log-panel">
+      <h4>Investigation Log</h4>
+      <div className="investigation-log-list">
+        {logEntries.map((entry) => (
+          <div key={entry.id} className={`investigation-log-entry ${entry.type.toLowerCase()}`}>
+            <div className="investigation-log-message">{entry.message}</div>
+            <div className="investigation-log-meta">
+              <span>{entry.actor}</span>
+              <span>{formatTimestamp(entry.at)}</span>
+              <span>{entry.type === 'ACTION' ? 'Action Taken' : entry.type === 'IOC' ? 'IOC Found' : 'Note'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="investigation-log-composer">
+        <div className="investigation-log-type-row">
+          <button type="button" className={`investigation-log-type-btn${newLogType === 'NOTE' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('NOTE')}>Note</button>
+          <button type="button" className={`investigation-log-type-btn${newLogType === 'ACTION' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('ACTION')}>Action Taken</button>
+          <button type="button" className={`investigation-log-type-btn${newLogType === 'IOC' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('IOC')}>IOC Found</button>
+        </div>
+        <div className="investigation-log-input-row">
+          <input
+            type="text"
+            value={newLogMessage}
+            onChange={(event) => onNewLogMessageChange(event.target.value)}
+            placeholder={newLogType === 'IOC' ? 'Enter IOC: IP, domain, hash, URL...' : 'Add investigation note...'}
+          />
+          <button type="button" className="btn btn-primary" onClick={onAddLogEntry}>+</button>
+        </div>
+      </div>
+    </section>
+  );
+
   if (!isOpen) {
     return null;
   }
@@ -1171,17 +1444,16 @@ function InvestigationCanvas({
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className="modal-close-btn"
-            onClick={() => {
-              flushRunbookState();
-              onClose();
-            }}
-            aria-label="Close investigation canvas"
-          >
-            ×
-          </button>
+          <div className="investigation-canvas-header-actions">
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={closeCanvas}
+              aria-label="Close investigation canvas"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="investigation-canvas-body">
@@ -1209,343 +1481,76 @@ function InvestigationCanvas({
                       </div>
                     </div>
                     <div className="investigation-runbook-actions">
-                      {task.id === 'review-asset-inventory' && assetAssessmentRan ? (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => setAssetResultsExpanded((current) => !current)}
-                          >
-                            {assetResultsExpanded ? 'Hide Results' : 'View Results'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => {
-                              setAssetResultsExpanded(true);
-                              onOpenAssetList();
-                            }}
-                          >
-                            View All
-                          </button>
-                        </>
-                      ) : isEolTask(task.id) && (eolAssessed || task.state === 'DONE') ? (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => {
-                              if (!eolExpanded) {
-                                showEolResults();
-                                return;
-                              }
-                              setEolExpanded(false);
-                            }}
-                          >
-                            {eolExpanded ? 'Hide Results' : 'View Results'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={runEolAnalysis}
-                          >
-                            Run Again
-                          </button>
-                        </>
-                      ) : task.id === 'find-false-positive' && falsePositiveRan ? (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => setFalsePositiveResultsExpanded((current) => !current)}
-                          >
-                            {falsePositiveResultsExpanded ? 'Hide Results' : 'View Results'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={runFalsePositiveAssessment}
-                          >
-                            Run Again
-                          </button>
-                        </>
-                      ) : task.state === 'DONE' ? (
-                        <button type="button" className="btn btn-secondary btn-inline" disabled>Done</button>
-                      ) : (
-                        <button type="button" className="btn btn-secondary btn-inline" onClick={() => handleRunbookAction(task.id)}>Run</button>
-                      )}
+                      {renderRunbookActions(task)}
                     </div>
                   </div>
-                {task.id === 'review-asset-inventory' && (assetResultsExpanded || !assetAssessmentRan) && reviewTask && (
-                  <div className="investigation-assessment-panel">
-                    <div className="investigation-assessment-header">
-                      <div>
-                        <h5>Assessment Criteria</h5>
-                        <div className="panel-caption">
-                          Start with the software already matched to this CVE, then add extra vendor or version criteria if needed.
-                        </div>
-                      </div>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={addAssetCriterion}>Add Software</button>
-                    </div>
-                    <div className="investigation-assessment-criteria-list">
-                      {assetCriteria.map((criterion) => (
-                        <div key={criterion.id} className="investigation-assessment-criteria-row">
-                          <span className={`investigation-criteria-badge${criterion.matched ? ' matched' : ''}`}>
-                            {criterion.matched ? 'Matched' : 'Added'}
-                          </span>
-                          <input
-                            type="text"
-                            value={criterion.software}
-                            onChange={(event) => updateAssetCriterion(criterion.id, 'software', event.target.value)}
-                            placeholder="Software"
-                          />
-                          <input
-                            type="text"
-                            value={criterion.version}
-                            onChange={(event) => updateAssetCriterion(criterion.id, 'version', event.target.value)}
-                            placeholder="Version"
-                          />
-                          <input
-                            type="text"
-                            value={criterion.vendor}
-                            onChange={(event) => updateAssetCriterion(criterion.id, 'vendor', event.target.value)}
-                            placeholder="Vendor"
-                          />
-                          <button type="button" className="btn btn-secondary btn-inline" onClick={() => removeAssetCriterion(criterion.id)}>
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="investigation-assessment-actions">
-                      <button type="button" className="btn btn-primary" onClick={runAssetInventoryAssessment}>
-                        Run Assessment
-                      </button>
-                      {assetAssessmentRan && (
-                        <div className="investigation-assessment-total">
-                          <strong>{assetResults.length}</strong>
-                          <span>Total assets matched</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {assetAssessmentRan && (
-                      <div className="investigation-asset-preview">
-                        <div className="investigation-asset-summary-grid">
-                          <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList({ scope: 'external-facing' })}>
-                            <span>External Facing Assets</span>
-                            <strong>{externalFacingCount}</strong>
-                          </button>
-                          <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList()}>
-                            <span>Total Assets</span>
-                            <strong>{totalAssetCount}</strong>
-                          </button>
-                          <div className="investigation-summary-card investigation-summary-card-wheel">
-                            <span>Assets by OS</span>
-                            <div className="investigation-os-wheel">
-                              <div className="investigation-os-wheel-chart" style={{ backgroundImage: osWheelStops }} />
-                              <div className="investigation-os-wheel-legend">
-                                {osBreakdown.map((entry) => (
-                                  <button key={entry.label} type="button" className="btn-link investigation-summary-link" onClick={() => onOpenAssetList({ os: entry.label })}>
-                                    {entry.label} {entry.count}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                          <button type="button" className="investigation-summary-card" onClick={() => onOpenAssetList({ scope: 'critical' })}>
-                            <span>Critical Assets</span>
-                            <strong>{criticalAssetCount}</strong>
-                          </button>
-                        </div>
-                        <div className="investigation-software-bar-panel">
-                          <div className="investigation-software-bar-header">
-                            <h5>Assets Matched by Software</h5>
-                          </div>
-                          <div className="investigation-software-bars">
-                            {softwareBreakdown.map((entry) => {
-                              const pct = totalAssetCount > 0 ? Math.max(12, Math.round((entry.count / totalAssetCount) * 100)) : 0;
-                              return (
-                                <div key={entry.label} className="investigation-software-bar-row">
-                                  <span>{entry.label}</span>
-                                  <button type="button" className="btn-link investigation-summary-link" onClick={() => onOpenAssetList({ software: entry.label })}>
-                                    {entry.count}
-                                  </button>
-                                  <div className="investigation-software-bar-track">
-                                    <div className="investigation-software-bar-fill" style={{ width: `${pct}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
+                  {task.id === 'review-asset-inventory' && (assetResultsExpanded || !assetAssessmentRan) && reviewTask && assessmentPanel}
+                  {task.id === 'find-false-positive' && falsePositiveRan && falsePositiveResultsExpanded && (
+                    <div className="investigation-false-positive-panel">
+                      <div className="investigation-false-positive-header">
+                        <div>
+                          <h5>False Positive Report</h5>
+                          <div className="panel-caption">
+                            {falsePositiveResults.length} unique software entr{falsePositiveResults.length === 1 ? 'y was' : 'ies were'} checked against vendor VEX and advisory guidance for this CVE.
                           </div>
                         </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-inline"
+                          onClick={() => setFalsePositiveResultsExpanded(false)}
+                        >
+                          Hide
+                        </button>
                       </div>
-                    )}
-                  </div>
-                )}
-                {task.id === 'find-false-positive' && falsePositiveRan && falsePositiveResultsExpanded && (
-                  <div className="investigation-false-positive-panel">
-                    <div className="investigation-false-positive-header">
-                      <div>
-                        <h5>False Positive Report</h5>
-                        <div className="panel-caption">
-                          {falsePositiveResults.length} unique software entr{falsePositiveResults.length === 1 ? 'y was' : 'ies were'} checked against vendor VEX and advisory guidance for this CVE.
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-inline"
-                        onClick={() => setFalsePositiveResultsExpanded(false)}
-                      >
-                        Hide
-                      </button>
+                      {falsePositiveDetails}
                     </div>
-                    {falsePositiveResults.length === 0 ? (
-                      <div className="panel-caption">No matched software is available for false-positive validation.</div>
-                    ) : (
-                      <div className="investigation-false-positive-table-wrap">
-                        <table className="investigation-false-positive-table">
-                          <thead>
-                            <tr>
-                              <th>Software</th>
-                              <th>Version</th>
-                              <th>False Positive</th>
-                              <th>Assets Not Impacted</th>
-                              <th>Vendor Guidance</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {falsePositiveResults.map((row) => (
-                              <tr key={row.id}>
-                                <td><strong>{row.software}</strong></td>
-                                <td className="mono">{row.version}</td>
-                                <td>
-                                  <strong className={row.falsePositive ? 'false-positive-yes' : 'false-positive-no'}>{row.statusLabel}</strong>
-                                  <div className="panel-caption">{row.statusDetail}</div>
-                                </td>
-                                <td>
-                                  <strong>{row.notImpactedAssetCount}</strong>
-                                </td>
-                                <td>{row.vendorGuidance}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {isEolTask(task.id) && eolExpanded && (
-                  <div className="investigation-eol-panel">
-                    <div className="investigation-eol-header">
-                      <div>
-                        <h5>End-of-Life Analysis</h5>
-                        <div className="panel-caption">
-                          Review the applicable software already identified in asset exposure, then assess it against lifecycle inventory.
+                  )}
+                  {isEolTask(task.id) && eolExpanded && (
+                    <div className="investigation-eol-panel">
+                      <div className="investigation-eol-header">
+                        <div>
+                          <h5>End-of-Life Analysis</h5>
+                          <div className="panel-caption">
+                            Review the applicable software already identified in asset exposure, then assess it against lifecycle inventory.
+                          </div>
                         </div>
+                        <button type="button" className="btn btn-primary" onClick={assessEolAnalysis}>
+                          Assess
+                        </button>
                       </div>
-                      <button type="button" className="btn btn-primary" onClick={assessEolAnalysis}>
-                        Assess
-                      </button>
-                    </div>
-                    <div className="investigation-eol-criteria-list">
-                      {eolCriteria.map((criterion) => (
-                        <div key={criterion.id} className="investigation-eol-criteria-row">
-                          <strong>{criterion.software}</strong>
-                          <span className="mono">{criterion.version || '—'}</span>
-                          <span>{criterion.vendor || 'Inventory'}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {eolAssessed && (
-                      <div className="investigation-eol-table-wrap">
-                        <table className="investigation-eol-table">
-                          <thead>
-                            <tr>
-                              <th>Software</th>
-                              <th>Vendor</th>
-                              <th>Version</th>
-                              <th>Lifecycle</th>
-                              <th>End of Support</th>
-                              <th>End of Life</th>
-                              <th>Recommended Upgrade</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {eolResults.map((row) => (
-                              <tr key={row.id}>
-                                <td><strong>{row.software}</strong></td>
-                                <td>{row.vendor}</td>
-                                <td className="mono">{row.version}</td>
-                                <td>{row.lifecycle}</td>
-                                <td>{row.endOfSupport}</td>
-                                <td>{row.endOfLife}</td>
-                                <td>{row.recommendedUpgrade}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      <div className="investigation-eol-criteria-list">
+                        {eolCriteria.map((criterion) => (
+                          <div key={criterion.id} className="investigation-eol-criteria-row">
+                            <strong>{criterion.software}</strong>
+                            <span className="mono">{criterion.version || '—'}</span>
+                            <span>{criterion.vendor || 'Inventory'}</span>
+                          </div>
+                        ))}
                       </div>
-                    )}
-                  </div>
-                )}
-              </React.Fragment>
+                      {eolDetails}
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
             </div>
             <button
               type="button"
               className="investigation-summary-btn"
-              onClick={() => {
-                setSummaryVisible(true);
-                onRunTask('generate-summary');
-              }}
+              onClick={triggerSummary}
             >
               Generate Investigation Summary ({completedCount}/{runbookTasks.length} actions run)
             </button>
             <CVEInvestigationSummary visible={summaryVisible} input={summaryInput} />
           </section>
 
-          <section className="investigation-log-panel">
-            <h4>Investigation Log</h4>
-            <div className="investigation-log-list">
-              {logEntries.map((entry) => (
-                <div key={entry.id} className={`investigation-log-entry ${entry.type.toLowerCase()}`}>
-                  <div className="investigation-log-message">{entry.message}</div>
-                  <div className="investigation-log-meta">
-                    <span>{entry.actor}</span>
-                    <span>{formatTimestamp(entry.at)}</span>
-                    <span>{entry.type === 'ACTION' ? 'Action' : entry.type === 'IOC' ? 'IOC Found' : 'Note'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="investigation-log-composer">
-              <div className="investigation-log-type-row">
-                <button type="button" className={`investigation-log-type-btn${newLogType === 'NOTE' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('NOTE')}>Note</button>
-                <button type="button" className={`investigation-log-type-btn${newLogType === 'ACTION' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('ACTION')}>Action Taken</button>
-                <button type="button" className={`investigation-log-type-btn${newLogType === 'IOC' ? ' active' : ''}`} onClick={() => onNewLogTypeChange('IOC')}>IOC Found</button>
-              </div>
-              <div className="investigation-log-input-row">
-                <input
-                  type="text"
-                  value={newLogMessage}
-                  onChange={(event) => onNewLogMessageChange(event.target.value)}
-                  placeholder={newLogType === 'IOC' ? 'Enter IOC: IP, domain, hash, URL...' : 'Add investigation note...'}
-                />
-                <button type="button" className="btn btn-primary" onClick={onAddLogEntry}>+</button>
-              </div>
-            </div>
-          </section>
+          {logPanel}
         </div>
 
         <div className="investigation-canvas-footer">
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => {
-              flushRunbookState();
-              onClose();
-            }}
+            onClick={closeCanvas}
           >
             Close
           </button>
@@ -1602,6 +1607,7 @@ function CveOverviewExperience({
   const statusLabel = assessmentStatusLabel(item, latestAssessment);
   const statusTone = assessmentStatusTone(item, latestAssessment);
   const topStatusLabel = item.impacted ? 'Affected' : statusLabel;
+  const currentLeadAnalyst = leadAnalyst || latestInvestigation?.assignedTo || analystId || 'Unassigned analyst';
   const referenceLinks = buildReferenceLinks(detail);
   const remediationText = detail.signals.patchAvailable
     ? `Apply the vendor-fixed version${detail.signals.patchVersions ? ` (${detail.signals.patchVersions})` : ''} and validate the mitigation on impacted assets.`
@@ -1634,37 +1640,6 @@ function CveOverviewExperience({
             <span className="cve-overview-badge">{detail.summary.cweIds || 'No CWE'}</span>
             <span className="cve-overview-badge">{detail.signals.patchAvailable ? 'Patch Available' : 'Patch Pending'}</span>
           </div>
-          <div className="cve-overview-footer-row">
-            <span className={`cve-overview-footer-pill ${detail.signals.exploitAvailable ? 'exploit' : 'neutral'}`}>
-              {detail.signals.exploitAvailable ? 'Public Exploit' : 'No Public Exploit'}
-            </span>
-            <span className={`cve-overview-footer-pill ${detail.signals.patchAvailable ? 'resolved' : 'neutral'}`}>
-              {detail.signals.patchAvailable ? 'Patch Available' : 'Patch Unavailable'}
-            </span>
-            <button
-              type="button"
-              className="btn-link cve-overview-footer-meta cve-overview-footer-link"
-              onClick={onOpenAffectedEntities}
-            >
-              {detail.signals.assetCount} affected entities
-            </button>
-            <button
-              type="button"
-              className="btn-link cve-overview-footer-meta cve-overview-footer-link"
-              onClick={onOpenImpactedSoftware}
-            >
-              {detail.signals.softwareCount} impacted software
-            </button>
-            <span className="cve-overview-footer-meta">{leadAnalyst || latestInvestigation?.assignedTo || analystId || 'Unassigned analyst'}</span>
-          </div>
-          <div className="cve-overview-lead-analyst">
-            <label htmlFor="cve-lead-analyst">Lead Analyst</label>
-            <select id="cve-lead-analyst" value={leadAnalyst} onChange={(event) => onLeadAnalystChange(event.target.value)}>
-              {[leadAnalyst, 'Alex Martinez', 'Sarah Chen', 'Ravi Kumar'].filter((value, index, values) => values.indexOf(value) === index).map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
         </div>
         <div className="cve-overview-hero-metrics">
           <HeroMetric
@@ -1681,14 +1656,90 @@ function CveOverviewExperience({
         </div>
       </section>
 
-      <section className="panel cve-action-strip-card">
-        <div className="cve-section-kicker">Actions</div>
-        <div className="cve-action-strip-grid">
-          <ActionTile title="Investigation" subtitle="Investigate & analyse" tone="investigation" onClick={() => onStepChange(1)} />
-          <ActionTile title="Applicability" subtitle={formatLabel(item.applicability)} tone="applicability" onClick={() => onStepChange(2)} />
-          <ActionTile title="Create Finding" subtitle="Add to backlog" tone="finding" onClick={() => onStepChange(3)} />
-          <ActionTile title="Notify Groups" subtitle="Send advisory" tone="notify" />
-          <ActionTile title="AI Insights" subtitle="Get recommendations" tone="insight" />
+      <section className="panel cve-overview-meta-card">
+        <div className="cve-overview-meta-grid">
+          <div className="cve-overview-meta-group">
+            <div className="cve-overview-meta-label">Exposure context</div>
+            <div className="cve-overview-meta-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-inline"
+                onClick={onOpenAffectedEntities}
+              >
+                {detail.signals.assetCount} affected entities
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-inline"
+                onClick={onOpenImpactedSoftware}
+              >
+                {detail.signals.softwareCount} impacted software
+              </button>
+            </div>
+          </div>
+
+          <div className="cve-overview-meta-group">
+            <div className="cve-overview-meta-label">Current signals</div>
+            <div className="cve-overview-meta-pills">
+              <span className={`cve-overview-footer-pill ${detail.signals.exploitAvailable ? 'exploit' : 'neutral'}`}>
+                {detail.signals.exploitAvailable ? 'Public Exploit' : 'No Public Exploit'}
+              </span>
+              <span className={`cve-overview-footer-pill ${detail.signals.patchAvailable ? 'resolved' : 'neutral'}`}>
+                {detail.signals.patchAvailable ? 'Patch Available' : 'Patch Unavailable'}
+              </span>
+              <span className="cve-overview-footer-meta">{currentLeadAnalyst}</span>
+            </div>
+          </div>
+
+          <div className="cve-overview-lead-analyst cve-overview-lead-analyst--inline">
+            <label htmlFor="cve-lead-analyst">Lead Analyst</label>
+            <select id="cve-lead-analyst" value={leadAnalyst} onChange={(event) => onLeadAnalystChange(event.target.value)}>
+              {[leadAnalyst, 'Alex Martinez', 'Sarah Chen', 'Ravi Kumar'].filter((value, index, values) => values.indexOf(value) === index).map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel cve-overview-workflow-card">
+        <div className="panel-header">
+          <div className="cve-overview-section-copy">
+            <h3>Workflow</h3>
+            <div className="panel-caption">Move from investigation to assessment and finding creation.</div>
+          </div>
+          <div className="cve-overview-utility-actions" aria-label="Secondary workflow actions">
+            <span className="cve-overview-utility-label">Secondary actions</span>
+            <div className="cve-overview-utility-pills">
+              <span className="cve-overview-utility-pill">Mark Deferred</span>
+              <span className="cve-overview-utility-pill">Export Evidence</span>
+              <span className="cve-overview-utility-pill">Notify Groups</span>
+              <span className="cve-overview-utility-pill">AI Insights</span>
+            </div>
+          </div>
+        </div>
+        <div className="org-cve-action-strip cve-overview-workflow-strip">
+          <button type="button" className="org-cve-action-card cve-overview-workflow-step active" onClick={() => onStepChange(1)}>
+            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--investigation" aria-hidden="true" />
+            <span className="org-cve-action-copy">
+              <strong>Investigation</strong>
+              <span>Open the runbook and gather evidence.</span>
+            </span>
+          </button>
+          <button type="button" className="org-cve-action-card cve-overview-workflow-step" onClick={() => onStepChange(2)}>
+            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--applicability" aria-hidden="true" />
+            <span className="org-cve-action-copy">
+              <strong>Applicability</strong>
+              <span>{formatLabel(item.applicability)}</span>
+            </span>
+          </button>
+          <button type="button" className="org-cve-action-card cve-overview-workflow-step" onClick={() => onStepChange(3)}>
+            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--finding" aria-hidden="true" />
+            <span className="org-cve-action-copy">
+              <strong>Create Finding</strong>
+              <span>Add impacted assets to the backlog.</span>
+            </span>
+          </button>
         </div>
       </section>
 
@@ -1815,448 +1866,6 @@ function CveOverviewExperience({
         </section>
       </section>
     </div>
-  );
-}
-
-// --- CVE Summary Sidebar (step 1) ---
-
-type SidebarProps = {
-  item: OrgSpecificCveExposureRecord;
-  detail: CveDetail;
-  cvssFields: Record<string, string>;
-  softwareGroups: SoftwareGroup[];
-};
-
-function CveSummarySidebar({ item, detail, cvssFields, softwareGroups }: SidebarProps) {
-  // Deduplicate affected products and enrich with version ranges from vendor intelligence
-  const affectedProductMap = new Map<string, { ecosystem?: string; versions: string[] }>();
-  for (const vi of (detail.vendorIntelligence ?? [])) {
-    if (!vi.packageName) continue;
-    const key = vi.packageName;
-    const existing = affectedProductMap.get(key);
-    if (existing) {
-      if (vi.affectedVersions && !existing.versions.includes(vi.affectedVersions)) {
-        existing.versions.push(vi.affectedVersions);
-      }
-    } else {
-      affectedProductMap.set(key, {
-        ecosystem: vi.ecosystem ?? undefined,
-        versions: vi.affectedVersions ? [vi.affectedVersions] : [],
-      });
-    }
-  }
-  // Fall back to matched software names if no vendor intelligence
-  if (affectedProductMap.size === 0) {
-    for (const g of softwareGroups.slice(0, 5)) {
-      const key = g.software.packageName;
-      if (!affectedProductMap.has(key)) {
-        affectedProductMap.set(key, { ecosystem: g.software.ecosystem ?? undefined, versions: [] });
-      }
-    }
-  }
-
-  // Unique CPEs from vendor intelligence
-  const cpes = [...new Set((detail.vendorIntelligence ?? []).map((vi) => vi.cpe).filter(Boolean))] as string[];
-
-  const epssScore = detail.summary.epssScore ?? null;
-  const epssUpdatedAt = detail.summary.epssUpdatedAt ?? null;
-  const cweIds = detail.summary.cweIds;
-
-  return (
-    <aside className="cve-summary-sidebar">
-
-      {/* Header: ID + severity + score */}
-      <div className="cve-sidebar-header">
-        <h4>CVE Summary</h4>
-        <div className="cve-sidebar-scores">
-          {epssScore != null && (
-            <span
-              className={`cve-score-chip ${epssScore >= 0.5 ? 'cve-score-chip-warn' : ''}`}
-              title={epssUpdatedAt
-                ? `Probability of exploitation in the next 30 days — score refreshed ${new Date(epssUpdatedAt).toLocaleDateString()}`
-                : 'Probability of exploitation in the next 30 days'}
-            >
-              EPSS {(epssScore * 100).toFixed(1)}%
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* KEV warning — exploitability signal only, not an applicability determination */}
-      {item.inKev && (
-        <div className="cve-kev-banner">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14">
-            <path d="M12 3L2 21h20L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-            <path d="M12 9v5M12 17h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          In CISA KEV — actively exploited in the wild. Prioritize review; applicability must still be verified against your inventory.
-        </div>
-      )}
-
-      {/* Description */}
-      <div>
-        <h5>Description</h5>
-        <p className="cve-summary-description">
-          {detail.summary.description || detail.summary.title || 'No description available.'}
-        </p>
-      </div>
-
-      {/* CWE */}
-      {cweIds && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>Weakness (CWE)</h5>
-            <p className="cve-summary-cwe">{cweIds}</p>
-          </div>
-        </>
-      )}
-
-      {/* Dates */}
-      {(detail.summary.publishedAt || detail.summary.modifiedAt) && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div className="cve-summary-meta-grid">
-            {detail.summary.publishedAt && (
-              <div className="cve-summary-meta-item">
-                <label>Published</label>
-                <span>{formatDate(detail.summary.publishedAt)}</span>
-              </div>
-            )}
-            {detail.summary.modifiedAt && (
-              <div className="cve-summary-meta-item">
-                <label>Updated</label>
-                <span>{formatDate(detail.summary.modifiedAt)}</span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* CVSS breakdown — only when vector present */}
-      {(cvssFields['AV'] || cvssFields['PR'] || cvssFields['UI']) && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>CVSS Details</h5>
-            {cvssFields['AV'] && (
-              <div className="cve-cvss-row">
-                <span>Attack Vector</span>
-                <span>{AV_LABELS[cvssFields['AV']] ?? cvssFields['AV']}</span>
-              </div>
-            )}
-            {cvssFields['PR'] && (
-              <div className="cve-cvss-row">
-                <span>Privileges Required</span>
-                <span>{PR_LABELS[cvssFields['PR']] ?? cvssFields['PR']}</span>
-              </div>
-            )}
-            {cvssFields['UI'] && (
-              <div className="cve-cvss-row">
-                <span>User Interaction</span>
-                <span>{UI_LABELS[cvssFields['UI']] ?? cvssFields['UI']}</span>
-              </div>
-            )}
-            {detail.summary.cvssVector && (
-              <div className="cve-cvss-row cve-cvss-vector-row">
-                <span>Vector</span>
-                <span className="mono cve-cvss-vector-val" title={detail.summary.cvssVector}>
-                  {detail.summary.cvssVector}
-                </span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Affected Products */}
-      {affectedProductMap.size > 0 && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>Affected Products</h5>
-            <ul className="cve-affected-products">
-              {Array.from(affectedProductMap.entries()).map(([name, { ecosystem, versions }]) => (
-                <li key={name} className="cve-affected-product-item">
-                  <div className="cve-affected-product-name">
-                    {ecosystem && <span className="cve-ecosystem-tag">{ecosystem}</span>}
-                    <strong>{name}</strong>
-                  </div>
-                  {versions.length > 0 && (
-                    <div className="cve-affected-product-range mono">{versions.join(', ')}</div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </>
-      )}
-
-      {/* CPE Identifiers */}
-      {cpes.length > 0 && (
-        <>
-          <hr className="cve-summary-divider" />
-          <div>
-            <h5>CPE Identifiers</h5>
-            <div className="cve-cpe-list">
-              {cpes.map((cpe) => (
-                <div key={cpe} className="cve-cpe-entry" title={cpe}>{cpe}</div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Sources */}
-      <hr className="cve-summary-divider" />
-      <div>
-        <h5>Sources</h5>
-        <div className="cve-source-badges">
-          {detail.summary.source && (
-            detail.summary.sourceUrl
-              ? <a href={detail.summary.sourceUrl} target="_blank" rel="noreferrer" className="cve-source-badge cve-source-badge-link">{detail.summary.source}</a>
-              : <span className="cve-source-badge">{detail.summary.source}</span>
-          )}
-          {item.inKev && <span className="cve-source-badge kev">KEV</span>}
-          {hasPersistedVexEvidence(detail) && <span className="cve-source-badge csaf">VEX</span>}
-          {detail.summary.cvssVector && <span className="cve-source-badge">CVSS</span>}
-        </div>
-      </div>
-
-    </aside>
-  );
-}
-
-// --- Investigation Content (step 1) ---
-
-type VendorRow = {
-  source: string;
-  statement: string;
-  statementClass: string;
-  affectedVersions: string;
-  fixedVersion: string;
-  ecosystem?: string;
-  packageName?: string;
-  cpe?: string;
-  vexStatus?: string;
-};
-
-type InvestigationContentProps = {
-  item: OrgSpecificCveExposureRecord;
-  detail: CveDetail;
-  softwareGroups: SoftwareGroup[];
-  vendorRows: VendorRow[];
-  overallConfidence: { label: string; cls: string; pct: number };
-  investigationNotes: string;
-  autoNote: string;
-  onNotesChange: (v: string) => void;
-};
-
-function InvestigationContent({
-  item, detail, softwareGroups, vendorRows, overallConfidence, investigationNotes, autoNote, onNotesChange,
-}: InvestigationContentProps) {
-  const [expandedRows, setExpandedRows] = React.useState<Set<string>>(new Set());
-
-  function toggleRow(key: string): void {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
-  return (
-    <>
-      <div className="cve-stat-cards">
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Matching Software</div>
-          <div className="cve-stat-card-value">{softwareGroups.length}</div>
-          <div className="cve-stat-card-sub">{softwareGroups.length > 0 ? 'Correlated to inventory' : 'None detected'}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Candidate Assets</div>
-          <div className="cve-stat-card-value">{detail.signals.assetCount}</div>
-          <div className="cve-stat-card-sub">{detail.signals.assetCount > 0 ? 'Assets with matched software' : 'None impacted'}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Open Findings</div>
-          <div className="cve-stat-card-value">{item.openFindings}</div>
-          <div className="cve-stat-card-sub">{formatLabel(item.impactState)}</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">Confidence</div>
-          <div className={`cve-stat-card-value cve-stat-card-value-composite ${overallConfidence.cls}`}>
-            <span className="cve-confidence-main">{overallConfidence.label}</span>
-            {overallConfidence.pct > 0 && <span className="cve-confidence-pct">{overallConfidence.pct}%</span>}
-          </div>
-          <div className="cve-stat-card-sub">Match confidence</div>
-        </div>
-        <div className="cve-stat-card">
-          <div className="cve-stat-card-label">CVSS Score</div>
-          <div className={`cve-stat-card-value cve-cvss-score-value cve-cvss-score-${item.severity.toLowerCase()}`}>
-            {detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : item.cvssScore != null ? item.cvssScore.toFixed(1) : 'N/A'}
-          </div>
-          <div className="cve-stat-card-sub">{formatLabel(item.severity)} severity</div>
-        </div>
-      </div>
-
-      <div className="cve-intel-section">
-        <div className="cve-intel-section-header">
-          <h4>Matched Software</h4>
-          <p>Software identified in your environment that may be affected</p>
-        </div>
-        {softwareGroups.length === 0 ? (
-          <div className="cve-intel-empty">No software inventory is currently correlated to this CVE.</div>
-        ) : (
-          <table className="cve-intel-table">
-            <thead>
-              <tr>
-                <th>Software</th>
-                <th>Version</th>
-                <th>Assets</th>
-                <th>Match Basis</th>
-                <th>Confidence</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {softwareGroups.map(({ software, assets }) => {
-                const conf = confidenceFromApplicability(software.applicabilityState);
-                const groupKey = software.version ? `${software.packageName}@${software.version}` : software.packageName;
-                const isExpanded = expandedRows.has(groupKey);
-                return (
-                  <React.Fragment key={groupKey}>
-                    <tr>
-                      <td>
-                        <div className="cve-sw-name-cell">
-                          {software.ecosystem && (
-                            <span className="cve-ecosystem-tag">{software.ecosystem}</span>
-                          )}
-                          <strong>{software.packageName}</strong>
-                        </div>
-                      </td>
-                      <td className="mono">{software.version}</td>
-                      <td>{assets.length}</td>
-                      <td>{matchBasisLabel(software.matchedBy)}</td>
-                      <td><span className={`cve-confidence-badge ${conf}`}>{formatLabel(conf)}</span></td>
-                      <td>
-                        <button
-                          type="button"
-                          className={`cve-view-assets-btn${isExpanded ? ' active' : ''}`}
-                          onClick={() => toggleRow(groupKey)}
-                          aria-expanded={isExpanded}
-                        >
-                          {isExpanded ? 'Hide Assets ›' : `View Assets (${assets.length}) ›`}
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr className="cve-assets-expansion-row">
-                        <td colSpan={6}>
-                          <div className="cve-assets-expansion">
-                            <table className="cve-assets-mini-table">
-                              <thead>
-                                <tr>
-                                  <th>Asset</th>
-                                  <th>Identifier</th>
-                                  <th>Finding</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {assets.map((asset) => (
-                                  <tr key={asset.componentId}>
-                                    <td>{asset.assetName ?? <span className="cve-muted">—</span>}</td>
-                                    <td className="mono">{asset.assetIdentifier ?? <span className="cve-muted">—</span>}</td>
-                                    <td>
-                                      {asset.eligibleForFinding
-                                        ? <span className="cve-finding-eligible-tag">Finding eligible</span>
-                                        : <span className="cve-muted">—</span>}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="cve-intel-section">
-        <div className="cve-intel-section-header">
-          <h4>Vendor Intelligence</h4>
-          <p>Official statements and patch information</p>
-        </div>
-        {vendorRows.length === 0 ? (
-          <div className="cve-intel-empty">No vendor intelligence data available.</div>
-        ) : (
-          <table className="cve-intel-table">
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Statement</th>
-                <th>Package</th>
-                <th>Affected Versions</th>
-                <th>Fixed In</th>
-                <th>CPE</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vendorRows.map((row, i) => (
-                <tr key={`${row.source}-${i}`}>
-                  <td><strong>{row.source}</strong></td>
-                  <td><span className={`cve-statement-badge ${row.statementClass}`}>{row.statement}</span></td>
-                  <td className="mono">
-                    {row.packageName
-                      ? <>{row.ecosystem ? <span className="cve-ecosystem-tag">{row.ecosystem}</span> : null}{row.packageName}</>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                  <td className="mono">{row.affectedVersions}</td>
-                  <td className="mono">
-                    {row.fixedVersion && row.fixedVersion !== '—'
-                      ? <span className="cve-patch-version">{row.fixedVersion}</span>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                  <td className="mono">
-                    {row.cpe
-                      ? <span className="cve-cpe-cell" title={row.cpe}>{row.cpe.length > 40 ? row.cpe.substring(0, 40) + '…' : row.cpe}</span>
-                      : <span className="cve-muted">—</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="cve-notes-section">
-        <div className="cve-notes-header"><h4>Investigation Notes</h4></div>
-        <div className="cve-notes-body">
-          {autoNote && (
-            <div className="cve-notes-auto-banner">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              <span>{autoNote}</span>
-            </div>
-          )}
-          <textarea
-            className="cve-notes-textarea"
-            value={investigationNotes}
-            onChange={(e) => onNotesChange(e.target.value)}
-            placeholder="Add analyst notes..."
-            rows={4}
-          />
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -2671,7 +2280,6 @@ function DecisionSummary({
 
 type FindingsContentProps = {
   filteredSoftware: FindingDisplayRow[];
-  cveId: string;
   selectedIds: Set<string>;
   showFilter: 'ALL' | 'IMPACTED_ONLY';
   searchQuery: string;
@@ -2684,12 +2292,12 @@ type FindingsContentProps = {
   onShowFilterChange: (v: 'ALL' | 'IMPACTED_ONLY') => void;
   onSearchQueryChange: (v: string) => void;
   onAssetTypeFilterChange: (v: string) => void;
-  onOpenCreateModal: () => void;
+  onOpenCreatePanel: () => void;
 };
 
 function FindingsContent({
-  filteredSoftware, cveId, selectedIds, showFilter, searchQuery, assetTypeFilter, severity, findingIdsByComponentId,
-  onToggleRow, onSelectAll, onClearAll, onShowFilterChange, onSearchQueryChange, onAssetTypeFilterChange, onOpenCreateModal,
+  filteredSoftware, selectedIds, showFilter, searchQuery, assetTypeFilter, severity, findingIdsByComponentId,
+  onToggleRow, onSelectAll, onClearAll, onShowFilterChange, onSearchQueryChange, onAssetTypeFilterChange, onOpenCreatePanel,
 }: FindingsContentProps) {
   const selectableRows = filteredSoftware.filter((row) => row.selectable);
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.software.componentId));
@@ -2741,8 +2349,8 @@ function FindingsContent({
         <div className="cve-findings-filter-links">
           <button type="button" className="cve-findings-link-btn" onClick={onSelectAll}>Select All</button>
           <button type="button" className="cve-findings-link-btn secondary" onClick={onClearAll}>Clear Selection</button>
-          <button type="button" className="btn btn-primary" onClick={onOpenCreateModal} disabled={selectedIds.size === 0}>
-            Create Findings
+          <button type="button" className="btn btn-primary" onClick={onOpenCreatePanel} disabled={selectedIds.size === 0}>
+            Review Configuration
           </button>
         </div>
       </div>
@@ -2768,7 +2376,7 @@ function FindingsContent({
       <div className="cve-findings-asset-section">
         <div className="cve-findings-asset-section-header">
           <h4>Select Impacted Assets for Finding Creation</h4>
-          <p className="panel-caption">Create findings for all impacted assets, or filter and select specific assets before opening the finding configuration popup.</p>
+          <p className="panel-caption">Create findings for all impacted assets, or filter and select specific assets before opening the finding configuration panel.</p>
         </div>
 
         <table className="cve-findings-asset-table">
@@ -2865,8 +2473,7 @@ function FindingsContent({
   );
 }
 
-type FindingConfigModalProps = {
-  isOpen: boolean;
+type FindingConfigPanelProps = {
   filteredSoftware: FindingDisplayRow[];
   selectedIds: Set<string>;
   findingTitle: string;
@@ -2890,8 +2497,7 @@ type FindingConfigModalProps = {
   onConfirm: () => void;
 };
 
-function FindingConfigModal({
-  isOpen,
+function FindingConfigPanel({
   filteredSoftware,
   selectedIds,
   findingTitle,
@@ -2913,8 +2519,7 @@ function FindingConfigModal({
   onTagsInputChange,
   onFindingNotesChange,
   onConfirm,
-}: FindingConfigModalProps) {
-  if (!isOpen) return null;
+}: FindingConfigPanelProps) {
   const selectedSoftware = filteredSoftware
     .map((row) => row.software)
     .filter((software) => selectedIds.has(software.componentId));
@@ -2928,150 +2533,156 @@ function FindingConfigModal({
     .filter((entry) => entry.length > 0);
 
   return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
-      <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="finding-config-title" onClick={(event) => event.stopPropagation()}>
-        <div className="cve-findings-modal-header">
-          <div>
-            <h3 id="finding-config-title">Create Findings</h3>
-            <p className="panel-caption">Configure due date, tags, and assignment logic before creating findings for the selected impacted assets.</p>
-          </div>
-          <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close finding configuration">
-            ×
-          </button>
+    <aside className="panel cve-findings-config-panel" role="region" aria-labelledby="finding-config-title">
+      <div className="cve-findings-modal-header">
+        <div>
+          <h3 id="finding-config-title">Finding Configuration</h3>
+          <p className="panel-caption">Configure due date, tags, and assignment logic for the selected impacted assets without leaving the current findings workspace.</p>
         </div>
+        <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close finding configuration">
+          ×
+        </button>
+      </div>
 
-        <div className="cve-findings-modal-grid">
-          <div className="cve-findings-modal-main">
+      <div className="cve-findings-modal-grid">
+        <div className="cve-findings-modal-main">
+          <div className="cve-form-field">
+            <label htmlFor="finding-title">Finding Title</label>
+            <input id="finding-title" type="text" value={findingTitle} onChange={(e) => onFindingTitleChange(e.target.value)} />
+          </div>
+
+          <div className="cve-findings-modal-row">
             <div className="cve-form-field">
-              <label htmlFor="finding-title">Finding Title</label>
-              <input id="finding-title" type="text" value={findingTitle} onChange={(e) => onFindingTitleChange(e.target.value)} />
-            </div>
-
-            <div className="cve-findings-modal-row">
-              <div className="cve-form-field">
-                <label htmlFor="finding-priority">Priority</label>
-                <select id="finding-priority" value={findingPriority} onChange={(e) => onFindingPriorityChange(e.target.value)}>
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                </select>
-              </div>
-              <div className="cve-form-field">
-                <label htmlFor="finding-due-date">Due Date</label>
-                <input id="finding-due-date" type="date" value={dueDate} onChange={(e) => onDueDateChange(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="cve-form-field">
-              <label htmlFor="finding-tags">Tags</label>
-              <input
-                id="finding-tags"
-                type="text"
-                value={tagsInput}
-                onChange={(e) => onTagsInputChange(e.target.value)}
-                placeholder="e.g. internet-facing, zero-day, patching"
-              />
-              {tags.length > 0 && (
-                <div className="cve-findings-tag-list">
-                  {tags.map((tag) => (
-                    <span key={tag} className="cve-findings-tag-chip">{tag}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="cve-form-field">
-              <label htmlFor="finding-ownership">Assignment / Ownership Logic</label>
-              <select id="finding-ownership" value={ownershipMode} onChange={(e) => onOwnershipModeChange(e.target.value as 'LEAD_ANALYST' | 'ASSIGNMENT_GROUP' | 'AUTO')}>
-                <option value="LEAD_ANALYST">Assign to lead analyst</option>
-                <option value="ASSIGNMENT_GROUP">Route to assignment group</option>
-                <option value="AUTO">Auto assign by ownership logic</option>
+              <label htmlFor="finding-priority">Priority</label>
+              <select id="finding-priority" value={findingPriority} onChange={(e) => onFindingPriorityChange(e.target.value)}>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
               </select>
             </div>
-
             <div className="cve-form-field">
-              <label htmlFor="assignment-group">Assignment Group</label>
-              <input
-                id="assignment-group"
-                type="text"
-                value={assignmentGroup}
-                onChange={(e) => onAssignmentGroupChange(e.target.value)}
-                placeholder="e.g. IT Infrastructure"
-              />
-            </div>
-
-            <div className="cve-form-field">
-              <label>Ticket Target</label>
-              <div className="cve-findings-ticket-target">
-                <button
-                  type="button"
-                  className={`cve-findings-ticket-btn ${ticketTarget === 'SERVICENOW' ? 'selected' : ''}`}
-                  onClick={() => onTicketTargetChange('SERVICENOW')}
-                >
-                  ServiceNow
-                </button>
-                <button
-                  type="button"
-                  className={`cve-findings-ticket-btn ${ticketTarget === 'JIRA' ? 'selected' : ''}`}
-                  onClick={() => onTicketTargetChange('JIRA')}
-                >
-                  Jira
-                </button>
-              </div>
-            </div>
-
-            <div className="cve-form-field">
-              <label htmlFor="finding-notes">Notes</label>
-              <textarea
-                id="finding-notes"
-                rows={5}
-                value={findingNotes}
-                onChange={(e) => onFindingNotesChange(e.target.value)}
-                placeholder="Describe the remediation approach or ticket creation context..."
-              />
+              <label htmlFor="finding-due-date">Due Date</label>
+              <input id="finding-due-date" type="date" value={dueDate} onChange={(e) => onDueDateChange(e.target.value)} />
             </div>
           </div>
 
-          <aside className="cve-findings-modal-summary">
-            <div className="cve-decision-summary-card">
-              <h4>Creation Scope</h4>
-              <div className="cve-decision-summary-row">
-                <span className="panel-caption">Selected Assets</span>
-                <span>{selectedAssetCount}</span>
+          <div className="cve-form-field">
+            <label htmlFor="finding-tags">Tags</label>
+            <input
+              id="finding-tags"
+              type="text"
+              value={tagsInput}
+              onChange={(e) => onTagsInputChange(e.target.value)}
+              placeholder="e.g. internet-facing, zero-day, patching"
+            />
+            {tags.length > 0 && (
+              <div className="cve-findings-tag-list">
+                {tags.map((tag) => (
+                  <span key={tag} className="cve-findings-tag-chip">{tag}</span>
+                ))}
               </div>
-              <div className="cve-decision-summary-row">
-                <span className="panel-caption">Selected Rows</span>
-                <span>{selectedSoftware.length}</span>
-              </div>
-              <div className="cve-decision-summary-row">
-                <span className="panel-caption">Software Families</span>
-                <span>{selectedSoftwareCount}</span>
-              </div>
-              <div className="cve-decision-summary-row">
-                <span className="panel-caption">Ownership Logic</span>
-                <span>{formatLabel(ownershipMode)}</span>
-              </div>
+            )}
+          </div>
+
+          <div className="cve-form-field">
+            <label htmlFor="finding-ownership">Assignment / Ownership Logic</label>
+            <select id="finding-ownership" value={ownershipMode} onChange={(e) => onOwnershipModeChange(e.target.value as 'LEAD_ANALYST' | 'ASSIGNMENT_GROUP' | 'AUTO')}>
+              <option value="LEAD_ANALYST">Assign to lead analyst</option>
+              <option value="ASSIGNMENT_GROUP">Route to assignment group</option>
+              <option value="AUTO">Auto assign by ownership logic</option>
+            </select>
+          </div>
+
+          <div className="cve-form-field">
+            <label htmlFor="assignment-group">Assignment Group</label>
+            <input
+              id="assignment-group"
+              type="text"
+              value={assignmentGroup}
+              onChange={(e) => onAssignmentGroupChange(e.target.value)}
+              placeholder="e.g. IT Infrastructure"
+            />
+          </div>
+
+          <div className="cve-form-field">
+            <label>Ticket Target</label>
+            <div className="cve-findings-ticket-target">
+              <button
+                type="button"
+                className={`cve-findings-ticket-btn ${ticketTarget === 'SERVICENOW' ? 'selected' : ''}`}
+                onClick={() => onTicketTargetChange('SERVICENOW')}
+              >
+                ServiceNow
+              </button>
+              <button
+                type="button"
+                className={`cve-findings-ticket-btn ${ticketTarget === 'JIRA' ? 'selected' : ''}`}
+                onClick={() => onTicketTargetChange('JIRA')}
+              >
+                Jira
+              </button>
             </div>
-          </aside>
+          </div>
+
+          <div className="cve-form-field">
+            <label htmlFor="finding-notes">Notes</label>
+            <textarea
+              id="finding-notes"
+              rows={5}
+              value={findingNotes}
+              onChange={(e) => onFindingNotesChange(e.target.value)}
+              placeholder="Describe the remediation approach or ticket creation context..."
+            />
+          </div>
         </div>
 
-        <div className="cve-findings-modal-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={findingBusy || selectedIds.size === 0}>
-            {findingBusy ? 'Creating...' : `Create Findings (${selectedIds.size})`}
-          </button>
-        </div>
+        <aside className="cve-findings-modal-summary">
+          <div className="cve-decision-summary-card">
+            <h4>Creation Scope</h4>
+            <div className="cve-decision-summary-row">
+              <span className="panel-caption">Selected Assets</span>
+              <span>{selectedAssetCount}</span>
+            </div>
+            <div className="cve-decision-summary-row">
+              <span className="panel-caption">Selected Rows</span>
+              <span>{selectedSoftware.length}</span>
+            </div>
+            <div className="cve-decision-summary-row">
+              <span className="panel-caption">Software Families</span>
+              <span>{selectedSoftwareCount}</span>
+            </div>
+            <div className="cve-decision-summary-row">
+              <span className="panel-caption">Ownership Logic</span>
+              <span>{formatLabel(ownershipMode)}</span>
+            </div>
+          </div>
+        </aside>
       </div>
-    </div>
+
+      <div className="cve-findings-modal-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>
+          Close
+        </button>
+        <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={findingBusy || selectedIds.size === 0}>
+          {findingBusy ? 'Creating...' : `Create Findings (${selectedIds.size})`}
+        </button>
+      </div>
+    </aside>
   );
 }
 
 // --- Main Component ---
 
-export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, findingGenerationMode, analystId, onBack, onRefreshDetail }: Props) {
+export function VulnRepoCveAssessmentWorkbench({
+  item,
+  detail,
+  loading,
+  error,
+  analystId,
+  onBack,
+  onRefreshDetail
+}: Props) {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = React.useState<WorkflowStep>(1);
   const [investigationCanvasOpen, setInvestigationCanvasOpen] = React.useState(false);
@@ -3082,8 +2693,7 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
   const latestAssessment = React.useMemo(() => latestByDate(detail?.assessments ?? []), [detail]);
 
   // Investigation state
-  const [investigationId, setInvestigationId] = React.useState<number | null>(null);
-  const investigationStatus: InvestigationStatus = 'IN_PROGRESS';
+  const [, setInvestigationId] = React.useState<number | null>(null);
   const investigationPriority: InvestigationPriority = 'MEDIUM';
   const [investigationNotes, setInvestigationNotes] = React.useState('');
   const [investigationBusy, setInvestigationBusy] = React.useState(false);
@@ -3094,7 +2704,7 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
   const [newInvestigationLogMessage, setNewInvestigationLogMessage] = React.useState('');
 
   // Applicability state
-  const [assessmentId, setAssessmentId] = React.useState<number | null>(null);
+  const [, setAssessmentId] = React.useState<number | null>(null);
   const [applicabilityDecisions, setApplicabilityDecisions] = React.useState<Map<string, ApplicabilityDecision>>(new Map());
   const [impactDecisions, setImpactDecisions] = React.useState<Map<string, ImpactDecision>>(new Map());
   const [analystRationale, setAnalystRationale] = React.useState('');
@@ -3507,75 +3117,6 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
 
   const cvssFields = React.useMemo(() => parseCvssVector(detail?.summary.cvssVector), [detail]);
 
-  const autoNote = React.useMemo(() => {
-    if (!detail || !item) return '';
-    const parts: string[] = [];
-    const topProducts = softwareGroups.slice(0, 2).map((g) => g.software.packageName).join(', ');
-    if (topProducts) {
-      parts.push(`${detail.signals.softwareCount > 0 ? 'High confidence match' : 'No direct software match'}. ${topProducts} detected with potentially vulnerable versions.`);
-    }
-    if (detail.signals.patchAvailable && detail.signals.patchVersions) {
-      parts.push(`Patch available: ${detail.signals.patchVersions}.`);
-    } else if (!detail.signals.patchAvailable) {
-      parts.push('No patch currently available.');
-    }
-    if (item.inKev) parts.push('This CVE is in the CISA KEV catalog — active exploitation confirmed.');
-    return parts.join(' ');
-  }, [detail, item, softwareGroups]);
-
-  const vendorRows = React.useMemo((): VendorRow[] => {
-    if (!detail) return [];
-    const rows: VendorRow[] = [];
-
-    const intel: VendorIntelligence[] = detail.vendorIntelligence ?? [];
-    if (intel.length > 0) {
-      for (const vi of intel) {
-        const vexNormalized = vi.vexStatus?.toUpperCase();
-        const statementClass =
-          vexNormalized === 'NOT_AFFECTED' || vexNormalized === 'FIXED' ? 'resolved'
-          : vexNormalized === 'UNDER_INVESTIGATION' ? 'under-investigation'
-          : 'affected';
-        const statement =
-          vi.vexStatus ? formatLabel(vi.vexStatus)
-          : 'Affected';
-        rows.push({
-          source: vi.source,
-          statement,
-          statementClass,
-          affectedVersions: vi.affectedVersions,
-          fixedVersion: vi.fixedVersion ?? '—',
-          ecosystem: vi.ecosystem ?? undefined,
-          packageName: vi.packageName ?? undefined,
-          cpe: vi.cpe ?? undefined,
-          vexStatus: vi.vexStatus ?? undefined,
-        });
-      }
-    } else {
-      // Fallback when backend returns no vendor intelligence records
-      rows.push({
-        source: detail.summary.source ?? 'ADVISORY',
-        statement: 'Affected',
-        statementClass: 'affected',
-        affectedVersions: detail.signals.patchVersions ? `< ${detail.signals.patchVersions}` : 'See advisory',
-        fixedVersion: detail.signals.patchVersions ?? '—',
-      });
-    }
-
-    if (item.inKev) {
-      // BLG-004: KEV signals exploitability, not product applicability. It is NOT an
-      // authoritative source for determining whether your specific version is affected.
-      // Rendered with a distinct style so analysts don't conflate it with NVD/VEX/advisory rows.
-      rows.push({
-        source: 'CISA KEV (exploitability context)',
-        statement: 'Actively Exploited — not an applicability source',
-        statementClass: 'exploited kev-context',
-        affectedVersions: '— (no version data)',
-        fixedVersion: '—',
-      });
-    }
-    return rows;
-  }, [detail, item]);
-
   const overallConfidence = React.useMemo(() => {
     if (!detail) return { label: 'Unknown', cls: '', pct: 0 };
     const applicable = detail.matchedSoftware.filter((s) => s.applicabilityState === 'APPLICABLE').length;
@@ -3604,7 +3145,7 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
 
   const currentBreadcrumbStep = activeStep === 1 ? null : activeStep === 2 ? 'Applicability' : 'Create Findings';
 
-  async function saveInvestigationAndContinue(): Promise<void> {
+  async function saveInvestigationAndContinue(): Promise<boolean> {
     setInvestigationBusy(true);
     setActionError(null);
     try {
@@ -3615,8 +3156,10 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
       });
       setInvestigationId(saved.id);
       setActiveStep(2);
+      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setInvestigationBusy(false);
     }
@@ -3821,10 +3364,9 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
 
           {/* Step 3 — Create Findings */}
           {activeStep === 3 && (
-            <div className="cve-findings-workspace">
+            <div className={`cve-findings-workspace${findingConfigOpen ? ' cve-findings-workspace--with-config' : ''}`}>
               <FindingsContent
                 filteredSoftware={filteredFindingSoftware}
-                cveId={item.externalId}
                 selectedIds={selectedFindingIds}
                 showFilter={findingShowFilter}
                 searchQuery={findingSearchQuery}
@@ -3837,8 +3379,33 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
                 onShowFilterChange={setFindingShowFilter}
                 onSearchQueryChange={setFindingSearchQuery}
                 onAssetTypeFilterChange={setFindingAssetTypeFilter}
-                onOpenCreateModal={() => setFindingConfigOpen(true)}
+                onOpenCreatePanel={() => setFindingConfigOpen(true)}
               />
+              {findingConfigOpen ? (
+                <FindingConfigPanel
+                  filteredSoftware={filteredFindingSoftware}
+                  selectedIds={selectedFindingIds}
+                  findingTitle={findingTitle}
+                  findingPriority={findingPriority}
+                  assignmentGroup={assignmentGroup}
+                  ownershipMode={ownershipMode}
+                  ticketTarget={ticketTarget}
+                  dueDate={dueDate}
+                  tagsInput={findingTagsInput}
+                  findingNotes={findingNotes}
+                  findingBusy={findingBusy}
+                  onClose={() => setFindingConfigOpen(false)}
+                  onFindingTitleChange={setFindingTitle}
+                  onFindingPriorityChange={setFindingPriority}
+                  onAssignmentGroupChange={setAssignmentGroup}
+                  onOwnershipModeChange={setOwnershipMode}
+                  onTicketTargetChange={setTicketTarget}
+                  onDueDateChange={setDueDate}
+                  onTagsInputChange={setFindingTagsInput}
+                  onFindingNotesChange={setFindingNotes}
+                  onConfirm={() => void createFindings()}
+                />
+              ) : null}
             </div>
           )}
 
@@ -3846,12 +3413,10 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
           {activeStep === 1 && (
             <div className="cve-assessment-footer">
               <div className="cve-assessment-footer-left">
-                <button type="button" className="btn btn-secondary" onClick={() => guardedNav(onBack)}>← Workbench</button>
-                <button type="button" className="btn btn-secondary">Mark Deferred</button>
-                <button type="button" className="btn btn-secondary">Export Evidence</button>
+                <button type="button" className="btn btn-secondary" onClick={() => guardedNav(onBack)}>← Vulnerabilities</button>
               </div>
               <div className="cve-assessment-footer-right">
-                <button type="button" className="btn btn-primary" onClick={saveInvestigationAndContinue} disabled={investigationBusy}>
+                <button type="button" className="btn btn-primary" onClick={() => void saveInvestigationAndContinue()} disabled={investigationBusy}>
                   {investigationBusy ? 'Saving...' : 'Continue to Applicability'}
                 </button>
               </div>
@@ -3873,31 +3438,6 @@ export function VulnRepoCveAssessmentWorkbench({ item, detail, loading, error, f
           action?.();
         }}
         onCancel={() => setPendingNavAction(null)}
-      />
-
-      <FindingConfigModal
-        isOpen={findingConfigOpen}
-        filteredSoftware={filteredFindingSoftware}
-        selectedIds={selectedFindingIds}
-        findingTitle={findingTitle}
-        findingPriority={findingPriority}
-        assignmentGroup={assignmentGroup}
-        ownershipMode={ownershipMode}
-        ticketTarget={ticketTarget}
-        dueDate={dueDate}
-        tagsInput={findingTagsInput}
-        findingNotes={findingNotes}
-        findingBusy={findingBusy}
-        onClose={() => setFindingConfigOpen(false)}
-        onFindingTitleChange={setFindingTitle}
-        onFindingPriorityChange={setFindingPriority}
-        onAssignmentGroupChange={setAssignmentGroup}
-        onOwnershipModeChange={setOwnershipMode}
-        onTicketTargetChange={setTicketTarget}
-        onDueDateChange={setDueDate}
-        onTagsInputChange={setFindingTagsInput}
-        onFindingNotesChange={setFindingNotes}
-        onConfirm={() => void createFindings()}
       />
 
       {detail && (
