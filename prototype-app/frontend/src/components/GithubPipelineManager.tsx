@@ -337,6 +337,7 @@ export function GithubPipelineManager({
           ) : (
             <div className="inline-note">
               GHCR mode discovers every container package and image digest under <span className="mono">ghcr.io/{sourceOwner.trim() || 'owner'}</span> and ingests each attested SBOM separately.
+              It requires a backend GitHub token with <span className="mono">read:packages</span> access.
               Run Once uses only the owner. Pipeline name is only required if you want to save a reusable pipeline.
             </div>
           )}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { pathForInventoryView, pathForVulnRepoHostAsset, pathForVulnRepoSoftwareAssets, pathForVulnRepoView } from '../app/routes';
+import { StatCard } from '../components/StatCard';
 import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import type {
   VulnRepoDashboardCriticalUnresolvedItem,
@@ -18,15 +19,15 @@ function formatSeverity(value: string): string {
 function severityClassName(value: string): string {
   switch (value.trim().toUpperCase()) {
     case 'CRITICAL':
-      return 'vuln-repo-severity-pill vuln-repo-severity-pill--critical';
+      return 'severity-pill severity-critical';
     case 'HIGH':
-      return 'vuln-repo-severity-pill vuln-repo-severity-pill--high';
+      return 'severity-pill severity-high';
     case 'MEDIUM':
-      return 'vuln-repo-severity-pill vuln-repo-severity-pill--medium';
+      return 'severity-pill severity-medium';
     case 'LOW':
-      return 'vuln-repo-severity-pill vuln-repo-severity-pill--low';
+      return 'severity-pill severity-low';
     default:
-      return 'vuln-repo-severity-pill';
+      return 'severity-pill';
   }
 }
 
@@ -42,6 +43,23 @@ function severityBarClassName(value: string): string {
       return 'vuln-repo-inline-bar vuln-repo-inline-bar--low';
     default:
       return 'vuln-repo-inline-bar';
+  }
+}
+
+function statusClassName(value: string): string {
+  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  switch (normalized) {
+    case 'OPEN':
+    case 'UNRESOLVED':
+      return 'status-pill status-open';
+    case 'IN_PROGRESS':
+      return 'status-pill status-in-progress';
+    case 'RESOLVED':
+      return 'status-pill status-resolved';
+    case 'ACCEPTED_RISK':
+      return 'status-pill status-warning';
+    default:
+      return 'status-pill status-unknown';
   }
 }
 
@@ -76,14 +94,25 @@ function renderCriticalUnresolvedTags(item: VulnRepoDashboardCriticalUnresolvedI
   return (
     <div className="vuln-repo-dashboard-item-tags">
       <span className={severityClassName(item.severity)}>{formatSeverity(item.severity)}</span>
-      <span className="vuln-repo-dashboard-tag">{item.statusLabel}</span>
-      {item.exploitKnown ? <span className="vuln-repo-dashboard-tag vuln-repo-dashboard-tag--warn">Exploit</span> : null}
+      <span className={statusClassName(item.statusLabel)}>{item.statusLabel}</span>
+      {item.exploitKnown ? <span className="status-pill status-warning">Exploit</span> : null}
     </div>
   );
 }
 
 function advisoryRelativeTimeLabel(value?: string): string {
   return value ? relativeTime(value) : 'Recently';
+}
+
+function formatGeneratedAt(value?: string): string | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+  return `Last updated ${new Date(timestamp).toLocaleString()}`;
 }
 
 function vulnRepoVulnerabilityPath(filters?: Record<string, string | number | boolean | undefined>) {
@@ -121,7 +150,8 @@ export function VulnRepoDashboardPage() {
   const [searchValue, setSearchValue] = React.useState('');
 
   const dashboard = dashboardQuery.data;
-  const loading = dashboardQuery.isPending || dashboardQuery.isFetching;
+  const loading = dashboardQuery.isPending && !dashboard;
+  const refreshing = dashboardQuery.isFetching && !!dashboard;
   const error = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : '';
   const severityMax = React.useMemo(
     () => topCount(dashboard?.severityBreakdown ?? []),
@@ -140,6 +170,44 @@ export function VulnRepoDashboardPage() {
         .slice(0, 5),
     [dashboard?.topAffectedSoftware]
   );
+  const generatedAtLabel = React.useMemo(
+    () => formatGeneratedAt(dashboard?.generatedAt),
+    [dashboard?.generatedAt]
+  );
+  const summaryCards = dashboard ? [
+    {
+      key: 'tracked',
+      title: 'Tracked CVEs',
+      value: dashboard.summaryCards.trackedCount,
+      caption: 'Repository coverage',
+      tone: 'neutral' as const,
+      onClick: () => navigate(vulnRepoTrackedVulnerabilityPath()),
+    },
+    {
+      key: 'recent',
+      title: 'Added This Week',
+      value: dashboard.summaryCards.trackedAddedLastWeek,
+      caption: 'New in the last 7 days',
+      tone: 'neutral' as const,
+      onClick: () => navigate(vulnRepoTrackedVulnerabilityPath({ createdSinceDays: 7 })),
+    },
+    {
+      key: 'critical',
+      title: 'Critical Severity',
+      value: dashboard.summaryCards.criticalCount,
+      caption: 'Immediate action required',
+      tone: 'critical' as const,
+      onClick: () => navigate(vulnRepoTrackedVulnerabilityPath({ severity: 'CRITICAL' })),
+    },
+    {
+      key: 'exploit',
+      title: 'Exploits Available',
+      value: dashboard.summaryCards.exploitCount,
+      caption: `${dashboard.summaryCards.exploitCoveragePercent}% of tracked CVEs`,
+      tone: 'warn' as const,
+      onClick: () => navigate(vulnRepoTrackedVulnerabilityPath({ exploitOnly: true })),
+    },
+  ] : [];
 
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -152,133 +220,113 @@ export function VulnRepoDashboardPage() {
   };
 
   return (
-    <section className="vuln-repo-page vuln-repo-dashboard-page">
-      <div className="vuln-repo-dashboard-shell">
-        <div className="vuln-repo-dashboard-topbar">
-          <div>
-            <h1 className="page-title">Vulnerability Repository</h1>
+    <div className="page-grid vuln-repo-dashboard-page">
+      <section className="panel vuln-repo-dashboard-header-panel">
+        <div className="panel-header vuln-repo-dashboard-header">
+          <div className="vuln-repo-dashboard-header-copy">
+            <div>
+              <h3>Vulnerability Repository</h3>
+              <div className="panel-caption">
+                Track repository coverage, review active risk, and jump directly into affected software, advisories, and assets.
+              </div>
+            </div>
+            {generatedAtLabel ? (
+              <div className="panel-caption vuln-repo-dashboard-generated-at">
+                {refreshing ? 'Refreshing dashboard...' : generatedAtLabel}
+              </div>
+            ) : null}
           </div>
-          <form className="vuln-repo-dashboard-search" onSubmit={handleSearchSubmit}>
-            <label className="sr-only" htmlFor="vuln-repo-dashboard-search-input">Search CVEs</label>
+          <form className="findings-filter-chip vuln-repo-dashboard-search" onSubmit={handleSearchSubmit}>
+            <label htmlFor="vuln-repo-dashboard-search-input">Search CVEs</label>
             <input
               id="vuln-repo-dashboard-search-input"
-              className="text-input"
               type="search"
               value={searchValue}
               onChange={(event) => setSearchValue(event.target.value)}
-              placeholder="Search CVEs..."
+              placeholder="CVE-2024-21762, FortiOS, critical"
             />
           </form>
         </div>
+      </section>
 
-        {loading ? <div className="panel-card">Loading dashboard…</div> : null}
-        {!loading && error ? <div className="empty-state">{error}</div> : null}
+      {loading ? <div className="panel"><div className="panel-caption">Loading dashboard...</div></div> : null}
+      {!dashboard && !loading && error ? <div className="panel"><div className="notice error">Failed to load dashboard: {error}</div></div> : null}
 
-        {!loading && !error && dashboard ? (
-          <>
-            <div className="vuln-repo-dashboard-metric-grid">
-              <article className="vuln-repo-dashboard-metric-card">
-                <div className="vuln-repo-dashboard-metric-icon vuln-repo-dashboard-metric-icon--tracked" />
-                <div>
-                  <button
-                    type="button"
-                    className="btn-link vuln-repo-dashboard-metric-link"
-                    onClick={() => navigate(vulnRepoTrackedVulnerabilityPath())}
-                  >
-                    {formatNumber(dashboard.summaryCards.trackedCount)}
-                  </button>
-                  <div className="vuln-repo-dashboard-metric-title">Total CVEs Tracked</div>
-                  <button
-                    type="button"
-                    className="btn-link vuln-repo-dashboard-metric-caption-link"
-                    onClick={() => navigate(vulnRepoTrackedVulnerabilityPath({ createdSinceDays: 7 }))}
-                  >
-                    +{formatNumber(dashboard.summaryCards.trackedAddedLastWeek)} this week
-                  </button>
-                </div>
-              </article>
-              <article className="vuln-repo-dashboard-metric-card">
-                <div className="vuln-repo-dashboard-metric-icon vuln-repo-dashboard-metric-icon--critical" />
-                <div>
-                  <button
-                    type="button"
-                    className="btn-link vuln-repo-dashboard-metric-link vuln-repo-dashboard-metric-value vuln-repo-dashboard-metric-value--critical"
-                    onClick={() => navigate(vulnRepoTrackedVulnerabilityPath({ severity: 'CRITICAL' }))}
-                  >
-                    {formatNumber(dashboard.summaryCards.criticalCount)}
-                  </button>
-                  <div className="vuln-repo-dashboard-metric-title">Critical Severity</div>
-                  <div className="vuln-repo-dashboard-metric-caption">Immediate action required</div>
-                </div>
-              </article>
-              <article className="vuln-repo-dashboard-metric-card">
-                <div className="vuln-repo-dashboard-metric-icon vuln-repo-dashboard-metric-icon--exploit" />
-                <div>
-                  <button
-                    type="button"
-                    className="btn-link vuln-repo-dashboard-metric-link vuln-repo-dashboard-metric-value vuln-repo-dashboard-metric-value--warn"
-                    onClick={() => navigate(vulnRepoTrackedVulnerabilityPath({ exploitOnly: true }))}
-                  >
-                    {formatNumber(dashboard.summaryCards.exploitCount)}
-                  </button>
-                  <div className="vuln-repo-dashboard-metric-title">Exploits Available</div>
-                  <div className="vuln-repo-dashboard-metric-caption">{dashboard.summaryCards.exploitCoveragePercent}% of tracked CVEs</div>
-                </div>
-              </article>
-            </div>
+      {dashboard ? (
+        <>
+          {error ? <div className="notice error">Using cached dashboard data while refresh failed: {error}</div> : null}
 
-            <div className="vuln-repo-dashboard-main-grid">
-              <section className="panel-card vuln-repo-dashboard-panel">
-                <div className="vuln-repo-dashboard-panel-header">
-                  <div>
-                    <h2>Critical unresolved</h2>
-                    <p>Requires immediate attention</p>
-                  </div>
-                  <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
+          <div className="stats-grid vuln-repo-dashboard-stats-grid">
+            {summaryCards.map((card) => (
+              <button
+                key={card.key}
+                type="button"
+                className="vuln-repo-dashboard-stat-button"
+                onClick={card.onClick}
+              >
+                <StatCard title={card.title} value={card.value} tone={card.tone} caption={card.caption} />
+              </button>
+            ))}
+          </div>
+
+          <div className="dashboard-grid vuln-repo-dashboard-main-grid">
+            <section className="panel vuln-repo-dashboard-panel">
+              <div className="panel-header">
+                <div className="vuln-repo-dashboard-section-copy">
+                  <h3>Critical unresolved</h3>
+                  <div className="panel-caption">Requires immediate attention</div>
                 </div>
-                <div className="vuln-repo-dashboard-unresolved-list">
-                  {dashboard.criticalUnresolved.length === 0 ? (
-                    <div className="empty-state">No unresolved CVEs with created findings are available right now.</div>
-                  ) : (
-                    dashboard.criticalUnresolved.map((item) => (
-                      <article
-                        key={item.externalId}
-                        className="vuln-repo-dashboard-unresolved-item"
-                      >
-                        <div className="vuln-repo-dashboard-unresolved-copy">
-                          <button
-                            type="button"
-                            className="btn-link vuln-repo-dashboard-cve-link mono"
-                            onClick={() => navigate(pathForVulnRepoView('org-cves', item.externalId))}
-                          >
-                            {item.externalId}
-                          </button>
-                          {renderCriticalUnresolvedTags(item)}
-                          <p>{item.title}</p>
-                        </div>
+                <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
+              </div>
+              <div className="vuln-repo-dashboard-unresolved-list">
+                {dashboard.criticalUnresolved.length === 0 ? (
+                  <div className="empty-state">No unresolved CVEs with created findings are available right now.</div>
+                ) : (
+                  dashboard.criticalUnresolved.map((item) => (
+                    <article
+                      key={item.externalId}
+                      className="vuln-repo-dashboard-unresolved-item"
+                    >
+                      <div className="vuln-repo-dashboard-unresolved-copy">
                         <button
                           type="button"
-                          className="vuln-repo-dashboard-findings-count btn-link"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            navigate(findingsPath({ vulnerabilityId: item.externalId, status: 'OPEN' }));
-                          }}
+                          className="btn-link vuln-repo-dashboard-cve-link mono"
+                          onClick={() => navigate(pathForVulnRepoView('org-cves', item.externalId))}
                         >
-                          <strong>{formatNumber(item.findingCount)}</strong>
-                          <span>findings</span>
+                          {item.externalId}
                         </button>
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
+                        {renderCriticalUnresolvedTags(item)}
+                        <p>{item.title}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="vuln-repo-dashboard-findings-count btn-link"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(findingsPath({ vulnerabilityId: item.externalId, status: 'OPEN' }));
+                        }}
+                      >
+                        <strong>{formatNumber(item.findingCount)}</strong>
+                        <span>findings</span>
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
 
-              <div className="vuln-repo-dashboard-side-stack">
-                <section className="panel-card vuln-repo-dashboard-panel">
-                  <div className="vuln-repo-dashboard-panel-header">
-                    <div>
-                      <h2>Severity breakdown</h2>
-                    </div>
+            <section className="panel vuln-repo-dashboard-panel">
+              <div className="panel-header">
+                <div className="vuln-repo-dashboard-section-copy">
+                  <h3>Risk overview</h3>
+                  <div className="panel-caption">Severity distribution and current disposition across tracked CVEs</div>
+                </div>
+              </div>
+              <div className="vuln-repo-dashboard-overview-stack">
+                <div className="vuln-repo-dashboard-panel-block">
+                  <div className="vuln-repo-dashboard-panel-block-header">
+                    <h4>Severity breakdown</h4>
+                    <span className="panel-caption">Current tracked vulnerability mix</span>
                   </div>
                   <div className="vuln-repo-dashboard-breakdown-list">
                     {dashboard.severityBreakdown.map((item) => (
@@ -300,13 +348,12 @@ export function VulnRepoDashboardPage() {
                       </div>
                     ))}
                   </div>
-                </section>
+                </div>
 
-                <section className="panel-card vuln-repo-dashboard-panel">
-                  <div className="vuln-repo-dashboard-panel-header">
-                    <div>
-                      <h2>Resolution status</h2>
-                    </div>
+                <div className="vuln-repo-dashboard-panel-block">
+                  <div className="vuln-repo-dashboard-panel-block-header">
+                    <h4>Resolution status</h4>
+                    <span className="panel-caption">Disposition across tracked CVEs</span>
                   </div>
                   <div className="vuln-repo-dashboard-resolution-grid">
                     <div className="vuln-repo-dashboard-resolution-card">
@@ -326,19 +373,25 @@ export function VulnRepoDashboardPage() {
                       <span>Accepted risk</span>
                     </div>
                   </div>
-                </section>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section className="panel vuln-repo-dashboard-panel">
+            <div className="panel-header">
+              <div className="vuln-repo-dashboard-section-copy">
+                <h3>Repository context</h3>
+                <div className="panel-caption">Explore concentration in affected software and the latest advisory movement.</div>
               </div>
             </div>
-
-            <div className="vuln-repo-dashboard-lower-grid">
-              <section className="panel-card vuln-repo-dashboard-panel">
-                <div className="vuln-repo-dashboard-panel-header">
-                  <div>
-                    <h2>Top affected software</h2>
-                    <p>By CVE count</p>
-                  </div>
-                  <button type="button" className="btn-link" onClick={() => navigate(pathForInventoryView('software-identities'))}>Show all</button>
+            <div className="vuln-repo-dashboard-context-grid">
+              <div className="vuln-repo-dashboard-context-section">
+                <div className="vuln-repo-dashboard-panel-block-header">
+                  <h4>Top affected software</h4>
+                  <div className="panel-caption">Sorted by tracked CVE count</div>
                 </div>
+                <button type="button" className="btn-link vuln-repo-dashboard-inline-link" onClick={() => navigate(pathForInventoryView('software-identities'))}>Show all</button>
                 <div className="vuln-repo-dashboard-software-list">
                   {topAffectedSoftware.length === 0 ? (
                     <div className="empty-state">No software exposure data is available yet.</div>
@@ -377,16 +430,14 @@ export function VulnRepoDashboardPage() {
                     ))
                   )}
                 </div>
-              </section>
+              </div>
 
-              <section className="panel-card vuln-repo-dashboard-panel">
-                <div className="vuln-repo-dashboard-panel-header">
-                  <div>
-                    <h2>Recent advisories</h2>
-                    <p>CISA KEV · NVD · Vendor</p>
-                  </div>
-                  <button type="button" className="btn-link" onClick={() => navigate(pathForVulnRepoView('vulnerabilities'))}>View all</button>
+              <div className="vuln-repo-dashboard-context-section">
+                <div className="vuln-repo-dashboard-panel-block-header">
+                  <h4>Recent advisories</h4>
+                  <div className="panel-caption">CISA KEV, NVD, and vendor updates</div>
                 </div>
+                <button type="button" className="btn-link vuln-repo-dashboard-inline-link" onClick={() => navigate(pathForVulnRepoView('vulnerabilities'))}>View all</button>
                 <div className="vuln-repo-dashboard-advisory-list">
                   {dashboard.recentAdvisories.map((item) => (
                     <button
@@ -406,44 +457,44 @@ export function VulnRepoDashboardPage() {
                     </button>
                   ))}
                 </div>
-              </section>
+              </div>
             </div>
+          </section>
 
-            <section className="panel-card vuln-repo-dashboard-panel">
-              <div className="vuln-repo-dashboard-panel-header">
-                <div>
-                  <h2>Impacted assets</h2>
-                  <p>Hosts with unresolved critical CVEs</p>
-                </div>
+          <section className="panel vuln-repo-dashboard-panel">
+            <div className="panel-header">
+              <div className="vuln-repo-dashboard-section-copy">
+                <h3>Impacted assets</h3>
+                <div className="panel-caption">Hosts with unresolved critical CVEs</div>
+              </div>
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => navigate(pathForInventoryView('hosts'))}
+              >
+                View all
+              </button>
+            </div>
+            <div className="vuln-repo-dashboard-assets-grid">
+              {dashboard.impactedAssets.map((asset) => (
                 <button
+                  key={asset.assetId}
                   type="button"
-                  className="btn-link"
-                  onClick={() => navigate(pathForInventoryView('hosts'))}
+                  className="vuln-repo-dashboard-asset-card"
+                  onClick={() => navigate(pathForVulnRepoHostAsset(asset.assetId, `${location.pathname}${location.search}${location.hash}`))}
                 >
-                  View all
+                  <div className="vuln-repo-dashboard-asset-copy">
+                    <strong>{asset.assetName}</strong>
+                    <span>{asset.assetType.toLowerCase()} · {asset.identifier}</span>
+                    {asset.environment ? <span>{asset.environment}</span> : null}
+                  </div>
+                  <span className="vuln-repo-dashboard-asset-count">{formatNumber(asset.cveCount)} CVEs</span>
                 </button>
-              </div>
-              <div className="vuln-repo-dashboard-assets-grid">
-                {dashboard.impactedAssets.map((asset) => (
-                  <button
-                    key={asset.assetId}
-                    type="button"
-                    className="vuln-repo-dashboard-asset-card"
-                    onClick={() => navigate(pathForVulnRepoHostAsset(asset.assetId, `${location.pathname}${location.search}${location.hash}`))}
-                  >
-                    <div className="vuln-repo-dashboard-asset-copy">
-                      <strong>{asset.assetName}</strong>
-                      <span>{asset.assetType.toLowerCase()} · {asset.identifier}</span>
-                      {asset.environment ? <span>{asset.environment}</span> : null}
-                    </div>
-                    <span className="vuln-repo-dashboard-asset-count">{formatNumber(asset.cveCount)} CVEs</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          </>
-        ) : null}
-      </div>
-    </section>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
+    </div>
   );
 }

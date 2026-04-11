@@ -498,7 +498,7 @@ public class OperationalQualityReadService {
                     ? "Open the Hosts or Inventory workflow to review normalization evidence and resolve the host-side software record."
                     : "Open Inventory or Software Identities to inspect the normalized record and confirm the missing or low-confidence fields.";
             case "CORRELATION" -> "Open Inventory or the owning asset workflow to inspect the software record, then review why the vulnerability match candidates are missing or low confidence.";
-            case "VEX" -> "Open the CVE Assessment Workbench to inspect matched software, current VEX evidence, and any open finding that now conflicts with that evidence.";
+            case "VEX" -> "Open Vulnerability Investigation to inspect matched software, current VEX evidence, and any open finding that now conflicts with that evidence.";
             case "EOL" -> "Open Software Identities or the EOL catalog to review the mapped slug and lifecycle coverage before changing any override.";
             case "PROJECTION_FRESHNESS" -> "Open the Operations freshness or read-path views to confirm whether a rebuild, recompute, or stale source is blocking the projection.";
             default -> "Open the owning workflow to inspect the underlying record and confirm whether the issue is still active.";
@@ -524,7 +524,7 @@ public class OperationalQualityReadService {
         if (row.vulnerabilityId() != null) {
             String externalId = deriveVulnerabilityExternalId(row);
             if (externalId != null && !externalId.isBlank()) {
-                addTarget(targets, "CVE Assessment Workbench", "/?tab=vulnerability-intelligence&vulnIntelView=org-cves&cveId=" + encode(externalId));
+                addTarget(targets, "Vulnerability Investigation", "/vuln-repo/org-cves/" + encode(externalId));
             }
         }
         if (row.assetId() != null) {

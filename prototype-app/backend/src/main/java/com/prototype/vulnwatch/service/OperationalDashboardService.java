@@ -379,6 +379,11 @@ public class OperationalDashboardService {
                 OperationalMetricsService.KEY_VULN_INTEL_LIST,
                 OperationalMetricsService.KEY_VULN_INTEL_FILTERS,
                 OperationalMetricsService.KEY_DASHBOARD_OVERVIEW,
+                OperationalMetricsService.KEY_VULN_REPO_DASHBOARD,
+                OperationalMetricsService.KEY_VULN_REPO_VULNERABILITIES,
+                OperationalMetricsService.KEY_VULN_REPO_ORG_CVES,
+                OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_STATUS,
+                OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_RECOMPUTE,
                 OperationalMetricsService.KEY_OPERATIONS_DASHBOARD,
                 OperationalMetricsService.KEY_OPERATIONS_OVERVIEW,
                 OperationalMetricsService.KEY_OPERATIONS_INGESTION,
@@ -611,6 +616,11 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_VULN_INTEL_LIST -> "Vulnerability Intelligence List";
             case OperationalMetricsService.KEY_VULN_INTEL_FILTERS -> "Vulnerability Intelligence Filters";
             case OperationalMetricsService.KEY_DASHBOARD_OVERVIEW -> "Overview Dashboard";
+            case OperationalMetricsService.KEY_VULN_REPO_DASHBOARD -> "Vulnerability Repository Dashboard";
+            case OperationalMetricsService.KEY_VULN_REPO_VULNERABILITIES -> "Vulnerability Repository Vulnerabilities";
+            case OperationalMetricsService.KEY_VULN_REPO_ORG_CVES -> "Vulnerability Investigation";
+            case OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_STATUS -> "Vulnerability Investigation Status";
+            case OperationalMetricsService.KEY_VULN_REPO_ORG_CVE_RECOMPUTE -> "Vulnerability Investigation Recompute";
             case OperationalMetricsService.KEY_OPERATIONS_DASHBOARD -> "Operations Dashboard";
             case OperationalMetricsService.KEY_OPERATIONS_OVERVIEW -> "Operations Overview";
             case OperationalMetricsService.KEY_OPERATIONS_INGESTION -> "Operations Ingestion Efficiency";

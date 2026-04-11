@@ -1,173 +1,146 @@
-.vuln-repo-page {
-  display: contents;
-}
-
 .vuln-repo-dashboard-page {
-  display: block;
-}
-
-.vuln-repo-dashboard-shell {
   display: grid;
-  gap: 24px;
+  gap: var(--space-4);
 }
 
-.vuln-repo-dashboard-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+.vuln-repo-dashboard-header {
+  align-items: flex-start;
 }
 
-.vuln-repo-dashboard-topbar .page-title {
-  margin: 0;
+.vuln-repo-dashboard-header-copy {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .vuln-repo-dashboard-search {
+  flex: 0 1 360px;
   width: min(360px, 100%);
+  margin-left: auto;
 }
 
-.vuln-repo-dashboard-search .text-input {
+.vuln-repo-dashboard-search input {
   width: 100%;
 }
 
-.vuln-repo-dashboard-metric-grid {
+.vuln-repo-dashboard-stats-grid {
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+}
+
+.vuln-repo-dashboard-stat-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vuln-repo-dashboard-stat-button .stat-card {
+  height: 100%;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.vuln-repo-dashboard-stat-button:hover .stat-card,
+.vuln-repo-dashboard-stat-button:focus-visible .stat-card {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.vuln-repo-dashboard-stat-button:focus-visible {
+  outline: none;
+}
+
+.vuln-repo-dashboard-main-grid {
+  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr);
+}
+
+.vuln-repo-dashboard-overview-stack {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.vuln-repo-dashboard-metric-card,
-.vuln-repo-dashboard-panel,
-.vuln-repo-dashboard-asset-card,
-.vuln-repo-dashboard-unresolved-item,
-.vuln-repo-dashboard-advisory-item {
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background: color-mix(in srgb, var(--panel-solid) 88%, #0f1520);
-}
-
-.vuln-repo-dashboard-metric-card {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 24px;
-  border-radius: 24px;
-  min-height: 156px;
-}
-
-.vuln-repo-dashboard-metric-icon {
-  width: 72px;
-  height: 72px;
-  border-radius: 20px;
-  flex-shrink: 0;
-}
-
-.vuln-repo-dashboard-metric-icon--tracked {
-  background: rgba(60, 127, 255, 0.18);
-}
-
-.vuln-repo-dashboard-metric-icon--critical {
-  background: rgba(255, 77, 109, 0.2);
-}
-
-.vuln-repo-dashboard-metric-icon--exploit {
-  background: rgba(245, 158, 11, 0.2);
-}
-
-.vuln-repo-dashboard-metric-value {
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.04em;
-  color: var(--title);
-}
-
-.vuln-repo-dashboard-metric-link {
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.04em;
-  color: var(--title);
-}
-
-.vuln-repo-dashboard-metric-value--critical {
-  color: var(--critical);
-}
-
-.vuln-repo-dashboard-metric-value--warn {
-  color: var(--warn);
-}
-
-.vuln-repo-dashboard-metric-title {
-  margin-top: 10px;
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--title);
-}
-
-.vuln-repo-dashboard-metric-caption {
-  margin-top: 4px;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-.vuln-repo-dashboard-metric-caption-link {
-  margin-top: 4px;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-.vuln-repo-dashboard-main-grid,
-.vuln-repo-dashboard-lower-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
-  gap: 18px;
-}
-
-.vuln-repo-dashboard-side-stack {
-  display: grid;
-  gap: 18px;
+  gap: var(--space-3);
 }
 
 .vuln-repo-dashboard-panel {
-  border-radius: 24px;
-  padding: 22px;
+  display: grid;
+  gap: var(--space-4);
 }
 
-.vuln-repo-dashboard-panel-header {
-  display: flex;
+.vuln-repo-dashboard-panel .panel-header {
+  margin-bottom: 0;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
 }
 
-.vuln-repo-dashboard-panel-header h2 {
+.vuln-repo-dashboard-section-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.vuln-repo-dashboard-panel-block {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.vuln-repo-dashboard-panel-block + .vuln-repo-dashboard-panel-block {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+}
+
+.vuln-repo-dashboard-panel-block-header {
+  display: grid;
+  gap: 4px;
+}
+
+.vuln-repo-dashboard-panel-block-header h4 {
   margin: 0;
   color: var(--title);
-  font-size: 1.15rem;
-  font-weight: 750;
+  font-family: var(--font-display);
+  font-weight: 600;
 }
 
-.vuln-repo-dashboard-panel-header p {
-  margin: 4px 0 0;
-  color: var(--muted);
+.vuln-repo-dashboard-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.vuln-repo-dashboard-context-section {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.vuln-repo-dashboard-context-section + .vuln-repo-dashboard-context-section {
+  border-left: 1px solid var(--border);
+  padding-left: var(--space-3);
+}
+
+.vuln-repo-dashboard-inline-link {
+  justify-self: start;
 }
 
 .vuln-repo-dashboard-unresolved-list,
 .vuln-repo-dashboard-software-list,
 .vuln-repo-dashboard-advisory-list {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
+}
+
+.vuln-repo-dashboard-unresolved-item,
+.vuln-repo-dashboard-advisory-item,
+.vuln-repo-dashboard-asset-card {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 94%, var(--panel-muted));
+  border-radius: var(--radius-lg);
 }
 
 .vuln-repo-dashboard-unresolved-item,
 .vuln-repo-dashboard-advisory-item {
   width: 100%;
-  border-radius: 18px;
-  padding: 18px;
+  padding: var(--space-4);
   color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
 .vuln-repo-dashboard-unresolved-item {
@@ -179,16 +152,18 @@
 
 .vuln-repo-dashboard-unresolved-copy {
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .vuln-repo-dashboard-unresolved-copy p,
+.vuln-repo-dashboard-advisory-copy p,
 .vuln-repo-dashboard-advisory-copy strong,
 .vuln-repo-dashboard-software-copy strong {
   margin: 0;
 }
 
-.vuln-repo-dashboard-unresolved-copy p {
+.vuln-repo-dashboard-unresolved-copy p,
+.vuln-repo-dashboard-advisory-copy p {
   color: var(--text);
   line-height: 1.5;
 }
@@ -199,47 +174,18 @@
   gap: 8px;
 }
 
-.vuln-repo-severity-pill,
-.vuln-repo-dashboard-tag,
 .vuln-repo-dashboard-asset-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 0.84rem;
-  font-weight: 700;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
-  background: color-mix(in srgb, var(--panel-muted) 74%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 94%, var(--panel-muted));
   color: var(--text);
-}
-
-.vuln-repo-severity-pill--critical {
-  color: var(--critical);
-  border-color: color-mix(in srgb, var(--critical) 44%, transparent);
-  background: rgba(255, 77, 109, 0.1);
-}
-
-.vuln-repo-severity-pill--high {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 44%, transparent);
-  background: rgba(245, 158, 11, 0.1);
-}
-
-.vuln-repo-severity-pill--medium {
-  color: #4994ff;
-  border-color: rgba(73, 148, 255, 0.3);
-  background: rgba(73, 148, 255, 0.12);
-}
-
-.vuln-repo-severity-pill--low {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
-  background: rgba(16, 185, 129, 0.1);
-}
-
-.vuln-repo-dashboard-tag--warn {
-  color: var(--warn);
 }
 
 .vuln-repo-dashboard-findings-count {
@@ -260,7 +206,7 @@
 
 .vuln-repo-dashboard-breakdown-list {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .vuln-repo-dashboard-breakdown-row {
@@ -278,7 +224,7 @@
   position: relative;
   height: 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-muted) 80%, transparent);
+  background: color-mix(in srgb, var(--panel-muted) 80%, var(--panel-solid));
   overflow: hidden;
 }
 
@@ -314,6 +260,26 @@
   font-size: 1rem;
 }
 
+.vuln-repo-dashboard-advisory-item,
+.vuln-repo-dashboard-asset-card {
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.vuln-repo-dashboard-advisory-item:hover,
+.vuln-repo-dashboard-advisory-item:focus-visible,
+.vuln-repo-dashboard-asset-card:hover,
+.vuln-repo-dashboard-asset-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.vuln-repo-dashboard-advisory-item:focus-visible,
+.vuln-repo-dashboard-asset-card:focus-visible {
+  outline: none;
+}
+
 .vuln-repo-dashboard-asset-link {
   white-space: nowrap;
 }
@@ -321,21 +287,21 @@
 .vuln-repo-dashboard-resolution-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .vuln-repo-dashboard-resolution-card {
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background: color-mix(in srgb, var(--panel-muted) 70%, transparent);
-  padding: 18px;
+  background: color-mix(in srgb, var(--panel-solid) 94%, var(--panel-muted));
+  padding: var(--space-4);
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .vuln-repo-dashboard-resolution-card strong {
   color: var(--critical);
-  font-size: 2rem;
+  font-size: 1.7rem;
   line-height: 1;
 }
 
@@ -354,7 +320,7 @@
 .vuln-repo-dashboard-software-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
 }
 
@@ -404,17 +370,15 @@
 .vuln-repo-dashboard-assets-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .vuln-repo-dashboard-asset-card {
   width: 100%;
   text-align: left;
-  border-radius: 18px;
-  padding: 18px;
-  cursor: pointer;
+  padding: var(--space-4);
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .vuln-repo-dashboard-asset-copy {
@@ -505,23 +469,56 @@
 }
 
 @media (max-width: 1100px) {
-  .vuln-repo-dashboard-metric-grid,
   .vuln-repo-dashboard-main-grid,
-  .vuln-repo-dashboard-lower-grid,
+  .vuln-repo-dashboard-context-grid,
   .vuln-repo-dashboard-assets-grid {
     grid-template-columns: 1fr;
   }
 
-  .vuln-repo-dashboard-topbar {
+  .vuln-repo-dashboard-context-section + .vuln-repo-dashboard-context-section {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: var(--space-3);
+  }
+
+  .vuln-repo-dashboard-header {
     flex-direction: column;
     align-items: stretch;
   }
 
+  .vuln-repo-dashboard-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .vuln-repo-dashboard-search {
     width: 100%;
+    margin-left: 0;
   }
 
   .vuln-repo-vulnerabilities-layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .vuln-repo-dashboard-stats-grid,
+  .vuln-repo-dashboard-resolution-grid,
+  .vuln-repo-dashboard-assets-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vuln-repo-dashboard-unresolved-item,
+  .vuln-repo-dashboard-software-row {
+    grid-template-columns: 1fr;
+  }
+
+  .vuln-repo-dashboard-findings-count {
+    justify-items: start;
+  }
+
+  .vuln-repo-dashboard-software-metrics {
+    min-width: 0;
+    flex-wrap: wrap;
   }
 }

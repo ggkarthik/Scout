@@ -135,6 +135,21 @@ class OutboundHttpClientTest {
         server.verify();
     }
 
+    @Test
+    void preservesPreEncodedQueryValues() {
+        server.expect(requestTo("https://example.test/advisories?after=Y3Vyc29y%3D%3D"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN));
+
+        ResponseEntity<String> response = exchange(
+                policy("github", 0L, 1, 0L),
+                "https://example.test/advisories?after=Y3Vyc29y%3D%3D"
+        );
+
+        assertEquals("ok", response.getBody());
+        server.verify();
+    }
+
     private ResponseEntity<String> exchange(OutboundPolicy policy, String endpoint) {
         try {
             return client.exchange(
