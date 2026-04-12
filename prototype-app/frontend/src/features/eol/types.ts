@@ -72,3 +72,18 @@ export type UnresolvedEolMapping = {
   openVulnerabilityCount: number;
   lastObservedAt?: string;
 };
+
+export type EolSlugSuggestion = {
+  slug: string;
+  displayName: string;
+  confidence: string;
+  method: string;
+};
+
+export type UnresolvedEolMappingPage = {
+  content: UnresolvedEolMapping[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+};

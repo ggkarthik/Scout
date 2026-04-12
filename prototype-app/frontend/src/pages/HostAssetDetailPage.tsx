@@ -388,7 +388,7 @@ export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPagePro
             onClick={handleClose}
             aria-label="Close host detail"
           >
-            x
+            ×
           </button>
         </div>
       )}

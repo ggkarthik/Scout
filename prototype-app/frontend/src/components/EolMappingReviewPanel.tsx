@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { api } from '../api/client';
 import { pathForTab } from '../app/routes';
@@ -8,15 +8,16 @@ import {
   type DataTableRow
 } from './DataTable';
 import {
-  useEolProductsQuery,
   useEolUnresolvedMappingsQuery
 } from '../features/eol/queries';
+
+const UNRESOLVED_PAGE_SIZE = 25;
 import {
   useOperationalQualityIssuesQuery,
   type OperationalQualityIssuesQueryParams
 } from '../features/operations/queries';
 import type {
-  EolProductCatalog,
+  EolSlugSuggestion,
   UnresolvedEolMapping
 } from '../features/eol/types';
 
@@ -45,15 +46,6 @@ const INVALIDATION_KEYS = [
 ] as const;
 const MATCHING_ISSUE_TYPE = 'SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING';
 
-function normalize(value?: string): string {
-  return (value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function formatInstant(value?: string): string {
   if (!value) {
     return '-';
@@ -75,74 +67,22 @@ function formatCount(value: number | string | undefined): string {
   return '0';
 }
 
-function collectSuggestionNeedles(item: UnresolvedEolMapping, draft: string): string[] {
-  return Array.from(new Set([
-    normalize(draft),
-    normalize(item.displayName),
-    normalize(item.vendor),
-    normalize(item.product),
-    ...normalize(item.normalizedKey).split(' ')
-  ].filter(value => value.length >= 2)));
-}
-
-function scoreProduct(product: EolProductCatalog, item: UnresolvedEolMapping, draft: string): number {
-  const slug = normalize(product.slug);
-  const displayName = normalize(product.displayName);
-  const aliases = (product.aliases ?? []).map(normalize);
-  const needles = collectSuggestionNeedles(item, draft);
-  let score = 0;
-
-  needles.forEach((needle) => {
-    if (slug === needle) score += 120;
-    else if (slug.startsWith(needle)) score += 80;
-    else if (slug.includes(needle)) score += 42;
-
-    if (displayName === needle) score += 90;
-    else if (displayName.includes(needle)) score += 36;
-
-    aliases.forEach((alias) => {
-      if (alias === needle) score += 60;
-      else if (alias.includes(needle)) score += 24;
-    });
-  });
-
-  if (normalize(item.product) && slug.includes(normalize(item.product))) {
-    score += 28;
-  }
-  if (normalize(item.vendor) && displayName.includes(normalize(item.vendor))) {
-    score += 12;
-  }
-
-  return score;
-}
-
-function topSuggestions(
-  item: UnresolvedEolMapping,
-  draft: string,
-  products: EolProductCatalog[]
-): EolProductCatalog[] {
-  return products
-    .map(product => ({ product, score: scoreProduct(product, item, draft) }))
-    .filter(entry => entry.score > 0)
-    .sort((left, right) => {
-      if (right.score !== left.score) return right.score - left.score;
-      return left.product.slug.localeCompare(right.product.slug);
-    })
-    .slice(0, 4)
-    .map(entry => entry.product);
-}
-
 export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }: Props) {
   const queryClient = useQueryClient();
-  const unresolvedMappingsQuery = useEolUnresolvedMappingsQuery();
-  const unresolvedList = React.useMemo(
-    () => unresolvedMappingsQuery.data ?? [],
-    [unresolvedMappingsQuery.data]
+  const [unresolvedPage, setUnresolvedPage] = React.useState(0);
+  const unresolvedMappingsQuery = useEolUnresolvedMappingsQuery(
+    { page: unresolvedPage, size: UNRESOLVED_PAGE_SIZE }
   );
+  const unresolvedPageData = unresolvedMappingsQuery.data;
+  const unresolvedList = React.useMemo(
+    () => unresolvedPageData?.content ?? [],
+    [unresolvedPageData]
+  );
+  const unresolvedTotalPages = unresolvedPageData?.totalPages ?? 1;
+  const unresolvedTotalElements = unresolvedPageData?.totalElements ?? 0;
   const normalizedIssueType = (qualityFilters?.issueType ?? '').trim().toUpperCase();
   const issueTypeExcludesMappingReview = normalizedIssueType.length > 0 && normalizedIssueType !== MATCHING_ISSUE_TYPE;
   const [open, setOpen] = React.useState(initiallyOpen);
-  const productsQuery = useEolProductsQuery(open);
   const mappingIssueFilters = React.useMemo<OperationalQualityIssuesQueryParams>(() => ({
     domain: 'EOL',
     issueType: MATCHING_ISSUE_TYPE,
@@ -177,8 +117,6 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
       setOpen(true);
     }
   }, [initiallyOpen]);
-
-  const products = React.useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
   const filteredIdentityIds = React.useMemo(
     () => new Set(
       (filteredMappingIssuesQuery.data?.items ?? [])
@@ -210,7 +148,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
     ? 0
     : hasIntersectionFilters && filteredMappingIssuesQuery.data
       ? filteredList.length
-      : unresolvedList.length;
+      : unresolvedTotalElements;
   const loadingReviewList = unresolvedMappingsQuery.isPending
     || (
       hasIntersectionFilters
@@ -219,10 +157,26 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
       && !filteredMappingIssuesQuery.data
     );
 
+  const suggestionQueries = useQueries({
+    queries: (open ? filteredList : []).map(item => ({
+      queryKey: ['eol-slug-suggestions', item.normalizedKey],
+      queryFn: () => api.listEolMappingSuggestions(item.normalizedKey),
+      staleTime: 5 * 60 * 1000
+    }))
+  });
+
+  const suggestionsMap = React.useMemo(() => {
+    const map = new Map<string, EolSlugSuggestion[]>();
+    filteredList.forEach((item, index) => {
+      map.set(item.normalizedKey, suggestionQueries[index]?.data ?? []);
+    });
+    return map;
+  }, [filteredList, suggestionQueries]);
+
   const reviewColumns = React.useMemo<DataTableColumn[]>(() => [
     { id: 'software', label: 'Software', header: 'Software', initialSize: 220 },
     { id: 'vendorProduct', label: 'Vendor / Product', header: 'Vendor / Product', initialSize: 220 },
-    { id: 'footprint', label: 'Footprint', header: 'Footprint', initialSize: 180 },
+    { id: 'footprint', label: 'Active Footprint', header: 'Active Footprint', initialSize: 180 },
     { id: 'exposure', label: 'Exposure', header: 'Exposure', initialSize: 180 },
     { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 },
     { id: 'normalizedKey', label: 'Normalized Key', header: 'Normalized Key', initialSize: 240 },
@@ -269,7 +223,8 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
   const reviewRows = React.useMemo<DataTableRow[]>(() => (
     filteredList.map((item) => {
       const draft = confirmSlug[item.normalizedKey] ?? '';
-      const suggestions = topSuggestions(item, draft, products);
+      const dropdownSuggestions = suggestionsMap.get(item.normalizedKey) ?? [];
+      const suggestionListId = `quality-eol-suggestions-${item.softwareIdentityId}`;
       return {
         id: item.normalizedKey,
         cells: {
@@ -294,9 +249,9 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
           footprint: {
             content: (
               <div className="software-identity-row-stack">
-                <span>{formatCount(item.componentCount)} components</span>
+                <span>{formatCount(item.componentCount)} active components</span>
                 <span className="panel-caption">
-                  {formatCount(item.assetCount)} assets · {formatCount(item.versionCount)} versions
+                  {formatCount(item.assetCount)} active assets · {formatCount(item.versionCount)} versions
                 </span>
               </div>
             )
@@ -319,7 +274,8 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
                 <input
                   type="text"
                   className="filter-input"
-                  placeholder="e.g. ubuntu, python, java"
+                  list={suggestionListId}
+                  placeholder="Select a slug or type one manually"
                   value={draft}
                   disabled={busyKey === item.normalizedKey}
                   onChange={(event) => setConfirmSlug(prev => ({
@@ -327,30 +283,15 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
                     [item.normalizedKey]: event.target.value
                   }))}
                 />
-                <div className="quality-eol-suggestion-row">
-                  {productsQuery.isPending && products.length === 0 ? (
-                    <span className="panel-caption">Loading catalog suggestions...</span>
-                  ) : suggestions.length > 0 ? (
-                    suggestions.map((suggestion) => (
-                      <button
-                        key={`${item.normalizedKey}-${suggestion.slug}`}
-                        type="button"
-                        className="quality-eol-suggestion-chip"
-                        onClick={() => setConfirmSlug(prev => ({
-                          ...prev,
-                          [item.normalizedKey]: suggestion.slug
-                        }))}
-                      >
-                        <span className="mono">{suggestion.slug}</span>
-                        {suggestion.displayName && suggestion.displayName !== suggestion.slug && (
-                          <span className="panel-caption">{suggestion.displayName}</span>
-                        )}
-                      </button>
-                    ))
-                  ) : (
-                    <span className="panel-caption">No close catalog matches yet. You can still enter the slug manually.</span>
-                  )}
-                </div>
+                <datalist id={suggestionListId}>
+                  {dropdownSuggestions.map((suggestion) => (
+                    <option
+                      key={`${item.normalizedKey}-${suggestion.slug}`}
+                      value={suggestion.slug}
+                      label={`${suggestion.displayName ?? suggestion.slug} (${suggestion.confidence})`}
+                    />
+                  ))}
+                </datalist>
               </div>
             )
           },
@@ -369,7 +310,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
         }
       };
     })
-  ), [busyKey, confirmSlug, filteredList, handleConfirmMapping, products, productsQuery.isPending]);
+  ), [busyKey, confirmSlug, filteredList, handleConfirmMapping, suggestionsMap]);
 
   return (
     <section className="panel quality-eol-review-panel">
@@ -442,19 +383,46 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
           <p>
             {hasActiveQualityFilters
               ? 'No unmatched EOL software matches the current filters.'
-              : 'All active software identities currently have an EOL slug mapping.'}
+              : 'No actionable EOL mapping gaps. Library-ecosystem packages (npm, maven, pypi, etc.) are excluded — endoflife.date tracks OS packages, runtimes, and infrastructure software, not individual libraries.'}
           </p>
         </div>
       )}
 
       {open && filteredList.length > 0 && (
-        <div className="table-scroll">
-          <DataTable
-            storageKey="operations-quality-eol-mapping-review"
-            columns={reviewColumns}
-            rows={reviewRows}
-          />
-        </div>
+        <>
+          <div className="table-scroll">
+            <DataTable
+              storageKey="operations-quality-eol-mapping-review"
+              columns={reviewColumns}
+              rows={reviewRows}
+            />
+          </div>
+
+          {!hasIntersectionFilters && unresolvedTotalPages > 1 && (
+            <div className="pagination quality-pagination">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={unresolvedPage === 0}
+                onClick={() => setUnresolvedPage(p => p - 1)}
+              >
+                Previous
+              </button>
+              <span className="panel-caption">
+                Page {unresolvedPage + 1} of {unresolvedTotalPages}
+                {' · '}{unresolvedTotalElements.toLocaleString()} unmatched
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={unresolvedPage >= unresolvedTotalPages - 1}
+                onClick={() => setUnresolvedPage(p => p + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

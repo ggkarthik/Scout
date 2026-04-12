@@ -53,8 +53,10 @@ import type {
   EolComponentPage,
   EolProductCatalog,
   EolRelease,
+  EolSlugSuggestion,
   EolSummary,
-  UnresolvedEolMapping
+  UnresolvedEolMapping,
+  UnresolvedEolMappingPage
 } from '../features/eol/types';
 import type {
   SoftwareIdentityDetail,
@@ -431,7 +433,14 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ normalizedKey, eolSlug })
   }),
-  listEolUnresolvedMappings: () => request<UnresolvedEolMapping[]>('/eol/mappings/unresolved'),
+  listEolMappingSuggestions: (normalizedKey: string) => request<EolSlugSuggestion[]>(`/eol/mappings/suggestions?normalizedKey=${encodeURIComponent(normalizedKey)}`),
+  listEolUnresolvedMappings: (params?: { page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<UnresolvedEolMappingPage>(`/eol/mappings/unresolved${suffix}`);
+  },
   triggerEolCatalogRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/catalog', { method: 'POST' }),
   triggerEolReleaseRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/releases', { method: 'POST' }),
   triggerEolMappingResolve: () => request<SyncTriggerResponse>('/eol/admin/refresh/mappings', { method: 'POST' }),

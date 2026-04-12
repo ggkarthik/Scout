@@ -2,11 +2,14 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.prototype.vulnwatch.domain.EolProductCatalog;
 import com.prototype.vulnwatch.domain.SoftwareEolMapping;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.dto.EolMappingConfirmRequest;
@@ -24,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class EolServiceTest {
@@ -46,15 +50,20 @@ class EolServiceTest {
     @Mock
     private EolRefreshService eolRefreshService;
 
+    @Mock
+    private RequestActorService requestActorService;
+
     @Test
     void confirmMappingLinksUniqueIdentityAndRefreshesProjection() {
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("test-user", false, null, null));
         EolService service = new EolService(
                 catalogRepository,
                 releaseRepository,
                 mappingRepository,
                 identityRepository,
                 jdbcTemplate,
-                eolRefreshService
+                eolRefreshService,
+                requestActorService
         );
 
         UUID identityId = UUID.randomUUID();
@@ -63,7 +72,10 @@ class EolServiceTest {
         identity.setVendor("microsoft");
         identity.setProduct("office");
 
+        EolProductCatalog catalogProduct = new EolProductCatalog();
+        catalogProduct.setSlug("office");
         when(mappingRepository.findByNormalizedKey("microsoft::office")).thenReturn(Optional.empty());
+        when(catalogRepository.findBySlug("office")).thenReturn(Optional.of(catalogProduct));
         when(identityRepository.findAllByVendorIgnoreCaseAndProductIgnoreCase("microsoft", "office"))
                 .thenReturn(List.of(identity));
         when(mappingRepository.saveAndFlush(any(SoftwareEolMapping.class)))
@@ -84,18 +96,23 @@ class EolServiceTest {
 
     @Test
     void confirmMappingKeepsIdentityUnsetWhenMatchIsAmbiguous() {
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("test-user", false, null, null));
         EolService service = new EolService(
                 catalogRepository,
                 releaseRepository,
                 mappingRepository,
                 identityRepository,
                 jdbcTemplate,
-                eolRefreshService
+                eolRefreshService,
+                requestActorService
         );
 
         SoftwareIdentity first = new SoftwareIdentity();
         SoftwareIdentity second = new SoftwareIdentity();
+        EolProductCatalog catalogProduct = new EolProductCatalog();
+        catalogProduct.setSlug("apache");
         when(mappingRepository.findByNormalizedKey("apache::httpd")).thenReturn(Optional.empty());
+        when(catalogRepository.findBySlug("apache")).thenReturn(Optional.of(catalogProduct));
         when(identityRepository.findAllByVendorIgnoreCaseAndProductIgnoreCase("apache", "httpd"))
                 .thenReturn(List.of(first, second));
         when(mappingRepository.saveAndFlush(any(SoftwareEolMapping.class)))
@@ -107,5 +124,33 @@ class EolServiceTest {
         verify(mappingRepository).saveAndFlush(mappingCaptor.capture());
         assertNull(mappingCaptor.getValue().getSoftwareIdentityId());
         verify(eolRefreshService).refreshConfirmedMapping(eq("apache::httpd"));
+    }
+
+    @Test
+    void confirmMappingRejectsUnknownSlugBeforePersisting() {
+        EolService service = new EolService(
+                catalogRepository,
+                releaseRepository,
+                mappingRepository,
+                identityRepository,
+                jdbcTemplate,
+                eolRefreshService,
+                requestActorService
+        );
+
+        when(catalogRepository.findBySlug("unknown-slug")).thenReturn(Optional.empty());
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.confirmMapping(new EolMappingConfirmRequest("microsoft::office", "unknown-slug"))
+        );
+
+        assertEquals(400, exception.getStatusCode().value());
+        assertEquals(
+                "Unknown EOL slug: unknown-slug. Refresh the catalog or choose a valid endoflife.date slug.",
+                exception.getReason()
+        );
+        verify(mappingRepository, never()).saveAndFlush(any(SoftwareEolMapping.class));
+        verify(eolRefreshService, never()).refreshConfirmedMapping(any());
     }
 }
