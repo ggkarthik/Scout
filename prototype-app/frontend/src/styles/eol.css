@@ -615,36 +615,6 @@
   width: 100%;
 }
 
-.quality-eol-suggestion-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.quality-eol-suggestion-chip {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
-  background: color-mix(in srgb, var(--panel-muted) 86%, transparent);
-  color: var(--text);
-  border-radius: 12px;
-  padding: 8px 10px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.quality-eol-suggestion-chip:hover {
-  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.quality-eol-suggestion-chip .panel-caption {
-  white-space: normal;
-}
-
 .quality-table {
   width: 100%;
 }
@@ -798,4 +768,165 @@
 
 .quality-drawer-links {
   flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* EolPage — page-level tabs                                            */
+/* ------------------------------------------------------------------ */
+
+.eol-page-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.eol-page-tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 22px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.eol-page-tab:hover {
+  color: var(--text);
+}
+
+.eol-page-tab.active {
+  border-color: var(--border);
+  background: var(--panel-solid);
+  color: var(--title);
+}
+
+/* ------------------------------------------------------------------ */
+/* EolPage — at-risk summary strip                                      */
+/* ------------------------------------------------------------------ */
+
+.eol-risk-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.eol-risk-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.eol-risk-stat:hover {
+  border-color: var(--border-strong);
+}
+
+.eol-risk-stat.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.eol-risk-stat-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.eol-risk-stat-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.eol-risk-stat--danger .eol-risk-stat-value { color: var(--critical); }
+.eol-risk-stat--danger.active { background: color-mix(in srgb, var(--critical) 6%, var(--panel-muted)); }
+
+.eol-risk-stat--warn .eol-risk-stat-value { color: var(--warn); }
+.eol-risk-stat--warn.active { background: color-mix(in srgb, var(--warn) 6%, var(--panel-muted)); }
+
+.eol-risk-stat--ok .eol-risk-stat-value { color: var(--low); }
+.eol-risk-stat--ok.active { background: color-mix(in srgb, var(--low) 6%, var(--panel-muted)); }
+
+.eol-risk-stat--muted .eol-risk-stat-value { color: var(--muted); }
+
+/* ------------------------------------------------------------------ */
+/* EolPage — at-risk toolbar & filter chips                             */
+/* ------------------------------------------------------------------ */
+
+.eol-atrisk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.eol-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
+  padding: 4px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+}
+
+.chip-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-strong);
+}
+
+/* ------------------------------------------------------------------ */
+/* EolPage — data freshness bar                                         */
+/* ------------------------------------------------------------------ */
+
+.eol-freshness-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.eol-freshness-error {
+  color: var(--critical);
+}
+
+@media (max-width: 760px) {
+  .eol-risk-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .eol-page-tab {
+    padding: 8px 14px;
+    font-size: 0.84rem;
+  }
 }

@@ -1,22 +1,30 @@
 import React from 'react';
+import { api } from '../api/client';
 import { pathForOperationsView } from '../app/routes';
 import {
   DataTable,
   type DataTableColumn,
   type DataTableRow
 } from '../components/DataTable';
+import { EolBadge } from '../components/EolBadge';
 import { EolDetailDrawer } from '../components/EolDetailDrawer';
-import { useEolProductsQuery } from '../features/eol/queries';
-import type { EolProductCatalog } from '../features/eol/types';
+import type { SyncTriggerResponse } from '../features/connect/types';
+import { useEolComponentStatusesQuery, useEolProductsQuery, useEolSummaryQuery } from '../features/eol/queries';
+import type { ComponentEolStatus, EolProductCatalog } from '../features/eol/types';
 
-const PAGE_SIZE = 25;
+const CATALOG_PAGE_SIZE = 25;
+const COMPONENT_PAGE_SIZE = 25;
+
+type EolTab = 'at-risk' | 'catalog';
+type AtRiskFilter = 'all' | 'eol' | 'near-eol' | 'unknown';
+
+// ---------------------------------------------------------------------------
+// Catalog helpers
+// ---------------------------------------------------------------------------
 
 function matchesProduct(product: EolProductCatalog, query: string): boolean {
   const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return true;
-  }
-
+  if (!needle) return true;
   const haystacks = [
     product.slug,
     product.displayName,
@@ -26,17 +34,12 @@ function matchesProduct(product: EolProductCatalog, query: string): boolean {
     product.purlNamespace,
     ...(product.aliases ?? [])
   ];
-
   return haystacks.some(value => value?.toLowerCase().includes(needle));
 }
 
 function formatAliases(aliases?: string[]): string {
-  if (!aliases || aliases.length === 0) {
-    return '-';
-  }
-  if (aliases.length <= 3) {
-    return aliases.join(', ');
-  }
+  if (!aliases || aliases.length === 0) return '-';
+  if (aliases.length <= 3) return aliases.join(', ');
   return `${aliases.slice(0, 3).join(', ')} +${aliases.length - 3} more`;
 }
 
@@ -45,16 +48,182 @@ function formatCount(value?: number): string {
 }
 
 function formatIdentifier(primary?: string, secondary?: string): string {
-  if (!primary && !secondary) {
-    return '-';
-  }
-  if (primary && secondary) {
-    return `${primary}/${secondary}`;
-  }
+  if (!primary && !secondary) return '-';
+  if (primary && secondary) return `${primary}/${secondary}`;
   return primary ?? secondary ?? '-';
 }
 
-export function EolPage() {
+function formatDate(value?: string): string {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+}
+
+// ---------------------------------------------------------------------------
+// At-Risk tab
+// ---------------------------------------------------------------------------
+
+const COMPONENT_COLUMNS: DataTableColumn[] = [
+  { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 200 },
+  { id: 'package', label: 'Package', header: 'Package', initialSize: 220 },
+  { id: 'version', label: 'Version', header: 'Version', initialSize: 130 },
+  { id: 'status', label: 'Status', header: 'Status', initialSize: 140 },
+  { id: 'eolDate', label: 'EOL Date', header: 'EOL Date', initialSize: 130 },
+  { id: 'daysRemaining', label: 'Days Remaining', header: 'Days Remaining', initialSize: 140 },
+];
+
+function buildComponentRows(components: ComponentEolStatus[]): DataTableRow[] {
+  return components.map((c) => ({
+    id: c.componentId,
+    cells: {
+      asset: { content: c.assetName || '-' },
+      package: {
+        content: (
+          <>
+            <div>{c.packageName || '-'}</div>
+            {c.ecosystem && <span className="panel-caption mono">{c.ecosystem}</span>}
+          </>
+        )
+      },
+      version: { content: <span className="mono">{c.version || '-'}</span> },
+      status: {
+        content: (
+          <EolBadge
+            isEol={c.isEol}
+            daysRemaining={c.eolDaysRemaining}
+            eolDate={c.eolDate}
+          />
+        )
+      },
+      eolDate: { content: formatDate(c.eolDate) },
+      daysRemaining: {
+        content: c.eolDaysRemaining != null
+          ? c.eolDaysRemaining.toLocaleString()
+          : '-'
+      },
+    }
+  }));
+}
+
+const FILTER_LABELS: Record<AtRiskFilter, string> = {
+  all: 'All',
+  eol: 'EOL',
+  'near-eol': 'Near EOL',
+  unknown: 'Unknown',
+};
+
+function AtRiskTab({ eolMappingReviewHref }: { eolMappingReviewHref: string }) {
+  const [filter, setFilter] = React.useState<AtRiskFilter>('all');
+  const [page, setPage] = React.useState(0);
+  const summaryQuery = useEolSummaryQuery();
+  const summary = summaryQuery.data;
+
+  const apiFilter = filter === 'all' ? undefined : filter;
+  const componentQuery = useEolComponentStatusesQuery(
+    { filter: apiFilter, page, size: COMPONENT_PAGE_SIZE }
+  );
+  const componentPage = componentQuery.data;
+  const components = componentPage?.content ?? [];
+  const totalPages = componentPage?.totalPages ?? 1;
+  const totalElements = componentPage?.totalElements ?? 0;
+
+  React.useEffect(() => {
+    setPage(0);
+  }, [filter]);
+
+  const rows = React.useMemo(() => buildComponentRows(components), [components]);
+
+  return (
+    <>
+      <div className="eol-risk-summary-strip">
+        {([
+          { key: 'eol', label: 'End of Life', value: summary?.eolCount, className: 'eol-risk-stat--danger' },
+          { key: 'near-eol', label: 'Near EOL (≤90d)', value: summary?.nearEolCount, className: 'eol-risk-stat--warn' },
+          { key: 'all', label: 'Supported', value: summary?.supportedCount, className: 'eol-risk-stat--ok' },
+          { key: 'unknown', label: 'Unknown', value: summary?.unknownCount, className: 'eol-risk-stat--muted' },
+        ] as const).map(({ key, label, value, className }) => (
+          <button
+            key={key}
+            type="button"
+            className={`eol-risk-stat ${className} ${filter === key ? 'active' : ''}`}
+            onClick={() => setFilter(key === filter ? 'all' : key as AtRiskFilter)}
+          >
+            <strong className="eol-risk-stat-value">{(value ?? 0).toLocaleString()}</strong>
+            <span className="eol-risk-stat-label">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="toolbar eol-atrisk-toolbar">
+        <div className="eol-filter-chips">
+          {(Object.keys(FILTER_LABELS) as AtRiskFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`chip ${filter === f ? 'chip-active' : ''}`}
+              onClick={() => setFilter(f)}
+            >
+              {FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
+        <div className="button-row">
+          <a href={eolMappingReviewHref} className="btn btn-secondary">
+            Review Unmatched Mappings
+          </a>
+        </div>
+      </div>
+
+      {componentQuery.isLoading || componentQuery.isFetching ? (
+        <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
+      ) : componentQuery.error instanceof Error ? (
+        <div className="notice error">{componentQuery.error.message}</div>
+      ) : rows.length === 0 ? (
+        <div className="empty-state">
+          <p>{filter === 'all' ? 'No EOL data has been processed yet.' : `No components match the "${FILTER_LABELS[filter]}" filter.`}</p>
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <DataTable
+            storageKey="eol-at-risk-components"
+            columns={COMPONENT_COLUMNS}
+            rows={rows}
+          />
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="pagination-row">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={page === 0}
+            onClick={() => setPage(p => p - 1)}
+          >
+            Previous
+          </button>
+          <span className="panel-caption">
+            Page {page + 1} of {totalPages} · {totalElements.toLocaleString()} components
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Product Catalog tab (unchanged logic, extracted)
+// ---------------------------------------------------------------------------
+
+function CatalogTab() {
   const productsQuery = useEolProductsQuery();
   const products = React.useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
   const loading = productsQuery.isPending;
@@ -62,37 +231,33 @@ export function EolPage() {
   const [query, setQuery] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [drawer, setDrawer] = React.useState<EolProductCatalog | null>(null);
-  const eolMappingReviewHref = `${pathForOperationsView('quality')}?domain=EOL&focus=eol-mapping-review`;
 
-  React.useEffect(() => {
-    setPage(0);
-  }, [query]);
+  React.useEffect(() => { setPage(0); }, [query]);
 
   const filteredProducts = React.useMemo(
     () => products.filter(product => matchesProduct(product, query)),
     [products, query]
   );
 
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / CATALOG_PAGE_SIZE));
   const activePage = Math.min(page, totalPages - 1);
   const pageItems = React.useMemo(
-    () => filteredProducts.slice(activePage * PAGE_SIZE, activePage * PAGE_SIZE + PAGE_SIZE),
+    () => filteredProducts.slice(activePage * CATALOG_PAGE_SIZE, activePage * CATALOG_PAGE_SIZE + CATALOG_PAGE_SIZE),
     [activePage, filteredProducts]
   );
 
   React.useEffect(() => {
-    if (page !== activePage) {
-      setPage(activePage);
-    }
+    if (page !== activePage) setPage(activePage);
   }, [activePage, page]);
 
   const catalogStats = React.useMemo(() => ({
     products: products.length,
-    lifecycleReady: products.filter(product => (product.releaseCount ?? 0) > 0).length,
-    cpeMapped: products.filter(product => Boolean(product.cpeVendor || product.cpeProduct)).length,
-    purlMapped: products.filter(product => Boolean(product.purlType || product.purlNamespace)).length,
-    aliases: products.filter(product => (product.aliases?.length ?? 0) > 0).length
+    lifecycleReady: products.filter(p => (p.releaseCount ?? 0) > 0).length,
+    cpeMapped: products.filter(p => Boolean(p.cpeVendor || p.cpeProduct)).length,
+    purlMapped: products.filter(p => Boolean(p.purlType || p.purlNamespace)).length,
+    aliases: products.filter(p => (p.aliases?.length ?? 0) > 0).length
   }), [products]);
+
   const productColumns = React.useMemo<DataTableColumn[]>(() => [
     { id: 'product', label: 'Product', header: 'Product', initialSize: 220 },
     { id: 'slug', label: 'Slug', header: 'Slug', initialSize: 150 },
@@ -101,6 +266,7 @@ export function EolPage() {
     { id: 'aliases', label: 'Aliases', header: 'Aliases', initialSize: 240 },
     { id: 'actions', label: 'Actions', header: '', initialSize: 140 }
   ], []);
+
   const productRows = React.useMemo<DataTableRow[]>(() => (
     pageItems.map((product) => ({
       id: product.slug,
@@ -180,6 +346,7 @@ export function EolPage() {
       }
     }))
   ), [pageItems]);
+
   function exportCsv() {
     const header = 'Display Name,Slug,Release Count,CPE Vendor,CPE Product,PURL Type,PURL Namespace,Aliases,Last Modified,Last Fetched At';
     const rows = filteredProducts.map(product =>
@@ -196,7 +363,6 @@ export function EolPage() {
         product.lastFetchedAt ?? ''
       ].map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')
     );
-
     const csv = [header, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -210,117 +376,87 @@ export function EolPage() {
   }
 
   return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h3>End-of-Life Catalog</h3>
-          </div>
-          <div className="button-row">
-            <a href={eolMappingReviewHref} className="btn btn-secondary">
-              Review Unmatched Mappings
-            </a>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={exportCsv}
-              disabled={filteredProducts.length === 0}
-            >
-              Export CSV
-            </button>
-          </div>
+    <>
+      <div className="ingestion-summary-grid">
+        <div className="summary-card"><strong>Products</strong><span>{catalogStats.products.toLocaleString()}</span></div>
+        <div className="summary-card"><strong>Lifecycle Ready</strong><span>{catalogStats.lifecycleReady.toLocaleString()}</span></div>
+        <div className="summary-card"><strong>CPE Tagged</strong><span>{catalogStats.cpeMapped.toLocaleString()}</span></div>
+        <div className="summary-card"><strong>PURL Tagged</strong><span>{catalogStats.purlMapped.toLocaleString()}</span></div>
+        <div className="summary-card"><strong>Aliases</strong><span>{catalogStats.aliases.toLocaleString()}</span></div>
+      </div>
+
+      <div className="toolbar eol-catalog-toolbar">
+        <label className="eol-catalog-search">
+          <span className="panel-caption">Search catalog</span>
+          <input
+            type="text"
+            className="filter-input"
+            placeholder="slug, display name, alias, CPE, or PURL"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+          />
+        </label>
+        <div className="button-row">
+          <span className="panel-caption">{filteredProducts.length.toLocaleString()} matching products</span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={exportCsv}
+            disabled={filteredProducts.length === 0}
+          >
+            Export CSV
+          </button>
         </div>
+      </div>
 
-        <div className="ingestion-summary-grid">
-          <div className="summary-card">
-            <strong>Products</strong>
-            <span>{catalogStats.products.toLocaleString()}</span>
-          </div>
-          <div className="summary-card">
-            <strong>Lifecycle Ready</strong>
-            <span>{catalogStats.lifecycleReady.toLocaleString()}</span>
-          </div>
-          <div className="summary-card">
-            <strong>CPE Tagged</strong>
-            <span>{catalogStats.cpeMapped.toLocaleString()}</span>
-          </div>
-          <div className="summary-card">
-            <strong>PURL Tagged</strong>
-            <span>{catalogStats.purlMapped.toLocaleString()}</span>
-          </div>
-          <div className="summary-card">
-            <strong>Aliases</strong>
-            <span>{catalogStats.aliases.toLocaleString()}</span>
-          </div>
-        </div>
+      {error && (
+        <div className="notice error" style={{ margin: '0 0 12px' }}>Error: {error}</div>
+      )}
 
-        <div className="toolbar eol-catalog-toolbar">
-          <label className="eol-catalog-search">
-            <span className="panel-caption">Search catalog</span>
-            <input
-              type="text"
-              className="filter-input"
-              placeholder="slug, display name, alias, CPE, or PURL"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-            />
-          </label>
-          <span className="panel-caption">
-            {filteredProducts.length.toLocaleString()} matching products
-          </span>
-        </div>
+      {loading ? (
+        <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
+      ) : (
+        <>
+          {pageItems.length === 0 ? (
+            <div className="panel-caption" style={{ padding: '32px 0' }}>
+              {query.trim().length > 0 ? 'No products matched your search.' : 'No EOL products have been ingested yet.'}
+            </div>
+          ) : (
+            <div className="table-scroll">
+              <DataTable
+                storageKey="eol-product-catalog-v2"
+                columns={productColumns}
+                rows={productRows}
+              />
+            </div>
+          )}
 
-        {error && (
-          <div className="notice error" style={{ margin: '0 0 12px' }}>
-            Error: {error}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
-        ) : (
-          <>
-            {error && products.length === 0 ? null : pageItems.length === 0 ? (
-              <div className="panel-caption" style={{ padding: '32px 0' }}>
-                {query.trim().length > 0 ? 'No products matched your search.' : 'No EOL products have been ingested yet.'}
-              </div>
-            ) : (
-              <div className="table-scroll">
-                <DataTable
-                  storageKey="eol-product-catalog-v2"
-                  columns={productColumns}
-                  rows={productRows}
-                />
-              </div>
-            )}
-
-            {filteredProducts.length > PAGE_SIZE && (
-              <div className="pagination-row">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={activePage === 0}
-                  onClick={() => setPage(current => current - 1)}
-                >
-                  Previous
-                </button>
-                <span className="panel-caption">
-                  Page {activePage + 1} of {totalPages}
-                  {' · '}{filteredProducts.length.toLocaleString()} products
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={activePage >= totalPages - 1}
-                  onClick={() => setPage(current => current + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+          {filteredProducts.length > CATALOG_PAGE_SIZE && (
+            <div className="pagination-row">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={activePage === 0}
+                onClick={() => setPage(current => current - 1)}
+              >
+                Previous
+              </button>
+              <span className="panel-caption">
+                Page {activePage + 1} of {totalPages}
+                {' · '}{filteredProducts.length.toLocaleString()} products
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={activePage >= totalPages - 1}
+                onClick={() => setPage(current => current + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
+      )}
 
       {drawer && (
         <EolDetailDrawer
@@ -332,6 +468,91 @@ export function EolPage() {
           onClose={() => setDrawer(null)}
         />
       )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data Freshness section
+// ---------------------------------------------------------------------------
+
+function DataFreshnessBar() {
+  const [running, setRunning] = React.useState(false);
+  const [result, setResult] = React.useState<SyncTriggerResponse | null>(null);
+
+  async function handleRefresh() {
+    setRunning(true);
+    setResult(null);
+    try {
+      const response = await api.triggerEolFullRefresh();
+      setResult(response);
+    } catch {
+      setResult({ runId: '', status: 'error', message: 'Failed to queue refresh. Check the Connect tab for details.' });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="eol-freshness-bar">
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={handleRefresh}
+        disabled={running}
+      >
+        {running ? 'Queuing...' : 'Run Full Refresh'}
+      </button>
+      {result && (
+        <span className={`panel-caption ${result.status === 'error' ? 'eol-freshness-error' : ''}`}>
+          {result.status === 'error'
+            ? result.message
+            : `Queued — run #${result.runId}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
+export function EolPage() {
+  const [activeTab, setActiveTab] = React.useState<EolTab>('at-risk');
+  const eolMappingReviewHref = `${pathForOperationsView('quality')}?domain=EOL&focus=eol-mapping-review`;
+
+  return (
+    <div className="page-grid">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>End-of-Life</h3>
+            <span className="panel-caption">Lifecycle risk across active inventory</span>
+          </div>
+          <DataFreshnessBar />
+        </div>
+
+        <div className="eol-page-tabs">
+          <button
+            type="button"
+            className={`eol-page-tab ${activeTab === 'at-risk' ? 'active' : ''}`}
+            onClick={() => setActiveTab('at-risk')}
+          >
+            At-Risk Components
+          </button>
+          <button
+            type="button"
+            className={`eol-page-tab ${activeTab === 'catalog' ? 'active' : ''}`}
+            onClick={() => setActiveTab('catalog')}
+          >
+            Product Catalog
+          </button>
+        </div>
+
+        {activeTab === 'at-risk' && <AtRiskTab eolMappingReviewHref={eolMappingReviewHref} />}
+        {activeTab === 'catalog' && <CatalogTab />}
+      </section>
     </div>
   );
 }

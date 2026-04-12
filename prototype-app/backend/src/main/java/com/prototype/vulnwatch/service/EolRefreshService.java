@@ -228,11 +228,16 @@ public class EolRefreshService {
     @Scheduled(cron = "${app.eol.catalog-refresh-cron:0 0 2 * * SUN}")
     public void fullCatalogRefresh() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping catalog refresh"); return; }
+        SyncRun run = startRun("EOL_CATALOG_REFRESH");
+        run.setStatus("running");
+        syncRunRepository.save(run);
         try {
             int count = runCatalogRefresh();
             LOG.info("EOL catalog refresh complete — upserted {} products", count);
+            completeRun(run, "completed", count);
         } catch (Exception e) {
             LOG.error("EOL catalog refresh failed", e);
+            completeRun(run, "failed", e.getMessage());
         }
     }
 
@@ -274,11 +279,16 @@ public class EolRefreshService {
     @Scheduled(cron = "${app.eol.release-refresh-cron:0 0 3 * * SUN}")
     public void releaseDataRefresh() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping release data refresh"); return; }
+        SyncRun run = startRun("EOL_RELEASE_REFRESH");
+        run.setStatus("running");
+        syncRunRepository.save(run);
         try {
             int count = runReleaseRefresh();
             LOG.info("EOL release refresh complete — {} cycles upserted", count);
+            completeRun(run, "completed", count);
         } catch (Exception e) {
             LOG.error("EOL release data refresh failed", e);
+            completeRun(run, "failed", e.getMessage());
         }
     }
 
@@ -370,11 +380,16 @@ public class EolRefreshService {
     @Scheduled(cron = "${app.eol.resolve-mappings-cron:0 30 3 * * SUN}")
     public void resolveInstanceMappings() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping mapping resolution"); return; }
+        SyncRun run = startRun("EOL_MAPPING_RESOLVE");
+        run.setStatus("running");
+        syncRunRepository.save(run);
         try {
             int count = runMappingResolve();
             LOG.info("EOL mapping resolution complete — {} new/updated mappings", count);
+            completeRun(run, "completed", count);
         } catch (Exception e) {
             LOG.error("EOL mapping resolution failed", e);
+            completeRun(run, "failed", e.getMessage());
         }
     }
 
@@ -395,11 +410,16 @@ public class EolRefreshService {
     @Scheduled(cron = "${app.eol.denormalize-cron:0 0 4 * * SUN}")
     public void denormalizeEolStatus() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping denormalization"); return; }
+        SyncRun run = startRun("EOL_DENORMALIZE");
+        run.setStatus("running");
+        syncRunRepository.save(run);
         try {
             int count = runDenormalize();
             LOG.info("EOL denormalization complete — {} rows updated", count);
+            completeRun(run, "completed", count);
         } catch (Exception e) {
             LOG.error("EOL denormalization failed", e);
+            completeRun(run, "failed", e.getMessage());
         }
     }
 
@@ -583,7 +603,8 @@ public class EolRefreshService {
                     ORDER BY si2.id, r.cycle DESC
                 ) bc
                 WHERE si.id = bc.si_id
-                """.formatted(identityKeyExpr, normalizedKeyFilter);
+                """;
+        sql = sql.replaceFirst("%s", identityKeyExpr).replaceFirst("%s", normalizedKeyFilter);
         try {
             return normalizedKey == null ? jdbcTemplate.update(sql) : jdbcTemplate.update(sql, normalizedKey);
         } catch (Exception e) {
@@ -634,7 +655,8 @@ public class EolRefreshService {
                     ORDER BY ic2.id, r.cycle DESC
                 ) bc
                 WHERE ic.id = bc.ic_id
-                """.formatted(identityKeyExpr, normalizedKeyFilter);
+                """;
+        sql = sql.replaceFirst("%s", identityKeyExpr).replaceFirst("%s", normalizedKeyFilter);
         try {
             return normalizedKey == null ? jdbcTemplate.update(sql) : jdbcTemplate.update(sql, normalizedKey);
         } catch (Exception e) {

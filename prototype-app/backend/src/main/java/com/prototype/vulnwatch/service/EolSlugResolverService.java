@@ -458,6 +458,70 @@ public class EolSlugResolverService {
         return null;
     }
 
+    /**
+     * Returns all candidate slug matches for a given normalizedKey across all 4 tiers.
+     * Unlike resolve(), this does not stop at the first match — it collects one match
+     * per tier (deduplicated by slug) so callers can surface suggestions to analysts.
+     */
+    public List<SlugMatch> resolveCandidates(String normalizedKey) {
+        // Look up identity by mapping or parse vendor/product from key
+        SoftwareIdentity identity = null;
+        java.util.Optional<SoftwareEolMapping> mapping = softwareEolMappingRepository.findByNormalizedKey(normalizedKey);
+        if (mapping.isPresent() && mapping.get().getSoftwareIdentityId() != null) {
+            identity = softwareIdentityRepository.findById(mapping.get().getSoftwareIdentityId()).orElse(null);
+        }
+
+        // Fall back to parsing vendor::product from the normalized key
+        String vendor = "";
+        String product = "";
+        if (normalizedKey != null) {
+            String[] parts = normalizedKey.split("::", 2);
+            vendor  = parts.length > 0 ? parts[0] : "";
+            product = parts.length > 1 ? parts[1] : "";
+        }
+
+        String cpe23 = identity != null ? identity.getCpe23() : null;
+        String purl  = identity != null ? identity.getPurl()  : null;
+        String effectiveVendor  = identity != null && identity.getVendor()  != null ? identity.getVendor()  : vendor;
+        String effectiveProduct = identity != null && identity.getProduct() != null ? identity.getProduct() : product;
+
+        List<SlugMatch> candidates = new ArrayList<>();
+
+        SlugMatch cpeMatch = resolveViaCpe(cpe23);
+        if (cpeMatch != null) candidates.add(cpeMatch);
+
+        SlugMatch purlMatch = resolveViaPurl(purl);
+        if (purlMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(purlMatch.slug()))) {
+            candidates.add(purlMatch);
+        }
+
+        SlugMatch aliasMatch = resolveViaAliasDb(effectiveVendor, effectiveProduct);
+        if (aliasMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(aliasMatch.slug()))) {
+            candidates.add(aliasMatch);
+        }
+
+        SlugMatch nameMatch = resolveViaName(effectiveVendor, effectiveProduct);
+        if (nameMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(nameMatch.slug()))) {
+            candidates.add(nameMatch);
+        }
+
+        // Tier 5: Text search fallback — used when no structured match was found.
+        // These items are in the unresolved list precisely because tiers 1-4 returned nothing,
+        // so substring matching against catalog slug/displayName is the only way to surface candidates.
+        if (candidates.isEmpty() && effectiveProduct != null && !effectiveProduct.isBlank()) {
+            String term = effectiveProduct.trim().toLowerCase(Locale.ROOT);
+            eolProductCatalogRepository
+                    .findTop5BySlugContainingIgnoreCaseOrDisplayNameContainingIgnoreCase(term, term)
+                    .forEach(match -> {
+                        if (candidates.stream().noneMatch(c -> c.slug().equals(match.getSlug()))) {
+                            candidates.add(new SlugMatch(match.getSlug(), "LOW", "TEXT_SEARCH"));
+                        }
+                    });
+        }
+
+        return candidates;
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------

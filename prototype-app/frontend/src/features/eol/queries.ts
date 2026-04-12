@@ -36,10 +36,22 @@ export function useEolReleasesQuery(slug: string | null, enabled = true) {
   });
 }
 
-export function useEolUnresolvedMappingsQuery(enabled = true) {
+export type EolUnresolvedMappingsQueryParams = { page?: number; size?: number };
+
+export function useEolUnresolvedMappingsQuery(params: EolUnresolvedMappingsQueryParams = {}, enabled = true) {
   return useQuery({
-    queryKey: ['eol-unresolved-mappings'],
-    queryFn: api.listEolUnresolvedMappings,
-    enabled
+    queryKey: ['eol-unresolved-mappings', params],
+    queryFn: () => api.listEolUnresolvedMappings(params),
+    enabled,
+    placeholderData: keepPreviousData
+  });
+}
+
+export function useEolSlugSuggestionsQuery(normalizedKey: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['eol-slug-suggestions', normalizedKey],
+    queryFn: () => api.listEolMappingSuggestions(normalizedKey ?? ''),
+    enabled: enabled && Boolean(normalizedKey),
+    staleTime: 5 * 60 * 1000
   });
 }

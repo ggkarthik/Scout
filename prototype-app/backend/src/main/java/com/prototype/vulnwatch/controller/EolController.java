@@ -4,11 +4,14 @@ import com.prototype.vulnwatch.dto.ComponentEolStatusDto;
 import com.prototype.vulnwatch.dto.EolMappingConfirmRequest;
 import com.prototype.vulnwatch.dto.EolProductCatalogDto;
 import com.prototype.vulnwatch.dto.EolReleaseDto;
+import com.prototype.vulnwatch.dto.EolSlugSuggestionDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
 import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.service.EolRefreshService;
 import com.prototype.vulnwatch.service.EolService;
+import com.prototype.vulnwatch.service.EolSlugResolverService;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
@@ -26,10 +29,15 @@ public class EolController {
 
     private final EolService eolService;
     private final EolRefreshService eolRefreshService;
+    private final EolSlugResolverService slugResolverService;
+    private final EolProductCatalogRepository catalogRepository;
 
-    public EolController(EolService eolService, EolRefreshService eolRefreshService) {
+    public EolController(EolService eolService, EolRefreshService eolRefreshService,
+            EolSlugResolverService slugResolverService, EolProductCatalogRepository catalogRepository) {
         this.eolService = eolService;
         this.eolRefreshService = eolRefreshService;
+        this.slugResolverService = slugResolverService;
+        this.catalogRepository = catalogRepository;
     }
 
     /**
@@ -67,6 +75,23 @@ public class EolController {
     @GetMapping("/products/{slug}/releases")
     public List<EolReleaseDto> listReleases(@PathVariable String slug) {
         return eolService.listReleases(slug);
+    }
+
+    /**
+     * Returns backend-computed slug candidates for a given normalizedKey.
+     * Runs all 4 resolution tiers and returns up to 5 candidates with confidence and method.
+     */
+    @GetMapping("/mappings/suggestions")
+    public List<EolSlugSuggestionDto> listSuggestions(@RequestParam String normalizedKey) {
+        return slugResolverService.resolveCandidates(normalizedKey).stream()
+                .map(match -> {
+                    String displayName = catalogRepository.findBySlug(match.slug())
+                            .map(c -> c.getDisplayName() != null ? c.getDisplayName() : c.getSlug())
+                            .orElse(match.slug());
+                    return new EolSlugSuggestionDto(match.slug(), displayName, match.confidence(), match.method());
+                })
+                .limit(5)
+                .toList();
     }
 
     /**
@@ -111,7 +136,10 @@ public class EolController {
      * Software identities that have no EOL slug mapping yet (for analyst review).
      */
     @GetMapping("/mappings/unresolved")
-    public List<EolUnresolvedMappingDto> listUnresolved() {
-        return eolService.listUnresolvedMappings();
+    public Page<EolUnresolvedMappingDto> listUnresolved(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size
+    ) {
+        return eolService.listUnresolvedMappings(page, Math.min(size, 100));
     }
 }

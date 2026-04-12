@@ -13,6 +13,7 @@ import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
@@ -22,14 +23,24 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class EolService {
 
     private static final int NEAR_EOL_THRESHOLD_DAYS = EolConstants.NEAR_EOL_THRESHOLD_DAYS;
+
+    /**
+     * Library/package-manager ecosystems that endoflife.date does not track.
+     * Excluded from "Unknown" counts and the unresolved review queue so analysts
+     * only see actionable gaps — OS packages, runtimes, infrastructure software.
+     */
+    private static final String LIBRARY_ECOSYSTEMS_SQL =
+            "'npm','pypi','gem','cargo','nuget','composer','maven','gomod','golang','go','rubygems'";
 
     private final EolProductCatalogRepository catalogRepository;
     private final EolReleaseRepository releaseRepository;
@@ -37,6 +48,7 @@ public class EolService {
     private final SoftwareIdentityRepository identityRepository;
     private final JdbcTemplate jdbcTemplate;
     private final EolRefreshService eolRefreshService;
+    private final RequestActorService requestActorService;
 
     public EolService(
             EolProductCatalogRepository catalogRepository,
@@ -44,13 +56,15 @@ public class EolService {
             SoftwareEolMappingRepository mappingRepository,
             SoftwareIdentityRepository identityRepository,
             JdbcTemplate jdbcTemplate,
-            EolRefreshService eolRefreshService) {
+            EolRefreshService eolRefreshService,
+            RequestActorService requestActorService) {
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
         this.mappingRepository = mappingRepository;
         this.identityRepository = identityRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.eolRefreshService = eolRefreshService;
+        this.requestActorService = requestActorService;
     }
 
     // -------------------------------------------------------------------------
@@ -66,7 +80,10 @@ public class EolService {
                                        AND (eol_date - CURRENT_DATE) <= ?)                                       AS near_eol_count,
                     COUNT(*) FILTER (WHERE is_eol = false
                                        AND (eol_date IS NULL OR (eol_date - CURRENT_DATE) > ?))                  AS supported_count,
-                    COUNT(*) FILTER (WHERE eol_slug IS NULL)                                                     AS unknown_count,
+                    COUNT(*) FILTER (WHERE eol_slug IS NULL
+                                       AND (ecosystem IS NULL
+                                            OR lower(ecosystem) NOT IN (""" + LIBRARY_ECOSYSTEMS_SQL + """
+                                           )))                                                                    AS unknown_count,
                     COUNT(*)                                                                                      AS total_count
                 FROM inventory_components
                 WHERE component_status = 'ACTIVE'
@@ -142,7 +159,7 @@ public class EolService {
             case "eol"      -> " AND ic.is_eol = true";
             case "near-eol" -> " AND ic.is_eol = false AND ic.eol_date IS NOT NULL AND (ic.eol_date - CURRENT_DATE) <= " + NEAR_EOL_THRESHOLD_DAYS;
             case "ok"       -> " AND ic.is_eol = false AND (ic.eol_date IS NULL OR (ic.eol_date - CURRENT_DATE) > " + NEAR_EOL_THRESHOLD_DAYS + ")";
-            case "unknown"  -> " AND ic.eol_slug IS NULL";
+            case "unknown"  -> " AND ic.eol_slug IS NULL AND (ic.ecosystem IS NULL OR lower(ic.ecosystem) NOT IN (" + LIBRARY_ECOSYSTEMS_SQL + "))";
             default         -> "";
         };
     }
@@ -201,21 +218,55 @@ public class EolService {
 
     @Transactional
     public void confirmMapping(EolMappingConfirmRequest request) {
-        Optional<SoftwareEolMapping> existing = mappingRepository.findByNormalizedKey(request.normalizedKey());
+        String normalizedKey = normalizeLowercaseValue(request.normalizedKey(), "Normalized key");
+        String eolSlug = normalizeLowercaseValue(request.eolSlug(), "EOL slug");
+        if (catalogRepository.findBySlug(eolSlug).isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Unknown EOL slug: " + eolSlug + ". Refresh the catalog or choose a valid endoflife.date slug."
+            );
+        }
+
+        Optional<SoftwareEolMapping> existing = mappingRepository.findByNormalizedKey(normalizedKey);
         SoftwareEolMapping mapping = existing.orElseGet(SoftwareEolMapping::new);
-        mapping.setNormalizedKey(request.normalizedKey());
-        mapping.setEolSlug(request.eolSlug());
-        attachIdentityIfUnique(mapping, request.normalizedKey());
+        String previousSlug = mapping.getEolSlug();
+        mapping.setNormalizedKey(normalizedKey);
+        mapping.setEolSlug(eolSlug);
+        attachIdentityIfUnique(mapping, normalizedKey);
         mapping.setMatchConfidence("MANUAL");
         mapping.setMatchMethod("MANUAL");
         mapping.setConfirmed(true);
+        mapping.setPreviousSlug(previousSlug);
+        mapping.setConfirmedBy(requestActorService.currentActor().userId());
+        mapping.setConfirmedAt(Instant.now());
         mapping.touch();
         mappingRepository.saveAndFlush(mapping);
-        eolRefreshService.refreshConfirmedMapping(request.normalizedKey());
+        eolRefreshService.refreshConfirmedMapping(normalizedKey);
     }
 
-    public List<EolUnresolvedMappingDto> listUnresolvedMappings() {
-        return jdbcTemplate.query("""
+    private static final String UNRESOLVED_WHERE = """
+            WHERE sis.eol_slug IS NULL
+              AND (
+                  nullif(trim(sis.cpe23), '') IS NOT NULL
+                  OR coalesce(array_length(sis.ecosystems, 1), 0) = 0
+                  OR EXISTS (
+                      SELECT 1
+                      FROM unnest(sis.ecosystems) AS ecosystem
+                      WHERE ecosystem IS NOT NULL
+                        AND lower(ecosystem) NOT IN (
+                            'npm','pypi','gem','cargo','nuget','composer','maven',
+                            'gomod','golang','go','rubygems'
+                        )
+                  )
+              )
+            """;
+
+    public Page<EolUnresolvedMappingDto> listUnresolvedMappings(int page, int size) {
+        Long total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM software_identity_summary sis " + UNRESOLVED_WHERE, Long.class);
+        long totalCount = total == null ? 0L : total;
+
+        List<EolUnresolvedMappingDto> content = jdbcTemplate.query("""
                 WITH exposure_counts AS (
                     SELECT
                         ic.software_identity_id,
@@ -273,7 +324,7 @@ public class EolService {
                     sis.asset_count DESC,
                     sis.display_name ASC NULLS LAST,
                     sis.canonical_key ASC NULLS LAST
-                LIMIT 200
+                LIMIT ? OFFSET ?
                 """, (rs, rowNum) -> new EolUnresolvedMappingDto(
                 (java.util.UUID) rs.getObject("software_identity_id"),
                 rs.getString("vendor"),
@@ -286,7 +337,9 @@ public class EolService {
                 rs.getLong("open_finding_count"),
                 rs.getLong("open_vulnerability_count"),
                 rs.getTimestamp("last_observed_at") == null ? null : rs.getTimestamp("last_observed_at").toInstant()
-        ));
+        ), size, (long) page * size);
+
+        return new PageImpl<>(content, PageRequest.of(page, size), totalCount);
     }
 
     // -------------------------------------------------------------------------
@@ -338,5 +391,12 @@ public class EolService {
             return null;
         }
         return new String[]{vendor, product};
+    }
+
+    private String normalizeLowercaseValue(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + " is required");
+        }
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 }

@@ -27,4 +27,8 @@ public interface EolProductCatalogRepository extends JpaRepository<EolProductCat
      */
     @Query("select e.slug from EolProductCatalog e where e.cpeVendor is not null or e.purlType is not null")
     List<String> findSlugsByHasIdentifiers();
+
+    /** Text-search fallback: slug or displayName contains the given term (case-insensitive). */
+    List<EolProductCatalog> findTop5BySlugContainingIgnoreCaseOrDisplayNameContainingIgnoreCase(
+            String slugFragment, String displayNameFragment);
 }

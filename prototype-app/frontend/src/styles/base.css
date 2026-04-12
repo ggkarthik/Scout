@@ -1981,11 +1981,11 @@ label {
 }
 
 .host-detail-page {
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(10, 16, 30, 0.98));
-  color: #e5edf7;
-  border: 1px solid rgba(76, 97, 129, 0.45);
-  border-radius: 28px;
-  box-shadow: 0 24px 48px rgba(3, 8, 20, 0.42);
+  background: var(--panel-solid);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   min-height: calc(100vh - 180px);
   padding: 28px;
 }
@@ -1994,19 +1994,19 @@ label {
 .host-detail-page .data-table,
 .host-detail-page .data-table-shell,
 .host-detail-page .data-table-wrap {
-  background: #0f1728;
+  background: var(--panel-solid);
 }
 
 .host-detail-page .data-table th,
 .host-detail-page .data-table td {
-  color: #dfe7f3;
-  border-color: rgba(73, 93, 122, 0.35);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .host-detail-page .panel-caption,
 .host-detail-page .empty-state,
 .host-detail-page .inline-note {
-  color: #8fa2bd;
+  color: var(--muted);
 }
 
 .host-detail-close-row {
@@ -2017,14 +2017,15 @@ label {
 .host-detail-page .modal-close-btn {
   width: 48px;
   height: 48px;
-  border-radius: 14px;
-  background: #111b2d;
-  border-color: rgba(76, 97, 129, 0.5);
-  color: #f4f7fb;
+  border-radius: var(--radius-md);
+  background: var(--panel-muted);
+  border-color: var(--border-strong);
+  color: var(--title);
 }
 
 .host-detail-page .modal-close-btn:hover {
-  background: #1a2840;
+  background: var(--panel-solid);
+  border-color: var(--border-strong);
 }
 
 .host-hero {
@@ -2044,9 +2045,9 @@ label {
 .host-hero-icon {
   width: 72px;
   height: 72px;
-  border-radius: 18px;
-  border: 1px solid rgba(78, 102, 136, 0.45);
-  background: linear-gradient(180deg, rgba(24, 35, 56, 0.94), rgba(17, 24, 39, 0.94));
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
   display: grid;
   place-items: center;
   font-size: 34px;
@@ -2056,12 +2057,12 @@ label {
   margin: 0 0 6px;
   font-size: 2.1rem;
   line-height: 1.05;
-  color: #f3f7fc;
+  color: var(--title);
 }
 
 .host-hero-subtitle {
   font-size: 0.98rem;
-  color: #9cb0c9;
+  color: var(--muted);
 }
 
 .host-hero-actions {
@@ -2070,11 +2071,6 @@ label {
   flex-wrap: wrap;
 }
 
-.host-detail-page .btn.btn-secondary {
-  background: #101a2c;
-  color: #edf3fa;
-  border-color: rgba(76, 97, 129, 0.48);
-}
 
 .host-summary-strip {
   display: grid;
@@ -2084,9 +2080,9 @@ label {
 }
 
 .host-stat-card {
-  background: rgba(17, 27, 44, 0.94);
-  border: 1px solid rgba(78, 102, 136, 0.34);
-  border-radius: 20px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 20px;
   min-height: 146px;
   display: flex;
@@ -2098,13 +2094,13 @@ label {
   font-size: 0.92rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #93a6bf;
+  color: var(--muted);
 }
 
 .host-stat-value {
   font-size: 1.15rem;
   font-weight: 700;
-  color: #f2f6fb;
+  color: var(--text);
 }
 
 .host-stat-number {
@@ -2114,11 +2110,11 @@ label {
 }
 
 .host-stat-number-danger {
-  color: #db4b4b;
+  color: var(--critical);
 }
 
 .host-stat-number-warning {
-  color: #b87311;
+  color: var(--warn);
 }
 
 .host-stat-pill {
@@ -2132,45 +2128,45 @@ label {
 }
 
 .host-stat-pill-warning {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f3bd59;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
 }
 
 .host-stat-pill-success {
-  background: rgba(16, 185, 129, 0.18);
-  color: #40d59e;
+  background: color-mix(in srgb, var(--low) 14%, transparent);
+  color: var(--low);
 }
 
 .host-detail-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  border-bottom: 1px solid rgba(73, 93, 122, 0.35);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 22px;
 }
 
 .host-detail-tab {
-  border: 1px solid rgba(76, 97, 129, 0.4);
+  border: 1px solid var(--border);
   border-bottom: 0;
-  background: #101a2c;
-  color: #dce6f5;
+  background: var(--panel-muted);
+  color: var(--muted);
   padding: 14px 28px;
   font-size: 0.96rem;
   font-weight: 700;
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
   margin-right: -1px;
 }
 
 .host-detail-tab.active {
-  background: #162338;
-  color: #f5f8fc;
+  background: var(--panel-solid);
+  color: var(--title);
 }
 
 .host-detail-surface {
-  background: #10192a;
-  border: 1px solid rgba(76, 97, 129, 0.34);
-  border-radius: 22px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -2197,7 +2193,7 @@ label {
 .inventory-section-header h2,
 .inventory-detail-hero h3 {
   margin: 0;
-  color: #f4f7fb;
+  color: var(--title);
 }
 
 .inventory-page-header-actions {
@@ -2216,10 +2212,10 @@ label {
 .inventory-section-card,
 .inventory-detail-card,
 .inventory-toolbar {
-  border: 1px solid rgba(76, 97, 129, 0.34);
-  background: rgba(15, 23, 40, 0.96);
-  border-radius: 24px;
-  box-shadow: 0 18px 36px rgba(4, 9, 20, 0.2);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .inventory-summary-card {
@@ -2233,17 +2229,17 @@ label {
   font-size: 0.78rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #8ea3c2;
+  color: var(--muted);
 }
 
 .inventory-summary-value {
   font-size: 2rem;
   line-height: 1;
-  color: #f5f8fc;
+  color: var(--title);
 }
 
 .inventory-summary-subtext {
-  color: #8fa2bd;
+  color: var(--muted);
   font-size: 0.95rem;
 }
 
@@ -2262,9 +2258,9 @@ label {
 .inventory-tab-button,
 .inventory-chip {
   border-radius: 999px;
-  border: 1px solid rgba(76, 97, 129, 0.34);
-  background: #10192a;
-  color: #dbe6f4;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
   min-height: 40px;
   padding: 0 16px;
   font-weight: 700;
@@ -2272,9 +2268,9 @@ label {
 
 .inventory-tab-button.active,
 .inventory-chip.active {
-  border-color: rgba(67, 110, 255, 0.55);
-  background: rgba(67, 110, 255, 0.14);
-  color: #8eb4ff;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-strong);
 }
 
 .inventory-chip.static {
@@ -2305,10 +2301,10 @@ label {
 }
 
 .inventory-error-banner {
-  border: 1px solid rgba(220, 82, 82, 0.4);
-  background: rgba(104, 30, 40, 0.35);
-  color: #ffd8dd;
-  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--critical) 40%, var(--border));
+  background: color-mix(in srgb, var(--critical) 10%, transparent);
+  color: var(--text);
+  border-radius: var(--radius-md);
   padding: 16px 18px;
 }
 
@@ -2332,10 +2328,10 @@ label {
 }
 
 .inventory-table-shell {
-  border: 1px solid rgba(76, 97, 129, 0.28);
-  border-radius: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  background: #0f1728;
+  background: var(--panel-solid);
 }
 
 .inventory-table {
@@ -2346,7 +2342,7 @@ label {
 .inventory-table th,
 .inventory-table td {
   padding: 16px 18px;
-  border-bottom: 1px solid rgba(76, 97, 129, 0.18);
+  border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
 }
@@ -2355,12 +2351,12 @@ label {
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #8ea3c2;
-  background: rgba(18, 28, 46, 0.98);
+  color: var(--muted);
+  background: var(--panel-muted);
 }
 
 .inventory-table td {
-  color: #dfe7f3;
+  color: var(--text);
 }
 
 .inventory-table tbody tr:last-child td {
@@ -2374,7 +2370,7 @@ label {
 
 .inventory-table-row-clickable:hover,
 .inventory-table-row-clickable.active {
-  background: rgba(35, 52, 83, 0.52);
+  background: var(--table-row);
 }
 
 .inventory-link-button {
@@ -2387,17 +2383,17 @@ label {
 }
 
 .inventory-link-button-primary {
-  color: #6ea2ff;
+  color: var(--accent);
   font-weight: 800;
 }
 
 .inventory-link-button-primary:hover {
-  color: #90baff;
+  color: var(--accent-strong);
 }
 
 .inventory-primary-text {
   font-weight: 800;
-  color: #f4f7fb;
+  color: var(--title);
 }
 
 .inventory-detail-stack {
@@ -2420,9 +2416,9 @@ label {
 }
 
 .inventory-detail-metric {
-  border: 1px solid rgba(76, 97, 129, 0.24);
-  background: rgba(16, 25, 42, 0.9);
-  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  border-radius: var(--radius-lg);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -2442,11 +2438,11 @@ label {
 }
 
 .inventory-detail-host-item {
-  border: 1px solid rgba(76, 97, 129, 0.24);
-  background: rgba(16, 25, 42, 0.92);
-  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  border-radius: var(--radius-lg);
   padding: 16px;
-  color: #edf3fa;
+  color: var(--text);
   text-align: left;
   display: flex;
   flex-direction: column;
@@ -2454,8 +2450,8 @@ label {
 }
 
 .inventory-detail-host-item:hover {
-  border-color: rgba(67, 110, 255, 0.38);
-  background: rgba(24, 37, 61, 0.98);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: var(--panel-solid);
 }
 
 @media (max-width: 1100px) {
@@ -2525,8 +2521,8 @@ label {
   }
 
   .host-detail-tab {
-    border: 1px solid rgba(76, 97, 129, 0.4);
-    border-radius: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     margin-right: 0;
   }
 
