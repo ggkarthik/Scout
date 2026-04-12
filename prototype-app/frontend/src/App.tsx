@@ -88,18 +88,6 @@ const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: Invent
     items: [
       { key: 'hosts', label: 'Hosts' }
     ]
-  },
-  {
-    title: 'Cloud',
-    items: [
-      { key: 'container-images', label: 'Container Images' }
-    ]
-  },
-  {
-    title: 'Repositories',
-    items: [
-      { key: 'sbom', label: 'Repositories' }
-    ]
   }
 ];
 const OPERATIONS_NAV_ITEMS = [
@@ -289,6 +277,17 @@ function VulnRepoHostAssetRoute() {
 
   if (!assetId) {
     return <Navigate to={pathForVulnRepoView('dashboard')} replace />;
+  }
+
+  return <HostAssetDetailPage assetId={assetId} />;
+}
+
+function InventoryHostAssetRoute() {
+  const params = useParams<{ assetId?: string }>();
+  const assetId = params.assetId ? decodeURIComponent(params.assetId) : null;
+
+  if (!assetId) {
+    return <Navigate to={pathForInventoryView('hosts')} replace />;
   }
 
   return <HostAssetDetailPage assetId={assetId} />;
@@ -663,6 +662,7 @@ export default function App() {
               <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
+              <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EolPage />} />
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />
