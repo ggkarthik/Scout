@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -26,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  *   cpe_vendor + cpe_product in an in-memory catalog map.
  *
  * Tier 2 — PURL match (HIGH confidence): parses purl type and namespace, looks up in
- *   in-memory catalog maps + curated hint map.
+ *   in-memory catalog maps + curated type/namespace hint map.
  *
  * Tier 3 — Alias match (MEDIUM confidence): checks product name/vendor against the
  *   aliases stored on catalog entries.
@@ -43,6 +44,19 @@ public class EolSlugResolverService {
     private static final Logger LOG = LoggerFactory.getLogger(EolSlugResolverService.class);
 
     private static final int IDENTITY_PAGE_SIZE = 500;
+    private static final Set<String> LIBRARY_ECOSYSTEMS = Set.of(
+            "npm",
+            "pypi",
+            "gem",
+            "cargo",
+            "nuget",
+            "composer",
+            "maven",
+            "gomod",
+            "golang",
+            "go",
+            "rubygems"
+    );
 
     // Curated PURL type+namespace → slug hints.
     private static final Map<String, String> PURL_HINTS = Map.ofEntries(
@@ -54,19 +68,11 @@ public class EolSlugResolverService {
             Map.entry("rpm/opensuse", "opensuse"),
             Map.entry("rpm/sles", "sles"),
             Map.entry("apk/alpine", "alpine"),
-            Map.entry("pypi", "python"),
-            Map.entry("npm", "nodejs"),
-            Map.entry("gem", "ruby"),
-            Map.entry("golang", "go"),
-            Map.entry("cargo", "rust"),
-            Map.entry("nuget", "dotnet"),
-            Map.entry("composer", "php"),
             Map.entry("maven/org.springframework.boot", "spring-boot"),
             Map.entry("maven/org.apache.tomcat", "tomcat"),
             Map.entry("maven/mysql", "mysql"),
             Map.entry("maven/org.postgresql", "postgresql"),
-            Map.entry("docker", "docker"),
-            Map.entry("oci", "docker")
+            Map.entry("oci/library", "docker")
     );
 
     // Curated "publisher::product" → slug hints for Tier 4 name matching.
@@ -245,6 +251,29 @@ public class EolSlugResolverService {
         return resolveViaName(identity.getVendor(), identity.getProduct());
     }
 
+    public boolean shouldSurfaceForLifecycleReview(SoftwareIdentity identity, List<String> ecosystems) {
+        if (identity == null) {
+            return false;
+        }
+        if (resolve(identity) != null) {
+            return true;
+        }
+        if (identity.getCpe23() != null && !identity.getCpe23().isBlank()) {
+            return true;
+        }
+        List<String> normalizedEcosystems = ecosystems == null
+                ? List.of()
+                : ecosystems.stream()
+                        .filter(value -> value != null && !value.isBlank())
+                        .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                        .distinct()
+                        .toList();
+        if (normalizedEcosystems.isEmpty()) {
+            return true;
+        }
+        return normalizedEcosystems.stream().anyMatch(ecosystem -> !LIBRARY_ECOSYSTEMS.contains(ecosystem));
+    }
+
     // -------------------------------------------------------------------------
     // In-memory resolution (used by resolveAll)
     // -------------------------------------------------------------------------
@@ -307,16 +336,12 @@ public class EolSlugResolverService {
             String hint = PURL_HINTS.get(type + "/" + namespace);
             if (hint != null) return new SlugMatch(hint, "HIGH", "PURL");
         }
-        String typeHint = PURL_HINTS.get(type);
-        if (typeHint != null) return new SlugMatch(typeHint, "HIGH", "PURL");
 
         // Catalog DB maps
         if (namespace != null) {
             String slug = purlTypeNsMap.get(type + "/" + namespace);
             if (slug != null) return new SlugMatch(slug, "HIGH", "PURL_DB");
         }
-        String typeSlug = purlTypeMap.get(type);
-        if (typeSlug != null) return new SlugMatch(typeSlug, "MEDIUM", "PURL_TYPE");
 
         return null;
     }
@@ -382,16 +407,12 @@ public class EolSlugResolverService {
             String hint = PURL_HINTS.get(type + "/" + namespace);
             if (hint != null) return new SlugMatch(hint, "HIGH", "PURL");
         }
-        String typeHint = PURL_HINTS.get(type);
-        if (typeHint != null) return new SlugMatch(typeHint, "HIGH", "PURL");
 
         if (namespace != null) {
             java.util.Optional<EolProductCatalog> dbMatch = eolProductCatalogRepository
                     .findByPurlTypeAndPurlNamespace(type, namespace);
             if (dbMatch.isPresent()) return new SlugMatch(dbMatch.get().getSlug(), "HIGH", "PURL_DB");
         }
-        java.util.Optional<EolProductCatalog> typeMatch = eolProductCatalogRepository.findByPurlType(type);
-        if (typeMatch.isPresent()) return new SlugMatch(typeMatch.get().getSlug(), "MEDIUM", "PURL_TYPE");
         return null;
     }
 

@@ -243,6 +243,10 @@
   color: var(--text);
 }
 
+.eol-drawer-value--wrap {
+  overflow-wrap: anywhere;
+}
+
 .eol-drawer-row-highlight {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
@@ -363,6 +367,56 @@
 
 .eol-catalog-search input {
   width: 100%;
+}
+
+.eol-catalog-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eol-catalog-coverage-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--title);
+}
+
+.eol-catalog-coverage-title--empty {
+  color: var(--muted);
+}
+
+.eol-catalog-reference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eol-catalog-reference-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eol-catalog-reference-label {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.eol-catalog-reference-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .eol-catalog-meta {
@@ -516,6 +570,79 @@
 .quality-filter-toolbar {
   align-items: end;
   margin-bottom: 18px;
+}
+
+.quality-eol-review-panel {
+  margin-bottom: 18px;
+}
+
+.quality-eol-review-header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.quality-eol-review-copy {
+  flex: 1 1 420px;
+}
+
+.quality-eol-review-summary {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.quality-eol-review-actions {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.quality-eol-review-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quality-eol-review-empty {
+  margin-top: 0;
+}
+
+.quality-eol-input-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-eol-input-stack .filter-input {
+  width: 100%;
+}
+
+.quality-eol-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quality-eol-suggestion-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--panel-muted) 86%, transparent);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.quality-eol-suggestion-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.quality-eol-suggestion-chip .panel-caption {
+  white-space: normal;
 }
 
 .quality-table {
