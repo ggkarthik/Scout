@@ -1,24 +1,21 @@
 export type InventoryViewKey =
-  | 'vulnerability-intelligence'
   | 'software-identities'
-  | 'technologies'
-  | 'service-catalog'
-  | 'cloud-resources'
   | 'hosts'
-  | 'kubernetes-clusters'
   | 'container-images'
   | 'secured-image-catalog'
   | 'container-registries'
+  | 'sbom'
+  | 'hosted-technologies'
+  | 'code-repositories'
+  | 'source-mappings'
+  | 'developers'
+  | 'kubernetes-clusters'
   | 'datastores'
   | 'subscriptions'
   | 'iam'
-  | 'hosted-technologies'
-  | 'sbom'
   | 'api-endpoints'
   | 'application-endpoints'
-  | 'code-repositories'
-  | 'source-mappings'
-  | 'developers';
+  | 'vulnerability-intelligence';
 
 export type InventoryScopedAssetType = 'ALL' | 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
 export type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'reviewCategory' | 'query';

@@ -14,7 +14,7 @@ export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'inventory-run-queue' | 'vuln-intel-queue' | 'processing-jobs';
 
-export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'sbom';
+export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'hosts';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
 export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
 
@@ -43,26 +43,8 @@ const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
 };
 
 const INVENTORY_VIEWS = new Set<InventoryViewKey>([
-  'vulnerability-intelligence',
   'software-identities',
-  'technologies',
-  'service-catalog',
-  'cloud-resources',
-  'hosts',
-  'kubernetes-clusters',
-  'container-images',
-  'secured-image-catalog',
-  'container-registries',
-  'datastores',
-  'subscriptions',
-  'iam',
-  'hosted-technologies',
-  'sbom',
-  'api-endpoints',
-  'application-endpoints',
-  'code-repositories',
-  'source-mappings',
-  'developers'
+  'hosts'
 ]);
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
@@ -131,6 +113,16 @@ export function pathForTab(tab: AppTab): string {
 
 export function pathForInventoryView(view: InventoryViewKey): string {
   return view === 'software-identities' ? '/inventory/software-identities' : `/inventory/${view}`;
+}
+
+export function pathForInventoryHostAsset(assetId: string, returnTo?: string): string {
+  const encodedAssetId = encodeURIComponent(assetId);
+  if (!returnTo || returnTo.trim().length === 0) {
+    return `/inventory/hosts/${encodedAssetId}`;
+  }
+  const searchParams = new URLSearchParams();
+  searchParams.set('returnTo', returnTo.trim());
+  return `/inventory/hosts/${encodedAssetId}?${searchParams.toString()}`;
 }
 
 export function pathForOperationsView(view: OperationsRouteView): string {
