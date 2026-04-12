@@ -380,7 +380,12 @@ public class EolRefreshService {
 
     private int runMappingResolve() {
         LOG.info("Starting EOL slug mapping resolution");
-        return slugResolverService.resolveAll();
+        int resolved = slugResolverService.resolveAll();
+        if (resolved > 0) {
+            softwareIdentitySummaryProjectionService.refreshAll();
+            qualityIssueProjectionService.refreshAll();
+        }
+        return resolved;
     }
 
     // -------------------------------------------------------------------------
@@ -406,6 +411,7 @@ public class EolRefreshService {
                 instancesUpdated, componentsUpdated);
         enqueueLifecycleDeltasForTrackedComponents("eol-denormalize");
         softwareIdentitySummaryProjectionService.refreshAll();
+        qualityIssueProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
     }
 
@@ -417,6 +423,7 @@ public class EolRefreshService {
         int componentsUpdated = denormalizeInventoryComponents(normalizedKey);
         enqueueLifecycleDeltasForNormalizedKey(normalizedKey, "eol-confirmed-mapping");
         softwareIdentitySummaryProjectionService.refreshByNormalizedKey(normalizedKey);
+        qualityIssueProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
     }
 

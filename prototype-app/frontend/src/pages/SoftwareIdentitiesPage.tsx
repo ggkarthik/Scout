@@ -219,9 +219,14 @@ export function SoftwareIdentitiesPage() {
         message: `Mapped ${identity.displayName} to ${draft}.`
       });
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['eol-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['eol-component-statuses'] }),
         queryClient.invalidateQueries({ queryKey: ['software-identities'] }),
         queryClient.invalidateQueries({ queryKey: ['software-identity-detail'] }),
-        queryClient.invalidateQueries({ queryKey: ['eol-unresolved-mappings'] })
+        queryClient.invalidateQueries({ queryKey: ['eol-unresolved-mappings'] }),
+        queryClient.invalidateQueries({ queryKey: ['operational-quality-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['operational-quality-issues'] }),
+        queryClient.invalidateQueries({ queryKey: ['operational-quality-issue-detail'] })
       ]);
     } catch (e) {
       setMappingNotice({

@@ -83,7 +83,7 @@ export function useOperationsViewQuery(selectedView: OperationsDashboardViewKey)
   });
 }
 
-export type OperationalQualityIssuesQueryParams = Parameters<typeof api.listOperationalQualityIssues>[0];
+export type OperationalQualityIssuesQueryParams = NonNullable<Parameters<typeof api.listOperationalQualityIssues>[0]>;
 
 export function useOperationalQualitySummaryQuery() {
   return useQuery({
@@ -100,10 +100,11 @@ export function useOperationalQualityFiltersQuery() {
   });
 }
 
-export function useOperationalQualityIssuesQuery(params: OperationalQualityIssuesQueryParams) {
+export function useOperationalQualityIssuesQuery(params: OperationalQualityIssuesQueryParams, enabled = true) {
   return useQuery({
     queryKey: ['operational-quality-issues', params],
     queryFn: () => api.listOperationalQualityIssues(params),
+    enabled,
     placeholderData: keepPreviousData,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS
   });

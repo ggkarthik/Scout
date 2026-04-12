@@ -1,10 +1,12 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   DataTable,
   type DataTableColumn,
   type DataTableRow
 } from '../components/DataTable';
+import { EolMappingReviewPanel } from '../components/EolMappingReviewPanel';
 import type {
   OperationalQualityIssue
 } from '../features/operations/types';
@@ -57,7 +59,13 @@ function ownerDestination(issue: OperationalQualityIssue): string {
   if (issue.domain === 'INGESTION') return 'Connect';
   if (issue.domain === 'PROJECTION_FRESHNESS') return 'Operations';
   if (issue.domain === 'VEX') return 'CVE Workbench';
-  if (issue.domain === 'EOL') return issue.primaryLabel ? 'Software Identities' : 'EOL';
+  if (issue.domain === 'EOL') {
+    return issue.issueType === 'SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING'
+      ? 'Operations Quality'
+      : issue.primaryLabel
+        ? 'Software Identities'
+        : 'EOL';
+  }
   if (issue.assetType === 'HOST') return 'Hosts';
   return issue.sourceObjectType === 'SOFTWARE_IDENTITY' ? 'Software Identities' : 'Inventory';
 }
@@ -169,8 +177,12 @@ function DetailDrawer({
 }
 
 export function OperationsQualityPage() {
+  const [searchParams] = useSearchParams();
+  const requestedDomainParam = (searchParams.get('domain') ?? '').trim().toUpperCase();
+  const requestedDomain = requestedDomainParam in DOMAIN_LABELS ? requestedDomainParam : '';
+  const focusTarget = (searchParams.get('focus') ?? '').trim().toLowerCase();
   const [queryInput, setQueryInput] = React.useState('');
-  const [domain, setDomain] = React.useState('');
+  const [domain, setDomain] = React.useState(requestedDomain);
   const [issueType, setIssueType] = React.useState('');
   const [severity, setSeverity] = React.useState('');
   const [affectsActiveFindings, setAffectsActiveFindings] = React.useState<'all' | 'yes' | 'no'>('all');
@@ -209,10 +221,25 @@ export function OperationsQualityPage() {
         : null;
 
   React.useEffect(() => {
+    setDomain(requestedDomain);
+  }, [requestedDomain]);
+
+  React.useEffect(() => {
     setPage(0);
   }, [domain, issueType, severity, affectsActiveFindings, assetType, sourceSystem, ecosystem, query]);
 
   const issues = React.useMemo(() => pageData?.items ?? [], [pageData?.items]);
+  const eolReviewFilters = React.useMemo(() => ({
+    issueType: issueType || undefined,
+    severity: severity || undefined,
+    affectsActiveFindings: affectsActiveFindings === 'all'
+      ? undefined
+      : affectsActiveFindings === 'yes',
+    assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
+    sourceSystem: sourceSystem ? [sourceSystem] : undefined,
+    ecosystem: ecosystem ? [ecosystem] : undefined,
+    query: query || undefined
+  }), [affectsActiveFindings, assetType, ecosystem, issueType, query, severity, sourceSystem]);
   const issueColumns = React.useMemo<DataTableColumn[]>(() => [
     { id: 'issue', label: 'Issue', header: 'Issue', initialSize: 240 },
     { id: 'domain', label: 'Domain', header: 'Domain', initialSize: 140 },
@@ -381,6 +408,13 @@ export function OperationsQualityPage() {
             </select>
           </label>
         </div>
+
+        {domain === 'EOL' && (
+          <EolMappingReviewPanel
+            initiallyOpen={focusTarget === 'eol-mapping-review'}
+            qualityFilters={eolReviewFilters}
+          />
+        )}
 
         {error && <div className="notice error">Failed to load quality issues: {error}</div>}
         {loading && !pageData && <div className="notice">Loading quality issues...</div>}
