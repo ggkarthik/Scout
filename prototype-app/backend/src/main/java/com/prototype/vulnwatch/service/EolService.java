@@ -8,15 +8,17 @@ import com.prototype.vulnwatch.dto.EolMappingConfirmRequest;
 import com.prototype.vulnwatch.dto.EolProductCatalogDto;
 import com.prototype.vulnwatch.dto.EolReleaseDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
+import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
+import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -150,6 +152,15 @@ public class EolService {
     // -------------------------------------------------------------------------
 
     public List<EolProductCatalogDto> listProducts() {
+        Map<String, Long> releaseCounts = new HashMap<>();
+        for (Object[] row : releaseRepository.countReleasesByProductSlug()) {
+            if (row.length < 2 || row[0] == null) {
+                continue;
+            }
+            long count = row[1] instanceof Number value ? value.longValue() : 0L;
+            releaseCounts.put(row[0].toString(), count);
+        }
+
         return catalogRepository.findAll().stream()
                 .sorted(Comparator.comparing(
                         (EolProductCatalog catalog) -> catalog.getDisplayName() == null || catalog.getDisplayName().isBlank()
@@ -157,7 +168,7 @@ public class EolService {
                                 : catalog.getDisplayName(),
                         String.CASE_INSENSITIVE_ORDER
                 ).thenComparing(EolProductCatalog::getSlug, String.CASE_INSENSITIVE_ORDER))
-                .map(this::toCatalogDto)
+                .map(catalog -> toCatalogDto(catalog, releaseCounts.getOrDefault(catalog.getSlug(), 0L)))
                 .toList();
     }
 
@@ -203,27 +214,86 @@ public class EolService {
         eolRefreshService.refreshConfirmedMapping(request.normalizedKey());
     }
 
-    public List<SoftwareIdentity> listUnresolvedIdentities() {
-        Set<String> resolvedKeys = mappingRepository.findAll().stream()
-                .map(SoftwareEolMapping::getNormalizedKey)
-                .filter(java.util.Objects::nonNull)
-                .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
-
-        return identityRepository.findAll().stream()
-                .filter(identity -> {
-                    String key = (identity.getVendor() == null ? "" : identity.getVendor().toLowerCase())
-                            + "::" + (identity.getProduct() == null ? "" : identity.getProduct().toLowerCase());
-                    return !resolvedKeys.contains(key);
-                })
-                .limit(200)
-                .toList();
+    public List<EolUnresolvedMappingDto> listUnresolvedMappings() {
+        return jdbcTemplate.query("""
+                WITH exposure_counts AS (
+                    SELECT
+                        ic.software_identity_id,
+                        COUNT(DISTINCT f.id) AS open_finding_count,
+                        COUNT(DISTINCT f.vulnerability_id) AS open_vulnerability_count
+                    FROM inventory_components ic
+                    LEFT JOIN findings f
+                        ON f.component_id = ic.id
+                       AND f.status = 'OPEN'
+                    WHERE ic.component_status = 'ACTIVE'
+                      AND ic.software_identity_id IS NOT NULL
+                    GROUP BY ic.software_identity_id
+                )
+                SELECT
+                    sis.software_identity_id,
+                    sis.vendor,
+                    sis.product,
+                    sis.display_name,
+                    sis.normalized_key,
+                    sis.asset_count,
+                    sis.component_count,
+                    sis.version_count,
+                    COALESCE(ec.open_finding_count, 0) AS open_finding_count,
+                    COALESCE(ec.open_vulnerability_count, 0) AS open_vulnerability_count,
+                    sis.last_observed_at
+                FROM software_identity_summary sis
+                LEFT JOIN exposure_counts ec ON ec.software_identity_id = sis.software_identity_id
+                WHERE sis.eol_slug IS NULL
+                  AND (
+                      nullif(trim(sis.cpe23), '') IS NOT NULL
+                      OR coalesce(array_length(sis.ecosystems, 1), 0) = 0
+                      OR EXISTS (
+                          SELECT 1
+                          FROM unnest(sis.ecosystems) AS ecosystem
+                          WHERE ecosystem IS NOT NULL
+                            AND lower(ecosystem) NOT IN (
+                                'npm',
+                                'pypi',
+                                'gem',
+                                'cargo',
+                                'nuget',
+                                'composer',
+                                'maven',
+                                'gomod',
+                                'golang',
+                                'go',
+                                'rubygems'
+                            )
+                      )
+                  )
+                ORDER BY
+                    COALESCE(ec.open_finding_count, 0) DESC,
+                    COALESCE(ec.open_vulnerability_count, 0) DESC,
+                    sis.component_count DESC,
+                    sis.asset_count DESC,
+                    sis.display_name ASC NULLS LAST,
+                    sis.canonical_key ASC NULLS LAST
+                LIMIT 200
+                """, (rs, rowNum) -> new EolUnresolvedMappingDto(
+                (java.util.UUID) rs.getObject("software_identity_id"),
+                rs.getString("vendor"),
+                rs.getString("product"),
+                rs.getString("display_name"),
+                rs.getString("normalized_key"),
+                rs.getLong("asset_count"),
+                rs.getLong("component_count"),
+                rs.getLong("version_count"),
+                rs.getLong("open_finding_count"),
+                rs.getLong("open_vulnerability_count"),
+                rs.getTimestamp("last_observed_at") == null ? null : rs.getTimestamp("last_observed_at").toInstant()
+        ));
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private EolProductCatalogDto toCatalogDto(EolProductCatalog catalog) {
+    private EolProductCatalogDto toCatalogDto(EolProductCatalog catalog, long releaseCount) {
         return new EolProductCatalogDto(
                 catalog.getSlug(),
                 catalog.getDisplayName(),
@@ -232,6 +302,7 @@ public class EolService {
                 catalog.getPurlType(),
                 catalog.getPurlNamespace(),
                 catalog.getAliasesList(),
+                releaseCount,
                 catalog.getLastModified(),
                 catalog.getLastFetchedAt()
         );

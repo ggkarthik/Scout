@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.dto.EolMappingConfirmRequest;
 import com.prototype.vulnwatch.dto.EolProductCatalogDto;
 import com.prototype.vulnwatch.dto.EolReleaseDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
+import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.service.EolRefreshService;
 import com.prototype.vulnwatch.service.EolService;
@@ -110,15 +111,7 @@ public class EolController {
      * Software identities that have no EOL slug mapping yet (for analyst review).
      */
     @GetMapping("/mappings/unresolved")
-    public List<Map<String, String>> listUnresolved() {
-        return eolService.listUnresolvedIdentities().stream()
-                .map(identity -> Map.of(
-                        "vendor", identity.getVendor() == null ? "" : identity.getVendor(),
-                        "product", identity.getProduct() == null ? "" : identity.getProduct(),
-                        "displayName", identity.getDisplayName(),
-                        "normalizedKey", (identity.getVendor() == null ? "" : identity.getVendor().toLowerCase())
-                                + "::" + (identity.getProduct() == null ? "" : identity.getProduct().toLowerCase())
-                ))
-                .toList();
+    public List<EolUnresolvedMappingDto> listUnresolved() {
+        return eolService.listUnresolvedMappings();
     }
 }

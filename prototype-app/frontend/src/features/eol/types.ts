@@ -27,6 +27,7 @@ export type EolProductCatalog = {
   purlType?: string;
   purlNamespace?: string;
   aliases?: string[];
+  releaseCount?: number;
   lastModified?: string;
   lastFetchedAt?: string;
 };
@@ -59,8 +60,15 @@ export type EolComponentPage = {
 };
 
 export type UnresolvedEolMapping = {
+  softwareIdentityId: string;
   vendor: string;
   product: string;
   displayName: string;
   normalizedKey: string;
+  assetCount: number;
+  componentCount: number;
+  versionCount: number;
+  openFindingCount: number;
+  openVulnerabilityCount: number;
+  lastObservedAt?: string;
 };
