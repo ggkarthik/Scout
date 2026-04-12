@@ -238,6 +238,7 @@ function HostRow({
 }
 
 export function InventoryPage({ selectedView: _selectedView }: Props) {
+  void _selectedView;
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = React.useState<HostInventoryTab>('all-hosts');
