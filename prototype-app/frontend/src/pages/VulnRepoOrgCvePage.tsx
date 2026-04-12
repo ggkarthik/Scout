@@ -275,6 +275,7 @@ export function VulnRepoOrgCvePage({
   React.useEffect(() => {
     const el = sectionRef.current;
     if (!el) return;
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
