@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../components/CVEInvestigationSummary';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { pathForVulnRepoView } from '../app/routes';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 import { useCveDetailQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
@@ -404,13 +405,6 @@ export function VulnRepoVulnerabilitiesPage() {
           <aside className="panel detail-panel vuln-repo-software-drawer">
             <div className="panel-header org-cve-drawer-header">
               <div>
-                <div className="org-cve-back-link">
-                  {drawerMode === 'summary'
-                    ? 'Investigation Summary'
-                    : drawerMode === 'metadata'
-                      ? 'CVE Metadata'
-                      : 'Impacted Software'}
-                </div>
                 <h3>{selectedSoftwareRecord.externalId}</h3>
                 <span className="panel-caption">
                   {drawerMode === 'summary'
@@ -426,9 +420,21 @@ export function VulnRepoVulnerabilitiesPage() {
                 onClick={() => setSelectedSoftwareRecord(null)}
                 aria-label="Close details panel"
               >
-                x
+                ×
               </button>
             </div>
+            <SegmentedControl
+              ariaLabel="CVE detail view"
+              value={drawerMode}
+              onChange={(mode) => setDrawerMode(mode as DrawerMode)}
+              options={[
+                { label: 'Software', value: 'software' },
+                { label: 'Metadata', value: 'metadata' },
+                ...(selectedSoftwareRecord.hasInvestigationSummary
+                  ? [{ label: 'Summary', value: 'summary' }]
+                  : []),
+              ]}
+            />
 
             {drawerMode === 'summary' ? (
               savedSummaryQuery.isLoading || savedSummaryQuery.isFetching ? (
@@ -525,7 +531,7 @@ export function VulnRepoVulnerabilitiesPage() {
         ) : null}
       </div>
 
-      <div className="pagination-bar">
+      <div className="pagination-row">
         <span className="panel-caption">
           {totalItems.toLocaleString()} CVEs
         </span>
