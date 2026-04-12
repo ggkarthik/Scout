@@ -522,3 +522,88 @@
     flex-wrap: wrap;
   }
 }
+
+/* ── Vulnerability Investigation — compact, resizable, height-persistent ── */
+
+.vuln-repo-investigation-shell {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  resize: vertical;
+  overflow: hidden;
+  min-height: 480px;
+  height: calc(100vh - 180px);
+}
+
+.vuln-repo-investigation-shell .panel-header {
+  flex-shrink: 0;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.vuln-repo-investigation-shell .panel-header h3 {
+  font-size: 0.95rem;
+}
+
+.vuln-repo-investigation-shell .org-cve-hero-stats {
+  flex-shrink: 0;
+  margin-top: 0;
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+.vuln-repo-investigation-shell .org-cve-score-card {
+  padding: 5px 10px;
+  gap: 0;
+}
+
+.vuln-repo-investigation-shell .org-cve-score-card span {
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.vuln-repo-investigation-shell .org-cve-score-card strong {
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+
+.vuln-repo-investigation-shell .org-cve-filter-row {
+  flex-shrink: 0;
+  margin: 0 0 6px;
+}
+
+.vuln-repo-investigation-shell .org-cve-filter-chip {
+  padding: 4px 6px;
+}
+
+.vuln-repo-investigation-shell .org-cve-filter-chip label {
+  margin-bottom: 2px;
+  font-size: 0.74rem;
+}
+
+.vuln-repo-investigation-shell .notice {
+  flex-shrink: 0;
+}
+
+.vuln-repo-investigation-shell .empty-state {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.vuln-repo-investigation-shell .table-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.vuln-repo-investigation-shell .pagination-row {
+  flex-shrink: 0;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}

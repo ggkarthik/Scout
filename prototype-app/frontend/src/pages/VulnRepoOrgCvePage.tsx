@@ -148,6 +148,8 @@ function buildFallbackRecord(detail: CveDetail, externalId: string): OrgSpecific
   };
 }
 
+const PANEL_HEIGHT_KEY = 'vuln-repo:investigation:panel-height';
+
 type VulnRepoOrgCvePageProps = {
   initialCveId?: string;
   onSelectedCveChange?: (cveId?: string) => void;
@@ -159,6 +161,7 @@ export function VulnRepoOrgCvePage({
 }: VulnRepoOrgCvePageProps = {}) {
   const actor = useActor();
   const queryClient = useQueryClient();
+  const sectionRef = React.useRef<HTMLElement>(null);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState('');
   const [query, setQuery] = React.useState('');
@@ -254,6 +257,35 @@ export function VulnRepoOrgCvePage({
       }
     }
   }, [automationStatusQuery.data, orgCveQuery, queryClient, selectedRecord?.externalId]);
+
+  // Restore persisted panel height on mount (before paint to avoid flash)
+  React.useLayoutEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    try {
+      const stored = localStorage.getItem(PANEL_HEIGHT_KEY);
+      const h = stored ? Number(stored) : NaN;
+      if (Number.isFinite(h) && h > 200) {
+        el.style.height = `${h}px`;
+      }
+    } catch { /* noop */ }
+  }, []);
+
+  // Persist panel height whenever the user resizes it
+  React.useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const h = Math.round(entry.contentRect.height);
+      if (h > 200) {
+        try { localStorage.setItem(PANEL_HEIGHT_KEY, String(h)); } catch { /* noop */ }
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Back from workbench: clear workbench state and refresh the list
   const closeDrawer = React.useCallback(() => {
@@ -383,7 +415,7 @@ export function VulnRepoOrgCvePage({
   }
 
   return (
-    <section className="panel">
+    <section ref={sectionRef} className="panel vuln-repo-investigation-shell">
         <div className="panel-header">
           <div>
             <h3>{WORKBENCH_LABEL}</h3>
@@ -520,7 +552,7 @@ export function VulnRepoOrgCvePage({
           <>
             <div className="table-scroll">
               <DataTable
-                storageKey="vuln-intel-org-cve-table-widths"
+                storageKey="vuln-repo-org-cve-table-widths"
                 columns={ORG_CVE_COLUMNS}
                 rows={tableRows}
               />
