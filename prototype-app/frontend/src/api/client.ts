@@ -57,7 +57,6 @@ import type {
   EolSummary,
   PackageAssetPage,
   PackageEolStatusPage,
-  UnresolvedEolMapping,
   UnresolvedEolMappingPage
 } from '../features/eol/types';
 import type {

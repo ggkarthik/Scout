@@ -233,7 +233,7 @@ function AtRiskTab({ eolMappingReviewHref }: { eolMappingReviewHref: string }) {
     { filter: apiFilter, page, size: PACKAGE_PAGE_SIZE }
   );
   const packagePage = packageQuery.data;
-  const packages = packagePage?.content ?? [];
+  const packages = React.useMemo(() => packagePage?.content ?? [], [packagePage?.content]);
   const totalPages = packagePage?.totalPages ?? 1;
   const totalElements = packagePage?.totalElements ?? 0;
 

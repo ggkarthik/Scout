@@ -2847,7 +2847,7 @@ export function VulnRepoCveAssessmentWorkbench({
     setVexEvidenceByComponent({});
     setVexEvidenceErrors({});
     setVexEvidenceLoadingComponentId(null);
-  }, [detail, item.externalId, latestAssessment, latestInvestigation]);
+  }, [analystId, detail, item.externalId, latestAssessment, latestInvestigation]);
 
   const loadPersistedFindingIds = React.useCallback(async (): Promise<void> => {
     try {
