@@ -409,47 +409,46 @@ export function OperationsQualityPage() {
           </label>
         </div>
 
-        {domain === 'EOL' && (
-          <EolMappingReviewPanel
-            initiallyOpen={focusTarget === 'eol-mapping-review'}
-            qualityFilters={eolReviewFilters}
-          />
-        )}
-
-        {error && <div className="notice error">Failed to load quality issues: {error}</div>}
-        {loading && !pageData && <div className="notice">Loading quality issues...</div>}
-
-        {!loading && issues.length === 0 && !error && (
-          <div className="empty-state">
-            <p>No quality issues match the current filters.</p>
-          </div>
-        )}
-
-        {issues.length > 0 && (
+        {domain === 'EOL' ? (
+          <EolMappingReviewPanel qualityFilters={eolReviewFilters} />
+        ) : (
           <>
-            <div className="table-scroll">
-              <DataTable
-                storageKey="operations-quality-issues"
-                columns={issueColumns}
-                rows={issueRows}
-              />
-            </div>
+            {error && <div className="notice error">Failed to load quality issues: {error}</div>}
+            {loading && !pageData && <div className="notice">Loading quality issues...</div>}
 
-            <div className="pagination quality-pagination">
-              <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>
-                Previous
-              </button>
-              <span>
-                Page {(pageData?.page ?? 0) + 1} of {Math.max(1, pageData?.totalPages ?? 1)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((current) => (pageData && current + 1 < pageData.totalPages ? current + 1 : current))}
-                disabled={!pageData || page + 1 >= pageData.totalPages}
-              >
-                Next
-              </button>
-            </div>
+            {!loading && issues.length === 0 && !error && (
+              <div className="empty-state">
+                <p>No quality issues match the current filters.</p>
+              </div>
+            )}
+
+            {issues.length > 0 && (
+              <>
+                <div className="table-scroll">
+                  <DataTable
+                    storageKey="operations-quality-issues"
+                    columns={issueColumns}
+                    rows={issueRows}
+                  />
+                </div>
+
+                <div className="pagination quality-pagination">
+                  <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>
+                    Previous
+                  </button>
+                  <span>
+                    Page {(pageData?.page ?? 0) + 1} of {Math.max(1, pageData?.totalPages ?? 1)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => (pageData && current + 1 < pageData.totalPages ? current + 1 : current))}
+                    disabled={!pageData || page + 1 >= pageData.totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
       </section>

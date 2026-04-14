@@ -55,3 +55,25 @@ export function useEolSlugSuggestionsQuery(normalizedKey: string | null, enabled
     staleTime: 5 * 60 * 1000
   });
 }
+
+export type EolPackageStatusesQueryParams = { filter?: string; page?: number; size?: number };
+
+export function useEolPackageStatusesQuery(params: EolPackageStatusesQueryParams, enabled = true) {
+  return useQuery({
+    queryKey: ['eol-package-statuses', params],
+    queryFn: () => api.getEolPackageStatuses(params),
+    enabled,
+    placeholderData: keepPreviousData
+  });
+}
+
+export type EolPackageAssetsQueryParams = { packageName: string; ecosystem?: string; page?: number; size?: number };
+
+export function useEolPackageAssetsQuery(params: EolPackageAssetsQueryParams | null, enabled = true) {
+  return useQuery({
+    queryKey: ['eol-package-assets', params],
+    queryFn: () => api.getEolPackageAssets(params!),
+    enabled: enabled && params !== null,
+    placeholderData: keepPreviousData
+  });
+}

@@ -9,11 +9,17 @@ import {
 import { EolBadge } from '../components/EolBadge';
 import { EolDetailDrawer } from '../components/EolDetailDrawer';
 import type { SyncTriggerResponse } from '../features/connect/types';
-import { useEolComponentStatusesQuery, useEolProductsQuery, useEolSummaryQuery } from '../features/eol/queries';
-import type { ComponentEolStatus, EolProductCatalog } from '../features/eol/types';
+import {
+  useEolPackageAssetsQuery,
+  useEolPackageStatusesQuery,
+  useEolProductsQuery,
+  useEolSummaryQuery
+} from '../features/eol/queries';
+import type { EolProductCatalog, PackageEolStatus } from '../features/eol/types';
 
 const CATALOG_PAGE_SIZE = 25;
-const COMPONENT_PAGE_SIZE = 25;
+const PACKAGE_PAGE_SIZE = 25;
+const ASSET_PAGE_SIZE = 25;
 
 type EolTab = 'at-risk' | 'catalog';
 type AtRiskFilter = 'all' | 'eol' | 'near-eol' | 'unknown';
@@ -63,47 +69,149 @@ function formatDate(value?: string): string {
 // At-Risk tab
 // ---------------------------------------------------------------------------
 
-const COMPONENT_COLUMNS: DataTableColumn[] = [
-  { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 200 },
+type SelectedPackage = { packageName: string; ecosystem?: string };
+
+const PACKAGE_COLUMNS: DataTableColumn[] = [
   { id: 'package', label: 'Package', header: 'Package', initialSize: 220 },
-  { id: 'version', label: 'Version', header: 'Version', initialSize: 130 },
+  { id: 'slug', label: 'EOL Slug', header: 'EOL Slug', initialSize: 160 },
+  { id: 'cycle', label: 'Cycle', header: 'Cycle', initialSize: 110 },
   { id: 'status', label: 'Status', header: 'Status', initialSize: 140 },
   { id: 'eolDate', label: 'EOL Date', header: 'EOL Date', initialSize: 130 },
-  { id: 'daysRemaining', label: 'Days Remaining', header: 'Days Remaining', initialSize: 140 },
+  { id: 'daysRemaining', label: 'Days Remaining', header: 'Days Remaining', initialSize: 130 },
+  { id: 'assets', label: 'Affected Assets', header: 'Affected Assets', initialSize: 150 },
 ];
 
-function buildComponentRows(components: ComponentEolStatus[]): DataTableRow[] {
-  return components.map((c) => ({
-    id: c.componentId,
+function buildPackageRows(
+  packages: PackageEolStatus[],
+  onSelectPackage: (pkg: SelectedPackage) => void
+): DataTableRow[] {
+  return packages.map((p) => ({
+    id: `${p.packageName}::${p.ecosystem ?? ''}`,
     cells: {
-      asset: { content: c.assetName || '-' },
       package: {
         content: (
           <>
-            <div>{c.packageName || '-'}</div>
-            {c.ecosystem && <span className="panel-caption mono">{c.ecosystem}</span>}
+            <div>{p.packageName || '-'}</div>
+            {p.ecosystem && <span className="panel-caption mono">{p.ecosystem}</span>}
           </>
         )
       },
-      version: { content: <span className="mono">{c.version || '-'}</span> },
+      slug: {
+        content: p.eolSlug
+          ? <span className="mono">{p.eolSlug}</span>
+          : <span className="panel-caption">—</span>
+      },
+      cycle: {
+        content: p.eolCycle
+          ? <span className="mono">{p.eolCycle}</span>
+          : <span className="panel-caption">—</span>
+      },
       status: {
         content: (
           <EolBadge
-            isEol={c.isEol}
-            daysRemaining={c.eolDaysRemaining}
-            eolDate={c.eolDate}
+            isEol={p.isEol}
+            daysRemaining={p.eolDaysRemaining}
+            eolDate={p.eolDate}
           />
         )
       },
-      eolDate: { content: formatDate(c.eolDate) },
+      eolDate: { content: formatDate(p.eolDate) },
       daysRemaining: {
-        content: c.eolDaysRemaining != null
-          ? c.eolDaysRemaining.toLocaleString()
+        content: p.eolDaysRemaining != null
+          ? p.eolDaysRemaining.toLocaleString()
           : '-'
       },
+      assets: {
+        content: (
+          <button
+            type="button"
+            className="eol-asset-count-btn"
+            onClick={() => onSelectPackage({ packageName: p.packageName, ecosystem: p.ecosystem })}
+          >
+            {p.assetCount.toLocaleString()} {p.assetCount === 1 ? 'asset' : 'assets'}
+          </button>
+        )
+      }
     }
   }));
 }
+
+// ---- Package asset drill-down panel ----------------------------------------
+
+function PackageAssetPanel({ packageName, ecosystem, onClose }: {
+  packageName: string;
+  ecosystem?: string;
+  onClose: () => void;
+}) {
+  const [page, setPage] = React.useState(0);
+  const assetsQuery = useEolPackageAssetsQuery(
+    { packageName, ecosystem, page, size: ASSET_PAGE_SIZE }
+  );
+  const assetPage = assetsQuery.data;
+  const assets = assetPage?.content ?? [];
+  const totalPages = assetPage?.totalPages ?? 1;
+  const totalElements = assetPage?.totalElements ?? 0;
+
+  return (
+    <div className="eol-asset-panel">
+      <div className="eol-asset-panel-header">
+        <div>
+          <strong className="eol-asset-panel-title">{packageName}</strong>
+          {ecosystem && <span className="panel-caption mono"> · {ecosystem}</span>}
+          <span className="panel-caption eol-asset-panel-count">
+            {' '}— {totalElements.toLocaleString()} {totalElements === 1 ? 'asset' : 'assets'} affected
+          </span>
+        </div>
+        <button type="button" className="btn btn-secondary" onClick={onClose}>
+          Close
+        </button>
+      </div>
+
+      {assetsQuery.isLoading ? (
+        <div className="panel-caption" style={{ padding: '12px 0' }}>Loading assets...</div>
+      ) : assetsQuery.error instanceof Error ? (
+        <div className="notice error">{assetsQuery.error.message}</div>
+      ) : assets.length === 0 ? (
+        <div className="panel-caption">No assets found.</div>
+      ) : (
+        <div className="eol-asset-list">
+          {assets.map((asset) => (
+            <div key={asset.assetName} className="eol-asset-row">
+              <span className="eol-asset-name">{asset.assetName}</span>
+              {asset.versions && (
+                <span className="panel-caption mono eol-asset-versions">{asset.versions}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="pagination-row">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={page === 0}
+            onClick={() => setPage(p => p - 1)}
+          >
+            Previous
+          </button>
+          <span className="panel-caption">Page {page + 1} of {totalPages}</span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- At-Risk tab -----------------------------------------------------------
 
 const FILTER_LABELS: Record<AtRiskFilter, string> = {
   all: 'All',
@@ -115,23 +223,29 @@ const FILTER_LABELS: Record<AtRiskFilter, string> = {
 function AtRiskTab({ eolMappingReviewHref }: { eolMappingReviewHref: string }) {
   const [filter, setFilter] = React.useState<AtRiskFilter>('all');
   const [page, setPage] = React.useState(0);
+  const [selectedPackage, setSelectedPackage] = React.useState<SelectedPackage | null>(null);
+
   const summaryQuery = useEolSummaryQuery();
   const summary = summaryQuery.data;
 
   const apiFilter = filter === 'all' ? undefined : filter;
-  const componentQuery = useEolComponentStatusesQuery(
-    { filter: apiFilter, page, size: COMPONENT_PAGE_SIZE }
+  const packageQuery = useEolPackageStatusesQuery(
+    { filter: apiFilter, page, size: PACKAGE_PAGE_SIZE }
   );
-  const componentPage = componentQuery.data;
-  const components = componentPage?.content ?? [];
-  const totalPages = componentPage?.totalPages ?? 1;
-  const totalElements = componentPage?.totalElements ?? 0;
+  const packagePage = packageQuery.data;
+  const packages = packagePage?.content ?? [];
+  const totalPages = packagePage?.totalPages ?? 1;
+  const totalElements = packagePage?.totalElements ?? 0;
 
   React.useEffect(() => {
     setPage(0);
+    setSelectedPackage(null);
   }, [filter]);
 
-  const rows = React.useMemo(() => buildComponentRows(components), [components]);
+  const rows = React.useMemo(
+    () => buildPackageRows(packages, setSelectedPackage),
+    [packages]
+  );
 
   return (
     <>
@@ -174,22 +288,30 @@ function AtRiskTab({ eolMappingReviewHref }: { eolMappingReviewHref: string }) {
         </div>
       </div>
 
-      {componentQuery.isLoading || componentQuery.isFetching ? (
+      {packageQuery.isLoading || packageQuery.isFetching ? (
         <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
-      ) : componentQuery.error instanceof Error ? (
-        <div className="notice error">{componentQuery.error.message}</div>
+      ) : packageQuery.error instanceof Error ? (
+        <div className="notice error">{packageQuery.error.message}</div>
       ) : rows.length === 0 ? (
         <div className="empty-state">
-          <p>{filter === 'all' ? 'No EOL data has been processed yet.' : `No components match the "${FILTER_LABELS[filter]}" filter.`}</p>
+          <p>{filter === 'all' ? 'No EOL data has been processed yet.' : `No packages match the "${FILTER_LABELS[filter]}" filter.`}</p>
         </div>
       ) : (
         <div className="table-scroll">
           <DataTable
-            storageKey="eol-at-risk-components"
-            columns={COMPONENT_COLUMNS}
+            storageKey="eol-at-risk-packages"
+            columns={PACKAGE_COLUMNS}
             rows={rows}
           />
         </div>
+      )}
+
+      {selectedPackage && (
+        <PackageAssetPanel
+          packageName={selectedPackage.packageName}
+          ecosystem={selectedPackage.ecosystem}
+          onClose={() => setSelectedPackage(null)}
+        />
       )}
 
       {totalPages > 1 && (
@@ -203,7 +325,7 @@ function AtRiskTab({ eolMappingReviewHref }: { eolMappingReviewHref: string }) {
             Previous
           </button>
           <span className="panel-caption">
-            Page {page + 1} of {totalPages} · {totalElements.toLocaleString()} components
+            Page {page + 1} of {totalPages} · {totalElements.toLocaleString()} packages
           </span>
           <button
             type="button"

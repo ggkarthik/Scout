@@ -7,6 +7,8 @@ import com.prototype.vulnwatch.dto.EolReleaseDto;
 import com.prototype.vulnwatch.dto.EolSlugSuggestionDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
 import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
+import com.prototype.vulnwatch.dto.PackageAssetDto;
+import com.prototype.vulnwatch.dto.PackageEolStatusDto;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.service.EolRefreshService;
@@ -59,6 +61,33 @@ public class EolController {
             @RequestParam(defaultValue = "25") int size
     ) {
         return eolService.getComponentStatuses(filter, page, Math.min(size, 200));
+    }
+
+    /**
+     * Paged list of packages (grouped across all assets) with their EOL status and impacted asset count.
+     * One row per unique (package_name, ecosystem, eol_slug, eol_cycle, eol_date, is_eol) combination.
+     */
+    @GetMapping("/status/packages")
+    public Page<PackageEolStatusDto> getPackageStatuses(
+            @RequestParam(required = false) String filter,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size
+    ) {
+        return eolService.getPackageStatuses(filter, page, Math.min(size, 200));
+    }
+
+    /**
+     * Assets that have a specific package installed, with the installed version(s).
+     * Used for drill-down from the package-centric EOL table.
+     */
+    @GetMapping("/status/packages/assets")
+    public Page<PackageAssetDto> getPackageAssets(
+            @RequestParam String packageName,
+            @RequestParam(required = false) String ecosystem,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size
+    ) {
+        return eolService.getPackageAssets(packageName, ecosystem, page, Math.min(size, 200));
     }
 
     /**

@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-22
+Last updated: 2026-04-14
 
 ## Purpose
 
@@ -12,8 +12,8 @@ The frontend is a React single-page operations console. It drives SBOM ingestion
 - TypeScript
 - Vite 5
 - Plain React state/hooks; no external state library
-- Query-param-driven navigation in `src/App.tsx`
-- No React Router
+- React Router for path-based navigation in `src/App.tsx`
+- No query-param-only navigation; deep links use URL paths (`/vuln-repo/org-cves/:cveId`, `/inventory/hosts/:assetId`, etc.)
 
 Run locally:
 
@@ -53,23 +53,28 @@ The client also handles:
 - ServiceNow CMDB connector config, connection test, live sync, and sample sync calls
 - host asset detail and host inventory calls
 - EOL status summary, component statuses, product catalog, release cycles, mapping confirmation, unresolved mappings, and admin refresh triggers
+- SLO status polling (`/slo/status`)
+- vulnerability source filter config reads and saves (`/connectors/vulnerability-sources/{sourceSystem}`)
+- Vulnerability Repository dashboard, vulnerability list, org-CVE list, and software-asset drilldown calls (`/vuln-repo/**`)
 
 ## Navigation Model
 
-`src/App.tsx` renders a sidebar shell with query-param state for `tab`, `inventoryView`, `vulnIntelView`, and connector state.
+`src/App.tsx` renders a sidebar shell using React Router. Navigation uses URL paths, not query params. The `src/app/routes.ts` module owns path builders (`pathForTab`, `pathForVulnRepoView`, `pathForInventoryView`, `pathForConnectView`, etc.) and tab title mappings.
 
-Current top-level sections:
+Legacy query-param URLs (`?tab=`, `?inventoryView=`, etc.) are redirected to their path equivalents by `LegacyQueryRedirect`.
 
-- Overview
-- Findings
-- Operational Dashboard
-- Vulnerability Intelligence
-- Inventory
-- Connect
-- Configurations
-- End-of-Life (tab key: `end-of-life`, nav label: `EOL`)
+Current top-level sections (nav tab key → display label → path):
 
-The active app is organized as a shell, not route-based pages. Most drill-downs happen inline in tables, drawers, and modals.
+- `dashboard` → Overview → `/`
+- `findings` → Findings → `/findings`
+- `operations` → Operational Dashboard → `/operations/:operationsView?`
+- `vuln-repo` → Vulnerability Repository → `/vuln-repo`
+- `inventory` → Inventory → `/inventory/:inventoryView?`
+- `end-of-life` → End-of-Life → `/end-of-life`
+- `connect` → Connect → `/connect/:connectView?`
+- `configurations` → Configurations → `/configurations`
+
+The active app is organized as a shell with path-routed content areas. Most drill-downs happen inline in tables, drawers, and modals. Certain deep links (host asset detail, CVE detail with selected CVE, CVE assets/software drilldown) have dedicated route paths.
 
 The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-to-page search input. The theme toggle is an icon-only button (sun/moon SVG) rather than a text label.
 
@@ -95,47 +100,53 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 - Quality reads `/operations/quality/summary`, `/operations/quality/issues`, `/operations/quality/filters`, and `/operations/quality/issues/{issueId}`
 - Pipeline reads `/operations/dashboard` for ingestion queue and run history
 - Pipeline includes correlation efficiency diagnostics such as CPE coverage, direct vs fallback share, recent CPE-created findings, and CSAF/VEX quality analytics
-- Platform Health reads operational metrics and `/operations/normalization-quality`
-- the Platform Health summary now includes noise-projection readiness, age, refresh failures, and projection refresh p95
-- the Pipeline view label `Queued/Running Sync Jobs` now refers to sync backlog, not durable delta-queue depth
-- Sub-view is tracked in the `operationsView` query param
+- Platform Health reads operational metrics via `/operations/normalization-quality`, `/operations/api-read-path`, `/operations/freshness-drift`, `/operations/metric-catalog`, and `/api/slo/status`
+- the Platform Health summary includes noise-projection readiness, age, refresh failures, and projection refresh p95; it also exposes SLO status (defined/passing/failing counts and per-SLO pass/fail indicators)
+- the Pipeline view label `Queued/Running Sync Jobs` refers to sync backlog, not durable delta-queue depth
+- Sub-view is tracked in the `:operationsView` route param
 
-### Vulnerability Intelligence
+### Vulnerability Repository
 
-There are three distinct views under the Vulnerability Intelligence flyout:
+The `vuln-repo` section replaces what was previously labelled "Vulnerability Intelligence" in the sidebar. It has two sub-views accessible via a section tab bar:
 
-- Dashboard: `VulnerabilityIntelDashboardPage`
-- Vulnerability list/detail: `InventoryPage` in `vulnerability-intelligence` mode using `/vulnerability-intelligence`, `/vulnerability-intelligence/filters`, and `/vulnerability-intelligence/{externalId}`
-- CVE Assessment Workbench: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/status` (flyout label: "CVE Assessment Workbench", view key: `org-cves`)
+- **Dashboard** (`VulnRepoDashboardPage`, path `/vuln-repo`) — summary metrics, critical/unresolved CVE list, and severity breakdown; links to host-asset and software-asset drilldowns
+- **Vulnerabilities** (`VulnRepoVulnerabilitiesPage`, path `/vuln-repo/vulnerabilities`) — filterable vulnerability list
 
-CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `CveAssessmentWorkbench`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+A third view, the **CVE Assessment Workbench**, is reached by clicking into a CVE from other views (path `/vuln-repo/org-cves/:cveId?`). It is rendered by `VulnRepoOrgCvePage`, which opens `VulnRepoCveAssessmentWorkbench` as a drawer. The workbench uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+
+Additional drilldown paths under `/vuln-repo`:
+
+- `/vuln-repo/org-cves/:cveId/assets` — `VulnRepoCveAssetsPage`: asset list for a specific CVE
+- `/vuln-repo/org-cves/:cveId/software` — `VulnRepoCveSoftwarePage`: software list for a specific CVE
+- `/vuln-repo/host-assets/:assetId` — host asset detail reached from the Vuln Repo section
+- `/vuln-repo/software-assets` — `VulnRepoSoftwareAssetsPage`: components for a specific software identity (reached via `softwareIdentityId` query param)
+
+Legacy `/vulnerability-intelligence/**` paths are automatically redirected to the corresponding `/vuln-repo/**` paths.
 
 Current workbench behavior:
 
 - analysts no longer use a foreground "Recompute Review Queue" button as the normal workflow
-- the page shows queue/projection freshness from `/vulnerability-intelligence/org-cves/status`
+- the page shows queue/projection freshness from `/vuln-repo/org-cves/status`
 - it polls every 10 seconds only while queue work is pending and the tab is visible
 - when queue work drains or projection freshness advances, it reloads the list and keeps the selected CVE detail in sync
 - after manual finding creation, it refreshes both detail and the current list page so row counts stay current while the drawer is still open
 
 ### Inventory
 
-The inventory flyout is organized into groups, each with one view:
+The inventory section is organized into two views (flyout groups):
 
-- **Summary** → Software Identities (`SoftwareIdentitiesPage`, view key `software-identities`)
-- **Infrastructure** → Hosts (`InventoryPage`, view key `hosts`)
-- **Cloud** → Container Images (`InventoryPage`, view key `container-images`)
-- **Repositories** → Repositories (`InventoryPage`, view key `sbom`)
+- **Summary** → Software Identities (`SoftwareIdentitiesPage`, view key `software-identities`, path `/inventory/software-identities`)
+- **Infrastructure** → Hosts (`InventoryPage`, view key `hosts`, path `/inventory/hosts`)
 
 `SoftwareIdentitiesPage` is the primary inventory summary view. It reads `/inventory/software-identities` (paged, with lifecycle and mapping-state filters) and `/inventory/software-identities/{softwareIdentityId}` for detail. It opens `SoftwareIdentityDetailDrawer` for per-identity EOL status, asset coverage, version breakdown, and EOL slug management. The legacy `imported-assets` query param redirects to `software-identities` for backwards URL compatibility.
 
-The Hosts, Container Images, and Repositories views continue to sit on top of `/inventory/components` and `/inventory/components/filters` with default asset-type filters changing by view.
+The Hosts view sits on top of `/inventory/components` and `/inventory/components/filters` with a host asset-type filter.
 
-`HostAssetDetailPage` is a dedicated drilldown for a single host asset, reached from the Hosts inventory view. It reads `/api/assets/hosts/{assetId}` for detailed CI metadata, alias list, software instances, and associated findings.
+`HostAssetDetailPage` is a dedicated drilldown for a single host asset, reached from the Hosts inventory view at `/inventory/hosts/:assetId`. It reads `/api/assets/hosts/{assetId}` for detailed CI metadata, alias list, software instances, and associated findings.
 
 ### Connect
 
-`ConnectPage` is a connector catalog with three top-level views: Sources, Inventory Run Queue, and Vuln Intel Run Queue.
+`ConnectPage` is a connector catalog with four top-level views accessible from a tab bar:
 
 **Sources** swaps in focused workflow pages per connector:
 
@@ -146,11 +157,13 @@ The Hosts, Container Images, and Repositories views continue to sit on top of `/
 
 **Inventory Run Queue** is `InventoryRunQueuePage`, a shared table of all host/container/SBOM ingestion run history (ServiceNow CMDB, GitHub SBOM, GitHub GHCR), showing type, status, started time, duration, assets, components, findings, and an expandable details panel per run.
 
-**Vuln Intel Run Queue** surfaces `SourcesPage` in queue-only mode for NVD/KEV/GHSA/CSAF run history.
+**Vuln Intel Run Queue** surfaces `SourcesPage` in `focusSource="vuln-only"` mode for NVD/KEV/GHSA/CSAF run history.
+
+**Processing Jobs** surfaces `SourcesPage` in `focusSource="processing"` mode for internal maintenance and rebuild jobs such as persisted VEX repair and vendor rollout backfills.
 
 ### End-of-Life
 
-`EolPage` is mounted at `activeTab === 'end-of-life'`. The `DashboardPage` navigation card links directly to this tab via the `onViewEol` prop.
+`EolPage` is mounted at `/end-of-life`. The `DashboardPage` navigation card links directly to this path.
 
 - Loads summary counts from `/eol/status/summary` once (drives filter-tab badges).
 - Loads a paged component list from `/eol/status/components` on filter or page change.
@@ -183,14 +196,14 @@ Supporting components:
 - `FilterBuilder` and `FilterValueSelectCard` drive reusable filter UX
 - `StatCard` is used for summary metrics
 - `GithubPipelineManager` is a self-contained GitHub source pipeline editor used inside `ConnectPage`
-- `CveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vuln Intel
+- `VulnRepoCveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vulnerability Repository
 - `SoftwareIdentityDetailDrawer` is a slide-over for per-identity detail, EOL status, and slug mapping; used from `SoftwareIdentitiesPage`
 - Most long-running actions surface inline status text instead of global toasts
 
 ## Current Caveats
 
-- There is no route-level page system; deep links depend on query params and mounted shell state.
-- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer (CVE Assessment Workbench).
+- Navigation uses React Router path-based routing. Legacy query-param URLs are redirected by `LegacyQueryRedirect`.
+- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the Vulnerability Repository CVE Assessment Workbench drawer.
 - The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
-- The inventory UI exposes more conceptual categories than the backend currently models explicitly; several filter-based views share the same `/inventory/components` endpoint.
+- The inventory UI exposes Software Identities and Hosts as the two active views. Container Images and Repositories views exist as `InventoryViewKey` type values but are not currently in the sidebar flyout.
 - The frontend package ships `dev`, `build`, `preview`, and `test:unit` scripts. `test:unit` runs Vitest in non-watch mode (`vitest run`). There is no dedicated lint script in `package.json`.
