@@ -180,7 +180,6 @@ export function OperationsQualityPage() {
   const [searchParams] = useSearchParams();
   const requestedDomainParam = (searchParams.get('domain') ?? '').trim().toUpperCase();
   const requestedDomain = requestedDomainParam in DOMAIN_LABELS ? requestedDomainParam : '';
-  const focusTarget = (searchParams.get('focus') ?? '').trim().toLowerCase();
   const [queryInput, setQueryInput] = React.useState('');
   const [domain, setDomain] = React.useState(requestedDomain);
   const [issueType, setIssueType] = React.useState('');

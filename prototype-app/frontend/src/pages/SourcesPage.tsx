@@ -326,6 +326,9 @@ export function SourcesPage({
   );
   const vexRepairSummary = vexRepairSummaryQuery.data ?? null;
   const sourceFilterConfigQuery = useSourceFilterConfigQuery(activeSourceFilterKey, showSourceFilters);
+  const { refetch: refetchSyncRuns } = syncRunsQuery;
+  const { refetch: refetchVexRepairSummary } = vexRepairSummaryQuery;
+  const { refetch: refetchSourceFilterConfig } = sourceFilterConfigQuery;
   const loadingRuns = syncRunsQuery.isLoading;
   const refreshingRuns = syncRunsQuery.isFetching;
   const loadingVexRepairSummary = vexRepairSummaryQuery.isLoading;
@@ -333,21 +336,21 @@ export function SourcesPage({
   const loadingSourceFilters = sourceFilterConfigQuery.isLoading && sourceFilterConfigQuery.data == null;
 
   const refreshRuns = React.useCallback(async () => {
-    const result = await syncRunsQuery.refetch();
+    const result = await refetchSyncRuns();
     if (result.error) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [syncRunsQuery.refetch]);
+  }, [refetchSyncRuns]);
 
   const refreshVexRepairSummary = React.useCallback(async () => {
     if (!shouldLoadVexRepairSummary) {
       return;
     }
-    const result = await vexRepairSummaryQuery.refetch();
+    const result = await refetchVexRepairSummary();
     if (result.error) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [shouldLoadVexRepairSummary, vexRepairSummaryQuery.refetch]);
+  }, [refetchVexRepairSummary, shouldLoadVexRepairSummary]);
 
   const refreshSourceFilters = React.useCallback(async () => {
     if (activeSourceFilterKey == null) {
@@ -355,11 +358,11 @@ export function SourcesPage({
       setSourceFilters({});
       return;
     }
-    const result = await sourceFilterConfigQuery.refetch();
+    const result = await refetchSourceFilterConfig();
     if (result.error && !isNotFoundError(result.error)) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [activeSourceFilterKey, sourceFilterConfigQuery.refetch]);
+  }, [activeSourceFilterKey, refetchSourceFilterConfig]);
 
   React.useEffect(() => {
     if (refreshSignal === previousRefreshSignalRef.current) {
