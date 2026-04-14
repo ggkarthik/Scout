@@ -572,47 +572,40 @@
   margin-bottom: 18px;
 }
 
-.quality-eol-review-panel {
-  margin-bottom: 18px;
+.eol-mapping-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.quality-eol-review-header {
-  align-items: flex-start;
-  gap: 16px;
+.eol-mapping-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
-.quality-eol-review-copy {
-  flex: 1 1 420px;
-}
-
-.quality-eol-review-summary {
-  margin: 8px 0 0;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-
-.quality-eol-review-actions {
-  justify-content: flex-end;
-  margin: 0;
-}
-
-.quality-eol-review-toggle {
-  display: inline-flex;
+.eol-slug-confirm-row {
+  display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
 }
 
+.eol-slug-confirm-row .slug-suggest-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.eol-slug-confirm-row .btn {
+  flex-shrink: 0;
+}
+
+/* legacy classes kept for any residual references */
 .quality-eol-review-empty {
   margin-top: 0;
-}
-
-.quality-eol-input-stack {
-  display: grid;
-  gap: 8px;
-}
-
-.quality-eol-input-stack .filter-input {
-  width: 100%;
 }
 
 .quality-table {
@@ -918,6 +911,180 @@
 
 .eol-freshness-error {
   color: var(--critical);
+}
+
+/* ------------------------------------------------------------------ */
+/* EolPage — affected assets count button                               */
+/* ------------------------------------------------------------------ */
+
+.eol-asset-count-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.eol-asset-count-btn:hover {
+  color: var(--accent-strong);
+}
+
+/* ------------------------------------------------------------------ */
+/* EolPage — package asset drill-down panel                             */
+/* ------------------------------------------------------------------ */
+
+.eol-asset-panel {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-muted);
+  padding: 16px 18px;
+}
+
+.eol-asset-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.eol-asset-panel-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.eol-asset-panel-count {
+  margin-left: 4px;
+}
+
+.eol-asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eol-asset-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+}
+
+.eol-asset-name {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.eol-asset-versions {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Slug suggestion combobox                                             */
+/* ------------------------------------------------------------------ */
+
+.slug-suggest-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.slug-suggest-wrap .filter-input {
+  width: 100%;
+}
+
+.slug-suggest-dropdown {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.slug-suggest-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.slug-suggest-option:last-child {
+  border-bottom: none;
+}
+
+.slug-suggest-option:hover {
+  background: var(--accent-muted);
+}
+
+.slug-suggest-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slug-suggest-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.slug-suggest-confidence {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid transparent;
+}
+
+.slug-suggest-confidence--high {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
+  color: var(--success);
+}
+
+.slug-suggest-confidence--medium {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  color: var(--warning);
+}
+
+.slug-suggest-confidence--low {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text-muted) 24%, transparent);
+  color: var(--text-muted);
+}
+
+.slug-suggest-method {
+  margin-left: auto;
+  font-size: 0.72rem;
 }
 
 @media (max-width: 760px) {

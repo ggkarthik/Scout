@@ -87,3 +87,35 @@ export type UnresolvedEolMappingPage = {
   totalElements: number;
   totalPages: number;
 };
+
+export type PackageEolStatus = {
+  packageName: string;
+  ecosystem: string;
+  eolSlug?: string;
+  eolCycle?: string;
+  eolDate?: string;
+  isEol?: boolean;
+  eolDaysRemaining?: number;
+  assetCount: number;
+};
+
+export type PackageEolStatusPage = {
+  content: PackageEolStatus[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+};
+
+export type PackageAsset = {
+  assetName: string;
+  versions: string;
+};
+
+export type PackageAssetPage = {
+  content: PackageAsset[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+};

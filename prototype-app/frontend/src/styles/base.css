@@ -1061,6 +1061,10 @@ a.btn {
   gap: var(--space-3);
 }
 
+.page-grid > * {
+  min-width: 0;
+}
+
 .dashboard-grid {
   display: grid;
   gap: var(--space-3);

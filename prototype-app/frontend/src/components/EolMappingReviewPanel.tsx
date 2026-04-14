@@ -1,5 +1,6 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api/client';
 import { pathForTab } from '../app/routes';
 import {
@@ -22,7 +23,6 @@ import type {
 } from '../features/eol/types';
 
 type Props = {
-  initiallyOpen?: boolean;
   qualityFilters?: Pick<
     OperationalQualityIssuesQueryParams,
     'issueType' | 'severity' | 'affectsActiveFindings' | 'assetType' | 'sourceSystem' | 'ecosystem' | 'query'
@@ -33,6 +33,92 @@ type MappingNotice = {
   kind: 'error' | 'success';
   message: string;
 };
+
+// ---------------------------------------------------------------------------
+// Slug suggestion combobox
+// ---------------------------------------------------------------------------
+
+function SlugSuggestInput({
+  value,
+  onChange,
+  suggestions,
+  disabled,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  suggestions: EolSlugSuggestion[];
+  disabled: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [dropdownPos, setDropdownPos] = React.useState<{ top: number; left: number; width: number } | null>(null);
+
+  function updatePosition() {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+  }
+
+  function confidenceClass(confidence: string) {
+    switch (confidence.toUpperCase()) {
+      case 'HIGH': return 'slug-suggest-confidence--high';
+      case 'MEDIUM': return 'slug-suggest-confidence--medium';
+      default: return 'slug-suggest-confidence--low';
+    }
+  }
+
+  const showDropdown = open && suggestions.length > 0;
+
+  return (
+    <div className="slug-suggest-wrap">
+      <input
+        ref={inputRef}
+        type="text"
+        className="filter-input"
+        placeholder="Select a suggestion or type a slug"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => { updatePosition(); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {showDropdown && dropdownPos && createPortal(
+        <div
+          className="slug-suggest-dropdown"
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            width: dropdownPos.width,
+            zIndex: 9999,
+          }}
+        >
+          {suggestions.map((s) => (
+            <button
+              key={s.slug}
+              type="button"
+              className="slug-suggest-option"
+              onMouseDown={() => { onChange(s.slug); setOpen(false); }}
+            >
+              <div className="slug-suggest-top">
+                <span className="mono">{s.slug}</span>
+                <span className={`slug-suggest-confidence ${confidenceClass(s.confidence)}`}>
+                  {s.confidence}
+                </span>
+              </div>
+              <div className="slug-suggest-bottom">
+                <span>{s.displayName}</span>
+                <span className="panel-caption slug-suggest-method">{s.method}</span>
+              </div>
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 const INVALIDATION_KEYS = [
   ['eol-unresolved-mappings'],
@@ -67,7 +153,7 @@ function formatCount(value: number | string | undefined): string {
   return '0';
 }
 
-export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }: Props) {
+export function EolMappingReviewPanel({ qualityFilters }: Props) {
   const queryClient = useQueryClient();
   const [unresolvedPage, setUnresolvedPage] = React.useState(0);
   const unresolvedMappingsQuery = useEolUnresolvedMappingsQuery(
@@ -82,7 +168,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
   const unresolvedTotalElements = unresolvedPageData?.totalElements ?? 0;
   const normalizedIssueType = (qualityFilters?.issueType ?? '').trim().toUpperCase();
   const issueTypeExcludesMappingReview = normalizedIssueType.length > 0 && normalizedIssueType !== MATCHING_ISSUE_TYPE;
-  const [open, setOpen] = React.useState(initiallyOpen);
+
   const mappingIssueFilters = React.useMemo<OperationalQualityIssuesQueryParams>(() => ({
     domain: 'EOL',
     issueType: MATCHING_ISSUE_TYPE,
@@ -112,11 +198,6 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
   const [notice, setNotice] = React.useState<MappingNotice | null>(null);
   const eolCatalogHref = pathForTab('end-of-life');
 
-  React.useEffect(() => {
-    if (initiallyOpen) {
-      setOpen(true);
-    }
-  }, [initiallyOpen]);
   const filteredIdentityIds = React.useMemo(
     () => new Set(
       (filteredMappingIssuesQuery.data?.items ?? [])
@@ -126,12 +207,8 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
     [filteredMappingIssuesQuery.data?.items]
   );
   const filteredList = React.useMemo(() => {
-    if (issueTypeExcludesMappingReview) {
-      return [];
-    }
-    if (!hasIntersectionFilters || !filteredMappingIssuesQuery.data) {
-      return unresolvedList;
-    }
+    if (issueTypeExcludesMappingReview) return [];
+    if (!hasIntersectionFilters || !filteredMappingIssuesQuery.data) return unresolvedList;
     return unresolvedList.filter((item) => filteredIdentityIds.has(item.softwareIdentityId));
   }, [
     filteredIdentityIds,
@@ -140,15 +217,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
     issueTypeExcludesMappingReview,
     unresolvedList
   ]);
-  const hasActiveQualityFilters = Boolean(
-    hasIntersectionFilters
-      || issueTypeExcludesMappingReview
-  );
-  const visibleCount = issueTypeExcludesMappingReview
-    ? 0
-    : hasIntersectionFilters && filteredMappingIssuesQuery.data
-      ? filteredList.length
-      : unresolvedTotalElements;
+
   const loadingReviewList = unresolvedMappingsQuery.isPending
     || (
       hasIntersectionFilters
@@ -158,7 +227,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
     );
 
   const suggestionQueries = useQueries({
-    queries: (open ? filteredList : []).map(item => ({
+    queries: filteredList.map(item => ({
       queryKey: ['eol-slug-suggestions', item.normalizedKey],
       queryFn: () => api.listEolMappingSuggestions(item.normalizedKey),
       staleTime: 5 * 60 * 1000
@@ -174,47 +243,28 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
   }, [filteredList, suggestionQueries]);
 
   const reviewColumns = React.useMemo<DataTableColumn[]>(() => [
-    { id: 'software', label: 'Software', header: 'Software', initialSize: 220 },
-    { id: 'vendorProduct', label: 'Vendor / Product', header: 'Vendor / Product', initialSize: 220 },
-    { id: 'footprint', label: 'Active Footprint', header: 'Active Footprint', initialSize: 180 },
-    { id: 'exposure', label: 'Exposure', header: 'Exposure', initialSize: 180 },
-    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 },
-    { id: 'normalizedKey', label: 'Normalized Key', header: 'Normalized Key', initialSize: 240 },
-    { id: 'eolSlug', label: 'EOL Slug', header: 'EOL Slug', initialSize: 300 },
-    { id: 'actions', label: 'Actions', header: '', initialSize: 140 }
+    { id: 'software', label: 'Software', header: 'Software', initialSize: 240 },
+    { id: 'footprint', label: 'Footprint', header: 'Footprint', initialSize: 200 },
+    { id: 'exposure', label: 'Exposure', header: 'Exposure', initialSize: 160 },
+    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 160 },
+    { id: 'eolSlug', label: 'EOL Slug', header: 'EOL Slug', initialSize: 360 },
   ], []);
 
   const handleConfirmMapping = React.useCallback(async (item: UnresolvedEolMapping) => {
     const slug = confirmSlug[item.normalizedKey]?.trim();
     if (!slug) {
-      setNotice({
-        kind: 'error',
-        message: `Enter an endoflife.date slug before confirming ${item.displayName}.`
-      });
+      setNotice({ kind: 'error', message: `Enter an endoflife.date slug before confirming ${item.displayName}.` });
       return;
     }
-
     setBusyKey(item.normalizedKey);
     setNotice(null);
     try {
       await api.confirmEolMapping(item.normalizedKey, slug);
-      setConfirmSlug(prev => {
-        const next = { ...prev };
-        delete next[item.normalizedKey];
-        return next;
-      });
-      setNotice({
-        kind: 'success',
-        message: `Mapped ${item.displayName} to ${slug}.`
-      });
-      await Promise.all(
-        INVALIDATION_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
-      );
+      setConfirmSlug(prev => { const next = { ...prev }; delete next[item.normalizedKey]; return next; });
+      setNotice({ kind: 'success', message: `Mapped ${item.displayName} to ${slug}.` });
+      await Promise.all(INVALIDATION_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
     } catch (error) {
-      setNotice({
-        kind: 'error',
-        message: error instanceof Error ? error.message : String(error)
-      });
+      setNotice({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
     } finally {
       setBusyKey(null);
     }
@@ -224,7 +274,7 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
     filteredList.map((item) => {
       const draft = confirmSlug[item.normalizedKey] ?? '';
       const dropdownSuggestions = suggestionsMap.get(item.normalizedKey) ?? [];
-      const suggestionListId = `quality-eol-suggestions-${item.softwareIdentityId}`;
+      const isBusy = busyKey === item.normalizedKey;
       return {
         id: item.normalizedKey,
         cells: {
@@ -232,26 +282,16 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
             content: (
               <div className="software-identity-row-stack">
                 <span>{item.displayName}</span>
-                <span className="panel-caption">
-                  Review and assign the official endoflife.date slug
-                </span>
-              </div>
-            )
-          },
-          vendorProduct: {
-            content: (
-              <div className="software-identity-row-stack">
-                <span>{item.vendor || '-'}</span>
-                <span className="panel-caption">{item.product || '-'}</span>
+                <span className="panel-caption mono">{item.normalizedKey}</span>
               </div>
             )
           },
           footprint: {
             content: (
               <div className="software-identity-row-stack">
-                <span>{formatCount(item.componentCount)} active components</span>
+                <span>{formatCount(item.assetCount)} assets</span>
                 <span className="panel-caption">
-                  {formatCount(item.assetCount)} active assets · {formatCount(item.versionCount)} versions
+                  {formatCount(item.componentCount)} components · {formatCount(item.versionCount)} versions
                 </span>
               </div>
             )
@@ -259,84 +299,49 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
           exposure: {
             content: (
               <div className="software-identity-row-stack">
-                <span>{formatCount(item.openFindingCount)} open findings</span>
-                <span className="panel-caption">
-                  {formatCount(item.openVulnerabilityCount)} open vulnerabilities
-                </span>
+                <span>{formatCount(item.openFindingCount)} findings</span>
+                <span className="panel-caption">{formatCount(item.openVulnerabilityCount)} vulns</span>
               </div>
             )
           },
           lastObserved: { content: formatInstant(item.lastObservedAt) },
-          normalizedKey: { content: <span className="mono">{item.normalizedKey}</span> },
           eolSlug: {
             content: (
-              <div className="quality-eol-input-stack">
-                <input
-                  type="text"
-                  className="filter-input"
-                  list={suggestionListId}
-                  placeholder="Select a slug or type one manually"
+              <div className="eol-slug-confirm-row">
+                <SlugSuggestInput
                   value={draft}
-                  disabled={busyKey === item.normalizedKey}
-                  onChange={(event) => setConfirmSlug(prev => ({
-                    ...prev,
-                    [item.normalizedKey]: event.target.value
-                  }))}
+                  onChange={(val) => setConfirmSlug(prev => ({ ...prev, [item.normalizedKey]: val }))}
+                  suggestions={dropdownSuggestions}
+                  disabled={isBusy}
                 />
-                <datalist id={suggestionListId}>
-                  {dropdownSuggestions.map((suggestion) => (
-                    <option
-                      key={`${item.normalizedKey}-${suggestion.slug}`}
-                      value={suggestion.slug}
-                      label={`${suggestion.displayName ?? suggestion.slug} (${suggestion.confidence})`}
-                    />
-                  ))}
-                </datalist>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={isBusy || !draft.trim()}
+                  onClick={() => void handleConfirmMapping(item)}
+                >
+                  {isBusy ? 'Saving...' : 'Confirm'}
+                </button>
               </div>
             )
           },
-          actions: {
-            content: (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={busyKey === item.normalizedKey || !draft.trim()}
-                onClick={() => void handleConfirmMapping(item)}
-              >
-                {busyKey === item.normalizedKey ? 'Saving...' : 'Confirm'}
-              </button>
-            )
-          }
         }
       };
     })
   ), [busyKey, confirmSlug, filteredList, handleConfirmMapping, suggestionsMap]);
 
   return (
-    <section className="panel quality-eol-review-panel">
-      <div className="panel-header quality-eol-review-header">
-        <div className="quality-eol-review-copy">
-          <h3>Unmatched EOL Software</h3>
-          <p className="quality-eol-review-summary">
-            These software identities already show up as lifecycle-quality gaps. Review them here, assign the official
-            endoflife.date slug, and the Quality and EOL views will refresh around that confirmed mapping. The queue is
-            sorted by active exposure first, then by deployment footprint.
-          </p>
+    <div className="eol-mapping-review">
+      <div className="eol-mapping-review-header">
+        <div>
+          <span className="panel-caption">
+            Software without an endoflife.date match — sorted by exposure then footprint.
+            {' '}{unresolvedTotalElements > 0 && <strong>{unresolvedTotalElements.toLocaleString()} remaining</strong>}
+          </span>
         </div>
-
-        <div className="button-row quality-eol-review-actions">
-          <a href={eolCatalogHref} className="btn btn-secondary">
-            Open EOL Catalog
-          </a>
-          <button
-            type="button"
-            className="btn btn-secondary quality-eol-review-toggle"
-            onClick={() => setOpen(current => !current)}
-          >
-            {open ? 'Hide Review' : 'Review Unmatched EOL Software'}
-            <span className="eol-unresolved-badge">{visibleCount}</span>
-          </button>
-        </div>
+        <a href={eolCatalogHref} className="btn btn-secondary">
+          Browse EOL Catalog
+        </a>
       </div>
 
       {notice && (
@@ -345,50 +350,35 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
         </div>
       )}
 
-      {!open && (
-        <div className="panel-caption">
-          Open the review queue when you want to work through unmatched lifecycle mappings from the Quality workflow.
-        </div>
+      {loadingReviewList && (
+        <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
       )}
 
-      {open && loadingReviewList && (
-        <div className="notice">Loading unmatched EOL software...</div>
-      )}
-
-      {open && unresolvedMappingsQuery.error instanceof Error && (
+      {!loadingReviewList && unresolvedMappingsQuery.error instanceof Error && (
         <div className="notice error">
           Unable to load unmatched EOL software: {unresolvedMappingsQuery.error.message}
         </div>
       )}
 
-      {open && hasIntersectionFilters && !issueTypeExcludesMappingReview && filteredMappingIssuesQuery.error instanceof Error && (
+      {!loadingReviewList && hasIntersectionFilters && !issueTypeExcludesMappingReview && filteredMappingIssuesQuery.error instanceof Error && (
         <div className="notice error">
-          Unable to apply current Quality filters to unmatched EOL software: {filteredMappingIssuesQuery.error.message}
+          Unable to apply current Quality filters: {filteredMappingIssuesQuery.error.message}
         </div>
       )}
 
-      {open && issueTypeExcludesMappingReview && (
-        <div className="empty-state quality-eol-review-empty">
-          <p>The current Issue Type filter excludes unmatched EOL software.</p>
-        </div>
-      )}
-
-      {open
-        && !loadingReviewList
-        && !(unresolvedMappingsQuery.error instanceof Error)
-        && !(hasIntersectionFilters && filteredMappingIssuesQuery.error instanceof Error)
-        && !issueTypeExcludesMappingReview
-        && filteredList.length === 0 && (
-        <div className="empty-state quality-eol-review-empty">
+      {!loadingReviewList && !unresolvedMappingsQuery.error && filteredList.length === 0 && (
+        <div className="empty-state">
           <p>
-            {hasActiveQualityFilters
-              ? 'No unmatched EOL software matches the current filters.'
-              : 'No actionable EOL mapping gaps. Library-ecosystem packages (npm, maven, pypi, etc.) are excluded — endoflife.date tracks OS packages, runtimes, and infrastructure software, not individual libraries.'}
+            {issueTypeExcludesMappingReview
+              ? 'The current Issue Type filter excludes unmatched EOL software.'
+              : hasIntersectionFilters
+                ? 'No unmatched EOL software matches the current filters.'
+                : 'No actionable EOL mapping gaps. Library-ecosystem packages (npm, maven, pypi, etc.) are excluded — endoflife.date tracks OS packages, runtimes, and infrastructure software, not individual libraries.'}
           </p>
         </div>
       )}
 
-      {open && filteredList.length > 0 && (
+      {!loadingReviewList && filteredList.length > 0 && (
         <>
           <div className="table-scroll">
             <DataTable
@@ -424,6 +414,6 @@ export function EolMappingReviewPanel({ initiallyOpen = false, qualityFilters }:
           )}
         </>
       )}
-    </section>
+    </div>
   );
 }

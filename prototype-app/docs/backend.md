@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-03-26
+Last updated: 2026-04-14
 
 ## Purpose
 
@@ -78,11 +78,22 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `GET /api/dashboard/impacted-cves`
 - `GET /api/dashboard/cve-inventory-map`
 - `GET /api/operations/dashboard`
+- `GET /api/operations/overview` — executive health snapshot
+- `GET /api/operations/ingestion-efficiency` — ingestion throughput and success rates
 - `GET /api/operations/normalization-quality`
+- `GET /api/operations/correlation-effectiveness` — CPE coverage, direct vs fallback share, recent findings
+- `GET /api/operations/noise-lifecycle` — noise reduction and lifecycle metrics
+- `GET /api/operations/api-read-path` — read-model freshness and latency
+- `GET /api/operations/freshness-drift` — projection staleness diagnostics
+- `GET /api/operations/metric-catalog` — full list of operational metric definitions
 - `GET /api/operations/quality/summary` — quality issue counts by domain/severity
 - `GET /api/operations/quality/issues` — paged quality issue list (filterable by domain, severity, asset type, source system)
 - `GET /api/operations/quality/issues/{issueId}` — single quality issue detail
 - `GET /api/operations/quality/filters` — available filter values for quality issues
+
+### SLO Status
+
+- `GET /api/slo/status` — real-time snapshot of whether the platform is meeting its defined service level objectives; lightweight (no DB joins), safe to poll by monitoring systems
 
 ### Findings and Policy
 
@@ -109,6 +120,22 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 - `PUT /api/connectors/servicenow-cmdb` — create or update connector config (URL, auth type, tables, sync schedule)
 - `POST /api/connectors/servicenow-cmdb/test` — save config then run a live connection test against all three ServiceNow tables
 - `POST /api/connectors/servicenow-cmdb/sync` — enqueue a live CMDB inventory pull via `ServiceNowCmdbSyncService`
+
+### Vulnerability Source Filter Configuration
+
+- `GET /api/connectors/vulnerability-sources/{sourceSystem}` — retrieve the filter configuration for a vulnerability source (e.g., `nvd`, `ghsa`, `microsoft-csaf`)
+- `PUT /api/connectors/vulnerability-sources/{sourceSystem}` — create or update the filter configuration for a source; controls which CVE ecosystems, severities, or product scopes are ingested
+
+### Vulnerability Repository (Vuln Repo)
+
+These endpoints back the Vulnerability Repository section of the UI (`/vuln-repo`). They provide an org-scoped view of vulnerability exposure with richer filtering than the legacy vulnerability-intelligence endpoints.
+
+- `GET /api/vuln-repo/dashboard` — summary dashboard for the Vulnerability Repository section
+- `GET /api/vuln-repo/vulnerabilities` — paged vulnerability list with query, KEV, severity, exploit, recency, and software-scope filters
+- `GET /api/vuln-repo/org-cves` — paged org-specific CVE exposure list (same filter set as `/vulnerabilities`)
+- `GET /api/vuln-repo/org-cves/status` — automation status and projection freshness for the org-CVE workbench
+- `POST /api/vuln-repo/org-cves/recompute` — admin repair/backfill endpoint; `mode=full` triggers a full recompute; default is `targeted`
+- `GET /api/vuln-repo/software-assets/{softwareIdentityId}` — assets and components for a specific software identity, used by the software-asset drilldown page
 
 ### Vulnerability Intelligence
 
@@ -158,14 +185,20 @@ If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/
 ### CVE Drill-Down and Archive Operations
 
 - `GET /api/cve-detail/{cveId}`
+- `GET /api/cve-detail/{cveId}/vex-evidence` — per-component VEX assertion detail for a CVE (requires `componentId` query param)
 - `POST /api/cve-detail/{cveId}/investigation`
 - `PUT /api/cve-detail/investigation/{investigationId}`
+- `POST /api/cve-detail/{cveId}/investigation/submit` — upsert investigation in a single call (create-or-update semantics)
 - `POST /api/cve-detail/{cveId}/applicability-assessment`
 - `PUT /api/cve-detail/applicability-assessment/{assessmentId}`
 - `POST /api/cve-detail/applicability-assessment/{assessmentId}/complete`
+- `POST /api/cve-detail/{cveId}/assessment/submit` — upsert and complete assessment in a single call
 - `POST /api/cve-detail/{cveId}/manual-finding`
 - `POST /api/cve-detail/{cveId}/suppress`
 - `POST /api/cve-detail/{cveId}/export`
+- `POST /api/cve-detail/{cveId}/investigation-summary` — generate a deterministic investigation summary and persist it against the org-CVE record
+- `POST /api/cve-detail/{cveId}/investigation-ai-summary` — generate an AI-assisted investigation summary and persist it against the org-CVE record
+- `GET /api/cve-detail/{cveId}/saved-investigation-summary` — retrieve the most recently persisted investigation summary for a CVE
 - `POST /api/operations/vulnerability-archive/migrate`
 - `GET /api/operations/vulnerability-archive/status`
 - `GET /api/operations/vulnerability-archive/{externalId}/description`
@@ -289,6 +322,7 @@ The newer CVE workflow APIs add:
 - manual finding creation
 - export/report responses
 - org-level CVE drill-down data assembly
+- investigation summaries (deterministic and AI-assisted) persisted against `org_cve_records`
 
 These APIs depend on `X-Tenant-ID` and `X-User-ID`, and are currently consumed by the org-CVE drawer in the frontend.
 
@@ -314,7 +348,9 @@ Scheduled jobs currently defined in code:
 - `02:05` daily: mark stale assets inactive
 - `02:30` daily: VEX staleness sweep enqueues `SOFTWARE_DELTA`
 - `00:15` daily: lifecycle date sweep (`EOL_DATE_SWEEP`)
+- `03:15` daily: EPSS score refresh — fetches updated exploit probability scores from the FIRST.org API for stale vulnerability rows (configurable via `app.epss.refresh-cron`)
 - every `5` minutes: run enabled GitHub SBOM sources
+- every `5` minutes: ServiceNow CMDB auto-sync check (when auto-sync is enabled)
 - every `15` minutes: reopen expired suppressions
 - hourly: auto-close findings by policy
 - `02:00` Sunday: EOL catalog refresh (stage 1 — `EolRefreshService.fullCatalogRefresh`)
@@ -333,8 +369,9 @@ Executors:
 ## Key Configuration
 
 - Security: `APP_API_KEY`, `APP_CREATOR_KEY`
-- Feature flags: `FEATURE_VEX_POLICY_ENABLED`, `FEATURE_VEX_RISK_MODIFIERS_ENABLED`, `FEATURE_SOFTWARE_MODEL_ENABLED`
+- Feature flags: `app.features.vex-policy-enabled` (default `true`), `app.features.vex-risk-modifiers-enabled` (default `true`), `app.features.vex-rollout-controls-enabled` (default `true`), `app.features.vex-rollout-backfill-enabled` (default `true`)
 - EOL: `app.eol.enabled` (default `true`), `app.eol.catalog-refresh-cron`, `app.eol.release-refresh-cron`, `app.eol.resolve-mappings-cron`, `app.eol.denormalize-cron`, `app.eol.lifecycle-date-sweep-cron`
+- EPSS: `app.epss.enabled` (default `true`), `app.epss.refresh-cron` (default `03:15` daily), `app.epss.base-url`, `app.epss.batch-size`
 - NVD: `NVD_API_KEY`, `NVD_API_KEY_FILE`, `NVD_*`
 - GitHub: `GITHUB_API_TOKEN`, `GITHUB_API_TOKEN_FILE`, `GITHUB_*`
 - SBOM fetch: `SBOM_FETCH_MAX_PAYLOAD_BYTES`, `SBOM_FETCH_ALLOWED_HOSTS`, `SBOM_FETCH_ALLOW_USER_AUTH_HEADER`
@@ -348,6 +385,7 @@ Executors:
 - `POST /api/cve-detail/{cveId}/suppress` is fully implemented: persists suppression via `OrgCveRecordService.suppress()` and suppresses related findings via `FindingService.suppressFindingsForVulnerability()`.
 - Flyway owns the PostgreSQL startup path. Remaining schema cleanup is now mostly historical normalization rather than runtime compatibility work.
 - The vulnerability optimization is only partially landed: archive/snippet fields exist, but legacy CVSS/source/status fields are still present on `Vulnerability` for compatibility.
+- Investigation summaries (`/investigation-summary`, `/investigation-ai-summary`) are persisted against the `org_cve_records` table as JSON columns (`investigation_summary_input_json`, `investigation_summary_output_json`, `investigation_summary_mode`, `investigation_summary_generated_at`). The AI summary path (`CveInvestigationAiSummaryService`) is present in code but requires external AI credentials to produce a meaningful response.
 
 ## Local Run
 

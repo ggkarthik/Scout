@@ -9,6 +9,8 @@ import com.prototype.vulnwatch.dto.EolProductCatalogDto;
 import com.prototype.vulnwatch.dto.EolReleaseDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
 import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
+import com.prototype.vulnwatch.dto.PackageAssetDto;
+import com.prototype.vulnwatch.dto.PackageEolStatusDto;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
@@ -162,6 +164,104 @@ public class EolService {
             case "unknown"  -> " AND ic.eol_slug IS NULL AND (ic.ecosystem IS NULL OR lower(ic.ecosystem) NOT IN (" + LIBRARY_ECOSYSTEMS_SQL + "))";
             default         -> "";
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // Package EOL statuses — grouped by package (one row per package, not per instance)
+    // -------------------------------------------------------------------------
+
+    public Page<PackageEolStatusDto> getPackageStatuses(String filter, int page, int size) {
+        String whereClause = buildComponentFilterClause(filter);
+
+        String countSql = "SELECT COUNT(*) FROM (" +
+                "SELECT 1 FROM inventory_components ic " +
+                "WHERE ic.component_status = 'ACTIVE'" + whereClause +
+                " GROUP BY ic.package_name, ic.ecosystem, ic.eol_slug, ic.eol_cycle, ic.eol_date, ic.is_eol" +
+                ") sub";
+
+        String dataSql = """
+                SELECT ic.package_name, ic.ecosystem, ic.eol_slug, ic.eol_cycle,
+                       ic.eol_date, ic.is_eol,
+                       MIN((ic.eol_date - CURRENT_DATE)::int) AS eol_days_remaining,
+                       COUNT(DISTINCT ic.asset_id) AS asset_count
+                FROM inventory_components ic
+                WHERE ic.component_status = 'ACTIVE'
+                """ + whereClause + """
+                GROUP BY ic.package_name, ic.ecosystem, ic.eol_slug, ic.eol_cycle, ic.eol_date, ic.is_eol
+                ORDER BY ic.eol_date ASC NULLS LAST, ic.package_name ASC
+                LIMIT ? OFFSET ?
+                """;
+
+        Long total = jdbcTemplate.queryForObject(countSql, Long.class);
+        if (total == null) {
+            total = 0L;
+        }
+
+        List<PackageEolStatusDto> items = jdbcTemplate.query(
+                dataSql,
+                (rs, rowNum) -> new PackageEolStatusDto(
+                        rs.getString("package_name"),
+                        rs.getString("ecosystem"),
+                        rs.getString("eol_slug"),
+                        rs.getString("eol_cycle"),
+                        rs.getObject("eol_date", java.time.LocalDate.class),
+                        rs.getObject("is_eol") != null ? rs.getBoolean("is_eol") : null,
+                        rs.getObject("eol_days_remaining") != null ? rs.getInt("eol_days_remaining") : null,
+                        rs.getLong("asset_count")
+                ),
+                size, (long) page * size);
+
+        return new PageImpl<>(items, PageRequest.of(page, size), total);
+    }
+
+    // -------------------------------------------------------------------------
+    // Package asset drill-down — assets that have a specific package installed
+    // -------------------------------------------------------------------------
+
+    public Page<PackageAssetDto> getPackageAssets(String packageName, String ecosystem, int page, int size) {
+        boolean hasEcosystem = ecosystem != null && !ecosystem.isBlank();
+        String ecosystemFilter = hasEcosystem ? " AND ic.ecosystem = ?" : "";
+
+        String countSql = "SELECT COUNT(DISTINCT ic.asset_id) FROM inventory_components ic " +
+                "WHERE ic.component_status = 'ACTIVE' AND ic.package_name = ?" + ecosystemFilter;
+
+        String dataSql = "SELECT a.name AS asset_name, " +
+                "STRING_AGG(DISTINCT ic.version, ', ' ORDER BY ic.version) AS versions " +
+                "FROM inventory_components ic " +
+                "JOIN assets a ON ic.asset_id = a.id " +
+                "WHERE ic.component_status = 'ACTIVE' AND ic.package_name = ?" + ecosystemFilter + " " +
+                "GROUP BY a.name " +
+                "ORDER BY a.name ASC " +
+                "LIMIT ? OFFSET ?";
+
+        Long total;
+        if (hasEcosystem) {
+            total = jdbcTemplate.queryForObject(countSql, Long.class, packageName, ecosystem);
+        } else {
+            total = jdbcTemplate.queryForObject(countSql, Long.class, packageName);
+        }
+        if (total == null) {
+            total = 0L;
+        }
+
+        List<PackageAssetDto> items;
+        if (hasEcosystem) {
+            items = jdbcTemplate.query(dataSql,
+                    (rs, rowNum) -> new PackageAssetDto(
+                            rs.getString("asset_name"),
+                            rs.getString("versions")
+                    ),
+                    packageName, ecosystem, size, (long) page * size);
+        } else {
+            items = jdbcTemplate.query(dataSql,
+                    (rs, rowNum) -> new PackageAssetDto(
+                            rs.getString("asset_name"),
+                            rs.getString("versions")
+                    ),
+                    packageName, size, (long) page * size);
+        }
+
+        return new PageImpl<>(items, PageRequest.of(page, size), total);
     }
 
     // -------------------------------------------------------------------------

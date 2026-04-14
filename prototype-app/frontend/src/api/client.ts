@@ -55,6 +55,8 @@ import type {
   EolRelease,
   EolSlugSuggestion,
   EolSummary,
+  PackageAssetPage,
+  PackageEolStatusPage,
   UnresolvedEolMapping,
   UnresolvedEolMappingPage
 } from '../features/eol/types';
@@ -434,6 +436,22 @@ export const api = {
     body: JSON.stringify({ normalizedKey, eolSlug })
   }),
   listEolMappingSuggestions: (normalizedKey: string) => request<EolSlugSuggestion[]>(`/eol/mappings/suggestions?normalizedKey=${encodeURIComponent(normalizedKey)}`),
+  getEolPackageStatuses: (params?: { filter?: string; page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.filter) searchParams.set('filter', params.filter);
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<PackageEolStatusPage>(`/eol/status/packages${suffix}`);
+  },
+  getEolPackageAssets: (params: { packageName: string; ecosystem?: string; page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.set('packageName', params.packageName);
+    if (params.ecosystem) searchParams.set('ecosystem', params.ecosystem);
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    return request<PackageAssetPage>(`/eol/status/packages/assets?${searchParams.toString()}`);
+  },
   listEolUnresolvedMappings: (params?: { page?: number; size?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.page != null) searchParams.set('page', String(params.page));
