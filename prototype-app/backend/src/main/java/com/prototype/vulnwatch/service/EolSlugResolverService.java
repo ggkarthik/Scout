@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.EolProductCatalog;
 import com.prototype.vulnwatch.domain.SoftwareEolMapping;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
+import com.prototype.vulnwatch.dto.EolSlugSuggestionDto;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
@@ -520,6 +521,23 @@ public class EolSlugResolverService {
         }
 
         return candidates;
+    }
+
+    public List<EolSlugSuggestionDto> resolveSuggestions(String normalizedKey) {
+        return resolveCandidates(normalizedKey).stream()
+                .map(match -> {
+                    String displayName = eolProductCatalogRepository.findBySlug(match.slug())
+                            .map(catalog -> {
+                                String catalogDisplayName = catalog.getDisplayName();
+                                return catalogDisplayName != null && !catalogDisplayName.isBlank()
+                                        ? catalogDisplayName
+                                        : catalog.getSlug();
+                            })
+                            .orElse(match.slug());
+                    return new EolSlugSuggestionDto(match.slug(), displayName, match.confidence(), match.method());
+                })
+                .limit(5)
+                .toList();
     }
 
     // -------------------------------------------------------------------------

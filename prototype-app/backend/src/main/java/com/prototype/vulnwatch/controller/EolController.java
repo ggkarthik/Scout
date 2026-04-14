@@ -10,7 +10,6 @@ import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
 import com.prototype.vulnwatch.dto.PackageAssetDto;
 import com.prototype.vulnwatch.dto.PackageEolStatusDto;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
-import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.service.EolRefreshService;
 import com.prototype.vulnwatch.service.EolService;
 import com.prototype.vulnwatch.service.EolSlugResolverService;
@@ -32,14 +31,12 @@ public class EolController {
     private final EolService eolService;
     private final EolRefreshService eolRefreshService;
     private final EolSlugResolverService slugResolverService;
-    private final EolProductCatalogRepository catalogRepository;
 
     public EolController(EolService eolService, EolRefreshService eolRefreshService,
-            EolSlugResolverService slugResolverService, EolProductCatalogRepository catalogRepository) {
+            EolSlugResolverService slugResolverService) {
         this.eolService = eolService;
         this.eolRefreshService = eolRefreshService;
         this.slugResolverService = slugResolverService;
-        this.catalogRepository = catalogRepository;
     }
 
     /**
@@ -112,15 +109,7 @@ public class EolController {
      */
     @GetMapping("/mappings/suggestions")
     public List<EolSlugSuggestionDto> listSuggestions(@RequestParam String normalizedKey) {
-        return slugResolverService.resolveCandidates(normalizedKey).stream()
-                .map(match -> {
-                    String displayName = catalogRepository.findBySlug(match.slug())
-                            .map(c -> c.getDisplayName() != null ? c.getDisplayName() : c.getSlug())
-                            .orElse(match.slug());
-                    return new EolSlugSuggestionDto(match.slug(), displayName, match.confidence(), match.method());
-                })
-                .limit(5)
-                .toList();
+        return slugResolverService.resolveSuggestions(normalizedKey);
     }
 
     /**
