@@ -21,6 +21,10 @@ export type HostAssetSummary = {
   sysId: string;
   environment?: string;
   ownerEmail?: string;
+  managedBy?: string;
+  department?: string;
+  supportGroup?: string;
+  assignedTo?: string;
   businessCriticality?: string;
   state?: string;
   lastInventoryAt?: string;

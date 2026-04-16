@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   DataTable,
@@ -148,20 +149,20 @@ function buildFallbackRecord(detail: CveDetail, externalId: string): OrgSpecific
   };
 }
 
-const PANEL_HEIGHT_KEY = 'vuln-repo:investigation:panel-height';
-
 type VulnRepoOrgCvePageProps = {
   initialCveId?: string;
   onSelectedCveChange?: (cveId?: string) => void;
+  returnTo?: string;
 };
 
 export function VulnRepoOrgCvePage({
   initialCveId,
-  onSelectedCveChange
+  onSelectedCveChange,
+  returnTo
 }: VulnRepoOrgCvePageProps = {}) {
   const actor = useActor();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const sectionRef = React.useRef<HTMLElement>(null);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState('');
   const [query, setQuery] = React.useState('');
@@ -258,45 +259,19 @@ export function VulnRepoOrgCvePage({
     }
   }, [automationStatusQuery.data, orgCveQuery, queryClient, selectedRecord?.externalId]);
 
-  // Restore persisted panel height on mount (before paint to avoid flash)
-  React.useLayoutEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    try {
-      const stored = localStorage.getItem(PANEL_HEIGHT_KEY);
-      const h = stored ? Number(stored) : NaN;
-      if (Number.isFinite(h) && h > 200) {
-        el.style.height = `${h}px`;
-      }
-    } catch { /* noop */ }
-  }, []);
-
-  // Persist panel height whenever the user resizes it
-  React.useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const h = Math.round(entry.contentRect.height);
-      if (h > 200) {
-        try { localStorage.setItem(PANEL_HEIGHT_KEY, String(h)); } catch { /* noop */ }
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Back from workbench: clear workbench state and refresh the list
+  // Back from workbench: if opened via returnTo, navigate back; otherwise clear workbench state
   const closeDrawer = React.useCallback(() => {
+    if (returnTo) {
+      navigate(returnTo);
+      return;
+    }
     setSelectedRecord(null);
     void Promise.all([
       orgCveQuery.refetch(),
       policyQuery.refetch(),
       automationStatusQuery.refetch()
     ]);
-  }, [automationStatusQuery, orgCveQuery, policyQuery]);
+  }, [automationStatusQuery, navigate, orgCveQuery, policyQuery, returnTo]);
 
   // Mid-session refresh inside workbench: detail by default, with optional row/list refresh for finding mutations.
   const refreshDetail = React.useCallback(async (options?: { includeList?: boolean }) => {
@@ -416,9 +391,18 @@ export function VulnRepoOrgCvePage({
   }
 
   return (
-    <section ref={sectionRef} className="panel vuln-repo-investigation-shell">
+    <section className="panel">
         <div className="panel-header">
           <div>
+            {returnTo && (
+              <button
+                type="button"
+                className="btn btn-secondary cve-back-to-asset-btn"
+                onClick={() => navigate(returnTo)}
+              >
+                ← Back to asset
+              </button>
+            )}
             <h3>{WORKBENCH_LABEL}</h3>
           </div>
           <div className="button-row">
@@ -553,7 +537,7 @@ export function VulnRepoOrgCvePage({
           <>
             <div className="table-scroll">
               <DataTable
-                storageKey="vuln-repo-org-cve-table-widths"
+                storageKey="vuln-intel-org-cve-table-widths"
                 columns={ORG_CVE_COLUMNS}
                 rows={tableRows}
               />

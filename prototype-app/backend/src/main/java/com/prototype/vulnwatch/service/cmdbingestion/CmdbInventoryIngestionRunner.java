@@ -146,13 +146,21 @@ public class CmdbInventoryIngestionRunner {
                 BusinessCriticality businessCriticality = supportService.parseBusinessCriticality(
                         row.get("business_criticality", "criticality", "ci_criticality")
                 );
+                CiResolutionService.OwnershipDetails ownership = new CiResolutionService.OwnershipDetails(
+                        row.get("owner_email", "owner",
+                                "installed_on_owned_by", "owned_by"),
+                        row.get("installed_on_managed_by", "managed_by"),
+                        row.get("installed_on_department", "department"),
+                        row.get("installed_on_support_group", "support_group"),
+                        row.get("installed_on_assigned_to", "assigned_to")
+                );
                 CiResolutionService.Resolution ciResolution = ciResolutionService.resolve(
                         resolutionContext,
                         tenant,
                         row.get("ci_sys_id", "installed_on_sys_id", "sys_id"),
                         hostName,
                         row.get("environment", "env"),
-                        row.get("owner_email", "owner"),
+                        ownership,
                         businessCriticality,
                         normalizedSource
                 );

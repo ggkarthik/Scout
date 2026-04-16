@@ -8,6 +8,7 @@ public record SoftwareIdentityVersionResponse(
         String eolSlug,
         String eolCycle,
         LocalDate eolDate,
+        LocalDate supportEndDate,
         Boolean isEol,
         Integer eolDaysRemaining,
         long assetCount,

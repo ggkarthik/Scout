@@ -114,6 +114,7 @@ public class SoftwareIdentityReadService {
                         rs.getString("eol_slug"),
                         rs.getString("eol_cycle"),
                         rs.getObject("eol_date", LocalDate.class),
+                        rs.getObject("support_end_date", LocalDate.class),
                         rs.getObject("is_eol") == null ? null : rs.getBoolean("is_eol"),
                         rs.getObject("eol_days_remaining") == null ? null : rs.getInt("eol_days_remaining"),
                         rs.getLong("asset_count"),
@@ -479,6 +480,7 @@ public class SoftwareIdentityReadService {
                         ic.eol_slug,
                         ic.eol_cycle,
                         ic.eol_date,
+                        ic.eol_support_end_date,
                         ic.is_eol,
                         ic.last_observed_at,
                         a.id AS asset_id,
@@ -501,6 +503,7 @@ public class SoftwareIdentityReadService {
                     MAX(fc.eol_slug) AS eol_slug,
                     MAX(fc.eol_cycle) AS eol_cycle,
                     MAX(fc.eol_date) AS eol_date,
+                    MAX(fc.eol_support_end_date) AS support_end_date,
                     BOOL_OR(fc.is_eol = true) AS is_eol,
                     CASE
                         WHEN MAX(fc.eol_date) IS NOT NULL THEN (MAX(fc.eol_date) - CURRENT_DATE)::int
