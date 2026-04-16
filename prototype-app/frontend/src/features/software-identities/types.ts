@@ -35,6 +35,7 @@ export type SoftwareIdentityVersion = {
   eolSlug?: string;
   eolCycle?: string;
   eolDate?: string;
+  supportEndDate?: string;
   isEol?: boolean;
   eolDaysRemaining?: number;
   assetCount: number;

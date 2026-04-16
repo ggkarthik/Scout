@@ -82,13 +82,14 @@ public class CiResolutionService {
             String requestedSysId,
             String hostName,
             String environment,
-            String ownerEmail,
+            OwnershipDetails ownership,
             BusinessCriticality businessCriticality,
             String sourceSystem
     ) {
         String normalizedSource = normalizeSource(sourceSystem);
         String normalizedHost = normalizeAlias(hostName);
         BusinessCriticality resolvedCriticality = businessCriticality == null ? BusinessCriticality.MEDIUM : businessCriticality;
+        OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
             return upsertCi(
@@ -96,7 +97,7 @@ public class CiResolutionService {
                     requestedSysId.trim(),
                     hostName,
                     environment,
-                    ownerEmail,
+                    resolvedOwnership,
                     resolvedCriticality,
                     normalizedSource,
                     false,
@@ -112,12 +113,20 @@ public class CiResolutionService {
 
         ServiceNowCiLookup lookup = lookupInServiceNow(tenant, hostName);
         if (lookup != null && hasText(lookup.sysId())) {
+            // Prefer ownership from CI table lookup over install-row data when available
+            OwnershipDetails lookupOwnership = new OwnershipDetails(
+                    coalesce(lookup.ownerEmail(), resolvedOwnership.ownerEmail()),
+                    coalesce(lookup.managedBy(), resolvedOwnership.managedBy()),
+                    coalesce(lookup.department(), resolvedOwnership.department()),
+                    coalesce(lookup.supportGroup(), resolvedOwnership.supportGroup()),
+                    coalesce(lookup.assignedTo(), resolvedOwnership.assignedTo())
+            );
             return upsertCi(
                     tenant,
                     lookup.sysId(),
                     lookup.displayName() == null ? hostName : lookup.displayName(),
                     environment,
-                    ownerEmail,
+                    lookupOwnership,
                     resolvedCriticality,
                     normalizedSource,
                     false,
@@ -131,7 +140,7 @@ public class CiResolutionService {
                 fallbackSysId,
                 hostName,
                 environment,
-                ownerEmail,
+                resolvedOwnership,
                 resolvedCriticality,
                 normalizedSource,
                 true,
@@ -229,17 +238,18 @@ public class CiResolutionService {
             String requestedSysId,
             String hostName,
             String environment,
-            String ownerEmail,
+            OwnershipDetails ownership,
             BusinessCriticality businessCriticality,
             String sourceSystem
     ) {
         if (context == null) {
-            return resolve(tenant, requestedSysId, hostName, environment, ownerEmail, businessCriticality, sourceSystem);
+            return resolve(tenant, requestedSysId, hostName, environment, ownership, businessCriticality, sourceSystem);
         }
 
         String normalizedSource = normalizeSource(sourceSystem);
         String normalizedHost = normalizeAlias(hostName);
         BusinessCriticality resolvedCriticality = businessCriticality == null ? BusinessCriticality.MEDIUM : businessCriticality;
+        OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
             return upsertCi(
@@ -248,7 +258,7 @@ public class CiResolutionService {
                     requestedSysId.trim(),
                     hostName,
                     environment,
-                    ownerEmail,
+                    resolvedOwnership,
                     resolvedCriticality,
                     normalizedSource,
                     false,
@@ -264,13 +274,20 @@ public class CiResolutionService {
 
         ServiceNowCiLookup lookup = lookupInServiceNow(tenant, hostName);
         if (lookup != null && hasText(lookup.sysId())) {
+            OwnershipDetails lookupOwnership = new OwnershipDetails(
+                    coalesce(lookup.ownerEmail(), resolvedOwnership.ownerEmail()),
+                    coalesce(lookup.managedBy(), resolvedOwnership.managedBy()),
+                    coalesce(lookup.department(), resolvedOwnership.department()),
+                    coalesce(lookup.supportGroup(), resolvedOwnership.supportGroup()),
+                    coalesce(lookup.assignedTo(), resolvedOwnership.assignedTo())
+            );
             return upsertCi(
                     context,
                     tenant,
                     lookup.sysId(),
                     lookup.displayName() == null ? hostName : lookup.displayName(),
                     environment,
-                    ownerEmail,
+                    lookupOwnership,
                     resolvedCriticality,
                     normalizedSource,
                     false,
@@ -285,7 +302,7 @@ public class CiResolutionService {
                 fallbackSysId,
                 hostName,
                 environment,
-                ownerEmail,
+                resolvedOwnership,
                 resolvedCriticality,
                 normalizedSource,
                 true,
@@ -370,7 +387,7 @@ public class CiResolutionService {
             String sysId,
             String hostName,
             String environment,
-            String ownerEmail,
+            OwnershipDetails ownership,
             BusinessCriticality businessCriticality,
             String sourceSystem,
             boolean lowConfidence,
@@ -400,7 +417,7 @@ public class CiResolutionService {
         asset.setType(AssetType.HOST);
         asset.setName(trimToFallback(hostName, sysId));
         asset.setEnvironment(trimToNull(environment));
-        asset.setOwnerEmail(trimToNull(ownerEmail));
+        applyOwnership(asset, ownership);
         asset.setBusinessCriticality(businessCriticality);
         asset.setState(AssetState.ACTIVE);
         asset.setLastCmdbSyncAt(now);
@@ -409,7 +426,7 @@ public class CiResolutionService {
         ci.setAsset(asset);
         ci.setDisplayName(trimToFallback(hostName, sysId));
         ci.setEnvironment(trimToNull(environment));
-        ci.setOwnerEmail(trimToNull(ownerEmail));
+        applyOwnership(ci, ownership);
         ci.setBusinessCriticality(businessCriticality);
         ci.setLastCmdbSyncAt(now);
         ci.touch();
@@ -425,7 +442,7 @@ public class CiResolutionService {
             String sysId,
             String hostName,
             String environment,
-            String ownerEmail,
+            OwnershipDetails ownership,
             BusinessCriticality businessCriticality,
             String sourceSystem,
             boolean lowConfidence,
@@ -457,7 +474,7 @@ public class CiResolutionService {
         asset.setType(AssetType.HOST);
         asset.setName(trimToFallback(hostName, normalizedSysId));
         asset.setEnvironment(trimToNull(environment));
-        asset.setOwnerEmail(trimToNull(ownerEmail));
+        applyOwnership(asset, ownership);
         asset.setBusinessCriticality(businessCriticality);
         asset.setState(AssetState.ACTIVE);
         asset.setLastCmdbSyncAt(now);
@@ -467,7 +484,7 @@ public class CiResolutionService {
         ci.setAsset(asset);
         ci.setDisplayName(trimToFallback(hostName, normalizedSysId));
         ci.setEnvironment(trimToNull(environment));
-        ci.setOwnerEmail(trimToNull(ownerEmail));
+        applyOwnership(ci, ownership);
         ci.setBusinessCriticality(businessCriticality);
         ci.setLastCmdbSyncAt(now);
         ci.touch();
@@ -476,6 +493,28 @@ public class CiResolutionService {
 
         boolean aliasCreated = updateAlias(context, ci, hostName, normalizeAlias(hostName), sourceSystem, lowConfidence ? 0.5 : 1.0);
         return new Resolution(ci, created, aliasCreated, lowConfidence, method);
+    }
+
+    private void applyOwnership(Asset asset, OwnershipDetails o) {
+        if (o == null) return;
+        asset.setOwnerEmail(trimToNull(o.ownerEmail()));
+        asset.setManagedBy(trimToNull(o.managedBy()));
+        asset.setDepartment(trimToNull(o.department()));
+        asset.setSupportGroup(trimToNull(o.supportGroup()));
+        asset.setAssignedTo(trimToNull(o.assignedTo()));
+    }
+
+    private void applyOwnership(Ci ci, OwnershipDetails o) {
+        if (o == null) return;
+        ci.setOwnerEmail(trimToNull(o.ownerEmail()));
+        ci.setManagedBy(trimToNull(o.managedBy()));
+        ci.setDepartment(trimToNull(o.department()));
+        ci.setSupportGroup(trimToNull(o.supportGroup()));
+        ci.setAssignedTo(trimToNull(o.assignedTo()));
+    }
+
+    private static String coalesce(String a, String b) {
+        return (a != null && !a.isBlank()) ? a : b;
     }
 
     private boolean updateAlias(Ci ci, String aliasName, String normalizedAliasName, String sourceSystem, double confidence) {
@@ -581,7 +620,8 @@ public class CiResolutionService {
         try {
             String uri = UriComponentsBuilder.fromHttpUrl(runtimeConfig.baseUrl())
                     .path("/api/now/table/{tableName}")
-                    .queryParam("sysparm_fields", "sys_id,name,sys_class_name")
+                    .queryParam("sysparm_fields",
+                        "sys_id,name,sys_class_name,owned_by,managed_by,assigned_to,department,support_group")
                     .queryParam("sysparm_query", "name=" + hostName)
                     .queryParam("sysparm_display_value", "all")
                     .buildAndExpand(runtimeConfig.ciTable())
@@ -623,7 +663,15 @@ public class CiResolutionService {
             JsonNode selected = results.get(0);
             String sysId = fieldValue(selected.path("sys_id"));
             String displayName = fieldValue(selected.path("name"));
-            return hasText(sysId) ? new ServiceNowCiLookup(sysId, displayName) : null;
+            if (!hasText(sysId)) return null;
+            return new ServiceNowCiLookup(
+                sysId, displayName,
+                fieldValue(selected.path("owned_by")),
+                fieldValue(selected.path("managed_by")),
+                fieldValue(selected.path("department")),
+                fieldValue(selected.path("support_group")),
+                fieldValue(selected.path("assigned_to"))
+            );
         } catch (Exception ignored) {
             return null;
         }
@@ -731,7 +779,27 @@ public class CiResolutionService {
 
     private record ServiceNowCiLookup(
             String sysId,
-            String displayName
+            String displayName,
+            String ownerEmail,
+            String managedBy,
+            String department,
+            String supportGroup,
+            String assignedTo
     ) {
+    }
+
+    public record OwnershipDetails(
+            String ownerEmail,
+            String managedBy,
+            String department,
+            String supportGroup,
+            String assignedTo
+    ) {
+        public static OwnershipDetails ofEmail(String ownerEmail) {
+            return new OwnershipDetails(ownerEmail, null, null, null, null);
+        }
+        public static OwnershipDetails empty() {
+            return new OwnershipDetails(null, null, null, null, null);
+        }
     }
 }

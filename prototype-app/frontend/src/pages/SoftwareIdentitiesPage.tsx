@@ -2,35 +2,30 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { pathForInventoryHostAsset } from '../app/routes';
 import { useSoftwareIdentitiesQuery, useSoftwareIdentityDetailQuery } from '../features/software-identities/queries';
+import { EolBadge } from '../components/EolBadge';
+import type { SoftwareIdentitySummary } from '../features/software-identities/types';
 
-function formatTimestamp(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+const COL_SPAN = 7;
+
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  return value;
 }
 
-function formatLabel(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-  return value
-    .replace(/[_/:-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+function eolSummaryLabel(identity: SoftwareIdentitySummary): string {
+  if (identity.eolComponentCount > 0) return `${identity.eolComponentCount} EOL`;
+  if (identity.nearEolComponentCount > 0) return `${identity.nearEolComponentCount} near EOL`;
+  if (identity.unknownEolComponentCount > 0) return 'Unknown';
+  return 'Supported';
 }
 
-function SummaryCard({
-  label,
-  value,
-  subtext
-}: {
-  label: string;
-  value: string;
-  subtext: string;
-}) {
+function eolSummaryClass(identity: SoftwareIdentitySummary): string {
+  if (identity.eolComponentCount > 0) return 'si-eol-summary si-eol-summary-risk';
+  if (identity.nearEolComponentCount > 0) return 'si-eol-summary si-eol-summary-warn';
+  return 'si-eol-summary';
+}
+
+function SummaryCard({ label, value, subtext }: { label: string; value: string; subtext: string }) {
   return (
     <article className="inventory-summary-card">
       <span className="inventory-summary-label">{label}</span>
@@ -40,10 +35,229 @@ function SummaryCard({
   );
 }
 
-export function SoftwareIdentitiesPage() {
+// ─── Active panel state ────────────────────────────────────────────────────
+
+type ActivePanel = {
+  type: 'hosts' | 'cves';
+  identityId: string;
+  identityName: string;
+  versionFilter?: string;
+} | null;
+
+// ─── Entity list panel ─────────────────────────────────────────────────────
+
+function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; onClose: () => void }) {
   const navigate = useNavigate();
+  const detailQuery = useSoftwareIdentityDetailQuery(panel.identityId, true);
+  const detail = detailQuery.data;
+
+  const assets = React.useMemo(() => {
+    if (!detail) return [];
+    let list = detail.assets;
+    if (panel.versionFilter) {
+      list = list.filter(a => a.version === panel.versionFilter);
+    }
+    if (panel.type === 'cves') {
+      list = list.filter(a => a.openVulnerabilityCount > 0);
+      return [...list].sort((a, b) => b.openVulnerabilityCount - a.openVulnerabilityCount);
+    }
+    return list;
+  }, [detail, panel.type, panel.versionFilter]);
+
+  const versionSuffix = panel.versionFilter ? ` @ ${panel.versionFilter}` : '';
+  const title = panel.type === 'hosts'
+    ? `Hosts — ${panel.identityName}${versionSuffix}`
+    : `CVE Exposure — ${panel.identityName}${versionSuffix}`;
+  const subtitle = panel.type === 'hosts'
+    ? `Enterprise hosts running this software identity.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`
+    : `Hosts with open CVE exposure.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`;
+
+  const cveColCount = panel.type === 'cves' ? COL_SPAN : COL_SPAN - 1;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-panel modal-panel-wide" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{title}</h3>
+            <p className="panel-caption">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            className="modal-close-btn"
+            aria-label="Close panel"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {detailQuery.isPending && !detail && (
+          <div className="empty-state"><p>Loading…</p></div>
+        )}
+
+        {detail && (
+          <div className="inventory-table-shell si-panel-table-shell">
+            <table className="inventory-table">
+              <thead>
+                <tr>
+                  <th>Host</th>
+                  <th>Version</th>
+                  <th>Type</th>
+                  {panel.type === 'cves' && <th>Open CVEs</th>}
+                  <th>Open Findings</th>
+                  <th>EOL Status</th>
+                  <th>EOL Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assets.length === 0 ? (
+                  <tr>
+                    <td colSpan={cveColCount}>
+                      <div className="empty-state">
+                        <p>No {panel.type === 'cves' ? 'CVE exposure' : 'hosts'} found
+                          {panel.versionFilter ? ` for version ${panel.versionFilter}` : ''}.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : assets.map(asset => (
+                  <tr
+                    key={asset.componentId}
+                    className="inventory-table-row-clickable"
+                    onClick={() => navigate(pathForInventoryHostAsset(asset.assetId, '/inventory/software-identities'))}
+                  >
+                    <td>
+                      <div className="inventory-primary-text">{asset.assetName}</div>
+                      <div className="panel-caption mono">{asset.assetIdentifier}</div>
+                    </td>
+                    <td><span className="mono">{asset.version || '—'}</span></td>
+                    <td>{asset.assetType || '—'}</td>
+                    {panel.type === 'cves' && (
+                      <td>
+                        <span className="si-cve-count-pill">{asset.openVulnerabilityCount}</span>
+                      </td>
+                    )}
+                    <td>{asset.openFindingCount}</td>
+                    <td>
+                      <EolBadge
+                        isEol={asset.isEol}
+                        daysRemaining={asset.eolDaysRemaining}
+                        eolDate={asset.eolDate}
+                      />
+                    </td>
+                    <td className="mono panel-caption">{formatDate(asset.eolDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Expanded version rows ─────────────────────────────────────────────────
+
+type ExpandedVersionRowsProps = {
+  identityId: string;
+  vendor?: string;
+  onHostsClick: (version?: string) => void;
+  onCvesClick: (version?: string) => void;
+};
+
+function ExpandedVersionRows({ identityId, vendor, onHostsClick, onCvesClick }: ExpandedVersionRowsProps) {
+  const detailQuery = useSoftwareIdentityDetailQuery(identityId, true);
+  const detail = detailQuery.data;
+
+  if (detailQuery.isPending && !detail) {
+    return (
+      <tr>
+        <td colSpan={COL_SPAN} className="si-version-state-row">
+          Loading versions…
+        </td>
+      </tr>
+    );
+  }
+
+  if (!detail?.versions.length) {
+    return (
+      <tr>
+        <td colSpan={COL_SPAN} className="si-version-state-row">
+          No version data available.
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      {detail.versions.map((v, i) => (
+        <tr key={`${v.version}-${i}`} className="si-version-row">
+          <td>
+            <span className="si-version-indent">↳</span>
+          </td>
+          <td>
+            <span className="mono si-version-tag">{v.version || '(unknown)'}</span>
+          </td>
+          <td className="panel-caption">{vendor || '—'}</td>
+          <td>
+            {v.assetCount > 0 ? (
+              <button
+                type="button"
+                className="si-count-link"
+                onClick={e => { e.stopPropagation(); onHostsClick(v.version); }}
+              >
+                {v.assetCount.toLocaleString()}
+              </button>
+            ) : (
+              <span className="panel-caption">0</span>
+            )}
+          </td>
+          <td>
+            {v.openVulnerabilityCount > 0 ? (
+              <button
+                type="button"
+                className="si-count-link si-count-link-cve"
+                onClick={e => { e.stopPropagation(); onCvesClick(v.version); }}
+              >
+                {v.openVulnerabilityCount.toLocaleString()}
+              </button>
+            ) : (
+              <span className="panel-caption">0</span>
+            )}
+          </td>
+          <td className="panel-caption">{v.openFindingCount}</td>
+          <td>
+            <div className="si-eol-cell">
+              <EolBadge isEol={v.isEol} daysRemaining={v.eolDaysRemaining} eolDate={v.eolDate} />
+              <div className="si-eol-dates">
+                {v.eolDate && (
+                  <span className="panel-caption">
+                    EOL: <span className="mono">{v.eolDate}</span>
+                  </span>
+                )}
+                {v.supportEndDate && (
+                  <span className="panel-caption">
+                    EOS: <span className="mono">{v.supportEndDate}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// ─── Page ──────────────────────────────────────────────────────────────────
+
+export function SoftwareIdentitiesPage() {
   const [query, setQuery] = React.useState('');
-  const [selectedIdentityId, setSelectedIdentityId] = React.useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
+  const [activePanel, setActivePanel] = React.useState<ActivePanel>(null);
 
   const identitiesQuery = useSoftwareIdentitiesQuery({
     page: 0,
@@ -54,47 +268,42 @@ export function SoftwareIdentitiesPage() {
 
   const identities = React.useMemo(() => (
     (identitiesQuery.data?.content ?? [])
-      .filter((identity) => identity.assetCount > 0)
-      .sort((left, right) => {
-        if (right.openVulnerabilityCount !== left.openVulnerabilityCount) {
-          return right.openVulnerabilityCount - left.openVulnerabilityCount;
-        }
-        if (right.assetCount !== left.assetCount) {
-          return right.assetCount - left.assetCount;
-        }
-        return left.displayName.localeCompare(right.displayName);
+      .filter(identity => identity.assetCount > 0)
+      .sort((a, b) => {
+        if (b.openVulnerabilityCount !== a.openVulnerabilityCount) return b.openVulnerabilityCount - a.openVulnerabilityCount;
+        if (b.assetCount !== a.assetCount) return b.assetCount - a.assetCount;
+        return a.displayName.localeCompare(b.displayName);
       })
   ), [identitiesQuery.data?.content]);
 
-  React.useEffect(() => {
-    if (!selectedIdentityId && identities.length > 0) {
-      setSelectedIdentityId(identities[0].id);
-    }
-    if (selectedIdentityId && !identities.some((identity) => identity.id === selectedIdentityId)) {
-      setSelectedIdentityId(identities[0]?.id ?? null);
-    }
-  }, [identities, selectedIdentityId]);
-
-  const selectedIdentity = React.useMemo(
-    () => identities.find((identity) => identity.id === selectedIdentityId) ?? null,
-    [identities, selectedIdentityId]
-  );
-
-  const detailQuery = useSoftwareIdentityDetailQuery(selectedIdentityId, Boolean(selectedIdentityId));
-  const detail = detailQuery.data;
-
   const totalHosts = React.useMemo(
-    () => identities.reduce((sum, identity) => sum + identity.assetCount, 0),
+    () => identities.reduce((sum, i) => sum + i.assetCount, 0),
     [identities]
   );
   const totalOpenCves = React.useMemo(
-    () => identities.reduce((sum, identity) => sum + identity.openVulnerabilityCount, 0),
+    () => identities.reduce((sum, i) => sum + i.openVulnerabilityCount, 0),
     [identities]
   );
   const totalOpenFindings = React.useMemo(
-    () => identities.reduce((sum, identity) => sum + identity.openFindingCount, 0),
+    () => identities.reduce((sum, i) => sum + i.openFindingCount, 0),
     [identities]
   );
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const openHostsPanel = (identityId: string, identityName: string, versionFilter?: string) => {
+    setActivePanel({ type: 'hosts', identityId, identityName, versionFilter });
+  };
+
+  const openCvesPanel = (identityId: string, identityName: string, versionFilter?: string) => {
+    setActivePanel({ type: 'cves', identityId, identityName, versionFilter });
+  };
 
   const loading = identitiesQuery.isPending && identities.length === 0;
   const errorMessage = identitiesQuery.error instanceof Error ? identitiesQuery.error.message : null;
@@ -120,10 +329,26 @@ export function SoftwareIdentitiesPage() {
       </header>
 
       <div className="inventory-summary-grid">
-        <SummaryCard label="Software Identities" value={identities.length.toLocaleString()} subtext="Deployed third-party software correlated to hosts" />
-        <SummaryCard label="Host Deployments" value={totalHosts.toLocaleString()} subtext="Total host-to-software deployment relationships" />
-        <SummaryCard label="Open CVEs" value={totalOpenCves.toLocaleString()} subtext="Applicable CVEs across deployed software identities" />
-        <SummaryCard label="Open Findings" value={totalOpenFindings.toLocaleString()} subtext="Findings currently tied to deployed software" />
+        <SummaryCard
+          label="Software Identities"
+          value={identities.length.toLocaleString()}
+          subtext="Deployed third-party software correlated to hosts"
+        />
+        <SummaryCard
+          label="Host Deployments"
+          value={totalHosts.toLocaleString()}
+          subtext="Total host-to-software deployment relationships"
+        />
+        <SummaryCard
+          label="Open CVEs"
+          value={totalOpenCves.toLocaleString()}
+          subtext="Applicable CVEs across deployed software identities"
+        />
+        <SummaryCard
+          label="Open Findings"
+          value={totalOpenFindings.toLocaleString()}
+          subtext="Findings currently tied to deployed software"
+        />
       </div>
 
       <div className="inventory-toolbar">
@@ -132,155 +357,141 @@ export function SoftwareIdentitiesPage() {
             <span className="panel-caption">Search software, vendor, product, or identity…</span>
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={e => setQuery(e.target.value)}
               placeholder="SQL Server, WebLogic, JBoss, Palo Alto, Fortinet…"
             />
           </label>
         </div>
       </div>
 
-      {errorMessage ? (
+      {errorMessage && (
         <div className="inventory-error-banner">
           Failed to load software identities: {errorMessage}
         </div>
-      ) : null}
+      )}
 
-      <div className="inventory-two-column-layout">
-        <div className="inventory-section-card">
-          <div className="inventory-section-header">
-            <div>
-              <h2>Deployed software identities</h2>
-              <p className="panel-caption">Normalized software identities built from software deployed on hosts.</p>
-            </div>
-            <span className="panel-caption">{identities.length.toLocaleString()} identities</span>
+      <div className="inventory-section-card">
+        <div className="inventory-section-header">
+          <div>
+            <h2>Deployed software identities</h2>
+            <p className="panel-caption">
+              Click a row to expand version-level breakdown with EOL and CVE exposure.
+            </p>
           </div>
-
-          {loading ? (
-            <div className="empty-state"><p>Loading software identities…</p></div>
-          ) : (
-            <div className="inventory-table-shell">
-              <table className="inventory-table">
-                <thead>
-                  <tr>
-                    <th>Software</th>
-                    <th>Vendor</th>
-                    <th>Hosts</th>
-                    <th>Versions</th>
-                    <th>Open CVEs</th>
-                    <th>Open Findings</th>
-                    <th>Last Seen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {identities.length === 0 ? (
-                    <tr>
-                      <td colSpan={7}>
-                        <div className="empty-state"><p>No deployed software identities matched the current search.</p></div>
-                      </td>
-                    </tr>
-                  ) : identities.map((identity) => (
-                    <tr
-                      key={identity.id}
-                      className={`inventory-table-row-clickable ${selectedIdentityId === identity.id ? 'active' : ''}`}
-                      onClick={() => setSelectedIdentityId(identity.id)}
-                    >
-                      <td>
-                        <div className="inventory-primary-text">{identity.displayName}</div>
-                        <div className="panel-caption mono">{identity.normalizedKey}</div>
-                      </td>
-                      <td>{identity.vendor || identity.product || '-'}</td>
-                      <td>{identity.assetCount.toLocaleString()}</td>
-                      <td>{identity.versionCount.toLocaleString()}</td>
-                      <td>{identity.openVulnerabilityCount.toLocaleString()}</td>
-                      <td>{identity.openFindingCount.toLocaleString()}</td>
-                      <td>{formatTimestamp(identity.lastObservedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <span className="panel-caption">{identities.length.toLocaleString()} identities</span>
         </div>
 
-        <aside className="inventory-section-card inventory-detail-card">
-          <div className="inventory-section-header">
-            <div>
-              <h2>Identity detail</h2>
-              <p className="panel-caption">
-                Deployment context for the selected software identity across enterprise hosts.
-              </p>
-            </div>
+        {loading ? (
+          <div className="empty-state"><p>Loading software identities…</p></div>
+        ) : (
+          <div className="inventory-table-shell">
+            <table className="inventory-table si-identities-table">
+              <thead>
+                <tr>
+                  <th>Software</th>
+                  <th>Version</th>
+                  <th>Vendor</th>
+                  <th>Hosts</th>
+                  <th>CVEs</th>
+                  <th>Open Findings</th>
+                  <th>EOL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {identities.length === 0 ? (
+                  <tr>
+                    <td colSpan={COL_SPAN}>
+                      <div className="empty-state">
+                        <p>No deployed software identities matched the current search.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : identities.map(identity => {
+                  const isExpanded = expandedIds.has(identity.id);
+                  return (
+                    <React.Fragment key={identity.id}>
+                      <tr
+                        className={`inventory-table-row-clickable si-identity-row${isExpanded ? ' si-identity-row-expanded' : ''}`}
+                        onClick={() => toggleExpand(identity.id)}
+                      >
+                        <td>
+                          <div className="si-identity-name-cell">
+                            <span className={`si-expand-toggle${isExpanded ? ' si-expand-toggle-open' : ''}`}>▶</span>
+                            <div>
+                              <div className="inventory-primary-text">{identity.displayName}</div>
+                              <div className="panel-caption mono">{identity.normalizedKey}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="si-version-count">
+                            {identity.versionCount.toLocaleString()} version{identity.versionCount !== 1 ? 's' : ''}
+                          </span>
+                        </td>
+                        <td>{identity.vendor || identity.product || '—'}</td>
+                        <td>
+                          {identity.assetCount > 0 ? (
+                            <button
+                              type="button"
+                              className="si-count-link"
+                              onClick={e => {
+                                e.stopPropagation();
+                                openHostsPanel(identity.id, identity.displayName);
+                              }}
+                            >
+                              {identity.assetCount.toLocaleString()}
+                            </button>
+                          ) : (
+                            <span className="panel-caption">0</span>
+                          )}
+                        </td>
+                        <td>
+                          {identity.openVulnerabilityCount > 0 ? (
+                            <button
+                              type="button"
+                              className="si-count-link si-count-link-cve"
+                              onClick={e => {
+                                e.stopPropagation();
+                                openCvesPanel(identity.id, identity.displayName);
+                              }}
+                            >
+                              {identity.openVulnerabilityCount.toLocaleString()}
+                            </button>
+                          ) : (
+                            <span className="panel-caption">0</span>
+                          )}
+                        </td>
+                        <td>{identity.openFindingCount.toLocaleString()}</td>
+                        <td>
+                          <span className={eolSummaryClass(identity)}>
+                            {eolSummaryLabel(identity)}
+                          </span>
+                        </td>
+                      </tr>
+
+                      {isExpanded && (
+                        <ExpandedVersionRows
+                          identityId={identity.id}
+                          vendor={identity.vendor || identity.product}
+                          onHostsClick={vf => openHostsPanel(identity.id, identity.displayName, vf)}
+                          onCvesClick={vf => openCvesPanel(identity.id, identity.displayName, vf)}
+                        />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-
-          {!selectedIdentity ? (
-            <div className="empty-state"><p>Select a software identity to inspect its host deployments.</p></div>
-          ) : detailQuery.isPending && !detail ? (
-            <div className="empty-state"><p>Loading identity detail…</p></div>
-          ) : !detail ? (
-            <div className="empty-state"><p>Identity detail is not available.</p></div>
-          ) : (
-            <div className="inventory-detail-stack">
-              <div className="inventory-detail-hero">
-                <div>
-                  <h3>{detail.displayName}</h3>
-                  <div className="panel-caption mono">{detail.normalizedKey}</div>
-                </div>
-                <span className="status-pill status-active">{detail.assetCount} hosts</span>
-              </div>
-
-              <div className="inventory-detail-grid">
-                <div className="inventory-detail-metric">
-                  <span className="inventory-summary-label">Vendor</span>
-                  <strong>{detail.vendor || '-'}</strong>
-                </div>
-                <div className="inventory-detail-metric">
-                  <span className="inventory-summary-label">Product</span>
-                  <strong>{detail.product || '-'}</strong>
-                </div>
-                <div className="inventory-detail-metric">
-                  <span className="inventory-summary-label">Open CVEs</span>
-                  <strong>{detail.openVulnerabilityCount.toLocaleString()}</strong>
-                </div>
-                <div className="inventory-detail-metric">
-                  <span className="inventory-summary-label">Open Findings</span>
-                  <strong>{detail.openFindingCount.toLocaleString()}</strong>
-                </div>
-              </div>
-
-              <div className="inventory-inline-list">
-                <span className="panel-caption">Observed versions</span>
-                <div className="inventory-chip-row">
-                  {detail.versions.slice(0, 6).map((version) => (
-                    <span key={version.version} className="inventory-chip static">
-                      {version.version || 'Unknown'}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="inventory-inline-list">
-                <span className="panel-caption">Deployed hosts</span>
-                <div className="inventory-detail-host-list">
-                  {detail.assets.slice(0, 8).map((asset) => (
-                    <button
-                      key={asset.componentId}
-                      type="button"
-                      className="inventory-detail-host-item"
-                      onClick={() => navigate(pathForInventoryHostAsset(asset.assetId, '/inventory/software-identities'))}
-                    >
-                      <strong>{asset.assetName}</strong>
-                      <span className="panel-caption mono">{asset.assetIdentifier}</span>
-                      <span className="panel-caption">
-                        {asset.version || 'Unknown version'} · {formatLabel(asset.assetType)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </aside>
+        )}
       </div>
+
+      {activePanel && (
+        <EntityListPanel
+          panel={activePanel}
+          onClose={() => setActivePanel(null)}
+        />
+      )}
     </section>
   );
 }

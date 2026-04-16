@@ -80,6 +80,7 @@ export type InvestigationSummaryInput = {
     version?: string;
     falsePositive: boolean;
     assetsNotImpacted?: number;
+    vendorAdvisory?: string;
     vendorGuidance?: string;
   }>;
   eolRows: Array<{
@@ -205,8 +206,8 @@ async function exportWordDocument(input: InvestigationSummaryInput, summary: Inv
           new Paragraph(`Internal asset count: ${internalAssetCount}`),
           new Paragraph({ text: 'False Positives', heading: HeadingLevel.HEADING_2 }),
           buildTable([
-            ['Asset / Software', 'Reason', 'Confidence'],
-            ...falsePositiveRows.map((row) => [row.software, row.vendorGuidance || 'Vendor guidance matched', 'High']),
+            ['Asset / Software', 'Vendor advisory', 'Reason', 'Confidence'],
+            ...falsePositiveRows.map((row) => [row.software, row.vendorAdvisory || '—', row.vendorGuidance || 'Vendor guidance matched', 'High']),
           ]),
           new Paragraph({ text: 'End-of-Life Assets', heading: HeadingLevel.HEADING_2 }),
           buildTable([

@@ -59,6 +59,7 @@ public record CveInvestigationSummaryRequest(
             String version,
             @NotNull Boolean falsePositive,
             Integer assetsNotImpacted,
+            String vendorAdvisory,
             String vendorGuidance
     ) {}
 
