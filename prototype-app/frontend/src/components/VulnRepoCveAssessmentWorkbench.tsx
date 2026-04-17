@@ -74,15 +74,18 @@ type AssetInventoryCriterion = {
 };
 
 type AssetInventoryResult = DerivedAssetRow;
+type FalsePositiveStatusTone = 'yes' | 'no' | 'waiting' | 'na';
 type FalsePositiveResult = {
   id: string;
   software: string;
   version: string;
   falsePositive: boolean;
   notImpactedAssetCount: number;
+  vendorAdvisory: string;
   vendorGuidance: string;
   statusLabel: string;
   statusDetail: string;
+  statusTone: FalsePositiveStatusTone;
 };
 type EolAnalysisCriterion = {
   id: string;
@@ -126,6 +129,135 @@ type Props = {
 const AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
 const PR_LABELS: Record<string, string> = { N: 'None', L: 'Low', H: 'High' };
 const UI_LABELS: Record<string, string> = { N: 'None', R: 'Required' };
+
+function normalizeFalsePositiveToken(value?: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'KNOWN_AFFECTED' || normalized === 'AFFECTED') return 'KNOWN_AFFECTED';
+  if (normalized === 'FIXED') return 'FIXED';
+  if (normalized === 'KNOWN_NOT_AFFECTED' || normalized === 'NOT_AFFECTED' || normalized === 'NOT_IMPACTED') return 'KNOWN_NOT_AFFECTED';
+  if (normalized === 'UNDER_INVESTIGATION') return 'UNDER_INVESTIGATION';
+  return null;
+}
+
+function vendorDisplayName(source?: string | null): string {
+  const normalized = (source ?? '').trim().toLowerCase();
+  if (!normalized) return 'Vendor';
+  if (normalized.includes('microsoft')) return 'Microsoft';
+  if (normalized.includes('redhat') || normalized.includes('red_hat') || normalized.includes('red-hat')) return 'Red Hat';
+  return formatLabel(source ?? 'Vendor');
+}
+
+function extractCpeVendor(cpe?: string | null): string | null {
+  if (!cpe) return null;
+  const parts = cpe.split(':');
+  return parts.length > 3 ? parts[3].toLowerCase() : null;
+}
+
+function cpeProductMatchesSoftware(cpe: string | undefined, software: string): boolean {
+  if (!cpe) return false;
+  const parts = cpe.split(':');
+  const product = parts.length > 4 ? parts[4].toLowerCase() : '';
+  const normalizedSoftware = software.toLowerCase();
+  return Boolean(product) && (
+    normalizedSoftware.includes(product)
+    || product.includes(normalizedSoftware)
+    || normalizedSoftware.replace(/[_\s-]+/g, '').includes(product.replace(/[_\s-]+/g, ''))
+    || product.replace(/[_\s-]+/g, '').includes(normalizedSoftware.replace(/[_\s-]+/g, ''))
+  );
+}
+
+function vendorCorrelationScore(
+  entry: CveDetail['vendorIntelligence'][number],
+  software: { packageName: string; ecosystem?: string; vendor?: string }
+): number {
+  const normalizedPackage = software.packageName.toLowerCase();
+  const normalizedVendor = (software.vendor ?? '').toLowerCase();
+  const normalizedEcosystem = (software.ecosystem ?? '').toLowerCase();
+  const source = (entry.source ?? '').toLowerCase();
+  const cpeVendor = extractCpeVendor(entry.cpe);
+  let score = 0;
+
+  if ((entry.packageName ?? '').toLowerCase() === normalizedPackage) score += 6;
+  if (cpeProductMatchesSoftware(entry.cpe, software.packageName)) score += 4;
+  if (normalizedEcosystem && (entry.ecosystem ?? '').toLowerCase() === normalizedEcosystem) score += 2;
+  if (normalizedVendor) {
+    if (source.includes(normalizedVendor)) score += 3;
+    if (cpeVendor === normalizedVendor) score += 3;
+  }
+  if (!normalizedVendor && (source.includes('microsoft') || source.includes('redhat') || source.includes('red_hat') || source.includes('red-hat'))) {
+    score += 1;
+  }
+  return score;
+}
+
+function falsePositiveStatusFromToken(statusToken: string | null): {
+  falsePositive: boolean;
+  statusLabel: string;
+  statusDetail: string;
+  statusTone: FalsePositiveStatusTone;
+} {
+  if (statusToken === 'KNOWN_AFFECTED') {
+    return {
+      falsePositive: false,
+      statusLabel: 'No',
+      statusDetail: 'Vendor advisory confirms the software is affected.',
+      statusTone: 'no',
+    };
+  }
+  if (statusToken === 'FIXED' || statusToken === 'KNOWN_NOT_AFFECTED') {
+    return {
+      falsePositive: true,
+      statusLabel: 'Yes',
+      statusDetail: 'Vendor advisory indicates the software is fixed or not affected.',
+      statusTone: 'yes',
+    };
+  }
+  if (statusToken === 'UNDER_INVESTIGATION') {
+    return {
+      falsePositive: false,
+      statusLabel: 'Waiting vendor assessment',
+      statusDetail: 'Vendor is still assessing impact for this software.',
+      statusTone: 'waiting',
+    };
+  }
+  return {
+    falsePositive: false,
+    statusLabel: 'n/a',
+    statusDetail: 'No matching vendor advisory status was available for this software.',
+    statusTone: 'na',
+  };
+}
+
+function vendorAdvisoryLabel(source: string | undefined, statusToken: string | null): string {
+  if (!source && !statusToken) return 'n/a';
+  const vendor = vendorDisplayName(source);
+  const status = statusToken ? formatLabel(statusToken.toLowerCase()) : 'n/a';
+  return `${vendor}: ${status}`;
+}
+
+function vendorGuidanceMessage(
+  source: string | undefined,
+  statusToken: string | null,
+  fixedVersion: string | undefined,
+  fallback: string
+): string {
+  if (!statusToken) return fallback;
+  const vendor = vendorDisplayName(source);
+  if (statusToken === 'KNOWN_AFFECTED') {
+    return `${vendor} advisory marks this software as known affected.`;
+  }
+  if (statusToken === 'FIXED') {
+    return `${vendor} advisory marks this software as fixed${fixedVersion ? ` in ${fixedVersion}` : ''}.`;
+  }
+  if (statusToken === 'KNOWN_NOT_AFFECTED') {
+    return `${vendor} advisory marks this software as known not affected.`;
+  }
+  if (statusToken === 'UNDER_INVESTIGATION') {
+    return `${vendor} advisory says the software is under investigation.`;
+  }
+  return fallback;
+}
 
 function assessmentStatusLabel(item: OrgSpecificCveExposureRecord, latestAssessment: CveApplicabilityAssessment | null): string {
   if (item.impactState === 'FIXED' || item.impactState === 'NOT_IMPACTED') {
@@ -637,56 +769,88 @@ function buildFalsePositiveResults(detail: CveDetail, resolvedInventory: Resolve
       relatedAssets.map((entry) => entry.assetId ?? entry.assetIdentifier ?? entry.assetName ?? entry.componentId)
     );
 
-    const matches = intel.filter((entry) => {
-      const samePackage = entry.packageName?.toLowerCase() === software.packageName.toLowerCase();
-      const sameEcosystem = !entry.ecosystem || entry.ecosystem.toLowerCase() === software.ecosystem.toLowerCase();
-      return samePackage && sameEcosystem;
-    });
-    const vendorDecision = matches.find((entry) => {
-      const status = entry.vexStatus?.toUpperCase();
-      return status === 'NOT_AFFECTED' || status === 'NOT_IMPACTED' || status === 'FIXED';
-    });
-    const isFalsePositive = Boolean(vendorDecision);
+    const vendorDecision = intel
+      .filter((entry) => vendorCorrelationScore(entry, {
+        packageName: software.packageName,
+        ecosystem: software.ecosystem,
+      }) > 0)
+      .sort((left, right) => (
+        vendorCorrelationScore(right, {
+          packageName: software.packageName,
+          ecosystem: software.ecosystem,
+        }) - vendorCorrelationScore(left, {
+          packageName: software.packageName,
+          ecosystem: software.ecosystem,
+        })
+      ))[0];
+    const statusToken = normalizeFalsePositiveToken(vendorDecision?.vexStatus ?? software.vexStatus);
+    const status = falsePositiveStatusFromToken(statusToken);
 
     rows.set(key, {
       id: key,
       software: software.packageName,
       version,
-      falsePositive: isFalsePositive,
-      notImpactedAssetCount: isFalsePositive ? assetKeys.size : 0,
-      vendorGuidance: vendorDecision
-        ? `${vendorDecision.source}: ${formatLabel(vendorDecision.vexStatus ?? 'NOT_AFFECTED')}${vendorDecision.fixedVersion ? `, fixed in ${vendorDecision.fixedVersion}` : ''}.`
-        : 'Installed software and version matched a vulnerability target in inventory correlation.',
-      statusLabel: isFalsePositive ? 'Yes' : 'No',
-      statusDetail: isFalsePositive ? 'Assets are not impacted per vendor advisory' : 'Assets are impacted and require analyst review',
+      falsePositive: status.falsePositive,
+      notImpactedAssetCount: status.falsePositive ? assetKeys.size : 0,
+      vendorAdvisory: vendorAdvisoryLabel(vendorDecision?.source ?? software.vexSource ?? software.vexProvider, statusToken),
+      vendorGuidance: vendorGuidanceMessage(
+        vendorDecision?.source ?? software.vexSource ?? software.vexProvider,
+        statusToken,
+        vendorDecision?.fixedVersion,
+        'Installed software and version matched a vulnerability target in inventory correlation.'
+      ),
+      statusLabel: status.statusLabel,
+      statusDetail: status.statusDetail,
+      statusTone: status.statusTone,
     });
   });
 
   resolvedInventory.forEach((software) => {
     const key = `${software.software}::${software.version}`;
     if (rows.has(key)) return;
-    const matches = intel.filter((entry) => entry.packageName?.toLowerCase() === software.software.toLowerCase());
-    const vendorDecision = matches.find((entry) => {
-      const status = entry.vexStatus?.toUpperCase();
-      return status === 'NOT_AFFECTED' || status === 'NOT_IMPACTED' || status === 'FIXED';
-    });
-    const isFalsePositive = Boolean(vendorDecision);
+    const vendorDecision = intel
+      .filter((entry) => vendorCorrelationScore(entry, {
+        packageName: software.software,
+        ecosystem: '',
+        vendor: software.vendor,
+      }) > 0)
+      .sort((left, right) => (
+        vendorCorrelationScore(right, {
+          packageName: software.software,
+          ecosystem: '',
+          vendor: software.vendor,
+        }) - vendorCorrelationScore(left, {
+          packageName: software.software,
+          ecosystem: '',
+          vendor: software.vendor,
+        })
+      ))[0];
+    const statusToken = normalizeFalsePositiveToken(vendorDecision?.vexStatus);
+    const status = falsePositiveStatusFromToken(statusToken);
     rows.set(key, {
       id: key,
       software: software.software,
       version: software.version,
-      falsePositive: isFalsePositive,
-      notImpactedAssetCount: isFalsePositive ? software.assets.length : 0,
-      vendorGuidance: vendorDecision
-        ? `${vendorDecision.source}: ${formatLabel(vendorDecision.vexStatus ?? 'NOT_AFFECTED')}${vendorDecision.fixedVersion ? `, fixed in ${vendorDecision.fixedVersion}` : ''}.`
-        : 'Installed software and version matched a software inventory target and still requires analyst review.',
-      statusLabel: isFalsePositive ? 'Yes' : 'No',
-      statusDetail: isFalsePositive ? 'Assets are not impacted per vendor advisory' : 'Assets are impacted and require analyst review',
+      falsePositive: status.falsePositive,
+      notImpactedAssetCount: status.falsePositive ? software.assets.length : 0,
+      vendorAdvisory: vendorAdvisoryLabel(vendorDecision?.source ?? software.vendor, statusToken),
+      vendorGuidance: vendorGuidanceMessage(
+        vendorDecision?.source ?? software.vendor,
+        statusToken,
+        vendorDecision?.fixedVersion,
+        'Installed software and version matched a software inventory target and still requires analyst review.'
+      ),
+      statusLabel: status.statusLabel,
+      statusDetail: status.statusDetail,
+      statusTone: status.statusTone,
     });
   });
 
   return Array.from(rows.values()).sort((left, right) => {
-    if (left.falsePositive !== right.falsePositive) return Number(right.falsePositive) - Number(left.falsePositive);
+    if (left.statusLabel !== right.statusLabel) {
+      const priority = { 'No': 0, 'Waiting vendor assessment': 1, 'n/a': 2, 'Yes': 3 };
+      return (priority[left.statusLabel as keyof typeof priority] ?? 99) - (priority[right.statusLabel as keyof typeof priority] ?? 99);
+    }
     return left.software.localeCompare(right.software) || left.version.localeCompare(right.version);
   });
 }
@@ -1017,6 +1181,7 @@ function InvestigationCanvas({
       version: row.version,
       falsePositive: row.falsePositive,
       assetsNotImpacted: row.notImpactedAssetCount,
+      vendorAdvisory: row.vendorAdvisory,
       vendorGuidance: row.vendorGuidance,
     })),
     eolRows: eolResults.map((row) => ({
@@ -1338,6 +1503,7 @@ function InvestigationCanvas({
               <th>Version</th>
               <th>False Positive</th>
               <th>Assets Not Impacted</th>
+              <th>Vendor Advisory</th>
               <th>Vendor Guidance</th>
             </tr>
           </thead>
@@ -1347,12 +1513,13 @@ function InvestigationCanvas({
                 <td><strong>{row.software}</strong></td>
                 <td className="mono">{row.version}</td>
                 <td>
-                  <strong className={row.falsePositive ? 'false-positive-yes' : 'false-positive-no'}>{row.statusLabel}</strong>
+                  <strong className={`false-positive-${row.statusTone}`}>{row.statusLabel}</strong>
                   <div className="panel-caption">{row.statusDetail}</div>
                 </td>
                 <td>
                   <strong>{row.notImpactedAssetCount}</strong>
                 </td>
+                <td>{row.vendorAdvisory}</td>
                 <td>{row.vendorGuidance}</td>
               </tr>
             ))}
@@ -2847,7 +3014,7 @@ export function VulnRepoCveAssessmentWorkbench({
     setVexEvidenceByComponent({});
     setVexEvidenceErrors({});
     setVexEvidenceLoadingComponentId(null);
-  }, [analystId, detail, item.externalId, latestAssessment, latestInvestigation]);
+  }, [detail, item.externalId, latestAssessment, latestInvestigation]);
 
   const loadPersistedFindingIds = React.useCallback(async (): Promise<void> => {
     try {

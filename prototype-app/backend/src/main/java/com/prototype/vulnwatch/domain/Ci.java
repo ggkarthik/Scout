@@ -58,6 +58,18 @@ public class Ci {
     @Column(name = "owner_email", length = 255)
     private String ownerEmail;
 
+    @Column(name = "managed_by", length = 255)
+    private String managedBy;
+
+    @Column(length = 255)
+    private String department;
+
+    @Column(name = "support_group", length = 255)
+    private String supportGroup;
+
+    @Column(name = "assigned_to", length = 255)
+    private String assignedTo;
+
     @Column(name = "last_inventory_at")
     private Instant lastInventoryAt;
 
@@ -128,6 +140,38 @@ public class Ci {
 
     public void setOwnerEmail(String ownerEmail) {
         this.ownerEmail = ownerEmail;
+    }
+
+    public String getManagedBy() {
+        return managedBy;
+    }
+
+    public void setManagedBy(String managedBy) {
+        this.managedBy = managedBy;
+    }
+
+    public String getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(String department) {
+        this.department = department;
+    }
+
+    public String getSupportGroup() {
+        return supportGroup;
+    }
+
+    public void setSupportGroup(String supportGroup) {
+        this.supportGroup = supportGroup;
+    }
+
+    public String getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(String assignedTo) {
+        this.assignedTo = assignedTo;
     }
 
     public Instant getLastInventoryAt() {

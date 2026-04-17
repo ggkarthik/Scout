@@ -44,7 +44,13 @@ public class ServiceNowCmdbConfigService {
             "active_install",
             "unlicensed_install",
             "installed_on",
-            "discovery_model"
+            "discovery_model",
+            // CI-level ownership fields via dot-walking
+            "installed_on.owned_by",
+            "installed_on.managed_by",
+            "installed_on.assigned_to",
+            "installed_on.department",
+            "installed_on.support_group"
     );
 
     public static final String DEFAULT_DISCOVERY_FIELDS = String.join(",",
