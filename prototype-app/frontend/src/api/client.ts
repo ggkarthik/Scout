@@ -53,11 +53,8 @@ import type {
   EolComponentPage,
   EolProductCatalog,
   EolRelease,
-  EolSlugSuggestion,
   EolSummary,
-  PackageAssetPage,
-  PackageEolStatusPage,
-  UnresolvedEolMappingPage
+  UnresolvedEolMapping
 } from '../features/eol/types';
 import type {
   SoftwareIdentityDetail,
@@ -418,6 +415,16 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ advisories })
   }),
+  getUpgradeRecommendation: (payload: {
+    softwareName: string;
+    vendor?: string;
+    currentVersion?: string;
+    eolDate?: string;
+    cveIds?: string[];
+  }) => request<{ recommendedVersion: string; upgradeNotes: string; urgency: string }>(
+    '/upgrade-recommendation',
+    { method: 'POST', body: JSON.stringify(payload) }
+  ),
   seedDemo: () => request<IngestionResult>('/demo/seed', { method: 'POST' }),
   getEolSummary: () => request<EolSummary>('/eol/status/summary'),
   getEolComponentStatuses: (params?: { filter?: string; page?: number; size?: number }) => {
@@ -434,30 +441,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ normalizedKey, eolSlug })
   }),
-  listEolMappingSuggestions: (normalizedKey: string) => request<EolSlugSuggestion[]>(`/eol/mappings/suggestions?normalizedKey=${encodeURIComponent(normalizedKey)}`),
-  getEolPackageStatuses: (params?: { filter?: string; page?: number; size?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.filter) searchParams.set('filter', params.filter);
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<PackageEolStatusPage>(`/eol/status/packages${suffix}`);
-  },
-  getEolPackageAssets: (params: { packageName: string; ecosystem?: string; page?: number; size?: number }) => {
-    const searchParams = new URLSearchParams();
-    searchParams.set('packageName', params.packageName);
-    if (params.ecosystem) searchParams.set('ecosystem', params.ecosystem);
-    if (params.page != null) searchParams.set('page', String(params.page));
-    if (params.size != null) searchParams.set('size', String(params.size));
-    return request<PackageAssetPage>(`/eol/status/packages/assets?${searchParams.toString()}`);
-  },
-  listEolUnresolvedMappings: (params?: { page?: number; size?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<UnresolvedEolMappingPage>(`/eol/mappings/unresolved${suffix}`);
-  },
+  listEolUnresolvedMappings: () => request<UnresolvedEolMapping[]>('/eol/mappings/unresolved'),
   triggerEolCatalogRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/catalog', { method: 'POST' }),
   triggerEolReleaseRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/releases', { method: 'POST' }),
   triggerEolMappingResolve: () => request<SyncTriggerResponse>('/eol/admin/refresh/mappings', { method: 'POST' }),

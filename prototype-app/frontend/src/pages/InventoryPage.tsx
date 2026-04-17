@@ -168,9 +168,10 @@ function matchesSearch(record: HostInventoryRecord, query: string): boolean {
   const haystack = [
     record.asset.name,
     record.asset.identifier,
-    record.asset.environment,
+    record.detail.host.environment ?? record.asset.environment,
     record.asset.ownerTeam,
-    record.asset.ownerEmail,
+    record.detail.host.ownerEmail ?? record.asset.ownerEmail,
+    record.detail.host.supportGroup,
     record.operatingSystem,
     ...record.detail.software.map((software) => software.displayName),
     ...record.detail.software.map((software) => software.publisher ?? '')
@@ -221,9 +222,12 @@ function HostRow({
         </button>
         <div className="panel-caption mono">{record.asset.identifier}</div>
       </td>
-      <td>{record.asset.environment || '-'}</td>
+      <td>{record.detail.host.environment ?? record.asset.environment ?? '-'}</td>
       <td>{record.operatingSystem}</td>
-      <td>{record.asset.ownerTeam || record.asset.ownerEmail || '-'}</td>
+      <td>
+        {record.detail.host.ownerEmail ?? record.asset.ownerTeam ?? record.asset.ownerEmail ?? '-'}
+      </td>
+      <td>{record.detail.host.supportGroup ?? '-'}</td>
       <td>{record.deployedSoftwareCount.toLocaleString()}</td>
       <td>{record.applicableCveCount.toLocaleString()}</td>
       <td>{record.openFindingCount.toLocaleString()}</td>
@@ -238,7 +242,6 @@ function HostRow({
 }
 
 export function InventoryPage({ selectedView: _selectedView }: Props) {
-  void _selectedView;
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = React.useState<HostInventoryTab>('all-hosts');
@@ -414,6 +417,7 @@ export function InventoryPage({ selectedView: _selectedView }: Props) {
                   <th>Environment</th>
                   <th>OS</th>
                   <th>Owner</th>
+                  <th>Support Group</th>
                   <th>Software</th>
                   <th>Applicable CVEs</th>
                   <th>Open Findings</th>
@@ -424,7 +428,7 @@ export function InventoryPage({ selectedView: _selectedView }: Props) {
               <tbody>
                 {filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <div className="empty-state"><p>No hosts matched the current filters.</p></div>
                     </td>
                   </tr>

@@ -250,11 +250,16 @@ function VulnRepoDashboardRoute() {
 
 function VulnRepoWorkbenchRoute() {
   const navigate = useNavigate();
+  const location = useLocation();
   const params = useParams<{ cveId?: string }>();
   const hasOpenedDirectRecordRef = React.useRef(false);
+  const returnTo = typeof location.state === 'object' && location.state && 'returnTo' in location.state
+    ? String((location.state as { returnTo?: string }).returnTo ?? '').trim()
+    : '';
   return (
     <VulnRepoOrgCvePage
       initialCveId={params.cveId}
+      returnTo={returnTo || undefined}
       onSelectedCveChange={(cveId) => {
         if (cveId) {
           hasOpenedDirectRecordRef.current = true;
