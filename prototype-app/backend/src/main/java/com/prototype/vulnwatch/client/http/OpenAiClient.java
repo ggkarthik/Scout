@@ -1,4 +1,4 @@
-package com.prototype.vulnwatch.client;
+package com.prototype.vulnwatch.client.http;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
