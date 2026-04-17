@@ -2,7 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.prototype.vulnwatch.client.OpenAiClient;
+import com.prototype.vulnwatch.client.http.OpenAiClient;
 import com.prototype.vulnwatch.dto.UpgradeRecommendationRequest;
 import com.prototype.vulnwatch.dto.UpgradeRecommendationResponse;
 import org.springframework.stereotype.Service;
