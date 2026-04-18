@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -64,6 +65,11 @@ public class IngestionController {
     @PostMapping("/ingestion/nvd-full-sync")
     public SyncTriggerResponse syncNvdFull(@RequestBody(required = false) NvdFullSyncRequest request) {
         return vulnerabilityIngestionService.triggerNvdFullSync(request == null ? null : request.apiKey());
+    }
+
+    @PostMapping("/ingestion/nvd-cve/{cveId}")
+    public IngestionResult refreshCveFromNvd(@PathVariable String cveId) {
+        return vulnerabilityIngestionService.refreshSingleCveFromNvd(cveId);
     }
 
     @PostMapping("/ingestion/kev-sync")

@@ -130,6 +130,19 @@ public class NvdSyncService {
         return executeNvdIncrementalSync(run, lookbackHours);
     }
 
+    /**
+     * Fetch a single CVE directly from NVD by ID and upsert it.
+     * Uses the cveId query parameter which bypasses the 120-day rolling window.
+     */
+    public IngestionResult refreshSingleCveFromNvd(String cveId) {
+        NvdApiClient.NvdRecord record = nvdApiClient.fetchSingleCve(cveId);
+        if (record == null) {
+            return new IngestionResult("not_found", 0, 0, 0, "CVE not found in NVD: " + cveId);
+        }
+        boolean created = upsertNvdRecord(record);
+        return new IngestionResult("ok", 1, created ? 1 : 0, created ? 0 : 1, "Refreshed " + cveId + " from NVD");
+    }
+
     private IngestionResult executeNvdIncrementalSync(SyncRun run, int lookbackHours) {
         int safeLookbackHours = Math.max(1, lookbackHours);
         Instant end = Instant.now();
