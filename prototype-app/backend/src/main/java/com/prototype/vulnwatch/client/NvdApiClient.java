@@ -12,6 +12,7 @@ import jakarta.annotation.PostConstruct;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -518,6 +519,11 @@ public class NvdApiClient {
     private Instant parseInstant(String value) {
         if (value == null || value.isBlank()) {
             return null;
+        }
+        try {
+            // NVD returns dates as "2024-01-09T18:15:45.917" — no zone suffix
+            return LocalDateTime.parse(value).toInstant(ZoneOffset.UTC);
+        } catch (Exception ignored) {
         }
         try {
             return Instant.parse(value);
