@@ -15,13 +15,16 @@ import com.prototype.vulnwatch.domain.VexAssertion;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
+import com.prototype.vulnwatch.domain.VulnerabilityIntelObservation;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -45,6 +48,7 @@ public class CveDetailQueryFacade {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
     private final VexAssertionRepository vexAssertionRepository;
+    private final VulnerabilityIntelObservationRepository observationRepository;
     private final InvestigationService investigationService;
     private final ApplicabilityAssessmentService assessmentService;
     private final RequestActorService requestActorService;
@@ -59,6 +63,7 @@ public class CveDetailQueryFacade {
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             VulnerabilityTargetRepository vulnerabilityTargetRepository,
             VexAssertionRepository vexAssertionRepository,
+            VulnerabilityIntelObservationRepository observationRepository,
             InvestigationService investigationService,
             ApplicabilityAssessmentService assessmentService,
             RequestActorService requestActorService,
@@ -72,6 +77,7 @@ public class CveDetailQueryFacade {
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
         this.vexAssertionRepository = vexAssertionRepository;
+        this.observationRepository = observationRepository;
         this.investigationService = investigationService;
         this.assessmentService = assessmentService;
         this.requestActorService = requestActorService;
@@ -180,18 +186,84 @@ public class CveDetailQueryFacade {
         );
         summary.setEpssUpdatedAt(vulnerability.getEpssUpdatedAt());
         summary.setCweIds(vulnerability.getCweIds());
-        summary.setPublishedAt(vulnerability.getPublishedAt());
-        summary.setModifiedAt(vulnerability.getModifiedAt());
         summary.setSource(vulnerability.getSource());
         summary.setInKev(vulnerability.getInKev());
-        summary.setKevDateAdded(vulnerability.getKevDateAdded());
-        summary.setKevDueDate(vulnerability.getKevDueDate());
-        summary.setKevRequiredAction(vulnerability.getKevRequiredAction());
+
+        // Fetch all observations once to fill gaps in canonical fields
+        List<VulnerabilityIntelObservation> observations =
+                observationRepository.findByVulnerabilityOrderByLastSeenAtDesc(vulnerability);
+
+        // NVD observation for publishedAt / modifiedAt / references
+        VulnerabilityIntelObservation nvdObs = observations.stream()
+                .filter(o -> "nvd".equalsIgnoreCase(o.getSourceSystem()))
+                .findFirst().orElse(null);
+
+        Instant publishedAt = vulnerability.getPublishedAt() != null
+                ? vulnerability.getPublishedAt()
+                : (nvdObs != null ? nvdObs.getPublishedAt() : null);
+        summary.setPublishedAt(publishedAt);
+
+        // Only use modifiedAt/publishedAt from actual NVD source dates — never from fallback sync timestamps.
+        // If no NVD observation exists, these fields remain null so the UI doesn't show misleading dates.
+        Instant modifiedAt = nvdObs != null ? nvdObs.getLastModifiedAt() : null;
+        if (modifiedAt == null && vulnerability.getModifiedAt() != null && nvdObs != null) {
+            // NVD obs exists but its lastModifiedAt is null — use what the entity has
+            modifiedAt = vulnerability.getModifiedAt();
+        }
+        summary.setModifiedAt(modifiedAt);
+
+        // KEV dates: prefer entity fields; fall back to raw payload parsing for legacy records
+        LocalDate kevDateAdded = vulnerability.getKevDateAdded();
+        LocalDate kevDueDate = vulnerability.getKevDueDate();
+        String kevRequiredAction = vulnerability.getKevRequiredAction();
+
+        if (Boolean.TRUE.equals(vulnerability.getInKev()) && (kevDateAdded == null || kevDueDate == null)) {
+            VulnerabilityIntelObservation kevObs = observations.stream()
+                    .filter(o -> "kev".equalsIgnoreCase(o.getSourceSystem()))
+                    .findFirst().orElse(null);
+            if (kevObs != null && kevObs.getRawPayload() != null) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode kev = objectMapper.readTree(kevObs.getRawPayload());
+                    if (kevDateAdded == null) {
+                        kevDateAdded = parseLocalDateOrNull(kev.path("dateAdded").asText(""));
+                    }
+                    if (kevDueDate == null) {
+                        kevDueDate = parseLocalDateOrNull(kev.path("dueDate").asText(""));
+                    }
+                    if (kevRequiredAction == null) {
+                        String ra = kev.path("requiredAction").asText(null);
+                        if (ra != null && !ra.isBlank()) {
+                            kevRequiredAction = ra.trim();
+                        }
+                    }
+                } catch (Exception ignored) { /* raw payload unparseable */ }
+            }
+        }
+        summary.setKevDateAdded(kevDateAdded);
+        summary.setKevDueDate(kevDueDate);
+        summary.setKevRequiredAction(kevRequiredAction);
         return summary;
+    }
+
+    private LocalDate parseLocalDateOrNull(String text) {
+        if (text == null || text.isBlank()) return null;
+        try {
+            return LocalDate.parse(text.trim());
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 
     List<CveDetailController.CveReference> buildReferences(Vulnerability vulnerability) {
         String json = vulnerability.getReferencesJson();
+        // Fall back to NVD observation's referencesJson if Vulnerability has none
+        if (json == null || json.isBlank()) {
+            json = observationRepository.findByVulnerabilityOrderByLastSeenAtDesc(vulnerability).stream()
+                    .filter(o -> "nvd".equalsIgnoreCase(o.getSourceSystem()))
+                    .map(VulnerabilityIntelObservation::getReferencesJson)
+                    .filter(r -> r != null && !r.isBlank())
+                    .findFirst().orElse(null);
+        }
         if (json == null || json.isBlank()) {
             return List.of();
         }
