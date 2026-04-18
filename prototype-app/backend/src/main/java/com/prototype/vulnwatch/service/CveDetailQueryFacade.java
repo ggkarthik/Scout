@@ -110,6 +110,7 @@ public class CveDetailQueryFacade {
         response.setSignals(buildSignals(vulnerability, orgCveRecord, matchedSoftware, targets));
         response.setMatchedSoftware(matchedSoftware);
         response.setVendorIntelligence(buildVendorIntelligence(vulnerability, targets));
+        response.setReferences(buildReferences(vulnerability));
         response.setInvestigations(investigationService.getInvestigationsByCve(tenantId, cveId).stream()
                 .map(this::toInvestigationDto)
                 .collect(Collectors.toList()));
@@ -183,7 +184,54 @@ public class CveDetailQueryFacade {
         summary.setModifiedAt(vulnerability.getModifiedAt());
         summary.setSource(vulnerability.getSource());
         summary.setInKev(vulnerability.getInKev());
+        summary.setKevDateAdded(vulnerability.getKevDateAdded());
+        summary.setKevDueDate(vulnerability.getKevDueDate());
+        summary.setKevRequiredAction(vulnerability.getKevRequiredAction());
         return summary;
+    }
+
+    List<CveDetailController.CveReference> buildReferences(Vulnerability vulnerability) {
+        String json = vulnerability.getReferencesJson();
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            // Try parsing as array of objects {url, source, tags}
+            List<Map<String, Object>> raw = objectMapper.readValue(json, new TypeReference<>() {});
+            return raw.stream()
+                    .filter(m -> m.get("url") instanceof String)
+                    .map(m -> {
+                        CveDetailController.CveReference ref = new CveDetailController.CveReference();
+                        ref.setUrl((String) m.get("url"));
+                        if (m.get("source") instanceof String s) {
+                            ref.setSource(s);
+                        }
+                        Object tagsObj = m.get("tags");
+                        if (tagsObj instanceof List<?> tagList) {
+                            ref.setTags(tagList.stream()
+                                    .filter(t -> t instanceof String)
+                                    .map(t -> (String) t)
+                                    .toList());
+                        }
+                        return ref;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            // Fallback: old format was array of plain URL strings
+            try {
+                List<String> urls = objectMapper.readValue(json, new TypeReference<>() {});
+                return urls.stream()
+                        .filter(u -> u != null && !u.isBlank())
+                        .map(u -> {
+                            CveDetailController.CveReference ref = new CveDetailController.CveReference();
+                            ref.setUrl(u);
+                            return ref;
+                        })
+                        .toList();
+            } catch (Exception ignored) {
+                return List.of();
+            }
+        }
     }
 
     private CveDetailController.KeySignals buildSignals(

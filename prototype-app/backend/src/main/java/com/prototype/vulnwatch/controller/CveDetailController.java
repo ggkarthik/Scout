@@ -205,6 +205,14 @@ public class CveDetailController {
         private List<AssessmentDto> assessments;
         private List<MatchedSoftwareDto> matchedSoftware;
         private List<VendorIntelligenceDto> vendorIntelligence;
+        private List<CveReference> references;
+    }
+
+    @Data
+    public static class CveReference {
+        private String url;
+        private String source;
+        private List<String> tags;
     }
 
     @Data
@@ -235,6 +243,9 @@ public class CveDetailController {
         private Instant modifiedAt;
         private VulnerabilitySource source;
         private Boolean inKev;
+        private LocalDate kevDateAdded;
+        private LocalDate kevDueDate;
+        private String kevRequiredAction;
     }
 
     @Data
