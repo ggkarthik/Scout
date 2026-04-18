@@ -1780,7 +1780,7 @@ function CveOverviewExperience({
   const timelineItems = [
     detail.summary.publishedAt ? { label: 'CVE Published', value: formatDate(detail.summary.publishedAt), tone: 'published' } : null,
     detail.summary.modifiedAt ? { label: 'CVE Record Updated', value: formatDate(detail.summary.modifiedAt), tone: 'updated' } : null,
-    detail.signals.exploitAvailable ? { label: 'Public Exploit Observed', value: detail.summary.modifiedAt ? formatDate(detail.summary.modifiedAt) : 'Observed', tone: 'exploit' } : null,
+    detail.signals.exploitAvailable ? { label: 'Public Exploit Observed', value: detail.signals.exploitReason || 'Active exploit known', tone: 'exploit' } : null,
     latestAssessment?.completedAt ? { label: 'Assessment Completed', value: formatDate(latestAssessment.completedAt), tone: 'verified' } : null,
   ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>;
 
