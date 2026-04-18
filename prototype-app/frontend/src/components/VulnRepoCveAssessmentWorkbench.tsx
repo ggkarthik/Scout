@@ -1765,15 +1765,13 @@ function CveOverviewExperience({
 }) {
   const affectedProducts = React.useMemo(() => buildAffectedProducts(detail, softwareGroups), [detail, softwareGroups]);
   const [productIndex, setProductIndex] = React.useState(0);
+  const [activeTab, setActiveTab] = React.useState<'assets' | 'refs' | 'timeline'>('assets');
 
   React.useEffect(() => {
     setProductIndex(0);
   }, [detail.summary.externalId]);
 
   const product = affectedProducts[Math.min(productIndex, Math.max(affectedProducts.length - 1, 0))];
-  const statusLabel = assessmentStatusLabel(item, latestAssessment);
-  const statusTone = assessmentStatusTone(item, latestAssessment);
-  const topStatusLabel = item.impacted ? 'Affected' : statusLabel;
   const currentLeadAnalyst = leadAnalyst || latestInvestigation?.assignedTo || analystId || 'Unassigned analyst';
   const referenceLinks = buildReferenceLinks(detail);
   const remediationText = detail.signals.patchAvailable
@@ -1786,252 +1784,389 @@ function CveOverviewExperience({
     latestAssessment?.completedAt ? { label: 'Assessment Completed', value: formatDate(latestAssessment.completedAt), tone: 'verified' } : null,
   ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>;
 
+  const cweList = React.useMemo(() =>
+    (detail.summary.cweIds ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    [detail.summary.cweIds]
+  );
+
+  const recommendedAction = React.useMemo(() => {
+    const sev = item.severity?.toLowerCase();
+    if (item.inKev && detail.signals.exploitAvailable)
+      return 'Investigate and patch immediately — CISA KEV confirmed with active exploitation.';
+    if (sev === 'critical' || sev === 'high')
+      return `${formatLabel(item.severity)} severity${detail.signals.exploitAvailable ? ' with active exploitation' : ''}. Review affected assets and apply available patches.`;
+    return 'Review exposure and apply mitigations per your remediation SLA.';
+  }, [item.severity, item.inKev, detail.signals.exploitAvailable]);
+
+  const CVSS_DIMS_LOCAL = [
+    { key: 'AV', label: 'Attack vector',       values: { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' } },
+    { key: 'AC', label: 'Attack complexity',   values: { L: 'Low', H: 'High' } },
+    { key: 'PR', label: 'Privileges required', values: { N: 'None', L: 'Low', H: 'High' } },
+    { key: 'UI', label: 'User interaction',    values: { N: 'None', R: 'Required' } },
+    { key: 'S',  label: 'Scope',               values: { U: 'Unchanged', C: 'Changed' } },
+    { key: 'C',  label: 'Confidentiality',     values: { N: 'None', L: 'Low', H: 'High' } },
+    { key: 'I',  label: 'Integrity',           values: { N: 'None', L: 'Low', H: 'High' } },
+    { key: 'A',  label: 'Availability',        values: { N: 'None', L: 'Low', H: 'High' } },
+  ] as const;
+
   return (
-    <div className="cve-overview-shell">
-      <section className="cve-overview-hero panel">
-        <div className="cve-overview-hero-main">
-          <div className="cve-overview-chip-row">
-            <span className={`severity-pill severity-${item.severity.toLowerCase()}`}>{formatLabel(item.severity)}</span>
-            <span className={`cve-applicability-tag ${topStatusLabel.toUpperCase() === 'AFFECTED' ? 'applicable' : statusTone === 'resolved' ? 'not-applicable' : 'unknown'}`}>
-              {topStatusLabel}
-            </span>
-            <span className={`cve-applicability-tag ${item.applicability === 'APPLICABLE' ? 'applicable' : item.applicability === 'NOT_APPLICABLE' ? 'not-applicable' : 'unknown'}`}>
-              {formatLabel(item.applicability)}
-            </span>
-          </div>
-          <h2 className="cve-overview-title mono">{item.externalId}</h2>
-          <p className="cve-overview-description cve-overview-description-clamped">{detail.summary.description || 'No description available.'}</p>
-          <div className="cve-overview-signal-row">
-            {detail.signals.exploitAvailable && <span className="cve-overview-badge">Actively Exploited</span>}
-            {item.inKev && <span className="cve-overview-badge">CISA KEV</span>}
-            <span className="cve-overview-badge">{detail.summary.cweIds || 'No CWE'}</span>
-            <span className="cve-overview-badge">{detail.signals.patchAvailable ? 'Patch Available' : 'Patch Pending'}</span>
-          </div>
-        </div>
-        <div className="cve-overview-hero-metrics">
-          <HeroMetric
-            value={detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : 'N/A'}
-            label="CVSS v3.1"
-            tone="critical"
-          />
-          <HeroMetric
-            value={detail.summary.epssScore != null ? `${(detail.summary.epssScore * 100).toFixed(2)}%` : 'N/A'}
-            label="EPSS Score"
-            sublabel={detail.summary.epssScore != null ? `${Math.max(1, Math.round(detail.summary.epssScore * 100))}th percentile` : undefined}
-            tone="accent"
-          />
-        </div>
-      </section>
+    <div className="cve-detail-page">
 
-      <section className="panel cve-overview-meta-card">
-        <div className="cve-overview-meta-grid">
-          <div className="cve-overview-meta-group">
-            <div className="cve-overview-meta-label">Exposure context</div>
-            <div className="cve-overview-meta-actions">
+      {/* ── Decision Panel ──────────────────────────────── */}
+      <div className="cvd-decision-panel">
+        <div className="cvd-decision-top">
+          <span className="cvd-section-label">Decision panel · should you act?</span>
+          <span className="cvd-muted-sm">
+            {item.lastEvaluatedAt ? `Last evaluated ${formatDate(item.lastEvaluatedAt)}` : ''}
+          </span>
+        </div>
+        <div className="cvd-kv-row">
+          <div className="cvd-kv">
+            <span className="cvd-kv-label">Severity</span>
+            <div className="cvd-kv-score-wrap">
+              <span className={`cvd-kv-big cvd-sev-${item.severity?.toLowerCase()}`}>
+                {detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : formatLabel(item.severity)}
+              </span>
+              {detail.summary.cvssScore != null && <span className="cvd-kv-denom">/10</span>}
+            </div>
+            <span className="cvd-kv-sub">{formatLabel(item.severity)}</span>
+          </div>
+
+          <div className="cvd-kv">
+            <span className="cvd-kv-label">Exploit status</span>
+            <div className="cvd-kv-status-wrap">
+              <span className={`cvd-dot ${detail.signals.exploitAvailable ? 'cvd-dot-danger' : 'cvd-dot-none'}`} />
+              <span className={detail.signals.exploitAvailable ? 'cvd-kv-danger' : 'cvd-kv-muted'}>
+                {detail.signals.exploitAvailable ? (detail.signals.exploitReason || 'Active') : 'None known'}
+              </span>
+            </div>
+            {detail.summary.epssScore != null && (
+              <span className="cvd-kv-sub">EPSS {(detail.summary.epssScore * 100).toFixed(1)}%</span>
+            )}
+          </div>
+
+          <div className="cvd-kv">
+            <span className="cvd-kv-label">Your exposure</span>
+            <div className="cvd-kv-score-wrap">
+              <span className="cvd-kv-big">{detail.signals.assetCount}</span>
+              <span className="cvd-kv-denom">assets</span>
+            </div>
+            <span className="cvd-kv-sub">
+              <button type="button" className="cvd-link-btn" onClick={onOpenAffectedEntities}>
+                {detail.signals.softwareCount} software →
+              </button>
+            </span>
+          </div>
+
+          <div className="cvd-kv">
+            <span className="cvd-kv-label">Patch available</span>
+            <div className="cvd-kv-status-wrap">
+              <span className={`cvd-dot ${detail.signals.patchAvailable ? 'cvd-dot-ok' : 'cvd-dot-none'}`} />
+              <span className={detail.signals.patchAvailable ? 'cvd-kv-ok' : 'cvd-kv-muted'}>
+                {detail.signals.patchAvailable ? 'Yes' : 'No'}
+              </span>
+            </div>
+            {detail.signals.patchVersions && (
+              <span className="cvd-kv-sub">{detail.signals.patchVersions}</span>
+            )}
+          </div>
+
+          <div className="cvd-kv">
+            <span className="cvd-kv-label">Lead analyst</span>
+            <div style={{ marginTop: 4 }}>
+              <select
+                value={leadAnalyst}
+                onChange={(e) => onLeadAnalystChange(e.target.value)}
+                style={{ fontSize: 12, color: 'var(--text)', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer' }}
+              >
+                {[leadAnalyst, 'Alex Martinez', 'Sarah Chen', 'Ravi Kumar']
+                  .filter((v, i, arr) => arr.indexOf(v) === i)
+                  .map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+            <span className="cvd-kv-sub">{currentLeadAnalyst}</span>
+          </div>
+        </div>
+
+        <div className="cvd-recommend-banner">
+          <div className="cvd-recommend-icon">!</div>
+          <div>
+            <strong>Recommended action: </strong>
+            <span>{recommendedAction}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Workflow Panel ───────────────────────────────── */}
+      <div className="cvd-workflow-panel">
+        <div className="cvd-workflow-header">
+          <div>
+            <span className="cvd-section-label">Workflow</span>
+            <p className="cvd-workflow-sub">Move from investigation to assessment and finding creation.</p>
+          </div>
+          <div className="cvd-workflow-secondary">
+            <span className="cvd-section-label" style={{ marginRight: 8 }}>Secondary actions</span>
+            <span className="cvd-pill-neutral">Mark Deferred</span>
+            <span className="cvd-pill-neutral">Export Evidence</span>
+            <span className="cvd-pill-neutral">Notify Groups</span>
+            <span className="cvd-pill-neutral">AI Insights</span>
+          </div>
+        </div>
+
+        <div className="cvd-wf-steps">
+          <button type="button" className="cvd-wf-step active" onClick={() => onStepChange(1)}>
+            <div className="cvd-wf-num">1</div>
+            <div className="cvd-wf-body">
+              <p className="cvd-wf-title">Investigation</p>
+              <p className="cvd-wf-sub">Open the runbook and gather evidence.</p>
+            </div>
+          </button>
+          <button type="button" className="cvd-wf-step" onClick={() => onStepChange(2)}>
+            <div className="cvd-wf-num">2</div>
+            <div className="cvd-wf-body">
+              <p className="cvd-wf-title">Applicability</p>
+              <p className="cvd-wf-sub">{formatLabel(item.applicability)} · {item.applicableComponentCount} of {item.matchedComponentCount} confirmed.</p>
+            </div>
+          </button>
+          <button type="button" className="cvd-wf-step" onClick={() => onStepChange(3)}>
+            <div className="cvd-wf-num">3</div>
+            <div className="cvd-wf-body">
+              <p className="cvd-wf-title">Create Finding</p>
+              <p className="cvd-wf-sub">Add impacted assets to the backlog.</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* ── CVE Detail Content ───────────────────────────── */}
+      <div className="cvd-content">
+
+        {/* Description */}
+        <div className="cvd-card">
+          <p className="cvd-section-label">Description</p>
+          <p className="cvd-description">{detail.summary.description || 'No description available.'}</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+            {detail.signals.exploitAvailable && <span className="cvd-flag-chip cvd-flag-critical"><span className="cvd-flag-dot" />Actively Exploited</span>}
+            {item.inKev && <span className="cvd-flag-chip cvd-flag-critical"><span className="cvd-flag-dot" />CISA KEV</span>}
+            {cweList.map(cwe => <span key={cwe} className="cvd-pill-neutral">{cwe}</span>)}
+            <span className={`cvd-pill-neutral ${detail.signals.patchAvailable ? '' : ''}`}>
+              {detail.signals.patchAvailable ? 'Patch Available' : 'Patch Pending'}
+            </span>
+          </div>
+        </div>
+
+        {/* Technical details / CVSS */}
+        {detail.summary.cvssVector && (
+          <div className="cvd-card">
+            <div className="cvd-technical-hdr">
+              <p className="cvd-section-label">Technical details · CVSS v3.1 vector</p>
+              {detail.summary.source && <span className="cvd-src-tag">{detail.summary.source}</span>}
+            </div>
+            <div className="cvd-vector-bar">
+              <code className="cvd-vector-code">{detail.summary.cvssVector}</code>
               <button
                 type="button"
-                className="btn btn-secondary btn-inline"
-                onClick={onOpenAffectedEntities}
-              >
-                {detail.signals.assetCount} affected entities
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-inline"
-                onClick={onOpenImpactedSoftware}
-              >
-                {detail.signals.softwareCount} impacted software
-              </button>
+                className="btn btn-secondary"
+                style={{ padding: '4px 10px', fontSize: '11px' }}
+                onClick={() => void navigator.clipboard.writeText(detail.summary.cvssVector ?? '')}
+              >Copy</button>
             </div>
-          </div>
-
-          <div className="cve-overview-meta-group">
-            <div className="cve-overview-meta-label">Current signals</div>
-            <div className="cve-overview-meta-pills">
-              <span className={`cve-overview-footer-pill ${detail.signals.exploitAvailable ? 'exploit' : 'neutral'}`}>
-                {detail.signals.exploitAvailable ? 'Public Exploit' : 'No Public Exploit'}
-              </span>
-              <span className={`cve-overview-footer-pill ${detail.signals.patchAvailable ? 'resolved' : 'neutral'}`}>
-                {detail.signals.patchAvailable ? 'Patch Available' : 'Patch Unavailable'}
-              </span>
-              <span className="cve-overview-footer-meta">{currentLeadAnalyst}</span>
+            <div className="cvd-cvss-grid">
+              {CVSS_DIMS_LOCAL.map(({ key, label, values }) => {
+                const raw = cvssFields[key];
+                if (!raw) return null;
+                return (
+                  <div key={key} className="cvd-cvss-cell">
+                    <p className="cvd-cvss-cell-label">{label}</p>
+                    <p className="cvd-cvss-cell-val">{(values as Record<string, string>)[raw] ?? raw}</p>
+                    <span className="cvd-cvss-cell-code">{key}:{raw}</span>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-
-          <div className="cve-overview-lead-analyst cve-overview-lead-analyst--inline">
-            <label htmlFor="cve-lead-analyst">Lead Analyst</label>
-            <select id="cve-lead-analyst" value={leadAnalyst} onChange={(event) => onLeadAnalystChange(event.target.value)}>
-              {[leadAnalyst, 'Alex Martinez', 'Sarah Chen', 'Ravi Kumar'].filter((value, index, values) => values.indexOf(value) === index).map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </section>
-
-      <section className="panel cve-overview-workflow-card">
-        <div className="panel-header">
-          <div className="cve-overview-section-copy">
-            <h3>Workflow</h3>
-            <div className="panel-caption">Move from investigation to assessment and finding creation.</div>
-          </div>
-          <div className="cve-overview-utility-actions" aria-label="Secondary workflow actions">
-            <span className="cve-overview-utility-label">Secondary actions</span>
-            <div className="cve-overview-utility-pills">
-              <span className="cve-overview-utility-pill">Mark Deferred</span>
-              <span className="cve-overview-utility-pill">Export Evidence</span>
-              <span className="cve-overview-utility-pill">Notify Groups</span>
-              <span className="cve-overview-utility-pill">AI Insights</span>
-            </div>
-          </div>
-        </div>
-        <div className="org-cve-action-strip cve-overview-workflow-strip">
-          <button type="button" className="org-cve-action-card cve-overview-workflow-step active" onClick={() => onStepChange(1)}>
-            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--investigation" aria-hidden="true" />
-            <span className="org-cve-action-copy">
-              <strong>Investigation</strong>
-              <span>Open the runbook and gather evidence.</span>
-            </span>
-          </button>
-          <button type="button" className="org-cve-action-card cve-overview-workflow-step" onClick={() => onStepChange(2)}>
-            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--applicability" aria-hidden="true" />
-            <span className="org-cve-action-copy">
-              <strong>Applicability</strong>
-              <span>{formatLabel(item.applicability)}</span>
-            </span>
-          </button>
-          <button type="button" className="org-cve-action-card cve-overview-workflow-step" onClick={() => onStepChange(3)}>
-            <span className="org-cve-action-icon cve-overview-workflow-icon cve-overview-workflow-icon--finding" aria-hidden="true" />
-            <span className="org-cve-action-copy">
-              <strong>Create Finding</strong>
-              <span>Add impacted assets to the backlog.</span>
-            </span>
-          </button>
-        </div>
-      </section>
-
-      <section className="panel cve-overview-vector-card">
-        <div className="cve-overview-section-title">CVSS v3.1 Vector</div>
-        <div className="cve-overview-vector-string mono">{detail.summary.cvssVector || 'CVSS vector unavailable'}</div>
-        <div className="cve-overview-vector-grid">
-          <div className="cve-overview-vector-cell">
-            <span>Attack Vector</span>
-            <strong>{AV_LABELS[cvssFields['AV']] ?? '-'}</strong>
-          </div>
-          <div className="cve-overview-vector-cell">
-            <span>Attack Complexity</span>
-            <strong>{cvssFields['AC'] === 'L' ? 'Low' : cvssFields['AC'] === 'H' ? 'High' : '-'}</strong>
-          </div>
-          <div className="cve-overview-vector-cell">
-            <span>Privileges Required</span>
-            <strong>{PR_LABELS[cvssFields['PR']] ?? '-'}</strong>
-          </div>
-          <div className="cve-overview-vector-cell">
-            <span>User Interaction</span>
-            <strong>{UI_LABELS[cvssFields['UI']] ?? '-'}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="panel cve-overview-remediation-card">
-        <div className="cve-overview-section-title">Remediation Guidance</div>
-        <p>{remediationText}</p>
-      </section>
-
-      <section className="panel cve-overview-timeline-card">
-        <div className="cve-overview-section-title">Timeline</div>
-        <div className="cve-overview-timeline">
-          {timelineItems.length === 0 ? (
-            <div className="panel-caption">No timeline events available.</div>
-          ) : (
-            timelineItems.map((entry) => (
-              <div key={`${entry.label}-${entry.value}`} className="cve-overview-timeline-item">
-                <span className={`cve-overview-timeline-dot ${entry.tone}`} aria-hidden="true" />
+            <div className="cvd-cvss-meta">
+              {detail.summary.publishedAt && (
                 <div>
-                  <strong>{entry.label}</strong>
-                  <div className="panel-caption">{entry.value}</div>
+                  <p className="cvd-meta-label">Published</p>
+                  <p className="cvd-meta-val">{formatDate(detail.summary.publishedAt)}</p>
                 </div>
+              )}
+              {detail.summary.modifiedAt && (
+                <div>
+                  <p className="cvd-meta-label">Last modified</p>
+                  <p className="cvd-meta-val">{formatDate(detail.summary.modifiedAt)}</p>
+                </div>
+              )}
+              {detail.summary.epssScore != null && (
+                <div>
+                  <p className="cvd-meta-label">EPSS score</p>
+                  <p className="cvd-meta-val cvd-meta-warn">{(detail.summary.epssScore * 100).toFixed(2)}%</p>
+                </div>
+              )}
+              {detail.summary.epssScore != null && (
+                <div>
+                  <p className="cvd-meta-label">EPSS percentile</p>
+                  <p className="cvd-meta-val">{Math.max(1, Math.round(detail.summary.epssScore * 100))}th</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Affected products + Weaknesses */}
+        {(affectedProducts.length > 0 || cweList.length > 0) && (
+          <div className="cvd-two-col">
+            {affectedProducts.length > 0 && (
+              <div className="cvd-card cvd-card-flush">
+                <div className="cvd-card-inset-hdr">
+                  <p className="cvd-section-label">Affected entities</p>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span className="cvd-count-badge">{affectedProducts.length} entries</span>
+                    {affectedProducts.length > 1 && (
+                      <button
+                        type="button"
+                        className="cvd-link-btn"
+                        onClick={() => setProductIndex(i => (i + 1) % affectedProducts.length)}
+                      >Next</button>
+                    )}
+                  </div>
+                </div>
+                {product ? (
+                  <div>
+                    <div className="cvd-entity-row">
+                      <div className="cvd-entity-row-top">
+                        <span className="cvd-entity-name">{product.product}</span>
+                        <span className="cvd-src-tag">{product.vendor}</span>
+                      </div>
+                      <span className="cvd-entity-versions">{product.affectedVersions}</span>
+                    </div>
+                    <div className="cvd-entity-row">
+                      <div className="cvd-entity-row-top">
+                        <span className="cvd-entity-name">CWE</span>
+                        <span className="cvd-entity-versions">{product.cwe}</span>
+                      </div>
+                    </div>
+                    <div className="cvd-entity-row">
+                      <div className="cvd-entity-row-top">
+                        <span className="cvd-entity-name">Assets impacted</span>
+                        <button type="button" className="cvd-link-btn" onClick={onOpenAffectedEntities}>
+                          {product.totalAssetsImpacted.toLocaleString()} →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="cvd-entity-row"><span className="cvd-kv-muted">No affected product data.</span></div>
+                )}
               </div>
-            ))
-          )}
-        </div>
-      </section>
+            )}
 
-      <section className="panel cve-overview-reference-card">
-        <div className="cve-overview-section-title">References</div>
-        <div className="cve-overview-reference-list">
-          {referenceLinks.map((reference) => (
-            <a key={reference.href} href={reference.href} target="_blank" rel="noreferrer" className="cve-overview-reference-item">
-              <span>{reference.label}</span>
-              <span aria-hidden="true">›</span>
-            </a>
-          ))}
-        </div>
-      </section>
+            {cweList.length > 0 && (
+              <div className="cvd-card cvd-card-flush">
+                <div className="cvd-card-inset-hdr">
+                  <p className="cvd-section-label">Weaknesses</p>
+                  <span className="cvd-count-badge">{cweList.length} CWEs</span>
+                </div>
+                {cweList.map(cwe => (
+                  <div key={cwe} className="cvd-entity-row">
+                    <span className="cvd-entity-name">{cwe}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-      <section className="panel cve-overview-affected-card">
-        <div className="cve-overview-section-header-row">
-          <div className="cve-overview-section-title">Affected Product</div>
-          {affectedProducts.length > 1 && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-inline"
-              onClick={() => setProductIndex((current) => (current + 1) % affectedProducts.length)}
-            >
-              Next
+        {/* Solution */}
+        <div className="cvd-card">
+          <div className="cvd-solution-hdr">
+            <p className="cvd-section-label">Solution</p>
+            <span className={`severity-pill ${detail.signals.patchAvailable ? 'severity-low' : 'severity-high'}`}>
+              {detail.signals.patchAvailable ? '✓ Available' : '⚠ Pending'}
+            </span>
+          </div>
+          <div className="cvd-sol-card">
+            <div className="cvd-sol-top">
+              <span className="cvd-sol-title">{remediationText}</span>
+              {detail.summary.source && <span className="cvd-src-tag">{detail.summary.source}</span>}
+            </div>
+            {detail.signals.patchAvailable && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <span className="severity-pill severity-low">Recommended</span>
+                <span className="cvd-pill-neutral">Full fix</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Tabs: Affected assets / References / Timeline */}
+        <div className="cvd-card" style={{ padding: 0 }}>
+          <div className="cvd-tab-bar">
+            <button type="button" className={`cvd-tab-btn ${activeTab === 'assets' ? 'active' : ''}`} onClick={() => setActiveTab('assets')}>
+              Affected assets · {detail.signals.assetCount}
             </button>
+            <button type="button" className={`cvd-tab-btn ${activeTab === 'refs' ? 'active' : ''}`} onClick={() => setActiveTab('refs')}>
+              References · {referenceLinks.length}
+            </button>
+            <button type="button" className={`cvd-tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
+              Timeline
+            </button>
+          </div>
+
+          {activeTab === 'assets' && (
+            <div style={{ padding: '14px 16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {affectedProducts.slice(0, 5).map((p, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{p.product}</p>
+                      <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{p.vendor} · {p.affectedVersions}</p>
+                    </div>
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={onOpenAffectedEntities}>
+                      {p.totalAssetsImpacted} assets
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="cvd-link-btn" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={onOpenAffectedEntities}>
+                  View all affected assets →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'refs' && (
+            <div className="cvd-refs-list">
+              {referenceLinks.length === 0 ? (
+                <p className="cvd-tab-empty">No references available.</p>
+              ) : (
+                referenceLinks.map(ref => (
+                  <div key={ref.href} className="cvd-ref-row">
+                    <a href={ref.href} target="_blank" rel="noreferrer" className="cvd-ref-link">{ref.label}</a>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeTab === 'timeline' && (
+            <div style={{ padding: '14px 16px' }}>
+              {timelineItems.length === 0 ? (
+                <p className="cvd-tab-empty">No timeline events available.</p>
+              ) : (
+                timelineItems.map(entry => (
+                  <div key={`${entry.label}-${entry.value}`} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span className={`cve-overview-timeline-dot ${entry.tone}`} aria-hidden="true" style={{ marginTop: 4, flexShrink: 0 }} />
+                    <div>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{entry.label}</p>
+                      <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{entry.value}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           )}
         </div>
-        {product ? (
-          <div className="cve-overview-detail-list">
-            <OverviewRow label="Vendor" value={product.vendor} />
-            <OverviewRow label="Product" value={product.product} />
-            <OverviewRow label="Affected Versions" value={product.affectedVersions} />
-            <OverviewRow label="CWE" value={product.cwe} />
-            <OverviewRow label="Total Assets Impacted" value={product.totalAssetsImpacted.toLocaleString()} />
-          </div>
-        ) : (
-          <div className="panel-caption">No affected product data available.</div>
-        )}
-        {!latestAssessment?.finalResult && (
-          <div className="cve-overview-assessment-note">Assessment is not done.</div>
-        )}
-      </section>
-
-      <section className="cve-overview-two-up">
-        <section className="panel cve-overview-technical-card">
-          <div className="cve-overview-section-title">Technical Details</div>
-          <div className="cve-overview-detail-list">
-            <OverviewRow label="Attack Vector" value={AV_LABELS[cvssFields['AV']] ?? '-'} />
-            <OverviewRow label="Attack Complexity" value={cvssFields['AC'] === 'L' ? 'Low' : cvssFields['AC'] === 'H' ? 'High' : '-'} />
-            <OverviewRow label="Privileges Required" value={PR_LABELS[cvssFields['PR']] ?? '-'} />
-            <OverviewRow label="User Interaction" value={UI_LABELS[cvssFields['UI']] ?? '-'} />
-            <OverviewRow label="Published" value={detail.summary.publishedAt ? formatDate(detail.summary.publishedAt) : '-'} />
-            <OverviewRow label="Last Modified" value={detail.summary.modifiedAt ? formatDate(detail.summary.modifiedAt) : '-'} />
-          </div>
-        </section>
-
-        <section className="panel cve-overview-risk-card">
-          <div className="cve-overview-section-title">Risk Scoring</div>
-          <div className="cve-overview-score-block">
-            <div className="cve-overview-score-head">
-              <span>CVSS Score</span>
-              <strong>{detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : 'N/A'}</strong>
-            </div>
-            <div className="cve-overview-score-bar danger"><span style={{ width: `${Math.min(100, (detail.summary.cvssScore ?? 0) * 10)}%` }} /></div>
-          </div>
-          <div className="cve-overview-score-block">
-            <div className="cve-overview-score-head">
-              <span>EPSS Score</span>
-              <strong>{detail.summary.epssScore != null ? `${(detail.summary.epssScore * 100).toFixed(2)}%` : 'N/A'}</strong>
-            </div>
-            <div className="cve-overview-score-bar accent"><span style={{ width: `${Math.min(100, (detail.summary.epssScore ?? 0) * 100)}%` }} /></div>
-            <div className="panel-caption">
-              {detail.summary.epssScore != null ? `${Math.max(1, Math.round(detail.summary.epssScore * 100))}th percentile of all CVEs` : 'EPSS unavailable'}
-            </div>
-          </div>
-        </section>
-      </section>
+      </div>
     </div>
   );
 }

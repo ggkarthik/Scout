@@ -301,6 +301,11 @@ public class EolRefreshService {
             LOG.info("No mappings yet — fetching release data for {} identified catalog slugs", trackedSlugs.size());
         }
 
+        if (trackedSlugs.isEmpty()) {
+            trackedSlugs = catalogRepository.findAllSlugs();
+            LOG.info("No identified slugs yet — falling back to all {} catalog slugs for initial release refresh", trackedSlugs.size());
+        }
+
         Map<String, String> lastModifiedBySlug = catalogRepository.findAll().stream()
                 .filter(c -> c.getLastModified() != null)
                 .collect(Collectors.toMap(
