@@ -187,6 +187,7 @@ public class EolService {
                 FROM inventory_components ic
                 WHERE ic.component_status = 'ACTIVE'
                 """ + whereClause + """
+
                 GROUP BY ic.package_name, ic.ecosystem, ic.eol_slug, ic.eol_cycle, ic.eol_date, ic.is_eol
                 ORDER BY ic.eol_date ASC NULLS LAST, ic.package_name ASC
                 LIMIT ? OFFSET ?
