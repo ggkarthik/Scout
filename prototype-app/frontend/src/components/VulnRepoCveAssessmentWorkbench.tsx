@@ -321,13 +321,32 @@ function buildAffectedProducts(detail: CveDetail, softwareGroups: SoftwareGroup[
   return Array.from(products.values());
 }
 
-function buildReferenceLinks(detail: CveDetail): Array<{ label: string; href: string }> {
-  const links = new Map<string, string>();
-  if (detail.summary.sourceUrl) {
-    links.set(`${detail.summary.source ?? 'Primary Advisory'}`, detail.summary.sourceUrl);
+function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: string; tags?: string[] }> {
+  const seen = new Set<string>();
+  const out: Array<{ href: string; source?: string; tags?: string[] }> = [];
+
+  // NVD-sourced references with source + tags
+  if (detail.references && detail.references.length > 0) {
+    for (const ref of detail.references) {
+      if (!seen.has(ref.url)) {
+        seen.add(ref.url);
+        out.push({ href: ref.url, source: ref.source, tags: ref.tags });
+      }
+    }
   }
-  links.set('NVD Entry', `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(detail.summary.externalId)}`);
-  return Array.from(links.entries()).map(([label, href]) => ({ label, href }));
+
+  // Fallback: sourceUrl advisory link if not already listed
+  if (detail.summary.sourceUrl && !seen.has(detail.summary.sourceUrl)) {
+    out.push({ href: detail.summary.sourceUrl, source: detail.summary.source ?? undefined });
+  }
+
+  // Always include NVD entry link
+  const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(detail.summary.externalId)}`;
+  if (!seen.has(nvdUrl)) {
+    out.push({ href: nvdUrl, source: 'NVD', tags: ['Advisory'] });
+  }
+
+  return out;
 }
 
 function HeroMetric({
@@ -1778,11 +1797,13 @@ function CveOverviewExperience({
     ? `Apply the vendor-fixed version${detail.signals.patchVersions ? ` (${detail.signals.patchVersions})` : ''} and validate the mitigation on impacted assets.`
     : 'No vendor patch is currently available. Continue investigation and apply compensating controls until remediation guidance is published.';
   const timelineItems = [
-    detail.summary.publishedAt ? { label: 'CVE Published', value: formatDate(detail.summary.publishedAt), tone: 'published' } : null,
-    detail.summary.modifiedAt ? { label: 'CVE Record Updated', value: formatDate(detail.summary.modifiedAt), tone: 'updated' } : null,
-    detail.signals.exploitAvailable ? { label: 'Public Exploit Observed', value: detail.signals.exploitReason || 'Active exploit known', tone: 'exploit' } : null,
-    latestAssessment?.completedAt ? { label: 'Assessment Completed', value: formatDate(latestAssessment.completedAt), tone: 'verified' } : null,
-  ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>;
+    detail.summary.publishedAt ? { label: 'CVE Record Created', value: formatDate(detail.summary.publishedAt), tone: 'published', sublabel: 'NVD Published Date' } : null,
+    detail.summary.modifiedAt ? { label: 'CVE Record Updated', value: formatDate(detail.summary.modifiedAt), tone: 'updated', sublabel: 'NVD Last Modified' } : null,
+    detail.summary.inKev && detail.summary.kevDateAdded ? { label: 'Added to CISA KEV', value: formatDate(detail.summary.kevDateAdded), tone: 'exploit', sublabel: 'Known Exploited Vulnerability' } : null,
+    detail.summary.inKev && detail.summary.kevDueDate ? { label: 'CISA Remediation Due', value: formatDate(detail.summary.kevDueDate), tone: 'danger', sublabel: detail.summary.kevRequiredAction ?? 'Patch or mitigate per vendor guidance' } : null,
+    detail.signals.exploitAvailable && !detail.summary.inKev ? { label: 'Public Exploit Observed', value: detail.signals.exploitReason || 'Active exploit known', tone: 'exploit', sublabel: undefined } : null,
+    latestAssessment?.completedAt ? { label: 'Assessment Completed', value: formatDate(latestAssessment.completedAt), tone: 'verified', sublabel: undefined } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; tone: string; sublabel?: string }>;
 
   const cweList = React.useMemo(() =>
     (detail.summary.cweIds ?? '').split(',').map(s => s.trim()).filter(Boolean),
@@ -2141,7 +2162,22 @@ function CveOverviewExperience({
               ) : (
                 referenceLinks.map(ref => (
                   <div key={ref.href} className="cvd-ref-row">
-                    <a href={ref.href} target="_blank" rel="noreferrer" className="cvd-ref-link">{ref.label}</a>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <a href={ref.href} target="_blank" rel="noreferrer" className="cvd-ref-link"
+                        style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ref.href}
+                      </a>
+                      {ref.source && (
+                        <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>{ref.source}</span>
+                      )}
+                    </div>
+                    {ref.tags && ref.tags.length > 0 && (
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flexShrink: 0 }}>
+                        {ref.tags.map(tag => (
+                          <span key={tag} className="cvd-src-tag">{tag}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -2159,6 +2195,7 @@ function CveOverviewExperience({
                     <div>
                       <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{entry.label}</p>
                       <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{entry.value}</p>
+                      {entry.sublabel && <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{entry.sublabel}</p>}
                     </div>
                   </div>
                 ))

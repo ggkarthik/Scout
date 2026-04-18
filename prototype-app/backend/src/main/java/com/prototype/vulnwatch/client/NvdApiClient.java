@@ -431,18 +431,38 @@ public class NvdApiClient {
         if (!references.isArray() || references.isEmpty()) {
             return null;
         }
-        List<String> urls = new ArrayList<>();
+        List<java.util.Map<String, Object>> refObjects = new ArrayList<>();
         for (JsonNode ref : references) {
             String url = textOrNull(ref.path("url"));
-            if (url != null) {
-                urls.add(url);
+            if (url == null) {
+                continue;
             }
+            java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("url", url);
+            String source = textOrNull(ref.path("source"));
+            if (source != null) {
+                entry.put("source", source);
+            }
+            JsonNode tagsNode = ref.path("tags");
+            if (tagsNode.isArray() && !tagsNode.isEmpty()) {
+                List<String> tags = new ArrayList<>();
+                for (JsonNode tag : tagsNode) {
+                    String t = tag.asText(null);
+                    if (t != null && !t.isBlank()) {
+                        tags.add(t);
+                    }
+                }
+                if (!tags.isEmpty()) {
+                    entry.put("tags", tags);
+                }
+            }
+            refObjects.add(entry);
         }
-        if (urls.isEmpty()) {
+        if (refObjects.isEmpty()) {
             return null;
         }
         try {
-            return objectMapper.writeValueAsString(urls);
+            return objectMapper.writeValueAsString(refObjects);
         } catch (Exception e) {
             return null;
         }

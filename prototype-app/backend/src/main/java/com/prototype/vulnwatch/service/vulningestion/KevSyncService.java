@@ -8,8 +8,10 @@ import com.prototype.vulnwatch.client.http.OutboundPolicy;
 import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.IngestionResult;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.service.ObservationIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelligenceService;
@@ -38,6 +40,7 @@ public class KevSyncService {
     private final OutboundHttpClient outboundHttpClient;
     private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
+    private final VulnerabilityRepository vulnerabilityRepository;
 
     public KevSyncService(
             ObservationIngestionService observationIngestionService,
@@ -49,7 +52,8 @@ public class KevSyncService {
             VulnerabilityIngestionCommonSupport support,
             OutboundHttpClient outboundHttpClient,
             OutboundPolicyFactory outboundPolicyFactory,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            VulnerabilityRepository vulnerabilityRepository
     ) {
         this.observationIngestionService = observationIngestionService;
         this.vulnerabilitySourceFilterConfigService = vulnerabilitySourceFilterConfigService;
@@ -61,6 +65,7 @@ public class KevSyncService {
         this.outboundHttpClient = outboundHttpClient;
         this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
+        this.vulnerabilityRepository = vulnerabilityRepository;
     }
 
     public void runScheduledDailySync() {
@@ -128,13 +133,26 @@ public class KevSyncService {
                                 kev.toString()
                         )
                 );
+                // Persist CISA KEV dates and required action on the Vulnerability record
+                Vulnerability vuln = result.vulnerability();
+                if (vuln != null) {
+                    java.time.LocalDate dateAdded = support.parseLocalDateOrNull(kev.path("dateAdded").asText(""));
+                    java.time.LocalDate dueDate = support.parseLocalDateOrNull(kev.path("dueDate").asText(""));
+                    String requiredAction = kev.path("requiredAction").asText(null);
+                    vuln.setKevDateAdded(dateAdded);
+                    vuln.setKevDueDate(dueDate);
+                    if (requiredAction != null && !requiredAction.isBlank()) {
+                        vuln.setKevRequiredAction(requiredAction.trim());
+                    }
+                    vulnerabilityRepository.save(vuln);
+                }
                 if (result.vulnerabilityCreated()) {
                     inserted++;
                 } else {
                     updated++;
                 }
-                if (result.vulnerability() != null && result.vulnerability().getId() != null) {
-                    changedVulnerabilityIds.add(result.vulnerability().getId());
+                if (vuln != null && vuln.getId() != null) {
+                    changedVulnerabilityIds.add(vuln.getId());
                 }
             }
 
