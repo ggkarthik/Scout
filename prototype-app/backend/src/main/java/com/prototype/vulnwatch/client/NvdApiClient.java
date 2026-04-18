@@ -173,6 +173,16 @@ public class NvdApiClient {
         return parsePage(body, startIndex);
     }
 
+    /** Fetch a single CVE by ID directly from NVD API (no date-range restriction). */
+    public NvdRecord fetchSingleCve(String cveId) {
+        String uri = UriComponentsBuilder.fromHttpUrl(baseUrl)
+                .queryParam("cveId", cveId.trim().toUpperCase(Locale.ROOT))
+                .build().toUriString();
+        String body = fetchRaw(uri, null);
+        NvdPage page = parsePage(body, 0);
+        return page.records().isEmpty() ? null : page.records().get(0);
+    }
+
     private String buildUri(int startIndex, Instant startInclusive, Instant endExclusive, NvdQueryFilters filters) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(baseUrl)
                 .queryParam("startIndex", Math.max(0, startIndex))
