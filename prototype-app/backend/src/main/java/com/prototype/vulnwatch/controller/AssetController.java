@@ -52,6 +52,18 @@ public class AssetController {
         return assetLifecycleService.syncFromCmdb(request);
     }
 
+    @GetMapping("/assignment-groups")
+    public List<String> assignmentGroups() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return assetQueryService.listAssignmentGroups(tenant);
+    }
+
+    @GetMapping("/assigned-to")
+    public List<String> assignedTo() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return assetQueryService.listAssignedTo(tenant);
+    }
+
     @GetMapping("/hosts/{assetId:[0-9a-fA-F\\-]{36}}")
     public HostAssetDetailResponse hostDetail(
             @PathVariable UUID assetId,

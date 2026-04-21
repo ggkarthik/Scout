@@ -98,7 +98,7 @@ export function VulnRepoSoftwareAssetsPage() {
     <section className="panel vuln-repo-assets-shell">
       <div className="panel-header">
         <div>
-          <div className="org-cve-back-link">Vulnerability Repository → Impacted Assets</div>
+          <div className="org-cve-back-link">Impacted Assets</div>
           <h3>{detailQuery.data?.displayName || softwareLabel || 'Software Assets'}</h3>
           <span className="panel-caption">
             {(detailQuery.data?.impactedAssetCount ?? impactedAssets.length).toLocaleString()} assets are currently associated with this software identity in the repository scope.

@@ -34,6 +34,8 @@ public record OrgSpecificCveExposureRecordResponse(
         long eosComponentCount,
         boolean hasInvestigationSummary,
         Instant investigationSummaryGeneratedAt,
-        String investigationSummaryMode
+        String investigationSummaryMode,
+        boolean hasAiSolution,
+        Instant aiSolutionGeneratedAt
 ) {
 }

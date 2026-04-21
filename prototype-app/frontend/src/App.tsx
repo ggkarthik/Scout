@@ -17,12 +17,16 @@ import {
 } from './app/routes';
 import { ActorProvider } from './features/auth/provider';
 import './styles/index.css';
+import './styles/finding-detail.css';
 
 const DashboardPage = React.lazy(async () => ({
   default: (await import('./pages/DashboardPage')).DashboardPage
 }));
 const FindingsPage = React.lazy(async () => ({
   default: (await import('./pages/FindingsPage')).FindingsPage
+}));
+const FindingDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/FindingDetailPage')).FindingDetailPage
 }));
 const OperationalDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/OperationalDashboardPage')).OperationalDashboardPage
@@ -226,6 +230,15 @@ function FindingsRoute() {
       onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnRepoView('org-cves', vulnerabilityId))}
     />
   );
+}
+
+function FindingDetailRoute() {
+  const params = useParams<{ displayId?: string }>();
+  const displayId = params.displayId ? decodeURIComponent(params.displayId) : null;
+  if (!displayId) {
+    return <Navigate to="/findings" replace />;
+  }
+  return <FindingDetailPage />;
 }
 
 function OperationsRoute() {
@@ -655,6 +668,7 @@ export default function App() {
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
               <Route path="/" element={<DashboardRoute />} />
+              <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
               <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
