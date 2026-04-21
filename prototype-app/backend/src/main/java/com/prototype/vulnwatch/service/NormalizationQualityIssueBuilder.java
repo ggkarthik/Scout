@@ -53,7 +53,7 @@ public class NormalizationQualityIssueBuilder {
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
                 WHERE ic.tenant_id = :tenantId
                   AND ic.component_status = 'ACTIVE'
-                  AND coalesce(nullif(trim(ic.version), ''), nullif(trim(ic.normalized_version), '')) IS NULL
+                  AND nullif(trim(ic.normalized_version), '') IS NULL
                 ORDER BY ic.last_observed_at DESC
                 """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, support.tenantParams(tenantId));
@@ -71,7 +71,7 @@ public class NormalizationQualityIssueBuilder {
                     "component_missing_version",
                     "component:" + support.stringValue(row.get("component_id")),
                     support.severityForExposureIssue(openFindingCount, openVulnerabilityCount, "MEDIUM"),
-                    "missing_component_version",
+                    "missing_component_normalized_version",
                     "Inventory component is missing a normalized version",
                     "INVENTORY_COMPONENT",
                     support.stringValue(row.get("component_id")),
@@ -96,10 +96,8 @@ public class NormalizationQualityIssueBuilder {
         return issues;
     }
 
-    public List<QualityIssueRecord> buildComponentMissingSoftwareIdentityIssues(UUID tenantId) {
-        List<QualityIssueRecord> issues = new ArrayList<>();
-
-        String componentSql = """
+    public List<QualityIssueRecord> buildComponentMissingNormalizedNameIssues(UUID tenantId) {
+        String sql = """
                 SELECT
                     ic.id AS component_id,
                     ic.asset_id,
@@ -126,10 +124,12 @@ public class NormalizationQualityIssueBuilder {
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
                 WHERE ic.tenant_id = :tenantId
                   AND ic.component_status = 'ACTIVE'
-                  AND ic.software_identity_id IS NULL
+                  AND nullif(trim(ic.normalized_name), '') IS NULL
                 ORDER BY ic.last_observed_at DESC
                 """;
-        for (Map<String, Object> row : jdbcTemplate.queryForList(componentSql, support.tenantParams(tenantId))) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, support.tenantParams(tenantId));
+        List<QualityIssueRecord> issues = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
             long openFindingCount = support.longValue(row.get("open_finding_count"));
             long openVulnerabilityCount = support.longValue(row.get("open_vulnerability_count"));
             Map<String, Object> evidence = new LinkedHashMap<>();
@@ -139,11 +139,11 @@ public class NormalizationQualityIssueBuilder {
             issues.add(support.issue(
                     tenantId,
                     "NORMALIZATION",
-                    "component_missing_software_identity",
-                    "component:" + support.stringValue(row.get("component_id")),
+                    "component_missing_normalized_name",
+                    "component:" + support.stringValue(row.get("component_id")) + ":normalized-name",
                     support.severityForExposureIssue(openFindingCount, openVulnerabilityCount, "MEDIUM"),
-                    "missing_software_identity",
-                    "Inventory component is missing a software identity",
+                    "missing_component_normalized_name",
+                    "Inventory component is missing a normalized name",
                     "INVENTORY_COMPONENT",
                     support.stringValue(row.get("component_id")),
                     support.stringValue(row.get("package_name")),
@@ -164,66 +164,154 @@ public class NormalizationQualityIssueBuilder {
                     evidence
             ));
         }
+        return issues;
+    }
 
-        String softwareSql = """
+    public List<QualityIssueRecord> buildComponentMissingSoftwareIdentityIssues(UUID tenantId) {
+        List<QualityIssueRecord> issues = new ArrayList<>();
+
+        // SBOM components grouped by (ecosystem, package_name) cluster.
+        // One quality issue per cluster covers all assets/components with that package.
+        String componentSql = """
                 SELECT
-                    si.id AS software_instance_id,
-                    ci.asset_id,
-                    a.name AS asset_name,
-                    a.identifier AS asset_identifier,
-                    a.type::text AS asset_type,
-                    lower(coalesce(si.source_system, 'inventory')) AS source_system,
-                    si.display_name,
-                    si.last_scanned,
-                    coalesce((
-                        SELECT count(*)
-                        FROM findings f
-                        WHERE f.asset_id = a.id
-                          AND f.status = 'OPEN'
-                    ), 0) AS open_finding_count,
-                    coalesce((
-                        SELECT count(DISTINCT f.vulnerability_id)
-                        FROM findings f
-                        WHERE f.asset_id = a.id
-                          AND f.status = 'OPEN'
-                    ), 0) AS open_vulnerability_count
-                FROM software_instances si
-                JOIN cis ci ON ci.id = si.ci_id
-                JOIN assets a ON a.id = ci.asset_id
-                WHERE si.tenant_id = :tenantId
-                  AND si.active_install = true
-                  AND si.software_identity_id IS NULL
-                  AND si.inventory_component_id IS NULL
-                ORDER BY si.last_scanned DESC NULLS LAST, si.display_name ASC
+                    ic.ecosystem || ':' || ic.package_name               AS source_key,
+                    ic.ecosystem,
+                    ic.package_name,
+                    COUNT(DISTINCT ic.asset_id)                          AS affected_asset_count,
+                    COUNT(ic.id)                                         AS affected_component_count,
+                    MIN(lower(coalesce(u.ingestion_source_system, 'inventory'))) AS source_system,
+                    MAX(ic.last_observed_at)                             AS last_observed_at,
+                    COALESCE(SUM(f_agg.open_finding_count), 0)           AS open_finding_count,
+                    COALESCE(SUM(f_agg.open_vulnerability_count), 0)     AS open_vulnerability_count
+                FROM inventory_components ic
+                LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)               AS open_finding_count,
+                           COUNT(DISTINCT vulnerability_id) AS open_vulnerability_count
+                    FROM findings
+                    WHERE component_id = ic.id AND status = 'OPEN'
+                ) f_agg ON true
+                WHERE ic.tenant_id = :tenantId
+                  AND ic.component_status = 'ACTIVE'
+                  AND ic.software_identity_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM software_identity_cluster_link cl
+                      WHERE cl.tenant_id   = :tenantId
+                        AND cl.source_type = 'PACKAGE_PATTERN'
+                        AND cl.source_key  = ic.ecosystem || ':' || ic.package_name
+                        AND cl.revoked_at IS NULL
+                  )
+                GROUP BY ic.ecosystem, ic.package_name
+                HAVING COUNT(ic.id) > 0
+                ORDER BY COUNT(ic.id) DESC, ic.package_name ASC
                 """;
-        for (Map<String, Object> row : jdbcTemplate.queryForList(softwareSql, support.tenantParams(tenantId))) {
+        for (Map<String, Object> row : jdbcTemplate.queryForList(componentSql, support.tenantParams(tenantId))) {
             long openFindingCount = support.longValue(row.get("open_finding_count"));
             long openVulnerabilityCount = support.longValue(row.get("open_vulnerability_count"));
+            long affectedAssetCount = support.longValue(row.get("affected_asset_count"));
+            long affectedComponentCount = support.longValue(row.get("affected_component_count"));
+            String sourceKey = support.stringValue(row.get("source_key"));
+            String ecosystem = support.stringValue(row.get("ecosystem"));
+            String packageName = support.stringValue(row.get("package_name"));
             Map<String, Object> evidence = new LinkedHashMap<>();
-            evidence.put("displayName", support.stringValue(row.get("display_name")));
-            evidence.put("assetName", support.stringValue(row.get("asset_name")));
-            evidence.put("assetIdentifier", support.stringValue(row.get("asset_identifier")));
+            evidence.put("clusterKey", sourceKey);
+            evidence.put("packageName", packageName);
+            evidence.put("ecosystem", ecosystem);
             issues.add(support.issue(
                     tenantId,
                     "NORMALIZATION",
                     "component_missing_software_identity",
-                    "software-instance:" + support.stringValue(row.get("software_instance_id")),
+                    "cluster-pkg:" + sourceKey,
+                    support.severityForExposureIssue(openFindingCount, openVulnerabilityCount, "MEDIUM"),
+                    "missing_software_identity",
+                    "Software package cluster is missing a software identity",
+                    "CLUSTER_PACKAGE_PATTERN",
+                    sourceKey,
+                    sourceKey,
+                    affectedAssetCount + " asset" + (affectedAssetCount != 1 ? "s" : ""),
+                    null,
+                    null,
+                    null,
+                    null,
+                    support.stringValue(row.get("source_system")),
+                    ecosystem,
+                    support.affectsActiveFindings(openFindingCount, openVulnerabilityCount),
+                    affectedAssetCount,
+                    affectedComponentCount,
+                    openFindingCount,
+                    openVulnerabilityCount,
+                    support.instantValue(row.get("last_observed_at")),
+                    support.instantValue(row.get("last_observed_at")),
+                    evidence
+            ));
+        }
+
+        // Host software instances grouped by discovery_model.primary_key cluster.
+        // One quality issue per cluster covers all matching assets.
+        String softwareSql = """
+                SELECT
+                    dm.primary_key                                       AS source_key,
+                    COUNT(DISTINCT ci.asset_id)                         AS affected_asset_count,
+                    COUNT(si.id)                                        AS affected_instance_count,
+                    MIN(si.display_name)                                AS sample_display_name,
+                    MIN(lower(coalesce(si.source_system, 'inventory'))) AS source_system,
+                    MAX(si.last_scanned)                                AS last_scanned,
+                    COALESCE(SUM(f_agg.open_finding_count), 0)          AS open_finding_count,
+                    COALESCE(SUM(f_agg.open_vulnerability_count), 0)    AS open_vulnerability_count
+                FROM software_instances si
+                JOIN cis ci ON ci.id = si.ci_id
+                JOIN discovery_models dm ON dm.id = si.discovery_model_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)               AS open_finding_count,
+                           COUNT(DISTINCT vulnerability_id) AS open_vulnerability_count
+                    FROM findings
+                    WHERE asset_id = ci.asset_id AND status = 'OPEN'
+                ) f_agg ON true
+                WHERE si.tenant_id = :tenantId
+                  AND si.active_install = true
+                  AND si.software_identity_id IS NULL
+                  AND si.inventory_component_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM software_identity_cluster_link cl
+                      WHERE cl.tenant_id   = :tenantId
+                        AND cl.source_type = 'DISCOVERY_MODEL'
+                        AND cl.source_key  = dm.primary_key
+                        AND cl.revoked_at IS NULL
+                  )
+                GROUP BY dm.id, dm.primary_key
+                HAVING COUNT(si.id) > 0
+                ORDER BY COUNT(si.id) DESC, dm.primary_key ASC
+                """;
+        for (Map<String, Object> row : jdbcTemplate.queryForList(softwareSql, support.tenantParams(tenantId))) {
+            long openFindingCount = support.longValue(row.get("open_finding_count"));
+            long openVulnerabilityCount = support.longValue(row.get("open_vulnerability_count"));
+            long affectedAssetCount = support.longValue(row.get("affected_asset_count"));
+            long affectedInstanceCount = support.longValue(row.get("affected_instance_count"));
+            String sourceKey = support.stringValue(row.get("source_key"));
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("clusterKey", sourceKey);
+            evidence.put("sampleDisplayName", support.stringValue(row.get("sample_display_name")));
+            issues.add(support.issue(
+                    tenantId,
+                    "NORMALIZATION",
+                    "component_missing_software_identity",
+                    "cluster-dm:" + sourceKey,
                     openFindingCount > 0 ? "MEDIUM" : "LOW",
                     "missing_software_identity",
-                    "Host software instance is missing a software identity",
-                    "SOFTWARE_INSTANCE",
-                    support.stringValue(row.get("software_instance_id")),
-                    support.stringValue(row.get("display_name")),
-                    support.stringValue(row.get("asset_name")) + " (" + support.stringValue(row.get("asset_identifier")) + ")",
-                    support.uuidValue(row.get("asset_id")),
+                    "Host software cluster is missing a software identity",
+                    "CLUSTER_DISCOVERY_MODEL",
+                    sourceKey,
+                    sourceKey,
+                    affectedAssetCount + " asset" + (affectedAssetCount != 1 ? "s" : ""),
                     null,
                     null,
-                    support.stringValue(row.get("asset_type")),
+                    null,
+                    "HOST",
                     support.stringValue(row.get("source_system")),
                     null,
                     support.affectsActiveFindings(openFindingCount, openVulnerabilityCount),
-                    1,
-                    0,
+                    affectedAssetCount,
+                    affectedInstanceCount,
                     openFindingCount,
                     openVulnerabilityCount,
                     support.instantValue(row.get("last_scanned")),
@@ -307,70 +395,64 @@ public class NormalizationQualityIssueBuilder {
     }
 
     public List<QualityIssueRecord> buildHostDiscoveryModelReviewIssues(UUID tenantId) {
+        // Grouped by discovery_model.primary_key so one issue covers all assets affected
+        // by the same genuinely uncertain model. Only fires when the source explicitly signals
+        // uncertainty: dm.low_confidence = true (set by ServiceNow/ML) or dm.normalization_status
+        // is a non-approved value. dm.approved is intentionally excluded — it defaults to false
+        // for every ingested model and is never auto-set, so using it would surface all software
+        // regardless of match confidence.
         String sql = """
                 SELECT
-                    si.id AS software_instance_id,
-                    si.inventory_component_id AS component_id,
-                    ci.asset_id,
-                    a.name AS asset_name,
-                    a.identifier AS asset_identifier,
-                    a.type::text AS asset_type,
-                    lower(coalesce(si.source_system, 'inventory')) AS source_system,
-                    si.display_name,
-                    dm.primary_key,
+                    dm.primary_key                                       AS source_key,
                     dm.normalization_status,
                     dm.approved,
                     dm.low_confidence,
-                    si.last_scanned,
-                    coalesce((
-                        SELECT count(*)
-                        FROM findings f
-                        WHERE (
-                            si.inventory_component_id IS NOT NULL
-                            AND f.component_id = si.inventory_component_id
-                            AND f.status = 'OPEN'
-                        ) OR (
-                            si.inventory_component_id IS NULL
-                            AND f.asset_id = a.id
-                            AND f.status = 'OPEN'
-                        )
-                    ), 0) AS open_finding_count,
-                    coalesce((
-                        SELECT count(DISTINCT f.vulnerability_id)
-                        FROM findings f
-                        WHERE (
-                            si.inventory_component_id IS NOT NULL
-                            AND f.component_id = si.inventory_component_id
-                            AND f.status = 'OPEN'
-                        ) OR (
-                            si.inventory_component_id IS NULL
-                            AND f.asset_id = a.id
-                            AND f.status = 'OPEN'
-                        )
-                    ), 0) AS open_vulnerability_count
+                    COUNT(DISTINCT ci.asset_id)                         AS affected_asset_count,
+                    COUNT(si.id)                                        AS affected_instance_count,
+                    MIN(si.display_name)                                AS sample_display_name,
+                    MIN(lower(coalesce(si.source_system, 'inventory'))) AS source_system,
+                    MAX(si.last_scanned)                                AS last_scanned,
+                    COALESCE(SUM(f_agg.open_finding_count), 0)          AS open_finding_count,
+                    COALESCE(SUM(f_agg.open_vulnerability_count), 0)    AS open_vulnerability_count
                 FROM software_instances si
                 JOIN cis ci ON ci.id = si.ci_id
-                JOIN assets a ON a.id = ci.asset_id
                 JOIN discovery_models dm ON dm.id = si.discovery_model_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)               AS open_finding_count,
+                           COUNT(DISTINCT vulnerability_id) AS open_vulnerability_count
+                    FROM findings
+                    WHERE asset_id = ci.asset_id AND status = 'OPEN'
+                ) f_agg ON true
                 WHERE si.tenant_id = :tenantId
                   AND si.active_install = true
                   AND (
                     dm.low_confidence = true
-                    OR dm.approved = false
                     OR (
                         dm.normalization_status IS NOT NULL
                         AND lower(dm.normalization_status) <> 'approved'
                     )
                   )
-                ORDER BY si.last_scanned DESC NULLS LAST, si.display_name ASC
+                  AND NOT EXISTS (
+                      SELECT 1 FROM software_identity_cluster_link cl
+                      WHERE cl.tenant_id   = :tenantId
+                        AND cl.source_type = 'DISCOVERY_MODEL'
+                        AND cl.source_key  = dm.primary_key
+                        AND cl.revoked_at IS NULL
+                  )
+                GROUP BY dm.id, dm.primary_key, dm.normalization_status, dm.approved, dm.low_confidence
+                HAVING COUNT(si.id) > 0
+                ORDER BY COUNT(si.id) DESC, dm.primary_key ASC
                 """;
         List<QualityIssueRecord> issues = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(sql, support.tenantParams(tenantId))) {
             long openFindingCount = support.longValue(row.get("open_finding_count"));
             long openVulnerabilityCount = support.longValue(row.get("open_vulnerability_count"));
+            long affectedAssetCount = support.longValue(row.get("affected_asset_count"));
+            long affectedInstanceCount = support.longValue(row.get("affected_instance_count"));
+            String sourceKey = support.stringValue(row.get("source_key"));
             Map<String, Object> evidence = new LinkedHashMap<>();
-            evidence.put("displayName", support.stringValue(row.get("display_name")));
-            evidence.put("discoveryModelKey", support.stringValue(row.get("primary_key")));
+            evidence.put("clusterKey", sourceKey);
+            evidence.put("sampleDisplayName", support.stringValue(row.get("sample_display_name")));
             evidence.put("normalizationStatus", support.stringValue(row.get("normalization_status")));
             evidence.put("approved", support.boolValue(row.get("approved")));
             evidence.put("lowConfidence", support.boolValue(row.get("low_confidence")));
@@ -378,23 +460,23 @@ public class NormalizationQualityIssueBuilder {
                     tenantId,
                     "NORMALIZATION",
                     "host_discovery_model_review",
-                    "software-instance:" + support.stringValue(row.get("software_instance_id")) + ":discovery-model",
+                    "cluster-dm:" + sourceKey + ":review",
                     support.severityForExposureIssue(openFindingCount, openVulnerabilityCount, "MEDIUM"),
                     "discovery_model_requires_review",
                     "Host discovery model normalization needs review",
-                    "SOFTWARE_INSTANCE",
-                    support.stringValue(row.get("software_instance_id")),
-                    support.stringValue(row.get("display_name")),
-                    support.stringValue(row.get("asset_name")) + " (" + support.stringValue(row.get("asset_identifier")) + ")",
-                    support.uuidValue(row.get("asset_id")),
-                    support.uuidValue(row.get("component_id")),
+                    "CLUSTER_DISCOVERY_MODEL",
+                    sourceKey,
+                    sourceKey,
+                    affectedAssetCount + " asset" + (affectedAssetCount != 1 ? "s" : ""),
                     null,
-                    support.stringValue(row.get("asset_type")),
+                    null,
+                    null,
+                    "HOST",
                     support.stringValue(row.get("source_system")),
                     null,
                     support.affectsActiveFindings(openFindingCount, openVulnerabilityCount),
-                    1,
-                    row.get("component_id") == null ? 0 : 1,
+                    affectedAssetCount,
+                    affectedInstanceCount,
                     openFindingCount,
                     openVulnerabilityCount,
                     support.instantValue(row.get("last_scanned")),

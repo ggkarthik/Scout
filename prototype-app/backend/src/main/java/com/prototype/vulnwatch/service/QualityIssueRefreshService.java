@@ -114,6 +114,7 @@ public class QualityIssueRefreshService {
         List<QualityIssueRecord> missingIdentityIssues = normalizationQualityIssueBuilder.buildComponentMissingSoftwareIdentityIssues(tenantId);
         addIssueRecords(issues, missingIdentityIssues, failedSources, missingIdentityComponentIds);
 
+        addIssueRecords(issues, normalizationQualityIssueBuilder.buildComponentMissingNormalizedNameIssues(tenantId), failedSources, missingIdentityComponentIds);
         addIssueRecords(issues, normalizationQualityIssueBuilder.buildComponentMissingVersionIssues(tenantId), failedSources, missingIdentityComponentIds);
         addIssueRecords(issues, normalizationQualityIssueBuilder.buildHostLowConfidenceAliasIssues(tenantId), failedSources, missingIdentityComponentIds);
         addIssueRecords(issues, normalizationQualityIssueBuilder.buildHostDiscoveryModelReviewIssues(tenantId), failedSources, missingIdentityComponentIds);

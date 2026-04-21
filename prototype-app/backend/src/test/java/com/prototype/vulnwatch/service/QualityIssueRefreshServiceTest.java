@@ -60,6 +60,7 @@ class QualityIssueRefreshServiceTest {
         when(ingestionQualityIssueBuilder.buildSourceFeedStaleIssues(tenant.getId(), Set.of())).thenReturn(List.of());
         when(ingestionQualityIssueBuilder.buildIngestedNoDownstreamRecordsIssues(tenant.getId())).thenReturn(List.of());
         when(normalizationQualityIssueBuilder.buildComponentMissingSoftwareIdentityIssues(tenant.getId())).thenReturn(List.of(normalizationIssue));
+        when(normalizationQualityIssueBuilder.buildComponentMissingNormalizedNameIssues(tenant.getId())).thenReturn(List.of());
         when(normalizationQualityIssueBuilder.buildComponentMissingVersionIssues(tenant.getId())).thenReturn(List.of());
         when(normalizationQualityIssueBuilder.buildHostLowConfidenceAliasIssues(tenant.getId())).thenReturn(List.of());
         when(normalizationQualityIssueBuilder.buildHostDiscoveryModelReviewIssues(tenant.getId())).thenReturn(List.of());
