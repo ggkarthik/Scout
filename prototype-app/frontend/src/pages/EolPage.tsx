@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api/client';
-import { pathForOperationsView } from '../app/routes';
+import { appendSearchToPath, pathForInventoryView } from '../app/routes';
 import {
   DataTable,
   type DataTableColumn,
@@ -642,7 +642,11 @@ function DataFreshnessBar() {
 
 export function EolPage() {
   const [activeTab, setActiveTab] = React.useState<EolTab>('at-risk');
-  const eolMappingReviewHref = `${pathForOperationsView('quality')}?domain=EOL&focus=eol-mapping-review`;
+  const eolMappingReviewHref = appendSearchToPath(pathForInventoryView('overview'), {
+    inventoryTabs: 'quality-eol',
+    inventoryActiveTab: 'quality-eol',
+    focus: 'eol-mapping-review'
+  });
 
   return (
     <div className="page-grid">

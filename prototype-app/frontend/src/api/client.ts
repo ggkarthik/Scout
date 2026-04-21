@@ -13,13 +13,17 @@ import type {
   ImpactedCvePage
 } from '../features/dashboard/types';
 import type {
+  ClusterImpactResult,
+  CorrelationOverridePayload,
+  NormalizationOverridePayload,
   OperationalDashboard,
   OperationalQualityFilterValues,
   OperationalQualityIssueDetail,
   OperationalQualityIssuePage,
   OperationalQualitySummary,
   OperationalSectionResponse,
-  SloStatus
+  SloStatus,
+  SoftwareIdentitySearchResult
 } from '../features/operations/types';
 import type {
   CmdbAssetRecord,
@@ -233,6 +237,34 @@ export const api = {
     `/operations/quality/issues/${encodeURIComponent(issueId)}`
   ),
   getOperationalQualityFilters: () => request<OperationalQualityFilterValues>('/operations/quality/filters'),
+  getNormalizationImpact: (issueId: string) =>
+    request<ClusterImpactResult>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize/impact`
+    ),
+  applyNormalizationOverride: (issueId: string, payload: NormalizationOverridePayload) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  revokeNormalizationOverride: (issueId: string) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize`,
+      { method: 'DELETE' }
+    ),
+  applyCorrelationOverride: (issueId: string, payload: CorrelationOverridePayload) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/correlate`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  revokeCorrelationOverride: (issueId: string) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/correlate`,
+      { method: 'DELETE' }
+    ),
+  searchSoftwareIdentities: (q: string, limit = 10) =>
+    request<SoftwareIdentitySearchResult[]>(
+      `/operations/software-identities/search?q=${encodeURIComponent(q)}&limit=${limit}`
+    ),
   getSloStatus: () => request<SloStatus>('/slo/status'),
   listAssets: () => request<Asset[]>('/assets'),
   getHostAssetDetail: (assetId: string, params?: { sourceSystem?: string }) => {

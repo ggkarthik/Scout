@@ -1,5 +1,7 @@
 export type InventoryViewKey =
+  | 'overview'
   | 'software-identities'
+  | 'manage-software'
   | 'hosts'
   | 'container-images'
   | 'secured-image-catalog'
