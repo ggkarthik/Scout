@@ -11,6 +11,7 @@ public record EolProductCatalogDto(
         String purlType,
         String purlNamespace,
         List<String> aliases,
+        long releaseCount,
         String lastModified,
         Instant lastFetchedAt
 ) {

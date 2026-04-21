@@ -29,6 +29,9 @@ public record OperationalQualityIssueDetailResponse(
         String evidenceJson,
         String recommendedAction,
         List<OperationalQualityDrilldownTargetResponse> drilldownTargets,
-        List<OperationalQualitySampleRecordResponse> sampleRecords
+        List<OperationalQualitySampleRecordResponse> sampleRecords,
+        boolean hasActiveOverride,
+        String overrideActor,
+        Instant overrideAt
 ) {
 }

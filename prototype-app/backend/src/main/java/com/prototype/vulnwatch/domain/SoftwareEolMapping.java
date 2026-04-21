@@ -42,6 +42,15 @@ public class SoftwareEolMapping {
     @Column(nullable = false)
     private boolean confirmed;
 
+    @Column(name = "confirmed_by", length = 200)
+    private String confirmedBy;
+
+    @Column(name = "confirmed_at")
+    private Instant confirmedAt;
+
+    @Column(name = "previous_slug", length = 200)
+    private String previousSlug;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -106,6 +115,30 @@ public class SoftwareEolMapping {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getConfirmedBy() {
+        return confirmedBy;
+    }
+
+    public void setConfirmedBy(String confirmedBy) {
+        this.confirmedBy = confirmedBy;
+    }
+
+    public Instant getConfirmedAt() {
+        return confirmedAt;
+    }
+
+    public void setConfirmedAt(Instant confirmedAt) {
+        this.confirmedAt = confirmedAt;
+    }
+
+    public String getPreviousSlug() {
+        return previousSlug;
+    }
+
+    public void setPreviousSlug(String previousSlug) {
+        this.previousSlug = previousSlug;
     }
 
     public void touch() {
