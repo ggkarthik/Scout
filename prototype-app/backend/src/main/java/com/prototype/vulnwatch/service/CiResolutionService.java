@@ -92,6 +92,18 @@ public class CiResolutionService {
         OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
+            if (!hasText(resolvedOwnership.supportGroup())) {
+                ServiceNowCiLookup ciLookup = lookupInServiceNowBySysId(tenant, requestedSysId.trim());
+                if (ciLookup != null) {
+                    resolvedOwnership = new OwnershipDetails(
+                            coalesce(ciLookup.ownerEmail(), resolvedOwnership.ownerEmail()),
+                            coalesce(ciLookup.managedBy(), resolvedOwnership.managedBy()),
+                            coalesce(ciLookup.department(), resolvedOwnership.department()),
+                            coalesce(ciLookup.supportGroup(), resolvedOwnership.supportGroup()),
+                            coalesce(ciLookup.assignedTo(), resolvedOwnership.assignedTo())
+                    );
+                }
+            }
             return upsertCi(
                     tenant,
                     requestedSysId.trim(),
@@ -252,6 +264,31 @@ public class CiResolutionService {
         OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
+            if (!hasText(resolvedOwnership.supportGroup())) {
+                // Check cached CI in the batch context first — avoids one API call per install row
+                // (there are typically ~7 install rows per unique CI)
+                Ci cachedCi = context.ciBySysId().get(requestedSysId.trim());
+                if (cachedCi != null && hasText(cachedCi.getSupportGroup())) {
+                    resolvedOwnership = new OwnershipDetails(
+                            coalesce(resolvedOwnership.ownerEmail(), cachedCi.getOwnerEmail()),
+                            coalesce(resolvedOwnership.managedBy(), cachedCi.getManagedBy()),
+                            coalesce(resolvedOwnership.department(), cachedCi.getDepartment()),
+                            cachedCi.getSupportGroup(),
+                            coalesce(resolvedOwnership.assignedTo(), cachedCi.getAssignedTo())
+                    );
+                } else {
+                    ServiceNowCiLookup ciLookup = lookupInServiceNowBySysId(tenant, requestedSysId.trim());
+                    if (ciLookup != null) {
+                        resolvedOwnership = new OwnershipDetails(
+                                coalesce(ciLookup.ownerEmail(), resolvedOwnership.ownerEmail()),
+                                coalesce(ciLookup.managedBy(), resolvedOwnership.managedBy()),
+                                coalesce(ciLookup.department(), resolvedOwnership.department()),
+                                coalesce(ciLookup.supportGroup(), resolvedOwnership.supportGroup()),
+                                coalesce(ciLookup.assignedTo(), resolvedOwnership.assignedTo())
+                        );
+                    }
+                }
+            }
             return upsertCi(
                     context,
                     tenant,
@@ -666,6 +703,95 @@ public class CiResolutionService {
             if (!hasText(sysId)) return null;
             return new ServiceNowCiLookup(
                 sysId, displayName,
+                fieldValue(selected.path("owned_by")),
+                fieldValue(selected.path("managed_by")),
+                fieldValue(selected.path("department")),
+                fieldValue(selected.path("support_group")),
+                fieldValue(selected.path("assigned_to"))
+            );
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private ServiceNowCiLookup lookupInServiceNowBySysId(Tenant tenant, String sysId) {
+        if (!hasText(sysId)) {
+            return null;
+        }
+        ServiceNowCmdbConfigService.ServiceNowRuntimeConfig runtimeConfig = serviceNowCmdbConfigService.resolveRuntimeConfig(tenant)
+                .orElseGet(() -> new ServiceNowCmdbConfigService.ServiceNowRuntimeConfig(
+                        trimToNull(serviceNowBaseUrl),
+                        com.prototype.vulnwatch.domain.ServiceNowAuthType.BASIC,
+                        trimToNull(serviceNowUsername),
+                        trimToNull(serviceNowPassword),
+                        "cmdb_sam_sw_install",
+                        "cmdb_sam_sw_discovery_model",
+                        "cmdb_ci",
+                        null,
+                        null,
+                        ServiceNowCmdbConfigService.DEFAULT_INSTALL_FIELDS,
+                        ServiceNowCmdbConfigService.DEFAULT_DISCOVERY_FIELDS,
+                        1000,
+                        true,
+                        false,
+                        1440
+                ));
+        if (!hasText(runtimeConfig.baseUrl()) || !hasText(runtimeConfig.ciTable())) {
+            return null;
+        }
+        try {
+            String uri = UriComponentsBuilder.fromHttpUrl(runtimeConfig.baseUrl())
+                    .path("/api/now/table/{tableName}/{sysId}")
+                    .queryParam("sysparm_fields",
+                        "sys_id,name,sys_class_name,owned_by,managed_by,assigned_to,department,support_group")
+                    .queryParam("sysparm_display_value", "all")
+                    .buildAndExpand(runtimeConfig.ciTable(), sysId)
+                    .toUriString();
+            HttpHeaders headers = new HttpHeaders();
+            if (runtimeConfig.authType() == com.prototype.vulnwatch.domain.ServiceNowAuthType.BEARER) {
+                headers.setBearerAuth(runtimeConfig.credentialSecret());
+            } else if (hasText(runtimeConfig.username())) {
+                headers.setBasicAuth(
+                        runtimeConfig.username(),
+                        runtimeConfig.credentialSecret() == null ? "" : runtimeConfig.credentialSecret(),
+                        StandardCharsets.UTF_8
+                );
+            }
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    uri,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class,
+                    "ServiceNow CI lookup by sys_id",
+                    outboundPolicy(),
+                    context -> new OutboundFailureDecision<>(
+                            context.isRetryableByDefault(),
+                            context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException runtimeException
+                                    ? runtimeException
+                                    : new RuntimeException(context.error())
+                    )
+            );
+            if (!response.getStatusCode().is2xxSuccessful() || !hasText(response.getBody())) {
+                return null;
+            }
+            JsonNode root = objectMapper.readTree(response.getBody());
+            // Direct record GET returns {"result": {...}} not {"result": [...]}
+            JsonNode result = root.path("result");
+            if (result.isMissingNode() || result.isNull()) {
+                return null;
+            }
+            // Handle both array and object responses
+            JsonNode selected = result.isArray() ? (result.isEmpty() ? null : result.get(0)) : result;
+            if (selected == null || selected.isMissingNode() || selected.isNull()) {
+                return null;
+            }
+            String resolvedSysId = fieldValue(selected.path("sys_id"));
+            String displayName = fieldValue(selected.path("name"));
+            if (!hasText(resolvedSysId)) return null;
+            return new ServiceNowCiLookup(
+                resolvedSysId, displayName,
                 fieldValue(selected.path("owned_by")),
                 fieldValue(selected.path("managed_by")),
                 fieldValue(selected.path("department")),

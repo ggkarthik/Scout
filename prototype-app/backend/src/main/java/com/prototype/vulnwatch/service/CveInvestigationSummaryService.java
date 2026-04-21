@@ -95,7 +95,8 @@ public class CveInvestigationSummaryService {
                 impactAnalysis,
                 remediationPlan,
                 keyFindings,
-                metrics
+                metrics,
+                null
         );
     }
 
@@ -178,7 +179,8 @@ public class CveInvestigationSummaryService {
                 impactAnalysis,
                 remediationPlan,
                 keyFindings,
-                metrics
+                metrics,
+                null
         );
     }
 

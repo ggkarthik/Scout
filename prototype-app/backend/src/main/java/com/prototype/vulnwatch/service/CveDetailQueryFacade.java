@@ -354,8 +354,9 @@ public class CveDetailQueryFacade {
             Vulnerability vulnerability,
             List<VulnerabilityTarget> targets
     ) {
-        List<CveDetailController.VendorIntelligenceDto> rows = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
+        // Use a map keyed by dedupeKey so we can merge CPE from CPE-type targets
+        // into the already-added COORD-type target DTO (COORD targets lack a CPE field).
+        Map<String, CveDetailController.VendorIntelligenceDto> dtoByKey = new LinkedHashMap<>();
         Map<UUID, String> vexStatusByTargetId = mapVexStatusByTargetId(targets);
         for (VulnerabilityTarget target : targets) {
             CveDetailController.VendorIntelligenceDto dto = new CveDetailController.VendorIntelligenceDto();
@@ -368,14 +369,19 @@ public class CveDetailQueryFacade {
             String affectedVersions = formatVersionRange(target);
             dto.setAffectedVersions(affectedVersions);
             dto.setFixedVersion(target.getFixed() != null && !target.getFixed().isBlank() ? target.getFixed() : null);
-            dto.setCpe(target.getCpe() != null && !target.getCpe().isBlank() ? target.getCpe() : null);
+            String cpe = target.getCpe() != null && !target.getCpe().isBlank() ? target.getCpe() : null;
+            dto.setCpe(cpe);
             dto.setVexStatus(vexStatusByTargetId.get(target.getId()));
             String dedupeKey = source + "|" + nullToEmpty(target.getPackageName()) + "|" + affectedVersions + "|" + nullToEmpty(target.getFixed());
-            if (seen.add(dedupeKey)) {
-                rows.add(dto);
+            CveDetailController.VendorIntelligenceDto existing = dtoByKey.get(dedupeKey);
+            if (existing == null) {
+                dtoByKey.put(dedupeKey, dto);
+            } else if (cpe != null && existing.getCpe() == null) {
+                // Merge CPE from this (CPE-type) target into the already-added DTO
+                existing.setCpe(cpe);
             }
         }
-        return rows;
+        return new ArrayList<>(dtoByKey.values());
     }
 
     private String formatVersionRange(VulnerabilityTarget target) {
@@ -587,6 +593,7 @@ public class CveDetailQueryFacade {
         }
         dto.setEolSupportEndDate(state.getComponent().getEolSupportEndDate());
         dto.setSupportPhase(state.getComponent().getSupportPhase());
+        dto.setSupportGroup(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getSupportGroup());
         return dto;
     }
 

@@ -11,7 +11,8 @@ public record CveInvestigationSummaryRequest(
         @NotNull @Valid List<RunbookResult> runbookResults,
         @NotNull @Valid List<AffectedAsset> affectedAssets,
         @NotNull @Valid List<FalsePositiveRow> falsePositiveRows,
-        @NotNull @Valid List<EolRow> eolRows
+        @NotNull @Valid List<EolRow> eolRows,
+        @Valid List<SolutionRow> solutionRows
 ) {
 
     public record Summary(
@@ -71,5 +72,15 @@ public record CveInvestigationSummaryRequest(
             String endOfSupport,
             String endOfLife,
             String recommendedUpgrade
+    ) {}
+
+    public record SolutionRow(
+            @NotBlank String software,
+            String version,
+            String vendor,
+            Integer impactedAssets,
+            String solutionType,
+            String solutionDetail,
+            String targetVersion
     ) {}
 }

@@ -117,6 +117,14 @@ public class Finding {
     @Column(name = "precedence_trace", columnDefinition = "TEXT")
     private String precedenceTrace;
 
+    /** ServiceNow incident number linked to this finding (e.g. INC0010005) */
+    @Column(name = "incident_id", length = 64)
+    private String incidentId;
+
+    /** Last known status of the linked ServiceNow incident (e.g. New, In Progress, Resolved) */
+    @Column(name = "incident_status", length = 64)
+    private String incidentStatus;
+
     @Column
     private Instant firstObservedAt = Instant.now();
 
@@ -327,6 +335,22 @@ public class Finding {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getIncidentId() {
+        return incidentId;
+    }
+
+    public void setIncidentId(String incidentId) {
+        this.incidentId = incidentId;
+    }
+
+    public String getIncidentStatus() {
+        return incidentStatus;
+    }
+
+    public void setIncidentStatus(String incidentStatus) {
+        this.incidentStatus = incidentStatus;
     }
 
     public void touch() {
