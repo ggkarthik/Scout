@@ -1,10 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
+import { FilterValueSelectCard, type FilterValueOption } from '../components/FilterValueSelectCard';
 import { api } from '../api/client';
 import { pathForInventoryHostAsset } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
+import { formatInventorySourceSystem } from '../features/inventory/helpers';
+import {
+  HOST_ENVIRONMENT_QUERY_KEY,
+  HOST_OPERATING_SYSTEM_QUERY_KEY,
+  HOST_QUICK_FILTER_QUERY_KEY,
+  INVENTORY_SOURCE_SYSTEM_QUERY_KEY,
+  readInventoryGroupByFromSearch,
+  readInventoryQueryFromSearch,
+  readSearchValueFromSearch,
+  readSearchValuesFromSearch,
+  writeInventoryGroupByToSearch,
+  writeInventoryQueryToSearch,
+  writeSearchValueToSearch,
+  writeSearchValuesToSearch
+} from '../features/inventory/searchState';
 import type { InventoryViewKey } from '../features/inventory/types';
+
+const PAGE_SIZE = 50;
 
 type Props = {
   selectedView: InventoryViewKey;
@@ -31,6 +50,13 @@ type HostOsSummary = {
 
 type HostInventoryTab = 'all-hosts' | 'by-os';
 type HostQuickFilter = 'all' | 'online' | 'with-findings' | 'linux' | 'windows';
+const HOST_GROUP_BY_OPTIONS: MultiGroupByOption[] = [
+  { key: 'operatingSystem', label: 'Operating System' },
+  { key: 'environment', label: 'Environment' },
+  { key: 'status', label: 'Status' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'sourceSystem', label: 'Source System' }
+];
 
 const OS_MATCHERS: Array<{ label: string; test: (value: string) => boolean }> = [
   { label: 'Windows Server 2022', test: (value) => value.includes('windows server 2022') },
@@ -94,6 +120,48 @@ function inferOperatingSystem(detail: HostAssetDetail): string {
   }
 
   return 'Unknown';
+}
+
+function sameValues(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function hostEnvironment(record: HostInventoryRecord): string {
+  return record.detail.host.environment ?? record.asset.environment ?? 'Unknown';
+}
+
+function hostOwner(record: HostInventoryRecord): string {
+  return record.detail.host.ownerEmail ?? record.asset.ownerTeam ?? record.asset.ownerEmail ?? 'Unassigned';
+}
+
+function hostSourceSystems(record: HostInventoryRecord): string[] {
+  return Array.from(new Set(
+    record.detail.software
+      .map((software) => software.sourceSystem?.trim())
+      .filter((value): value is string => Boolean(value))
+  ));
+}
+
+function hostGroupValues(record: HostInventoryRecord, key: string): string[] {
+  if (key === 'operatingSystem') {
+    return [record.operatingSystem];
+  }
+  if (key === 'environment') {
+    return [hostEnvironment(record)];
+  }
+  if (key === 'status') {
+    return [record.isOnline ? 'Online' : formatHostState(record.detail.host.state)];
+  }
+  if (key === 'owner') {
+    return [hostOwner(record)];
+  }
+  if (key === 'sourceSystem') {
+    const values = hostSourceSystems(record);
+    return values.length > 0
+      ? values.map((value) => formatInventorySourceSystem(value))
+      : ['Unspecified source'];
+  }
+  return ['Unknown'];
 }
 
 function toInventoryRecord(asset: Asset, detail: HostAssetDetail): HostInventoryRecord {
@@ -174,7 +242,9 @@ function matchesSearch(record: HostInventoryRecord, query: string): boolean {
     record.detail.host.supportGroup,
     record.operatingSystem,
     ...record.detail.software.map((software) => software.displayName),
-    ...record.detail.software.map((software) => software.publisher ?? '')
+    ...record.detail.software.map((software) => software.publisher ?? ''),
+    ...record.detail.software.map((software) => software.discoveryModelPrimaryKey ?? ''),
+    ...record.detail.software.map((software) => software.softwareIdentity ?? '')
   ]
     .join(' ')
     .toLowerCase();
@@ -244,9 +314,38 @@ function HostRow({
 export function InventoryPage(_: Props) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialSearchValue = React.useMemo(() => readInventoryQueryFromSearch(searchParams), [searchParams]);
+  const initialQuickFilter = React.useMemo<HostQuickFilter>(() => {
+    const value = readSearchValueFromSearch(searchParams, HOST_QUICK_FILTER_QUERY_KEY);
+    return value === 'online' || value === 'with-findings' || value === 'linux' || value === 'windows'
+      ? value
+      : 'all';
+  }, [searchParams]);
+  const initialEnvironments = React.useMemo(
+    () => readSearchValuesFromSearch(searchParams, HOST_ENVIRONMENT_QUERY_KEY),
+    [searchParams]
+  );
+  const initialOperatingSystems = React.useMemo(
+    () => readSearchValuesFromSearch(searchParams, HOST_OPERATING_SYSTEM_QUERY_KEY),
+    [searchParams]
+  );
+  const initialSourceSystems = React.useMemo(
+    () => readSearchValuesFromSearch(searchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY),
+    [searchParams]
+  );
+  const initialGroupBy = React.useMemo(
+    () => readInventoryGroupByFromSearch(searchParams),
+    [searchParams]
+  );
   const [activeTab, setActiveTab] = React.useState<HostInventoryTab>('all-hosts');
-  const [searchValue, setSearchValue] = React.useState('');
-  const [quickFilter, setQuickFilter] = React.useState<HostQuickFilter>('all');
+  const [searchValue, setSearchValue] = React.useState(initialSearchValue);
+  const [quickFilter, setQuickFilter] = React.useState<HostQuickFilter>(initialQuickFilter);
+  const [selectedEnvironments, setSelectedEnvironments] = React.useState<string[]>(initialEnvironments);
+  const [selectedOperatingSystems, setSelectedOperatingSystems] = React.useState<string[]>(initialOperatingSystems);
+  const [selectedSourceSystems, setSelectedSourceSystems] = React.useState<string[]>(initialSourceSystems);
+  const [groupBy, setGroupBy] = React.useState<string[]>(initialGroupBy);
+  const [page, setPage] = React.useState(0);
 
   const assetsQuery = useQuery({
     queryKey: ['inventory-host-assets'],
@@ -274,12 +373,133 @@ export function InventoryPage(_: Props) {
       .sort((left, right) => left.asset.name.localeCompare(right.asset.name))
   ), [hostDetailsQuery.data]);
 
+  const environmentOptions = React.useMemo<FilterValueOption[]>(() => (
+    Array.from(new Set(hostRecords.map((record) => hostEnvironment(record))))
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({ value, label: value }))
+  ), [hostRecords]);
+  const operatingSystemOptions = React.useMemo<FilterValueOption[]>(() => (
+    Array.from(new Set(hostRecords.map((record) => record.operatingSystem)))
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({ value, label: value }))
+  ), [hostRecords]);
+  const sourceSystemOptions = React.useMemo<FilterValueOption[]>(() => (
+    Array.from(new Set(hostRecords.flatMap((record) => hostSourceSystems(record))))
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({
+        value,
+        label: formatInventorySourceSystem(value)
+      }))
+  ), [hostRecords]);
+
+  React.useEffect(() => {
+    const nextSearchValue = readInventoryQueryFromSearch(searchParams);
+    const nextQuickFilterValue = readSearchValueFromSearch(searchParams, HOST_QUICK_FILTER_QUERY_KEY);
+    const nextQuickFilter = nextQuickFilterValue === 'online'
+      || nextQuickFilterValue === 'with-findings'
+      || nextQuickFilterValue === 'linux'
+      || nextQuickFilterValue === 'windows'
+      ? nextQuickFilterValue
+      : 'all';
+    const nextEnvironments = readSearchValuesFromSearch(searchParams, HOST_ENVIRONMENT_QUERY_KEY);
+    const nextOperatingSystems = readSearchValuesFromSearch(searchParams, HOST_OPERATING_SYSTEM_QUERY_KEY);
+    const nextSourceSystems = readSearchValuesFromSearch(searchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY);
+    const nextGroupBy = readInventoryGroupByFromSearch(searchParams);
+
+    setSearchValue((current) => (current === nextSearchValue ? current : nextSearchValue));
+    setQuickFilter((current) => (current === nextQuickFilter ? current : nextQuickFilter));
+    setSelectedEnvironments((current) => (sameValues(current, nextEnvironments) ? current : nextEnvironments));
+    setSelectedOperatingSystems((current) => (sameValues(current, nextOperatingSystems) ? current : nextOperatingSystems));
+    setSelectedSourceSystems((current) => (sameValues(current, nextSourceSystems) ? current : nextSourceSystems));
+    setGroupBy((current) => (sameValues(current, nextGroupBy) ? current : nextGroupBy));
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    let nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams = writeInventoryQueryToSearch(nextSearchParams, searchValue);
+    nextSearchParams = writeSearchValueToSearch(nextSearchParams, HOST_QUICK_FILTER_QUERY_KEY, quickFilter === 'all' ? '' : quickFilter);
+    nextSearchParams = writeSearchValuesToSearch(nextSearchParams, HOST_ENVIRONMENT_QUERY_KEY, selectedEnvironments);
+    nextSearchParams = writeSearchValuesToSearch(nextSearchParams, HOST_OPERATING_SYSTEM_QUERY_KEY, selectedOperatingSystems);
+    nextSearchParams = writeSearchValuesToSearch(nextSearchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY, selectedSourceSystems);
+    nextSearchParams = writeInventoryGroupByToSearch(nextSearchParams, groupBy);
+
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [
+    groupBy,
+    quickFilter,
+    searchParams,
+    searchValue,
+    selectedEnvironments,
+    selectedOperatingSystems,
+    selectedSourceSystems,
+    setSearchParams
+  ]);
+
   const filteredRecords = React.useMemo(
-    () => hostRecords.filter((record) => matchesQuickFilter(record, quickFilter) && matchesSearch(record, searchValue.trim())),
-    [hostRecords, quickFilter, searchValue]
+    () => hostRecords.filter((record) => {
+      if (!matchesQuickFilter(record, quickFilter) || !matchesSearch(record, searchValue.trim())) {
+        return false;
+      }
+      if (selectedEnvironments.length > 0 && !selectedEnvironments.includes(hostEnvironment(record))) {
+        return false;
+      }
+      if (selectedOperatingSystems.length > 0 && !selectedOperatingSystems.includes(record.operatingSystem)) {
+        return false;
+      }
+      if (selectedSourceSystems.length > 0) {
+        const sources = hostSourceSystems(record);
+        if (!selectedSourceSystems.some((value) => sources.includes(value))) {
+          return false;
+        }
+      }
+      return true;
+    }),
+    [
+      hostRecords,
+      quickFilter,
+      searchValue,
+      selectedEnvironments,
+      selectedOperatingSystems,
+      selectedSourceSystems
+    ]
+  );
+
+  React.useEffect(() => {
+    setPage(0);
+  }, [quickFilter, searchValue, selectedEnvironments, selectedOperatingSystems, selectedSourceSystems]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / PAGE_SIZE));
+  const paginatedRecords = React.useMemo(
+    () => filteredRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filteredRecords, page]
   );
 
   const osSummaries = React.useMemo(() => buildOsSummary(filteredRecords), [filteredRecords]);
+  const groupedCards = React.useMemo(() => (
+    groupBy
+      .map((key) => {
+        const option = HOST_GROUP_BY_OPTIONS.find((entry) => entry.key === key);
+        if (!option) {
+          return null;
+        }
+        const counts = new Map<string, number>();
+        filteredRecords.forEach((record) => {
+          hostGroupValues(record, key).forEach((value) => {
+            counts.set(value, (counts.get(value) ?? 0) + 1);
+          });
+        });
+        return {
+          key,
+          label: option.label,
+          items: Array.from(counts.entries())
+            .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+            .slice(0, 5)
+        };
+      })
+      .filter((entry): entry is { key: string; label: string; items: Array<[string, number]> } => entry != null)
+  ), [filteredRecords, groupBy]);
 
   const totalSoftware = React.useMemo(
     () => filteredRecords.reduce((sum, record) => sum + record.deployedSoftwareCount, 0),
@@ -311,6 +531,13 @@ export function InventoryPage(_: Props) {
   const handleOpenHost = React.useCallback((assetId: string) => {
     navigate(pathForInventoryHostAsset(assetId, `${location.pathname}${location.search}`));
   }, [location.pathname, location.search, navigate]);
+  const clearFilters = React.useCallback(() => {
+    setSearchValue('');
+    setQuickFilter('all');
+    setSelectedEnvironments([]);
+    setSelectedOperatingSystems([]);
+    setSelectedSourceSystems([]);
+  }, []);
 
   return (
     <section className="inventory-page-shell">
@@ -361,7 +588,7 @@ export function InventoryPage(_: Props) {
           </button>
         </div>
 
-        <div className="inventory-search-row">
+        <div className="inventory-search-row inventory-search-row-stacked">
           <label className="inventory-search-field">
             <span className="panel-caption">Search hostname, owner, OS, software…</span>
             <input
@@ -389,6 +616,43 @@ export function InventoryPage(_: Props) {
             ))}
           </div>
         </div>
+        <div className="inventory-filter-card-grid">
+          <FilterValueSelectCard
+            label="Environment"
+            selectedValues={selectedEnvironments}
+            options={environmentOptions}
+            onChange={setSelectedEnvironments}
+          />
+          <FilterValueSelectCard
+            label="Operating System"
+            selectedValues={selectedOperatingSystems}
+            options={operatingSystemOptions}
+            onChange={setSelectedOperatingSystems}
+          />
+          <FilterValueSelectCard
+            label="Source System"
+            selectedValues={selectedSourceSystems}
+            options={sourceSystemOptions}
+            onChange={setSelectedSourceSystems}
+          />
+        </div>
+        <div className="inventory-toolbar-actions">
+          <button type="button" className="btn btn-secondary btn-inline" onClick={clearFilters}>
+            Clear Filters
+          </button>
+        </div>
+        <div className="findings-groupby-shell">
+          <MultiGroupBy
+            options={HOST_GROUP_BY_OPTIONS}
+            value={groupBy}
+            onChange={setGroupBy}
+            label="GROUP BY"
+            placeholder="No secondary grouping"
+            allowEmptyPrimary
+            emptyPrimaryLabel="Select..."
+            showSelectorsByDefault={false}
+          />
+        </div>
       </div>
 
       {errorMessage ? (
@@ -396,6 +660,36 @@ export function InventoryPage(_: Props) {
           Failed to load hosts inventory: {errorMessage}
         </div>
       ) : null}
+
+      {groupedCards.length > 0 && (
+        <div className="inventory-section-card">
+          <div className="inventory-section-header findings-title-row">
+            <div>
+              <h2>Grouped Breakdown</h2>
+              <p className="panel-caption">Top host segments in the current filtered inventory result set.</p>
+            </div>
+          </div>
+          <div className="findings-widget-grid">
+            {groupedCards.map((group) => (
+              <div className="findings-widget-card" key={group.key}>
+                <div className="findings-widget-title">{group.label}</div>
+                <div className="findings-widget-list">
+                  {group.items.length === 0 ? (
+                    <div className="panel-caption">No rows in the current result set.</div>
+                  ) : (
+                    group.items.map(([value, count]) => (
+                      <div className="findings-widget-row" key={`${group.key}:${value}`}>
+                        <span>{value}</span>
+                        <strong>{count.toLocaleString()}</strong>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="empty-state"><p>Loading host inventory…</p></div>
@@ -432,12 +726,32 @@ export function InventoryPage(_: Props) {
                       <div className="empty-state"><p>No hosts matched the current filters.</p></div>
                     </td>
                   </tr>
-                ) : filteredRecords.map((record) => (
+                ) : paginatedRecords.map((record) => (
                   <HostRow key={record.asset.id} record={record} onOpen={handleOpenHost} />
                 ))}
               </tbody>
             </table>
           </div>
+
+          {totalPages > 1 && (
+            <div className="pagination">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(0, current - 1))}
+                disabled={page === 0}
+              >
+                Previous
+              </button>
+              <span>Page {page + 1} of {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => (current + 1 < totalPages ? current + 1 : current))}
+                disabled={page + 1 >= totalPages}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="inventory-section-card">

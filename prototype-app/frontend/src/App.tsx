@@ -51,6 +51,12 @@ const HostAssetDetailPage = React.lazy(async () => ({
 const InventoryPage = React.lazy(async () => ({
   default: (await import('./pages/InventoryPage')).InventoryPage
 }));
+const InventoryComponentViewsPage = React.lazy(async () => ({
+  default: (await import('./pages/InventoryComponentViewsPage')).InventoryComponentViewsPage
+}));
+const InventoryOverviewPage = React.lazy(async () => ({
+  default: (await import('./pages/InventoryOverviewPage')).InventoryOverviewPage
+}));
 const SoftwareIdentitiesPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentitiesPage')).SoftwareIdentitiesPage
 }));
@@ -80,7 +86,14 @@ const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: Invent
   {
     title: 'Summary',
     items: [
+      { key: 'overview', label: 'Overview' },
       { key: 'software-identities', label: 'Software Identities' }
+    ]
+  },
+  {
+    title: 'Applications',
+    items: [
+      { key: 'sbom', label: 'Applications' }
     ]
   },
   {
@@ -88,10 +101,15 @@ const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: Invent
     items: [
       { key: 'hosts', label: 'Hosts' }
     ]
+  },
+  {
+    title: 'Cloud',
+    items: [
+      { key: 'container-images', label: 'Container Images' }
+    ]
   }
 ];
 const OPERATIONS_NAV_ITEMS = [
-  { key: 'quality', label: 'Quality' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'platform-health', label: 'Platform Health' }
 ] as const;
@@ -230,7 +248,26 @@ function FindingsRoute() {
 
 function OperationsRoute() {
   const params = useParams<{ operationsView?: string }>();
-  return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} />;
+  const location = useLocation();
+  return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} redirectSearch={location.search} />;
+}
+
+function inventoryManageSoftwareRedirectPath(search: string): string {
+  const nextParams = new URLSearchParams(search);
+  const domain = (nextParams.get('domain') ?? '').trim().toUpperCase();
+  const tab = domain === 'CORRELATION'
+    ? 'quality-correlation'
+    : domain === 'EOL'
+      ? 'quality-eol'
+      : domain === 'VEX'
+        ? 'quality-vex'
+        : 'quality-normalization';
+
+  nextParams.delete('domain');
+  nextParams.set('inventoryTabs', tab);
+  nextParams.set('inventoryActiveTab', tab);
+  const nextSearch = nextParams.toString();
+  return `/inventory${nextSearch ? `?${nextSearch}` : ''}`;
 }
 
 function LegacyVulnerabilityIntelVulnerabilitiesRoute() {
@@ -300,11 +337,21 @@ function InventoryHostAssetRoute() {
 
 function InventoryRoute() {
   const params = useParams<{ inventoryView?: string }>();
+  const location = useLocation();
   const selectedView = normalizeInventoryRouteView(params.inventoryView);
+  if (selectedView === 'overview') {
+    return <InventoryOverviewPage />;
+  }
   if (selectedView === 'software-identities') {
     return <SoftwareIdentitiesPage />;
   }
-  return <InventoryPage selectedView={selectedView} />;
+  if (selectedView === 'manage-software') {
+    return <Navigate to={inventoryManageSoftwareRedirectPath(location.search)} replace />;
+  }
+  if (selectedView === 'hosts') {
+    return <InventoryPage selectedView={selectedView} />;
+  }
+  return <InventoryComponentViewsPage selectedView={selectedView} />;
 }
 
 function ConnectRoute() {

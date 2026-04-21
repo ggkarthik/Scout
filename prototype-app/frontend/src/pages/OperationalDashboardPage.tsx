@@ -1,5 +1,5 @@
 import React from 'react';
-import { OperationsQualityPage } from './OperationsQualityPage';
+import { Navigate } from 'react-router-dom';
 
 type ErrorBoundaryState = { error: Error | null };
 
@@ -65,7 +65,6 @@ export type OperationsViewKey =
   | 'platform-health';
 
 const OPERATIONS_NAV_ITEMS: Array<{ key: OperationsViewKey; label: string }> = [
-  { key: 'quality', label: 'Quality' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'platform-health', label: 'Platform Health' }
 ];
@@ -106,6 +105,7 @@ function normalizeOperationsView(value: string | null | undefined): OperationsVi
 
 type OperationalDashboardPageProps = {
   selectedView: OperationsViewKey;
+  redirectSearch?: string;
 };
 
 const METRIC_HELP: Record<string, string> = {
@@ -740,18 +740,14 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
   );
 }
 
-export function OperationalDashboardPage({ selectedView }: OperationalDashboardPageProps) {
+export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: OperationalDashboardPageProps) {
   const normalizedView = normalizeOperationsView(selectedView);
   const operationsViewQuery = useOperationsViewQuery(normalizedView);
   const payload = operationsViewQuery.data ?? null;
   const error = operationsViewQuery.error instanceof Error ? operationsViewQuery.error.message : null;
 
   if (normalizedView === 'quality') {
-    return (
-      <OperationsSectionErrorBoundary viewKey={normalizedView}>
-        <OperationsQualityPage />
-      </OperationsSectionErrorBoundary>
-    );
+    return <Navigate to={`/inventory/manage-software${redirectSearch}`} replace />;
   }
 
   if (error) {

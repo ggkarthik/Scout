@@ -232,7 +232,10 @@ public class OperationalQualityReadService {
                 evidenceJson,
                 recommendedAction(row),
                 buildDrilldownTargets(row),
-                buildSampleRecords(row)
+                buildSampleRecords(row),
+                row.hasActiveOverride(),
+                row.overrideActor(),
+                row.overrideAt()
         );
     }
 
@@ -391,13 +394,14 @@ public class OperationalQualityReadService {
                 FROM quality_issue_projection q
                 """ + whereClause + "\n" + """
                 ORDER BY
+                    q.affected_asset_count DESC,
+                    q.affects_active_findings DESC,
                     CASE q.severity
                         WHEN 'CRITICAL' THEN 0
                         WHEN 'HIGH' THEN 1
                         WHEN 'MEDIUM' THEN 2
                         ELSE 3
                     END,
-                    q.affects_active_findings DESC,
                     q.last_seen_at DESC,
                     q.title ASC
                 LIMIT :limit OFFSET :offset
@@ -433,8 +437,38 @@ public class OperationalQualityReadService {
                     q.open_vulnerability_count,
                     q.first_seen_at,
                     q.last_seen_at,
-                    cast(q.evidence_json as text) AS evidence_json
+                    cast(q.evidence_json as text) AS evidence_json,
+                    (cl_ov.id IS NOT NULL
+                     OR ic_ov.manual_identity_id IS NOT NULL
+                     OR cvs_ov.analyst_updated_by IS NOT NULL) AS has_active_override,
+                    coalesce(cl_ov.confirmed_by,
+                             ic_ov.manual_identity_confirmed_by,
+                             cvs_ov.analyst_updated_by)        AS override_actor,
+                    coalesce(cl_ov.confirmed_at,
+                             ic_ov.manual_identity_confirmed_at,
+                             cvs_ov.analyst_updated_at)        AS override_at
                 FROM quality_issue_projection q
+                LEFT JOIN software_identity_cluster_link cl_ov
+                       ON cl_ov.tenant_id   = :tenantId
+                      AND cl_ov.source_type = CASE q.source_object_type
+                                                  WHEN 'CLUSTER_DISCOVERY_MODEL' THEN 'DISCOVERY_MODEL'
+                                                  WHEN 'CLUSTER_PACKAGE_PATTERN' THEN 'PACKAGE_PATTERN'
+                                                  ELSE q.source_object_type
+                                              END
+                      AND cl_ov.source_key  = q.source_object_id
+                      AND cl_ov.revoked_at IS NULL
+                LEFT JOIN inventory_components ic_ov
+                       ON ic_ov.id = q.component_id
+                      AND ic_ov.tenant_id = :tenantId
+                LEFT JOIN LATERAL (
+                    SELECT analyst_updated_by, analyst_updated_at
+                    FROM component_vulnerability_states
+                    WHERE component_id = q.component_id
+                      AND tenant_id = :tenantId
+                      AND analyst_disposition IS NOT NULL
+                    ORDER BY analyst_updated_at DESC NULLS LAST
+                    LIMIT 1
+                ) cvs_ov ON q.component_id IS NOT NULL
                 WHERE q.tenant_id = :tenantId
                   AND q.id = :issueId
                 """;
@@ -468,7 +502,10 @@ public class OperationalQualityReadService {
                 rs.getLong("open_vulnerability_count"),
                 getInstant(rs, "first_seen_at"),
                 getInstant(rs, "last_seen_at"),
-                rs.getString("evidence_json")
+                rs.getString("evidence_json"),
+                rs.getBoolean("has_active_override"),
+                rs.getString("override_actor"),
+                getInstant(rs, "override_at")
         );
     }
 
@@ -478,7 +515,8 @@ public class OperationalQualityReadService {
             case "SOURCE_RUN_PARTIAL_FAILURE" -> "The latest source run only completed partially, which means some records landed while others were dropped or failed.";
             case "SOURCE_FEED_STALE" -> "This source has not refreshed recently enough to trust the current downstream views without qualification.";
             case "INGESTED_NO_DOWNSTREAM_RECORDS" -> "The source completed, but it did not create usable downstream records, which usually points to parser, schema, or mapping gaps.";
-            case "COMPONENT_MISSING_VERSION", "COMPONENT_MISSING_SOFTWARE_IDENTITY", "HOST_LOW_CONFIDENCE_ALIAS", "HOST_DISCOVERY_MODEL_REVIEW",
+            case "COMPONENT_MISSING_NORMALIZED_NAME", "COMPONENT_MISSING_VERSION", "COMPONENT_MISSING_SOFTWARE_IDENTITY",
+                    "HOST_LOW_CONFIDENCE_ALIAS", "HOST_DISCOVERY_MODEL_REVIEW",
                     "VULNERABILITY_TARGET_IDENTITY_UNRESOLVED", "VEX_PRODUCT_KEY_UNRESOLVED" ->
                     "Normalization is incomplete here, so the app cannot confidently reason about correlation, VEX, or lifecycle for the affected records.";
             case "COMPONENT_NO_CORRELATION_CANDIDATES", "COMPONENT_LOW_CONFIDENCE_MATCH", "COMPONENT_FALLBACK_ONLY_CORRELATION" ->
@@ -785,7 +823,49 @@ public class OperationalQualityReadService {
             long openVulnerabilityCount,
             Instant firstSeenAt,
             Instant lastSeenAt,
-            String evidenceJson
+            String evidenceJson,
+            boolean hasActiveOverride,
+            String overrideActor,
+            Instant overrideAt
     ) {
+    }
+
+    public record IssueSourceIds(
+            UUID componentId,
+            UUID vulnerabilityId,
+            String domain,
+            String issueType,
+            String sourceObjectType,
+            String sourceObjectId
+    ) {}
+
+    public IssueSourceIds getIssueSourceIds(Tenant tenant, String issueId) {
+        requireTenant(tenant);
+        if (issueId == null || issueId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Issue id is required");
+        }
+        String sql = """
+                SELECT component_id, vulnerability_id, domain, issue_type,
+                       source_object_type, source_object_id
+                FROM quality_issue_projection
+                WHERE tenant_id = :tenantId
+                  AND id = :issueId
+                """;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId())
+                .addValue("issueId", issueId.trim());
+        return jdbcTemplate.query(sql, params, rs -> {
+            if (!rs.next()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quality issue not found");
+            }
+            return new IssueSourceIds(
+                    getUuid(rs, "component_id"),
+                    getUuid(rs, "vulnerability_id"),
+                    rs.getString("domain"),
+                    rs.getString("issue_type"),
+                    rs.getString("source_object_type"),
+                    rs.getString("source_object_id")
+            );
+        });
     }
 }

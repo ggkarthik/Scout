@@ -1,19 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeTabForPath,
+  appendSearchToPath,
   buildLegacyCompatiblePath,
   pathForConnectView,
+  pathForInventoryViewWithSearch,
   pathForOperationsView,
-  pathForTab
+  pathForTab,
+  pathForVulnRepoView
 } from './routes';
 
 describe('routes', () => {
   it('maps top-level tabs to canonical paths', () => {
     expect(pathForTab('dashboard')).toBe('/');
     expect(pathForTab('operations')).toBe('/operations/pipeline');
-    expect(pathForTab('inventory')).toBe('/inventory/hosts');
+    expect(pathForTab('inventory')).toBe('/inventory');
+    expect(pathForTab('end-of-life')).toBe('/end-of-life');
     expect(pathForConnectView('vuln-intel-queue')).toBe('/connect/vuln-intel-queue');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
+    expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
+  });
+
+  it('appends query-string filters for inventory drilldowns', () => {
+    expect(pathForInventoryViewWithSearch('sbom', {
+      sourceSystem: ['github', 'api'],
+      ecosystem: 'maven',
+      query: 'log4j',
+      ignored: ''
+    })).toBe('/inventory/sbom?sourceSystem=github&sourceSystem=api&ecosystem=maven&query=log4j');
+
+    expect(appendSearchToPath('/operations/quality', {
+      domain: 'EOL',
+      focus: 'eol-mapping-review',
+      empty: null
+    })).toBe('/operations/quality?domain=EOL&focus=eol-mapping-review');
   });
 
   it('infers the active navigation tab from the route path', () => {
@@ -28,6 +48,9 @@ describe('routes', () => {
     expect(buildLegacyCompatiblePath('?tab=operations&operationsView=api-read-path&foo=bar')).toBe(
       '/operations/platform-health?foo=bar'
     );
+    expect(buildLegacyCompatiblePath('?tab=operations&operationsView=ai&capability=NORMALIZATION_IDENTITY_ASSIGNMENT')).toBe(
+      '/operations/pipeline?capability=NORMALIZATION_IDENTITY_ASSIGNMENT'
+    );
   });
 
   it('redirects legacy vulnerability intelligence deep links to canonical routes', () => {
@@ -35,11 +58,19 @@ describe('routes', () => {
       '/vuln-repo/org-cves/CVE-2026-1234'
     );
     expect(buildLegacyCompatiblePath('?tab=vulnerability-intelligence')).toBe('/vuln-repo/vulnerabilities');
+    expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=end-of-life')).toBe('/end-of-life');
+    expect(buildLegacyCompatiblePath('?tab=end-of-life')).toBe('/end-of-life');
   });
 
   it('redirects legacy inventory and connect deep links while preserving non-routing params', () => {
     expect(buildLegacyCompatiblePath('?tab=inventory&inventoryView=host-review-queue&reviewCategory=MISSING_VERSION')).toBe(
       '/inventory/hosts?reviewCategory=MISSING_VERSION'
+    );
+    expect(buildLegacyCompatiblePath('?tab=inventory&inventoryView=applications&sourceSystem=github')).toBe(
+      '/inventory/sbom?sourceSystem=github'
+    );
+    expect(buildLegacyCompatiblePath('?tab=inventory&inventoryView=image-inventory&ecosystem=oci')).toBe(
+      '/inventory/container-images?ecosystem=oci'
     );
     expect(buildLegacyCompatiblePath('?tab=connect&connectView=integration-queue&source=ghsa')).toBe(
       '/connect/vuln-intel-queue?source=ghsa'

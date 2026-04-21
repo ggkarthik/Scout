@@ -1,26 +1,34 @@
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api/client';
 import { pathForTab } from '../app/routes';
 import {
-  DataTable,
-  type DataTableColumn,
-  type DataTableRow
-} from './DataTable';
-import {
-  useEolUnresolvedMappingsQuery
-} from '../features/eol/queries';
-
-const UNRESOLVED_PAGE_SIZE = 25;
-import {
   useOperationalQualityIssuesQuery,
   type OperationalQualityIssuesQueryParams
 } from '../features/operations/queries';
+import {
+  useEolUnresolvedMappingsQuery,
+  useEolSlugSuggestionsQuery
+} from '../features/eol/queries';
+import { useSoftwareIdentityDetailQuery } from '../features/software-identities/queries';
 import type {
   EolSlugSuggestion,
   UnresolvedEolMapping
 } from '../features/eol/types';
+
+const UNRESOLVED_PAGE_SIZE = 25;
+const MATCHING_ISSUE_TYPE = 'SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING';
+const INVALIDATION_KEYS = [
+  ['eol-unresolved-mappings'],
+  ['eol-summary'],
+  ['eol-component-statuses'],
+  ['software-identities'],
+  ['software-identity-detail'],
+  ['operational-quality-summary'],
+  ['operational-quality-issues'],
+  ['operational-quality-issue-detail']
+] as const;
 
 type Props = {
   qualityFilters?: Pick<
@@ -29,10 +37,20 @@ type Props = {
   >;
 };
 
-type MappingNotice = {
-  kind: 'error' | 'success';
-  message: string;
-};
+function formatInstant(value?: string): string {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function formatCount(value: number | string | undefined): string {
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed.toLocaleString();
+  }
+  return '0';
+}
 
 // ---------------------------------------------------------------------------
 // Slug suggestion combobox
@@ -120,52 +138,202 @@ function SlugSuggestInput({
   );
 }
 
-const INVALIDATION_KEYS = [
-  ['eol-unresolved-mappings'],
-  ['eol-summary'],
-  ['eol-component-statuses'],
-  ['software-identities'],
-  ['software-identity-detail'],
-  ['operational-quality-summary'],
-  ['operational-quality-issues'],
-  ['operational-quality-issue-detail']
-] as const;
-const MATCHING_ISSUE_TYPE = 'SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING';
+// ---------------------------------------------------------------------------
+// Per-version EOL status badge
+// ---------------------------------------------------------------------------
 
-function formatInstant(value?: string): string {
-  if (!value) {
-    return '-';
+function EolVersionBadge({ isEol, eolDate, daysRemaining }: {
+  isEol?: boolean;
+  eolDate?: string;
+  daysRemaining?: number;
+}) {
+  if (isEol === true) {
+    return <span className="eol-badge eol-badge--eol">EOL</span>;
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  if (daysRemaining !== undefined && daysRemaining <= 365) {
+    return <span className="eol-badge eol-badge--near">Near EOL · {daysRemaining}d</span>;
+  }
+  if (eolDate) {
+    return <span className="panel-caption mono">{eolDate}</span>;
+  }
+  return <span className="panel-caption">Unknown</span>;
 }
 
-function formatCount(value: number | string | undefined): string {
-  if (typeof value === 'number') {
-    return value.toLocaleString();
+// ---------------------------------------------------------------------------
+// Expanded version rows — lazy-loaded when identity is expanded
+// ---------------------------------------------------------------------------
+
+function EolVersionRows({ identityId }: { identityId: string }) {
+  const detailQuery = useSoftwareIdentityDetailQuery(identityId);
+  const versions = detailQuery.data?.versions ?? [];
+
+  if (detailQuery.isPending && !detailQuery.data) {
+    return (
+      <tr>
+        <td colSpan={5} className="si-version-state-row">Loading versions…</td>
+      </tr>
+    );
   }
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed.toLocaleString();
+
+  if (!versions.length) {
+    return (
+      <tr>
+        <td colSpan={5} className="si-version-state-row panel-caption">No version data available.</td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      {versions.map(v => (
+        <tr key={v.version} className="si-version-row">
+          <td>
+            <div className="quality-version-child-cell">
+              <span className="si-version-indent">↳</span>
+              <span className="mono si-version-tag">{v.version || '—'}</span>
+              {v.eolCycle && (
+                <span className="panel-caption"> · cycle {v.eolCycle}</span>
+              )}
+            </div>
+          </td>
+          <td>
+            <div className="software-identity-row-stack">
+              <span>{v.assetCount.toLocaleString()} asset{v.assetCount !== 1 ? 's' : ''}</span>
+              <span className="panel-caption">{v.componentCount.toLocaleString()} components</span>
+            </div>
+          </td>
+          <td>
+            <div className="software-identity-row-stack">
+              <span>{v.openFindingCount.toLocaleString()} findings</span>
+              <span className="panel-caption">{v.openVulnerabilityCount.toLocaleString()} vulns</span>
+            </div>
+          </td>
+          <td className="panel-caption">{v.lastObservedAt ? formatInstant(v.lastObservedAt) : '—'}</td>
+          <td>
+            <EolVersionBadge isEol={v.isEol} eolDate={v.eolDate} daysRemaining={v.eolDaysRemaining} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Identity parent row — owns its own draft slug + suggestion state
+// Fetching suggestions here (not in the parent) avoids bulk upfront queries
+// and ensures data is ready before the user interacts with the input.
+// ---------------------------------------------------------------------------
+
+type EolIdentityRowProps = {
+  item: UnresolvedEolMapping;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onMapped: () => Promise<void>;
+};
+
+function EolIdentityRow({ item, isExpanded, onToggle, onMapped }: EolIdentityRowProps) {
+  const [draft, setDraft] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [rowNotice, setRowNotice] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(null);
+
+  // Suggestions fetched per-row so they load in the background as the list
+  // renders, rather than all at once via useQueries in the parent.
+  const suggestionsQuery = useEolSlugSuggestionsQuery(item.normalizedKey);
+  const suggestions = suggestionsQuery.data ?? [];
+
+  async function handleConfirm() {
+    const slug = draft.trim();
+    if (!slug) return;
+    setBusy(true);
+    setRowNotice(null);
+    try {
+      await api.confirmEolMapping(item.normalizedKey, slug);
+      setRowNotice({ kind: 'success', message: `Mapped to "${slug}"` });
+      await onMapped();
+    } catch (err) {
+      setRowNotice({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+      setBusy(false);
     }
   }
-  return '0';
+
+  return (
+    <tr className={`si-identity-row${isExpanded ? ' si-identity-row-expanded' : ''}`}>
+      <td onClick={onToggle} style={{ cursor: 'pointer' }}>
+        <div className="si-identity-name-cell">
+          <span className={`si-expand-toggle${isExpanded ? ' si-expand-toggle-open' : ''}`}>▶</span>
+          <div>
+            <div>{item.displayName}</div>
+            <div className="panel-caption mono">{item.normalizedKey}</div>
+            {item.versionCount > 0 && (
+              <div className="panel-caption si-version-count">
+                {item.versionCount} version{item.versionCount !== 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+        </div>
+      </td>
+      <td>
+        <div className="software-identity-row-stack">
+          <span>{formatCount(item.assetCount)} assets</span>
+          <span className="panel-caption">
+            {formatCount(item.componentCount)} components · {formatCount(item.versionCount)} versions
+          </span>
+        </div>
+      </td>
+      <td>
+        <div className="software-identity-row-stack">
+          <span>{formatCount(item.openFindingCount)} findings</span>
+          <span className="panel-caption">{formatCount(item.openVulnerabilityCount)} vulns</span>
+        </div>
+      </td>
+      <td>{formatInstant(item.lastObservedAt)}</td>
+      <td onClick={e => e.stopPropagation()}>
+        <div className="eol-slug-confirm-row">
+          <SlugSuggestInput
+            value={draft}
+            onChange={setDraft}
+            suggestions={suggestions}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy || !draft.trim()}
+            onClick={() => void handleConfirm()}
+          >
+            {busy ? 'Saving…' : 'Confirm'}
+          </button>
+        </div>
+        {rowNotice && (
+          <div
+            className={`notice${rowNotice.kind === 'error' ? ' error' : ''}`}
+            style={{ marginTop: 4, padding: '4px 8px', fontSize: '0.85em' }}
+          >
+            {rowNotice.message}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Main panel
+// ---------------------------------------------------------------------------
 
 export function EolMappingReviewPanel({ qualityFilters }: Props) {
   const queryClient = useQueryClient();
   const [unresolvedPage, setUnresolvedPage] = React.useState(0);
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
+
   const unresolvedMappingsQuery = useEolUnresolvedMappingsQuery(
     { page: unresolvedPage, size: UNRESOLVED_PAGE_SIZE }
   );
   const unresolvedPageData = unresolvedMappingsQuery.data;
-  const unresolvedList = React.useMemo(
-    () => unresolvedPageData?.content ?? [],
-    [unresolvedPageData]
-  );
+  const unresolvedList = React.useMemo(() => unresolvedPageData?.content ?? [], [unresolvedPageData]);
   const unresolvedTotalPages = unresolvedPageData?.totalPages ?? 1;
   const unresolvedTotalElements = unresolvedPageData?.totalElements ?? 0;
+
   const normalizedIssueType = (qualityFilters?.issueType ?? '').trim().toUpperCase();
   const issueTypeExcludesMappingReview = normalizedIssueType.length > 0 && normalizedIssueType !== MATCHING_ISSUE_TYPE;
 
@@ -181,35 +349,34 @@ export function EolMappingReviewPanel({ qualityFilters }: Props) {
     page: 0,
     size: 200
   }), [qualityFilters]);
+
   const hasIntersectionFilters = Boolean(
     qualityFilters?.severity
-      || qualityFilters?.affectsActiveFindings != null
-      || (qualityFilters?.assetType?.length ?? 0) > 0
-      || (qualityFilters?.sourceSystem?.length ?? 0) > 0
-      || (qualityFilters?.ecosystem?.length ?? 0) > 0
-      || (qualityFilters?.query?.trim().length ?? 0) > 0
+    || qualityFilters?.affectsActiveFindings != null
+    || (qualityFilters?.assetType?.length ?? 0) > 0
+    || (qualityFilters?.sourceSystem?.length ?? 0) > 0
+    || (qualityFilters?.ecosystem?.length ?? 0) > 0
+    || (qualityFilters?.query?.trim().length ?? 0) > 0
   );
+
   const filteredMappingIssuesQuery = useOperationalQualityIssuesQuery(
     mappingIssueFilters,
     hasIntersectionFilters && !issueTypeExcludesMappingReview
   );
-  const [confirmSlug, setConfirmSlug] = React.useState<Record<string, string>>({});
-  const [busyKey, setBusyKey] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<MappingNotice | null>(null);
-  const eolCatalogHref = pathForTab('end-of-life');
 
   const filteredIdentityIds = React.useMemo(
     () => new Set(
       (filteredMappingIssuesQuery.data?.items ?? [])
-        .map((issue) => issue.sourceObjectId)
-        .filter((value): value is string => Boolean(value))
+        .map(issue => issue.sourceObjectId)
+        .filter((v): v is string => Boolean(v))
     ),
     [filteredMappingIssuesQuery.data?.items]
   );
+
   const filteredList = React.useMemo(() => {
     if (issueTypeExcludesMappingReview) return [];
     if (!hasIntersectionFilters || !filteredMappingIssuesQuery.data) return unresolvedList;
-    return unresolvedList.filter((item) => filteredIdentityIds.has(item.softwareIdentityId));
+    return unresolvedList.filter(item => filteredIdentityIds.has(item.softwareIdentityId));
   }, [
     filteredIdentityIds,
     filteredMappingIssuesQuery.data,
@@ -226,109 +393,19 @@ export function EolMappingReviewPanel({ qualityFilters }: Props) {
       && !filteredMappingIssuesQuery.data
     );
 
-  const suggestionQueries = useQueries({
-    queries: filteredList.map(item => ({
-      queryKey: ['eol-slug-suggestions', item.normalizedKey],
-      queryFn: () => api.listEolMappingSuggestions(item.normalizedKey),
-      staleTime: 5 * 60 * 1000
-    }))
-  });
+  const eolCatalogHref = pathForTab('end-of-life');
 
-  const suggestionsMap = React.useMemo(() => {
-    const map = new Map<string, EolSlugSuggestion[]>();
-    filteredList.forEach((item, index) => {
-      map.set(item.normalizedKey, suggestionQueries[index]?.data ?? []);
+  function toggleExpand(identityId: string) {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(identityId)) next.delete(identityId); else next.add(identityId);
+      return next;
     });
-    return map;
-  }, [filteredList, suggestionQueries]);
+  }
 
-  const reviewColumns = React.useMemo<DataTableColumn[]>(() => [
-    { id: 'software', label: 'Software', header: 'Software', initialSize: 240 },
-    { id: 'footprint', label: 'Footprint', header: 'Footprint', initialSize: 200 },
-    { id: 'exposure', label: 'Exposure', header: 'Exposure', initialSize: 160 },
-    { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 160 },
-    { id: 'eolSlug', label: 'EOL Slug', header: 'EOL Slug', initialSize: 360 },
-  ], []);
-
-  const handleConfirmMapping = React.useCallback(async (item: UnresolvedEolMapping) => {
-    const slug = confirmSlug[item.normalizedKey]?.trim();
-    if (!slug) {
-      setNotice({ kind: 'error', message: `Enter an endoflife.date slug before confirming ${item.displayName}.` });
-      return;
-    }
-    setBusyKey(item.normalizedKey);
-    setNotice(null);
-    try {
-      await api.confirmEolMapping(item.normalizedKey, slug);
-      setConfirmSlug(prev => { const next = { ...prev }; delete next[item.normalizedKey]; return next; });
-      setNotice({ kind: 'success', message: `Mapped ${item.displayName} to ${slug}.` });
-      await Promise.all(INVALIDATION_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
-    } catch (error) {
-      setNotice({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusyKey(null);
-    }
-  }, [confirmSlug, queryClient]);
-
-  const reviewRows = React.useMemo<DataTableRow[]>(() => (
-    filteredList.map((item) => {
-      const draft = confirmSlug[item.normalizedKey] ?? '';
-      const dropdownSuggestions = suggestionsMap.get(item.normalizedKey) ?? [];
-      const isBusy = busyKey === item.normalizedKey;
-      return {
-        id: item.normalizedKey,
-        cells: {
-          software: {
-            content: (
-              <div className="software-identity-row-stack">
-                <span>{item.displayName}</span>
-                <span className="panel-caption mono">{item.normalizedKey}</span>
-              </div>
-            )
-          },
-          footprint: {
-            content: (
-              <div className="software-identity-row-stack">
-                <span>{formatCount(item.assetCount)} assets</span>
-                <span className="panel-caption">
-                  {formatCount(item.componentCount)} components · {formatCount(item.versionCount)} versions
-                </span>
-              </div>
-            )
-          },
-          exposure: {
-            content: (
-              <div className="software-identity-row-stack">
-                <span>{formatCount(item.openFindingCount)} findings</span>
-                <span className="panel-caption">{formatCount(item.openVulnerabilityCount)} vulns</span>
-              </div>
-            )
-          },
-          lastObserved: { content: formatInstant(item.lastObservedAt) },
-          eolSlug: {
-            content: (
-              <div className="eol-slug-confirm-row">
-                <SlugSuggestInput
-                  value={draft}
-                  onChange={(val) => setConfirmSlug(prev => ({ ...prev, [item.normalizedKey]: val }))}
-                  suggestions={dropdownSuggestions}
-                  disabled={isBusy}
-                />
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={isBusy || !draft.trim()}
-                  onClick={() => void handleConfirmMapping(item)}
-                >
-                  {isBusy ? 'Saving...' : 'Confirm'}
-                </button>
-              </div>
-            )
-          },
-        }
-      };
-    })
-  ), [busyKey, confirmSlug, filteredList, handleConfirmMapping, suggestionsMap]);
+  const handleMapped = React.useCallback(async () => {
+    await Promise.all(INVALIDATION_KEYS.map(queryKey => queryClient.invalidateQueries({ queryKey })));
+  }, [queryClient]);
 
   return (
     <div className="eol-mapping-review">
@@ -344,14 +421,8 @@ export function EolMappingReviewPanel({ qualityFilters }: Props) {
         </a>
       </div>
 
-      {notice && (
-        <div className={`notice${notice.kind === 'error' ? ' error' : ''}`}>
-          {notice.message}
-        </div>
-      )}
-
       {loadingReviewList && (
-        <div className="panel-caption" style={{ padding: '24px 0' }}>Loading...</div>
+        <div className="panel-caption" style={{ padding: '24px 0' }}>Loading…</div>
       )}
 
       {!loadingReviewList && unresolvedMappingsQuery.error instanceof Error && (
@@ -381,11 +452,32 @@ export function EolMappingReviewPanel({ qualityFilters }: Props) {
       {!loadingReviewList && filteredList.length > 0 && (
         <>
           <div className="table-scroll">
-            <DataTable
-              storageKey="operations-quality-eol-mapping-review"
-              columns={reviewColumns}
-              rows={reviewRows}
-            />
+            <table className="resizable-table">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 240 }}>Software</th>
+                  <th style={{ minWidth: 180 }}>Footprint</th>
+                  <th style={{ minWidth: 140 }}>Exposure</th>
+                  <th style={{ minWidth: 160 }}>Last Observed</th>
+                  <th style={{ minWidth: 360 }}>EOL Slug</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredList.map(item => (
+                  <React.Fragment key={item.softwareIdentityId}>
+                    <EolIdentityRow
+                      item={item}
+                      isExpanded={expandedIds.has(item.softwareIdentityId)}
+                      onToggle={() => toggleExpand(item.softwareIdentityId)}
+                      onMapped={handleMapped}
+                    />
+                    {expandedIds.has(item.softwareIdentityId) && (
+                      <EolVersionRows identityId={item.softwareIdentityId} />
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           {!hasIntersectionFilters && unresolvedTotalPages > 1 && (
