@@ -36,6 +36,8 @@ export type Finding = {
   eolDate?: string;
   isEol?: boolean;
   eolDaysRemaining?: number;
+  incidentId?: string;
+  incidentStatus?: string;
 };
 export type FindingPage = {
   items: Finding[];

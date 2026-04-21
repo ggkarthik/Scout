@@ -1,12 +1,10 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   DataTable,
   type DataTableColumn,
   type DataTableRow
 } from '../components/DataTable';
-import { EolMappingReviewPanel } from '../components/EolMappingReviewPanel';
 import type {
   OperationalQualityIssue
 } from '../features/operations/types';
@@ -59,13 +57,7 @@ function ownerDestination(issue: OperationalQualityIssue): string {
   if (issue.domain === 'INGESTION') return 'Connect';
   if (issue.domain === 'PROJECTION_FRESHNESS') return 'Operations';
   if (issue.domain === 'VEX') return 'CVE Workbench';
-  if (issue.domain === 'EOL') {
-    return issue.issueType === 'SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING'
-      ? 'Operations Quality'
-      : issue.primaryLabel
-        ? 'Software Identities'
-        : 'EOL';
-  }
+  if (issue.domain === 'EOL') return issue.primaryLabel ? 'Software Identities' : 'EOL';
   if (issue.assetType === 'HOST') return 'Hosts';
   return issue.sourceObjectType === 'SOFTWARE_IDENTITY' ? 'Software Identities' : 'Inventory';
 }
@@ -177,11 +169,8 @@ function DetailDrawer({
 }
 
 export function OperationsQualityPage() {
-  const [searchParams] = useSearchParams();
-  const requestedDomainParam = (searchParams.get('domain') ?? '').trim().toUpperCase();
-  const requestedDomain = requestedDomainParam in DOMAIN_LABELS ? requestedDomainParam : '';
   const [queryInput, setQueryInput] = React.useState('');
-  const [domain, setDomain] = React.useState(requestedDomain);
+  const [domain, setDomain] = React.useState('');
   const [issueType, setIssueType] = React.useState('');
   const [severity, setSeverity] = React.useState('');
   const [affectsActiveFindings, setAffectsActiveFindings] = React.useState<'all' | 'yes' | 'no'>('all');
@@ -220,25 +209,10 @@ export function OperationsQualityPage() {
         : null;
 
   React.useEffect(() => {
-    setDomain(requestedDomain);
-  }, [requestedDomain]);
-
-  React.useEffect(() => {
     setPage(0);
   }, [domain, issueType, severity, affectsActiveFindings, assetType, sourceSystem, ecosystem, query]);
 
   const issues = React.useMemo(() => pageData?.items ?? [], [pageData?.items]);
-  const eolReviewFilters = React.useMemo(() => ({
-    issueType: issueType || undefined,
-    severity: severity || undefined,
-    affectsActiveFindings: affectsActiveFindings === 'all'
-      ? undefined
-      : affectsActiveFindings === 'yes',
-    assetType: assetType ? [assetType as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'] : undefined,
-    sourceSystem: sourceSystem ? [sourceSystem] : undefined,
-    ecosystem: ecosystem ? [ecosystem] : undefined,
-    query: query || undefined
-  }), [affectsActiveFindings, assetType, ecosystem, issueType, query, severity, sourceSystem]);
   const issueColumns = React.useMemo<DataTableColumn[]>(() => [
     { id: 'issue', label: 'Issue', header: 'Issue', initialSize: 240 },
     { id: 'domain', label: 'Domain', header: 'Domain', initialSize: 140 },
@@ -408,46 +382,40 @@ export function OperationsQualityPage() {
           </label>
         </div>
 
-        {domain === 'EOL' ? (
-          <EolMappingReviewPanel qualityFilters={eolReviewFilters} />
-        ) : (
+        {error && <div className="notice error">Failed to load quality issues: {error}</div>}
+        {loading && !pageData && <div className="notice">Loading quality issues...</div>}
+
+        {!loading && issues.length === 0 && !error && (
+          <div className="empty-state">
+            <p>No quality issues match the current filters.</p>
+          </div>
+        )}
+
+        {issues.length > 0 && (
           <>
-            {error && <div className="notice error">Failed to load quality issues: {error}</div>}
-            {loading && !pageData && <div className="notice">Loading quality issues...</div>}
+            <div className="table-scroll">
+              <DataTable
+                storageKey="operations-quality-issues"
+                columns={issueColumns}
+                rows={issueRows}
+              />
+            </div>
 
-            {!loading && issues.length === 0 && !error && (
-              <div className="empty-state">
-                <p>No quality issues match the current filters.</p>
-              </div>
-            )}
-
-            {issues.length > 0 && (
-              <>
-                <div className="table-scroll">
-                  <DataTable
-                    storageKey="operations-quality-issues"
-                    columns={issueColumns}
-                    rows={issueRows}
-                  />
-                </div>
-
-                <div className="pagination quality-pagination">
-                  <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>
-                    Previous
-                  </button>
-                  <span>
-                    Page {(pageData?.page ?? 0) + 1} of {Math.max(1, pageData?.totalPages ?? 1)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((current) => (pageData && current + 1 < pageData.totalPages ? current + 1 : current))}
-                    disabled={!pageData || page + 1 >= pageData.totalPages}
-                  >
-                    Next
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="pagination quality-pagination">
+              <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>
+                Previous
+              </button>
+              <span>
+                Page {(pageData?.page ?? 0) + 1} of {Math.max(1, pageData?.totalPages ?? 1)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => (pageData && current + 1 < pageData.totalPages ? current + 1 : current))}
+                disabled={!pageData || page + 1 >= pageData.totalPages}
+              >
+                Next
+              </button>
+            </div>
           </>
         )}
       </section>

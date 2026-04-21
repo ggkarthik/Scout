@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-04-14
+Last updated: 2026-03-27
 
 ## Why This Fourth Document Exists
 
@@ -32,10 +32,9 @@ Runtime shape:
 
 ### 2. Vulnerability Intelligence In
 
-- The backend syncs NVD, KEV, GHSA, EPSS, Microsoft CSAF/VEX, Red Hat CSAF/VEX, and advisory imports.
+- The backend syncs NVD, KEV, GHSA, Microsoft CSAF/VEX, Red Hat CSAF/VEX, and advisory imports.
 - Canonical vulnerability rows and summary/read-model tables are refreshed.
 - Normalized target records are built for later matching.
-- EPSS scores are refreshed daily from the FIRST.org API independently of the main NVD sync.
 
 ### 3. Deterministic Correlation
 
@@ -47,7 +46,7 @@ Runtime shape:
 ### 4. Org-CVE Projection
 
 - Component states are rolled up into `org_cve_records`.
-- The frontend uses this view for the Vulnerability Repository section and the CVE Assessment Workbench workflow.
+- The frontend uses this view for the Org CVEs table and workbench workflow.
 - Freshness is now durable and event-driven inside the monolith: ingest paths enqueue projection deltas, and the background worker refreshes `component_vulnerability_states` and `org_cve_records`.
 
 ### 5. Dashboard Noise Projection
@@ -74,9 +73,7 @@ The queue worker batches those deltas and updates only the affected scopes. It a
 ### 7. Findings and Workflow
 
 - Findings are created, reopened, resolved, suppressed, or auto-closed according to policy and recomputation logic.
-- Each finding now has a human-readable `display_id` (e.g., `Find00001`) for analyst-facing references.
 - Analysts can create investigations, run applicability assessments, and manually create findings from the CVE workflow APIs.
-- Investigation summaries (deterministic rule-based and AI-assisted) can be generated and persisted against `org_cve_records` for quick analyst orientation.
 
 ### 8. Operational Maintenance
 
@@ -88,7 +85,7 @@ A 4-stage weekly pipeline tracks software end-of-life status for all active inve
 
 1. **Catalog refresh** — fetches all product slugs and CPE/PURL identifiers from endoflife.date into `eol_product_catalog`
 2. **Release data refresh** — conditionally fetches release cycles for tracked slugs (respects `If-Modified-Since`) into `eol_releases`
-3. **Slug resolution** — maps `SoftwareIdentity` rows to EOL slugs via `EolSlugResolverService` into `software_eol_mapping`; manual confirmations are now audited with `confirmed_by`, `confirmed_at`, and `previous_slug`
+3. **Slug resolution** — maps `SoftwareIdentity` rows to EOL slugs via `EolSlugResolverService` into `software_eol_mapping`
 4. **Denormalization** — set-based `DISTINCT ON` update writes `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, and `latest_supported_version` onto both `inventory_components` and `software_instances`, then enqueues lifecycle deltas for scoped org-CVE refresh
 5. **Date sweep** — daily lifecycle sweep catches date-driven EOL/EOS transitions even when no source feed changed
 
@@ -100,23 +97,22 @@ What is actively exposed in the UI today:
 
 - dashboard metrics (with EOL risk widget)
 - findings management
-- operational metrics (Quality, Pipeline, Platform Health sub-views) including SLO status panel
-- Vulnerability Repository section (Dashboard, Vulnerabilities, CVE Assessment Workbench) replacing the legacy Vulnerability Intelligence section
-- inventory component views (Software Identities, Hosts)
-- host asset detail page with CI metadata, aliases, software instances, and findings (reachable from both Inventory and Vulnerability Repository sections)
-- vulnerability source filter configuration per source system (NVD, GHSA, CSAF, etc.)
+- operational metrics (Quality, Pipeline, Platform Health sub-views)
+- vulnerability intelligence list/detail
+- org-CVE exposure list with CVE Assessment Workbench drawer
+- inventory component views (Software Identities, Hosts, Container Images, Repositories)
+- host asset detail page with CI metadata, aliases, software instances, and findings
 - ServiceNow CMDB live connector setup, connection testing, and live sync trigger
 - Inventory Run Queue showing all host/container/SBOM ingestion run history
 - risk policy and GitHub pipeline configuration
 - End-of-Life component tracking (EolPage) with filter tabs, CSV export, and unresolved-mapping review
 - EOL source panel in Connect UI for manual pipeline stage triggers
-- Connect Processing Jobs view for internal maintenance jobs (VEX repair, rollout backfills)
 
 What exists in code but is not fully surfaced or is still transitional:
 
 - standalone `CveDetailPage.tsx`
 - archive migration endpoints and manual SQL migration support
-- Container Images and Repositories inventory views (type definitions exist; not in active sidebar navigation)
+- several conceptual inventory categories without dedicated backend models
 
 ## Major Architectural Decisions
 
@@ -174,9 +170,7 @@ Important built-in jobs:
 - stale asset inactivation at `02:05`
 - nightly VEX freshness sweep at `02:30` (queue-driven)
 - lifecycle date sweep at `00:15`
-- EPSS score refresh at `03:15` (configurable via `app.epss.refresh-cron`)
 - GitHub SBOM source execution every `5` minutes
-- ServiceNow CMDB auto-sync check every `5` minutes
 - suppression expiry reopening every `15` minutes
 - hourly policy-based auto-close sweep
 - weekly EOL pipeline (Sunday): catalog `02:00`, releases `03:00`, slug resolution `03:30`, denormalization `04:00`

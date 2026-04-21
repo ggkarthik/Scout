@@ -5,12 +5,10 @@ import {
   type DataTableRow
 } from './DataTable';
 import { useEolReleasesQuery } from '../features/eol/queries';
-import type { EolProductCatalog } from '../features/eol/types';
 import { EolBadge } from './EolBadge';
 
 type EolDetailDrawerProps = {
   slug: string;
-  catalogProduct?: EolProductCatalog;
   cycle?: string;
   packageName?: string;
   version?: string;
@@ -20,32 +18,8 @@ type EolDetailDrawerProps = {
   onClose: () => void;
 };
 
-function formatInstant(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString();
-}
-
-function formatIdentifier(primary?: string, secondary?: string): string {
-  if (!primary && !secondary) {
-    return '-';
-  }
-  if (primary && secondary) {
-    return `${primary}/${secondary}`;
-  }
-  return primary ?? secondary ?? '-';
-}
-
 export function EolDetailDrawer({
   slug,
-  catalogProduct,
   cycle,
   packageName,
   version,
@@ -61,20 +35,6 @@ export function EolDetailDrawer({
 
   const thisRelease = releases?.find(r => r.cycle === cycle);
   const hasStatusContext = isEol != null || daysRemaining != null || eolDate != null;
-  const hasCatalogReference = Boolean(catalogProduct);
-  const catalogReleaseCount = catalogProduct?.releaseCount ?? releases?.length ?? 0;
-  const hasLifecycleContext = Boolean(
-    !catalogProduct
-      || cycle
-      || hasStatusContext
-      || eolDate
-      || thisRelease?.supportPhase
-      || thisRelease?.supportEndDate
-      || thisRelease?.extendedSupportDate
-      || thisRelease?.securitySupportDate
-      || thisRelease?.latestVersion
-      || thisRelease?.lts
-  );
   const releaseColumns = React.useMemo<DataTableColumn[]>(() => [
     { id: 'cycle', label: 'Cycle', header: 'Cycle', initialSize: 120 },
     { id: 'eolDate', label: 'EOL Date', header: 'EOL Date', initialSize: 140 },
@@ -125,125 +85,68 @@ export function EolDetailDrawer({
         </div>
 
         <div className="eol-drawer-body">
-          {hasCatalogReference && (
-            <div className="eol-drawer-section">
-              <div className="eol-drawer-section-title">Catalog Reference</div>
+          <div className="eol-drawer-section">
+            <div className="eol-drawer-row">
+              <span className="eol-drawer-label">Product</span>
+              <span className="eol-drawer-value mono">{slug}</span>
+            </div>
+            {cycle && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">Display Name</span>
-                <span className="eol-drawer-value">{catalogProduct?.displayName || slug}</span>
+                <span className="eol-drawer-label">Selected Cycle</span>
+                <span className="eol-drawer-value mono">{cycle}</span>
               </div>
+            )}
+            {hasStatusContext && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">Slug</span>
-                <span className="eol-drawer-value mono">{slug}</span>
-              </div>
-              <div className="eol-drawer-row">
-                <span className="eol-drawer-label">Coverage</span>
+                <span className="eol-drawer-label">Status</span>
                 <span className="eol-drawer-value">
-                  {catalogReleaseCount > 0
-                    ? `${catalogReleaseCount.toLocaleString()} ${catalogReleaseCount === 1 ? 'cycle' : 'cycles'} loaded`
-                    : 'Reference-only entry'}
+                  <EolBadge isEol={isEol} daysRemaining={daysRemaining} eolDate={eolDate} />
                 </span>
               </div>
-              {(catalogProduct?.aliases?.length ?? 0) > 0 && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Aliases</span>
-                  <span className="eol-drawer-value eol-drawer-value--wrap">
-                    {(catalogProduct?.aliases ?? []).join(', ')}
-                  </span>
-                </div>
-              )}
+            )}
+            {eolDate && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">CPE</span>
-                <span className="eol-drawer-value mono">
-                  {formatIdentifier(catalogProduct?.cpeVendor, catalogProduct?.cpeProduct)}
-                </span>
+                <span className="eol-drawer-label">EOL Date</span>
+                <span className="eol-drawer-value">{eolDate}</span>
               </div>
+            )}
+            {thisRelease?.supportPhase && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">PURL</span>
-                <span className="eol-drawer-value mono">
-                  {formatIdentifier(catalogProduct?.purlType, catalogProduct?.purlNamespace)}
-                </span>
+                <span className="eol-drawer-label">Support Phase</span>
+                <span className="eol-drawer-value">{thisRelease.supportPhase}</span>
               </div>
-              {catalogProduct?.lastFetchedAt && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Last Fetched</span>
-                  <span className="eol-drawer-value">{formatInstant(catalogProduct.lastFetchedAt)}</span>
-                </div>
-              )}
-              {catalogProduct?.lastModified && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Last Modified</span>
-                  <span className="eol-drawer-value mono">{catalogProduct.lastModified}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {hasLifecycleContext && (
-            <div className="eol-drawer-section">
-              <div className="eol-drawer-section-title">Lifecycle Context</div>
+            )}
+            {thisRelease?.supportEndDate && (
               <div className="eol-drawer-row">
-                <span className="eol-drawer-label">Product</span>
-                <span className="eol-drawer-value mono">{slug}</span>
+                <span className="eol-drawer-label">Active Support Ends</span>
+                <span className="eol-drawer-value">{thisRelease.supportEndDate}</span>
               </div>
-              {cycle && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Selected Cycle</span>
-                  <span className="eol-drawer-value mono">{cycle}</span>
-                </div>
-              )}
-              {hasStatusContext && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Status</span>
-                  <span className="eol-drawer-value">
-                    <EolBadge isEol={isEol} daysRemaining={daysRemaining} eolDate={eolDate} />
-                  </span>
-                </div>
-              )}
-              {eolDate && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">EOL Date</span>
-                  <span className="eol-drawer-value">{eolDate}</span>
-                </div>
-              )}
-              {thisRelease?.supportPhase && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Support Phase</span>
-                  <span className="eol-drawer-value">{thisRelease.supportPhase}</span>
-                </div>
-              )}
-              {thisRelease?.supportEndDate && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Active Support Ends</span>
-                  <span className="eol-drawer-value">{thisRelease.supportEndDate}</span>
-                </div>
-              )}
-              {thisRelease?.extendedSupportDate && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Extended Support Ends</span>
-                  <span className="eol-drawer-value">{thisRelease.extendedSupportDate}</span>
-                </div>
-              )}
-              {thisRelease?.securitySupportDate && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Security Support Ends</span>
-                  <span className="eol-drawer-value">{thisRelease.securitySupportDate}</span>
-                </div>
-              )}
-              {thisRelease?.latestVersion && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">Latest Version</span>
-                  <span className="eol-drawer-value mono">{thisRelease.latestVersion}</span>
-                </div>
-              )}
-              {thisRelease?.lts && (
-                <div className="eol-drawer-row">
-                  <span className="eol-drawer-label">LTS</span>
-                  <span className="eol-drawer-value">Yes</span>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+            {thisRelease?.extendedSupportDate && (
+              <div className="eol-drawer-row">
+                <span className="eol-drawer-label">Extended Support Ends</span>
+                <span className="eol-drawer-value">{thisRelease.extendedSupportDate}</span>
+              </div>
+            )}
+            {thisRelease?.securitySupportDate && (
+              <div className="eol-drawer-row">
+                <span className="eol-drawer-label">Security Support Ends</span>
+                <span className="eol-drawer-value">{thisRelease.securitySupportDate}</span>
+              </div>
+            )}
+            {thisRelease?.latestVersion && (
+              <div className="eol-drawer-row">
+                <span className="eol-drawer-label">Latest Version</span>
+                <span className="eol-drawer-value mono">{thisRelease.latestVersion}</span>
+              </div>
+            )}
+            {thisRelease?.lts && (
+              <div className="eol-drawer-row">
+                <span className="eol-drawer-label">LTS</span>
+                <span className="eol-drawer-value">Yes</span>
+              </div>
+            )}
+          </div>
 
           <div className="eol-drawer-section">
             <div className="eol-drawer-section-title">All Release Cycles</div>
