@@ -146,6 +146,7 @@ function buildFallbackRecord(detail: CveDetail, externalId: string): OrgSpecific
     eolComponentCount: 0,
     eosComponentCount: 0,
     hasInvestigationSummary: false,
+    hasAiSolution: false,
   };
 }
 

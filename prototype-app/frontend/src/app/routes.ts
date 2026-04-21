@@ -170,6 +170,16 @@ export function pathForConnectView(view: ConnectRouteView): string {
   return `/connect/${normalizeConnectRouteView(view)}`;
 }
 
+export function pathForFindingDetail(displayId: string, returnTo?: string): string {
+  const encodedId = encodeURIComponent(displayId);
+  if (!returnTo || returnTo.trim().length === 0) {
+    return `/findings/${encodedId}`;
+  }
+  const searchParams = new URLSearchParams();
+  searchParams.set('returnTo', returnTo.trim());
+  return `/findings/${encodedId}?${searchParams.toString()}`;
+}
+
 export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';

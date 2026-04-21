@@ -4,8 +4,6 @@
 **Purpose:** Plain-language explanation of every decision, rule, and process inside the application — written so that tweaks to the logic can be proposed without needing to read code
 **How to use it:** Each section has a short summary followed by a numbered, step-by-step walkthrough. Every section is detailed enough to draw a flow diagram from.
 
-Last updated: 2026-04-14
-
 ---
 
 ## Table of Contents
@@ -42,7 +40,7 @@ VulnWatch is a security operations tool that answers one core question: **which 
 
 1. **Inventory comes in.** Someone uploads a software bill of materials (SBOM) file — a machine-readable list of every software package inside an application, container, or server. Alternatively, the system fetches SBOMs automatically from GitHub or via a URL.
 
-2. **Vulnerability intelligence comes in.** The system downloads vulnerability data daily from five authoritative external sources: the US National Vulnerability Database (NVD), the CISA Known Exploited Vulnerabilities list (KEV), GitHub Security Advisories (GHSA), vendor security advisories in CSAF/VEX format from Microsoft and Red Hat, and the FIRST.org Exploit Prediction Scoring System (EPSS) for daily exploit probability scores.
+2. **Vulnerability intelligence comes in.** The system downloads vulnerability data daily from four authoritative external sources: the US National Vulnerability Database (NVD), the CISA Known Exploited Vulnerabilities list (KEV), GitHub Security Advisories (GHSA), and vendor security advisories in CSAF/VEX format from Microsoft and Red Hat.
 
 3. **Matching happens.** The system compares every software package in inventory against every known vulnerability to find candidates — pairs where the software *could* be affected.
 
@@ -151,7 +149,7 @@ An SBOM is a structured file that lists every software package inside a system. 
 ## 3. Bringing Vulnerability Data In (Intelligence Ingestion)
 
 ### Summary
-The system downloads vulnerability information from five external sources on a scheduled basis. Each source provides different kinds of data: NVD provides detailed technical vulnerability records and affected software configuration trees; KEV flags which vulnerabilities are actively being exploited; GHSA provides package-level advisory data tied to ecosystems; CSAF and VEX provide vendor-specific statements about whether their products are affected; and EPSS provides a daily probability score estimating how likely each vulnerability is to be exploited in the next 30 days. All of this data is merged into a single canonical record per CVE.
+The system downloads vulnerability information from four external sources on a scheduled basis. Each source provides different kinds of data: NVD provides detailed technical vulnerability records and affected software configuration trees; KEV flags which vulnerabilities are actively being exploited; GHSA provides package-level advisory data tied to ecosystems; CSAF and VEX provide vendor-specific statements about whether their products are affected. All of this data is merged into a single canonical record per CVE.
 
 ### Step-by-Step Logic
 
@@ -218,26 +216,13 @@ The system downloads vulnerability information from five external sources on a s
 
 15. **Freshness tracking:** Every VEX statement records when it was published and when it was last seen. The system tracks whether a statement is still fresh or has become stale (see Section 6).
 
-#### E. EPSS (Exploit Prediction Scoring System) — Daily at 03:15
+#### E. How Sources Are Merged
 
-16. **What it provides:** A probability score between 0 and 1 representing how likely it is that a given CVE will be exploited in the next 30 days. Published daily by FIRST.org. A score of 0.80 means an 80% probability of exploitation within 30 days.
+16. **One canonical record per CVE:** All sources write to the same central vulnerability record. The CVE ID (`CVE-XXXX-XXXXXX`) is the shared key.
 
-17. **How it is fetched:** The FIRST.org EPSS API is called once daily. Only vulnerability records whose EPSS score has not been updated in the last 25 hours are refreshed (batched calls).
+17. **Source-specific observations are preserved separately** so the UI can show where each piece of data came from (which source, when last updated).
 
-18. **What is captured per CVE:**
-    - EPSS score (0–1)
-    - Seven-day score delta (how much the score moved in the past week — useful for spotting rapidly escalating threats)
-    - Timestamp of when the score was last refreshed
-
-19. **How it is used:** The EPSS score feeds directly into the risk score formula (Section 8) and is shown on CVE detail views alongside the CVSS score.
-
-#### F. How Sources Are Merged
-
-20. **One canonical record per CVE:** All sources write to the same central vulnerability record. The CVE ID (`CVE-XXXX-XXXXXX`) is the shared key.
-
-21. **Source-specific observations are preserved separately** so the UI can show where each piece of data came from (which source, when last updated).
-
-22. **After every ingestion batch, correlation is triggered** — the system re-runs matching for all CVEs that were updated, to reflect new vulnerability data in findings.
+18. **After every ingestion batch, correlation is triggered** — the system re-runs matching for all CVEs that were updated, to reflect new vulnerability data in findings.
 
 ---
 
@@ -576,7 +561,6 @@ A "finding" is a tracked work item representing a confirmed vulnerability exposu
 4. **Finding fields set at creation:**
    - Status: **OPEN**
    - Decision state: **AFFECTED**
-   - Display ID: a sequential human-readable reference such as `Find00001`, auto-assigned by the system and never reused
    - First observed: current timestamp
    - Last observed: current timestamp
    - Risk score: calculated per Section 8
@@ -818,7 +802,7 @@ Software inventory goes stale if a system is decommissioned or stops reporting. 
 ## 13. Automated GitHub Inventory Collection
 
 ### Summary
-GitHub can automatically generate an SBOM for any repository using its dependency graph feature, and it can also attach SBOMs to container images published to the GitHub Container Registry (GHCR). The system can be configured to poll GitHub repositories on a schedule and automatically ingest the latest SBOM, removing the need for manual uploads. It can also scan an entire GitHub owner's GHCR namespace to find and ingest SBOMs from every tagged container image.
+GitHub can automatically generate an SBOM for any repository using its dependency graph feature. The system can be configured to poll GitHub repositories on a schedule and automatically ingest the latest SBOM, removing the need for manual uploads.
 
 ### Step-by-Step Logic
 
@@ -849,15 +833,9 @@ GitHub can automatically generate an SBOM for any repository using its dependenc
 7. **On success:** Source status = "completed," last-run timestamp updated, last error cleared.
 8. **On failure:** Source status = "failed," error message stored on the source record.
 
-#### D. GHCR Batch Ingestion
+#### D. Manual Trigger
 
-10. **In addition to repository SBOMs**, the system can run a one-time or on-demand scan of all container images published under a GitHub owner account. It enumerates all packages in GHCR, looks up the SBOMs attached as artifact attestations on each tagged image, and feeds every discovered SBOM through the same pipeline used for uploaded files.
-
-11. **Trust note:** GHCR attestation ingestion does not yet perform cryptographic signature verification of the attestation envelope. The system checks that the attestation subject matches the image digest and repository, but it does not yet validate the provenance certificate against GitHub or Sigstore identity. This feature is ready for automated ingestion but should not yet be used as a hard provenance gate.
-
-#### E. Manual Trigger
-
-12. **An analyst can manually trigger a run** for any configured source from the Configurations screen, bypassing the schedule.
+9. **An analyst can manually trigger a run** for any configured source from the Configurations screen, bypassing the schedule.
 
 ---
 
@@ -919,7 +897,7 @@ The system can pull host software inventory directly from a ServiceNow instance 
 ## 16. Dashboard Metrics and What They Measure
 
 ### Summary
-The application surfaces two dashboards — a risk-focused main security dashboard and an operational dashboard for team leads — plus a dedicated Vulnerability Repository section for CVE exposure management. Overview is intentionally limited to risk metrics and risk-oriented drill-downs. Operational metrics such as noise reduction, CPE coverage, correlation efficiency, freshness, and CSAF/VEX health belong under Operations, not Overview. This section describes exactly what each metric means, how it is calculated, and what business question it answers.
+The application surfaces two dashboards — a risk-focused main security dashboard and an operational dashboard for team leads. Overview is intentionally limited to risk metrics and risk-oriented drill-downs. Operational metrics such as noise reduction, CPE coverage, correlation efficiency, freshness, and CSAF/VEX health belong under Operations, not Overview. This section describes exactly what each metric means, how it is calculated, and what business question it answers.
 
 ### Step-by-Step Logic
 
@@ -1001,17 +979,8 @@ The application surfaces two dashboards — a risk-focused main security dashboa
 29. **Ingestion health:** Sync run history, success/failure counts for each feed type.
 30. **Queue depth:** Pipeline currently shows queued/running sync jobs, not durable delta-queue depth.
 31. **Overview boundary:** Operational diagnostics stay in Operations; the main Overview page is reserved for risk metrics and risk-oriented summaries.
-32. **Platform Health now includes projection telemetry:** noise-projection readiness, age, refresh failures, and projection refresh p95 help operators tell whether executive dashboard reads are fresh. Platform Health also surfaces SLO status — a summary of how many service-level objectives the platform is currently meeting versus breaching.
-33. **GitHub source status:** Last run time, status, and error messages for each configured GitHub SBOM source.
-
-#### K. Vulnerability Repository (CVE Exposure Management)
-
-34. **The Vulnerability Repository section** (accessible from the main navigation) is the primary surface for org-level CVE exposure analysis. It exposes:
-    - A **Dashboard** summarising the most critical unresolved CVEs, severity breakdown, and affected software/asset links.
-    - A **Vulnerabilities list** — a filterable view of all CVEs known to the system, with KEV/EPSS/severity filters and software-scope filters.
-    - The **CVE Assessment Workbench** — reached by clicking any CVE — where analysts can run investigations, conduct structured applicability assessments, create or suppress findings, and view per-component impact decisions.
-
-35. **The CVE Assessment Workbench** also supports generating an **investigation summary** — a brief structured write-up of the CVE's risk context that is saved against the org-level CVE record so all analysts working the same CVE see the same starting point.
+31. **Platform Health now includes projection telemetry:** noise-projection readiness, age, refresh failures, and projection refresh p95 help operators tell whether executive dashboard reads are fresh.
+32. **GitHub source status:** Last run time, status, and error messages for each configured GitHub SBOM source.
 
 ---
 
@@ -1077,7 +1046,6 @@ Many of the rules described in this document use numeric thresholds or feature f
 | Microsoft + Red Hat CSAF/VEX sync | Daily at 01:45 | Downloads vendor security advisories and VEX statements |
 | Mark stale assets inactive | Daily at 02:05 | Transitions assets with no SBOM for 30+ days to INACTIVE |
 | VEX freshness sweep | Daily at 02:30 | Enqueues software deltas for components whose previously fresh VEX evidence may have gone stale |
-| EPSS score refresh | Daily at 03:15 | Fetches updated exploit probability scores from the FIRST.org EPSS API for stale vulnerability records |
 | Lifecycle date sweep | Daily at 00:15 | Catches EOL/EOS transitions caused only by the date rolling forward |
 | GitHub SBOM auto-fetch | Every 5 minutes | Runs configured GitHub SBOM sources that are due |
 | Suppression expiry check | Every 15 minutes | Reopens findings whose suppression has expired |
@@ -1142,8 +1110,6 @@ When a match is found it records:
 - whether an analyst has confirmed the mapping
 
 **Unresolved mappings** (software that could not be matched automatically) are surfaced in the UI so analysts can type the correct slug and confirm it. Confirmed mappings are never overwritten by the automated resolver.
-
-When an analyst manually confirms or overrides a mapping, the system records who made the change (`confirmed_by`), when the change was made (`confirmed_at`), and what the previous slug was (`previous_slug`). This audit trail supports compliance reviews of manual lifecycle decisions.
 
 **When it runs:** Sunday at 03:30, or manually.
 
@@ -1249,7 +1215,7 @@ This is useful for answering questions such as: "How broadly is nginx deployed?"
 
 #### D. Relationship to Other Views
 
-7. **Software Identities is the inventory summary layer.** The Hosts view shows individual component instances by asset. Software Identities shows the normalised product across all assets in one place.
+7. **Software Identities is the inventory summary layer.** The Hosts / Container Images / Repositories views show individual component instances. Software Identities shows the normalised product across all of them in one place.
 
 8. **EOL data flows from Software Identities outward.** When the EOL pipeline runs, it matches Software Identity records to EOL slugs, then denormalises the status back down to individual component and software instance records.
 

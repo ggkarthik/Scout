@@ -152,6 +152,18 @@ public class OrgCveRecord {
     @Column(name = "investigation_summary_generated_at")
     private Instant investigationSummaryGeneratedAt;
 
+    @Column(name = "ai_solution_json", length = 200000)
+    private String aiSolutionJson;
+
+    @Column(name = "ai_solution_generated_at")
+    private Instant aiSolutionGeneratedAt;
+
+    @Column(name = "ai_actions_json", length = 50000)
+    private String aiActionsJson;
+
+    @Column(name = "ai_actions_generated_at")
+    private Instant aiActionsGeneratedAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -451,6 +463,38 @@ public class OrgCveRecord {
 
     public void setInvestigationSummaryGeneratedAt(Instant investigationSummaryGeneratedAt) {
         this.investigationSummaryGeneratedAt = investigationSummaryGeneratedAt;
+    }
+
+    public String getAiSolutionJson() {
+        return aiSolutionJson;
+    }
+
+    public void setAiSolutionJson(String aiSolutionJson) {
+        this.aiSolutionJson = aiSolutionJson;
+    }
+
+    public Instant getAiSolutionGeneratedAt() {
+        return aiSolutionGeneratedAt;
+    }
+
+    public void setAiSolutionGeneratedAt(Instant aiSolutionGeneratedAt) {
+        this.aiSolutionGeneratedAt = aiSolutionGeneratedAt;
+    }
+
+    public String getAiActionsJson() {
+        return aiActionsJson;
+    }
+
+    public void setAiActionsJson(String aiActionsJson) {
+        this.aiActionsJson = aiActionsJson;
+    }
+
+    public Instant getAiActionsGeneratedAt() {
+        return aiActionsGeneratedAt;
+    }
+
+    public void setAiActionsGeneratedAt(Instant aiActionsGeneratedAt) {
+        this.aiActionsGeneratedAt = aiActionsGeneratedAt;
     }
 
     public Instant getCreatedAt() {

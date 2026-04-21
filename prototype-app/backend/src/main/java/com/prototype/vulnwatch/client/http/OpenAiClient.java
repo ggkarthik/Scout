@@ -20,7 +20,7 @@ public class OpenAiClient {
     @Value("${app.openai.api-key:}")
     private String apiKey;
 
-    @Value("${app.openai.base-url:https://api.openai.com}")
+    @Value("${app.openai.base-url:https://api.openai.com/v1}")
     private String baseUrl;
 
     @Value("${app.openai.model:gpt-4o-mini}")
@@ -42,27 +42,40 @@ public class OpenAiClient {
     }
 
     public String chatCompletion(String systemPrompt, String userPrompt) {
-        if (!isAvailable()) {
-            return null;
-        }
+        return chatCompletion(systemPrompt, userPrompt, 300);
+    }
+
+    public String chatCompletion(String systemPrompt, String userPrompt, int maxTokens) {
+        return doChat(systemPrompt, userPrompt, maxTokens, false);
+    }
+
+    /** Calls the chat completions API with response_format=json_object. */
+    public String chatCompletionJson(String systemPrompt, String userPrompt, int maxTokens) {
+        return doChat(systemPrompt, userPrompt, maxTokens, true);
+    }
+
+    private String doChat(String systemPrompt, String userPrompt, int maxTokens, boolean jsonMode) {
+        if (!isAvailable()) return null;
         try {
-            String url = baseUrl.stripTrailing() + "/v1/chat/completions";
+            String url = baseUrl.stripTrailing() + "/chat/completions";
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(apiKey);
 
-            Map<String, Object> body = Map.of(
-                "model", model,
-                "messages", List.of(
-                    Map.of("role", "system", "content", systemPrompt),
-                    Map.of("role", "user", "content", userPrompt)
-                ),
-                "max_tokens", 300,
-                "temperature", 0.3
-            );
+            java.util.LinkedHashMap<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("model", model);
+            body.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userPrompt)
+            ));
+            body.put("max_tokens", maxTokens);
+            body.put("temperature", 0.3);
+            if (jsonMode) {
+                body.put("response_format", Map.of("type", "json_object"));
+            }
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+            HttpEntity<java.util.LinkedHashMap<String, Object>> request = new HttpEntity<>(body, headers);
             ResponseEntity<JsonNode> response = restTemplate.exchange(url, HttpMethod.POST, request, JsonNode.class);
 
             JsonNode responseBody = response.getBody();

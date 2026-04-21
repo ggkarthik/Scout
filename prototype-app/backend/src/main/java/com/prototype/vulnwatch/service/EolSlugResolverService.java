@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.EolProductCatalog;
 import com.prototype.vulnwatch.domain.SoftwareEolMapping;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
-import com.prototype.vulnwatch.dto.EolSlugSuggestionDto;
 import com.prototype.vulnwatch.repo.EolProductCatalogRepository;
 import com.prototype.vulnwatch.repo.SoftwareEolMappingRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
@@ -13,7 +12,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -28,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  *   cpe_vendor + cpe_product in an in-memory catalog map.
  *
  * Tier 2 — PURL match (HIGH confidence): parses purl type and namespace, looks up in
- *   in-memory catalog maps + curated type/namespace hint map.
+ *   in-memory catalog maps + curated hint map.
  *
  * Tier 3 — Alias match (MEDIUM confidence): checks product name/vendor against the
  *   aliases stored on catalog entries.
@@ -45,19 +43,6 @@ public class EolSlugResolverService {
     private static final Logger LOG = LoggerFactory.getLogger(EolSlugResolverService.class);
 
     private static final int IDENTITY_PAGE_SIZE = 500;
-    private static final Set<String> LIBRARY_ECOSYSTEMS = Set.of(
-            "npm",
-            "pypi",
-            "gem",
-            "cargo",
-            "nuget",
-            "composer",
-            "maven",
-            "gomod",
-            "golang",
-            "go",
-            "rubygems"
-    );
 
     // Curated PURL type+namespace → slug hints.
     private static final Map<String, String> PURL_HINTS = Map.ofEntries(
@@ -69,11 +54,19 @@ public class EolSlugResolverService {
             Map.entry("rpm/opensuse", "opensuse"),
             Map.entry("rpm/sles", "sles"),
             Map.entry("apk/alpine", "alpine"),
+            Map.entry("pypi", "python"),
+            Map.entry("npm", "nodejs"),
+            Map.entry("gem", "ruby"),
+            Map.entry("golang", "go"),
+            Map.entry("cargo", "rust"),
+            Map.entry("nuget", "dotnet"),
+            Map.entry("composer", "php"),
             Map.entry("maven/org.springframework.boot", "spring-boot"),
             Map.entry("maven/org.apache.tomcat", "tomcat"),
             Map.entry("maven/mysql", "mysql"),
             Map.entry("maven/org.postgresql", "postgresql"),
-            Map.entry("oci/library", "docker")
+            Map.entry("docker", "docker"),
+            Map.entry("oci", "docker")
     );
 
     // Curated "publisher::product" → slug hints for Tier 4 name matching.
@@ -252,29 +245,6 @@ public class EolSlugResolverService {
         return resolveViaName(identity.getVendor(), identity.getProduct());
     }
 
-    public boolean shouldSurfaceForLifecycleReview(SoftwareIdentity identity, List<String> ecosystems) {
-        if (identity == null) {
-            return false;
-        }
-        if (resolve(identity) != null) {
-            return true;
-        }
-        if (identity.getCpe23() != null && !identity.getCpe23().isBlank()) {
-            return true;
-        }
-        List<String> normalizedEcosystems = ecosystems == null
-                ? List.of()
-                : ecosystems.stream()
-                        .filter(value -> value != null && !value.isBlank())
-                        .map(value -> value.trim().toLowerCase(Locale.ROOT))
-                        .distinct()
-                        .toList();
-        if (normalizedEcosystems.isEmpty()) {
-            return true;
-        }
-        return normalizedEcosystems.stream().anyMatch(ecosystem -> !LIBRARY_ECOSYSTEMS.contains(ecosystem));
-    }
-
     // -------------------------------------------------------------------------
     // In-memory resolution (used by resolveAll)
     // -------------------------------------------------------------------------
@@ -337,12 +307,16 @@ public class EolSlugResolverService {
             String hint = PURL_HINTS.get(type + "/" + namespace);
             if (hint != null) return new SlugMatch(hint, "HIGH", "PURL");
         }
+        String typeHint = PURL_HINTS.get(type);
+        if (typeHint != null) return new SlugMatch(typeHint, "HIGH", "PURL");
 
         // Catalog DB maps
         if (namespace != null) {
             String slug = purlTypeNsMap.get(type + "/" + namespace);
             if (slug != null) return new SlugMatch(slug, "HIGH", "PURL_DB");
         }
+        String typeSlug = purlTypeMap.get(type);
+        if (typeSlug != null) return new SlugMatch(typeSlug, "MEDIUM", "PURL_TYPE");
 
         return null;
     }
@@ -408,12 +382,16 @@ public class EolSlugResolverService {
             String hint = PURL_HINTS.get(type + "/" + namespace);
             if (hint != null) return new SlugMatch(hint, "HIGH", "PURL");
         }
+        String typeHint = PURL_HINTS.get(type);
+        if (typeHint != null) return new SlugMatch(typeHint, "HIGH", "PURL");
 
         if (namespace != null) {
             java.util.Optional<EolProductCatalog> dbMatch = eolProductCatalogRepository
                     .findByPurlTypeAndPurlNamespace(type, namespace);
             if (dbMatch.isPresent()) return new SlugMatch(dbMatch.get().getSlug(), "HIGH", "PURL_DB");
         }
+        java.util.Optional<EolProductCatalog> typeMatch = eolProductCatalogRepository.findByPurlType(type);
+        if (typeMatch.isPresent()) return new SlugMatch(typeMatch.get().getSlug(), "MEDIUM", "PURL_TYPE");
         return null;
     }
 
@@ -457,87 +435,6 @@ public class EolSlugResolverService {
             }
         }
         return null;
-    }
-
-    /**
-     * Returns all candidate slug matches for a given normalizedKey across all 4 tiers.
-     * Unlike resolve(), this does not stop at the first match — it collects one match
-     * per tier (deduplicated by slug) so callers can surface suggestions to analysts.
-     */
-    public List<SlugMatch> resolveCandidates(String normalizedKey) {
-        // Look up identity by mapping or parse vendor/product from key
-        SoftwareIdentity identity = null;
-        java.util.Optional<SoftwareEolMapping> mapping = softwareEolMappingRepository.findByNormalizedKey(normalizedKey);
-        if (mapping.isPresent() && mapping.get().getSoftwareIdentityId() != null) {
-            identity = softwareIdentityRepository.findById(mapping.get().getSoftwareIdentityId()).orElse(null);
-        }
-
-        // Fall back to parsing vendor::product from the normalized key
-        String vendor = "";
-        String product = "";
-        if (normalizedKey != null) {
-            String[] parts = normalizedKey.split("::", 2);
-            vendor  = parts.length > 0 ? parts[0] : "";
-            product = parts.length > 1 ? parts[1] : "";
-        }
-
-        String cpe23 = identity != null ? identity.getCpe23() : null;
-        String purl  = identity != null ? identity.getPurl()  : null;
-        String effectiveVendor  = identity != null && identity.getVendor()  != null ? identity.getVendor()  : vendor;
-        String effectiveProduct = identity != null && identity.getProduct() != null ? identity.getProduct() : product;
-
-        List<SlugMatch> candidates = new ArrayList<>();
-
-        SlugMatch cpeMatch = resolveViaCpe(cpe23);
-        if (cpeMatch != null) candidates.add(cpeMatch);
-
-        SlugMatch purlMatch = resolveViaPurl(purl);
-        if (purlMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(purlMatch.slug()))) {
-            candidates.add(purlMatch);
-        }
-
-        SlugMatch aliasMatch = resolveViaAliasDb(effectiveVendor, effectiveProduct);
-        if (aliasMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(aliasMatch.slug()))) {
-            candidates.add(aliasMatch);
-        }
-
-        SlugMatch nameMatch = resolveViaName(effectiveVendor, effectiveProduct);
-        if (nameMatch != null && candidates.stream().noneMatch(c -> c.slug().equals(nameMatch.slug()))) {
-            candidates.add(nameMatch);
-        }
-
-        // Tier 5: Text search fallback — used when no structured match was found.
-        // These items are in the unresolved list precisely because tiers 1-4 returned nothing,
-        // so substring matching against catalog slug/displayName is the only way to surface candidates.
-        if (candidates.isEmpty() && effectiveProduct != null && !effectiveProduct.isBlank()) {
-            String term = effectiveProduct.trim().toLowerCase(Locale.ROOT);
-            eolProductCatalogRepository
-                    .findTop5BySlugContainingIgnoreCaseOrDisplayNameContainingIgnoreCase(term, term)
-                    .forEach(match -> {
-                        if (candidates.stream().noneMatch(c -> c.slug().equals(match.getSlug()))) {
-                            candidates.add(new SlugMatch(match.getSlug(), "LOW", "TEXT_SEARCH"));
-                        }
-                    });
-        }
-
-        return candidates;
-    }
-
-    public List<EolSlugSuggestionDto> resolveSuggestions(String normalizedKey) {
-        return resolveCandidates(normalizedKey).stream()
-                .map(match -> {
-                    String displayName = eolProductCatalogRepository.findBySlug(match.slug())
-                            .map(catalog -> {
-                                String catalogDisplayName = catalog.getDisplayName();
-                                return catalogDisplayName != null && !catalogDisplayName.isBlank()
-                                        ? catalogDisplayName
-                                        : catalog.getSlug();
-                            })
-                            .orElse(match.slug());
-                    return new EolSlugSuggestionDto(match.slug(), displayName, match.confidence(), match.method());
-                })
-                .limit(5)
-                .toList();
     }
 
     // -------------------------------------------------------------------------

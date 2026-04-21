@@ -236,7 +236,10 @@ public class InvestigationService {
             investigation.addActivity(activity);
         }
 
-        investigation.setStatus(Investigation.InvestigationStatus.IN_PROGRESS);
+        Investigation.InvestigationStatus targetStatus = request.getStatus() != null
+                ? request.getStatus()
+                : Investigation.InvestigationStatus.IN_PROGRESS;
+        investigation.setStatus(targetStatus);
         investigation.setPriority(request.getPriority() != null ? request.getPriority() : Investigation.InvestigationPriority.MEDIUM);
         if (request.getNotes() != null) investigation.setNotes(request.getNotes());
         if (request.getAssignedTo() != null) investigation.setAssignedTo(request.getAssignedTo());
@@ -273,6 +276,7 @@ public class InvestigationService {
     // DTO for single-call submit (create-or-update)
     @lombok.Data
     public static class SubmitInvestigationRequest {
+        private Investigation.InvestigationStatus status;
         private Investigation.InvestigationPriority priority;
         private String assignedTo;
         private String notes;

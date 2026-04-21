@@ -109,9 +109,10 @@ public class CsafDiscoveryService {
             return List.of();
         }
 
-        List<CsafDocumentRef> sorted = new ArrayList<>(refs.values());
-        sorted.sort(Comparator.comparing(CsafDocumentRef::url));
-        return sorted;
+        // Preserve the insertion order from changes.csv (newest-modified first) so that
+        // the per-sync document limit processes recent CVEs before older ones.
+        // Previously this sorted alphabetically, which buried 2024/2025 CVEs beyond the limit.
+        return new ArrayList<>(refs.values());
     }
 
     private List<CsafDocumentRef> collectDocumentRefsFromRoot(String distributionRoot, boolean vexProfile, CsafProvider provider) {

@@ -265,4 +265,19 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
               and trim(f.vexProvider) <> ''
             """)
     List<String> findDistinctVexProvidersByTenant(@Param("tenant") Tenant tenant);
+
+    /** Findings that already have a linked ServiceNow incident (for daily status sync). */
+    @Query("select f from Finding f where f.incidentId is not null")
+    List<Finding> findAllWithIncidentId();
+
+    /** Find findings for a set of component IDs matching a CVE external ID. */
+    @Query("""
+            select f from Finding f
+            where f.component.id in :componentIds
+              and f.vulnerability.externalId = :cveId
+            """)
+    List<Finding> findByComponentIdInAndVulnerabilityCveId(
+            @Param("componentIds") Collection<UUID> componentIds,
+            @Param("cveId") String cveId
+    );
 }
