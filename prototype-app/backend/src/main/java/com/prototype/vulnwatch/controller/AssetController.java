@@ -5,7 +5,6 @@ import com.prototype.vulnwatch.dto.AssetResponse;
 import com.prototype.vulnwatch.dto.CmdbAssetSyncRequest;
 import com.prototype.vulnwatch.dto.CmdbAssetSyncResponse;
 import com.prototype.vulnwatch.dto.HostAssetDetailResponse;
-import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.service.AssetQueryService;
 import com.prototype.vulnwatch.service.AssetLifecycleService;
 import com.prototype.vulnwatch.service.HostInventoryReadService;
@@ -29,20 +28,17 @@ public class AssetController {
     private final AssetQueryService assetQueryService;
     private final AssetLifecycleService assetLifecycleService;
     private final HostInventoryReadService hostInventoryReadService;
-    private final AssetRepository assetRepository;
 
     public AssetController(
             WorkspaceService workspaceService,
             AssetQueryService assetQueryService,
             AssetLifecycleService assetLifecycleService,
-            HostInventoryReadService hostInventoryReadService,
-            AssetRepository assetRepository
+            HostInventoryReadService hostInventoryReadService
     ) {
         this.workspaceService = workspaceService;
         this.assetQueryService = assetQueryService;
         this.assetLifecycleService = assetLifecycleService;
         this.hostInventoryReadService = hostInventoryReadService;
-        this.assetRepository = assetRepository;
     }
 
     @GetMapping
@@ -59,13 +55,13 @@ public class AssetController {
     @GetMapping("/assignment-groups")
     public List<String> assignmentGroups() {
         Tenant tenant = workspaceService.getWorkspace();
-        return assetRepository.findDistinctSupportGroupsByTenant(tenant);
+        return assetQueryService.listAssignmentGroups(tenant);
     }
 
     @GetMapping("/assigned-to")
     public List<String> assignedTo() {
         Tenant tenant = workspaceService.getWorkspace();
-        return assetRepository.findDistinctAssignedToByTenant(tenant);
+        return assetQueryService.listAssignedTo(tenant);
     }
 
     @GetMapping("/hosts/{assetId:[0-9a-fA-F\\-]{36}}")
