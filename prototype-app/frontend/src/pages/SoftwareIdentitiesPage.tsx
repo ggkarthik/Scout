@@ -1,15 +1,102 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { pathForInventoryHostAsset } from '../app/routes';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
+import { FilterValueSelectCard, type FilterValueOption } from '../components/FilterValueSelectCard';
+import { pathForInventoryHostAsset, pathForInventoryViewWithSearch } from '../app/routes';
+import {
+  formatAssetType,
+  formatInventoryLabel,
+  formatInventorySourceSystem
+} from '../features/inventory/helpers';
+import {
+  INVENTORY_ECOSYSTEM_QUERY_KEY,
+  INVENTORY_SOURCE_SYSTEM_QUERY_KEY,
+  SOFTWARE_LIFECYCLE_QUERY_KEY,
+  SOFTWARE_MAPPING_STATE_QUERY_KEY,
+  readInventoryGroupByFromSearch,
+  readInventoryQueryFromSearch,
+  readSearchValueFromSearch,
+  readSearchValuesFromSearch,
+  writeInventoryGroupByToSearch,
+  writeInventoryQueryToSearch,
+  writeSearchValueToSearch,
+  writeSearchValuesToSearch
+} from '../features/inventory/searchState';
 import { useSoftwareIdentitiesQuery, useSoftwareIdentityDetailQuery } from '../features/software-identities/queries';
 import { EolBadge } from '../components/EolBadge';
 import type { SoftwareIdentitySummary } from '../features/software-identities/types';
 
 const COL_SPAN = 7;
+const SOFTWARE_GROUP_BY_OPTIONS: MultiGroupByOption[] = [
+  { key: 'sourceSystem', label: 'Source System' },
+  { key: 'ecosystem', label: 'Ecosystem' },
+  { key: 'lifecycle', label: 'Lifecycle' },
+  { key: 'mappingState', label: 'Mapping State' },
+  { key: 'vendor', label: 'Vendor' },
+  { key: 'assetType', label: 'Asset Type' }
+];
+const LIFECYCLE_OPTIONS = [
+  { value: '', label: 'Any lifecycle' },
+  { value: 'eol', label: 'EOL' },
+  { value: 'near-eol', label: 'Near EOL' },
+  { value: 'unknown', label: 'Unknown' },
+  { value: 'supported', label: 'Supported' }
+] as const;
+const MAPPING_STATE_OPTIONS = [
+  { value: '', label: 'Any mapping state' },
+  { value: 'needs-review', label: 'Needs review' },
+  { value: 'mapped', label: 'Mapped' },
+  { value: 'manual', label: 'Manual mapping' },
+  { value: 'automatic', label: 'Automatic mapping' }
+] as const;
+const SOFTWARE_IDENTITIES_PAGE_SIZE = 50;
+
+function sameValues(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   return value;
+}
+
+function identityLifecycle(identity: SoftwareIdentitySummary): string {
+  if (identity.eolComponentCount > 0) return 'EOL';
+  if (identity.nearEolComponentCount > 0) return 'Near EOL';
+  if (identity.unknownEolComponentCount > 0) return 'Unknown';
+  return 'Supported';
+}
+
+function identityMappingState(identity: SoftwareIdentitySummary): string {
+  if (identity.needsEolMapping) return 'Needs review';
+  if (!identity.eolSlug) return 'Unmapped';
+  return identity.mappingConfirmed ? 'Manual mapping' : 'Automatic mapping';
+}
+
+function softwareIdentityGroupValues(identity: SoftwareIdentitySummary, key: string): string[] {
+  if (key === 'sourceSystem') {
+    return identity.sourceSystems.length > 0
+      ? identity.sourceSystems.map((value) => formatInventorySourceSystem(value))
+      : ['Unspecified source'];
+  }
+  if (key === 'ecosystem') {
+    return identity.ecosystems.length > 0 ? identity.ecosystems : ['Unspecified ecosystem'];
+  }
+  if (key === 'lifecycle') {
+    return [identityLifecycle(identity)];
+  }
+  if (key === 'mappingState') {
+    return [identityMappingState(identity)];
+  }
+  if (key === 'vendor') {
+    return [identity.vendor || identity.product || 'Unknown vendor'];
+  }
+  if (key === 'assetType') {
+    return identity.assetTypes.length > 0
+      ? identity.assetTypes.map((value) => formatAssetType(value as 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE'))
+      : ['Unknown asset type'];
+  }
+  return ['Unknown'];
 }
 
 function eolSummaryLabel(identity: SoftwareIdentitySummary): string {
@@ -38,16 +125,28 @@ function SummaryCard({ label, value, subtext }: { label: string; value: string; 
 // ─── Active panel state ────────────────────────────────────────────────────
 
 type ActivePanel = {
-  type: 'hosts' | 'cves';
+  type: 'assets' | 'cves';
   identityId: string;
   identityName: string;
   versionFilter?: string;
 } | null;
 
+function inventoryViewForAssetType(assetType?: string): 'hosts' | 'sbom' | 'container-images' {
+  const normalized = assetType?.trim().toUpperCase();
+  if (normalized === 'APPLICATION') {
+    return 'sbom';
+  }
+  if (normalized === 'CONTAINER_IMAGE') {
+    return 'container-images';
+  }
+  return 'hosts';
+}
+
 // ─── Entity list panel ─────────────────────────────────────────────────────
 
 function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; onClose: () => void }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const detailQuery = useSoftwareIdentityDetailQuery(panel.identityId, true);
   const detail = detailQuery.data;
 
@@ -65,12 +164,12 @@ function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; 
   }, [detail, panel.type, panel.versionFilter]);
 
   const versionSuffix = panel.versionFilter ? ` @ ${panel.versionFilter}` : '';
-  const title = panel.type === 'hosts'
-    ? `Hosts — ${panel.identityName}${versionSuffix}`
+  const title = panel.type === 'assets'
+    ? `Assets — ${panel.identityName}${versionSuffix}`
     : `CVE Exposure — ${panel.identityName}${versionSuffix}`;
-  const subtitle = panel.type === 'hosts'
-    ? `Enterprise hosts running this software identity.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`
-    : `Hosts with open CVE exposure.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`;
+  const subtitle = panel.type === 'assets'
+    ? `Enterprise assets running this software identity.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`
+    : `Assets with open CVE exposure.${panel.versionFilter ? ` Filtered to version ${panel.versionFilter}.` : ''}`;
 
   const cveColCount = panel.type === 'cves' ? COL_SPAN : COL_SPAN - 1;
 
@@ -101,7 +200,7 @@ function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; 
             <table className="inventory-table">
               <thead>
                 <tr>
-                  <th>Host</th>
+                  <th>Asset</th>
                   <th>Version</th>
                   <th>Type</th>
                   {panel.type === 'cves' && <th>Open CVEs</th>}
@@ -115,7 +214,7 @@ function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; 
                   <tr>
                     <td colSpan={cveColCount}>
                       <div className="empty-state">
-                        <p>No {panel.type === 'cves' ? 'CVE exposure' : 'hosts'} found
+                        <p>No {panel.type === 'cves' ? 'CVE exposure' : 'assets'} found
                           {panel.versionFilter ? ` for version ${panel.versionFilter}` : ''}.
                         </p>
                       </div>
@@ -125,7 +224,16 @@ function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; 
                   <tr
                     key={asset.componentId}
                     className="inventory-table-row-clickable"
-                    onClick={() => navigate(pathForInventoryHostAsset(asset.assetId, '/inventory/software-identities'))}
+                    onClick={() => {
+                      if ((asset.assetType ?? '').toUpperCase() === 'HOST') {
+                        navigate(pathForInventoryHostAsset(asset.assetId, `${location.pathname}${location.search}`));
+                        return;
+                      }
+                      navigate(pathForInventoryViewWithSearch(inventoryViewForAssetType(asset.assetType), {
+                        query: asset.assetIdentifier || asset.assetName,
+                        groupBy: ['sourceSystem', 'ecosystem']
+                      }));
+                    }}
                   >
                     <td>
                       <div className="inventory-primary-text">{asset.assetName}</div>
@@ -163,11 +271,11 @@ function EntityListPanel({ panel, onClose }: { panel: NonNullable<ActivePanel>; 
 type ExpandedVersionRowsProps = {
   identityId: string;
   vendor?: string;
-  onHostsClick: (version?: string) => void;
+  onAssetsClick: (version?: string) => void;
   onCvesClick: (version?: string) => void;
 };
 
-function ExpandedVersionRows({ identityId, vendor, onHostsClick, onCvesClick }: ExpandedVersionRowsProps) {
+function ExpandedVersionRows({ identityId, vendor, onAssetsClick, onCvesClick }: ExpandedVersionRowsProps) {
   const detailQuery = useSoftwareIdentityDetailQuery(identityId, true);
   const detail = detailQuery.data;
 
@@ -207,7 +315,7 @@ function ExpandedVersionRows({ identityId, vendor, onHostsClick, onCvesClick }: 
               <button
                 type="button"
                 className="si-count-link"
-                onClick={e => { e.stopPropagation(); onHostsClick(v.version); }}
+                onClick={e => { e.stopPropagation(); onAssetsClick(v.version); }}
               >
                 {v.assetCount.toLocaleString()}
               </button>
@@ -255,15 +363,47 @@ function ExpandedVersionRows({ identityId, vendor, onHostsClick, onCvesClick }: 
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export function SoftwareIdentitiesPage() {
-  const [query, setQuery] = React.useState('');
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialQuery = React.useMemo(() => readInventoryQueryFromSearch(searchParams), [searchParams]);
+  const initialSourceSystems = React.useMemo(
+    () => readSearchValuesFromSearch(searchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY),
+    [searchParams]
+  );
+  const initialEcosystems = React.useMemo(
+    () => readSearchValuesFromSearch(searchParams, INVENTORY_ECOSYSTEM_QUERY_KEY),
+    [searchParams]
+  );
+  const initialLifecycle = React.useMemo(
+    () => readSearchValueFromSearch(searchParams, SOFTWARE_LIFECYCLE_QUERY_KEY),
+    [searchParams]
+  );
+  const initialMappingState = React.useMemo(
+    () => readSearchValueFromSearch(searchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY),
+    [searchParams]
+  );
+  const initialGroupBy = React.useMemo(
+    () => readInventoryGroupByFromSearch(searchParams),
+    [searchParams]
+  );
+  const [query, setQuery] = React.useState(initialQuery);
+  const [sourceSystems, setSourceSystems] = React.useState<string[]>(initialSourceSystems);
+  const [ecosystems, setEcosystems] = React.useState<string[]>(initialEcosystems);
+  const [lifecycle, setLifecycle] = React.useState(initialLifecycle);
+  const [mappingState, setMappingState] = React.useState(initialMappingState);
+  const [groupBy, setGroupBy] = React.useState<string[]>(initialGroupBy);
+  const [page, setPage] = React.useState(0);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
   const [activePanel, setActivePanel] = React.useState<ActivePanel>(null);
 
   const identitiesQuery = useSoftwareIdentitiesQuery({
-    page: 0,
-    size: 250,
+    page,
+    size: SOFTWARE_IDENTITIES_PAGE_SIZE,
     query: query.trim() || undefined,
-    assetType: ['HOST']
+    sourceSystem: sourceSystems.length > 0 ? sourceSystems : undefined,
+    ecosystem: ecosystems.length > 0 ? ecosystems : undefined,
+    lifecycle: lifecycle ? lifecycle as 'eol' | 'near-eol' | 'unknown' | 'supported' : undefined,
+    mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined
   });
 
   const identities = React.useMemo(() => (
@@ -276,7 +416,7 @@ export function SoftwareIdentitiesPage() {
       })
   ), [identitiesQuery.data?.content]);
 
-  const totalHosts = React.useMemo(
+  const totalAssets = React.useMemo(
     () => identities.reduce((sum, i) => sum + i.assetCount, 0),
     [identities]
   );
@@ -288,6 +428,112 @@ export function SoftwareIdentitiesPage() {
     () => identities.reduce((sum, i) => sum + i.openFindingCount, 0),
     [identities]
   );
+  const totalIdentityCount = identitiesQuery.data?.totalElements ?? identities.length;
+  const totalPages = identitiesQuery.data?.totalPages ?? 0;
+  const sourceSystemOptions = React.useMemo<FilterValueOption[]>(() => {
+    const values = new Set<string>(sourceSystems);
+    identities.forEach((identity) => identity.sourceSystems.forEach((value) => {
+      if (value?.trim().length) {
+        values.add(value.trim());
+      }
+    }));
+    return Array.from(values)
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({
+        value,
+        label: formatInventorySourceSystem(value)
+      }));
+  }, [identities, sourceSystems]);
+  const ecosystemOptions = React.useMemo<FilterValueOption[]>(() => {
+    const values = new Set<string>(ecosystems);
+    identities.forEach((identity) => identity.ecosystems.forEach((value) => {
+      if (value?.trim().length) {
+        values.add(value.trim());
+      }
+    }));
+    return Array.from(values)
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({
+        value,
+        label: formatInventoryLabel(value)
+      }));
+  }, [ecosystems, identities]);
+  const groupedCards = React.useMemo(() => (
+    groupBy
+      .map((key) => {
+        const option = SOFTWARE_GROUP_BY_OPTIONS.find((entry) => entry.key === key);
+        if (!option) {
+          return null;
+        }
+        const counts = new Map<string, number>();
+        identities.forEach((identity) => {
+          softwareIdentityGroupValues(identity, key).forEach((value) => {
+            counts.set(value, (counts.get(value) ?? 0) + 1);
+          });
+        });
+        return {
+          key,
+          label: option.label,
+          items: Array.from(counts.entries())
+            .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+            .slice(0, 5)
+        };
+      })
+      .filter((entry): entry is { key: string; label: string; items: Array<[string, number]> } => entry != null)
+  ), [groupBy, identities]);
+
+  React.useEffect(() => {
+    const nextQuery = readInventoryQueryFromSearch(searchParams);
+    const nextSourceSystems = readSearchValuesFromSearch(searchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY);
+    const nextEcosystems = readSearchValuesFromSearch(searchParams, INVENTORY_ECOSYSTEM_QUERY_KEY);
+    const nextLifecycle = readSearchValueFromSearch(searchParams, SOFTWARE_LIFECYCLE_QUERY_KEY);
+    const nextMappingState = readSearchValueFromSearch(searchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY);
+    const nextGroupBy = readInventoryGroupByFromSearch(searchParams);
+
+    setQuery((current) => (current === nextQuery ? current : nextQuery));
+    setSourceSystems((current) => (sameValues(current, nextSourceSystems) ? current : nextSourceSystems));
+    setEcosystems((current) => (sameValues(current, nextEcosystems) ? current : nextEcosystems));
+    setLifecycle((current) => (current === nextLifecycle ? current : nextLifecycle));
+    setMappingState((current) => (current === nextMappingState ? current : nextMappingState));
+    setGroupBy((current) => (sameValues(current, nextGroupBy) ? current : nextGroupBy));
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    let nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams = writeInventoryQueryToSearch(nextSearchParams, query);
+    nextSearchParams = writeSearchValuesToSearch(nextSearchParams, INVENTORY_SOURCE_SYSTEM_QUERY_KEY, sourceSystems);
+    nextSearchParams = writeSearchValuesToSearch(nextSearchParams, INVENTORY_ECOSYSTEM_QUERY_KEY, ecosystems);
+    nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_LIFECYCLE_QUERY_KEY, lifecycle);
+    nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY, mappingState);
+    nextSearchParams = writeInventoryGroupByToSearch(nextSearchParams, groupBy);
+
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [ecosystems, groupBy, lifecycle, mappingState, query, searchParams, setSearchParams, sourceSystems]);
+
+  React.useEffect(() => {
+    setPage(0);
+    setExpandedIds(new Set());
+    setActivePanel(null);
+  }, [query, sourceSystems, ecosystems, lifecycle, mappingState]);
+
+  React.useEffect(() => {
+    setExpandedIds(new Set());
+    setActivePanel(null);
+  }, [page]);
+
+  React.useEffect(() => {
+    if (totalPages === 0) {
+      if (page !== 0) {
+        setPage(0);
+      }
+      return;
+    }
+    if (page >= totalPages) {
+      setPage(totalPages - 1);
+    }
+  }, [page, totalPages]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -297,8 +543,8 @@ export function SoftwareIdentitiesPage() {
     });
   };
 
-  const openHostsPanel = (identityId: string, identityName: string, versionFilter?: string) => {
-    setActivePanel({ type: 'hosts', identityId, identityName, versionFilter });
+  const openAssetsPanel = (identityId: string, identityName: string, versionFilter?: string) => {
+    setActivePanel({ type: 'assets', identityId, identityName, versionFilter });
   };
 
   const openCvesPanel = (identityId: string, identityName: string, versionFilter?: string) => {
@@ -307,6 +553,13 @@ export function SoftwareIdentitiesPage() {
 
   const loading = identitiesQuery.isPending && identities.length === 0;
   const errorMessage = identitiesQuery.error instanceof Error ? identitiesQuery.error.message : null;
+  const clearFilters = React.useCallback(() => {
+    setQuery('');
+    setSourceSystems([]);
+    setEcosystems([]);
+    setLifecycle('');
+    setMappingState('');
+  }, []);
 
   return (
     <section className="inventory-page-shell">
@@ -314,7 +567,7 @@ export function SoftwareIdentitiesPage() {
         <div>
           <h1>Software identities</h1>
           <p className="panel-caption">
-            Third-party software deployed on enterprise hosts, correlated to host inventory, CVEs, and findings.
+            Third-party software deployed across hosts, applications, and container images, correlated to inventory, CVEs, and findings.
           </p>
         </div>
         <div className="inventory-page-header-actions">
@@ -331,28 +584,28 @@ export function SoftwareIdentitiesPage() {
       <div className="inventory-summary-grid">
         <SummaryCard
           label="Software Identities"
-          value={identities.length.toLocaleString()}
-          subtext="Deployed third-party software correlated to hosts"
+          value={totalIdentityCount.toLocaleString()}
+          subtext="Matching deployed software identities across the full result set"
         />
         <SummaryCard
-          label="Host Deployments"
-          value={totalHosts.toLocaleString()}
-          subtext="Total host-to-software deployment relationships"
+          label="Asset Deployments"
+          value={totalAssets.toLocaleString()}
+          subtext="Asset-to-software deployments shown on the current page"
         />
         <SummaryCard
           label="Open CVEs"
           value={totalOpenCves.toLocaleString()}
-          subtext="Applicable CVEs across deployed software identities"
+          subtext="Applicable CVEs shown on the current page"
         />
         <SummaryCard
           label="Open Findings"
           value={totalOpenFindings.toLocaleString()}
-          subtext="Findings currently tied to deployed software"
+          subtext="Findings tied to the software identities shown on this page"
         />
       </div>
 
       <div className="inventory-toolbar">
-        <div className="inventory-search-row inventory-search-row-single">
+        <div className="inventory-search-row inventory-search-row-stacked">
           <label className="inventory-search-field">
             <span className="panel-caption">Search software, vendor, product, or identity…</span>
             <input
@@ -361,6 +614,61 @@ export function SoftwareIdentitiesPage() {
               placeholder="SQL Server, WebLogic, JBoss, Palo Alto, Fortinet…"
             />
           </label>
+          <label className="inventory-select-field">
+            <span className="panel-caption">Lifecycle</span>
+            <select value={lifecycle} onChange={(event) => setLifecycle(event.target.value)}>
+              {LIFECYCLE_OPTIONS.map((option) => (
+                <option key={option.value || 'any'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="inventory-select-field">
+            <span className="panel-caption">Mapping state</span>
+            <select value={mappingState} onChange={(event) => setMappingState(event.target.value)}>
+              {MAPPING_STATE_OPTIONS.map((option) => (
+                <option key={option.value || 'any'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="inventory-filter-card-grid">
+          <FilterValueSelectCard
+            label="Source System"
+            selectedValues={sourceSystems}
+            options={sourceSystemOptions}
+            onChange={setSourceSystems}
+          />
+          <FilterValueSelectCard
+            label="Ecosystem"
+            selectedValues={ecosystems}
+            options={ecosystemOptions}
+            onChange={setEcosystems}
+          />
+        </div>
+        <div className="inventory-toolbar-actions">
+          <button type="button" className="btn btn-secondary btn-inline" onClick={clearFilters}>
+            Clear Filters
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => void identitiesQuery.refetch()}
+            disabled={identitiesQuery.isFetching}
+          >
+            {identitiesQuery.isFetching ? 'Refreshing...' : 'Refresh Software Identities'}
+          </button>
+        </div>
+        <div className="findings-groupby-shell">
+          <MultiGroupBy
+            options={SOFTWARE_GROUP_BY_OPTIONS}
+            value={groupBy}
+            onChange={setGroupBy}
+            label="GROUP BY"
+            placeholder="No secondary grouping"
+            allowEmptyPrimary
+            emptyPrimaryLabel="Select..."
+            showSelectorsByDefault={false}
+          />
         </div>
       </div>
 
@@ -368,6 +676,36 @@ export function SoftwareIdentitiesPage() {
         <div className="inventory-error-banner">
           Failed to load software identities: {errorMessage}
         </div>
+      )}
+
+      {groupedCards.length > 0 && (
+        <section className="inventory-section-card">
+          <div className="inventory-section-header findings-title-row">
+            <div>
+              <h2>Grouped Breakdown</h2>
+              <p className="panel-caption">Top values in the current filtered software identity result set.</p>
+            </div>
+          </div>
+          <div className="findings-widget-grid">
+            {groupedCards.map((group) => (
+              <div className="findings-widget-card" key={group.key}>
+                <div className="findings-widget-title">{group.label}</div>
+                <div className="findings-widget-list">
+                  {group.items.length === 0 ? (
+                    <div className="panel-caption">No rows in the current result set.</div>
+                  ) : (
+                    group.items.map(([value, count]) => (
+                      <div className="findings-widget-row" key={`${group.key}:${value}`}>
+                        <span>{value}</span>
+                        <strong>{count.toLocaleString()}</strong>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="inventory-section-card">
@@ -378,7 +716,7 @@ export function SoftwareIdentitiesPage() {
               Click a row to expand version-level breakdown with EOL and CVE exposure.
             </p>
           </div>
-          <span className="panel-caption">{identities.length.toLocaleString()} identities</span>
+          <span className="panel-caption">{totalIdentityCount.toLocaleString()} identities</span>
         </div>
 
         {loading ? (
@@ -391,7 +729,7 @@ export function SoftwareIdentitiesPage() {
                   <th>Software</th>
                   <th>Version</th>
                   <th>Vendor</th>
-                  <th>Hosts</th>
+                  <th>Assets</th>
                   <th>CVEs</th>
                   <th>Open Findings</th>
                   <th>EOL</th>
@@ -436,7 +774,12 @@ export function SoftwareIdentitiesPage() {
                               className="si-count-link"
                               onClick={e => {
                                 e.stopPropagation();
-                                openHostsPanel(identity.id, identity.displayName);
+                                const primaryType = identity.assetTypes.find(t => t.toUpperCase() === 'HOST') ?? identity.assetTypes[0] ?? 'HOST';
+                                const view = inventoryViewForAssetType(primaryType);
+                                const groupBy = view === 'hosts'
+                                  ? ['operatingSystem', 'environment']
+                                  : ['sourceSystem', 'ecosystem'];
+                                navigate(pathForInventoryViewWithSearch(view, { query: identity.displayName, groupBy }));
                               }}
                             >
                               {identity.assetCount.toLocaleString()}
@@ -473,7 +816,14 @@ export function SoftwareIdentitiesPage() {
                         <ExpandedVersionRows
                           identityId={identity.id}
                           vendor={identity.vendor || identity.product}
-                          onHostsClick={vf => openHostsPanel(identity.id, identity.displayName, vf)}
+                          onAssetsClick={() => {
+                            const primaryType = identity.assetTypes.find(t => t.toUpperCase() === 'HOST') ?? identity.assetTypes[0] ?? 'HOST';
+                            const view = inventoryViewForAssetType(primaryType);
+                            const groupBy = view === 'hosts'
+                              ? ['operatingSystem', 'environment']
+                              : ['sourceSystem', 'ecosystem'];
+                            navigate(pathForInventoryViewWithSearch(view, { query: identity.displayName, groupBy }));
+                          }}
                           onCvesClick={vf => openCvesPanel(identity.id, identity.displayName, vf)}
                         />
                       )}
@@ -482,6 +832,30 @@ export function SoftwareIdentitiesPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="pagination-row">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={page === 0 || identitiesQuery.isFetching}
+            >
+              Previous
+            </button>
+            <span className="panel-caption pagination-caption">
+              {`Page ${page + 1} of ${totalPages}`}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setPage((current) => (current + 1 < totalPages ? current + 1 : current))}
+              disabled={identitiesQuery.isFetching || page + 1 >= totalPages}
+            >
+              Next
+            </button>
           </div>
         )}
       </div>

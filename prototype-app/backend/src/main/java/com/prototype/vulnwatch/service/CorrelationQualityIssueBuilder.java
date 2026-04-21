@@ -53,6 +53,7 @@ public class CorrelationQualityIssueBuilder {
                 WHERE state.tenant_id = :tenantId
                   AND ic.component_status = 'ACTIVE'
                   AND lower(coalesce(state.applicability_reason, '')) = 'no_candidates'
+                  AND state.analyst_disposition IS NULL
                 GROUP BY ic.id, ic.asset_id, a.name, a.identifier, a.type, u.ingestion_source_system, ic.ecosystem, ic.package_name, ic.version
                 ORDER BY max(state.last_evaluated_at) DESC
                 """;
@@ -132,6 +133,7 @@ public class CorrelationQualityIssueBuilder {
                 WHERE state.tenant_id = :tenantId
                   AND ic.component_status = 'ACTIVE'
                   AND trim(coalesce(state.matched_by, '')) <> ''
+                  AND state.analyst_disposition IS NULL
                 GROUP BY ic.id, ic.asset_id, a.name, a.identifier, a.type, u.ingestion_source_system, ic.ecosystem, ic.package_name, ic.version
                 HAVING count(*) FILTER (WHERE lower(coalesce(state.matched_by, '')) like '%fallback%') = count(*)
                    AND count(*) > 0
@@ -216,6 +218,7 @@ public class CorrelationQualityIssueBuilder {
                   AND state.confidence_score IS NOT NULL
                   AND state.confidence_score < :confidenceThreshold
                   AND trim(coalesce(state.matched_by, '')) <> ''
+                  AND state.analyst_disposition IS NULL
                 GROUP BY ic.id, ic.asset_id, a.name, a.identifier, a.type, u.ingestion_source_system, ic.ecosystem, ic.package_name, ic.version
                 ORDER BY min(state.confidence_score) ASC, max(state.last_evaluated_at) DESC
                 """;

@@ -1,5 +1,7 @@
 import type { InventoryViewKey } from '../features/inventory/types';
 
+export type RouteSearchValue = string | number | boolean | null | undefined | Array<string | number | boolean>;
+
 export type AppTab =
   | 'dashboard'
   | 'findings'
@@ -11,10 +13,10 @@ export type AppTab =
   | 'configurations';
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
-export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'org-cves';
+export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'inventory-run-queue' | 'vuln-intel-queue' | 'processing-jobs';
 
-export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'hosts';
+export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
 export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
 
@@ -43,8 +45,25 @@ const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
 };
 
 const INVENTORY_VIEWS = new Set<InventoryViewKey>([
+  'overview',
   'software-identities',
-  'hosts'
+  'manage-software',
+  'hosts',
+  'container-images',
+  'secured-image-catalog',
+  'container-registries',
+  'sbom',
+  'hosted-technologies',
+  'code-repositories',
+  'source-mappings',
+  'developers',
+  'kubernetes-clusters',
+  'datastores',
+  'subscriptions',
+  'iam',
+  'api-endpoints',
+  'application-endpoints',
+  'vulnerability-intelligence'
 ]);
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
@@ -68,8 +87,17 @@ export function normalizeInventoryRouteView(value: string | null | undefined): I
   if (!value) {
     return INVENTORY_DEFAULT_VIEW;
   }
+  if (value === 'overview' || value === 'summary' || value === 'dashboard') {
+    return 'overview';
+  }
   if (value === 'imported-assets') {
     return 'software-identities';
+  }
+  if (value === 'applications' || value === 'application-inventory' || value === 'repositories' || value === 'repository-inventory') {
+    return 'sbom';
+  }
+  if (value === 'images' || value === 'image-inventory' || value === 'container-image-inventory') {
+    return 'container-images';
   }
   if (value === 'host-review-queue' || value === 'host-details') {
     return 'hosts';
@@ -101,7 +129,7 @@ export function pathForTab(tab: AppTab): string {
     case 'vuln-repo':
       return '/vuln-repo';
     case 'inventory':
-      return `/inventory/${INVENTORY_DEFAULT_VIEW}`;
+      return pathForInventoryView(INVENTORY_DEFAULT_VIEW);
     case 'end-of-life':
       return '/end-of-life';
     case 'connect':
@@ -112,7 +140,48 @@ export function pathForTab(tab: AppTab): string {
 }
 
 export function pathForInventoryView(view: InventoryViewKey): string {
+  if (view === 'overview') {
+    return '/inventory';
+  }
   return view === 'software-identities' ? '/inventory/software-identities' : `/inventory/${view}`;
+}
+
+export function appendSearchToPath(
+  path: string,
+  values?: Record<string, RouteSearchValue>
+): string {
+  if (!values) {
+    return path;
+  }
+
+  const searchParams = new URLSearchParams();
+  const appendValue = (key: string, value: string | number | boolean | null | undefined): void => {
+    if (value == null) {
+      return;
+    }
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return;
+    }
+    searchParams.append(key, normalized);
+  };
+
+  Object.entries(values).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => appendValue(key, item));
+      return;
+    }
+    appendValue(key, value);
+  });
+
+  return searchParams.size > 0 ? `${path}?${searchParams.toString()}` : path;
+}
+
+export function pathForInventoryViewWithSearch(
+  view: InventoryViewKey,
+  values?: Record<string, RouteSearchValue>
+): string {
+  return appendSearchToPath(pathForInventoryView(view), values);
 }
 
 export function pathForInventoryHostAsset(assetId: string, returnTo?: string): string {
@@ -135,6 +204,9 @@ export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: s
   }
   if (view === 'vulnerabilities') {
     return '/vuln-repo/vulnerabilities';
+  }
+  if (view === 'end-of-life') {
+    return '/end-of-life';
   }
   return cveId ? `/vuln-repo/org-cves/${encodeURIComponent(cveId)}` : '/vuln-repo/org-cves';
 }
@@ -242,6 +314,8 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   } else if (tab === 'vuln-repo') {
     const normalizedView = vulnRepoView === 'vulnerabilities'
       ? 'vulnerabilities'
+      : vulnRepoView === 'end-of-life' || vulnRepoView === 'eol'
+        ? 'end-of-life'
       : vulnRepoView === 'org-cves'
         ? 'org-cves'
         : 'dashboard';
@@ -253,7 +327,7 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   } else if (tab === 'configurations') {
     nextPath = '/configurations';
   } else if (tab === 'end-of-life') {
-    nextPath = '/end-of-life';
+    nextPath = pathForVulnRepoView('end-of-life');
   }
 
   ['tab', 'inventoryView', 'operationsView', 'vulnIntelView', 'vulnRepoView', 'connectView', 'cveId'].forEach((key) => params.delete(key));
