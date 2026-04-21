@@ -1,6 +1,5 @@
-package com.prototype.vulnwatch.service;
+package com.prototype.vulnwatch.client.http;
 
-import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +57,6 @@ public class AdvisoryFetchService {
     public String fetchMsrcPatchInfo(String cveId) {
         if (cveId == null || !cveId.toUpperCase().startsWith("CVE-")) return "";
         try {
-            // MSRC affected products API — returns KB article IDs and product names
             String apiUrl = "https://api.msrc.microsoft.com/sug/v2.0/en-US/affectedProduct"
                     + "?%24filter=cveNumber%20eq%20%27" + cveId + "%27";
             HttpHeaders headers = new HttpHeaders();
@@ -68,7 +66,6 @@ public class AdvisoryFetchService {
             ResponseEntity<String> response = restTemplate.exchange(apiUrl, HttpMethod.GET, req, String.class);
             String body = response.getBody();
             if (body == null || body.isBlank()) return "";
-            // Truncate to avoid token bloat
             String truncated = body.length() > 4000 ? body.substring(0, 4000) : body;
             return "\n--- MSRC Affected Products API (JSON) for " + cveId + " ---\n" + truncated + "\n";
         } catch (Exception e) {
@@ -85,7 +82,6 @@ public class AdvisoryFetchService {
         ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, req, String.class);
         String body = response.getBody();
         if (body == null) return null;
-        // Strip HTML tags
         String text = body.replaceAll("(?s)<style[^>]*>.*?</style>", " ")
                           .replaceAll("(?s)<script[^>]*>.*?</script>", " ")
                           .replaceAll("<[^>]+>", " ")
@@ -96,12 +92,11 @@ public class AdvisoryFetchService {
                           .replaceAll("&quot;", "\"")
                           .replaceAll("\\s{2,}", " ")
                           .trim();
-        // Keep only lines with meaningful content (length > 20)
         StringBuilder out = new StringBuilder();
         for (String line : text.split("\\n")) {
-            String l = line.trim();
-            if (l.length() > 20) {
-                out.append(l).append('\n');
+            String lineValue = line.trim();
+            if (lineValue.length() > 20) {
+                out.append(lineValue).append('\n');
             }
         }
         return out.toString().trim();

@@ -32,4 +32,12 @@ public class AssetQueryService {
                         asset.getLastCmdbSyncAt()))
                 .toList();
     }
+
+    public List<String> listAssignmentGroups(Tenant tenant) {
+        return assetRepository.findDistinctSupportGroupsByTenant(tenant);
+    }
+
+    public List<String> listAssignedTo(Tenant tenant) {
+        return assetRepository.findDistinctAssignedToByTenant(tenant);
+    }
 }

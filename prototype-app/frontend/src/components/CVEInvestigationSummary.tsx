@@ -812,7 +812,6 @@ export function CVEInvestigationSummary({
             <div className="inv-summary-markdown-panel">
               <div
                 className="inv-summary-markdown-body"
-                // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(summary.markdownReport) }}
               />
             </div>

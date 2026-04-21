@@ -427,7 +427,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         }
       }
     }))
-  ), [onOpenCveWorkbench, rows]);
+  ), [navigate, onOpenCveWorkbench, rows]);
 
   function handleColumnVisibilityChange(next: Set<string>): void {
     setVisibleColumns(next);

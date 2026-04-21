@@ -16,8 +16,6 @@ import {
   deriveAssessmentResult,
   exactMatchMeta,
   explainApplicability,
-  impactBadgeClass,
-  impactLabel,
   initialApplicabilityDecision,
   latestByDate,
   matchBasisLabel,
@@ -43,9 +41,6 @@ import {
   CveVexEvidence,
   OrgSpecificCveExposureRecord,
 } from '../features/cve-workbench/types';
-import {
-  InvestigationPriority,
-} from '../features/cve-workbench/workflow';
 import type { Finding } from '../features/findings/types';
 import type { SoftwareIdentityAsset, SoftwareIdentitySummary } from '../features/software-identities/types';
 
@@ -126,9 +121,9 @@ type Props = {
   onRefreshDetail: (options?: { includeList?: boolean }) => Promise<void>;
 };
 
-const AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
-const PR_LABELS: Record<string, string> = { N: 'None', L: 'Low', H: 'High' };
-const UI_LABELS: Record<string, string> = { N: 'None', R: 'Required' };
+const _AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
+const _PR_LABELS: Record<string, string> = { N: 'None', L: 'Low', H: 'High' };
+const _UI_LABELS: Record<string, string> = { N: 'None', R: 'Required' };
 
 function normalizeFalsePositiveToken(value?: string | null): string | null {
   if (!value) return null;
@@ -288,7 +283,7 @@ function assessmentStatusLabel(item: OrgSpecificCveExposureRecord, latestAssessm
   return 'Assessment Pending';
 }
 
-function assessmentStatusTone(item: OrgSpecificCveExposureRecord, latestAssessment: CveApplicabilityAssessment | null): string {
+function _assessmentStatusTone(item: OrgSpecificCveExposureRecord, latestAssessment: CveApplicabilityAssessment | null): string {
   const label = assessmentStatusLabel(item, latestAssessment).toUpperCase();
   if (label.includes('RESOLVED') || label.includes('NOT AFFECTED')) return 'resolved';
   if (label.includes('UNDER INVESTIGATION')) return 'warning';
@@ -1063,7 +1058,7 @@ function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: 
   return out;
 }
 
-function HeroMetric({
+function _HeroMetric({
   value,
   label,
   sublabel,
@@ -1847,7 +1842,7 @@ function InvestigationCanvas({
   onNewLogMessageChange,
   onAddLogEntry,
   onClose,
-  onSaveDraft
+  onSaveDraft: _onSaveDraft
 }: {
   isOpen: boolean;
   item: OrgSpecificCveExposureRecord;
@@ -1904,7 +1899,7 @@ function InvestigationCanvas({
   // identityId → list of versions (lazy-loaded cache)
   const [versionCache, setVersionCache] = React.useState<Record<string, string[]>>({});
   const [assetResults, setAssetResults] = React.useState<AssetInventoryResult[]>(initialResults);
-  const [assetResultsExpanded, setAssetResultsExpanded] = React.useState(initialResults.length > 0);
+  const [_assetResultsExpanded, setAssetResultsExpanded] = React.useState(initialResults.length > 0);
   const [assetAssessmentRan, setAssetAssessmentRan] = React.useState(
     persistedRunbookState?.assetAssessmentRan ?? initialResults.length > 0
   );
@@ -1921,7 +1916,7 @@ function InvestigationCanvas({
     [detail, eolTask?.state, initialResolvedInventory, persistedRunbookState]
   );
   const [eolResults, setEolResults] = React.useState<EolAnalysisResult[]>(initialEolResults);
-  const [eolExpanded, setEolExpanded] = React.useState(
+  const [_eolExpanded, setEolExpanded] = React.useState(
     (persistedRunbookState?.eolAssessed ?? false) || eolTask?.state === 'DONE'
   );
   const [eolAssessed, setEolAssessed] = React.useState(
@@ -1944,7 +1939,7 @@ function InvestigationCanvas({
   const [resolvedInventory, setResolvedInventory] = React.useState<ResolvedInventorySoftware[]>(initialResolvedInventory);
   const [summaryVisible, setSummaryVisible] = React.useState(false);
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
-  const [savedAt, setSavedAt] = React.useState<Date | null>(null);
+  const [, setSavedAt] = React.useState<Date | null>(null);
   const [solutionEntries, setSolutionEntries] = React.useState<Record<string, string>>(
     persistedRunbookState?.solutionEntries ?? {}
   );
@@ -2204,7 +2199,6 @@ function InvestigationCanvas({
       .slice(0, 6);
   }, [assetResults]);
   const externalFacingCount = assetResults.filter((asset) => asset.externalFacing).length;
-  const criticalAssetCount = assetResults.filter((asset) => asset.criticality.toLowerCase() === 'critical').length;
   const totalAssetCount = assetResults.length;
   const summaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
     summary: {
@@ -2348,19 +2342,6 @@ function InvestigationCanvas({
     onRunTask('find-false-positive');
   }
 
-  function runEolAnalysis(): void {
-    setEolExpanded(true);
-  }
-
-  async function assessEolAnalysis(): Promise<void> {
-    const resolved = await resolveInventorySoftware(assetCriteria);
-    setResolvedInventory(resolved);
-    setEolResults(buildEolAnalysisResults(detail, eolCriteria, resolved));
-    setEolExpanded(true);
-    setEolAssessed(true);
-    onRunTask('end-of-life-analysis');
-  }
-
   async function generateSolutionsForRows(): Promise<void> {
     const rowsToGenerate = solutionRows.filter((row) => {
       const key = `${row.software}@${row.version}`;
@@ -2450,14 +2431,6 @@ function InvestigationCanvas({
     }));
 
     setSolutionGeneratingKeys(new Set());
-  }
-
-  function showEolResults(): void {
-    if (eolResults.length === 0) {
-      setEolResults(buildEolAnalysisResults(detail, eolCriteria, resolvedInventory));
-    }
-    setEolExpanded(true);
-    setEolAssessed(true);
   }
 
   function handleRunbookAction(taskId: string): void {
@@ -2972,7 +2945,7 @@ function InvestigationCanvas({
     </div>
   ) : null;
 
-  const logPanel = (
+  const _logPanel = (
     <section className="investigation-log-panel">
       <h4>Investigation Log</h4>
       <div className="investigation-log-list">
@@ -3217,15 +3190,6 @@ function InvestigationCanvas({
   );
 }
 
-function OverviewRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="cve-overview-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function CveOverviewExperience({
   item,
   detail,
@@ -3233,13 +3197,13 @@ function CveOverviewExperience({
   latestInvestigation,
   cvssFields,
   softwareGroups,
-  analystId,
+  analystId: _analystId,
   onStepChange,
   onOpenAffectedEntities,
   onOpenImpactedSoftware,
   onOpenExternalFacingAssets,
-  leadAnalyst,
-  onLeadAnalystChange,
+  leadAnalyst: _leadAnalyst,
+  onLeadAnalystChange: _onLeadAnalystChange,
   persistedRunbookState,
 }: {
   item: OrgSpecificCveExposureRecord;
@@ -3271,7 +3235,7 @@ function CveOverviewExperience({
   const [aiActions, setAiActions] = React.useState<AiRequiredAction[] | null>(null);
   const [aiActionsLoading, setAiActionsLoading] = React.useState(false);
   const [aiActionsError, setAiActionsError] = React.useState<string | null>(null);
-  const [aiActionsGeneratedAt, setAiActionsGeneratedAt] = React.useState<string | null>(null);
+  const [, setAiActionsGeneratedAt] = React.useState<string | null>(null);
 
   // Load persisted AI actions on mount
   React.useEffect(() => {
@@ -3340,7 +3304,6 @@ function CveOverviewExperience({
       })
       .catch(() => { /* no saved solution — normal */ });
   }, [detail.summary.externalId]);
-  const currentLeadAnalyst = leadAnalyst || latestInvestigation?.assignedTo || analystId || 'Unassigned analyst';
   const referenceLinks = buildReferenceLinks(detail);
   const remediationText = detail.signals.patchAvailable
     ? `Apply the vendor-fixed version${detail.signals.patchVersions ? ` (${detail.signals.patchVersions})` : ''} and validate the mitigation on impacted assets.`
@@ -3363,15 +3326,6 @@ function CveOverviewExperience({
     (detail.summary.cweIds ?? '').split(',').map(s => s.trim()).filter(Boolean),
     [detail.summary.cweIds]
   );
-
-  const recommendedAction = React.useMemo(() => {
-    const sev = item.severity?.toLowerCase();
-    if (item.inKev && detail.signals.exploitAvailable)
-      return 'Investigate and patch immediately — CISA KEV confirmed with active exploitation.';
-    if (sev === 'critical' || sev === 'high')
-      return `${formatLabel(item.severity)} severity${detail.signals.exploitAvailable ? ' with active exploitation' : ''}. Review affected assets and apply available patches.`;
-    return 'Review exposure and apply mitigations per your remediation SLA.';
-  }, [item.severity, item.inKev, detail.signals.exploitAvailable]);
 
   const CVSS_DIMS_LOCAL = [
     { key: 'AV', label: 'Attack vector',       values: { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' } },
@@ -3789,9 +3743,12 @@ function CveOverviewExperience({
           const multiSource = allSources.length > 1;
 
           // Per-source CVSS scores: primary from summary; secondary from vendorIntelligence if present
-          const altScores: Array<{ source: string; score: number }> = detail.vendorIntelligence
-            .filter(v => v.source && v.source !== detail.summary.source && (v as any).cvssScore != null)
-            .map(v => ({ source: v.source, score: (v as any).cvssScore as number }));
+          const altScores = detail.vendorIntelligence.reduce<Array<{ source: string; score: number }>>((scores, intel) => {
+            if (intel.source && intel.source !== detail.summary.source && typeof intel.cvssScore === 'number') {
+              scores.push({ source: intel.source, score: intel.cvssScore });
+            }
+            return scores;
+          }, []);
 
           return (
             <div className="cvd-tech-weakness-row">
@@ -4958,10 +4915,10 @@ type FindingsContentProps = {
 };
 
 function FindingsContent({
-  filteredSoftware, selectedIds, searchQuery, severity, findingIdsByComponentId,
+  filteredSoftware, selectedIds, searchQuery: _searchQuery, severity, findingIdsByComponentId,
   findingsByDisplayId,
   analystFpOverrides,
-  onToggleRow, onSelectAll, onClearAll, onSearchQueryChange, onOpenCreatePanel, onOpenAsset,
+  onToggleRow, onSelectAll: _onSelectAll, onClearAll, onSearchQueryChange: _onSearchQueryChange, onOpenCreatePanel, onOpenAsset,
   onOpenFinding,
   onBulkFpMark, onBulkFpUnmark,
 }: FindingsContentProps) {
@@ -5308,10 +5265,10 @@ function FindingConfigPanel({
   const selectedSoftware = filteredSoftware
     .map((row) => row.software)
     .filter((software) => selectedIds.has(software.componentId));
-  const selectedAssetCount = new Set(
+  const _selectedAssetCount = new Set(
     selectedSoftware.map((software) => software.assetId ?? software.assetIdentifier ?? software.componentId)
   ).size;
-  const selectedSoftwareCount = new Set(selectedSoftware.map((software) => software.packageName)).size;
+  const _selectedSoftwareCount = new Set(selectedSoftware.map((software) => software.packageName)).size;
   const tags = tagsInput
     .split(',')
     .map((entry) => entry.trim())
@@ -5771,7 +5728,7 @@ export function VulnRepoCveAssessmentWorkbench({
   loading,
   error,
   analystId,
-  onBack,
+  onBack: _onBack,
   onRefreshDetail
 }: Props) {
   const navigate = useNavigate();
@@ -5785,9 +5742,7 @@ export function VulnRepoCveAssessmentWorkbench({
 
   // Investigation state
   const [, setInvestigationId] = React.useState<number | null>(null);
-  const investigationPriority: InvestigationPriority = 'MEDIUM';
   const [investigationNotes, setInvestigationNotes] = React.useState('');
-  const [investigationBusy, setInvestigationBusy] = React.useState(false);
   const [leadAnalyst, setLeadAnalyst] = React.useState('');
   const [runbookTasks, setRunbookTasks] = React.useState<RunbookTask[]>([]);
   const [investigationLogEntries, setInvestigationLogEntries] = React.useState<InvestigationLogEntry[]>([]);
@@ -5820,10 +5775,10 @@ export function VulnRepoCveAssessmentWorkbench({
   const [findingTagsInput, setFindingTagsInput] = React.useState('');
   const [findingNotes, setFindingNotes] = React.useState('');
   const [selectedFindingIds, setSelectedFindingIds] = React.useState<Set<string>>(new Set());
-  const [findingShowFilter, setFindingShowFilter] = React.useState<'ALL' | 'IMPACTED_ONLY'>('IMPACTED_ONLY');
+  const [findingShowFilter] = React.useState<'ALL' | 'IMPACTED_ONLY'>('IMPACTED_ONLY');
   const [findingSearchQuery, setFindingSearchQuery] = React.useState('');
   const [findingExternalFacingOnly, setFindingExternalFacingOnly] = React.useState(false);
-  const [findingAssetTypeFilter, setFindingAssetTypeFilter] = React.useState('ALL');
+  const [findingAssetTypeFilter] = React.useState('ALL');
   const [findingBusy, setFindingBusy] = React.useState(false);
   const [findingConfigOpen, setFindingConfigOpen] = React.useState(false);
   const [findingIdsByComponentId, setFindingIdsByComponentId] = React.useState<Map<string, string>>(new Map());
@@ -6308,27 +6263,6 @@ export function VulnRepoCveAssessmentWorkbench({
   }
 
   const currentBreadcrumbStep = investigationCanvasOpen ? null : activeStep === 1 ? null : activeStep === 2 ? 'Applicability' : activeStep === 4 ? 'Notify Groups' : 'Impacted Assets';
-
-  async function saveInvestigationAndContinue(): Promise<boolean> {
-    setInvestigationBusy(true);
-    setActionError(null);
-    try {
-      const saved = await cveWorkbenchApi.submitCveInvestigation(item.externalId, {
-        status: 'PENDING_REVIEW',
-        priority: investigationPriority,
-        assignedTo: leadAnalyst.trim() || undefined,
-        notes: investigationNotes.trim() || undefined,
-      });
-      setInvestigationId(saved.id);
-      setActiveStep(2);
-      return true;
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-      return false;
-    } finally {
-      setInvestigationBusy(false);
-    }
-  }
 
   async function saveAssessment(proceed: boolean): Promise<void> {
     if (!detail) return;
