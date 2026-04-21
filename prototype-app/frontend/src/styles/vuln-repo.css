@@ -438,6 +438,148 @@
   height: 1rem;
 }
 
+/* AI Solution icon — amber/gold tint to distinguish from investigation summary */
+.vuln-repo-ai-solution-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.28);
+}
+.vuln-repo-ai-solution-link:hover {
+  background: rgba(217, 119, 6, 0.16);
+}
+.vuln-repo-ai-solution-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* AI Solution side panel */
+.ai-sol-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.ai-sol-ts {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+}
+.ai-sol-scope {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  font-style: italic;
+}
+.ai-sol-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-sol-section-hdr {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0;
+}
+.ai-sol-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ai-sol-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border-strong) 30%, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.ai-sol-text {
+  font-size: 13px;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.5;
+}
+.ai-sol-fix-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--title);
+  margin: 0;
+}
+.ai-sol-verify {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+}
+.ai-sol-timeline-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.ai-sol-timeline-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+.ai-sol-timeline-hdr {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 3px 0;
+}
+.ai-sol-list {
+  margin: 2px 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ai-sol-list li {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.ai-sol-ctrl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ai-sol-lifecycle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.ai-sol-confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.ai-sol-conf-score {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 .vuln-repo-cve-metadata {
   display: grid;
   gap: 12px;
@@ -521,89 +663,4 @@
     min-width: 0;
     flex-wrap: wrap;
   }
-}
-
-/* ── Vulnerability Investigation — compact, resizable, height-persistent ── */
-
-.vuln-repo-investigation-shell {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  resize: vertical;
-  overflow: hidden;
-  min-height: 480px;
-  height: calc(100vh - 180px);
-}
-
-.vuln-repo-investigation-shell .panel-header {
-  flex-shrink: 0;
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-}
-
-.vuln-repo-investigation-shell .panel-header h3 {
-  font-size: 0.95rem;
-}
-
-.vuln-repo-investigation-shell .org-cve-hero-stats {
-  flex-shrink: 0;
-  margin-top: 0;
-  margin-bottom: 6px;
-  gap: 6px;
-}
-
-.vuln-repo-investigation-shell .org-cve-score-card {
-  padding: 5px 10px;
-  gap: 0;
-}
-
-.vuln-repo-investigation-shell .org-cve-score-card span {
-  font-size: 0.72rem;
-  line-height: 1.3;
-}
-
-.vuln-repo-investigation-shell .org-cve-score-card strong {
-  font-size: 0.92rem;
-  line-height: 1.2;
-}
-
-.vuln-repo-investigation-shell .org-cve-filter-row {
-  flex-shrink: 0;
-  margin: 0 0 6px;
-}
-
-.vuln-repo-investigation-shell .org-cve-filter-chip {
-  padding: 4px 6px;
-}
-
-.vuln-repo-investigation-shell .org-cve-filter-chip label {
-  margin-bottom: 2px;
-  font-size: 0.74rem;
-}
-
-.vuln-repo-investigation-shell .notice {
-  flex-shrink: 0;
-}
-
-.vuln-repo-investigation-shell .empty-state {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.vuln-repo-investigation-shell .table-scroll {
-  flex: 1 1 0;
-  min-height: 0;
-  margin-top: 0;
-}
-
-.vuln-repo-investigation-shell .pagination-row {
-  flex-shrink: 0;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
 }

@@ -46,6 +46,7 @@ describe('VulnRepoOrgCvePage', () => {
           eolComponentCount: 0,
           eosComponentCount: 0,
           hasInvestigationSummary: false,
+          hasAiSolution: false,
         },
       ],
       page: 0,

@@ -68,7 +68,7 @@ app:
       retry-on-network-errors: ${HTTP_OUTBOUND_RETRY_ON_NETWORK_ERRORS:true}
   openai:
     api-key: ${OPENAI_API_KEY:}
-    base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
     model: ${OPENAI_MODEL:gpt-4o-mini}
     enabled: ${OPENAI_ENABLED:true}
   nvd:

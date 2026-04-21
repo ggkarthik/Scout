@@ -36,8 +36,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class OperationalQualityReadService {
 
     private static final int MAX_PAGE_SIZE = 200;
-    private static final String EOL_MAPPING_REVIEW_HREF =
-            "/?tab=operations&operationsView=quality&domain=EOL&focus=eol-mapping-review";
     private static final List<String> DOMAIN_ORDER = List.of(
             "INGESTION",
             "NORMALIZATION",
@@ -501,9 +499,7 @@ public class OperationalQualityReadService {
                     : "Open Inventory or Software Identities to inspect the normalized record and confirm the missing or low-confidence fields.";
             case "CORRELATION" -> "Open Inventory or the owning asset workflow to inspect the software record, then review why the vulnerability match candidates are missing or low confidence.";
             case "VEX" -> "Open Vulnerability Investigation to inspect matched software, current VEX evidence, and any open finding that now conflicts with that evidence.";
-            case "EOL" -> "SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING".equals(row.issueType())
-                    ? "Open the Operations Quality EOL mapping review queue to assign the official slug, then use Software Identities or the EOL catalog if you need more lifecycle context."
-                    : "Open Software Identities or the EOL catalog to review the mapped slug and lifecycle coverage before changing any override.";
+            case "EOL" -> "Open Software Identities or the EOL catalog to review the mapped slug and lifecycle coverage before changing any override.";
             case "PROJECTION_FRESHNESS" -> "Open the Operations freshness or read-path views to confirm whether a rebuild, recompute, or stale source is blocking the projection.";
             default -> "Open the owning workflow to inspect the underlying record and confirm whether the issue is still active.";
         };
@@ -523,9 +519,6 @@ public class OperationalQualityReadService {
             addTarget(targets, "Software Identities", "/?tab=inventory&inventoryView=software-identities&softwareIdentityId=" + row.softwareIdentityId());
         }
         if ("EOL".equals(row.domain())) {
-            if ("SOFTWARE_IDENTITY_NEEDS_EOL_MAPPING".equals(row.issueType())) {
-                addTarget(targets, "Operations · Mapping Review", EOL_MAPPING_REVIEW_HREF);
-            }
             addTarget(targets, "EOL Catalog", "/?tab=end-of-life");
         }
         if (row.vulnerabilityId() != null) {

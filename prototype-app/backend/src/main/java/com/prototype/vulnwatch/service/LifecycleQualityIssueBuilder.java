@@ -66,29 +66,7 @@ public class LifecycleQualityIssueBuilder {
                 FROM software_identity_summary sis
                 LEFT JOIN exposure ON exposure.software_identity_id = sis.software_identity_id
                 WHERE sis.tenant_id = :tenantId
-                  AND sis.eol_slug IS NULL
-                  AND (
-                      nullif(trim(sis.cpe23), '') IS NOT NULL
-                      OR coalesce(array_length(sis.ecosystems, 1), 0) = 0
-                      OR EXISTS (
-                          SELECT 1
-                          FROM unnest(sis.ecosystems) AS ecosystem
-                          WHERE ecosystem IS NOT NULL
-                            AND lower(ecosystem) NOT IN (
-                                'npm',
-                                'pypi',
-                                'gem',
-                                'cargo',
-                                'nuget',
-                                'composer',
-                                'maven',
-                                'gomod',
-                                'golang',
-                                'go',
-                                'rubygems'
-                            )
-                      )
-                  )
+                  AND sis.needs_eol_mapping = true
                 ORDER BY sis.last_observed_at DESC NULLS LAST, sis.display_name ASC
                 """;
         List<QualityIssueRecord> issues = new ArrayList<>();

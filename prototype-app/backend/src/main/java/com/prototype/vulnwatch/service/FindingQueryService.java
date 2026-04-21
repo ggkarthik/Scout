@@ -271,7 +271,9 @@ public class FindingQueryService {
                 component.getIsEol(),
                 component.getEolDate() != null
                         ? (int) ChronoUnit.DAYS.between(LocalDate.now(), component.getEolDate())
-                        : null);
+                        : null,
+                finding.getIncidentId(),
+                finding.getIncidentStatus());
     }
 
     private Specification<Finding> byTenant(Tenant tenant) {

@@ -135,22 +135,7 @@ public class EolApiClient {
     public List<EolProductSummary> fetchAllProducts() {
         String url = baseUrl + "/products";
         FetchResult result = fetchRawConditional(url, null);
-        List<EolProductSummary> products = parseProductList(result.body());
-        List<EolProductSummary> enriched = new ArrayList<>(products.size());
-        for (EolProductSummary product : products) {
-            if (product.slug() == null || product.slug().isBlank()) {
-                continue;
-            }
-            try {
-                FetchResult detail = fetchRawConditional(baseUrl + "/products/" + product.slug(), null);
-                EolProductSummary detailSummary = parseProductSummary(objectMapper.readTree(detail.body()));
-                enriched.add(mergeProductSummary(product, detailSummary));
-            } catch (Exception ex) {
-                LOG.warn("Failed to enrich EOL product '{}' from detail endpoint: {}", product.slug(), ex.getMessage());
-                enriched.add(product);
-            }
-        }
-        return enriched;
+        return parseProductList(result.body());
     }
 
     /**
@@ -243,57 +228,33 @@ public class EolApiClient {
     }
 
     private EolProductSummary parseProductSummary(JsonNode item) {
-        JsonNode effective = item;
-        if (!item.isTextual()) {
-            JsonNode resultNode = item.path("result");
-            if (resultNode.isObject()) {
-                effective = resultNode;
-            }
+        if (item.isTextual()) {
+            return new EolProductSummary(item.asText(), null, null, null, List.of());
         }
 
-        if (effective.isTextual()) {
-            return new EolProductSummary(effective.asText(), null, null, null, List.of());
-        }
-
-        String slug = textOrNull(effective.path("name"));
+        String slug = textOrNull(item.path("name"));
         if (slug == null) {
-            slug = textOrNull(effective.path("slug"));
+            slug = textOrNull(item.path("slug"));
         }
         if (slug == null) {
             return null;
         }
 
-        String label = textOrNull(effective.path("label"));
+        String label = textOrNull(item.path("label"));
         String cpe = null;
         String purl = null;
 
-        JsonNode identifiers = effective.path("identifiers");
+        JsonNode identifiers = item.path("identifiers");
         if (!identifiers.isMissingNode() && !identifiers.isNull()) {
-            if (identifiers.isArray()) {
-                for (JsonNode identifier : identifiers) {
-                    String type = textOrNull(identifier.path("type"));
-                    String id = textOrNull(identifier.path("id"));
-                    if (type == null || id == null) {
-                        continue;
-                    }
-                    String normalizedType = type.trim().toLowerCase();
-                    if (cpe == null && normalizedType.contains("cpe")) {
-                        cpe = id;
-                    } else if (purl == null
-                            && (normalizedType.contains("purl") || normalizedType.contains("package-url"))) {
-                        purl = id;
-                    }
-                }
-            } else {
-                cpe = textOrNull(identifiers.path("cpe"));
-                purl = textOrNull(identifiers.path("purl"));
-            }
+            cpe = textOrNull(identifiers.path("cpe"));
+            purl = textOrNull(identifiers.path("purl"));
         }
-        if (cpe == null) cpe = textOrNull(effective.path("cpe"));
-        if (purl == null) purl = textOrNull(effective.path("purl"));
+        if (cpe == null) cpe = textOrNull(item.path("cpe"));
+        if (purl == null) purl = textOrNull(item.path("purl"));
 
+        // Parse aliases array from product list or detail document
         List<String> aliases = new ArrayList<>();
-        JsonNode aliasesNode = effective.path("aliases");
+        JsonNode aliasesNode = item.path("aliases");
         if (aliasesNode.isArray()) {
             for (JsonNode a : aliasesNode) {
                 if (a.isTextual() && !a.asText().isBlank()) {
@@ -301,8 +262,10 @@ public class EolApiClient {
                 }
             }
         }
-        if (!effective.equals(item)) {
-            JsonNode resultAliases = item.path("aliases");
+        // Also check inside result envelope (detail document format)
+        JsonNode resultNode = item.path("result");
+        if (!resultNode.isMissingNode()) {
+            JsonNode resultAliases = resultNode.path("aliases");
             if (resultAliases.isArray()) {
                 for (JsonNode a : resultAliases) {
                     if (a.isTextual() && !a.asText().isBlank()) {
@@ -368,22 +331,10 @@ public class EolApiClient {
         LocalDate extendedSupportDate = parseDate(node.path("extendedSupport"));
         LocalDate securitySupportDate = parseDate(node.path("securitySupport"));
         String officialSourceUrl = textOrNull(node.path("link"));
-        JsonNode latestNode = node.path("latest");
-        String latestVersion = textOrNull(latestNode);
+        String latestVersion = textOrNull(node.path("latest"));
         LocalDate latestReleaseDate = parseDate(node.path("latestReleaseDate"));
-        if (latestNode.isObject()) {
-            if (latestVersion == null) {
-                latestVersion = textOrNull(latestNode.path("name"));
-            }
-            if (latestReleaseDate == null) {
-                latestReleaseDate = parseDate(latestNode.path("date"));
-            }
-            if (officialSourceUrl == null) {
-                officialSourceUrl = textOrNull(latestNode.path("link"));
-            }
-        }
-        boolean lts = node.path("lts").asBoolean(false) || node.path("isLts").asBoolean(false);
-        boolean discontinued = node.path("discontinued").asBoolean(false) || node.path("isDiscontinued").asBoolean(false);
+        boolean lts = node.path("lts").asBoolean(false);
+        boolean discontinued = node.path("discontinued").asBoolean(false);
 
         boolean isEolFlag = node.path("isEol").asBoolean(false);
         Boolean isEoas = booleanOrNull(node.path("isEoas"));
@@ -445,30 +396,6 @@ public class EolApiClient {
     private Boolean booleanOrNull(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull() || !node.isBoolean()) return null;
         return node.asBoolean();
-    }
-
-    private EolProductSummary mergeProductSummary(EolProductSummary base, EolProductSummary detail) {
-        if (detail == null) {
-            return base;
-        }
-        List<String> aliases = new ArrayList<>();
-        if (base.aliases() != null) {
-            aliases.addAll(base.aliases());
-        }
-        if (detail.aliases() != null) {
-            for (String alias : detail.aliases()) {
-                if (alias != null && !alias.isBlank() && !aliases.contains(alias)) {
-                    aliases.add(alias);
-                }
-            }
-        }
-        return new EolProductSummary(
-                detail.slug() != null ? detail.slug() : base.slug(),
-                detail.label() != null ? detail.label() : base.label(),
-                detail.cpe() != null ? detail.cpe() : base.cpe(),
-                detail.purl() != null ? detail.purl() : base.purl(),
-                List.copyOf(aliases)
-        );
     }
 
     private OutboundPolicy outboundPolicy() {

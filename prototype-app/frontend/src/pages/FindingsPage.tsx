@@ -1,5 +1,6 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { pathForFindingDetail } from '../app/routes';
 import type { Finding, FindingFilterValues } from '../features/findings/types';
 import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
 import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
@@ -35,6 +36,8 @@ const FINDINGS_COLUMNS: ColumnDef[] = [
   { key: 'first-observed', label: 'First Observed', defaultVisible: false },
   { key: 'last-observed', label: 'Last Observed', defaultVisible: false },
   { key: 'evidence', label: 'Evidence', defaultVisible: false },
+  { key: 'incident-id', label: 'Incident ID', defaultVisible: true },
+  { key: 'incident-status', label: 'Incident Status', defaultVisible: true },
 ];
 
 const COL_VIS_STORAGE_KEY = 'findings-column-visibility';
@@ -220,7 +223,18 @@ function groupValue(row: Finding, key: string): string {
   return 'unknown';
 }
 
+function incidentStatusClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === 'resolved' || s === 'closed') return 'severity-low';
+  if (s === 'in progress') return 'severity-medium';
+  if (s === 'new') return 'severity-info';
+  if (s === 'on hold') return 'severity-high';
+  if (s === 'canceled') return 'severity-none';
+  return 'severity-none';
+}
+
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialVulnerabilityId = React.useMemo(() => searchParams.get('vulnerabilityId')?.trim() ?? '', [searchParams]);
   const initialPackageName = React.useMemo(() => searchParams.get('packageName')?.trim() ?? '', [searchParams]);
@@ -294,6 +308,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     if (visibleColumns.has('first-observed')) columns.push({ id: 'firstObserved', label: 'First Observed', header: 'First Observed', initialSize: 180 });
     if (visibleColumns.has('last-observed')) columns.push({ id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 });
     if (visibleColumns.has('evidence')) columns.push({ id: 'evidence', label: 'Evidence', header: 'Evidence', initialSize: 220 });
+    if (visibleColumns.has('incident-id')) columns.push({ id: 'incidentId', label: 'Incident ID', header: 'Incident ID', initialSize: 140 });
+    if (visibleColumns.has('incident-status')) columns.push({ id: 'incidentStatus', label: 'Incident Status', header: 'Incident Status', initialSize: 140 });
     return columns;
   }, [visibleColumns]);
   const tableRows = React.useMemo<DataTableRow[]>(() => (
@@ -301,21 +317,26 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       id: row.id,
       cells: {
         vulnerability: {
-          content: onOpenCveWorkbench ? (
+          content: (
             <>
-              <div className="mono">{row.displayId || row.id}</div>
               <button
                 type="button"
-                className="findings-vuln-link-btn"
-                onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
+                className="finding-id-link mono"
+                onClick={() => navigate(pathForFindingDetail(row.displayId || row.id), { state: { finding: row } })}
               >
-                {row.vulnerabilityId}
+                {row.displayId || row.id}
               </button>
-            </>
-          ) : (
-            <>
-              <div className="mono">{row.displayId || row.id}</div>
-              <div>{row.vulnerabilityId}</div>
+              {onOpenCveWorkbench ? (
+                <button
+                  type="button"
+                  className="findings-vuln-link-btn"
+                  onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
+                >
+                  {row.vulnerabilityId}
+                </button>
+              ) : (
+                <div>{row.vulnerabilityId}</div>
+              )}
             </>
           ),
           props: { className: 'mono' }
@@ -393,6 +414,16 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
               <pre>{row.evidence}</pre>
             </details>
           ) : '-'
+        },
+        incidentId: {
+          content: row.incidentId
+            ? <span className="mono" style={{ fontSize: 12 }}>{row.incidentId}</span>
+            : <span style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 12 }}>—</span>
+        },
+        incidentStatus: {
+          content: row.incidentStatus
+            ? <span className={`severity-pill ${incidentStatusClass(row.incidentStatus)}`}>{row.incidentStatus}</span>
+            : <span style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 12 }}>—</span>
         }
       }
     }))

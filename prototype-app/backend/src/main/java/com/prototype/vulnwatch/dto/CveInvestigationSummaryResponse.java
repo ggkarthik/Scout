@@ -10,7 +10,8 @@ public record CveInvestigationSummaryResponse(
         ImpactAnalysis impactAnalysis,
         List<RemediationAction> remediationPlan,
         List<String> keyFindings,
-        MetricsSummary metrics
+        MetricsSummary metrics,
+        String markdownReport
 ) {
 
     public record RiskAnalysis(
