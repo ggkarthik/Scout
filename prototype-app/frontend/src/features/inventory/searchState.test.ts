@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearHostInventorySearchState,
+  readInventoryGroupByFromSearch,
+  readInventoryQueryFromSearch,
   readHostAssetIdFromSearch,
   readHostReviewCategoriesFromSearch,
+  readSearchValuesFromSearch,
+  writeInventoryGroupByToSearch,
+  writeInventoryQueryToSearch,
   writeHostAssetIdToSearch,
-  writeHostReviewCategoriesToSearch
+  writeHostReviewCategoriesToSearch,
+  writeSearchValuesToSearch
 } from './searchState';
 
 describe('inventory searchState', () => {
@@ -33,5 +39,28 @@ describe('inventory searchState', () => {
     );
 
     expect(clearHostInventorySearchState(searchParams).toString()).toBe('page=1&query=openssl');
+  });
+
+  it('reads and writes shared inventory drilldown params', () => {
+    const searchParams = new URLSearchParams(
+      'query=log4j&sourceSystem=github&sourceSystem=api&groupBy=sourceSystem&groupBy=ecosystem'
+    );
+
+    expect(readInventoryQueryFromSearch(searchParams)).toBe('log4j');
+    expect(readSearchValuesFromSearch(searchParams, 'sourceSystem')).toEqual(['github', 'api']);
+    expect(readInventoryGroupByFromSearch(searchParams)).toEqual(['sourceSystem', 'ecosystem']);
+
+    const withUpdates = writeInventoryGroupByToSearch(
+      writeSearchValuesToSearch(
+        writeInventoryQueryToSearch(searchParams, 'openssl'),
+        'sourceSystem',
+        ['servicenow', 'github']
+      ),
+      ['operatingSystem']
+    );
+
+    expect(withUpdates.toString()).toBe(
+      'query=openssl&sourceSystem=servicenow&sourceSystem=github&groupBy=operatingSystem'
+    );
   });
 });

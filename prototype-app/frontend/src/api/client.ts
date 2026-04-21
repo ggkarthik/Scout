@@ -13,13 +13,17 @@ import type {
   ImpactedCvePage
 } from '../features/dashboard/types';
 import type {
+  ClusterImpactResult,
+  CorrelationOverridePayload,
+  NormalizationOverridePayload,
   OperationalDashboard,
   OperationalQualityFilterValues,
   OperationalQualityIssueDetail,
   OperationalQualityIssuePage,
   OperationalQualitySummary,
   OperationalSectionResponse,
-  SloStatus
+  SloStatus,
+  SoftwareIdentitySearchResult
 } from '../features/operations/types';
 import type {
   CmdbAssetRecord,
@@ -53,8 +57,11 @@ import type {
   EolComponentPage,
   EolProductCatalog,
   EolRelease,
+  EolSlugSuggestion,
   EolSummary,
-  UnresolvedEolMapping
+  PackageAssetPage,
+  PackageEolStatusPage,
+  UnresolvedEolMappingPage
 } from '../features/eol/types';
 import type {
   SoftwareIdentityDetail,
@@ -230,6 +237,34 @@ export const api = {
     `/operations/quality/issues/${encodeURIComponent(issueId)}`
   ),
   getOperationalQualityFilters: () => request<OperationalQualityFilterValues>('/operations/quality/filters'),
+  getNormalizationImpact: (issueId: string) =>
+    request<ClusterImpactResult>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize/impact`
+    ),
+  applyNormalizationOverride: (issueId: string, payload: NormalizationOverridePayload) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  revokeNormalizationOverride: (issueId: string) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/normalize`,
+      { method: 'DELETE' }
+    ),
+  applyCorrelationOverride: (issueId: string, payload: CorrelationOverridePayload) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/correlate`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  revokeCorrelationOverride: (issueId: string) =>
+    request<{ issueId: string; overrideActive: boolean; actor: string }>(
+      `/operations/quality/issues/${encodeURIComponent(issueId)}/correlate`,
+      { method: 'DELETE' }
+    ),
+  searchSoftwareIdentities: (q: string, limit = 10) =>
+    request<SoftwareIdentitySearchResult[]>(
+      `/operations/software-identities/search?q=${encodeURIComponent(q)}&limit=${limit}`
+    ),
   getSloStatus: () => request<SloStatus>('/slo/status'),
   listAssets: () => request<Asset[]>('/assets'),
   getHostAssetDetail: (assetId: string, params?: { sourceSystem?: string }) => {
@@ -441,7 +476,31 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ normalizedKey, eolSlug })
   }),
-  listEolUnresolvedMappings: () => request<UnresolvedEolMapping[]>('/eol/mappings/unresolved'),
+  listEolUnresolvedMappings: (params?: { page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<UnresolvedEolMappingPage>(`/eol/mappings/unresolved${suffix}`);
+  },
+  listEolMappingSuggestions: (normalizedKey: string) =>
+    request<EolSlugSuggestion[]>(`/eol/mappings/suggestions?normalizedKey=${encodeURIComponent(normalizedKey)}`),
+  getEolPackageStatuses: (params?: { filter?: string; page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.filter) searchParams.set('filter', params.filter);
+    if (params?.page != null) searchParams.set('page', String(params.page));
+    if (params?.size != null) searchParams.set('size', String(params.size));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<PackageEolStatusPage>(`/eol/status/packages${suffix}`);
+  },
+  getEolPackageAssets: (params: { packageName: string; ecosystem?: string; page?: number; size?: number }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.set('packageName', params.packageName);
+    if (params.ecosystem) searchParams.set('ecosystem', params.ecosystem);
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    return request<PackageAssetPage>(`/eol/status/packages/assets?${searchParams.toString()}`);
+  },
   triggerEolCatalogRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/catalog', { method: 'POST' }),
   triggerEolReleaseRefresh: () => request<SyncTriggerResponse>('/eol/admin/refresh/releases', { method: 'POST' }),
   triggerEolMappingResolve: () => request<SyncTriggerResponse>('/eol/admin/refresh/mappings', { method: 'POST' }),

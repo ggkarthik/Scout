@@ -172,6 +172,31 @@ export type OperationalQualityIssueDetail = OperationalQualityIssue & {
   recommendedAction: string;
   drilldownTargets: OperationalQualityDrilldownTarget[];
   sampleRecords: OperationalQualitySampleRecord[];
+  hasActiveOverride: boolean;
+  overrideActor?: string;
+  overrideAt?: string;
+};
+
+export type SoftwareIdentitySearchResult = {
+  id: string;
+  displayName: string;
+  canonicalKey: string;
+};
+
+export type NormalizationOverridePayload = {
+  softwareIdentityId: string;
+  reason: string;
+  applyToFuture: boolean;
+};
+
+export type ClusterImpactResult = {
+  affectedAssetCount: number;
+  affectedInstanceCount: number;
+};
+
+export type CorrelationOverridePayload = {
+  disposition: 'IMPACTED' | 'NOT_IMPACTED' | 'UNKNOWN';
+  reason: string;
 };
 
 export type OperationalQualityIssuePage = {
