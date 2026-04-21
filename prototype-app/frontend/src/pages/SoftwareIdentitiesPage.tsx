@@ -543,7 +543,7 @@ export function SoftwareIdentitiesPage() {
     });
   };
 
-  const openAssetsPanel = (identityId: string, identityName: string, versionFilter?: string) => {
+  const _openAssetsPanel = (identityId: string, identityName: string, versionFilter?: string) => {
     setActivePanel({ type: 'assets', identityId, identityName, versionFilter });
   };
 

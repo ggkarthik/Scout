@@ -6,7 +6,7 @@ import com.prototype.vulnwatch.service.ManualNormalizationOverrideService;
 import com.prototype.vulnwatch.service.NormalizationClusterOverrideService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService.IssueSourceIds;
-import com.prototype.vulnwatch.service.QualityIssueRefreshService;
+import com.prototype.vulnwatch.service.QualityIssueProjectionCoordinator;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
@@ -33,7 +33,7 @@ public class OperationsOverrideController {
     private final ManualNormalizationOverrideService normalizationOverrideService;
     private final ManualCorrelationOverrideService correlationOverrideService;
     private final NormalizationClusterOverrideService clusterOverrideService;
-    private final QualityIssueRefreshService refreshService;
+    private final QualityIssueProjectionCoordinator qualityIssueProjectionCoordinator;
 
     public OperationsOverrideController(
             WorkspaceService workspaceService,
@@ -41,14 +41,14 @@ public class OperationsOverrideController {
             ManualNormalizationOverrideService normalizationOverrideService,
             ManualCorrelationOverrideService correlationOverrideService,
             NormalizationClusterOverrideService clusterOverrideService,
-            QualityIssueRefreshService refreshService
+            QualityIssueProjectionCoordinator qualityIssueProjectionCoordinator
     ) {
         this.workspaceService = workspaceService;
         this.qualityReadService = qualityReadService;
         this.normalizationOverrideService = normalizationOverrideService;
         this.correlationOverrideService = correlationOverrideService;
         this.clusterOverrideService = clusterOverrideService;
-        this.refreshService = refreshService;
+        this.qualityIssueProjectionCoordinator = qualityIssueProjectionCoordinator;
     }
 
     private static boolean isClusterType(String sourceObjectType) {
@@ -113,7 +113,7 @@ public class OperationsOverrideController {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "This quality issue is not associated with an inventory component or software instance");
         }
-        refreshService.refreshTenant(tenant);
+        qualityIssueProjectionCoordinator.refreshTenant(tenant);
         return ResponseEntity.ok(new OverrideResponse(issueId, true, actor));
     }
 
@@ -143,7 +143,7 @@ public class OperationsOverrideController {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "This quality issue is not associated with an inventory component or software instance");
         }
-        refreshService.refreshTenant(tenant);
+        qualityIssueProjectionCoordinator.refreshTenant(tenant);
         return ResponseEntity.ok(new OverrideResponse(issueId, false, actor));
     }
 
@@ -179,7 +179,7 @@ public class OperationsOverrideController {
                 request.getReason(),
                 actor
         );
-        refreshService.refreshTenant(tenant);
+        qualityIssueProjectionCoordinator.refreshTenant(tenant);
         return ResponseEntity.ok(new OverrideResponse(issueId, true, actor));
     }
 
@@ -199,7 +199,7 @@ public class OperationsOverrideController {
                     "This quality issue is not associated with an inventory component");
         }
         correlationOverrideService.revokeOverride(tenant.getId(), sourceIds.componentId());
-        refreshService.refreshTenant(tenant);
+        qualityIssueProjectionCoordinator.refreshTenant(tenant);
         return ResponseEntity.ok(new OverrideResponse(issueId, false, actor));
     }
 

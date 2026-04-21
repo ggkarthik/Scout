@@ -684,7 +684,7 @@ export function InventoryOverviewPage() {
     () => softwarePage?.content ?? [],
     [softwarePage?.content]
   );
-  const assetNormalizationSummary = React.useMemo(
+  const _assetNormalizationSummary = React.useMemo(
     () => buildAssetNormalizationSummary(inventoryComponentsQuery.data ?? []),
     [inventoryComponentsQuery.data]
   );
