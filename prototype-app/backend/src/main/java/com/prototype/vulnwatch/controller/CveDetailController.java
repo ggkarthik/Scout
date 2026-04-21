@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.controller;
 
+import com.prototype.vulnwatch.client.http.AdvisoryFetchService;
 import com.prototype.vulnwatch.client.http.OpenAiClient;
 import com.prototype.vulnwatch.dto.CveInvestigationSummaryResponse;
 import com.prototype.vulnwatch.dto.SavedCveInvestigationSummaryResponse;
@@ -8,7 +9,6 @@ import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.Investigation;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
-import com.prototype.vulnwatch.service.AdvisoryFetchService;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
 import com.prototype.vulnwatch.service.CveAiSolutionPersistenceService;
 import com.prototype.vulnwatch.service.CveInvestigationAiSummaryService;
