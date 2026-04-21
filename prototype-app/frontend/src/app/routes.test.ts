@@ -11,7 +11,7 @@ describe('routes', () => {
   it('maps top-level tabs to canonical paths', () => {
     expect(pathForTab('dashboard')).toBe('/');
     expect(pathForTab('operations')).toBe('/operations/pipeline');
-    expect(pathForTab('inventory')).toBe('/inventory/sbom');
+    expect(pathForTab('inventory')).toBe('/inventory/hosts');
     expect(pathForConnectView('vuln-intel-queue')).toBe('/connect/vuln-intel-queue');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
   });
