@@ -43,6 +43,8 @@ public record FindingResponse(
         String eolCycle,
         LocalDate eolDate,
         Boolean isEol,
-        Integer eolDaysRemaining
+        Integer eolDaysRemaining,
+        String incidentId,
+        String incidentStatus
 ) {
 }

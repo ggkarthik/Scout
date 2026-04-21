@@ -2,10 +2,10 @@ import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../components/CVEInvestigationSummary';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
-import { SegmentedControl } from '../components/SegmentedControl';
 import { pathForVulnRepoView } from '../app/routes';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
-import { useCveDetailQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
+import { useCveDetailQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
+import type { AiSolutionData } from '../features/cve-workbench/api';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
 
 const PAGE_SIZE = 25;
@@ -15,12 +15,40 @@ const VULN_REPO_COLUMNS: DataTableColumn[] = [
   { id: 'title', label: 'Description', header: 'Description', initialSize: 360 },
   { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
   { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
-  { id: 'applicable', label: 'Applicable', header: 'Applicable', initialSize: 130 },
+  { id: 'applicable', label: 'Applicable', header: 'Applicable', initialSize: 110 },
+  { id: 'investigationStatus', label: 'Investigation Status', header: 'Investigation Status', initialSize: 170 },
   { id: 'impactedSoftware', label: 'Impacted Software', header: 'Impacted Software', initialSize: 180 },
-  { id: 'investigationSummary', label: 'Investigation Summary', header: 'Investigation Summary', initialSize: 140 },
+  { id: 'investigationSummary', label: 'AI Summaries', header: 'AI Summaries', initialSize: 140 },
   { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
   { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 },
 ];
+
+const RUNBOOK_TASK_IDS = ['review-asset-inventory', 'find-false-positive', 'end-of-life-analysis', 'solutions', 'installed-patch-info'];
+
+function getInvestigationStatus(cveId: string): 'not-started' | 'in-progress' | 'done' {
+  try {
+    const raw = window.localStorage.getItem(`vulnrepo:${cveId}:investigation-runbook`);
+    if (!raw) return 'not-started';
+    const state = JSON.parse(raw) as { doneTaskIds?: string[] };
+    const done = new Set(state.doneTaskIds ?? []);
+    if (done.size === 0) return 'not-started';
+    if (RUNBOOK_TASK_IDS.every((id) => done.has(id))) return 'done';
+    return 'in-progress';
+  } catch {
+    return 'not-started';
+  }
+}
+
+function getLocalSummaryMode(cveId: string): 'ai' | 'deterministic' | null {
+  try {
+    const raw = window.localStorage.getItem(`vulnrepo:${cveId}:ai-summary`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { mode?: string };
+    return parsed.mode === 'ai' ? 'ai' : 'deterministic';
+  } catch {
+    return null;
+  }
+}
 
 type SoftwareDrawerRow = {
   id: string;
@@ -29,7 +57,7 @@ type SoftwareDrawerRow = {
   version: string;
 };
 
-type DrawerMode = 'metadata' | 'software' | 'summary';
+type DrawerMode = 'metadata' | 'software' | 'summary' | 'ai-solution';
 
 function parseCombinedSearchInput(value: string): { query?: string; software?: string } {
   const normalized = value.trim();
@@ -150,6 +178,10 @@ export function VulnRepoVulnerabilitiesPage() {
     drawerMode === 'summary' ? selectedSoftwareRecord?.externalId ?? null : null,
     drawerMode === 'summary'
   );
+  const savedAiSolutionQuery = useSavedAiSolutionQuery(
+    drawerMode === 'ai-solution' ? selectedSoftwareRecord?.externalId ?? null : null,
+    drawerMode === 'ai-solution'
+  );
   const softwareRows = React.useMemo(
     () => buildSoftwareDrawerRows(softwareDetailQuery.data ?? null),
     [softwareDetailQuery.data]
@@ -195,8 +227,16 @@ export function VulnRepoVulnerabilitiesPage() {
           },
           applicable: {
             content: applicable
-              ? <span className="status-pill status-open">Applicable</span>
-              : <span className="status-pill status-suppressed">Not Matched</span>,
+              ? <span className="status-pill status-open">Yes</span>
+              : <span className="status-pill status-suppressed">No</span>,
+          },
+          investigationStatus: {
+            content: (() => {
+              const status = getInvestigationStatus(item.externalId);
+              if (status === 'done') return <span className="inv-status-badge inv-status-done">Done</span>;
+              if (status === 'in-progress') return <span className="inv-status-badge inv-status-in-progress">In Progress</span>;
+              return <span className="inv-status-badge inv-status-not-started">Not Started</span>;
+            })(),
           },
           impactedSoftware: {
             content: applicable ? (
@@ -215,38 +255,51 @@ export function VulnRepoVulnerabilitiesPage() {
             ),
           },
           investigationSummary: {
-            content: item.hasInvestigationSummary ? (
-              <button
-                type="button"
-                className="btn-link vuln-repo-summary-link"
-                aria-label={`Open saved investigation summary for ${item.externalId}`}
-                title={`Open saved investigation summary for ${item.externalId}`}
-                onClick={() => {
-                  setSelectedSoftwareRecord(item);
-                  setDrawerMode('summary');
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path
-                    d="M7 4h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 1.5V10h4.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9 13h6M9 16h6M9 19h4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : (
-              <span className="panel-caption">-</span>
-            ),
+            content: (() => {
+              const localMode = getLocalSummaryMode(item.externalId);
+              const hasSummary = item.hasInvestigationSummary || localMode !== null;
+              return (hasSummary || item.hasAiSolution) ? (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {(item.hasInvestigationSummary || localMode !== null) && (
+                  <button
+                    type="button"
+                    className="btn-link vuln-repo-summary-link"
+                    aria-label={`Open investigation summary for ${item.externalId}`}
+                    title={`Investigation Summary — ${item.externalId}`}
+                    onClick={() => { setSelectedSoftwareRecord(item); setDrawerMode('summary'); }}
+                  >
+                    {/* Investigation: clipboard/document icon */}
+                    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M7 4h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 1.5V10h4.5"
+                        fill="none" stroke="currentColor" strokeWidth="1.8"
+                        strokeLinecap="round" strokeLinejoin="round"
+                      />
+                      <path d="M9 13h6M9 16h6M9 19h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+                {item.hasAiSolution && (
+                  <button
+                    type="button"
+                    className="btn-link vuln-repo-ai-solution-link"
+                    aria-label={`Open AI solution for ${item.externalId}`}
+                    title={`AI Remediation Solution — ${item.externalId}`}
+                    onClick={() => { setSelectedSoftwareRecord(item); setDrawerMode('ai-solution'); }}
+                  >
+                    {/* AI Solution: sparkle/lightning icon */}
+                    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M13 2L4.5 13.5H11L10 22L19.5 10H13L13 2Z"
+                        fill="none" stroke="currentColor" strokeWidth="1.8"
+                        strokeLinecap="round" strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              ) : null;
+            })(),
           },
           openFindings: {
             content: item.openFindings.toLocaleString(),
@@ -405,10 +458,21 @@ export function VulnRepoVulnerabilitiesPage() {
           <aside className="panel detail-panel vuln-repo-software-drawer">
             <div className="panel-header org-cve-drawer-header">
               <div>
+                <div className="org-cve-back-link">
+                  {drawerMode === 'summary'
+                    ? 'Investigation Summary'
+                    : drawerMode === 'ai-solution'
+                      ? 'AI Remediation Solution'
+                      : drawerMode === 'metadata'
+                        ? 'CVE Metadata'
+                        : 'Impacted Software'}
+                </div>
                 <h3>{selectedSoftwareRecord.externalId}</h3>
                 <span className="panel-caption">
                   {drawerMode === 'summary'
                     ? 'Saved investigation summary for this CVE.'
+                    : drawerMode === 'ai-solution'
+                    ? 'AI-generated remediation recommendation.'
                     : drawerMode === 'metadata'
                     ? 'Summary and metadata for the selected CVE.'
                     : 'Matched software inventory for this CVE.'}
@@ -420,21 +484,9 @@ export function VulnRepoVulnerabilitiesPage() {
                 onClick={() => setSelectedSoftwareRecord(null)}
                 aria-label="Close details panel"
               >
-                ×
+                x
               </button>
             </div>
-            <SegmentedControl
-              ariaLabel="CVE detail view"
-              value={drawerMode}
-              onChange={(mode) => setDrawerMode(mode as DrawerMode)}
-              options={[
-                { label: 'Software', value: 'software' },
-                { label: 'Metadata', value: 'metadata' },
-                ...(selectedSoftwareRecord.hasInvestigationSummary
-                  ? [{ label: 'Summary', value: 'summary' }]
-                  : []),
-              ]}
-            />
 
             {drawerMode === 'summary' ? (
               savedSummaryQuery.isLoading || savedSummaryQuery.isFetching ? (
@@ -454,6 +506,14 @@ export function VulnRepoVulnerabilitiesPage() {
                 </div>
               ) : (
                 <div className="empty-state"><p>No saved investigation summary was found for this CVE.</p></div>
+              )
+            ) : drawerMode === 'ai-solution' ? (
+              savedAiSolutionQuery.isLoading || savedAiSolutionQuery.isFetching ? (
+                <div className="empty-state"><p>Loading AI solution...</p></div>
+              ) : !savedAiSolutionQuery.data?.success || !savedAiSolutionQuery.data?.data ? (
+                <div className="empty-state"><p>No AI solution has been generated yet for this CVE. Open the CVE detail and click Generate AI Recommendation.</p></div>
+              ) : (
+                <AiSolutionPanel data={savedAiSolutionQuery.data.data} generatedAt={savedAiSolutionQuery.data.generatedAt} />
               )
             ) : softwareDetailQuery.isLoading || softwareDetailQuery.isFetching ? (
               <div className="empty-state"><p>Loading CVE details...</p></div>
@@ -531,7 +591,7 @@ export function VulnRepoVulnerabilitiesPage() {
         ) : null}
       </div>
 
-      <div className="pagination-row">
+      <div className="pagination-bar">
         <span className="panel-caption">
           {totalItems.toLocaleString()} CVEs
         </span>
@@ -558,5 +618,98 @@ export function VulnRepoVulnerabilitiesPage() {
         </div>
       </div>
     </section>
+  );
+}
+
+function AiSolutionPanel({ data, generatedAt }: { data: AiSolutionData; generatedAt?: string }) {
+  const val = (v: string | null | undefined) => (!v || v === 'null' || v === 'N/A') ? null : v;
+  const phaseColor = (c: string) => c === 'red' ? '#e53e3e' : c === 'amber' ? '#d97706' : '#16a34a';
+
+  return (
+    <div className="ai-sol-panel">
+      {generatedAt && (
+        <p className="ai-sol-ts">Generated {new Date(generatedAt).toLocaleString()}</p>
+      )}
+      {data.affected_scope && <p className="ai-sol-scope">{data.affected_scope}</p>}
+
+      {data.bottom_line && (
+        <div className="ai-sol-section">
+          <p className="ai-sol-section-hdr">The Bottom Line</p>
+          <div className="ai-sol-badges">
+            {data.bottom_line.severity && (
+              <span className={`severity-pill severity-${data.bottom_line.severity.toLowerCase()}`}>{data.bottom_line.severity}</span>
+            )}
+            {data.bottom_line.cvss && <span className="ai-sol-badge">CVSS {data.bottom_line.cvss}</span>}
+            {data.bottom_line.kev_status && <span className="ai-sol-badge">{data.bottom_line.kev_status}</span>}
+          </div>
+          {data.bottom_line.summary && <p className="ai-sol-text">{data.bottom_line.summary}</p>}
+        </div>
+      )}
+
+      {data.primary_fix && (() => {
+        const patchId = val(data.primary_fix!.patch_id);
+        const targetVer = val(data.primary_fix!.target_version);
+        return (
+          <div className="ai-sol-section">
+            <p className="ai-sol-section-hdr">Primary Fix</p>
+            <p className="ai-sol-fix-title">
+              {val(data.primary_fix.action) ?? 'Apply'}{patchId ? ` — ${patchId}` : ''}
+            </p>
+            {targetVer && <p className="ai-sol-text"><code>{targetVer}</code></p>}
+            {val(data.primary_fix.verification) && (
+              <p className="ai-sol-verify">{val(data.primary_fix.verification)}</p>
+            )}
+          </div>
+        );
+      })()}
+
+      {data.timeline && data.timeline.length > 0 && (
+        <div className="ai-sol-section">
+          <p className="ai-sol-section-hdr">Timeline</p>
+          {data.timeline.map((t, i) => (
+            <div key={i} className="ai-sol-timeline-row">
+              <div className="ai-sol-timeline-dot" style={{ background: phaseColor(t.color) }} />
+              <div>
+                <p className="ai-sol-timeline-hdr" style={{ color: phaseColor(t.color) }}>
+                  {t.window} — {t.label}
+                </p>
+                {t.actions && (
+                  <ul className="ai-sol-list">
+                    {t.actions.map((a, j) => <li key={j}>{a}</li>)}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.compensating_controls && data.compensating_controls.length > 0 && (
+        <div className="ai-sol-section">
+          <p className="ai-sol-section-hdr">Compensating Controls</p>
+          {data.compensating_controls.map((c, i) => (
+            <div key={i} className="ai-sol-ctrl-row">
+              <span className="ai-sol-text">{c.control}</span>
+              <span className="ai-sol-badge">{c.effort}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.lifecycle_warning?.upgrade_recommendation && (
+        <div className="ai-sol-lifecycle">
+          <span style={{ color: '#d97706' }}>⚠</span>
+          <p className="ai-sol-text">{data.lifecycle_warning.upgrade_recommendation}</p>
+        </div>
+      )}
+
+      {data.confidence_score != null && (
+        <div className="ai-sol-confidence">
+          <span className="ai-sol-section-hdr">Confidence</span>
+          <span className="ai-sol-conf-score">{data.confidence_score}%</span>
+          {data.confidence_rationale && <span className="ai-sol-text">{data.confidence_rationale}</span>}
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-04-14
+Last updated: 2026-03-22
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -108,23 +108,12 @@ Added by V1030–V1033:
 - `org_cve_records`
   - tenant-level rollup for one row per CVE per tenant
   - stores applicability, impact state, matched component count, and software count
-  - extended by V1047 with `investigation_summary_input_json`, `investigation_summary_output_json`, `investigation_summary_mode`, and `investigation_summary_generated_at` for persisted CVE investigation summaries
 - `findings`
   - tenant-scoped workflow records
   - unique key on `(component_id, vulnerability_id)`
-  - extended by V1048 with `display_id` — a human-readable sequential identifier (`Find00001`, `Find00002`, …) backed by a dedicated sequence; unique and non-null
 - `finding_events`
 - `finding_comments`
 - `risk_policies`
-
-### Vulnerability Source Filter Configuration
-
-Added by V1046:
-
-- `vulnerability_source_filter_configs`
-  - one row per `(tenant_id, source_system)` — stores per-source ingestion filter settings as `filters_json`
-  - unique index on `(tenant_id, source_system)`
-  - used by `VulnerabilitySourceFilterConfigController` to scope which CVE ecosystems, severities, or product ranges are ingested for each feed
 
 ### End-of-Life Tracking
 
@@ -142,7 +131,6 @@ Added by V1034–V1042:
   - maps a `software_identity_id` (or `normalized_key` string) to an EOL slug
   - stores `normalized_key`, `eol_slug`, `match_confidence`, `match_method`, `confirmed`, `software_identity_id`
   - `confirmed = true` for analyst-reviewed mappings; `match_method = MANUAL` for those set via the UI
-  - extended by V1050 with `confirmed_by`, `confirmed_at`, and `previous_slug` for compliance-level audit tracking of manual confirmations
 
 EOL denormalized columns added to `inventory_components` and `software_instances` (V1036, V1038–V1041):
 - `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, `latest_supported_version`, `eol_checked_at`
@@ -246,7 +234,6 @@ This is a major change from the older documentation set and is now the correct p
 ### Workflow Operations
 
 - investigations and applicability assessments are persisted directly from `/api/cve-detail/*`
-- investigation summaries (deterministic and AI-assisted) are persisted as JSON columns on `org_cve_records`
 - finding events/comments capture audit trail around status and suppression changes
 - scheduled jobs mutate asset state, suppression expiry, and policy-based auto-close behavior
 
@@ -295,7 +282,6 @@ The data model preserves explainability rather than only final status:
 - `findings.evidence` and `findings.precedence_trace` preserve decision traces
 - `finding_events` records workflow changes
 - `sync_runs` records ingest execution history
-- `findings.display_id` provides a human-readable sequential reference number (`Find00001`, …) for analyst-facing references
 
 ## Current Caveats
 

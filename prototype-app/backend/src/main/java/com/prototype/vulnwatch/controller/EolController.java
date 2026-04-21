@@ -4,15 +4,10 @@ import com.prototype.vulnwatch.dto.ComponentEolStatusDto;
 import com.prototype.vulnwatch.dto.EolMappingConfirmRequest;
 import com.prototype.vulnwatch.dto.EolProductCatalogDto;
 import com.prototype.vulnwatch.dto.EolReleaseDto;
-import com.prototype.vulnwatch.dto.EolSlugSuggestionDto;
 import com.prototype.vulnwatch.dto.EolSummaryDto;
-import com.prototype.vulnwatch.dto.EolUnresolvedMappingDto;
-import com.prototype.vulnwatch.dto.PackageAssetDto;
-import com.prototype.vulnwatch.dto.PackageEolStatusDto;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.service.EolRefreshService;
 import com.prototype.vulnwatch.service.EolService;
-import com.prototype.vulnwatch.service.EolSlugResolverService;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
@@ -30,13 +25,10 @@ public class EolController {
 
     private final EolService eolService;
     private final EolRefreshService eolRefreshService;
-    private final EolSlugResolverService slugResolverService;
 
-    public EolController(EolService eolService, EolRefreshService eolRefreshService,
-            EolSlugResolverService slugResolverService) {
+    public EolController(EolService eolService, EolRefreshService eolRefreshService) {
         this.eolService = eolService;
         this.eolRefreshService = eolRefreshService;
-        this.slugResolverService = slugResolverService;
     }
 
     /**
@@ -61,33 +53,6 @@ public class EolController {
     }
 
     /**
-     * Paged list of packages (grouped across all assets) with their EOL status and impacted asset count.
-     * One row per unique (package_name, ecosystem, eol_slug, eol_cycle, eol_date, is_eol) combination.
-     */
-    @GetMapping("/status/packages")
-    public Page<PackageEolStatusDto> getPackageStatuses(
-            @RequestParam(required = false) String filter,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size
-    ) {
-        return eolService.getPackageStatuses(filter, page, Math.min(size, 200));
-    }
-
-    /**
-     * Assets that have a specific package installed, with the installed version(s).
-     * Used for drill-down from the package-centric EOL table.
-     */
-    @GetMapping("/status/packages/assets")
-    public Page<PackageAssetDto> getPackageAssets(
-            @RequestParam String packageName,
-            @RequestParam(required = false) String ecosystem,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size
-    ) {
-        return eolService.getPackageAssets(packageName, ecosystem, page, Math.min(size, 200));
-    }
-
-    /**
      * Full EOL product catalog (slugs + CPE/PURL identifiers).
      */
     @GetMapping("/products")
@@ -101,15 +66,6 @@ public class EolController {
     @GetMapping("/products/{slug}/releases")
     public List<EolReleaseDto> listReleases(@PathVariable String slug) {
         return eolService.listReleases(slug);
-    }
-
-    /**
-     * Returns backend-computed slug candidates for a given normalizedKey.
-     * Runs all 4 resolution tiers and returns up to 5 candidates with confidence and method.
-     */
-    @GetMapping("/mappings/suggestions")
-    public List<EolSlugSuggestionDto> listSuggestions(@RequestParam String normalizedKey) {
-        return slugResolverService.resolveSuggestions(normalizedKey);
     }
 
     /**
@@ -154,10 +110,15 @@ public class EolController {
      * Software identities that have no EOL slug mapping yet (for analyst review).
      */
     @GetMapping("/mappings/unresolved")
-    public Page<EolUnresolvedMappingDto> listUnresolved(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size
-    ) {
-        return eolService.listUnresolvedMappings(page, Math.min(size, 100));
+    public List<Map<String, String>> listUnresolved() {
+        return eolService.listUnresolvedIdentities().stream()
+                .map(identity -> Map.of(
+                        "vendor", identity.getVendor() == null ? "" : identity.getVendor(),
+                        "product", identity.getProduct() == null ? "" : identity.getProduct(),
+                        "displayName", identity.getDisplayName(),
+                        "normalizedKey", (identity.getVendor() == null ? "" : identity.getVendor().toLowerCase())
+                                + "::" + (identity.getProduct() == null ? "" : identity.getProduct().toLowerCase())
+                ))
+                .toList();
     }
 }
