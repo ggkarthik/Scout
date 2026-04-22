@@ -403,8 +403,6 @@ export default function App() {
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
-  const [tabSearch, setTabSearch] = React.useState('');
-  const quickJumpRef = React.useRef<HTMLInputElement>(null);
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
@@ -423,9 +421,6 @@ export default function App() {
     : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
       : 'dashboard';
-  const tabSearchSuggestions = [...PRIMARY_NAV_TABS, ...BOTTOM_NAV_TABS]
-    .filter((tab) => titleForTab(tab).toLowerCase().includes(tabSearch.trim().toLowerCase()));
-
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -435,17 +430,6 @@ export default function App() {
     setNavOpen(false);
   }, [location.pathname]);
 
-  React.useEffect(() => {
-    const handleGlobalKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        quickJumpRef.current?.focus();
-        quickJumpRef.current?.select();
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
 
   React.useEffect(() => () => {
     if (inventoryFlyoutTimer.current != null) {
@@ -500,13 +484,6 @@ export default function App() {
     if (tab !== 'operations') {
       setOperationsFlyoutOpen(false);
     }
-  };
-
-  const applyTabSearch = (): void => {
-    const next = matchTabFromInput(tabSearch, [...PRIMARY_NAV_TABS, ...BOTTOM_NAV_TABS]);
-    if (!next) return;
-    navigateToTab(next);
-    setTabSearch('');
   };
 
   const renderNavButton = (tab: AppTab): React.ReactNode => (
@@ -647,39 +624,6 @@ export default function App() {
               <h1>{activeTitle}</h1>
             </div>
             <div className="topbar-actions">
-              <div className="quick-jump">
-                <input
-                  ref={quickJumpRef}
-                  value={tabSearch}
-                  onChange={(event) => setTabSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      applyTabSearch();
-                    }
-                  }}
-                  placeholder="Jump to page..."
-                  aria-label="Jump to page"
-                />
-                {!tabSearch && <span className="quick-jump-kbd">⌘K</span>}
-                {tabSearch.trim() && tabSearchSuggestions.length > 0 && (
-                  <div className="quick-jump-menu">
-                    {tabSearchSuggestions.map((tab) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        className="quick-jump-item"
-                        onClick={() => {
-                          navigateToTab(tab);
-                          setTabSearch('');
-                        }}
-                      >
-                        {titleForTab(tab)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
               <button
                 className="btn btn-secondary nav-toggle"
                 onClick={() => setNavOpen((current) => !current)}
