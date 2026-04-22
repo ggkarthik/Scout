@@ -1373,6 +1373,12 @@ th {
   color: var(--muted);
 }
 
+.status-investigating {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #d97706;
+}
+
 .inv-status-badge {
   display: inline-flex;
   align-items: center;
