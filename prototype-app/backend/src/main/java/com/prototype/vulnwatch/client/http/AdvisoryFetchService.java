@@ -14,7 +14,7 @@ import org.springframework.web.client.RestTemplate;
  * Fetches vendor advisory pages and extracts plain text for use as AI prompt context.
  * For MSRC CVEs, also queries the MSRC JSON API for structured patch/KB data.
  */
-@Service
+@Service("httpAdvisoryFetchService")
 public class AdvisoryFetchService {
 
     private static final Logger log = LoggerFactory.getLogger(AdvisoryFetchService.class);
