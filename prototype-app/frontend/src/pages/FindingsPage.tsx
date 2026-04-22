@@ -1,853 +1,944 @@
 import React from 'react';
+import '../styles/findings-list.css';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail } from '../app/routes';
-import type { Finding, FindingFilterValues } from '../features/findings/types';
-import { FilterBuilder, FilterBuilderCategory, FilterBuilderField } from '../components/FilterBuilder';
-import { FilterValueOption, FilterValueSelectCard } from '../components/FilterValueSelectCard';
-import { MultiGroupBy, MultiGroupByOption } from '../components/MultiGroupBy';
-import {
-  DataTable,
-  type DataTableColumn,
-  type DataTableRow
-} from '../components/DataTable';
-import { StatCard } from '../components/StatCard';
-import { ColumnVisibilityToggle, ColumnDef } from '../components/ColumnVisibilityToggle';
-import { EolBadge } from '../components/EolBadge';
+import type { Finding } from '../features/findings/types';
+import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
+import { cveWorkbenchApi } from '../features/cve-workbench/api';
+import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
+import { apiRequest } from '../api/client';
+
+// ─── constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
-const DEFAULT_MATCH_METHODS: string[] = [];
-const DEFAULT_ACTIVE_FILTERS: FindingFilterKey[] = [];
+const COL_VIS_KEY = 'findings-col-vis-v2';
 
-const FINDINGS_COLUMNS: ColumnDef[] = [
-  { key: 'vulnerability', label: 'Vulnerability', defaultVisible: true },
-  { key: 'asset', label: 'Asset', defaultVisible: true },
-  { key: 'package', label: 'Package', defaultVisible: true },
-  { key: 'severity', label: 'Severity', defaultVisible: true },
-  { key: 'status', label: 'Status', defaultVisible: true },
-  { key: 'decision', label: 'Decision', defaultVisible: true },
-  { key: 'vex', label: 'VEX', defaultVisible: true },
-  { key: 'impact-reason', label: 'Impact Reason', defaultVisible: true },
-  { key: 'risk', label: 'Risk', defaultVisible: true },
-  { key: 'confidence', label: 'Confidence', defaultVisible: true },
-  { key: 'match-method', label: 'Match Method', defaultVisible: true },
-  { key: 'kev', label: 'KEV', defaultVisible: true },
-  { key: 'eol-status', label: 'EOL Status', defaultVisible: true },
-  { key: 'first-observed', label: 'First Observed', defaultVisible: false },
-  { key: 'last-observed', label: 'Last Observed', defaultVisible: false },
-  { key: 'evidence', label: 'Evidence', defaultVisible: false },
-  { key: 'incident-id', label: 'Incident ID', defaultVisible: true },
-  { key: 'incident-status', label: 'Incident Status', defaultVisible: true },
+const ALL_COLUMNS = [
+  { key: 'findingId',      label: 'Finding ID',    alwaysVisible: true  },
+  { key: 'cveId',          label: 'CVE ID',         alwaysVisible: true  },
+  { key: 'asset',          label: 'Asset',          alwaysVisible: false },
+  { key: 'package',        label: 'Package',        alwaysVisible: false },
+  { key: 'severity',       label: 'Severity',       alwaysVisible: false },
+  { key: 'status',         label: 'Status',         alwaysVisible: false },
+  { key: 'risk',           label: 'Risk',           alwaysVisible: false },
+  { key: 'assignedTo',     label: 'Assigned To',    alwaysVisible: false },
+  { key: 'dueDate',        label: 'Due Date',       alwaysVisible: false },
+  { key: 'incidentId',     label: 'Incident ID',    alwaysVisible: false },
+  { key: 'incidentStatus', label: 'Inc. Status',    alwaysVisible: false },
+  { key: 'firstObserved',  label: 'First Observed', alwaysVisible: false },
+  { key: 'lastObserved',   label: 'Last Observed',  alwaysVisible: false },
+] as const;
+
+type ColKey = typeof ALL_COLUMNS[number]['key'];
+
+const DEFAULT_VISIBLE: ColKey[] = [
+  'findingId', 'cveId', 'asset', 'package', 'severity', 'status',
+  'risk', 'assignedTo', 'dueDate', 'incidentId',
 ];
 
-const COL_VIS_STORAGE_KEY = 'findings-column-visibility';
+const SEV_COLORS: Record<string, string> = {
+  CRITICAL: '#ef4444',
+  HIGH:     '#f97316',
+  MEDIUM:   '#eab308',
+  LOW:      '#22c55e',
+  NONE:     '#9ca3af',
+  UNKNOWN:  '#d1d5db',
+};
 
-function loadColumnVisibility(): Set<string> {
+const STATUS_COLORS: Record<string, string> = {
+  OPEN:        '#3b82f6',
+  RESOLVED:    '#22c55e',
+  SUPPRESSED:  '#f59e0b',
+  AUTO_CLOSED: '#9ca3af',
+};
+
+const SEVERITY_ORDER: Record<string, number> = {
+  CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, NONE: 4, UNKNOWN: 5,
+};
+
+const GROUP_OPTIONS: MultiGroupByOption[] = [
+  { key: 'severity',        label: 'Severity'          },
+  { key: 'status',          label: 'Status'            },
+  { key: 'assetName',       label: 'Asset'             },
+  { key: 'packageName',     label: 'Package'           },
+  { key: 'vulnerabilityId', label: 'Vulnerability ID'  },
+];
+
+// ─── column filter types ──────────────────────────────────────────────────────
+
+type DueDateBand = 'overdue' | 'due-soon' | 'on-track' | 'no-sla' | null;
+
+type ColFilters = {
+  findingId:  string;
+  cveId:      string;
+  asset:      string;
+  package:    string;
+  severity:   string[];
+  status:     string[];
+  risk:       string;
+  assignedTo: string;
+  dueDate:    string;
+  incidentId: string;
+};
+
+const DEFAULT_COL_FILTERS: ColFilters = {
+  findingId: '', cveId: '', asset: '', package: '',
+  severity: ['CRITICAL', 'HIGH'], // default: show Critical + High
+  status: ['OPEN'],               // default: show Open
+  risk: '', assignedTo: '', dueDate: '', incidentId: '',
+};
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(v: string): string {
+  return v.replace(/[_-]+/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+function severityClass(s: string) { return `severity-pill severity-${s.toLowerCase()}`; }
+function statusClass(s: string)   { return `status-pill status-${s.toLowerCase()}`; }
+function statusLabel(row: Finding): string {
+  if (row.status === 'SUPPRESSED') {
+    const r = (row.suppressionReason ?? '').toUpperCase();
+    if (r.includes('FALSE_POSITIVE')) return 'False Positive';
+    if (r.includes('DUPLICATE')) return 'Duplicate';
+    return 'Deferred';
+  }
+  if (row.status === 'AUTO_CLOSED') return 'Closed';
+  return fmt(row.status);
+}
+
+function loadVis(): Set<ColKey> {
   try {
-    const raw = localStorage.getItem(COL_VIS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) return new Set(parsed as string[]);
-    }
-  } catch {
-    // ignore
-  }
-  return new Set(FINDINGS_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+    const raw = localStorage.getItem(COL_VIS_KEY);
+    if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) return new Set(p as ColKey[]); }
+  } catch { /**/ }
+  return new Set(DEFAULT_VISIBLE);
 }
 
-type FindingsPageProps = {
-  onOpenCveWorkbench?: (vulnerabilityId: string) => void;
-};
-const DEFAULT_MIN_CONFIDENCE = 0.7;
-
-type FindingFilterKey =
-  | 'severity'
-  | 'status'
-  | 'decisionState'
-  | 'matchMethod'
-  | 'vexStatus'
-  | 'vexFreshness'
-  | 'vexProvider'
-  | 'minConfidence'
-  | 'vulnerabilityId'
-  | 'packageName'
-  | 'ecosystem';
-
-const FINDING_FILTER_CATEGORIES: FilterBuilderCategory[] = [
-  { key: 'finding', label: 'Finding' },
-  { key: 'correlation', label: 'Correlation' },
-  { key: 'vex', label: 'VEX' }
-];
-
-const FINDING_FILTER_FIELDS: FilterBuilderField[] = [
-  {
-    key: 'severity',
-    label: 'Severity',
-    categoryKey: 'finding',
-    description: 'Filter by vulnerability severity.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'status',
-    label: 'Workflow Status',
-    categoryKey: 'finding',
-    description: 'Filter by finding workflow state.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'decisionState',
-    label: 'Decision State',
-    categoryKey: 'finding',
-    description: 'Filter by applicability outcome.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'matchMethod',
-    label: 'Match Method',
-    categoryKey: 'correlation',
-    description: 'Limit results by the correlation method used to create the finding.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'minConfidence',
-    label: 'Min Confidence',
-    categoryKey: 'correlation',
-    description: 'Show findings with confidence at or above threshold.',
-    typeLabel: 'Number property'
-  },
-  {
-    key: 'vulnerabilityId',
-    label: 'Vulnerability ID',
-    categoryKey: 'finding',
-    description: 'Search exact vulnerability id (for example CVE-2025-1234).',
-    typeLabel: 'String property'
-  },
-  {
-    key: 'packageName',
-    label: 'Package Name',
-    categoryKey: 'finding',
-    description: 'Filter by package name.',
-    typeLabel: 'String property'
-  },
-  {
-    key: 'ecosystem',
-    label: 'Ecosystem',
-    categoryKey: 'finding',
-    description: 'Filter by package ecosystem.',
-    typeLabel: 'String property'
-  },
-  {
-    key: 'vexStatus',
-    label: 'VEX Status',
-    categoryKey: 'vex',
-    description: 'Filter by parsed VEX statement status.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'vexFreshness',
-    label: 'VEX Freshness',
-    categoryKey: 'vex',
-    description: 'Filter by VEX freshness classification.',
-    typeLabel: 'Enum property'
-  },
-  {
-    key: 'vexProvider',
-    label: 'VEX Provider',
-    categoryKey: 'vex',
-    description: 'Filter by VEX provider/source.',
-    typeLabel: 'Enum property'
-  }
-];
-
-const GROUP_BY_OPTIONS: MultiGroupByOption[] = [
-  { key: 'severity', label: 'Severity' },
-  { key: 'status', label: 'Workflow Status' },
-  { key: 'decisionState', label: 'Decision State' },
-  { key: 'assetType', label: 'Asset Type' },
-  { key: 'assetName', label: 'Asset Name' },
-  { key: 'packageName', label: 'Package Name' },
-  { key: 'vulnerabilityId', label: 'Vulnerability ID' },
-  { key: 'matchedBy', label: 'Match Method' },
-  { key: 'inKev', label: 'KEV' }
-];
-
-const DEFAULT_FILTER_VALUES: FindingFilterValues = {
-  severities: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE', 'UNKNOWN'],
-  statuses: ['OPEN', 'RESOLVED', 'SUPPRESSED', 'AUTO_CLOSED'],
-  decisionStates: ['AFFECTED', 'NOT_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'NEEDS_REVIEW'],
-  matchMethods: DEFAULT_MATCH_METHODS,
-  vexStatuses: ['AFFECTED', 'NOT_AFFECTED', 'FIXED', 'UNDER_INVESTIGATION', 'UNKNOWN'],
-  vexFreshness: ['FRESH', 'STALE', 'UNKNOWN'],
-  vexProviders: ['unknown']
-};
-
-function formatLabel(value: string): string {
-  const normalized = value.trim().replace(/[_-]+/g, ' ').toLowerCase();
-  return normalized.replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
-
-function severityTone(value: string): FilterValueOption['tone'] {
-  if (value === 'CRITICAL') return 'critical';
-  if (value === 'HIGH') return 'high';
-  if (value === 'MEDIUM') return 'medium';
-  if (value === 'LOW') return 'low';
-  return 'neutral';
-}
-
-function matchMethodLabel(value: string): string {
-  if (value.startsWith('cpe-indexed-direct')) return 'CPE Direct + Version';
-  if (value.startsWith('cpe-indexed-fallback')) return 'CPE Fallback + Version';
-  if (value.startsWith('cpe-direct')) return 'CPE Direct + Version';
-  if (value.startsWith('cpe-fallback')) return 'CPE Fallback + Version';
-  if (value.startsWith('purl-indexed-exact')) return 'PURL Exact + Version';
-  if (value.startsWith('coord-indexed-exact')) return 'Package Coordinate Exact + Version';
-  if (value.startsWith('advisory-pkg-indexed-exact')) return 'Advisory Package Exact + Version';
-  if (value.startsWith('manual-org-cve-review')) return 'Manual Org CVE Review';
-  return formatLabel(value);
-}
-
-function statusClass(status: Finding['status']): string {
-  return `status-${status.toLowerCase()}`;
-}
-
-function groupValue(row: Finding, key: string): string {
-  if (key === 'severity') return row.severity || 'UNKNOWN';
-  if (key === 'status') return row.status;
-  if (key === 'decisionState') return row.decisionState;
-  if (key === 'assetType') return row.assetType;
-  if (key === 'assetName') return row.assetName;
-  if (key === 'packageName') return row.packageName;
-  if (key === 'vulnerabilityId') return row.vulnerabilityId;
-  if (key === 'matchedBy') return row.matchedBy || 'unknown';
-  if (key === 'inKev') return row.inKev ? 'true' : 'false';
+function groupValue(r: Finding, key: string): string {
+  if (key === 'severity')        return r.severity || 'UNKNOWN';
+  if (key === 'status')          return r.status;
+  if (key === 'assetName')       return r.assetName;
+  if (key === 'packageName')     return r.packageName;
+  if (key === 'vulnerabilityId') return r.vulnerabilityId;
   return 'unknown';
 }
 
-function incidentStatusClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === 'resolved' || s === 'closed') return 'severity-low';
-  if (s === 'in progress') return 'severity-medium';
-  if (s === 'new') return 'severity-info';
-  if (s === 'on hold') return 'severity-high';
-  if (s === 'canceled') return 'severity-none';
-  return 'severity-none';
+function applyColFilters(rows: Finding[], f: ColFilters, dueDateBand: DueDateBand): Finding[] {
+  const now = Date.now();
+  const sevenDays = 7 * 24 * 3600 * 1000;
+  return rows.filter(r => {
+    if (f.findingId && !(r.displayId || r.id).toLowerCase().includes(f.findingId.toLowerCase())) return false;
+    if (f.cveId && !r.vulnerabilityId.toLowerCase().includes(f.cveId.toLowerCase())) return false;
+    if (f.asset && !r.assetName.toLowerCase().includes(f.asset.toLowerCase())) return false;
+    if (f.package && !r.packageName.toLowerCase().includes(f.package.toLowerCase())) return false;
+    if (f.severity.length > 0 && !f.severity.includes(r.severity)) return false;
+    if (f.status.length > 0 && !f.status.includes(r.status)) return false;
+    if (f.assignedTo && !(r.assignedTo ?? '').toLowerCase().includes(f.assignedTo.toLowerCase())) return false;
+    if (f.incidentId && !(r.incidentId ?? '').toLowerCase().includes(f.incidentId.toLowerCase())) return false;
+    if (f.risk) { const min = parseFloat(f.risk); if (!isNaN(min) && r.riskScore < min) return false; }
+    if (dueDateBand) {
+      const due = r.dueAt ? new Date(r.dueAt).getTime() : null;
+      if (dueDateBand === 'overdue')  return r.status === 'OPEN' && !!due && due < now;
+      if (dueDateBand === 'due-soon') return r.status === 'OPEN' && !!due && due >= now && due < now + sevenDays;
+      if (dueDateBand === 'on-track') return r.status === 'OPEN' && !!due && due >= now + sevenDays;
+      if (dueDateBand === 'no-sla')   return r.status === 'OPEN' && !due;
+    }
+    return true;
+  });
 }
+
+async function updateWorkflow(findingId: string, payload: Record<string, unknown>) {
+  return apiRequest(`/findings/${findingId}/workflow`, { method: 'PUT', body: JSON.stringify(payload) });
+}
+
+// ─── chart primitives ─────────────────────────────────────────────────────────
+
+type DonutSeg = { key: string; label: string; value: number; color: string; onClick: () => void };
+
+function DonutChart({ segs, size = 88, sw = 16 }: { segs: DonutSeg[]; size?: number; sw?: number }) {
+  const r = (size - sw) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const C = 2 * Math.PI * r;
+  const total = segs.reduce((s, g) => s + g.value, 0);
+  const [hovered, setHovered] = React.useState<string | null>(null);
+
+  if (total === 0) return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border,#e5e7eb)" strokeWidth={sw}/>
+      <text x={cx} y={cy+4} textAnchor="middle" fontSize={10} fill="var(--muted,#9ca3af)">—</text>
+    </svg>
+  );
+
+  let cum = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink:0, overflow:'visible' }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border,#e5e7eb)" strokeWidth={sw}/>
+      {segs.filter(s=>s.value>0).map(seg => {
+        const arcLen = (seg.value / total) * C;
+        const offset = -cum;
+        cum += arcLen;
+        const isHov = hovered === seg.key;
+        return (
+          <circle key={seg.key}
+            cx={cx} cy={cy} r={r}
+            fill="none"
+            stroke={seg.color}
+            strokeWidth={isHov ? sw + 4 : sw}
+            strokeDasharray={`${arcLen} ${C}`}
+            strokeDashoffset={offset}
+            transform={`rotate(-90 ${cx} ${cy})`}
+            style={{ cursor:'pointer', transition:'stroke-width 0.15s' }}
+            onClick={seg.onClick}
+            onMouseEnter={() => setHovered(seg.key)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <title>{seg.label}: {seg.value}</title>
+          </circle>
+        );
+      })}
+      <text x={cx} y={cy+2} textAnchor="middle" fontSize={13} fontWeight="700" fill="var(--title,#111827)">{total}</text>
+      <text x={cx} y={cy+13} textAnchor="middle" fontSize={8} fill="var(--muted,#9ca3af)">total</text>
+    </svg>
+  );
+}
+
+type HBarItem = { key: string; label: string; value: number; color: string; onClick: () => void };
+
+function HBarChart({ items, activeKey }: { items: HBarItem[]; activeKey?: string }) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  return (
+    <div className="fpl-hbar">
+      {items.filter(i => i.value > 0 || items.length <= 4).map(item => (
+        <div key={item.key}
+          className={`fpl-hbar-row${activeKey === item.key ? ' fpl-hbar-row--active' : ''}`}
+          onClick={item.onClick}
+        >
+          <div className="fpl-hbar-label" title={item.label}>{item.label}</div>
+          <div className="fpl-hbar-track">
+            <div className="fpl-hbar-fill" style={{ width: `${(item.value / max) * 100}%`, background: item.color }}/>
+          </div>
+          <div className="fpl-hbar-val">{item.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WidgetCard({ title, children, active }: { title: string; children: React.ReactNode; active?: boolean }) {
+  return (
+    <div className={`fpl-widget${active ? ' fpl-widget--active' : ''}`}>
+      <div className="fpl-widget-title">{title}</div>
+      <div className="fpl-widget-body">{children}</div>
+    </div>
+  );
+}
+
+// ─── main component ───────────────────────────────────────────────────────────
+
+type FindingsPageProps = { onOpenCveWorkbench?: (vulnerabilityId: string) => void };
 
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const initialVulnerabilityId = React.useMemo(() => searchParams.get('vulnerabilityId')?.trim() ?? '', [searchParams]);
-  const initialPackageName = React.useMemo(() => searchParams.get('packageName')?.trim() ?? '', [searchParams]);
-  const initialStatuses = React.useMemo(
-    () => searchParams.getAll('status').map((value) => value.trim()).filter((value) => value.length > 0),
-    [searchParams]
-  );
-  const initialSeverities = React.useMemo(
-    () => searchParams.getAll('severity').map((value) => value.trim()).filter((value) => value.length > 0),
-    [searchParams]
-  );
+
+  // ── filter state ───────────────────────────────────────────────────────────
   const [page, setPage] = React.useState(0);
-  const [activeFilters, setActiveFilters] = React.useState<FindingFilterKey[]>(() => {
-    const filters = new Set<FindingFilterKey>(DEFAULT_ACTIVE_FILTERS);
-    if (initialVulnerabilityId) filters.add('vulnerabilityId');
-    if (initialPackageName) filters.add('packageName');
-    if (initialStatuses.length > 0) filters.add('status');
-    if (initialSeverities.length > 0) filters.add('severity');
-    return Array.from(filters);
-  });
-  const [severities, setSeverities] = React.useState<string[]>(initialSeverities);
-  const [statuses, setStatuses] = React.useState<string[]>(initialStatuses);
-  const [decisionStates, setDecisionStates] = React.useState<string[]>([]);
-  const [matchMethods, setMatchMethods] = React.useState<string[]>(DEFAULT_MATCH_METHODS);
-  const [vexStatuses, setVexStatuses] = React.useState<string[]>([]);
-  const [vexFreshness, setVexFreshness] = React.useState<string[]>([]);
-  const [vexProviders, setVexProviders] = React.useState<string[]>([]);
-  const [minConfidence, setMinConfidence] = React.useState(DEFAULT_MIN_CONFIDENCE);
-  const [vulnerabilityId, setVulnerabilityId] = React.useState(initialVulnerabilityId);
-  const [packageName, setPackageName] = React.useState(initialPackageName);
-  const [ecosystem, setEcosystem] = React.useState('');
+  const [colFilters, setColFilters] = React.useState<ColFilters>(() => ({
+    ...DEFAULT_COL_FILTERS,
+    severity: searchParams.getAll('severity').length ? searchParams.getAll('severity') : DEFAULT_COL_FILTERS.severity,
+    status:   searchParams.getAll('status').length   ? searchParams.getAll('status')   : DEFAULT_COL_FILTERS.status,
+    cveId:    searchParams.get('vulnerabilityId') ?? '',
+    package:  searchParams.get('packageName') ?? '',
+  }));
+  const [dueDateBand, setDueDateBand] = React.useState<DueDateBand>(null);
+  const [openColFilter, setOpenColFilter] = React.useState<ColKey | null>(null);
+  const colFilterRef = React.useRef<HTMLDivElement | null>(null);
+
+  // ── ui state ───────────────────────────────────────────────────────────────
+  const [visibleCols, setVisibleCols] = React.useState<Set<ColKey>>(loadVis);
+  const [showColVis, setShowColVis] = React.useState(false);
+  const colVisRef = React.useRef<HTMLDivElement | null>(null);
   const [groupBy, setGroupBy] = React.useState<string[]>([]);
-  const [visibleColumns, setVisibleColumns] = React.useState<Set<string>>(loadColumnVisibility);
-  const findingFiltersQuery = useFindingFiltersQuery();
-  const filterValues: FindingFilterValues = findingFiltersQuery.data ?? DEFAULT_FILTER_VALUES;
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [actionModal, setActionModal] = React.useState<ActionType | null>(null);
+  const [actionLoading, setActionLoading] = React.useState(false);
+  const [actionError, setActionError] = React.useState('');
+  const [showMoreActions, setShowMoreActions] = React.useState(false);
+  const moreActionsRef = React.useRef<HTMLDivElement | null>(null);
+
+  // action form
+  const [deferReason, setDeferReason] = React.useState('');
+  const [deferExpiry, setDeferExpiry] = React.useState('');
+  const [fpJustification, setFpJustification] = React.useState('');
+  const [duplicateOf, setDuplicateOf] = React.useState('');
+  const [incidentNotes, setIncidentNotes] = React.useState('');
+  const [incidentPriority, setIncidentPriority] = React.useState('3');
+  const [incidentAssignedTo, setIncidentAssignedTo] = React.useState('');
+  const [incidentAssignmentGroup, setIncidentAssignmentGroup] = React.useState('');
+  const [incidentDueDate, setIncidentDueDate] = React.useState('');
+
+  // ── queries ────────────────────────────────────────────────────────────────
+  const filtersQuery = useFindingFiltersQuery();
+  const filterValues = filtersQuery.data;
+
+  // main table query — uses active column filters
   const findingsQuery = useFindingsQuery({
     page,
     size: PAGE_SIZE,
-    severity: activeFilters.includes('severity') && severities.length > 0 ? severities : undefined,
-    status: activeFilters.includes('status') && statuses.length > 0 ? statuses : undefined,
-    decisionState: activeFilters.includes('decisionState') && decisionStates.length > 0 ? decisionStates : undefined,
-    matchMethod: activeFilters.includes('matchMethod') && matchMethods.length > 0 ? matchMethods : undefined,
-    vexStatus: activeFilters.includes('vexStatus') && vexStatuses.length > 0 ? vexStatuses : undefined,
-    vexFreshness: activeFilters.includes('vexFreshness') && vexFreshness.length > 0 ? vexFreshness : undefined,
-    vexProvider: activeFilters.includes('vexProvider') && vexProviders.length > 0 ? vexProviders : undefined,
-    minConfidence: activeFilters.includes('minConfidence') ? minConfidence : undefined,
-    vulnerabilityId: activeFilters.includes('vulnerabilityId') ? vulnerabilityId : undefined,
-    packageName: activeFilters.includes('packageName') ? packageName : undefined,
-    ecosystem: activeFilters.includes('ecosystem') ? ecosystem : undefined
+    severity:        colFilters.severity.length > 0 ? colFilters.severity : undefined,
+    status:          colFilters.status.length > 0   ? colFilters.status   : undefined,
+    vulnerabilityId: colFilters.cveId.trim()    || undefined,
+    packageName:     colFilters.package.trim()  || undefined,
   });
-  const rows = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data?.items]);
+
+  // widget data — loads broader sample, unfiltered except by any search params
+  const widgetQuery = useFindingsQuery({ page: 0, size: 500 });
+
+  const allRows  = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data]);
+  const wRows    = React.useMemo(() => widgetQuery.data?.items ?? [], [widgetQuery.data]);
   const totalItems = findingsQuery.data?.totalItems ?? 0;
   const totalPages = findingsQuery.data?.totalPages ?? 0;
-  const loading = findingsQuery.isLoading || findingsQuery.isFetching;
-  const error = findingsQuery.error instanceof Error ? findingsQuery.error.message : '';
-  const tableColumns = React.useMemo<DataTableColumn[]>(() => {
-    const columns: DataTableColumn[] = [];
-    if (visibleColumns.has('vulnerability')) columns.push({ id: 'vulnerability', label: 'Finding ID', header: 'Finding ID', initialSize: 180 });
-    if (visibleColumns.has('asset')) columns.push({ id: 'asset', label: 'Asset', header: 'Asset', initialSize: 180 });
-    if (visibleColumns.has('package')) columns.push({ id: 'package', label: 'Package', header: 'Package', initialSize: 180 });
-    if (visibleColumns.has('severity')) columns.push({ id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 });
-    if (visibleColumns.has('status')) columns.push({ id: 'status', label: 'Status', header: 'Status', initialSize: 140 });
-    if (visibleColumns.has('decision')) columns.push({ id: 'decision', label: 'Decision', header: 'Decision', initialSize: 140 });
-    if (visibleColumns.has('vex')) columns.push({ id: 'vex', label: 'VEX', header: 'VEX', initialSize: 180 });
-    if (visibleColumns.has('impact-reason')) columns.push({ id: 'impactReason', label: 'Impact Reason', header: 'Impact Reason', initialSize: 160 });
-    if (visibleColumns.has('risk')) columns.push({ id: 'risk', label: 'Risk', header: 'Risk', initialSize: 100 });
-    if (visibleColumns.has('confidence')) columns.push({ id: 'confidence', label: 'Confidence', header: 'Confidence', initialSize: 120 });
-    if (visibleColumns.has('match-method')) columns.push({ id: 'matchMethod', label: 'Match Method', header: 'Match Method', initialSize: 180 });
-    if (visibleColumns.has('kev')) columns.push({ id: 'kev', label: 'KEV', header: 'KEV', initialSize: 80 });
-    if (visibleColumns.has('eol-status')) columns.push({ id: 'eolStatus', label: 'EOL Status', header: 'EOL Status', initialSize: 160 });
-    if (visibleColumns.has('first-observed')) columns.push({ id: 'firstObserved', label: 'First Observed', header: 'First Observed', initialSize: 180 });
-    if (visibleColumns.has('last-observed')) columns.push({ id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 });
-    if (visibleColumns.has('evidence')) columns.push({ id: 'evidence', label: 'Evidence', header: 'Evidence', initialSize: 220 });
-    if (visibleColumns.has('incident-id')) columns.push({ id: 'incidentId', label: 'Incident ID', header: 'Incident ID', initialSize: 140 });
-    if (visibleColumns.has('incident-status')) columns.push({ id: 'incidentStatus', label: 'Incident Status', header: 'Incident Status', initialSize: 140 });
-    return columns;
-  }, [visibleColumns]);
-  const tableRows = React.useMemo<DataTableRow[]>(() => (
-    rows.map((row) => ({
-      id: row.id,
-      cells: {
-        vulnerability: {
-          content: (
-            <>
-              <button
-                type="button"
-                className="finding-id-link mono"
-                onClick={() => navigate(pathForFindingDetail(row.displayId || row.id), { state: { finding: row } })}
-              >
-                {row.displayId || row.id}
-              </button>
-              {onOpenCveWorkbench ? (
-                <button
-                  type="button"
-                  className="findings-vuln-link-btn"
-                  onClick={() => onOpenCveWorkbench(row.vulnerabilityId)}
-                >
-                  {row.vulnerabilityId}
-                </button>
-              ) : (
-                <div>{row.vulnerabilityId}</div>
-              )}
-            </>
-          ),
-          props: { className: 'mono' }
-        },
-        asset: {
-          content: (
-            <>
-              <div>{row.assetName}</div>
-              <div className="panel-caption">{formatLabel(row.assetType)}</div>
-            </>
-          )
-        },
-        package: {
-          content: (
-            <>
-              <div>{row.packageName}</div>
-              <div className="panel-caption mono">{row.packageVersion}</div>
-            </>
-          )
-        },
-        severity: {
-          content: (
-            <span className={`severity-pill severity-${row.severity.toLowerCase()}`}>
-              {row.severity}
-            </span>
-          )
-        },
-        status: {
-          content: (
-            <span className={`status-pill ${statusClass(row.status)}`}>
-              {row.status}
-            </span>
-          )
-        },
-        decision: { content: <span className="match-pill">{row.decisionState}</span> },
-        vex: {
-          content: (
-            <>
-              <div>{row.vexStatus ? formatLabel(row.vexStatus) : '-'}</div>
-              <div className="panel-caption">
-                {row.vexProvider ? formatLabel(row.vexProvider) : row.vexFreshness ? formatLabel(row.vexFreshness) : '-'}
-              </div>
-            </>
-          )
-        },
-        impactReason: { content: row.impactReason ? formatLabel(row.impactReason) : '-' },
-        risk: { content: row.riskScore.toFixed(2), props: { className: 'confidence-cell' } },
-        confidence: { content: `${(row.confidenceScore * 100).toFixed(1)}%`, props: { className: 'confidence-cell' } },
-        matchMethod: {
-          content: (
-            <>
-              <span className="match-pill">{matchMethodLabel(row.matchedBy)}</span>
-              {row.matchedVexAssertionId && (
-                <div className="panel-caption mono">{row.matchedVexAssertionId}</div>
-              )}
-            </>
-          )
-        },
-        kev: { content: row.inKev ? 'Yes' : 'No' },
-        eolStatus: {
-          content: (
-            <EolBadge
-              isEol={row.isEol}
-              daysRemaining={row.eolDaysRemaining}
-              eolDate={row.eolDate}
-            />
-          )
-        },
-        firstObserved: { content: row.firstObservedAt ? new Date(row.firstObservedAt).toLocaleString() : '-' },
-        lastObserved: { content: row.lastObservedAt ? new Date(row.lastObservedAt).toLocaleString() : '-' },
-        evidence: {
-          content: row.evidence ? (
-            <details className="evidence-details">
-              <summary>View</summary>
-              <pre>{row.evidence}</pre>
-            </details>
-          ) : '-'
-        },
-        incidentId: {
-          content: row.incidentId
-            ? <span className="mono" style={{ fontSize: 12 }}>{row.incidentId}</span>
-            : <span style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 12 }}>—</span>
-        },
-        incidentStatus: {
-          content: row.incidentStatus
-            ? <span className={`severity-pill ${incidentStatusClass(row.incidentStatus)}`}>{row.incidentStatus}</span>
-            : <span style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 12 }}>—</span>
-        }
-      }
-    }))
-  ), [navigate, onOpenCveWorkbench, rows]);
+  const loading    = findingsQuery.isLoading || findingsQuery.isFetching;
 
-  function handleColumnVisibilityChange(next: Set<string>): void {
-    setVisibleColumns(next);
-    localStorage.setItem(COL_VIS_STORAGE_KEY, JSON.stringify(Array.from(next)));
+  const rows = React.useMemo(
+    () => applyColFilters(allRows, colFilters, dueDateBand),
+    [allRows, colFilters, dueDateBand]
+  );
+
+  // group breakdown
+  const groupCards = React.useMemo(() =>
+    groupBy.map(key => {
+      const opt = GROUP_OPTIONS.find(o => o.key === key);
+      if (!opt) return null;
+      const counts = new Map<string, number>();
+      rows.forEach(r => { const v = groupValue(r, key); counts.set(v, (counts.get(v) ?? 0) + 1); });
+      const items = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      return { key, label: opt.label, items };
+    }).filter((c): c is { key:string; label:string; items:[string,number][] } => c != null),
+  [groupBy, rows]);
+
+  // ── widget data computations ───────────────────────────────────────────────
+
+  const sevCounts = React.useMemo(() => {
+    const m = new Map<string,number>();
+    wRows.forEach(r => m.set(r.severity, (m.get(r.severity)??0)+1));
+    return m;
+  }, [wRows]);
+
+  const statusCounts = React.useMemo(() => {
+    const m = new Map<string,number>();
+    wRows.forEach(r => m.set(r.status, (m.get(r.status)??0)+1));
+    return m;
+  }, [wRows]);
+
+  const assetCounts = React.useMemo(() => {
+    const m = new Map<string,number>();
+    wRows.filter(r=>r.status==='OPEN').forEach(r => m.set(r.assetName,(m.get(r.assetName)??0)+1));
+    return Array.from(m.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  }, [wRows]);
+
+  const dueDateCounts = React.useMemo(() => {
+    const now = Date.now(), soon = 7*24*3600*1000;
+    let overdue=0, dueSoon=0, onTrack=0, noSla=0;
+    wRows.filter(r=>r.status==='OPEN').forEach(r => {
+      const t = r.dueAt ? new Date(r.dueAt).getTime() : null;
+      if (!t) { noSla++; return; }
+      if (t < now) overdue++;
+      else if (t < now+soon) dueSoon++;
+      else onTrack++;
+    });
+    return { overdue, dueSoon, onTrack, noSla };
+  }, [wRows]);
+
+  // ── outside click ──────────────────────────────────────────────────────────
+  React.useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node)) setOpenColFilter(null);
+      if (colVisRef.current && !colVisRef.current.contains(e.target as Node)) setShowColVis(false);
+      if (moreActionsRef.current && !moreActionsRef.current.contains(e.target as Node)) setShowMoreActions(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  // ── widget click helpers ───────────────────────────────────────────────────
+  function filterBySeverity(sev: string) {
+    const toggled = colFilters.severity.length===1 && colFilters.severity[0]===sev;
+    setColFilters(p=>({...p, severity: toggled ? [] : [sev], status: []}));
+    setDueDateBand(null);
+    setPage(0);
+  }
+  function filterByStatus(s: string) {
+    const toggled = colFilters.status.length===1 && colFilters.status[0]===s;
+    setColFilters(p=>({...p, status: toggled ? [] : [s], severity: []}));
+    setDueDateBand(null);
+    setPage(0);
+  }
+  function filterByAsset(name: string) {
+    setColFilters(p=>({...p, asset: p.asset===name ? '' : name}));
+    setDueDateBand(null);
+    setPage(0);
+  }
+  function filterByDueBand(band: DueDateBand) {
+    setDueDateBand(prev => prev===band ? null : band);
+    setPage(0);
   }
 
-  const severityOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.severities.map((value) => ({ value, label: formatLabel(value), tone: severityTone(value) })),
-    [filterValues.severities]
-  );
-  const statusOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.statuses.map((value) => ({ value, label: formatLabel(value) })),
-    [filterValues.statuses]
-  );
-  const decisionStateOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.decisionStates.map((value) => ({ value, label: formatLabel(value) })),
-    [filterValues.decisionStates]
-  );
-  const matchMethodOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.matchMethods.map((value) => ({ value, label: matchMethodLabel(value) })),
-    [filterValues.matchMethods]
-  );
-  const vexStatusOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.vexStatuses.map((value) => ({ value, label: formatLabel(value) })),
-    [filterValues.vexStatuses]
-  );
-  const vexFreshnessOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.vexFreshness.map((value) => ({ value, label: formatLabel(value) })),
-    [filterValues.vexFreshness]
-  );
-  const vexProviderOptions = React.useMemo<FilterValueOption[]>(
-    () => filterValues.vexProviders.map((value) => ({ value, label: value })),
-    [filterValues.vexProviders]
-  );
-
-  const addFilter = React.useCallback((key: FindingFilterKey) => {
-    setActiveFilters((current) => (current.includes(key) ? current : [...current, key]));
-  }, []);
-
-  const removeFilter = React.useCallback((key: FindingFilterKey) => {
-    setActiveFilters((current) => current.filter((item) => item !== key));
-    if (key === 'severity') setSeverities([]);
-    if (key === 'status') setStatuses([]);
-    if (key === 'decisionState') setDecisionStates([]);
-    if (key === 'matchMethod') setMatchMethods(DEFAULT_MATCH_METHODS);
-    if (key === 'vexStatus') setVexStatuses([]);
-    if (key === 'vexFreshness') setVexFreshness([]);
-    if (key === 'vexProvider') setVexProviders([]);
-    if (key === 'minConfidence') setMinConfidence(DEFAULT_MIN_CONFIDENCE);
-    if (key === 'vulnerabilityId') setVulnerabilityId('');
-    if (key === 'packageName') setPackageName('');
-    if (key === 'ecosystem') setEcosystem('');
+  // ── filter helpers ─────────────────────────────────────────────────────────
+  function setColFilter<K extends keyof ColFilters>(key: K, val: ColFilters[K]) {
+    setColFilters(prev=>({...prev,[key]:val}));
     setPage(0);
-  }, []);
-
-  const clearFilters = React.useCallback(() => {
-    setActiveFilters(DEFAULT_ACTIVE_FILTERS);
-    setSeverities([]);
-    setStatuses([]);
-    setDecisionStates([]);
-    setMatchMethods(DEFAULT_MATCH_METHODS);
-    setVexStatuses([]);
-    setVexFreshness([]);
-    setVexProviders([]);
-    setMinConfidence(DEFAULT_MIN_CONFIDENCE);
-    setVulnerabilityId('');
-    setPackageName('');
-    setEcosystem('');
+  }
+  function toggleSeverityFilter(v: string) {
+    setColFilters(prev=>({ ...prev, severity: prev.severity.includes(v) ? prev.severity.filter(s=>s!==v) : [...prev.severity,v] }));
     setPage(0);
-  }, []);
+  }
+  function toggleStatusFilter(v: string) {
+    setColFilters(prev=>({ ...prev, status: prev.status.includes(v) ? prev.status.filter(s=>s!==v) : [...prev.status,v] }));
+    setPage(0);
+  }
+  function hasColFilter(key: ColKey): boolean {
+    if (key==='severity') return colFilters.severity.length>0;
+    if (key==='status')   return colFilters.status.length>0;
+    if (key==='findingId') return !!colFilters.findingId;
+    if (key==='cveId')    return !!colFilters.cveId;
+    if (key==='asset')    return !!colFilters.asset;
+    if (key==='package')  return !!colFilters.package;
+    if (key==='risk')     return !!colFilters.risk;
+    if (key==='assignedTo') return !!colFilters.assignedTo;
+    if (key==='dueDate')  return !!dueDateBand || !!colFilters.dueDate;
+    if (key==='incidentId') return !!colFilters.incidentId;
+    return false;
+  }
+  function clearColFilter(key: ColKey) {
+    if (key==='severity')   setColFilter('severity',[]);
+    else if (key==='status') setColFilter('status',[]);
+    else if (key==='findingId') setColFilter('findingId','');
+    else if (key==='cveId')  setColFilter('cveId','');
+    else if (key==='asset')  setColFilter('asset','');
+    else if (key==='package') setColFilter('package','');
+    else if (key==='risk')   setColFilter('risk','');
+    else if (key==='assignedTo') setColFilter('assignedTo','');
+    else if (key==='dueDate') { setColFilter('dueDate',''); setDueDateBand(null); }
+    else if (key==='incidentId') setColFilter('incidentId','');
+  }
+  function clearAllFilters() {
+    setColFilters(DEFAULT_COL_FILTERS);
+    setDueDateBand(null);
+    setPage(0);
+  }
 
-  const groupedCards = React.useMemo(() => {
-    return groupBy
-      .map((key) => {
-        const option = GROUP_BY_OPTIONS.find((entry) => entry.key === key);
-        if (!option) return null;
-        const counts = new Map<string, number>();
-        rows.forEach((row) => {
-          const value = groupValue(row, key);
-          counts.set(value, (counts.get(value) ?? 0) + 1);
-        });
-        const items = Array.from(counts.entries())
-          .sort((left, right) => right[1] - left[1])
-          .slice(0, 5);
-        return { key, label: option.label, items };
-      })
-      .filter((entry): entry is { key: string; label: string; items: Array<[string, number]> } => entry != null);
-  }, [groupBy, rows]);
+  // active filter chips (server-side only for now)
+  const activeChips: Array<{ label: string; onRemove: ()=>void }> = [];
+  if (colFilters.severity.length>0) activeChips.push({ label:`Severity: ${colFilters.severity.join(', ')}`, onRemove:()=>setColFilter('severity',[]) });
+  if (colFilters.status.length>0)   activeChips.push({ label:`Status: ${colFilters.status.map(fmt).join(', ')}`, onRemove:()=>setColFilter('status',[]) });
+  if (colFilters.cveId)    activeChips.push({ label:`CVE: ${colFilters.cveId}`,  onRemove:()=>setColFilter('cveId','') });
+  if (colFilters.package)  activeChips.push({ label:`Package: ${colFilters.package}`, onRemove:()=>setColFilter('package','') });
+  if (colFilters.asset)    activeChips.push({ label:`Asset: ${colFilters.asset}`, onRemove:()=>setColFilter('asset','') });
+  if (colFilters.assignedTo) activeChips.push({ label:`Assigned: ${colFilters.assignedTo}`, onRemove:()=>setColFilter('assignedTo','') });
+  if (dueDateBand)         activeChips.push({ label:`SLA: ${fmt(dueDateBand)}`, onRemove:()=>setDueDateBand(null) });
+
+  // ── selection ──────────────────────────────────────────────────────────────
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+  }
+  function toggleSelectAll() {
+    setSelectedIds(selectedIds.size===rows.length ? new Set() : new Set(rows.map(r=>r.id)));
+  }
+  function saveColVis(next: Set<ColKey>) {
+    setVisibleCols(next);
+    localStorage.setItem(COL_VIS_KEY, JSON.stringify(Array.from(next)));
+  }
+
+  const selectedFindings = rows.filter(r=>selectedIds.has(r.id));
+  const hasSelection = selectedIds.size>0;
+  const allSelected = rows.length>0 && selectedIds.size===rows.length;
+
+  // ── actions ────────────────────────────────────────────────────────────────
+  type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate';
+  function openAction(t: ActionType) { if (!hasSelection) return; setShowMoreActions(false); setActionError(''); setActionModal(t); }
+  function closeModal() {
+    setActionModal(null); setActionError('');
+    setDeferReason(''); setDeferExpiry(''); setFpJustification(''); setDuplicateOf('');
+    setIncidentNotes(''); setIncidentPriority('3'); setIncidentAssignedTo('');
+    setIncidentAssignmentGroup(''); setIncidentDueDate('');
+  }
+  async function execAll(payload: Record<string,unknown>) {
+    await Promise.all(selectedFindings.map(f=>updateWorkflow(f.id,payload)));
+    void findingsQuery.refetch(); setSelectedIds(new Set());
+  }
+  async function handleResolve()     { setActionLoading(true); try { await execAll({status:'RESOLVED',actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleReopen()      { if (!hasSelection) return; setActionLoading(true); try { await execAll({status:'OPEN',actor:'local-analyst'}); } catch(e){console.error(e);} finally{setActionLoading(false); setShowMoreActions(false);} }
+  async function handleDefer()       { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:deferReason||'DEFERRED',suppressedUntil:deferExpiry?new Date(deferExpiry).toISOString():undefined,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleFalsePos()    { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`FALSE_POSITIVE${fpJustification?': '+fpJustification:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleDuplicate()   { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`DUPLICATE${duplicateOf?': '+duplicateOf:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleCreateIncident() {
+    setActionLoading(true);
+    try {
+      const byCve = new Map<string,Finding[]>();
+      for (const f of selectedFindings) { const l=byCve.get(f.vulnerabilityId)??[]; l.push(f); byCve.set(f.vulnerabilityId,l); }
+      for (const [cveId, findings] of byCve) {
+        const top = findings.reduce((b,f)=>(SEVERITY_ORDER[f.severity]??5)<(SEVERITY_ORDER[b.severity]??5)?f:b, findings[0]!);
+        const payload: CreateServiceNowIncidentRequest = {
+          findingTitle: `${cveId} — Vulnerability Remediation`,
+          severity: top.severity, cvssScore: undefined,
+          inKev: findings.some(f=>f.inKev), priority: incidentPriority,
+          dueDate: incidentDueDate||undefined, assignedTo: incidentAssignedTo.trim()||undefined,
+          notes: incidentNotes.trim()||undefined,
+          affectedAssets: findings.map(f=>({ componentId:f.componentId, assetName:f.assetName, assetIdentifier:f.assetIdentifier, assetType:f.assetType, packageName:f.packageName, packageVersion:f.packageVersion, assignmentGroup:incidentAssignmentGroup.trim()||undefined })),
+        };
+        await cveWorkbenchApi.createServiceNowIncident(cveId, payload);
+      }
+      void findingsQuery.refetch(); setSelectedIds(new Set()); closeModal();
+    } catch(e) { setActionError(String(e)); }
+    finally { setActionLoading(false); }
+  }
+
+  // ── column filter popover ──────────────────────────────────────────────────
+  function renderColFilterPopover(colKey: ColKey) {
+    if (openColFilter!==colKey) return null;
+    const severities = filterValues?.severities ?? ['CRITICAL','HIGH','MEDIUM','LOW','NONE','UNKNOWN'];
+    const statuses   = filterValues?.statuses   ?? ['OPEN','RESOLVED','SUPPRESSED','AUTO_CLOSED'];
+    return (
+      <div className="fpl-col-filter-popover" ref={colFilterRef}>
+        <div className="fpl-col-filter-header">
+          <span>{ALL_COLUMNS.find(c=>c.key===colKey)?.label}</span>
+          {hasColFilter(colKey) && <button className="fpl-col-filter-clear" onClick={()=>clearColFilter(colKey)}>Clear</button>}
+        </div>
+        {colKey==='severity' && (
+          <div className="fpl-col-filter-checks">
+            {severities.map(v=>(
+              <label key={v} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.severity.includes(v)} onChange={()=>toggleSeverityFilter(v)}/>
+                <span className={severityClass(v)} style={{fontSize:11}}>{v}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {colKey==='status' && (
+          <div className="fpl-col-filter-checks">
+            {statuses.map(v=>(
+              <label key={v} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.status.includes(v)} onChange={()=>toggleStatusFilter(v)}/>
+                <span>{v === 'SUPPRESSED' ? 'Deferred / Suppressed' : v === 'AUTO_CLOSED' ? 'Closed' : fmt(v)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {(['findingId','cveId','asset','package','assignedTo','incidentId'] as const).includes(colKey as any) && (
+          <input autoFocus className="fpl-col-filter-input"
+            placeholder={`Search ${ALL_COLUMNS.find(c=>c.key===colKey)?.label}…`}
+            value={(colFilters as unknown as Record<string,string>)[colKey] ?? ''}
+            onChange={e=>setColFilter(colKey as 'findingId'|'cveId'|'asset'|'package'|'assignedTo'|'incidentId', e.target.value)}
+          />
+        )}
+        {colKey==='risk' && (
+          <input autoFocus type="number" min={0} max={10} step={0.1} className="fpl-col-filter-input"
+            placeholder="Min risk score" value={colFilters.risk} onChange={e=>setColFilter('risk',e.target.value)}/>
+        )}
+        {colKey==='dueDate' && (
+          <div className="fpl-col-filter-checks">
+            {([['overdue','Overdue'],['due-soon','Due in 7 days'],['on-track','On Track'],['no-sla','No SLA']] as [DueDateBand,string][]).map(([band,label])=>(
+              <label key={band!} className="fpl-col-filter-check">
+                <input type="radio" name="dueband" checked={dueDateBand===band} onChange={()=>{setDueDateBand(dueDateBand===band?null:band);setPage(0);}}/>
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── col header ─────────────────────────────────────────────────────────────
+  function ColHeader({ colKey, label }: { colKey: ColKey; label: string }) {
+    const active = hasColFilter(colKey);
+    return (
+      <th className={`fpl-th${active?' fpl-th--filtered':''}`}>
+        <div className="fpl-th-inner">
+          <span className="fpl-th-label">{label}</span>
+          <button className="fpl-filter-btn" title={`Filter ${label}`}
+            onClick={e=>{e.stopPropagation();setOpenColFilter(p=>p===colKey?null:colKey);setShowColVis(false);}}>
+            <svg viewBox="0 0 12 12" width="11" height="11" fill={active?'var(--accent,#3b82f6)':'currentColor'} aria-hidden>
+              <path d="M1 2h10l-4 5v3l-2-1V7z"/>
+            </svg>
+          </button>
+        </div>
+        <div style={{position:'relative'}}>{renderColFilterPopover(colKey)}</div>
+      </th>
+    );
+  }
+
+  // ── cell renderer ──────────────────────────────────────────────────────────
+  function renderCell(row: Finding, key: ColKey): React.ReactNode {
+    const now = Date.now();
+    if (key==='findingId') return (
+      <button type="button" className="finding-id-link mono"
+        onClick={()=>navigate(pathForFindingDetail(row.displayId||row.id),{state:{finding:row}})}>
+        {row.displayId||row.id}
+      </button>
+    );
+    if (key==='cveId') return onOpenCveWorkbench
+      ? <button type="button" className="fpl-cve-link" onClick={()=>onOpenCveWorkbench(row.vulnerabilityId)}>{row.vulnerabilityId}</button>
+      : <span className="mono fpl-cve-text">{row.vulnerabilityId}</span>;
+    if (key==='asset') return <div><div className="fpl-cell-main">{row.assetName}</div><div className="fpl-cell-sub">{fmt(row.assetType)}</div></div>;
+    if (key==='package') return <div><div className="fpl-cell-main">{row.packageName}</div><div className="fpl-cell-sub mono">{row.packageVersion}</div></div>;
+    if (key==='severity') return <span className={severityClass(row.severity)}>{row.severity}</span>;
+    if (key==='status') return <span className={statusClass(row.status)}>{statusLabel(row)}</span>;
+    if (key==='risk') return <span className="fpl-risk">{row.riskScore.toFixed(1)}</span>;
+    if (key==='assignedTo') return row.assignedTo ? <span className="fpl-assigned">{row.assignedTo}</span> : <span className="fpl-empty">—</span>;
+    if (key==='dueDate') {
+      if (!row.dueAt) return <span className="fpl-empty">—</span>;
+      const overdue = row.status==='OPEN' && new Date(row.dueAt).getTime()<now;
+      return <span className={overdue?'fpl-overdue':'fpl-date'}>{new Date(row.dueAt).toLocaleDateString()}</span>;
+    }
+    if (key==='incidentId') return row.incidentId ? <span className="mono fpl-incident-id">{row.incidentId}</span> : <span className="fpl-empty">—</span>;
+    if (key==='incidentStatus') return row.incidentStatus ? <span className="fpl-inc-status">{row.incidentStatus}</span> : <span className="fpl-empty">—</span>;
+    if (key==='firstObserved') return row.firstObservedAt ? <span className="fpl-date">{new Date(row.firstObservedAt).toLocaleDateString()}</span> : <span className="fpl-empty">—</span>;
+    if (key==='lastObserved') return row.lastObservedAt ? <span className="fpl-date">{new Date(row.lastObservedAt).toLocaleDateString()}</span> : <span className="fpl-empty">—</span>;
+    return null;
+  }
+
+  const visColDefs = ALL_COLUMNS.filter(c=>c.alwaysVisible||visibleCols.has(c.key));
+
+  // ── modal ──────────────────────────────────────────────────────────────────
+  function renderModal() {
+    if (!actionModal) return null;
+    const n = selectedIds.size;
+    const TITLES: Record<ActionType,string> = {
+      'create-incident':'Create ServiceNow Incident','defer':'Defer Findings',
+      'resolve':`Resolve ${n} Finding${n!==1?'s':''}`,
+      'false-positive':'Mark as False Positive',
+      'duplicate':'Mark as Duplicate',
+    };
+    return (
+      <div className="fd3-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)closeModal();}}>
+        <div className="fd3-modal" style={{maxWidth:actionModal==='create-incident'?520:440}}>
+          <div className="fd3-modal-header">
+            <span>{TITLES[actionModal]}</span>
+            <button className="fd3-modal-close" onClick={closeModal}>✕</button>
+          </div>
+          <div className="fd3-modal-body">
+            {actionError && <div className="notice error" style={{marginBottom:12}}>{actionError}</div>}
+            {actionModal==='create-incident' && (
+              <div className="fpl-form">
+                <div className="fpl-form-row"><label>Priority</label>
+                  <select value={incidentPriority} onChange={e=>setIncidentPriority(e.target.value)} className="fpl-form-select">
+                    <option value="1">1 - Critical</option><option value="2">2 - High</option>
+                    <option value="3">3 - Moderate</option><option value="4">4 - Low</option>
+                  </select>
+                </div>
+                <div className="fpl-form-row"><label>Assigned To</label><input className="fpl-form-input" value={incidentAssignedTo} onChange={e=>setIncidentAssignedTo(e.target.value)} placeholder="username or email"/></div>
+                <div className="fpl-form-row"><label>Assignment Group</label><input className="fpl-form-input" value={incidentAssignmentGroup} onChange={e=>setIncidentAssignmentGroup(e.target.value)} placeholder="Security Operations"/></div>
+                <div className="fpl-form-row"><label>Due Date</label><input type="date" className="fpl-form-input" value={incidentDueDate} onChange={e=>setIncidentDueDate(e.target.value)}/></div>
+                <div className="fpl-form-row"><label>Notes</label><textarea className="fpl-form-textarea" rows={3} value={incidentNotes} onChange={e=>setIncidentNotes(e.target.value)} placeholder="Remediation context…"/></div>
+                <div className="fpl-form-info">Creating for <strong>{n}</strong> finding(s) across <strong>{new Set(selectedFindings.map(f=>f.vulnerabilityId)).size}</strong> CVE(s).</div>
+              </div>
+            )}
+            {actionModal==='defer' && (
+              <div className="fpl-form">
+                <p className="fpl-form-desc">Suppress {n} finding(s) until a specified date.</p>
+                <div className="fpl-form-row"><label>Reason</label>
+                  <select value={deferReason} onChange={e=>setDeferReason(e.target.value)} className="fpl-form-select">
+                    <option value="">Select reason…</option>
+                    <option value="RISK_ACCEPTED">Risk Accepted</option>
+                    <option value="COMPENSATING_CONTROL">Compensating Control</option>
+                    <option value="PENDING_PATCH">Pending Patch</option>
+                    <option value="DEFERRED">Deferred</option>
+                  </select>
+                </div>
+                <div className="fpl-form-row"><label>Expires</label><input type="date" className="fpl-form-input" value={deferExpiry} onChange={e=>setDeferExpiry(e.target.value)}/></div>
+              </div>
+            )}
+            {actionModal==='resolve' && <p className="fpl-form-desc">Mark <strong>{n}</strong> finding(s) as resolved.</p>}
+            {actionModal==='false-positive' && (
+              <div className="fpl-form">
+                <p className="fpl-form-desc">Suppress <strong>{n}</strong> finding(s) as false positives.</p>
+                <div className="fpl-form-row"><label>Justification</label><textarea className="fpl-form-textarea" rows={3} value={fpJustification} onChange={e=>setFpJustification(e.target.value)} placeholder="Why is this a false positive?"/></div>
+              </div>
+            )}
+            {actionModal==='duplicate' && (
+              <div className="fpl-form">
+                <p className="fpl-form-desc">Mark <strong>{n}</strong> finding(s) as duplicate.</p>
+                <div className="fpl-form-row"><label>Duplicate Of</label><input className="fpl-form-input mono" value={duplicateOf} onChange={e=>setDuplicateOf(e.target.value)} placeholder="Finding ID or Incident ID"/></div>
+              </div>
+            )}
+          </div>
+          <div className="fd3-modal-footer">
+            <button className="btn btn-secondary" onClick={closeModal} disabled={actionLoading}>Cancel</button>
+            <button className="btn btn-primary" disabled={actionLoading}
+              onClick={()=>{
+                if (actionModal==='create-incident') void handleCreateIncident();
+                else if (actionModal==='defer') void handleDefer();
+                else if (actionModal==='resolve') void handleResolve();
+                else if (actionModal==='false-positive') void handleFalsePos();
+                else if (actionModal==='duplicate') void handleDuplicate();
+              }}>
+              {actionLoading ? 'Working…' : actionModal==='create-incident' ? 'Create Incident' : actionModal==='defer' ? 'Defer' : actionModal==='resolve' ? 'Resolve' : actionModal==='false-positive' ? 'Mark False Positive' : 'Mark Duplicate'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="page-grid">
-      <section className="panel panel-findings-filters">
-        <div className="findings-filter-shell">
-          <div className="findings-filter-builder-row">
-            <FilterBuilder
-              categories={FINDING_FILTER_CATEGORIES}
-              fields={FINDING_FILTER_FIELDS}
-              activeKeys={activeFilters}
-              onAddFilter={(key) => addFilter(key as FindingFilterKey)}
+    <div className="fpl-root">
+
+      {/* ── toolbar ────────────────────────────────────────────────────── */}
+      <div className="fpl-toolbar">
+        <div className="fpl-toolbar-left">
+          <MultiGroupBy options={GROUP_OPTIONS} value={groupBy} onChange={setGroupBy}
+            label="GROUP BY" placeholder="None" allowEmptyPrimary emptyPrimaryLabel="None" showSelectorsByDefault={false}/>
+
+          {/* active filter chips */}
+          {activeChips.length>0 && (
+            <div className="fpl-active-chips">
+              {activeChips.map((chip,i)=>(
+                <span key={i} className="fpl-chip">
+                  {chip.label}
+                  <button onClick={chip.onRemove} aria-label="Remove filter">✕</button>
+                </span>
+              ))}
+              {activeChips.length>1 && <button className="fpl-chip-clear" onClick={clearAllFilters}>Clear all</button>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 5 dashboard widgets ─────────────────────────────────────────── */}
+      <div className="fpl-widgets">
+
+        {/* Widget 1: Exposure by Severity (donut) */}
+        <WidgetCard title="Exposure by Severity" active={colFilters.severity.length>0&&colFilters.severity.length<6}>
+          <div className="fpl-widget-donut-layout">
+            <DonutChart
+              size={90} sw={16}
+              segs={(['CRITICAL','HIGH','MEDIUM','LOW','NONE'] as const).map(s=>({
+                key:s, label:s, value:sevCounts.get(s)??0, color:SEV_COLORS[s],
+                onClick:()=>filterBySeverity(s),
+              }))}
             />
-            <div className="findings-filter-active-chips">
-              {activeFilters.map((key) => {
-                let label: string = key;
-                if (key === 'severity') label = `Severity${severities.length > 0 ? ` (${severities.length})` : ''}`;
-                if (key === 'status') label = `Status${statuses.length > 0 ? ` (${statuses.length})` : ''}`;
-                if (key === 'decisionState') label = `Decision${decisionStates.length > 0 ? ` (${decisionStates.length})` : ''}`;
-                if (key === 'matchMethod') label = `Match Method${matchMethods.length > 0 ? ` (${matchMethods.length})` : ''}`;
-                if (key === 'vexStatus') label = `VEX Status${vexStatuses.length > 0 ? ` (${vexStatuses.length})` : ''}`;
-                if (key === 'vexFreshness') label = `VEX Freshness${vexFreshness.length > 0 ? ` (${vexFreshness.length})` : ''}`;
-                if (key === 'vexProvider') label = `VEX Provider${vexProviders.length > 0 ? ` (${vexProviders.length})` : ''}`;
-                if (key === 'minConfidence') label = `Min Confidence (${Math.round(minConfidence * 100)}%)`;
-                if (key === 'vulnerabilityId') label = `Vulnerability ID${vulnerabilityId.trim() ? ' (1)' : ''}`;
-                if (key === 'packageName') label = `Package${packageName.trim() ? ' (1)' : ''}`;
-                if (key === 'ecosystem') label = `Ecosystem${ecosystem.trim() ? ' (1)' : ''}`;
+            <div className="fpl-widget-legend">
+              {(['CRITICAL','HIGH','MEDIUM','LOW','NONE'] as const).map(s=>{
+                const cnt = sevCounts.get(s)??0;
+                if (!cnt) return null;
                 return (
-                  <button
-                    key={key}
-                    type="button"
-                    className="findings-filter-chip-tag"
-                    onClick={() => removeFilter(key)}
-                    title="Remove filter"
-                  >
-                    <span>{label}</span>
-                    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                  </button>
+                  <div key={s} className={`fpl-legend-row${colFilters.severity.includes(s)?' fpl-legend-row--active':''}`}
+                    onClick={()=>filterBySeverity(s)}>
+                    <span className="fpl-legend-dot" style={{background:SEV_COLORS[s]}}/>
+                    <span className="fpl-legend-label">{s}</span>
+                    <strong className="fpl-legend-val">{cnt}</strong>
+                  </div>
                 );
               })}
             </div>
           </div>
+        </WidgetCard>
 
-          <div className="findings-active-filter-grid">
-            {activeFilters.includes('severity') && (
-              <FilterValueSelectCard
-                label="Severity"
-                selectedValues={severities}
-                options={severityOptions}
-                onChange={(values) => {
-                  setSeverities(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('severity')}
-              />
-            )}
-            {activeFilters.includes('status') && (
-              <FilterValueSelectCard
-                label="Workflow Status"
-                selectedValues={statuses}
-                options={statusOptions}
-                onChange={(values) => {
-                  setStatuses(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('status')}
-              />
-            )}
-            {activeFilters.includes('decisionState') && (
-              <FilterValueSelectCard
-                label="Decision State"
-                selectedValues={decisionStates}
-                options={decisionStateOptions}
-                onChange={(values) => {
-                  setDecisionStates(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('decisionState')}
-              />
-            )}
-            {activeFilters.includes('matchMethod') && (
-              <FilterValueSelectCard
-                label="Match Method"
-                selectedValues={matchMethods}
-                options={matchMethodOptions}
-                onChange={(values) => {
-                  setMatchMethods(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('matchMethod')}
-              />
-            )}
-            {activeFilters.includes('vexStatus') && (
-              <FilterValueSelectCard
-                label="VEX Status"
-                selectedValues={vexStatuses}
-                options={vexStatusOptions}
-                onChange={(values) => {
-                  setVexStatuses(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('vexStatus')}
-              />
-            )}
-            {activeFilters.includes('vexFreshness') && (
-              <FilterValueSelectCard
-                label="VEX Freshness"
-                selectedValues={vexFreshness}
-                options={vexFreshnessOptions}
-                onChange={(values) => {
-                  setVexFreshness(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('vexFreshness')}
-              />
-            )}
-            {activeFilters.includes('vexProvider') && (
-              <FilterValueSelectCard
-                label="VEX Provider"
-                selectedValues={vexProviders}
-                options={vexProviderOptions}
-                onChange={(values) => {
-                  setVexProviders(values);
-                  setPage(0);
-                }}
-                onRemove={() => removeFilter('vexProvider')}
-              />
-            )}
-            {activeFilters.includes('minConfidence') && (
-              <label className="findings-filter-chip findings-confidence-chip">
-                Min Confidence: <strong>{Math.round(minConfidence * 100)}%</strong>
-                <button
-                  type="button"
-                  className="findings-filter-chip-remove"
-                  onClick={() => removeFilter('minConfidence')}
-                  aria-label="Remove minimum confidence filter"
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={minConfidence}
-                  onChange={(event) => {
-                    setMinConfidence(Number(event.target.value));
-                    setPage(0);
-                  }}
-                />
-              </label>
-            )}
-            {activeFilters.includes('vulnerabilityId') && (
-              <label className="findings-filter-chip findings-filter-text-card">Vulnerability ID
-                <button
-                  type="button"
-                  className="findings-filter-chip-remove"
-                  onClick={() => removeFilter('vulnerabilityId')}
-                  aria-label="Remove vulnerability id filter"
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                </button>
-                <input
-                  value={vulnerabilityId}
-                  onChange={(event) => {
-                    setVulnerabilityId(event.target.value);
-                    setPage(0);
-                  }}
-                  placeholder="CVE-2025-1234"
-                  className="mono"
-                />
-              </label>
-            )}
-            {activeFilters.includes('packageName') && (
-              <label className="findings-filter-chip findings-filter-text-card">Package Name
-                <button
-                  type="button"
-                  className="findings-filter-chip-remove"
-                  onClick={() => removeFilter('packageName')}
-                  aria-label="Remove package filter"
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                </button>
-                <input
-                  value={packageName}
-                  onChange={(event) => {
-                    setPackageName(event.target.value);
-                    setPage(0);
-                  }}
-                  placeholder="log4j-core"
-                  className="mono"
-                />
-              </label>
-            )}
-            {activeFilters.includes('ecosystem') && (
-              <label className="findings-filter-chip findings-filter-text-card">Ecosystem
-                <button
-                  type="button"
-                  className="findings-filter-chip-remove"
-                  onClick={() => removeFilter('ecosystem')}
-                  aria-label="Remove ecosystem filter"
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                </button>
-                <input
-                  value={ecosystem}
-                  onChange={(event) => {
-                    setEcosystem(event.target.value);
-                    setPage(0);
-                  }}
-                  placeholder="maven"
-                  className="mono"
-                />
-              </label>
-            )}
-          </div>
+        {/* Widget 2: Findings by Status (horizontal bars) */}
+        <WidgetCard title="Findings by Status" active={colFilters.status.length>0&&colFilters.status.length<4}>
+          <HBarChart
+            activeKey={colFilters.status.length===1?colFilters.status[0]:undefined}
+            items={(['OPEN','RESOLVED','SUPPRESSED','AUTO_CLOSED'] as const).map(s=>({
+              key:s, label:s==='SUPPRESSED'?'Deferred':s==='AUTO_CLOSED'?'Closed':fmt(s), value:statusCounts.get(s)??0,
+              color:STATUS_COLORS[s], onClick:()=>filterByStatus(s),
+            }))}
+          />
+        </WidgetCard>
 
-          <div className="findings-groupby-shell">
-            <MultiGroupBy
-              options={GROUP_BY_OPTIONS}
-              value={groupBy}
-              onChange={setGroupBy}
-              label="GROUP BY"
-              placeholder="No secondary grouping"
-              allowEmptyPrimary
-              emptyPrimaryLabel="Select..."
-              showSelectorsByDefault={false}
-            />
-          </div>
+        {/* Widget 3: Top Assets at Risk (horizontal bars, top 5 open) */}
+        <WidgetCard title="Top Assets at Risk" active={!!colFilters.asset}>
+          {assetCounts.length===0
+            ? <div className="fpl-widget-empty">No open findings</div>
+            : <HBarChart
+                activeKey={colFilters.asset||undefined}
+                items={assetCounts.map(([name,cnt],i)=>({
+                  key:name, label:name.length>18?name.slice(0,16)+'…':name,
+                  value:cnt, color:['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe'][i]??'#6366f1',
+                  onClick:()=>filterByAsset(name),
+                }))}
+              />
+          }
+        </WidgetCard>
 
-          <div className="findings-filter-row">
-            <div className="findings-filter-actions">
-              <button className="btn btn-secondary btn-inline" type="button" onClick={clearFilters}>
-                Clear Filters
-              </button>
-              <button className="btn btn-secondary btn-inline" type="button" onClick={() => void findingsQuery.refetch()} disabled={loading}>
-                {loading ? 'Refreshing...' : 'Refresh Findings'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+        {/* Widget 4: SLA & Due Date Status (horizontal bars) */}
+        <WidgetCard title="SLA & Due Date" active={!!dueDateBand}>
+          <HBarChart
+            activeKey={dueDateBand??undefined}
+            items={[
+              { key:'overdue',  label:'Overdue',       value:dueDateCounts.overdue,  color:'#ef4444', onClick:()=>filterByDueBand('overdue')  },
+              { key:'due-soon', label:'Due in 7 days', value:dueDateCounts.dueSoon,  color:'#f97316', onClick:()=>filterByDueBand('due-soon') },
+              { key:'on-track', label:'On Track',      value:dueDateCounts.onTrack,  color:'#22c55e', onClick:()=>filterByDueBand('on-track') },
+              { key:'no-sla',   label:'No SLA Set',    value:dueDateCounts.noSla,    color:'#9ca3af', onClick:()=>filterByDueBand('no-sla')   },
+            ]}
+          />
+        </WidgetCard>
 
-      <div className="stats-grid">
-        <StatCard title="Total Findings" value={totalItems} caption="Across all pages matching current filters" />
-        <StatCard title="This Page" value={rows.length} caption={totalItems === 0 ? 'No results' : `Page ${page + 1} of ${totalPages}`} />
-      </div>
-
-      {groupedCards.length > 0 && (
-        <section className="panel">
-          <div className="panel-header findings-title-row">
-            <h3>Group Breakdown</h3>
-            <span className="panel-caption">Top values on current page</span>
-          </div>
-          <div className="findings-widget-grid">
-            {groupedCards.map((group) => (
-              <div className="findings-widget-card" key={group.key}>
-                <div className="findings-widget-title">{group.label}</div>
-                <div className="findings-widget-list">
-                  {group.items.length === 0 ? (
-                    <div className="panel-caption">No rows in current result set.</div>
-                  ) : (
-                    group.items.map(([value, count]) => (
-                      <div className="findings-widget-row" key={`${group.key}:${value}`}>
-                        <span>{group.key === 'matchedBy' ? matchMethodLabel(value) : value}</span>
-                        <strong>{count.toLocaleString()}</strong>
-                      </div>
-                    ))
-                  )}
-                </div>
+        {/* Widget 5: Key Indicators (big KPI numbers) */}
+        <WidgetCard title="Key Indicators">
+          <div className="fpl-kpi-grid">
+            {[
+              {
+                label:'Critical Open',
+                value: wRows.filter(r=>r.severity==='CRITICAL'&&r.status==='OPEN').length,
+                color:'#ef4444',
+                onClick:()=>{setColFilters(p=>({...p,severity:['CRITICAL'],status:['OPEN']}));setDueDateBand(null);setPage(0);}
+              },
+              {
+                label:'Unassigned',
+                value: wRows.filter(r=>r.status==='OPEN'&&!r.assignedTo).length,
+                color:'#f97316',
+                onClick:()=>{setColFilters(p=>({...p,severity:[],status:['OPEN'],assignedTo:''}));setDueDateBand('no-sla');setPage(0);}
+              },
+              {
+                label:'With Incidents',
+                value: wRows.filter(r=>!!r.incidentId).length,
+                color:'#3b82f6',
+                onClick:()=>{setColFilters(p=>({...p,severity:[],status:[]}));setDueDateBand(null);setPage(0);setColFilter('incidentId','INC');}
+              },
+              {
+                label:'Overdue',
+                value: dueDateCounts.overdue,
+                color:'#b91c1c',
+                onClick:()=>filterByDueBand('overdue'),
+              },
+            ].map(kpi=>(
+              <div key={kpi.label} className="fpl-kpi-card" onClick={kpi.onClick} style={{'--kpi-color':kpi.color} as React.CSSProperties}>
+                <div className="fpl-kpi-num">{kpi.value}</div>
+                <div className="fpl-kpi-label">{kpi.label}</div>
               </div>
             ))}
           </div>
-        </section>
+        </WidgetCard>
+
+      </div>
+
+      {/* ── group breakdown ──────────────────────────────────────────────── */}
+      {groupCards.length>0 && (
+        <div className="fpl-group-row">
+          {groupCards.map(g=>(
+            <div className="fpl-group-card" key={g.key}>
+              <div className="fpl-group-title">{g.label}</div>
+              {g.items.map(([v,c])=>(
+                <div className="fpl-group-item" key={v}><span>{v}</span><strong>{c}</strong></div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
 
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Correlated Findings</h3>
-          <div className="panel-header-actions">
-            <span className="panel-caption">
-              Showing {totalItems.toLocaleString()} total findings for the current filter set.
-            </span>
-            <ColumnVisibilityToggle
-              columns={FINDINGS_COLUMNS}
-              visible={visibleColumns}
-              onChange={handleColumnVisibilityChange}
-            />
+      {/* ── list controls bar ────────────────────────────────────────────── */}
+      <div className="fpl-list-bar">
+        <div className="fpl-list-bar-left">
+          {/* Resolve — primary standalone action */}
+          <button className={`fpl-action-btn fpl-action-btn--resolve${!hasSelection?' fpl-action-btn--disabled':''}`}
+            onClick={()=>openAction('resolve')}>Resolve</button>
+
+          {/* More actions "..." dropdown */}
+          <div className="fpl-more-wrap" ref={moreActionsRef}>
+            <button className={`fpl-more-btn${showMoreActions?' fpl-more-btn--open':''}`}
+              onClick={()=>setShowMoreActions(p=>!p)} title="More actions">
+              <span className="fpl-more-dots">•••</span>
+            </button>
+            {showMoreActions && (
+              <div className="fpl-more-menu">
+                <button className="fpl-more-item" onClick={()=>openAction('create-incident')} disabled={!hasSelection}>+ Create Incident</button>
+                <button className="fpl-more-item" onClick={()=>openAction('defer')} disabled={!hasSelection}>Defer</button>
+                <button className="fpl-more-item" onClick={()=>openAction('false-positive')} disabled={!hasSelection}>False Positive</button>
+                <button className="fpl-more-item" onClick={()=>openAction('duplicate')} disabled={!hasSelection}>Duplicate</button>
+                <div className="fpl-more-sep"/>
+                <button className="fpl-more-item" onClick={()=>void handleReopen()} disabled={!hasSelection}>Re-open</button>
+              </div>
+            )}
           </div>
+
+          {/* Selected count badge */}
+          {selectedIds.size > 0 && (
+            <span className="fpl-sel-badge">{selectedIds.size} selected</span>
+          )}
         </div>
 
-        {error && <div className="notice error">Failed to load findings: {error}</div>}
-
-        {loading && rows.length === 0 ? (
-          <div className="notice">Loading findings...</div>
-        ) : rows.length === 0 ? (
-          <div className="empty-state">
-            <p>No findings matched the current filter set.</p>
+        <div className="fpl-list-bar-right">
+          {/* Column visibility — gear icon */}
+          <div className="fpl-colvis-wrap" ref={colVisRef}>
+            <button className={`fpl-colvis-btn${showColVis?' fpl-colvis-btn--open':''}`}
+              onClick={()=>{setShowColVis(p=>!p);setOpenColFilter(null);}} title="Column settings">
+              <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" aria-hidden>
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd"/>
+              </svg>
+            </button>
+            {showColVis && (
+              <div className="fpl-colvis-popover fpl-colvis-popover--right">
+                <div className="fpl-colvis-header"><span>VISIBLE COLUMNS</span><button className="fpl-col-filter-clear" onClick={()=>saveColVis(new Set(DEFAULT_VISIBLE))}>Reset</button></div>
+                {ALL_COLUMNS.filter(c=>!c.alwaysVisible).map(c=>(
+                  <label key={c.key} className="fpl-colvis-item">
+                    <input type="checkbox" checked={visibleCols.has(c.key)} onChange={()=>{const n=new Set(visibleCols);n.has(c.key)?n.delete(c.key):n.add(c.key);saveColVis(n);}}/>
+                    <span>{c.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="table-scroll">
-              <DataTable
-                storageKey="findings-table-widths"
-                columns={tableColumns}
-                rows={tableRows}
-                showColumnControls={false}
-              />
-            </div>
-            <div className="pagination-row">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setPage((current) => Math.max(0, current - 1))}
-                disabled={page <= 0 || loading}
-              >
-                Previous
-              </button>
-              <span className="panel-caption pagination-caption">
-                {totalItems === 0 ? 'No results' : `Page ${page + 1} of ${totalPages}`}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setPage((current) => (current + 1 < totalPages ? current + 1 : current))}
-                disabled={loading || totalPages === 0 || page + 1 >= totalPages}
-              >
-                Next
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+
+        </div>
+      </div>
+
+      {/* ── main table ───────────────────────────────────────────────────── */}
+      <div className="fpl-table-wrap">
+        {findingsQuery.error && <div className="notice error">Failed to load findings: {String(findingsQuery.error)}</div>}
+
+        <div className="fpl-table-scroll">
+          <table className="fpl-table">
+            <thead>
+              <tr>
+                <th className="fpl-th fpl-th--check">
+                  <input type="checkbox" checked={allSelected}
+                    ref={el=>{if(el) el.indeterminate=selectedIds.size>0&&!allSelected;}}
+                    onChange={toggleSelectAll} aria-label="Select all"/>
+                </th>
+                {visColDefs.map(c=><ColHeader key={c.key} colKey={c.key} label={c.label}/>)}
+              </tr>
+            </thead>
+            <tbody>
+              {loading && rows.length===0 ? (
+                <tr><td colSpan={visColDefs.length+1} className="fpl-loading-row">Loading findings…</td></tr>
+              ) : rows.length===0 ? (
+                <tr><td colSpan={visColDefs.length+1} className="fpl-empty-row">
+                  No findings matched the current filters.{' '}
+                  {activeChips.length>0 && <button className="fpl-link-btn" onClick={clearAllFilters}>Clear filters</button>}
+                </td></tr>
+              ) : rows.map(row=>(
+                <tr key={row.id} className={`fpl-tr${selectedIds.has(row.id)?' fpl-tr--selected':''}`} onClick={()=>toggleSelect(row.id)}>
+                  <td className="fpl-td fpl-td--check" onClick={e=>e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.has(row.id)} onChange={()=>toggleSelect(row.id)} aria-label="Select row"/>
+                  </td>
+                  {visColDefs.map(c=>(
+                    <td key={c.key} className="fpl-td"
+                      onClick={c.key==='findingId'||c.key==='cveId'?e=>e.stopPropagation():undefined}>
+                      {renderCell(row,c.key)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="fpl-pagination">
+          <button className="btn btn-secondary btn-inline" disabled={page<=0||loading} onClick={()=>setPage(p=>Math.max(0,p-1))}>← Prev</button>
+          <span className="fpl-page-info">
+            {totalItems===0 ? 'No results' : `Page ${page+1} of ${Math.max(1,totalPages)} · ${totalItems.toLocaleString()} findings`}
+          </span>
+          <button className="btn btn-secondary btn-inline" disabled={loading||page+1>=totalPages} onClick={()=>setPage(p=>p+1)}>Next →</button>
+        </div>
+      </div>
+
+      {renderModal()}
     </div>
   );
 }
