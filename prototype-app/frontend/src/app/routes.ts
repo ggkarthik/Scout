@@ -14,7 +14,7 @@ export type AppTab =
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
-export type ConnectRouteView = 'sources' | 'inventory-run-queue' | 'vuln-intel-queue' | 'processing-jobs';
+export type ConnectRouteView = 'sources' | 'integration-run-queue' | 'processing-jobs';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -68,8 +68,7 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
   'sources',
-  'inventory-run-queue',
-  'vuln-intel-queue',
+  'integration-run-queue',
   'processing-jobs'
 ]);
 
@@ -112,8 +111,8 @@ export function normalizeConnectRouteView(value: string | null | undefined): Con
   if (value === 'github-pipelines') {
     return 'sources';
   }
-  if (value === 'integration-queue') {
-    return 'vuln-intel-queue';
+  if (value === 'integration-queue' || value === 'inventory-run-queue' || value === 'vuln-intel-queue') {
+    return 'integration-run-queue';
   }
   return CONNECT_VIEWS.has(value as ConnectRouteView) ? value as ConnectRouteView : CONNECT_DEFAULT_VIEW;
 }

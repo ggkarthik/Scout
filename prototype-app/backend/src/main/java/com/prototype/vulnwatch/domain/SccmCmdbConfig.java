@@ -17,16 +17,16 @@ import java.util.UUID;
 
 @Entity
 @Table(
-        name = "servicenow_cmdb_configs",
+        name = "sccm_cmdb_configs",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_servicenow_cmdb_configs_tenant_source", columnNames = {"tenant_id", "source_system"})
+                @UniqueConstraint(name = "uk_sccm_cmdb_configs_tenant_source", columnNames = {"tenant_id", "source_system"})
         },
         indexes = {
-                @Index(name = "idx_servicenow_cmdb_configs_enabled", columnList = "enabled,auto_sync_enabled"),
-                @Index(name = "idx_servicenow_cmdb_configs_tenant", columnList = "tenant_id")
+                @Index(name = "idx_sccm_cmdb_configs_enabled", columnList = "enabled,auto_sync_enabled"),
+                @Index(name = "idx_sccm_cmdb_configs_tenant", columnList = "tenant_id")
         }
 )
-public class ServiceNowCmdbConfig {
+public class SccmCmdbConfig {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -37,14 +37,14 @@ public class ServiceNowCmdbConfig {
     private Tenant tenant;
 
     @Column(name = "source_system", nullable = false, length = 80)
-    private String sourceSystem = "servicenow";
+    private String sourceSystem = "sccm";
 
-    @Column(name = "base_url", length = 1000)
-    private String baseUrl;
+    @Column(name = "jdbc_url", length = 1000)
+    private String jdbcUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_type", nullable = false, length = 32)
-    private ServiceNowAuthType authType = ServiceNowAuthType.BASIC;
+    private SccmAuthType authType = SccmAuthType.SQL_AUTH;
 
     @Column(length = 255)
     private String username;
@@ -52,29 +52,20 @@ public class ServiceNowCmdbConfig {
     @Column(name = "credential_secret", length = 4000)
     private String credentialSecret;
 
-    @Column(name = "install_table", nullable = false, length = 255)
-    private String installTable = "cmdb_sam_sw_install";
+    @Column(name = "site_code", length = 20)
+    private String siteCode;
 
-    @Column(name = "discovery_model_table", nullable = false, length = 255)
-    private String discoveryModelTable = "cmdb_sam_sw_discovery_model";
+    @Column(name = "database_name", nullable = false, length = 255)
+    private String databaseName = "CM_P01";
 
-    @Column(name = "ci_table", nullable = false, length = 255)
-    private String ciTable = "cmdb_ci";
+    @Column(name = "fetch_size", nullable = false)
+    private Integer fetchSize = 500;
 
-    @Column(name = "install_query", length = 4000)
-    private String installQuery;
+    @Column(name = "query_timeout_seconds", nullable = false)
+    private Integer queryTimeoutSeconds = 120;
 
-    @Column(name = "discovery_query", length = 4000)
-    private String discoveryQuery;
-
-    @Column(name = "install_fields", length = 4000)
-    private String installFields;
-
-    @Column(name = "discovery_fields", length = 4000)
-    private String discoveryFields;
-
-    @Column(name = "page_size", nullable = false)
-    private Integer pageSize = 1000;
+    @Column(name = "mock_mode", nullable = false)
+    private boolean mockMode = false;
 
     @Column(name = "enabled", nullable = false)
     private boolean enabled = true;
@@ -123,19 +114,19 @@ public class ServiceNowCmdbConfig {
         this.sourceSystem = sourceSystem;
     }
 
-    public String getBaseUrl() {
-        return baseUrl;
+    public String getJdbcUrl() {
+        return jdbcUrl;
     }
 
-    public void setBaseUrl(String baseUrl) {
-        this.baseUrl = baseUrl;
+    public void setJdbcUrl(String jdbcUrl) {
+        this.jdbcUrl = jdbcUrl;
     }
 
-    public ServiceNowAuthType getAuthType() {
+    public SccmAuthType getAuthType() {
         return authType;
     }
 
-    public void setAuthType(ServiceNowAuthType authType) {
+    public void setAuthType(SccmAuthType authType) {
         this.authType = authType;
     }
 
@@ -155,68 +146,44 @@ public class ServiceNowCmdbConfig {
         this.credentialSecret = credentialSecret;
     }
 
-    public String getInstallTable() {
-        return installTable;
+    public String getSiteCode() {
+        return siteCode;
     }
 
-    public void setInstallTable(String installTable) {
-        this.installTable = installTable;
+    public void setSiteCode(String siteCode) {
+        this.siteCode = siteCode;
     }
 
-    public String getDiscoveryModelTable() {
-        return discoveryModelTable;
+    public String getDatabaseName() {
+        return databaseName;
     }
 
-    public void setDiscoveryModelTable(String discoveryModelTable) {
-        this.discoveryModelTable = discoveryModelTable;
+    public void setDatabaseName(String databaseName) {
+        this.databaseName = databaseName;
     }
 
-    public String getCiTable() {
-        return ciTable;
+    public Integer getFetchSize() {
+        return fetchSize;
     }
 
-    public void setCiTable(String ciTable) {
-        this.ciTable = ciTable;
+    public void setFetchSize(Integer fetchSize) {
+        this.fetchSize = fetchSize;
     }
 
-    public String getInstallQuery() {
-        return installQuery;
+    public Integer getQueryTimeoutSeconds() {
+        return queryTimeoutSeconds;
     }
 
-    public void setInstallQuery(String installQuery) {
-        this.installQuery = installQuery;
+    public void setQueryTimeoutSeconds(Integer queryTimeoutSeconds) {
+        this.queryTimeoutSeconds = queryTimeoutSeconds;
     }
 
-    public String getDiscoveryQuery() {
-        return discoveryQuery;
+    public boolean isMockMode() {
+        return mockMode;
     }
 
-    public void setDiscoveryQuery(String discoveryQuery) {
-        this.discoveryQuery = discoveryQuery;
-    }
-
-    public String getInstallFields() {
-        return installFields;
-    }
-
-    public void setInstallFields(String installFields) {
-        this.installFields = installFields;
-    }
-
-    public String getDiscoveryFields() {
-        return discoveryFields;
-    }
-
-    public void setDiscoveryFields(String discoveryFields) {
-        this.discoveryFields = discoveryFields;
-    }
-
-    public Integer getPageSize() {
-        return pageSize;
-    }
-
-    public void setPageSize(Integer pageSize) {
-        this.pageSize = pageSize;
+    public void setMockMode(boolean mockMode) {
+        this.mockMode = mockMode;
     }
 
     public boolean isEnabled() {

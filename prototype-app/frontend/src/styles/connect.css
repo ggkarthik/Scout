@@ -222,3 +222,154 @@
   }
 }
 
+/* Vuln intel unified config page */
+.vi-source-section {
+  padding: var(--space-3) 0;
+}
+
+.vi-source-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.vi-source-icon {
+  font-size: 1.05rem;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.vi-source-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.vi-source-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.vi-source-meta--fail {
+  color: var(--critical);
+}
+
+.vi-source-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 2px 0 var(--space-2) 32px;
+  line-height: 1.5;
+}
+
+.vi-source-config {
+  margin: var(--space-2) 0 0 32px;
+}
+
+.vi-source-actions {
+  margin: var(--space-2) 0 0 32px;
+}
+
+.vi-source-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.vi-run-every-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vi-run-every-label {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: default;
+}
+
+.vi-run-every-next {
+  font-size: 0.82rem;
+  color: var(--muted);
+  padding-left: 2px;
+}
+
+.vi-run-every-select {
+  font-size: 0.88rem;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Connector inline page */
+.connector-page-back-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.connector-page-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Compact connection status row */
+.sn-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-alt, #f8f9fa);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 0.82rem;
+}
+
+.sn-status-pill {
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.sn-status-ok {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.sn-status-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sn-status-meta {
+  color: var(--muted);
+}
+
+.sn-status-row--error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.sn-status-pill.sn-status-fail {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sn-status-error-msg {
+  color: #dc2626;
+  font-style: italic;
+}
+

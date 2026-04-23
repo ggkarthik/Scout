@@ -3,14 +3,32 @@ import { useSearchParams } from 'react-router-dom';
 import { IngestionPage } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
-import { InventoryRunQueuePage } from './InventoryRunQueuePage';
+import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
+import { SccmConnectorPage } from './SccmConnectorPage';
+import { VulnIntelConfigPage } from './VulnIntelConfigPage';
+import { api } from '../api/client';
+import type { VulnIntelSourcesSummary } from '../api/client';
+import type { ServiceNowCmdbConfig, SccmCmdbConfig } from '../features/connect/types';
+
+function timeAgo(iso?: string): string | null {
+  if (!iso) return null;
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
 
 type ConnectorId =
   | 'sbom-endpoint'
   | 'sbom-github'
   | 'servicenow-cmdb'
+  | 'sccm-cmdb'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -19,8 +37,7 @@ type ConnectorId =
   | 'advisory-feed'
   | 'endoflife-date';
 
-type CategoryFilter = 'all' | 'inventory' | 'vulnerability';
-type ConnectView = 'sources' | 'inventory-run-queue' | 'vuln-intel-queue' | 'processing-jobs';
+type ConnectView = 'sources' | 'integration-run-queue' | 'processing-jobs';
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -48,6 +65,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'ServiceNow CMDB',
     summary: 'Pull host inventory from ServiceNow Table APIs and review ingestion history in Connect.',
     icon: '🧾'
+  },
+  {
+    id: 'sccm-cmdb',
+    name: 'SCCM / MECM',
+    summary: 'Ingest hardware asset and installed software inventory from Microsoft Endpoint Configuration Manager (SCCM/MECM) via direct SQL Server connection.',
+    icon: '🖥️'
   },
   {
     id: 'nvd-api',
@@ -106,7 +129,8 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
 const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
   'sbom-endpoint',
   'sbom-github',
-  'servicenow-cmdb'
+  'servicenow-cmdb',
+  'sccm-cmdb'
 ];
 
 function isConnectorId(value: string | null): value is ConnectorId {
@@ -123,9 +147,10 @@ function readConnectorFromSearch(searchParams: URLSearchParams): ConnectorId | n
 
 type ConnectorDetailsProps = {
   connectorId: ConnectorId;
+  vulnSummary?: VulnIntelSourcesSummary | null;
 };
 
-function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
+function ConnectorDetailContent({ connectorId, vulnSummary }: ConnectorDetailsProps) {
   if (connectorId === 'sbom-endpoint') {
     return (
       <IngestionPage
@@ -144,71 +169,15 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
       />
     );
   }
-  if (connectorId === 'nvd-api') {
-    return (
-        <SourcesPage
-          focusSource="nvd"
-          showQueue={false}
-          hideHeader
-          title="NVD Vulnerability Feed"
-          caption="Trigger NVD synchronization. View run history in Vuln Intel Feed Queue."
-        />
-      );
-  }
-  if (connectorId === 'cisa-kev') {
-    return (
-        <SourcesPage
-          focusSource="kev"
-          showQueue={false}
-          hideHeader
-          title="CISA KEV Feed"
-          caption="Trigger KEV ingestion. View run history in Vuln Intel Feed Queue."
-        />
-      );
-  }
-  if (connectorId === 'ghsa-feed') {
-    return (
-        <SourcesPage
-          focusSource="ghsa"
-          showQueue={false}
-          hideHeader
-          title="GitHub Advisory Database (GHSA)"
-          caption="Trigger GHSA ingestion. View run history in Vuln Intel Feed Queue."
-        />
-      );
-  }
-  if (connectorId === 'microsoft-csaf-vex') {
-    return (
-        <SourcesPage
-          focusSource="microsoft-csaf"
-          showQueue={false}
-          hideHeader
-          title="Microsoft CSAF + VEX Feed"
-          caption="Trigger Microsoft CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue."
-        />
-      );
-  }
-  if (connectorId === 'redhat-csaf-vex') {
-    return (
-        <SourcesPage
-          focusSource="redhat-csaf"
-          showQueue={false}
-          hideHeader
-          title="Red Hat CSAF + VEX Feed"
-          caption="Trigger Red Hat CSAF/VEX ingestion. View feed runs in Vuln Intel Feed Queue."
-        />
-      );
-  }
-  if (connectorId === 'advisory-feed') {
-    return (
-        <SourcesPage
-          focusSource="advisories"
-          showQueue={false}
-          hideHeader
-          title="Advisory Import Feed"
-          caption="Seed/import advisory records. View run history in Vuln Intel Feed Queue."
-        />
-      );
+  if (
+    connectorId === 'nvd-api' ||
+    connectorId === 'cisa-kev' ||
+    connectorId === 'ghsa-feed' ||
+    connectorId === 'microsoft-csaf-vex' ||
+    connectorId === 'redhat-csaf-vex' ||
+    connectorId === 'advisory-feed'
+  ) {
+    return <VulnIntelConfigPage vulnSummary={vulnSummary} />;
   }
   if (connectorId === 'endoflife-date') {
     return (
@@ -220,6 +189,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'servicenow-cmdb') {
     return <AssetsPage />;
+  }
+  if (connectorId === 'sccm-cmdb') {
+    return <SccmConnectorPage />;
   }
 
   return (
@@ -243,9 +215,16 @@ type ConnectPageProps = {
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
-  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all');
-  const [search, setSearch] = React.useState('');
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
+  const [snConfig, setSnConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
+  const [sccmConfig, setSccmConfig] = React.useState<SccmCmdbConfig | null>(null);
+  const [vulnSummary, setVulnSummary] = React.useState<VulnIntelSourcesSummary | null>(null);
+
+  React.useEffect(() => {
+    api.getServiceNowCmdbConfig().then(setSnConfig).catch(() => {});
+    api.getSccmCmdbConfig().then(setSccmConfig).catch(() => {});
+    api.getVulnIntelSourcesSummary().then(setVulnSummary).catch(() => {});
+  }, []);
 
   React.useEffect(() => {
     setActiveView(initialView);
@@ -276,26 +255,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
 
-  const query = search.trim().toLowerCase();
-  const matchesSearch = (connector: ConnectorDefinition): boolean => {
-    if (!query) {
-      return true;
-    }
-    return (
-      connector.name.toLowerCase().includes(query)
-      || connector.summary.toLowerCase().includes(query)
-    );
-  };
-
   const vulnerabilityConnectors = CONNECTORS
-    .filter((connector) => VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(connector.id))
-    .filter(matchesSearch);
+    .filter((connector) => VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(connector.id));
 
   const inventoryConnectors = CONNECTORS
-    .filter((connector) => INVENTORY_SOURCE_CONNECTOR_IDS.includes(connector.id))
-    .filter(matchesSearch);
+    .filter((connector) => INVENTORY_SOURCE_CONNECTOR_IDS.includes(connector.id));
 
-  const allSections = [
+  const visibleSections = [
     {
       key: 'inventory' as const,
       title: 'Inventory Sources',
@@ -310,85 +276,35 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     }
   ];
 
-  const visibleSections = categoryFilter === 'all'
-    ? allSections
-    : allSections.filter((s) => s.key === categoryFilter);
-
-  const totalVisible = visibleSections.reduce((sum, section) => sum + section.connectors.length, 0);
-
   const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
 
   return (
     <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Connect</h3>
-          <span className="panel-caption">
-            {activeView === 'sources' && 'Connect inventory and vulnerability sources. Click any source to open its configuration.'}
-            {activeView === 'inventory-run-queue' && 'Shared inventory ingestion run history across host, container-image, and application inventory sources.'}
-            {activeView === 'vuln-intel-queue' && 'Upstream vulnerability-feed ingestion history for NVD, KEV, GHSA, CSAF, and advisory sources.'}
-            {activeView === 'processing-jobs' && 'Internal maintenance jobs like VEX repair, rollout backfills, and future recompute tasks.'}
-          </span>
-        </div>
-      </section>
+      <div className="connect-filter-bar connect-filter-bar--standalone">
+        {(['sources', 'integration-run-queue', 'processing-jobs'] as const).map((view) => (
+          <button
+            key={view}
+            type="button"
+            className={`connect-filter-btn${activeView === view ? ' active' : ''}`}
+            onClick={() => {
+              setActiveView(view);
+              onViewChange?.(view);
+              if (view !== 'sources') {
+                setActiveConnector(null);
+              }
+            }}
+          >
+            {view === 'sources' && 'Sources'}
+            {view === 'integration-run-queue' && 'Integration Run Queue'}
+            {view === 'processing-jobs' && 'Processing Jobs'}
+          </button>
+        ))}
+      </div>
 
-      <section className="panel">
-        <div className="connect-filter-bar">
-          {(['sources', 'inventory-run-queue', 'vuln-intel-queue', 'processing-jobs'] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              className={`connect-filter-btn${activeView === view ? ' active' : ''}`}
-              onClick={() => {
-                setActiveView(view);
-                onViewChange?.(view);
-                if (view !== 'sources') {
-                  setActiveConnector(null);
-                }
-              }}
-            >
-              {view === 'sources' && 'Sources'}
-              {view === 'inventory-run-queue' && 'Inventory Run Queue'}
-              {view === 'vuln-intel-queue' && 'Vuln Intel Feed Queue'}
-              {view === 'processing-jobs' && 'Processing Jobs'}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {activeView === 'sources' && (
+      {activeView === 'sources' && !activeConnector && (
         <section className="panel connect-catalog-panel">
-          <div className="connect-search-row">
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search sources..."
-              aria-label="Search sources"
-            />
-          </div>
-
-          <div className="connect-filter-bar">
-            {(['all', 'inventory', 'vulnerability'] as const).map((filter) => (
-              <button
-                key={filter}
-                type="button"
-                className={`connect-filter-btn${categoryFilter === filter ? ' active' : ''}`}
-                onClick={() => setCategoryFilter(filter)}
-              >
-                {filter === 'all' && 'All'}
-                {filter === 'inventory' && <>Inventory Sources <strong>{inventoryConnectors.length}</strong></>}
-                {filter === 'vulnerability' && <>Vulnerability Intelligence <strong>{vulnerabilityConnectors.length}</strong></>}
-              </button>
-            ))}
-          </div>
-
           <div className="connect-sections-layout">
-            {totalVisible === 0 ? (
-              <div className="empty-state">
-                <p>No sources match the current search.</p>
-              </div>
-            ) : (
-              visibleSections.map((section) => (
+            {visibleSections.map((section) => (
                 <div key={section.key} className="connect-source-section">
                   <div className="connect-source-section-head">
                     <h4>{section.title}</h4>
@@ -400,38 +316,76 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                     </div>
                   ) : (
                     <div className="connect-card-grid">
-                      {section.connectors.map((connector) => (
-                        <button
-                          key={connector.id}
-                          type="button"
-                          className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}`}
-                          onClick={() => setActiveConnector(connector.id)}
-                        >
-                          <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
-                          <div>
-                            <div className="connect-source-name">{connector.name}</div>
-                            <div className="panel-caption">{connector.summary}</div>
-                          </div>
-                        </button>
-                      ))}
+                      {section.connectors.map((connector) => {
+                        // Map connector IDs to sync summary keys
+                        const vulnKeyMap: Record<string, string> = {
+                          'nvd-api': 'NVD',
+                          'cisa-kev': 'KEV',
+                          'ghsa-feed': 'GHSA',
+                          'microsoft-csaf-vex': 'CSAF_MICROSOFT',
+                          'redhat-csaf-vex': 'CSAF_REDHAT',
+                          'advisory-feed': 'ADVISORY'
+                        };
+                        const vulnKey = vulnKeyMap[connector.id];
+                        const vulnRun = vulnKey ? vulnSummary?.sources[vulnKey] : undefined;
+
+                        const lastSyncAt =
+                          connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt :
+                          connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt :
+                          vulnRun?.completedAt ?? undefined;
+
+                        const lastSync = timeAgo(lastSyncAt);
+                        const runStatus = vulnRun?.status;
+                        const isFailed = runStatus === 'failed';
+                        const totalRecords = vulnRun ? (vulnRun.recordsInserted + vulnRun.recordsUpdated) : null;
+
+                        const hasSynced =
+                          connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt != null :
+                          connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt != null :
+                          vulnRun != null && vulnRun.status !== 'never';
+
+                        const dotClass = isFailed ? 'connect-source-dot--fail' :
+                                         hasSynced ? 'connect-source-dot--ok' :
+                                         'connect-source-dot--warn';
+
+                        return (
+                          <button
+                            key={connector.id}
+                            type="button"
+                            className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}`}
+                            onClick={() => setActiveConnector(connector.id)}
+                          >
+                            <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
+                            <div className="connect-source-body">
+                              <div className="connect-source-name-row">
+                                <span className="connect-source-name">{connector.name}</span>
+                                <span className={`connect-source-dot ${dotClass}`} />
+                              </div>
+                              <div className="panel-caption">{connector.summary}</div>
+                              {isFailed && lastSync && (
+                                <div className="connect-source-lastsync connect-source-lastsync--fail">
+                                  Failed · {lastSync}
+                                </div>
+                              )}
+                              {!isFailed && lastSync && (
+                                <div className="connect-source-lastsync">
+                                  Last sync · {lastSync}
+                                  {totalRecords !== null && totalRecords > 0 && ` · ${totalRecords.toLocaleString()} records`}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-              ))
-            )}
+              ))}
           </div>
         </section>
       )}
 
-      {activeView === 'inventory-run-queue' && <InventoryRunQueuePage />}
-
-      {activeView === 'vuln-intel-queue' && (
-        <SourcesPage
-          focusSource="vuln-only"
-          title="Vuln Intel Feed Queue"
-          caption="External vulnerability-feed runs only: NVD, KEV, GHSA, CSAF, and advisory ingestion."
-        />
-      )}
+      {activeView === 'integration-run-queue' && <IntegrationRunQueuePage />}
 
       {activeView === 'processing-jobs' && (
         <SourcesPage
@@ -442,34 +396,19 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       )}
 
       {activeConnector && selectedConnector && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setActiveConnector(null); }}
-          role="dialog"
-          aria-modal="true"
-          aria-label={selectedConnector.name}
-        >
-          <div className="modal-panel modal-panel-wide">
-            <div className="connector-drawer-header">
-              <div className="connector-drawer-title">
-                <span className="connect-source-icon" aria-hidden="true">{selectedConnector.icon}</span>
-                <div>
-                  <h3>{selectedConnector.name}</h3>
-                  <span className="panel-caption">{selectedConnector.summary}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setActiveConnector(null)}
-                aria-label="Close connector setup"
-              >
-                ✕
-              </button>
-            </div>
-            <ConnectorDetailContent connectorId={activeConnector} />
+        <section className="panel">
+          <div className="connector-page-back-row">
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => setActiveConnector(null)}
+            >
+              ← Back to Sources
+            </button>
+            <span className="connector-page-title">{selectedConnector.name}</span>
           </div>
-        </div>
+          <ConnectorDetailContent connectorId={activeConnector} vulnSummary={vulnSummary} />
+        </section>
       )}
     </div>
   );

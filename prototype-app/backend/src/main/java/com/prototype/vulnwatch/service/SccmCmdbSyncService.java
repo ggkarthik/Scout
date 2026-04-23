@@ -1,0 +1,305 @@
+package com.prototype.vulnwatch.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.SccmCmdbConfig;
+import com.prototype.vulnwatch.domain.SyncRun;
+import com.prototype.vulnwatch.dto.CmdbInventorySyncResponse;
+import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
+import com.prototype.vulnwatch.repo.SyncRunRepository;
+import jakarta.persistence.EntityNotFoundException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Service
+public class SccmCmdbSyncService {
+
+    public static final String SYNC_TYPE_SCCM_CMDB = "SCCM_CMDB";
+    private static final Logger LOG = LoggerFactory.getLogger(SccmCmdbSyncService.class);
+
+    private final SccmCmdbConfigRepository sccmCmdbConfigRepository;
+    private final SccmCmdbConfigService sccmCmdbConfigService;
+    private final SccmQueryService sccmQueryService;
+    private final SyncRunRepository syncRunRepository;
+    private final CmdbIngestionService cmdbIngestionService;
+    private final ObjectMapper objectMapper;
+    private final TaskExecutor integrationQueueExecutor;
+    private final TransactionTemplate transactionTemplate;
+
+    public SccmCmdbSyncService(
+            SccmCmdbConfigRepository sccmCmdbConfigRepository,
+            SccmCmdbConfigService sccmCmdbConfigService,
+            SccmQueryService sccmQueryService,
+            SyncRunRepository syncRunRepository,
+            CmdbIngestionService cmdbIngestionService,
+            ObjectMapper objectMapper,
+            @Qualifier("integrationQueueExecutor") TaskExecutor integrationQueueExecutor,
+            TransactionTemplate transactionTemplate
+    ) {
+        this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
+        this.sccmCmdbConfigService = sccmCmdbConfigService;
+        this.sccmQueryService = sccmQueryService;
+        this.syncRunRepository = syncRunRepository;
+        this.cmdbIngestionService = cmdbIngestionService;
+        this.objectMapper = objectMapper;
+        this.integrationQueueExecutor = integrationQueueExecutor;
+        this.transactionTemplate = transactionTemplate;
+    }
+
+    public SyncTriggerResponse trigger() {
+        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun());
+        if (!claimed.reusedActiveRun()) {
+            integrationQueueExecutor.execute(() -> executeRun(claimed.configId(), claimed.runId(), "manual"));
+            return new SyncTriggerResponse(claimed.runId(), "queued", "SCCM CMDB sync queued");
+        }
+        return new SyncTriggerResponse(claimed.runId(), "running", "SCCM CMDB sync is already queued or running");
+    }
+
+    @Scheduled(cron = "0 */5 * * * *")
+    public void runScheduledSyncs() {
+        for (SccmCmdbConfig config : sccmCmdbConfigRepository.findByEnabledTrueAndAutoSyncEnabledTrueOrderByUpdatedAtAsc()) {
+            ClaimedRun claimed = transactionTemplate.execute(status -> claimScheduledRun(config));
+            if (claimed == null) {
+                continue;
+            }
+            integrationQueueExecutor.execute(() -> executeRun(claimed.configId(), claimed.runId(), "scheduled"));
+            return;
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasActiveRun() {
+        return !syncRunRepository.findActiveRunsBySyncType(SYNC_TYPE_SCCM_CMDB, List.of("queued", "running")).isEmpty();
+    }
+
+    // ── Run claiming ───────────────────────────────────────────────────────────────────────────
+
+    private ClaimedRun claimManualRun() {
+        SccmCmdbConfig config = sccmCmdbConfigRepository.findAll().stream()
+                .filter(this::isConfigured)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
+        if (!config.isEnabled()) {
+            throw new IllegalStateException("SCCM CMDB connector is disabled");
+        }
+        return claimRunForConfig(config, "manual", true);
+    }
+
+    private ClaimedRun claimScheduledRun(SccmCmdbConfig config) {
+        if (!isConfigured(config) || !config.isEnabled() || !config.isAutoSyncEnabled() || !isDue(config)) {
+            return null;
+        }
+        return claimRunForConfig(config, "scheduled", false);
+    }
+
+    private ClaimedRun claimRunForConfig(SccmCmdbConfig config, String triggerMode, boolean allowReuseActiveRun) {
+        Optional<SyncRun> active = syncRunRepository.findActiveRunsBySyncType(
+                SYNC_TYPE_SCCM_CMDB,
+                List.of("queued", "running")
+        ).stream().findFirst();
+        if (active.isPresent()) {
+            if (!allowReuseActiveRun) {
+                return null;
+            }
+            return new ClaimedRun(config.getId(), active.get().getId(), true);
+        }
+
+        SyncRun run = new SyncRun();
+        run.setSyncType(SYNC_TYPE_SCCM_CMDB);
+        run.setStatus("queued");
+        run.setMetadataJson(toJson(Map.of(
+                "triggerMode", triggerMode,
+                "sourceSystem", defaultIfBlank(config.getSourceSystem(), "sccm"),
+                "jdbcUrl", defaultIfBlank(config.getJdbcUrl(), ""),
+                "mockMode", config.isMockMode()
+        )));
+        run = syncRunRepository.save(run);
+        return new ClaimedRun(config.getId(), run.getId(), false);
+    }
+
+    private boolean isDue(SccmCmdbConfig config) {
+        SyncRun latest = syncRunRepository
+                .findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(SYNC_TYPE_SCCM_CMDB)
+                .orElse(null);
+        if (latest == null) {
+            return true;
+        }
+        Instant reference = latest.getCompletedAt() != null ? latest.getCompletedAt() : latest.getStartedAt();
+        if (reference == null) {
+            return true;
+        }
+        int minutes = config.getIntervalMinutes() == null ? 1440 : Math.max(5, config.getIntervalMinutes());
+        return Duration.between(reference, Instant.now()).toMinutes() >= minutes;
+    }
+
+    // ── Execution ──────────────────────────────────────────────────────────────────────────────
+
+    private void executeRun(UUID configId, UUID runId, String triggerMode) {
+        markRunRunning(runId, triggerMode);
+        try {
+            SccmCmdbConfig config = sccmCmdbConfigRepository.findById(configId)
+                    .orElseThrow(() -> new EntityNotFoundException("SCCM CMDB config not found: " + configId));
+            sccmCmdbConfigService.resolveRuntimeConfig(config.getTenant())
+                    .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
+
+            LOG.info("SCCM sync run {} starting (trigger={})", runId, triggerMode);
+            List<Map<String, String>> installRows = sccmQueryService.fetchInstallRows(config);
+            updateRunProgress(runId, installRows.size(), "building-discovery");
+
+            List<Map<String, String>> discoveryRows = sccmQueryService.buildDiscoveryRows(installRows);
+            updateRunProgress(runId, installRows.size() + discoveryRows.size(), "ingesting");
+
+            CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
+                    config.getTenant(),
+                    defaultIfBlank(config.getSourceSystem(), "sccm"),
+                    installRows,
+                    discoveryRows,
+                    new CmdbIngestionService.HostInventorySourceDescriptor(
+                            "sccm-live-sync",
+                            "sccm-jdbc",
+                            defaultIfBlank(config.getSourceSystem(), "sccm"),
+                            "v_GS_INSTALLED_SOFTWARE",
+                            defaultIfBlank(config.getJdbcUrl(), ""),
+                            MediaType.APPLICATION_JSON_VALUE,
+                            null
+                    )
+            );
+
+            completeRun(configId, runId, response, installRows.size() + discoveryRows.size(), triggerMode);
+        } catch (Exception e) {
+            LOG.error("SCCM sync run {} failed: {}", runId, e.getMessage(), e);
+            failRun(runId, e.getMessage(), triggerMode);
+        }
+    }
+
+    // ── Run lifecycle state transitions ───────────────────────────────────────────────────────
+
+    private void markRunRunning(UUID runId, String triggerMode) {
+        transactionTemplate.executeWithoutResult(status -> {
+            SyncRun run = requireRun(runId);
+            run.setStatus("running");
+            run.setMetadataJson(toJson(Map.of(
+                    "triggerMode", triggerMode,
+                    "state", "running",
+                    "sourceSystem", "sccm",
+                    "assetType", "HOST"
+            )));
+            syncRunRepository.save(run);
+        });
+    }
+
+    private void updateRunProgress(UUID runId, int recordsFetched, String stage) {
+        transactionTemplate.executeWithoutResult(status -> {
+            SyncRun run = requireRun(runId);
+            run.setRecordsFetched(recordsFetched);
+            run.setMetadataJson(toJson(Map.of(
+                    "sourceSystem", "sccm",
+                    "assetType", "HOST",
+                    "stage", stage,
+                    "recordsFetched", recordsFetched
+            )));
+            syncRunRepository.save(run);
+        });
+    }
+
+    private void completeRun(UUID configId, UUID runId, CmdbInventorySyncResponse response, int fetched, String triggerMode) {
+        transactionTemplate.executeWithoutResult(status -> {
+            SyncRun run = requireRun(runId);
+            run.setStatus("completed");
+            run.setRecordsFetched(fetched);
+            run.setRecordsInserted(response.ciCreated() + response.softwareInstancesCreated() + response.inventoryComponentsCreated());
+            run.setRecordsUpdated(response.softwareInstancesUpdated() + response.inventoryComponentsUpdated());
+            run.setRecordsFailed(0);
+            run.setErrorMessage(null);
+            run.setCompletedAt(Instant.now());
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("sourceSystem", response.sourceSystem());
+            metadata.put("assetType", "HOST");
+            metadata.put("assetsIngested", response.assetsIngested());
+            metadata.put("installRowsProcessed", response.installRowsProcessed());
+            metadata.put("discoveryRowsProcessed", response.discoveryRowsProcessed());
+            metadata.put("unmatchedDiscoveryRows", response.unmatchedDiscoveryRows());
+            metadata.put("ciCreated", response.ciCreated());
+            metadata.put("ciAliasesCreated", response.ciAliasesCreated());
+            metadata.put("softwareInstancesCreated", response.softwareInstancesCreated());
+            metadata.put("softwareInstancesUpdated", response.softwareInstancesUpdated());
+            metadata.put("inventoryComponentsCreated", response.inventoryComponentsCreated());
+            metadata.put("inventoryComponentsUpdated", response.inventoryComponentsUpdated());
+            metadata.put("findingsGenerated", response.findingsRecomputed());
+            metadata.put("message", response.message());
+            run.setMetadataJson(toJson(metadata));
+            syncRunRepository.save(run);
+            sccmCmdbConfigRepository.findById(configId).ifPresent(cfg -> {
+                cfg.setLastSyncAt(Instant.now());
+                sccmCmdbConfigRepository.save(cfg);
+            });
+        });
+    }
+
+    private void failRun(UUID runId, String errorMessage, String triggerMode) {
+        transactionTemplate.executeWithoutResult(status -> {
+            SyncRun run = requireRun(runId);
+            run.setStatus("failed");
+            run.setRecordsFailed(Math.max(1, run.getRecordsFailed()));
+            run.setErrorMessage(errorMessage);
+            run.setCompletedAt(Instant.now());
+            run.setMetadataJson(toJson(Map.of(
+                    "triggerMode", triggerMode,
+                    "state", "failed",
+                    "sourceSystem", "sccm",
+                    "assetType", "HOST"
+            )));
+            syncRunRepository.save(run);
+        });
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────────────────────────────────
+
+    private boolean isConfigured(SccmCmdbConfig config) {
+        return config != null
+                && config.getTenant() != null
+                && (config.isMockMode() || hasText(config.getJdbcUrl()));
+    }
+
+    private SyncRun requireRun(UUID runId) {
+        return syncRunRepository.findById(runId)
+                .orElseThrow(() -> new EntityNotFoundException("Sync run not found: " + runId));
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private String defaultIfBlank(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private record ClaimedRun(
+            UUID configId,
+            UUID runId,
+            boolean reusedActiveRun
+    ) {}
+}
