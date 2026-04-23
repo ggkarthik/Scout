@@ -390,9 +390,9 @@ export function VulnRepoVulnerabilitiesPage() {
     <section className="panel vuln-repo-vulnerabilities-shell">
       <div className="panel-header">
         <div>
-          <h3>Unified Vulnerability Records</h3>
+          <h3>Vulnerability Intelligence</h3>
           <span className="panel-caption">
-            Applicable CVEs are flagged when any CVE CPE is matched to software inventory. Impacted software shows matched software only, not assets.
+            Full CVE feed from NVD, GHSA, and CISA KEV. Use <strong>Unified Records</strong> to see only CVEs matched to your org's software inventory.
           </span>
         </div>
         <div className="button-row">

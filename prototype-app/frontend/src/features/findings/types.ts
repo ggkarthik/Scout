@@ -1,3 +1,5 @@
+import type { OwnershipSummary } from '../../types/ownership';
+
 export type Finding = {
   id: string;
   displayId: string;
@@ -38,6 +40,8 @@ export type Finding = {
   eolDaysRemaining?: number;
   incidentId?: string;
   incidentStatus?: string;
+  ownershipSyncedAt?: string;
+  ownership?: OwnershipSummary;
 };
 export type FindingPage = {
   items: Finding[];
@@ -55,6 +59,10 @@ export type FindingFilterValues = {
   vexStatuses: string[];
   vexFreshness: string[];
   vexProviders: string[];
+  owners: string[];
+  supportGroups: string[];
+  assignedTo: string[];
+  ownershipSources: string[];
 };
 
 export type FindingBulkWorkflowRequest = {
@@ -71,6 +79,9 @@ export type FindingBulkWorkflowRequest = {
   vulnerabilityId?: string;
   packageName?: string;
   ecosystem?: string;
+  owner?: string[];
+  supportGroup?: string[];
+  ownershipSource?: string[];
   workflowStatus?: 'OPEN' | 'RESOLVED' | 'SUPPRESSED' | 'AUTO_CLOSED';
   assignedTo?: string;
   dueAt?: string;
