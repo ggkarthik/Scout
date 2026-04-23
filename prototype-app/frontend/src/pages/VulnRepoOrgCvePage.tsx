@@ -23,15 +23,17 @@ import {
   useRiskPolicyQuery
 } from '../features/cve-workbench/queries';
 import { useActor } from '../features/auth/context';
+import { computeCveRiskScore, riskScoreLabel } from '../lib/riskScoring';
 
 const PAGE_SIZE = 25;
-const WORKBENCH_LABEL = 'Vulnerability Investigation';
+const WORKBENCH_LABEL = 'Unified Vulnerability Records';
 const ORG_CVE_COLUMNS: DataTableColumn[] = [
   { id: 'cve', label: 'CVE', header: 'CVE', initialSize: 180 },
   { id: 'title', label: 'Title', header: 'Title', initialSize: 280 },
   { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
   { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
   { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
+  { id: 'cveRisk', label: 'S.AI Risk', header: 'S.AI Risk', initialSize: 110 },
   { id: 'applicability', label: 'Applicability', header: 'Applicability', initialSize: 160 },
   { id: 'impact', label: 'Impact', header: 'Impact', initialSize: 160 },
   { id: 'matched', label: 'Matched Software / Assets', header: 'Matched Software / Assets', initialSize: 200 },
@@ -325,6 +327,17 @@ export function VulnRepoOrgCvePage({
         severity: { content: <span className={severityClassName(item.severity)}>{formatLabel(item.severity)}</span> },
         cvss: { content: item.cvssScore?.toFixed(1) ?? '-' },
         epss: { content: item.epssScore != null ? `${(item.epssScore * 100).toFixed(1)}%` : '-' },
+        cveRisk: {
+          content: (() => {
+            const r = computeCveRiskScore(item, policyQuery.data);
+            const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(r.score).toLowerCase()}`;
+            return (
+              <span className={cls} title={r.topReasons.join(' · ')}>
+                {r.score.toFixed(1)}
+              </span>
+            );
+          })()
+        },
         applicability: {
           content: (
             <span className={`status-pill ${applicabilityClass(item.applicability)}`}>

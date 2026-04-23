@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CveRiskScorePanel } from './CveRiskScorePanel';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from './CVEInvestigationSummary';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
@@ -141,6 +142,18 @@ function vendorDisplayName(source?: string | null): string {
   if (normalized.includes('microsoft')) return 'Microsoft';
   if (normalized.includes('redhat') || normalized.includes('red_hat') || normalized.includes('red-hat')) return 'Red Hat';
   return formatLabel(source ?? 'Vendor');
+}
+
+function ownershipDisplayName(software: CveMatchedSoftware): string {
+  return software.ownership?.displayName || 'Unassigned';
+}
+
+function ownershipSupportGroup(software: CveMatchedSoftware): string | undefined {
+  return software.ownership?.supportGroup ?? software.supportGroup ?? undefined;
+}
+
+function ownershipAssignedTo(software: CveMatchedSoftware): string | undefined {
+  return software.ownership?.assignedTo ?? undefined;
 }
 
 function extractCpeVendor(cpe?: string | null): string | null {
@@ -1002,7 +1015,7 @@ function buildAffectedProducts(detail: CveDetail, softwareGroups: SoftwareGroup[
       eolDaysRemaining: sw?.eolDaysRemaining,
       supportPhase: sw?.supportPhase,
       vendorAdvisory: intel.vexStatus ?? undefined,
-      supportGroup: sw?.supportGroup ?? undefined,
+      supportGroup: sw ? ownershipSupportGroup(sw) : undefined,
     });
   }
 
@@ -1021,7 +1034,7 @@ function buildAffectedProducts(detail: CveDetail, softwareGroups: SoftwareGroup[
         eolDaysRemaining: sw.eolDaysRemaining,
         supportPhase: sw.supportPhase,
         vendorAdvisory: sw.vexStatus ?? undefined,
-        supportGroup: sw.supportGroup ?? undefined,
+        supportGroup: ownershipSupportGroup(sw),
       });
     }
   }
@@ -4950,7 +4963,7 @@ function FindingsContent({
       if (colFilterSoftware && !`${sw.packageName} ${sw.version ?? ''}`.toLowerCase().includes(colFilterSoftware.toLowerCase())) return false;
       if (colFilterFp === 'YES' && !isFp) return false;
       if (colFilterFp === 'NO' && isFp) return false;
-      if (colFilterSupportGroup && !(sw.supportGroup ?? '').toLowerCase().includes(colFilterSupportGroup.toLowerCase())) return false;
+      if (colFilterSupportGroup && !(ownershipSupportGroup(sw) ?? '').toLowerCase().includes(colFilterSupportGroup.toLowerCase())) return false;
       if (colFilterPriority !== 'ALL' && pri !== colFilterPriority) return false;
       return true;
     });
@@ -5162,6 +5175,46 @@ function FindingsContent({
                           {sw.assetName ?? sw.assetIdentifier ?? sw.componentId}
                         </button>
                         <div className="panel-caption mono">{sw.assetIdentifier ?? sw.assetId ?? sw.componentId}</div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--text)',
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 999,
+                              padding: '2px 8px',
+                              display: 'inline-block',
+                              maxWidth: 180,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                            title={ownershipDisplayName(sw)}
+                          >
+                            {ownershipDisplayName(sw)}
+                          </span>
+                          {ownershipSupportGroup(sw) && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: 'var(--muted)',
+                                background: 'var(--panel)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 999,
+                                padding: '2px 8px',
+                                display: 'inline-block',
+                                maxWidth: 180,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title={ownershipSupportGroup(sw)}
+                            >
+                              {ownershipSupportGroup(sw)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -5185,7 +5238,7 @@ function FindingsContent({
                       ? <span className="cve-fp-yes-badge">Yes</span>
                       : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
                   </td>
-                  <td><span style={{ fontSize: 13 }}>{sw.supportGroup ?? '—'}</span></td>
+                  <td><span style={{ fontSize: 13 }}>{ownershipSupportGroup(sw) ?? '—'}</span></td>
                   <td><span style={{ fontSize: 13 }}>{sw.analystReason ?? '—'}</span></td>
                   <td><span className={severityClassName(pri)}>{formatLabel(pri)}</span></td>
                   <td onClick={(e) => e.stopPropagation()}>
@@ -5474,7 +5527,7 @@ type NotifyGroupInfo = {
 function buildNotifyGroupInfo(detail: CveDetail): Map<string, NotifyGroupInfo> {
   const map = new Map<string, NotifyGroupInfo>();
   for (const sw of detail.matchedSoftware) {
-    const group = sw.supportGroup;
+    const group = ownershipSupportGroup(sw);
     if (!group) continue;
     const isImpacted = sw.impactState === 'IMPACTED' || sw.computedImpactState === 'IMPACTED';
     const existing = map.get(group);
@@ -6389,8 +6442,9 @@ export function VulnRepoCveAssessmentWorkbench({
               packageVersion: row.software.version ?? undefined,
               // Per-asset assignment group: from CMDB ownership (supportGroup) or
               // the panel-level group when ownershipMode is ASSIGNMENT_GROUP
-              assignmentGroup: row.software.supportGroup
+              assignmentGroup: ownershipSupportGroup(row.software)
                 ?? (ownershipMode === 'ASSIGNMENT_GROUP' && assignmentGroup.trim() ? assignmentGroup.trim() : undefined),
+              assignedTo: ownershipAssignedTo(row.software),
             })),
           };
           const snowRaw = await cveWorkbenchApi.createServiceNowIncident(item.externalId, snowPayload);
@@ -6460,6 +6514,9 @@ export function VulnRepoCveAssessmentWorkbench({
         <>
           {actionNotice && <div className="notice">{actionNotice}</div>}
           {actionError && <div className="notice error">{actionError}</div>}
+
+          {/* CVE Risk Score journey — visible on all steps except full-screen investigation canvas */}
+          {!investigationCanvasOpen && <CveRiskScorePanel item={item} />}
 
           {/* Investigation page — full page, replaces step content */}
           {investigationCanvasOpen && detail && (

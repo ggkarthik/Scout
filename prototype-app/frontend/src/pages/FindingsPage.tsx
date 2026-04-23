@@ -7,7 +7,9 @@ import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
+import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { apiRequest } from '../api/client';
+import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -18,10 +20,13 @@ const ALL_COLUMNS = [
   { key: 'findingId',      label: 'Finding ID',    alwaysVisible: true  },
   { key: 'cveId',          label: 'CVE ID',         alwaysVisible: true  },
   { key: 'asset',          label: 'Asset',          alwaysVisible: false },
+  { key: 'owner',          label: 'Owner',          alwaysVisible: false },
+  { key: 'supportGroup',   label: 'Support Group',  alwaysVisible: false },
   { key: 'package',        label: 'Package',        alwaysVisible: false },
   { key: 'severity',       label: 'Severity',       alwaysVisible: false },
   { key: 'status',         label: 'Status',         alwaysVisible: false },
   { key: 'risk',           label: 'Risk',           alwaysVisible: false },
+  { key: 'priority',      label: 'S.AI Priority',  alwaysVisible: false },
   { key: 'assignedTo',     label: 'Assigned To',    alwaysVisible: false },
   { key: 'dueDate',        label: 'Due Date',       alwaysVisible: false },
   { key: 'incidentId',     label: 'Incident ID',    alwaysVisible: false },
@@ -33,8 +38,8 @@ const ALL_COLUMNS = [
 type ColKey = typeof ALL_COLUMNS[number]['key'];
 
 const DEFAULT_VISIBLE: ColKey[] = [
-  'findingId', 'cveId', 'asset', 'package', 'severity', 'status',
-  'risk', 'assignedTo', 'dueDate', 'incidentId',
+  'findingId', 'cveId', 'asset', 'owner', 'supportGroup', 'package',
+  'severity', 'status', 'risk', 'priority', 'assignedTo', 'dueDate', 'incidentId',
 ];
 
 const SEV_COLORS: Record<string, string> = {
@@ -60,6 +65,7 @@ const SEVERITY_ORDER: Record<string, number> = {
 const GROUP_OPTIONS: MultiGroupByOption[] = [
   { key: 'severity',        label: 'Severity'          },
   { key: 'status',          label: 'Status'            },
+  { key: 'owner',           label: 'Owner'             },
   { key: 'assetName',       label: 'Asset'             },
   { key: 'packageName',     label: 'Package'           },
   { key: 'vulnerabilityId', label: 'Vulnerability ID'  },
@@ -73,6 +79,8 @@ type ColFilters = {
   findingId:  string;
   cveId:      string;
   asset:      string;
+  owner:      string;
+  supportGroup: string;
   package:    string;
   severity:   string[];
   status:     string[];
@@ -83,7 +91,7 @@ type ColFilters = {
 };
 
 const DEFAULT_COL_FILTERS: ColFilters = {
-  findingId: '', cveId: '', asset: '', package: '',
+  findingId: '', cveId: '', asset: '', owner: '', supportGroup: '', package: '',
   severity: ['CRITICAL', 'HIGH'], // default: show Critical + High
   status: ['OPEN'],               // default: show Open
   risk: '', assignedTo: '', dueDate: '', incidentId: '',
@@ -115,9 +123,18 @@ function loadVis(): Set<ColKey> {
   return new Set(DEFAULT_VISIBLE);
 }
 
+function ownershipDisplayName(row: Finding): string {
+  return row.ownership?.displayName || 'Unassigned';
+}
+
+function ownershipSupportGroup(row: Finding): string {
+  return row.ownership?.supportGroup || '';
+}
+
 function groupValue(r: Finding, key: string): string {
   if (key === 'severity')        return r.severity || 'UNKNOWN';
   if (key === 'status')          return r.status;
+  if (key === 'owner')           return ownershipDisplayName(r);
   if (key === 'assetName')       return r.assetName;
   if (key === 'packageName')     return r.packageName;
   if (key === 'vulnerabilityId') return r.vulnerabilityId;
@@ -131,6 +148,8 @@ function applyColFilters(rows: Finding[], f: ColFilters, dueDateBand: DueDateBan
     if (f.findingId && !(r.displayId || r.id).toLowerCase().includes(f.findingId.toLowerCase())) return false;
     if (f.cveId && !r.vulnerabilityId.toLowerCase().includes(f.cveId.toLowerCase())) return false;
     if (f.asset && !r.assetName.toLowerCase().includes(f.asset.toLowerCase())) return false;
+    if (f.owner && !ownershipDisplayName(r).toLowerCase().includes(f.owner.toLowerCase())) return false;
+    if (f.supportGroup && !ownershipSupportGroup(r).toLowerCase().includes(f.supportGroup.toLowerCase())) return false;
     if (f.package && !r.packageName.toLowerCase().includes(f.package.toLowerCase())) return false;
     if (f.severity.length > 0 && !f.severity.includes(r.severity)) return false;
     if (f.status.length > 0 && !f.status.includes(r.status)) return false;
@@ -280,6 +299,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [incidentDueDate, setIncidentDueDate] = React.useState('');
 
   // ── queries ────────────────────────────────────────────────────────────────
+  const policyQuery = useRiskPolicyQuery();
   const filtersQuery = useFindingFiltersQuery();
   const filterValues = filtersQuery.data;
 
@@ -405,6 +425,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     if (key==='findingId') return !!colFilters.findingId;
     if (key==='cveId')    return !!colFilters.cveId;
     if (key==='asset')    return !!colFilters.asset;
+    if (key==='owner')    return !!colFilters.owner;
+    if (key==='supportGroup') return !!colFilters.supportGroup;
     if (key==='package')  return !!colFilters.package;
     if (key==='risk')     return !!colFilters.risk;
     if (key==='assignedTo') return !!colFilters.assignedTo;
@@ -418,6 +440,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     else if (key==='findingId') setColFilter('findingId','');
     else if (key==='cveId')  setColFilter('cveId','');
     else if (key==='asset')  setColFilter('asset','');
+    else if (key==='owner') setColFilter('owner','');
+    else if (key==='supportGroup') setColFilter('supportGroup','');
     else if (key==='package') setColFilter('package','');
     else if (key==='risk')   setColFilter('risk','');
     else if (key==='assignedTo') setColFilter('assignedTo','');
@@ -437,6 +461,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   if (colFilters.cveId)    activeChips.push({ label:`CVE: ${colFilters.cveId}`,  onRemove:()=>setColFilter('cveId','') });
   if (colFilters.package)  activeChips.push({ label:`Package: ${colFilters.package}`, onRemove:()=>setColFilter('package','') });
   if (colFilters.asset)    activeChips.push({ label:`Asset: ${colFilters.asset}`, onRemove:()=>setColFilter('asset','') });
+  if (colFilters.owner)    activeChips.push({ label:`Owner: ${colFilters.owner}`, onRemove:()=>setColFilter('owner','') });
+  if (colFilters.supportGroup) activeChips.push({ label:`Support Group: ${colFilters.supportGroup}`, onRemove:()=>setColFilter('supportGroup','') });
   if (colFilters.assignedTo) activeChips.push({ label:`Assigned: ${colFilters.assignedTo}`, onRemove:()=>setColFilter('assignedTo','') });
   if (dueDateBand)         activeChips.push({ label:`SLA: ${fmt(dueDateBand)}`, onRemove:()=>setDueDateBand(null) });
 
@@ -527,11 +553,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             ))}
           </div>
         )}
-        {(['findingId','cveId','asset','package','assignedTo','incidentId'] as const).includes(colKey as any) && (
+        {(['findingId','cveId','asset','owner','supportGroup','package','assignedTo','incidentId'] as const).includes(colKey as any) && (
           <input autoFocus className="fpl-col-filter-input"
             placeholder={`Search ${ALL_COLUMNS.find(c=>c.key===colKey)?.label}…`}
             value={(colFilters as unknown as Record<string,string>)[colKey] ?? ''}
-            onChange={e=>setColFilter(colKey as 'findingId'|'cveId'|'asset'|'package'|'assignedTo'|'incidentId', e.target.value)}
+            onChange={e=>setColFilter(colKey as 'findingId'|'cveId'|'asset'|'owner'|'supportGroup'|'package'|'assignedTo'|'incidentId', e.target.value)}
           />
         )}
         {colKey==='risk' && (
@@ -584,10 +610,28 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       ? <button type="button" className="fpl-cve-link" onClick={()=>onOpenCveWorkbench(row.vulnerabilityId)}>{row.vulnerabilityId}</button>
       : <span className="mono fpl-cve-text">{row.vulnerabilityId}</span>;
     if (key==='asset') return <div><div className="fpl-cell-main">{row.assetName}</div><div className="fpl-cell-sub">{fmt(row.assetType)}</div></div>;
+    if (key==='owner') return (
+      <div>
+        <div className="fpl-cell-main">{ownershipDisplayName(row)}</div>
+        <div className="fpl-cell-sub">{row.ownership?.sourceSystem ? fmt(row.ownership.sourceSystem) : 'No ownership source'}</div>
+      </div>
+    );
+    if (key==='supportGroup') return ownershipSupportGroup(row)
+      ? <span className="fpl-assigned">{ownershipSupportGroup(row)}</span>
+      : <span className="fpl-empty">—</span>;
     if (key==='package') return <div><div className="fpl-cell-main">{row.packageName}</div><div className="fpl-cell-sub mono">{row.packageVersion}</div></div>;
     if (key==='severity') return <span className={severityClass(row.severity)}>{row.severity}</span>;
     if (key==='status') return <span className={statusClass(row.status)}>{statusLabel(row)}</span>;
     if (key==='risk') return <span className="fpl-risk">{row.riskScore.toFixed(1)}</span>;
+    if (key==='priority') {
+      const p = computeFindingPriorityScore(row, policyQuery.data);
+      const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(p.score).toLowerCase()}`;
+      return (
+        <span className={cls} title={p.topReasons.join(' · ')}>
+          {p.score.toFixed(1)}
+        </span>
+      );
+    }
     if (key==='assignedTo') return row.assignedTo ? <span className="fpl-assigned">{row.assignedTo}</span> : <span className="fpl-empty">—</span>;
     if (key==='dueDate') {
       if (!row.dueAt) return <span className="fpl-empty">—</span>;

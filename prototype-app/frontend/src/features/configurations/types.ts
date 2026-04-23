@@ -26,6 +26,14 @@ export type RiskPolicy = {
   autoCloseAssetIdentifier?: string;
   autoCloseAfterDays: number;
   findingGenerationMode: 'AUTO' | 'MANUAL';
+  // Triage urgency signal weights — control how findings/CVEs are ranked
+  // before investigation starts. All weights 0–2; 0 = disabled, 2 = highest influence.
+  triageExploitabilityWeight: number;
+  triageBlastRadiusWeight: number;
+  triageEolRiskWeight: number;
+  triageSlaBreachWeight: number;
+  triageMissingOwnerBoost: number;
+  triagePatchGapBoost: number;
 };
 
 export type PrototypeDataResetResponse = {
