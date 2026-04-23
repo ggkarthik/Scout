@@ -48,7 +48,7 @@ function inventoryHref(view: 'hosts', reviewCategories?: string[]): string {
   return query ? `${pathForInventoryView(view)}?${query}` : pathForInventoryView(view);
 }
 
-function connectHref(view: 'inventory-run-queue'): string {
+function connectHref(view: 'integration-run-queue'): string {
   return pathForConnectView(view);
 }
 
@@ -113,12 +113,6 @@ function Tooltip({ text }: { text: string }) {
   );
 }
 
-type HealthStatus = 'healthy' | 'error' | 'warning' | 'neutral';
-
-function healthCardClass(status: HealthStatus): string {
-  return `sn-health-card sn-health-${status}`;
-}
-
 export function AssetsPage() {
   const queryClient = useQueryClient();
   const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
@@ -132,7 +126,6 @@ export function AssetsPage() {
   const [error, setError] = React.useState('');
   const [liveSyncResult, setLiveSyncResult] = React.useState<SyncTriggerResponse | null>(null);
   const [showSecret, setShowSecret] = React.useState(false);
-  const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   React.useEffect(() => {
     setForm(formFromConfig(config));
@@ -143,6 +136,10 @@ export function AssetsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  // Display interval as hours; store internally as minutes
+  const intervalHours = Math.max(1, Math.round((form.intervalMinutes ?? 1440) / 60));
+  const updateIntervalHours = (hours: number) => updateField('intervalMinutes', Math.max(60, hours * 60));
+
   const saveConnector = async (): Promise<ServiceNowCmdbConfig | null> => {
     setSaving(true);
     setError('');
@@ -151,16 +148,17 @@ export function AssetsPage() {
         ...form,
         username: form.authType === 'BASIC' ? form.username?.trim() ?? '' : '',
         credentialSecret: credentialSecret.trim().length > 0 ? credentialSecret.trim() : undefined,
-        installTable: form.installTable.trim(),
-        discoveryModelTable: form.discoveryModelTable.trim(),
-        ciTable: form.ciTable.trim(),
-        installQuery: form.installQuery?.trim() ?? '',
-        discoveryQuery: form.discoveryQuery?.trim() ?? '',
-        installFields: form.installFields?.trim() ?? DEFAULT_INSTALL_FIELDS,
-        discoveryFields: form.discoveryFields?.trim() ?? DEFAULT_DISCOVERY_FIELDS,
+        installTable: form.installTable.trim() || 'cmdb_sam_sw_install',
+        discoveryModelTable: form.discoveryModelTable.trim() || 'cmdb_sam_sw_discovery_model',
+        ciTable: form.ciTable.trim() || 'cmdb_ci',
+        installQuery: '',
+        discoveryQuery: '',
+        installFields: DEFAULT_INSTALL_FIELDS,
+        discoveryFields: DEFAULT_DISCOVERY_FIELDS,
         baseUrl: form.baseUrl.trim(),
-        pageSize: Math.max(1, Number(form.pageSize) || 1000),
-        intervalMinutes: Math.max(5, Number(form.intervalMinutes) || 1440)
+        pageSize: 1000,
+        enabled: true,
+        intervalMinutes: Math.max(60, Number(form.intervalMinutes) || 1440)
       };
       const saved = await api.saveServiceNowCmdbConfig(payload);
       queryClient.setQueryData(['service-now-cmdb-config'], saved);
@@ -201,9 +199,7 @@ export function AssetsPage() {
     setLiveSyncResult(null);
     try {
       const saved = await saveConnector();
-      if (!saved) {
-        return;
-      }
+      if (!saved) return;
       const result = await api.triggerServiceNowCmdbSync();
       setLiveSyncResult(result);
     } catch (requestError) {
@@ -213,28 +209,6 @@ export function AssetsPage() {
     }
   };
 
-  // Derive health card states
-  const connStatus: HealthStatus = !config?.configured
-    ? 'warning'
-    : config.lastTestStatus === 'SUCCESS'
-      ? 'healthy'
-      : config.lastTestStatus === 'FAILED'
-        ? 'error'
-        : 'warning';
-
-  const connLabel = !config?.configured
-    ? 'Needs Setup'
-    : config.lastTestStatus === 'SUCCESS'
-      ? 'Connected'
-      : config.lastTestStatus === 'FAILED'
-        ? 'Test Failed'
-        : 'Not Tested';
-
-  const credStatus: HealthStatus = config?.hasCredentialSecret ? 'healthy' : 'error';
-  const credLabel = config?.hasCredentialSecret ? 'Credentials Stored' : 'Credentials Missing';
-
-  const syncStatus: HealthStatus = form.autoSyncEnabled ? 'healthy' : 'neutral';
-  const syncLabel = form.autoSyncEnabled ? `Every ${form.intervalMinutes} min` : 'Manual Only';
   const queryError = serviceNowConfigQuery.error instanceof Error ? serviceNowConfigQuery.error.message : '';
   const displayError = error || queryError;
 
@@ -244,49 +218,6 @@ export function AssetsPage() {
 
   return (
     <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>ServiceNow CMDB Connector</h3>
-          <span className="panel-caption">
-            Live Table API ingestion from ServiceNow. Configure, test connectivity, then review imported hosts in Inventory.
-          </span>
-        </div>
-      </div>
-
-      {/* ── 3-card health bar ── */}
-      <div className="sn-health-bar">
-        <div className={healthCardClass(connStatus)}>
-          <span className="sn-health-label">Connection Health</span>
-          <span className="sn-health-value">{connLabel}</span>
-          {config?.lastTestedAt ? (
-            <span className="sn-health-meta">Last tested {formatTimestamp(config.lastTestedAt)}</span>
-          ) : (
-            <span className="sn-health-meta">No test run yet</span>
-          )}
-          {!config?.configured && (
-            <a className="sn-health-cta" href="#sn-base-url">Complete Setup ↓</a>
-          )}
-        </div>
-
-        <div className={healthCardClass(credStatus)}>
-          <span className="sn-health-label">Auth &amp; Credentials</span>
-          <span className="sn-health-value">{formatAuthType(form.authType)}</span>
-          <span className={`sn-health-meta ${credStatus === 'error' ? 'sn-health-meta-error' : ''}`}>{credLabel}</span>
-          {!config?.hasCredentialSecret && (
-            <a className="sn-health-cta" href="#sn-credential">Add Credentials ↓</a>
-          )}
-        </div>
-
-        <div className={healthCardClass(syncStatus)}>
-          <span className="sn-health-label">Sync Status</span>
-          <span className="sn-health-value">{syncLabel}</span>
-          <span className="sn-health-meta">
-            {form.autoSyncEnabled ? 'Scheduled ingestion active' : 'Configure in Sync Settings below'}
-          </span>
-        </div>
-      </div>
-
-      {/* Setup banner — only shown when not yet configured */}
       {!config?.configured && (
         <div className="notice">
           This connector is not yet configured. Fill in the Connection section below to enable live ServiceNow API pulls.
@@ -294,6 +225,17 @@ export function AssetsPage() {
       )}
 
       {displayError && <div className="notice error">{displayError}</div>}
+
+      {/* Connection status summary */}
+      {config?.configured && (
+        <div className="sn-status-row">
+          {config.lastSyncAt ? (
+            <span className="sn-status-meta">Last integration run: {formatTimestamp(config.lastSyncAt)}</span>
+          ) : (
+            <span className="sn-status-meta">No integration run yet</span>
+          )}
+        </div>
+      )}
 
       {/* ── SECTION 1: Connection ── */}
       <div className="form-section">
@@ -397,27 +339,13 @@ export function AssetsPage() {
           <label>
             <span>
               CI Lookup Table <span className="sn-required">*</span>{' '}
-              <Tooltip text="Used for host lookup and CI resolution when install rows do not carry a direct sys_id." />
+              <Tooltip text="Used for host lookup and CI resolution." />
             </span>
             <input
               type="text"
               value={form.ciTable}
               onChange={(event) => updateField('ciTable', event.target.value)}
               placeholder="cmdb_ci"
-            />
-          </label>
-
-          <label>
-            <span>
-              Page Size{' '}
-              <Tooltip text="Rows requested per Table API page during live pulls. Reduce if ServiceNow times out." />
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={10000}
-              value={form.pageSize}
-              onChange={(event) => updateField('pageSize', Number(event.target.value))}
             />
           </label>
         </div>
@@ -427,15 +355,6 @@ export function AssetsPage() {
       <div className="form-section">
         <h4 className="form-section-title">Sync Settings</h4>
         <div className="sn-toggle-group">
-          <label className="sn-toggle-row">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(event) => updateField('enabled', event.target.checked)}
-            />
-            <span>Connector enabled</span>
-            <Tooltip text="When disabled, no live pulls will be triggered." />
-          </label>
           <label className="sn-toggle-row">
             <input
               type="checkbox"
@@ -450,80 +369,14 @@ export function AssetsPage() {
           <div className="form-grid sn-sync-interval-grid">
             <label>
               <span>
-                Sync Interval (minutes){' '}
-                <Tooltip text="How often the scheduled sync runs. Minimum 5 minutes." />
+                Sync Interval (hours){' '}
+                <Tooltip text="How often the scheduled sync runs. Minimum 1 hour." />
               </span>
               <input
                 type="number"
-                min={5}
-                value={form.intervalMinutes}
-                onChange={(event) => updateField('intervalMinutes', Number(event.target.value))}
-              />
-            </label>
-          </div>
-        )}
-      </div>
-
-      {/* ── SECTION 4: Advanced Options (accordion) ── */}
-      <div className="form-section">
-        <button
-          type="button"
-          className="sn-advanced-toggle"
-          onClick={() => setShowAdvanced((v) => !v)}
-          aria-expanded={showAdvanced}
-        >
-          <span className="sn-advanced-toggle-chevron">{showAdvanced ? '▾' : '▸'}</span>
-          <span>Advanced Options</span>
-          <span className="sn-advanced-toggle-hint">Field selection and query overrides for install and discovery tables</span>
-        </button>
-        {showAdvanced && (
-          <div className="form-grid sn-advanced-grid">
-            <label>
-              <span>
-                Install Fields{' '}
-                <Tooltip text="Comma-separated ServiceNow fields pulled from the install table. Defaults to only the fields NoScan ingests." />
-              </span>
-              <textarea
-                rows={4}
-                value={form.installFields ?? ''}
-                onChange={(event) => updateField('installFields', event.target.value)}
-                placeholder={DEFAULT_INSTALL_FIELDS}
-              />
-            </label>
-            <label>
-              <span>
-                Discovery Fields{' '}
-                <Tooltip text="Comma-separated ServiceNow fields pulled from the discovery-model table. Defaults to the deterministic normalization fields." />
-              </span>
-              <textarea
-                rows={4}
-                value={form.discoveryFields ?? ''}
-                onChange={(event) => updateField('discoveryFields', event.target.value)}
-                placeholder={DEFAULT_DISCOVERY_FIELDS}
-              />
-            </label>
-            <label>
-              <span>
-                Install Query Override{' '}
-                <Tooltip text="Optional sysparm_query fragment to scope to active rows or a specific business unit." />
-              </span>
-              <textarea
-                rows={4}
-                value={form.installQuery ?? ''}
-                onChange={(event) => updateField('installQuery', event.target.value)}
-                placeholder="Optional sysparm_query fragment for cmdb_sam_sw_install"
-              />
-            </label>
-            <label>
-              <span>
-                Discovery Query Override{' '}
-                <Tooltip text="Optional sysparm_query fragment to filter discovery-model rows." />
-              </span>
-              <textarea
-                rows={4}
-                value={form.discoveryQuery ?? ''}
-                onChange={(event) => updateField('discoveryQuery', event.target.value)}
-                placeholder="Optional sysparm_query fragment for cmdb_sam_sw_discovery_model"
+                min={1}
+                value={intervalHours}
+                onChange={(event) => updateIntervalHours(Number(event.target.value))}
               />
             </label>
           </div>
@@ -544,22 +397,10 @@ export function AssetsPage() {
           onClick={() => void queueLiveSync()}
           disabled={syncingLive || saving || testing || serviceNowConfigQuery.isFetching}
         >
-          {syncingLive ? 'Queueing Live Sync...' : 'Run Live Sync'}
+          {syncingLive ? 'Running...' : 'Run Integration now'}
         </button>
-        <button
-          type="button"
-          className="btn-link"
-          onClick={() => void serviceNowConfigQuery.refetch()}
-          disabled={serviceNowConfigQuery.isFetching || saving || testing}
-        >
-          {serviceNowConfigQuery.isFetching ? 'Refreshing...' : '↺ Refresh Setup'}
-        </button>
-        <a className="btn-link sn-queue-link" href={connectHref('inventory-run-queue')}>
-          Open Inventory Run Queue →
-        </a>
       </div>
 
-      {/* Inline test result — directly below action bar */}
       {testResult && (
         <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? '' : 'error'}`}>
           <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
@@ -580,8 +421,8 @@ export function AssetsPage() {
 
       {liveSyncResult && (
         <div className="notice">
-          <strong>Live sync queued.</strong> {liveSyncResult.message}. Track progress in{' '}
-          <a href={connectHref('inventory-run-queue')}>Inventory Run Queue</a>.
+          <strong>Integration queued.</strong> {liveSyncResult.message}. Track progress in{' '}
+          <a href={connectHref('integration-run-queue')}>Integration Run Queue</a>.
         </div>
       )}
 

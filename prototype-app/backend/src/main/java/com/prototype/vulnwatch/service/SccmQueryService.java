@@ -1,0 +1,257 @@
+package com.prototype.vulnwatch.service;
+
+import com.prototype.vulnwatch.domain.SccmAuthType;
+import com.prototype.vulnwatch.domain.SccmCmdbConfig;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+/**
+ * Extracts hardware/software inventory rows from an SCCM SQL Server database.
+ *
+ * <p>In MOCK mode no real SQL Server connection is attempted; realistic fixture rows are returned
+ * instead, allowing the rest of the ingestion pipeline to be exercised without infrastructure.
+ *
+ * <p>In LIVE mode a JDBC connection is opened directly via {@link DriverManager} (not a Spring
+ * DataSource) because connection details are stored per-tenant in the database, not in
+ * application.yml.
+ */
+@Service
+public class SccmQueryService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SccmQueryService.class);
+
+    /**
+     * Full JOIN query used for production syncs. Fetches all active hosts with their installed
+     * software from the two primary SCCM views.
+     */
+    static final String INSTALL_SQL = """
+            SELECT
+                CAST(sys.ResourceID AS VARCHAR(50))       AS sys_id,
+                sys.Name0                                 AS computer_name,
+                sys.Domain0                               AS domain,
+                sys.Operating_System_Name_and0            AS os_name,
+                sys.User_Name0                            AS last_user,
+                sw.DisplayName0                           AS display_name,
+                sw.Publisher0                             AS publisher,
+                sw.Version0                               AS version,
+                CONVERT(VARCHAR(10), sw.InstallDate0, 23) AS install_date,
+                sw.ProductID0                             AS version_evidence
+            FROM v_R_System sys
+            INNER JOIN v_GS_INSTALLED_SOFTWARE sw ON sys.ResourceID = sw.ResourceID
+            WHERE sys.Active0 = 1
+              AND sys.Obsolete0 = 0
+              AND sw.DisplayName0 IS NOT NULL
+              AND sw.DisplayName0 != ''
+            ORDER BY sys.Name0, sw.DisplayName0
+            """;
+
+    /** Lightweight query used by connection-test to verify that the system view is reachable. */
+    static final String TEST_SQL =
+            "SELECT TOP 5 CAST(ResourceID AS VARCHAR(50)) AS sys_id, Name0 AS computer_name "
+            + "FROM v_R_System WHERE Active0 = 1";
+
+    // ── Mock fixtures ──────────────────────────────────────────────────────────────────────────
+
+    private static final String[][] MOCK_HOSTS = {
+        {"1001", "WKSTN-001", "CORP", "Microsoft Windows 10 Enterprise", "jdoe"},
+        {"1002", "WKSTN-002", "CORP", "Microsoft Windows 10 Enterprise", "asmith"},
+        {"1003", "SRV-WEB-001", "CORP", "Microsoft Windows Server 2022 Standard", "svc-iis"}
+    };
+
+    private static final String[][] MOCK_SOFTWARE = {
+        {"Microsoft Corporation", "Microsoft Office 365", "16.0.17231.20236", "2023-08-15", "{90160000-0011-0000-0000-0000000FF1CE}"},
+        {"Google LLC", "Google Chrome", "117.0.5938.62", "2023-09-05", "{13A49EFB-E02F-39A3-B4FF-DB3A0B6C944D}"},
+        {"Microsoft Corporation", ".NET Framework 4.8", "4.8.03761", "2022-11-02", "{92FB6C44-E685-45AD-9B20-CADF4CABA132}"},
+        {"OpenSSL Software Foundation", "OpenSSL 3.0.7", "3.0.7", "2023-01-10", null},
+        {"Apache Software Foundation", "Log4j 2.14.1", "2.14.1", "2021-12-03", null}
+    };
+
+    // ── Public API ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fetches install rows for the given config.  Returns mock data when {@code mockMode} is true.
+     *
+     * <p>Each row map contains the keys expected by {@code CmdbInventoryIngestionRunner}:
+     * {@code computer_name}, {@code sys_id}, {@code display_name}, {@code publisher},
+     * {@code version}, {@code install_date}, {@code version_evidence}.
+     */
+    public List<Map<String, String>> fetchInstallRows(SccmCmdbConfig config) throws Exception {
+        if (config.isMockMode()) {
+            LOG.info("SCCM mock mode: returning {} fixture install rows", MOCK_HOSTS.length * MOCK_SOFTWARE.length);
+            return buildMockInstallRows();
+        }
+        LOG.info("SCCM live mode: executing install query against {}", safeJdbcUrl(config.getJdbcUrl()));
+        return executeQuery(config, INSTALL_SQL);
+    }
+
+    /**
+     * Derives discovery rows from the set of distinct (publisher, product) pairs found in
+     * {@code installRows}.  The primary key is {@code lower(publisher) + "::" + lower(display_name)}.
+     */
+    public List<Map<String, String>> buildDiscoveryRows(List<Map<String, String>> installRows) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (Map<String, String> row : installRows) {
+            String publisher = blankToEmpty(row.get("publisher"));
+            String displayName = blankToEmpty(row.get("display_name"));
+            if (displayName.isEmpty()) {
+                continue;
+            }
+            String pk = publisher.toLowerCase(Locale.ROOT) + "::" + displayName.toLowerCase(Locale.ROOT);
+            if (seen.add(pk)) {
+                Map<String, String> discovery = new LinkedHashMap<>();
+                discovery.put("primary_key", pk);
+                discovery.put("display_name", displayName);
+                discovery.put("normalized_product", displayName);
+                discovery.put("normalized_publisher", publisher);
+                discovery.put("normalized_version", blankToEmpty(row.get("version")));
+                discovery.put("normalization_status", "SCCM_DERIVED");
+                discovery.put("approved", "false");
+                discovery.put("low_confidence", "true");
+                rows.add(discovery);
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Tests connectivity and verifies that the two key SCCM views are reachable.
+     *
+     * @return a two-element boolean array: {@code [systemViewReachable, softwareViewReachable]}
+     */
+    public boolean[] testConnection(SccmCmdbConfig config) {
+        if (config.isMockMode()) {
+            LOG.info("SCCM mock mode: test connection always succeeds");
+            return new boolean[]{true, true};
+        }
+        boolean systemOk = false;
+        boolean softwareOk = false;
+        try (Connection conn = openConnection(config)) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.setQueryTimeout(Math.max(5, config.getQueryTimeoutSeconds() == null ? 30 : config.getQueryTimeoutSeconds()));
+                try (ResultSet rs = stmt.executeQuery(TEST_SQL)) {
+                    systemOk = true;
+                }
+            }
+            // Quick probe of the software view
+            try (Statement stmt = conn.createStatement()) {
+                stmt.setQueryTimeout(Math.max(5, config.getQueryTimeoutSeconds() == null ? 30 : config.getQueryTimeoutSeconds()));
+                try (ResultSet rs = stmt.executeQuery(
+                        "SELECT TOP 1 ResourceID FROM v_GS_INSTALLED_SOFTWARE WHERE DisplayName0 IS NOT NULL")) {
+                    softwareOk = true;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("SCCM connection test failed: {}", e.getMessage());
+        }
+        return new boolean[]{systemOk, softwareOk};
+    }
+
+    // ── Private helpers ────────────────────────────────────────────────────────────────────────
+
+    private List<Map<String, String>> executeQuery(SccmCmdbConfig config, String sql) throws Exception {
+        List<Map<String, String>> rows = new ArrayList<>();
+        try (Connection conn = openConnection(config);
+             Statement stmt = conn.createStatement()) {
+            stmt.setFetchSize(config.getFetchSize() == null ? 500 : Math.max(1, config.getFetchSize()));
+            stmt.setQueryTimeout(config.getQueryTimeoutSeconds() == null ? 120 : Math.max(1, config.getQueryTimeoutSeconds()));
+            try (ResultSet rs = stmt.executeQuery(sql)) {
+                ResultSetMetaData meta = rs.getMetaData();
+                int colCount = meta.getColumnCount();
+                while (rs.next()) {
+                    Map<String, String> row = new LinkedHashMap<>();
+                    for (int i = 1; i <= colCount; i++) {
+                        String colName = meta.getColumnLabel(i).toLowerCase(Locale.ROOT);
+                        String value = rs.getString(i);
+                        if (value != null) {
+                            row.put(colName, value.trim());
+                        }
+                    }
+                    rows.add(row);
+                }
+            }
+        }
+        LOG.info("SCCM query returned {} rows", rows.size());
+        return rows;
+    }
+
+    private Connection openConnection(SccmCmdbConfig config) throws Exception {
+        String url = config.getJdbcUrl();
+        if (url == null || url.isBlank()) {
+            throw new IllegalStateException("SCCM JDBC URL is not configured");
+        }
+        Properties props = new Properties();
+        if (config.getAuthType() == SccmAuthType.WINDOWS_AUTH) {
+            props.setProperty("integratedSecurity", "true");
+            props.setProperty("authenticationScheme", "NativeAuthentication");
+        } else {
+            String username = config.getUsername();
+            String password = config.getCredentialSecret();
+            if (username == null || username.isBlank()) {
+                throw new IllegalStateException("SCCM username is required for SQL_AUTH");
+            }
+            if (password == null || password.isBlank()) {
+                throw new IllegalStateException("SCCM password/secret is required for SQL_AUTH");
+            }
+            props.setProperty("user", username.trim());
+            props.setProperty("password", password);
+        }
+        return DriverManager.getConnection(url.trim(), props);
+    }
+
+    private List<Map<String, String>> buildMockInstallRows() {
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (String[] host : MOCK_HOSTS) {
+            for (String[] sw : MOCK_SOFTWARE) {
+                Map<String, String> row = new LinkedHashMap<>();
+                row.put("sys_id", host[0]);
+                row.put("computer_name", host[1]);
+                row.put("domain", host[2]);
+                row.put("os_name", host[3]);
+                row.put("last_user", host[4]);
+                row.put("display_name", sw[1]);
+                row.put("publisher", sw[0]);
+                row.put("version", sw[2]);
+                row.put("install_date", sw[3]);
+                if (sw[4] != null) {
+                    row.put("version_evidence", sw[4]);
+                }
+                // Ingestion pipeline fields
+                row.put("environment", "production");
+                row.put("department", "IT");
+                row.put("support_group", "Desktop Support");
+                row.put("managed_by", "IT Operations");
+                row.put("assigned_to", host[4]);
+                row.put("business_criticality", "medium");
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    private String blankToEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String safeJdbcUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return "(not configured)";
+        }
+        // Strip any embedded password from the URL for logging
+        return url.replaceAll("(?i)(password|pwd)=[^;]+", "$1=***");
+    }
+}

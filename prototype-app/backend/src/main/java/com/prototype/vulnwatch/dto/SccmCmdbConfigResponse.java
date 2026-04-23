@@ -3,22 +3,19 @@ package com.prototype.vulnwatch.dto;
 import java.time.Instant;
 import java.util.UUID;
 
-public record ServiceNowCmdbConfigResponse(
+public record SccmCmdbConfigResponse(
         UUID id,
         String sourceSystem,
         boolean configured,
-        String baseUrl,
+        String jdbcUrl,
         String authType,
         String username,
-        boolean hasCredentialSecret,
-        String installTable,
-        String discoveryModelTable,
-        String ciTable,
-        String installQuery,
-        String discoveryQuery,
-        String installFields,
-        String discoveryFields,
-        Integer pageSize,
+        boolean hasCredential,
+        String siteCode,
+        String databaseName,
+        Integer fetchSize,
+        Integer queryTimeoutSeconds,
+        boolean mockMode,
         boolean enabled,
         boolean autoSyncEnabled,
         Integer intervalMinutes,
@@ -26,5 +23,4 @@ public record ServiceNowCmdbConfigResponse(
         String lastTestMessage,
         Instant lastTestedAt,
         Instant lastSyncAt
-) {
-}
+) {}

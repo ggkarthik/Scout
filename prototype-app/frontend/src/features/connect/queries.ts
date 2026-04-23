@@ -56,3 +56,10 @@ export function useServiceNowCmdbConfigQuery() {
     queryFn: api.getServiceNowCmdbConfig
   });
 }
+
+export function useSccmCmdbConfigQuery() {
+  return useQuery({
+    queryKey: ['sccm-cmdb-config'],
+    queryFn: api.getSccmCmdbConfig
+  });
+}

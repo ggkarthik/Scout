@@ -211,7 +211,7 @@ public class ServiceNowCmdbSyncService {
                     )
             );
 
-            completeRun(runId, response, discoveryRows.size() + installRows.size(), triggerMode);
+            completeRun(configId, runId, response, discoveryRows.size() + installRows.size(), triggerMode);
         } catch (Exception e) {
             failRun(runId, e.getMessage(), triggerMode);
         }
@@ -231,7 +231,7 @@ public class ServiceNowCmdbSyncService {
         });
     }
 
-    private void completeRun(UUID runId, CmdbInventorySyncResponse response, int fetched, String triggerMode) {
+    private void completeRun(UUID configId, UUID runId, CmdbInventorySyncResponse response, int fetched, String triggerMode) {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
             run.setStatus("completed");
@@ -259,6 +259,10 @@ public class ServiceNowCmdbSyncService {
             metadata.put("message", response.message());
             run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
+            serviceNowCmdbConfigRepository.findById(configId).ifPresent(cfg -> {
+                cfg.setLastSyncAt(Instant.now());
+                serviceNowCmdbConfigRepository.save(cfg);
+            });
         });
     }
 

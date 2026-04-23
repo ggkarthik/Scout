@@ -16,7 +16,7 @@ describe('routes', () => {
     expect(pathForTab('operations')).toBe('/operations/pipeline');
     expect(pathForTab('inventory')).toBe('/inventory');
     expect(pathForTab('end-of-life')).toBe('/end-of-life');
-    expect(pathForConnectView('vuln-intel-queue')).toBe('/connect/vuln-intel-queue');
+    expect(pathForConnectView('integration-run-queue')).toBe('/connect/integration-run-queue');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
     expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
   });
@@ -73,7 +73,7 @@ describe('routes', () => {
       '/inventory/container-images?ecosystem=oci'
     );
     expect(buildLegacyCompatiblePath('?tab=connect&connectView=integration-queue&source=ghsa')).toBe(
-      '/connect/vuln-intel-queue?source=ghsa'
+      '/connect/integration-run-queue?source=ghsa'
     );
   });
 

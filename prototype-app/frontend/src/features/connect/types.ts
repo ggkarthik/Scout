@@ -153,6 +153,7 @@ export type ServiceNowCmdbConfig = {
   lastTestStatus?: string;
   lastTestMessage?: string;
   lastTestedAt?: string;
+  lastSyncAt?: string;
 };
 
 export type ServiceNowCmdbConfigRequest = {
@@ -179,6 +180,53 @@ export type ServiceNowCmdbConnectionTest = {
   ciTableReachable: boolean;
   installTableReachable: boolean;
   discoveryTableReachable: boolean;
+  testedAt: string;
+};
+
+export type SccmAuthType = 'SQL_AUTH' | 'WINDOWS_AUTH';
+
+export type SccmCmdbConfig = {
+  id?: string;
+  sourceSystem: string;
+  configured: boolean;
+  jdbcUrl: string;
+  authType: SccmAuthType;
+  username: string;
+  hasCredential: boolean;
+  siteCode: string;
+  databaseName: string;
+  fetchSize: number;
+  queryTimeoutSeconds: number;
+  mockMode: boolean;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: number;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+  lastSyncAt?: string;
+};
+
+export type SccmCmdbConfigRequest = {
+  jdbcUrl?: string;
+  authType?: SccmAuthType;
+  username?: string;
+  credentialSecret?: string;
+  siteCode?: string;
+  databaseName?: string;
+  fetchSize?: number;
+  queryTimeoutSeconds?: number;
+  mockMode?: boolean;
+  enabled?: boolean;
+  autoSyncEnabled?: boolean;
+  intervalMinutes?: number;
+};
+
+export type SccmConnectionTestResponse = {
+  status: 'SUCCESS' | 'FAILED';
+  message: string;
+  systemViewReachable: boolean;
+  softwareViewReachable: boolean;
   testedAt: string;
 };
 
