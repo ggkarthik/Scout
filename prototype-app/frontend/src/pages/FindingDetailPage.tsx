@@ -7,6 +7,8 @@ import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { AiSolutionApiResponse } from '../features/cve-workbench/api';
 import type { CveDetail, VendorIntelligence, ServiceNowIncidentResponse, CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
 import type { HostAssetSummary } from '../features/inventory/api-types';
+import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
+import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,6 +105,7 @@ export function FindingDetailPage() {
 
   const finding = (location.state as { finding?: Finding } | null)?.finding ?? null;
   const returnTo = searchParams.get('returnTo') || '/findings';
+  const policyQuery = useRiskPolicyQuery();
 
   // ── local state ────────────────────────────────────────────────────────────
   const [currentFinding, setCurrentFinding] = React.useState<Finding | null>(finding);
@@ -429,6 +432,8 @@ export function FindingDetailPage() {
   // ─── render ────────────────────────────────────────────────────────────────
 
   const cve = currentFinding.vulnerabilityId;
+  const ownership = currentFinding.ownership;
+  const ownershipSource = ownership?.sourceSystem || ownership?.sourceType || '—';
 
   return (
     <div className="fd3-page">
@@ -548,11 +553,44 @@ export function FindingDetailPage() {
             </div>
           </Panel>
 
+          {ownership && (
+            <Panel title="Asset Ownership">
+              <div className="fd3-kv-table">
+                <KVRow label="Owner">{ownership.displayName || 'Unassigned'}</KVRow>
+                <KVRow label="Owner Team">{ownership.ownerTeam || '—'}</KVRow>
+                <KVRow label="Owner Email">{ownership.ownerEmail || '—'}</KVRow>
+                <KVRow label="Managed By">{ownership.managedBy || '—'}</KVRow>
+                <KVRow label="Department">{ownership.department || '—'}</KVRow>
+                <KVRow label="Support Group">{ownership.supportGroup || '—'}</KVRow>
+                <KVRow label="Asset Assigned To">{ownership.assignedTo || '—'}</KVRow>
+                <KVRow label="Source">{ownershipSource}</KVRow>
+                <KVRow label="Authority">{ownership.authority || '—'}</KVRow>
+                <KVRow label="Last Ownership Sync">{fmtDt(currentFinding.ownershipSyncedAt)}</KVRow>
+              </div>
+            </Panel>
+          )}
+
           <Panel title="Details">
             <div className="fd3-kv-table">
               <KVRow label="Status">
                 <span className={statusCls(currentFinding)}>{statusLabel(currentFinding)}</span>
               </KVRow>
+              {(() => {
+                const p = computeFindingPriorityScore(currentFinding, policyQuery.data);
+                const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(p.score).toLowerCase()}`;
+                return (
+                  <KVRow label="S.AI Priority">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span className={cls}>{p.score.toFixed(1)}</span>
+                      {p.topReasons.length > 0 && (
+                        <span className="fd3-muted" style={{ fontSize: 11 }}>
+                          {p.topReasons.join(' · ')}
+                        </span>
+                      )}
+                    </span>
+                  </KVRow>
+                );
+              })()}
               <KVRow label="Due Date">
                 {currentFinding.dueAt
                   ? <span className={overdue ? 'fd3-overdue' : undefined}>{fmtDate(currentFinding.dueAt)}{overdue && ' ⚠'}</span>

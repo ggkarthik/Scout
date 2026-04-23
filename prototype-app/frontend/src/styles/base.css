@@ -3527,6 +3527,367 @@ label {
   padding: 0 12px 12px;
 }
 
+/* ── Configurations page redesign ────────────────────────────────────── */
+
+.config-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  min-height: 580px;
+  margin-top: var(--space-2);
+}
+
+.config-sidebar {
+  background: var(--panel-solid);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.config-sidebar-title {
+  padding: 10px 14px 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.config-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.config-nav-item:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid));
+}
+
+.config-nav-item.active {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-solid));
+  border-left-color: var(--accent);
+}
+
+.config-nav-item-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--title);
+}
+
+.config-nav-item.active .config-nav-item-label {
+  color: var(--accent);
+}
+
+.config-nav-item-desc {
+  font-size: 0.73rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.config-nav-badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  letter-spacing: 0.02em;
+}
+
+.config-content {
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel-muted);
+  overflow-y: auto;
+}
+
+.config-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.config-section-head-text h3 {
+  margin: 0 0 3px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.config-section-head-text p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.config-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.config-section-intro {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.83rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.config-section-intro p {
+  margin: 0;
+}
+
+.config-subsection-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+/* Triage signal cards */
+.triage-signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.triage-signal-card {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.triage-signal-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: var(--space-2);
+}
+
+.triage-signal-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+  line-height: 1;
+}
+
+.triage-signal-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.triage-signal-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--title);
+  margin-bottom: 3px;
+}
+
+.triage-signal-reason {
+  font-size: 0.79rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.triage-weight-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-weight-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.triage-weight-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+}
+
+.triage-slider-track-fill {
+  display: none; /* purely informational — browser renders track natively */
+}
+
+.triage-weight-value {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--title);
+  min-width: 30px;
+  text-align: right;
+}
+
+.triage-urgency-tag {
+  display: inline-block;
+  font-size: 0.73rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--title));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.triage-urgency-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* Score simulators */
+.score-sim {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.score-sim-header {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--title);
+  background: color-mix(in srgb, var(--panel-solid) 80%, var(--panel-muted));
+}
+
+.score-sim-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+@media (max-width: 860px) {
+  .score-sim-body {
+    grid-template-columns: 1fr;
+  }
+  .config-layout {
+    grid-template-columns: 1fr;
+  }
+  .config-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.score-sim-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.score-sim-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.score-sim-input-row label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.score-sim-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.score-sim-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 12px;
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.score-sim-badge-number {
+  font-size: 2.6rem;
+  font-weight: 800;
+  line-height: 1;
+  display: block;
+}
+
+.score-sim-badge-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: block;
+  margin-top: 4px;
+}
+
+.score-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.score-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.score-breakdown-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.score-breakdown-bar-bg {
+  flex: 1;
+  background: var(--panel-muted);
+  border-radius: 999px;
+  height: 7px;
+  overflow: hidden;
+}
+
+.score-breakdown-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 160ms ease;
+  min-width: 2px;
+}
+
+.score-breakdown-value {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--title);
+  min-width: 30px;
+  text-align: right;
+}
+
 .connect-catalog-panel {
   padding: 0;
   overflow: hidden;
@@ -3708,17 +4069,9 @@ label {
   flex-shrink: 0;
 }
 
-.connect-source-dot--ok {
-  background: #22c55e;
-}
-
-.connect-source-dot--warn {
-  background: #d1d5db;
-}
-
-.connect-source-dot--fail {
-  background: #ef4444;
-}
+.connect-source-dot--ok { background: #22c55e; }
+.connect-source-dot--warn { background: #d1d5db; }
+.connect-source-dot--fail { background: #ef4444; }
 
 .connect-source-lastsync {
   font-size: 0.78rem;
@@ -3726,9 +4079,7 @@ label {
   margin-top: 6px;
 }
 
-.connect-source-lastsync--fail {
-  color: #dc2626;
-}
+.connect-source-lastsync--fail { color: #dc2626; }
 
 /* ── Software Identities expanded table ───────────────────────────────────── */
 
@@ -3873,4 +4224,305 @@ label {
 
 .si-panel-table-shell {
   margin-top: 16px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Shared risk score badge
+   Used in both the CVE table (CVE Risk column) and findings table (Priority column)
+───────────────────────────────────────────────────────────────────────────── */
+
+.risk-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.risk-score-badge--critical {
+  background: var(--critical);
+  color: #fff;
+}
+
+.risk-score-badge--high {
+  background: var(--high);
+  color: #fff;
+}
+
+.risk-score-badge--medium {
+  background: var(--medium);
+  color: #000;
+}
+
+.risk-score-badge--low {
+  background: var(--low);
+  color: #fff;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   S.AI Risk Score Panel  (assessment workbench)
+   Horizontal left-to-right phase timeline
+───────────────────────────────────────────────────────────────────────────── */
+
+.cvrs-panel {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px 14px;
+  margin-bottom: 14px;
+}
+
+/* ── Header ── */
+
+.cvrs-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.cvrs-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cvrs-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cvrs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border-radius: 20px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.cvrs-badge-num {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.cvrs-badge-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.cvrs-reasons {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.cvrs-reason-tag {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 10%, var(--panel-solid));
+  color: color-mix(in srgb, var(--accent, #3b82f6) 85%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 22%, transparent);
+  white-space: nowrap;
+}
+
+.cvrs-toggle {
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cvrs-toggle:hover {
+  color: var(--text);
+}
+
+/* ── Timeline ── */
+
+.cvrs-timeline {
+  display: flex;
+  align-items: flex-start;
+  overflow-x: auto;
+  margin-top: 14px;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+/* Each phase occupies equal width */
+.cvrs-phase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 100px;
+  max-width: 200px;
+}
+
+/* Note-only phases are rendered at reduced opacity */
+.cvrs-phase--note .cvrs-phase-body {
+  opacity: 0.55;
+}
+
+/* ── Track row: [half-line] — [dot] — [half-line] ── */
+
+.cvrs-phase-track {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 16px;
+}
+
+/* Each line segment fills half the space between phases */
+.cvrs-track-seg {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+}
+
+.cvrs-track-seg--hidden {
+  background: transparent;
+}
+
+/* Default dot — empty circle */
+.cvrs-track-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel-solid);
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+/* Final phase dot — filled with the risk color, slightly larger */
+.cvrs-track-dot--final {
+  width: 14px;
+  height: 14px;
+  border: none;
+}
+
+/* ── Content below track ── */
+
+.cvrs-phase-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 5px 8px 0;
+  gap: 2px;
+}
+
+.cvrs-phase-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.cvrs-phase-metrics {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.cvrs-phase-delta {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.cvrs-phase-delta--up {
+  background: color-mix(in srgb, var(--critical) 14%, transparent);
+  color: var(--critical);
+}
+
+.cvrs-phase-delta--down {
+  background: color-mix(in srgb, var(--low) 16%, transparent);
+  color: var(--low);
+}
+
+.cvrs-phase-score {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.cvrs-phase-reason {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.35;
+  max-width: 150px;
+}
+
+/* ── Responsive: stack vertically on narrow screens ── */
+
+@media (max-width: 640px) {
+  .cvrs-timeline {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .cvrs-phase {
+    flex-direction: row;
+    align-items: flex-start;
+    max-width: 100%;
+    min-width: 0;
+    gap: 10px;
+    padding: 4px 0;
+  }
+
+  .cvrs-phase-track {
+    flex-direction: column;
+    width: 16px;
+    height: auto;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .cvrs-track-seg {
+    flex: 1;
+    width: 2px;
+    height: 20px;
+  }
+
+  .cvrs-track-seg--hidden {
+    background: transparent;
+  }
+
+  .cvrs-phase-body {
+    align-items: flex-start;
+    text-align: left;
+    padding: 0;
+  }
 }
