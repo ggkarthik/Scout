@@ -150,6 +150,11 @@ app:
       base-url: ${CMDB_SERVICENOW_BASE_URL:}
       username: ${CMDB_SERVICENOW_USERNAME:}
       password: ${CMDB_SERVICENOW_PASSWORD:}
+    sccm:
+      jdbc-url: ${SCCM_JDBC_URL:}
+      username: ${SCCM_USERNAME:}
+      password: ${SCCM_PASSWORD:}
+      mock-mode: ${SCCM_MOCK_MODE:false}
 
 management:
   endpoints:

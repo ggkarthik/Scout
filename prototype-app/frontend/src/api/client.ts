@@ -31,6 +31,9 @@ import type {
   GithubSbomSource,
   IngestionEvidence,
   IngestionResult,
+  SccmCmdbConfig,
+  SccmCmdbConfigRequest,
+  SccmConnectionTestResponse,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
   ServiceNowCmdbConnectionTest,
@@ -385,6 +388,17 @@ export const api = {
     method: 'POST'
   }),
   triggerServiceNowCmdbSync: () => request<SyncTriggerResponse>('/connectors/servicenow-cmdb/sync', {
+    method: 'POST'
+  }),
+  getSccmCmdbConfig: () => request<SccmCmdbConfig>('/connectors/sccm-cmdb'),
+  saveSccmCmdbConfig: (payload: SccmCmdbConfigRequest) => request<SccmCmdbConfig>('/connectors/sccm-cmdb', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  testSccmCmdbConnection: () => request<SccmConnectionTestResponse>('/connectors/sccm-cmdb/test', {
+    method: 'POST'
+  }),
+  triggerSccmCmdbSync: () => request<SyncTriggerResponse>('/connectors/sccm-cmdb/sync', {
     method: 'POST'
   }),
   listGithubSbomSources: () => request<GithubSbomSource[]>('/github-sbom-sources'),

@@ -6,11 +6,13 @@ import { AssetsPage } from './AssetsPage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
+import { SccmConnectorPage } from './SccmConnectorPage';
 
 type ConnectorId =
   | 'sbom-endpoint'
   | 'sbom-github'
   | 'servicenow-cmdb'
+  | 'sccm-cmdb'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -48,6 +50,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'ServiceNow CMDB',
     summary: 'Pull host inventory from ServiceNow Table APIs and review ingestion history in Connect.',
     icon: '🧾'
+  },
+  {
+    id: 'sccm-cmdb',
+    name: 'SCCM / MECM',
+    summary: 'Ingest hardware asset and installed software inventory from Microsoft Endpoint Configuration Manager (SCCM/MECM) via direct SQL Server connection.',
+    icon: '🖥️'
   },
   {
     id: 'nvd-api',
@@ -106,7 +114,8 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
 const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
   'sbom-endpoint',
   'sbom-github',
-  'servicenow-cmdb'
+  'servicenow-cmdb',
+  'sccm-cmdb'
 ];
 
 function isConnectorId(value: string | null): value is ConnectorId {
@@ -220,6 +229,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'servicenow-cmdb') {
     return <AssetsPage />;
+  }
+  if (connectorId === 'sccm-cmdb') {
+    return <SccmConnectorPage />;
   }
 
   return (
