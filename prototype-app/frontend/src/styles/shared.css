@@ -7,6 +7,11 @@
   flex-wrap: wrap;
 }
 
+.connect-filter-bar--standalone {
+  padding: 12px 0;
+  border-bottom: none;
+}
+
 .connect-filter-btn {
   border: 1px solid var(--border);
   background: var(--panel-muted);

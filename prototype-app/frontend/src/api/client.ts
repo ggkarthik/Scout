@@ -56,6 +56,18 @@ import type {
   VulnerabilityIntelPage
 } from '../features/vulnerability-intel/types';
 import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
+
+export type VulnIntelSourceStatus = {
+  status: 'completed' | 'failed' | 'running' | 'never';
+  completedAt?: string;
+  recordsInserted: number;
+  recordsUpdated: number;
+  recordsFetched: number;
+  errorMessage?: string;
+};
+export type VulnIntelSourcesSummary = {
+  sources: Record<string, VulnIntelSourceStatus>;
+};
 import type {
   EolComponentPage,
   EolProductCatalog,
@@ -446,6 +458,7 @@ export const api = {
   cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
     method: 'POST'
   }),
+  getVulnIntelSourcesSummary: () => request<VulnIntelSourcesSummary>('/sync-runs/sources-summary'),
   syncNvd: (lookbackHours = 24) => request<SyncTriggerResponse>(`/ingestion/nvd-sync?lookbackHours=${lookbackHours}`, { method: 'POST' }),
   syncNvdFull: (payload?: { apiKey?: string }) => request<SyncTriggerResponse>('/ingestion/nvd-full-sync', {
     method: 'POST',
