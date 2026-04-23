@@ -24,6 +24,7 @@ public record ServiceNowCmdbConfigResponse(
         Integer intervalMinutes,
         String lastTestStatus,
         String lastTestMessage,
-        Instant lastTestedAt
+        Instant lastTestedAt,
+        Instant lastSyncAt
 ) {
 }

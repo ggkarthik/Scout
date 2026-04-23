@@ -3688,6 +3688,48 @@ label {
   background: color-mix(in srgb, var(--accent) 13%, var(--panel-muted));
 }
 
+.connect-source-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.connect-source-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.connect-source-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connect-source-dot--ok {
+  background: #22c55e;
+}
+
+.connect-source-dot--warn {
+  background: #d1d5db;
+}
+
+.connect-source-dot--fail {
+  background: #ef4444;
+}
+
+.connect-source-lastsync {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.connect-source-lastsync--fail {
+  color: #dc2626;
+}
+
 /* ── Software Identities expanded table ───────────────────────────────────── */
 
 .si-identities-table th,

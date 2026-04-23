@@ -11,12 +11,18 @@ import type {
 } from '../features/connect/types';
 import { useSccmCmdbConfigQuery } from '../features/connect/queries';
 
-function connectHref(view: 'inventory-run-queue'): string {
+function connectHref(view: 'integration-run-queue'): string {
   return pathForConnectView(view);
 }
 
 function inventoryHref(view: 'hosts'): string {
   return pathForInventoryView(view);
+}
+
+function formatTimestamp(value?: string): string {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
 function defaultForm(): SccmCmdbConfigRequest {
@@ -37,9 +43,7 @@ function defaultForm(): SccmCmdbConfigRequest {
 }
 
 function formFromConfig(config: SccmCmdbConfig | null): SccmCmdbConfigRequest {
-  if (!config) {
-    return defaultForm();
-  }
+  if (!config) return defaultForm();
   return {
     jdbcUrl: config.jdbcUrl ?? '',
     authType: config.authType,
@@ -56,24 +60,10 @@ function formFromConfig(config: SccmCmdbConfig | null): SccmCmdbConfigRequest {
   };
 }
 
-function formatTimestamp(value?: string): string {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
 function Tooltip({ text }: { text: string }) {
   return (
-    <span className="sn-tooltip" title={text} aria-label={text}>
-      &#9432;
-    </span>
+    <span className="sn-tooltip" title={text} aria-label={text}>ⓘ</span>
   );
-}
-
-type HealthStatus = 'healthy' | 'error' | 'warning' | 'neutral';
-
-function healthCardClass(status: HealthStatus): string {
-  return `sn-health-card sn-health-${status}`;
 }
 
 export function SccmConnectorPage() {
@@ -90,7 +80,6 @@ export function SccmConnectorPage() {
   const [error, setError] = React.useState('');
   const [syncResult, setSyncResult] = React.useState<SyncTriggerResponse | null>(null);
   const [showSecret, setShowSecret] = React.useState(false);
-  const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   React.useEffect(() => {
     setForm(formFromConfig(config));
@@ -100,6 +89,10 @@ export function SccmConnectorPage() {
   const updateField = <K extends keyof SccmCmdbConfigRequest>(key: K, value: SccmCmdbConfigRequest[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
+
+  // Display interval as hours; store internally as minutes
+  const intervalHours = Math.max(1, Math.round((form.intervalMinutes ?? 1440) / 60));
+  const updateIntervalHours = (hours: number) => updateField('intervalMinutes', Math.max(60, hours * 60));
 
   const saveConnector = async (): Promise<SccmCmdbConfig | null> => {
     setSaving(true);
@@ -112,9 +105,10 @@ export function SccmConnectorPage() {
         credentialSecret: credentialSecret.trim().length > 0 ? credentialSecret.trim() : undefined,
         siteCode: form.siteCode?.trim() ?? '',
         databaseName: form.databaseName?.trim() || 'CM_P01',
-        fetchSize: Math.max(1, Number(form.fetchSize) || 500),
-        queryTimeoutSeconds: Math.max(1, Number(form.queryTimeoutSeconds) || 120),
-        intervalMinutes: Math.max(5, Number(form.intervalMinutes) || 1440)
+        fetchSize: 500,
+        queryTimeoutSeconds: 120,
+        enabled: true,
+        intervalMinutes: Math.max(60, Number(form.intervalMinutes) || 1440)
       };
       const saved = await api.saveSccmCmdbConfig(payload);
       queryClient.setQueryData(['sccm-cmdb-config'], saved);
@@ -165,33 +159,6 @@ export function SccmConnectorPage() {
     }
   };
 
-  // Health bar state derivation
-  const connStatus: HealthStatus = !config?.configured
-    ? 'warning'
-    : config.lastTestStatus === 'SUCCESS'
-      ? 'healthy'
-      : config.lastTestStatus === 'FAILED'
-        ? 'error'
-        : 'warning';
-
-  const connLabel = !config?.configured
-    ? 'Needs Setup'
-    : config.lastTestStatus === 'SUCCESS'
-      ? 'Connected'
-      : config.lastTestStatus === 'FAILED'
-        ? 'Test Failed'
-        : 'Not Tested';
-
-  const credStatus: HealthStatus = config?.hasCredential || form.mockMode ? 'healthy' : 'error';
-  const credLabel = form.mockMode
-    ? 'Mock Mode — No Credentials Needed'
-    : config?.hasCredential
-      ? 'Credentials Stored'
-      : 'Credentials Missing';
-
-  const syncStatus: HealthStatus = form.autoSyncEnabled ? 'healthy' : 'neutral';
-  const syncLabel = form.autoSyncEnabled ? `Every ${form.intervalMinutes} min` : 'Manual Only';
-
   const queryError = sccmConfigQuery.error instanceof Error ? sccmConfigQuery.error.message : '';
   const displayError = error || queryError;
 
@@ -201,70 +168,35 @@ export function SccmConnectorPage() {
 
   return (
     <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>SCCM / MECM Connector</h3>
-          <span className="panel-caption">
-            Direct SQL Server ingestion from Microsoft Endpoint Configuration Manager. Configure the
-            JDBC connection, test connectivity, then sync hardware and software inventory into Scout.
-          </span>
-        </div>
-      </div>
-
-      {/* Health bar */}
-      <div className="sn-health-bar">
-        <div className={healthCardClass(connStatus)}>
-          <span className="sn-health-label">Connection Health</span>
-          <span className="sn-health-value">{connLabel}</span>
-          {config?.lastTestedAt ? (
-            <span className="sn-health-meta">Last tested {formatTimestamp(config.lastTestedAt)}</span>
+      {/* Status row */}
+      {config?.configured && (
+        <div className="sn-status-row">
+          {config.lastSyncAt ? (
+            <span className="sn-status-meta">Last integration run: {formatTimestamp(config.lastSyncAt)}</span>
           ) : (
-            <span className="sn-health-meta">No test run yet</span>
-          )}
-          {!config?.configured && (
-            <a className="sn-health-cta" href="#sccm-jdbc-url">Complete Setup ↓</a>
+            <span className="sn-status-meta">No integration run yet</span>
           )}
         </div>
-
-        <div className={healthCardClass(credStatus)}>
-          <span className="sn-health-label">Auth &amp; Credentials</span>
-          <span className="sn-health-value">
-            {form.mockMode ? 'Mock Mode' : form.authType === 'WINDOWS_AUTH' ? 'Windows Auth' : 'SQL Auth'}
-          </span>
-          <span className={`sn-health-meta ${credStatus === 'error' ? 'sn-health-meta-error' : ''}`}>{credLabel}</span>
-          {!config?.hasCredential && !form.mockMode && (
-            <a className="sn-health-cta" href="#sccm-credential">Add Credentials ↓</a>
-          )}
-        </div>
-
-        <div className={healthCardClass(syncStatus)}>
-          <span className="sn-health-label">Sync Status</span>
-          <span className="sn-health-value">{syncLabel}</span>
-          <span className="sn-health-meta">
-            {form.autoSyncEnabled ? 'Scheduled ingestion active' : 'Configure in Sync Settings below'}
-          </span>
-        </div>
-      </div>
+      )}
 
       {/* Mock mode notice */}
       {form.mockMode && (
         <div className="notice">
-          <strong>Mock Mode is enabled.</strong> All syncs will return realistic fixture data without
-          connecting to a real SQL Server. Disable mock mode and provide a JDBC URL to run live syncs.
+          <strong>Mock Mode is enabled.</strong> All syncs return fixture data without connecting to
+          a real SQL Server. Disable mock mode and provide a JDBC URL to run live syncs.
         </div>
       )}
 
       {/* Setup banner */}
       {!config?.configured && !form.mockMode && (
         <div className="notice">
-          This connector is not yet configured. Fill in the Connection section below to enable live
-          SQL Server pulls from SCCM/MECM.
+          This connector is not yet configured. Fill in the Connection section below.
         </div>
       )}
 
       {displayError && <div className="notice error">{displayError}</div>}
 
-      {/* SECTION 1: Connection */}
+      {/* ── SECTION 1: Connection ── */}
       <div className="form-section">
         <h4 className="form-section-title">Connection</h4>
         <div className="form-grid">
@@ -285,7 +217,7 @@ export function SccmConnectorPage() {
           <label>
             <span>
               Auth Method <span className="sn-required">*</span>{' '}
-              <Tooltip text="SQL Auth uses a SQL Server login. Windows Auth uses integrated Kerberos/NTLM (requires integratedSecurity=true in the JDBC driver)." />
+              <Tooltip text="SQL Auth uses a SQL Server login. Windows Auth uses integrated Kerberos/NTLM." />
             </span>
             <select
               value={form.authType}
@@ -337,7 +269,7 @@ export function SccmConnectorPage() {
                 </button>
               </div>
               {config?.hasCredential && (
-                <span className="sn-saved-badge">&#10003; Password saved — leave blank to keep it</span>
+                <span className="sn-saved-badge">✓ Password saved — leave blank to keep it</span>
               )}
             </label>
           )}
@@ -345,7 +277,7 @@ export function SccmConnectorPage() {
           <label>
             <span>
               Site Code{' '}
-              <Tooltip text="The SCCM/MECM three-character site code (e.g. P01). Used for documentation; not required for the SQL query." />
+              <Tooltip text="The SCCM/MECM three-character site code (e.g. P01)." />
             </span>
             <input
               type="text"
@@ -372,41 +304,7 @@ export function SccmConnectorPage() {
         </div>
       </div>
 
-      {/* SECTION 2: Performance */}
-      <div className="form-section">
-        <h4 className="form-section-title">Performance</h4>
-        <div className="form-grid">
-          <label>
-            <span>
-              Fetch Size{' '}
-              <Tooltip text="Number of rows the JDBC driver buffers per round-trip. Reduce if the SQL Server runs out of memory during the query." />
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={10000}
-              value={form.fetchSize ?? 500}
-              onChange={(e) => updateField('fetchSize', Number(e.target.value))}
-            />
-          </label>
-
-          <label>
-            <span>
-              Query Timeout (seconds){' '}
-              <Tooltip text="Maximum time in seconds allowed for the inventory query to complete. Increase for very large SCCM databases." />
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={3600}
-              value={form.queryTimeoutSeconds ?? 120}
-              onChange={(e) => updateField('queryTimeoutSeconds', Number(e.target.value))}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* SECTION 3: Sync Settings */}
+      {/* ── SECTION 2: Sync Settings ── */}
       <div className="form-section">
         <h4 className="form-section-title">Sync Settings</h4>
         <div className="sn-toggle-group">
@@ -416,17 +314,8 @@ export function SccmConnectorPage() {
               checked={form.mockMode ?? false}
               onChange={(e) => updateField('mockMode', e.target.checked)}
             />
-            <span>Mock mode (use fixture data, no real SQL Server needed)</span>
-            <Tooltip text="When enabled, every sync returns hardcoded fixture rows. Useful for testing the ingestion pipeline without a live SCCM deployment." />
-          </label>
-          <label className="sn-toggle-row">
-            <input
-              type="checkbox"
-              checked={form.enabled ?? true}
-              onChange={(e) => updateField('enabled', e.target.checked)}
-            />
-            <span>Connector enabled</span>
-            <Tooltip text="When disabled, no syncs (manual or scheduled) will be triggered." />
+            <span>Mock mode (fixture data, no real SQL Server needed)</span>
+            <Tooltip text="When enabled, every sync returns hardcoded fixture rows — useful for testing without a live SCCM deployment." />
           </label>
           <label className="sn-toggle-row">
             <input
@@ -434,7 +323,7 @@ export function SccmConnectorPage() {
               checked={form.autoSyncEnabled ?? false}
               onChange={(e) => updateField('autoSyncEnabled', e.target.checked)}
             />
-            <span>Enable scheduled sync</span>
+            <span>Enable scheduled live sync</span>
             <Tooltip text="Automatically syncs SCCM inventory on the configured interval." />
           </label>
         </div>
@@ -442,54 +331,21 @@ export function SccmConnectorPage() {
           <div className="form-grid sn-sync-interval-grid">
             <label>
               <span>
-                Sync Interval (minutes){' '}
-                <Tooltip text="How often the scheduled sync runs. Minimum 5 minutes." />
+                Sync Interval (hours){' '}
+                <Tooltip text="How often the scheduled sync runs. Minimum 1 hour." />
               </span>
               <input
                 type="number"
-                min={5}
-                value={form.intervalMinutes ?? 1440}
-                onChange={(e) => updateField('intervalMinutes', Number(e.target.value))}
+                min={1}
+                value={intervalHours}
+                onChange={(e) => updateIntervalHours(Number(e.target.value))}
               />
             </label>
           </div>
         )}
       </div>
 
-      {/* SECTION 4: Advanced (accordion) */}
-      <div className="form-section">
-        <button
-          type="button"
-          className="sn-advanced-toggle"
-          onClick={() => setShowAdvanced((v) => !v)}
-          aria-expanded={showAdvanced}
-        >
-          <span className="sn-advanced-toggle-chevron">{showAdvanced ? '▾' : '▸'}</span>
-          <span>Advanced Notes</span>
-          <span className="sn-advanced-toggle-hint">SCCM view requirements and SQL query details</span>
-        </button>
-        {showAdvanced && (
-          <div className="form-grid sn-advanced-grid">
-            <div>
-              <p className="panel-caption">
-                The connector queries <code>v_R_System</code> JOINed with{' '}
-                <code>v_GS_INSTALLED_SOFTWARE</code>. The SQL Server login requires at minimum{' '}
-                <code>db_datareader</code> on the SCCM database. Both views must exist — they are
-                standard SCCM built-in views present on all supported versions (SCCM 2012 R2 and
-                newer / MECM 2002+).
-              </p>
-              <p className="panel-caption">
-                For WINDOWS_AUTH, the mssql-jdbc driver must be able to resolve a Kerberos ticket
-                for the service account running the Scout backend. Ensure{' '}
-                <code>integratedSecurity=true</code> is set in the JDBC URL and the native
-                authentication library is on the JVM path.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Action bar */}
+      {/* ── Action bar ── */}
       <div className="button-row section-actions sn-action-bar">
         <button
           type="button"
@@ -513,22 +369,10 @@ export function SccmConnectorPage() {
           onClick={() => void triggerSync()}
           disabled={syncing || saving || testing || sccmConfigQuery.isFetching}
         >
-          {syncing ? 'Queueing Sync...' : 'Sync Now'}
+          {syncing ? 'Running...' : 'Run Integration now'}
         </button>
-        <button
-          type="button"
-          className="btn-link"
-          onClick={() => void sccmConfigQuery.refetch()}
-          disabled={sccmConfigQuery.isFetching || saving || testing}
-        >
-          {sccmConfigQuery.isFetching ? 'Refreshing...' : '↺ Refresh Setup'}
-        </button>
-        <a className="btn-link sn-queue-link" href={connectHref('inventory-run-queue')}>
-          Open Inventory Run Queue →
-        </a>
       </div>
 
-      {/* Inline test result */}
       {testResult && (
         <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? '' : 'error'}`}>
           <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
@@ -546,8 +390,8 @@ export function SccmConnectorPage() {
 
       {syncResult && (
         <div className="notice">
-          <strong>Sync queued.</strong> {syncResult.message}. Track progress in{' '}
-          <a href={connectHref('inventory-run-queue')}>Inventory Run Queue</a>.
+          <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
+          <a href={connectHref('integration-run-queue')}>Integration Run Queue</a>.
         </div>
       )}
 

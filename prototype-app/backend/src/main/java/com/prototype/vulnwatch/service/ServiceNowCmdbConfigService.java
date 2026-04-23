@@ -356,6 +356,7 @@ public class ServiceNowCmdbConfigService {
                     1440,
                     null,
                     null,
+                    null,
                     null
             );
         }
@@ -380,7 +381,8 @@ public class ServiceNowCmdbConfigService {
                 config.getIntervalMinutes() == null ? 1440 : config.getIntervalMinutes(),
                 config.getLastTestStatus(),
                 config.getLastTestMessage(),
-                config.getLastTestedAt()
+                config.getLastTestedAt(),
+                config.getLastSyncAt()
         );
     }
 

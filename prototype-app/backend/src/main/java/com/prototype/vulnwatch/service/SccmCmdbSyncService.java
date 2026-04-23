@@ -179,7 +179,7 @@ public class SccmCmdbSyncService {
                     )
             );
 
-            completeRun(runId, response, installRows.size() + discoveryRows.size(), triggerMode);
+            completeRun(configId, runId, response, installRows.size() + discoveryRows.size(), triggerMode);
         } catch (Exception e) {
             LOG.error("SCCM sync run {} failed: {}", runId, e.getMessage(), e);
             failRun(runId, e.getMessage(), triggerMode);
@@ -216,7 +216,7 @@ public class SccmCmdbSyncService {
         });
     }
 
-    private void completeRun(UUID runId, CmdbInventorySyncResponse response, int fetched, String triggerMode) {
+    private void completeRun(UUID configId, UUID runId, CmdbInventorySyncResponse response, int fetched, String triggerMode) {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
             run.setStatus("completed");
@@ -244,6 +244,10 @@ public class SccmCmdbSyncService {
             metadata.put("message", response.message());
             run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
+            sccmCmdbConfigRepository.findById(configId).ifPresent(cfg -> {
+                cfg.setLastSyncAt(Instant.now());
+                sccmCmdbConfigRepository.save(cfg);
+            });
         });
     }
 

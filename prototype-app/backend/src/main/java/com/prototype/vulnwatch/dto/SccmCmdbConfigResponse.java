@@ -21,5 +21,6 @@ public record SccmCmdbConfigResponse(
         Integer intervalMinutes,
         String lastTestStatus,
         String lastTestMessage,
-        Instant lastTestedAt
+        Instant lastTestedAt,
+        Instant lastSyncAt
 ) {}

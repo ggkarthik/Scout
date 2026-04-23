@@ -94,6 +94,9 @@ public class ServiceNowCmdbConfig {
     @Column(name = "last_tested_at")
     private Instant lastTestedAt;
 
+    @Column(name = "last_sync_at")
+    private Instant lastSyncAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -262,6 +265,14 @@ public class ServiceNowCmdbConfig {
 
     public void setLastTestedAt(Instant lastTestedAt) {
         this.lastTestedAt = lastTestedAt;
+    }
+
+    public Instant getLastSyncAt() {
+        return lastSyncAt;
+    }
+
+    public void setLastSyncAt(Instant lastSyncAt) {
+        this.lastSyncAt = lastSyncAt;
     }
 
     public Instant getCreatedAt() {
