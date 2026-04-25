@@ -388,7 +388,7 @@ export function VulnRepoOrgCvePage({
         lastEvaluated: { content: formatDateTime(item.lastEvaluatedAt) }
       }
     }))
-  ), [openRecord, selectedRecord?.recordId, visibleItems]);
+  ), [openRecord, policyQuery.data, selectedRecord?.recordId, visibleItems]);
 
   if (selectedRecord) {
     return (
