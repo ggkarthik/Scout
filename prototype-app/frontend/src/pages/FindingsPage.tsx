@@ -190,14 +190,20 @@ function DonutChart({ segs, size = 88, sw = 16 }: { segs: DonutSeg[]; size?: num
     </svg>
   );
 
-  let cum = 0;
+  const visibleSegments = segs.filter(s => s.value > 0);
+  const segmentOffsets = visibleSegments.reduce<Record<string, number>>((offsets, seg, index) => {
+    const previous = visibleSegments[index - 1];
+    offsets[seg.key] = previous
+      ? offsets[previous.key] + (previous.value / total) * C
+      : 0;
+    return offsets;
+  }, {});
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink:0, overflow:'visible' }}>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border,#e5e7eb)" strokeWidth={sw}/>
-      {segs.filter(s=>s.value>0).map(seg => {
+      {visibleSegments.map(seg => {
         const arcLen = (seg.value / total) * C;
-        const offset = -cum;
-        cum += arcLen;
+        const offset = -segmentOffsets[seg.key];
         const isHov = hovered === seg.key;
         return (
           <circle key={seg.key}
@@ -468,7 +474,15 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   // ── selection ──────────────────────────────────────────────────────────────
   function toggleSelect(id: string) {
-    setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
+      return n;
+    });
   }
   function toggleSelectAll() {
     setSelectedIds(selectedIds.size===rows.length ? new Set() : new Set(rows.map(r=>r.id)));
@@ -553,7 +567,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             ))}
           </div>
         )}
-        {(['findingId','cveId','asset','owner','supportGroup','package','assignedTo','incidentId'] as const).includes(colKey as any) && (
+        {(['findingId','cveId','asset','owner','supportGroup','package','assignedTo','incidentId'] as readonly string[]).includes(colKey) && (
           <input autoFocus className="fpl-col-filter-input"
             placeholder={`Search ${ALL_COLUMNS.find(c=>c.key===colKey)?.label}…`}
             value={(colFilters as unknown as Record<string,string>)[colKey] ?? ''}
@@ -921,7 +935,15 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <div className="fpl-colvis-header"><span>VISIBLE COLUMNS</span><button className="fpl-col-filter-clear" onClick={()=>saveColVis(new Set(DEFAULT_VISIBLE))}>Reset</button></div>
                 {ALL_COLUMNS.filter(c=>!c.alwaysVisible).map(c=>(
                   <label key={c.key} className="fpl-colvis-item">
-                    <input type="checkbox" checked={visibleCols.has(c.key)} onChange={()=>{const n=new Set(visibleCols);n.has(c.key)?n.delete(c.key):n.add(c.key);saveColVis(n);}}/>
+                    <input type="checkbox" checked={visibleCols.has(c.key)} onChange={()=>{
+                      const n = new Set(visibleCols);
+                      if (n.has(c.key)) {
+                        n.delete(c.key);
+                      } else {
+                        n.add(c.key);
+                      }
+                      saveColVis(n);
+                    }}/>
                     <span>{c.label}</span>
                   </label>
                 ))}

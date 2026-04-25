@@ -2,8 +2,11 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.dto.SyncRunResponse;
+import com.prototype.vulnwatch.dto.VulnIntelSourceSummary;
+import com.prototype.vulnwatch.dto.VulnIntelSourceSummary.SourceStatus;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -27,6 +30,9 @@ public class SyncRunHistoryService {
     private static final String RUN_CLASS_REPAIR = "REPAIR";
     private static final String RUN_CLASS_BACKFILL = "BACKFILL";
     private static final String RUN_CLASS_RECOMPUTE = "RECOMPUTE";
+    private static final List<String> VULN_INTEL_TYPES = List.of(
+            "NVD", "KEV", "GHSA", "CSAF_MICROSOFT", "CSAF_REDHAT", "ADVISORY"
+    );
     private static final Set<String> PROCESSING_RUN_TYPES = Set.of(
             "VEX_ASSERTION_REPAIR",
             "VEX_ROLLOUT_BACKFILL",
@@ -57,6 +63,18 @@ public class SyncRunHistoryService {
                         .thenComparing(SyncRunResponse::id, Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(normalizedLimit)
                 .toList();
+    }
+
+    public VulnIntelSourceSummary sourcesSummary() {
+        Map<String, SourceStatus> sources = new LinkedHashMap<>();
+        for (String type : VULN_INTEL_TYPES) {
+            syncRunRepository.findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(type)
+                    .ifPresentOrElse(
+                            run -> sources.put(type, toSourceStatus(run)),
+                            () -> sources.put(type, new SourceStatus("never", null, 0, 0, 0, null))
+                    );
+        }
+        return new VulnIntelSourceSummary(sources);
     }
 
     private Map<UUID, Integer> activeQueuePositions(String category) {
@@ -93,6 +111,17 @@ public class SyncRunHistoryService {
         );
     }
 
+    private static SourceStatus toSourceStatus(SyncRun run) {
+        return new SourceStatus(
+                run.getStatus(),
+                run.getCompletedAt(),
+                run.getRecordsInserted(),
+                run.getRecordsUpdated(),
+                run.getRecordsFetched(),
+                run.getErrorMessage()
+        );
+    }
+
     private boolean matchesCategory(String syncType, String category) {
         SyncRunClassification classification = classifyRunType(syncType);
         return switch (category) {
@@ -106,7 +135,10 @@ public class SyncRunHistoryService {
 
     private boolean isInventoryRunType(String syncType) {
         String normalizedType = safe(syncType).toUpperCase(Locale.ROOT);
-        return normalizedType.startsWith("GITHUB_") || "SERVICENOW_CMDB".equals(normalizedType);
+        return normalizedType.startsWith("GITHUB_")
+                || "SERVICENOW_CMDB".equals(normalizedType)
+                || "SCCM_CMDB".equals(normalizedType)
+                || "AWS_DISCOVERY".equals(normalizedType);
     }
 
     private String normalizeCategory(String category) {

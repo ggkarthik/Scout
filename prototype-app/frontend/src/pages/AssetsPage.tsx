@@ -101,10 +101,6 @@ function formatTimestamp(value?: string): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
-function formatAuthType(value: ServiceNowCmdbAuthType): string {
-  return value === 'BEARER' ? 'Bearer Token' : 'Basic Auth';
-}
-
 function Tooltip({ text }: { text: string }) {
   return (
     <span className="sn-tooltip" title={text} aria-label={text}>

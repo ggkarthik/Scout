@@ -92,15 +92,15 @@ public class CiResolutionService {
         OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
-            if (!hasText(resolvedOwnership.supportGroup())) {
+            if (requiresOwnershipLookup(resolvedOwnership)) {
                 ServiceNowCiLookup ciLookup = lookupInServiceNowBySysId(tenant, requestedSysId.trim());
                 if (ciLookup != null) {
                     resolvedOwnership = new OwnershipDetails(
-                            coalesce(ciLookup.ownerEmail(), resolvedOwnership.ownerEmail()),
-                            coalesce(ciLookup.managedBy(), resolvedOwnership.managedBy()),
-                            coalesce(ciLookup.department(), resolvedOwnership.department()),
-                            coalesce(ciLookup.supportGroup(), resolvedOwnership.supportGroup()),
-                            coalesce(ciLookup.assignedTo(), resolvedOwnership.assignedTo())
+                            coalesceDisplay(ciLookup.ownerEmail(), resolvedOwnership.ownerEmail()),
+                            coalesceDisplay(ciLookup.managedBy(), resolvedOwnership.managedBy()),
+                            coalesceDisplay(ciLookup.department(), resolvedOwnership.department()),
+                            coalesceDisplay(ciLookup.supportGroup(), resolvedOwnership.supportGroup()),
+                            coalesceDisplay(ciLookup.assignedTo(), resolvedOwnership.assignedTo())
                     );
                 }
             }
@@ -264,30 +264,11 @@ public class CiResolutionService {
         OwnershipDetails resolvedOwnership = ownership != null ? ownership : OwnershipDetails.empty();
 
         if (hasText(requestedSysId)) {
-            if (!hasText(resolvedOwnership.supportGroup())) {
-                // Check cached CI in the batch context first — avoids one API call per install row
-                // (there are typically ~7 install rows per unique CI)
+            if (requiresOwnershipLookup(resolvedOwnership)) {
+                // Batch ingestion has already fetched the install table. Do not do per-row CI API lookups
+                // here; they can turn an 8k-row sync into thousands of serial ServiceNow calls.
                 Ci cachedCi = context.ciBySysId().get(requestedSysId.trim());
-                if (cachedCi != null && hasText(cachedCi.getSupportGroup())) {
-                    resolvedOwnership = new OwnershipDetails(
-                            coalesce(resolvedOwnership.ownerEmail(), cachedCi.getOwnerEmail()),
-                            coalesce(resolvedOwnership.managedBy(), cachedCi.getManagedBy()),
-                            coalesce(resolvedOwnership.department(), cachedCi.getDepartment()),
-                            cachedCi.getSupportGroup(),
-                            coalesce(resolvedOwnership.assignedTo(), cachedCi.getAssignedTo())
-                    );
-                } else {
-                    ServiceNowCiLookup ciLookup = lookupInServiceNowBySysId(tenant, requestedSysId.trim());
-                    if (ciLookup != null) {
-                        resolvedOwnership = new OwnershipDetails(
-                                coalesce(ciLookup.ownerEmail(), resolvedOwnership.ownerEmail()),
-                                coalesce(ciLookup.managedBy(), resolvedOwnership.managedBy()),
-                                coalesce(ciLookup.department(), resolvedOwnership.department()),
-                                coalesce(ciLookup.supportGroup(), resolvedOwnership.supportGroup()),
-                                coalesce(ciLookup.assignedTo(), resolvedOwnership.assignedTo())
-                        );
-                    }
-                }
+                resolvedOwnership = mergeCachedOwnership(resolvedOwnership, cachedCi);
             }
             return upsertCi(
                     context,
@@ -534,24 +515,66 @@ public class CiResolutionService {
 
     private void applyOwnership(Asset asset, OwnershipDetails o) {
         if (o == null) return;
-        asset.setOwnerEmail(trimToNull(o.ownerEmail()));
-        asset.setManagedBy(trimToNull(o.managedBy()));
-        asset.setDepartment(trimToNull(o.department()));
-        asset.setSupportGroup(trimToNull(o.supportGroup()));
-        asset.setAssignedTo(trimToNull(o.assignedTo()));
+        asset.setOwnerEmail(displayOrNull(o.ownerEmail()));
+        asset.setManagedBy(displayOrNull(o.managedBy()));
+        asset.setDepartment(displayOrNull(o.department()));
+        asset.setSupportGroup(displayOrNull(o.supportGroup()));
+        asset.setAssignedTo(displayOrNull(o.assignedTo()));
     }
 
     private void applyOwnership(Ci ci, OwnershipDetails o) {
         if (o == null) return;
-        ci.setOwnerEmail(trimToNull(o.ownerEmail()));
-        ci.setManagedBy(trimToNull(o.managedBy()));
-        ci.setDepartment(trimToNull(o.department()));
-        ci.setSupportGroup(trimToNull(o.supportGroup()));
-        ci.setAssignedTo(trimToNull(o.assignedTo()));
+        ci.setOwnerEmail(displayOrNull(o.ownerEmail()));
+        ci.setManagedBy(displayOrNull(o.managedBy()));
+        ci.setDepartment(displayOrNull(o.department()));
+        ci.setSupportGroup(displayOrNull(o.supportGroup()));
+        ci.setAssignedTo(displayOrNull(o.assignedTo()));
     }
 
     private static String coalesce(String a, String b) {
         return (a != null && !a.isBlank()) ? a : b;
+    }
+
+    private static String coalesceDisplay(String preferred, String fallback) {
+        if (hasDisplayText(preferred)) {
+            return preferred;
+        }
+        return hasDisplayText(fallback) ? fallback : preferred;
+    }
+
+    private boolean requiresOwnershipLookup(OwnershipDetails ownership) {
+        if (ownership == null) {
+            return true;
+        }
+        return !hasDisplayText(ownership.supportGroup())
+                || isLikelyServiceNowSysId(ownership.ownerEmail())
+                || isLikelyServiceNowSysId(ownership.managedBy())
+                || isLikelyServiceNowSysId(ownership.assignedTo());
+    }
+
+    private OwnershipDetails mergeCachedOwnership(OwnershipDetails current, Ci ci) {
+        if (ci == null) {
+            return current;
+        }
+        return new OwnershipDetails(
+                coalesceDisplay(current.ownerEmail(), ci.getOwnerEmail()),
+                coalesceDisplay(current.managedBy(), ci.getManagedBy()),
+                coalesceDisplay(current.department(), ci.getDepartment()),
+                coalesceDisplay(current.supportGroup(), ci.getSupportGroup()),
+                coalesceDisplay(current.assignedTo(), ci.getAssignedTo())
+        );
+    }
+
+    private static boolean hasDisplayText(String value) {
+        return value != null && !value.isBlank() && !isLikelyServiceNowSysId(value);
+    }
+
+    private String displayOrNull(String value) {
+        return hasDisplayText(value) ? value.trim() : null;
+    }
+
+    private static boolean isLikelyServiceNowSysId(String value) {
+        return value != null && value.trim().matches("(?i)[0-9a-f]{32}");
     }
 
     private boolean updateAlias(Ci ci, String aliasName, String normalizedAliasName, String sourceSystem, double confidence) {
@@ -825,11 +848,11 @@ public class CiResolutionService {
             return null;
         }
         if (node.isObject()) {
-            String value = trimToNull(node.path("value").asText(null));
-            if (hasText(value)) {
-                return value;
+            String display = trimToNull(node.path("display_value").asText(null));
+            if (hasText(display)) {
+                return display;
             }
-            return trimToNull(node.path("display_value").asText(null));
+            return trimToNull(node.path("value").asText(null));
         }
         return trimToNull(node.asText(null));
     }

@@ -99,6 +99,14 @@ public class SoftwareIdentityReadService {
                 rs -> rs.next() ? toProjectionRow(rs) : null
         );
         if (summary == null) {
+            projectionService.refreshTenant(tenant);
+            summary = jdbcTemplate.query(
+                    detailSummarySql(),
+                    summaryParams,
+                    rs -> rs.next() ? toProjectionRow(rs) : null
+            );
+        }
+        if (summary == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Software identity not found in active inventory");
         }
 
@@ -487,7 +495,19 @@ public class SoftwareIdentityReadService {
                         a.name AS asset_name,
                         a.identifier AS asset_identifier,
                         a.type AS asset_type,
-                        lower(coalesce(u.ingestion_source_system, '')) AS source_system
+                        COALESCE(
+                            NULLIF(lower(coalesce(u.ingestion_source_system, '')), ''),
+                            (
+                                SELECT lower(si.source_system)
+                                FROM software_instances si
+                                WHERE si.inventory_component_id = ic.id
+                                  AND si.source_system IS NOT NULL
+                                  AND trim(si.source_system) <> ''
+                                ORDER BY si.updated_at DESC
+                                LIMIT 1
+                            ),
+                            ''
+                        ) AS source_system
                     FROM inventory_components ic
                     JOIN assets a ON a.id = ic.asset_id
                     LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id

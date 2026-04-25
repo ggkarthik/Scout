@@ -5,7 +5,7 @@ import { pathForVulnRepoView, pathForInventoryHostAsset, type VulnerabilityIntel
 import { apiRequest, api } from '../api/client';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { AiSolutionApiResponse } from '../features/cve-workbench/api';
-import type { CveDetail, VendorIntelligence, ServiceNowIncidentResponse, CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
+import type { CveDetail, ServiceNowIncidentResponse, CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
 import type { HostAssetSummary } from '../features/inventory/api-types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
@@ -54,14 +54,6 @@ function statusLabel(f: Finding): string {
   if (f.status === 'OPEN' && f.decisionState === 'UNDER_INVESTIGATION') return 'Under Investigation';
   if (f.status === 'OPEN') return 'Open';
   return fmt(f.status);
-}
-
-function decisionCls(d: string) {
-  if (d === 'AFFECTED') return 'fd3-decision fd3-decision--affected';
-  if (d === 'NOT_AFFECTED') return 'fd3-decision fd3-decision--not-affected';
-  if (d === 'FIXED') return 'fd3-decision fd3-decision--fixed';
-  if (d === 'UNDER_INVESTIGATION') return 'fd3-decision fd3-decision--investigating';
-  return 'fd3-decision fd3-decision--review';
 }
 
 // UUID pattern – finding IDs from the backend are always UUID format
@@ -135,7 +127,6 @@ export function FindingDetailPage() {
 
   // remote data
   const [cveDetail, setCveDetail] = React.useState<CveDetail | null>(null);
-  const [vendorIntel, setVendorIntel] = React.useState<VendorIntelligence[] | null>(null);
   const [aiSolution, setAiSolution] = React.useState<AiSolutionApiResponse | null>(null);
   const [hostAssetId, setHostAssetId] = React.useState<string | null>(null);
   const [hostAsset, setHostAsset] = React.useState<HostAssetSummary | null>(null);
@@ -143,8 +134,8 @@ export function FindingDetailPage() {
   React.useEffect(() => {
     if (!currentFinding) return;
     cveWorkbenchApi.getCveDetail(currentFinding.vulnerabilityId)
-      .then(d => { setCveDetail(d); setVendorIntel(d.vendorIntelligence ?? []); })
-      .catch(() => { setCveDetail(null); setVendorIntel([]); });
+      .then(d => setCveDetail(d))
+      .catch(() => setCveDetail(null));
     cveWorkbenchApi.getSavedAiSolution(currentFinding.vulnerabilityId)
       .then(r => setAiSolution(r))
       .catch(() => setAiSolution(null));

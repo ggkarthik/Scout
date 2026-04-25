@@ -148,11 +148,16 @@ public class CmdbInventoryIngestionRunner {
                 );
                 CiResolutionService.OwnershipDetails ownership = new CiResolutionService.OwnershipDetails(
                         row.get("owner_email", "owner",
+                                "installed_on_owned_by_display_value", "owned_by_display_value",
                                 "installed_on_owned_by", "owned_by"),
-                        row.get("installed_on_managed_by", "managed_by"),
-                        row.get("installed_on_department", "department"),
-                        row.get("installed_on_support_group", "support_group"),
-                        row.get("installed_on_assigned_to", "assigned_to")
+                        row.get("installed_on_managed_by_display_value", "managed_by_display_value",
+                                "installed_on_managed_by", "managed_by"),
+                        row.get("installed_on_department_display_value", "department_display_value",
+                                "installed_on_department", "department"),
+                        row.get("installed_on_support_group_display_value", "support_group_display_value",
+                                "installed_on_support_group", "support_group"),
+                        row.get("installed_on_assigned_to_display_value", "assigned_to_display_value",
+                                "installed_on_assigned_to", "assigned_to")
                 );
                 CiResolutionService.Resolution ciResolution = ciResolutionService.resolve(
                         resolutionContext,
