@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
 import type {
-  ServiceNowCmdbAuthType,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
   ServiceNowCmdbConnectionTest,
@@ -99,10 +98,6 @@ function formatTimestamp(value?: string): string {
   if (!value) return '-';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
-function formatAuthType(value: ServiceNowCmdbAuthType): string {
-  return value === 'BEARER' ? 'Bearer Token' : 'Basic Auth';
 }
 
 function Tooltip({ text }: { text: string }) {

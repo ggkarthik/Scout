@@ -144,11 +144,6 @@ const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
   'aws-discovery'
 ];
 
-const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
-  ...CMDB_CONNECTOR_IDS,
-  ...CLOUD_CONNECTOR_IDS
-];
-
 function isConnectorId(value: string | null): value is ConnectorId {
   return CONNECTORS.some((connector) => connector.id === value);
 }
