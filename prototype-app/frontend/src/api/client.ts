@@ -26,6 +26,11 @@ import type {
   SoftwareIdentitySearchResult
 } from '../features/operations/types';
 import type {
+  AwsConnectionTestResponse,
+  AwsDiscoveryConfig,
+  AwsDiscoveryConfigRequest,
+  AwsDiscoveryTarget,
+  AwsDiscoveryTargetRequest,
   CmdbAssetRecord,
   CmdbAssetSyncResponse,
   GithubSbomSource,
@@ -411,6 +416,35 @@ export const api = {
     method: 'POST'
   }),
   triggerSccmCmdbSync: () => request<SyncTriggerResponse>('/connectors/sccm-cmdb/sync', {
+    method: 'POST'
+  }),
+  getAwsDiscoveryConfig: () => request<AwsDiscoveryConfig>('/connectors/aws-discovery'),
+  saveAwsDiscoveryConfig: (payload: AwsDiscoveryConfigRequest) => request<AwsDiscoveryConfig>('/connectors/aws-discovery', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  testAwsDiscoveryConnection: () => request<AwsConnectionTestResponse>('/connectors/aws-discovery/test', {
+    method: 'POST'
+  }),
+  triggerAwsDiscoverySync: () => request<SyncTriggerResponse>('/connectors/aws-discovery/sync', {
+    method: 'POST'
+  }),
+  listAwsDiscoveryTargets: () => request<AwsDiscoveryTarget[]>('/connectors/aws-discovery/targets'),
+  createAwsDiscoveryTarget: (payload: AwsDiscoveryTargetRequest) => request<AwsDiscoveryTarget>('/connectors/aws-discovery/targets', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateAwsDiscoveryTarget: (targetId: string, payload: AwsDiscoveryTargetRequest) => request<AwsDiscoveryTarget>(`/connectors/aws-discovery/targets/${encodeURIComponent(targetId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteAwsDiscoveryTarget: (targetId: string) => request<void>(`/connectors/aws-discovery/targets/${encodeURIComponent(targetId)}`, {
+    method: 'DELETE'
+  }),
+  testAwsDiscoveryTarget: (targetId: string) => request<AwsConnectionTestResponse>(`/connectors/aws-discovery/targets/${encodeURIComponent(targetId)}/test`, {
+    method: 'POST'
+  }),
+  triggerAwsDiscoveryTargetSync: (targetId: string) => request<SyncTriggerResponse>(`/connectors/aws-discovery/targets/${encodeURIComponent(targetId)}/sync`, {
     method: 'POST'
   }),
   listGithubSbomSources: () => request<GithubSbomSource[]>('/github-sbom-sources'),

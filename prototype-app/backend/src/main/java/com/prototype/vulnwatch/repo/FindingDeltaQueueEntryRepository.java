@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingDeltaQueueEntry, Long> {
 
@@ -34,6 +35,7 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
      * that are already PENDING. Returns 1 if inserted, 0 if skipped.
      */
     @Modifying
+    @Transactional
     @Query(value = """
             INSERT INTO finding_delta_queue
                 (event_type, tenant_id, component_id, vulnerability_id,

@@ -204,6 +204,7 @@ public class OperationalQualityReadService {
         }
 
         String evidenceJson = prettyJson(row.evidenceJson());
+        OverrideInfo overrideInfo = resolveOverrideInfo(tenant, row);
         return new OperationalQualityIssueDetailResponse(
                 row.id(),
                 row.issueKey(),
@@ -230,7 +231,10 @@ public class OperationalQualityReadService {
                 evidenceJson,
                 recommendedAction(row),
                 buildDrilldownTargets(row),
-                buildSampleRecords(row)
+                buildSampleRecords(row),
+                overrideInfo.active(),
+                overrideInfo.actor(),
+                overrideInfo.at()
         );
     }
 
@@ -586,6 +590,144 @@ public class OperationalQualityReadService {
         return samples.stream().limit(5).toList();
     }
 
+    private OverrideInfo resolveOverrideInfo(Tenant tenant, QualityIssueRow row) {
+        if ("NORMALIZATION".equals(row.domain())) {
+            OverrideInfo clusterOverride = findClusterNormalizationOverride(tenant, row);
+            if (clusterOverride.active()) {
+                return clusterOverride;
+            }
+
+            OverrideInfo componentOverride = findComponentNormalizationOverride(tenant, row);
+            if (componentOverride.active()) {
+                return componentOverride;
+            }
+
+            return findSoftwareInstanceNormalizationOverride(tenant, row);
+        }
+
+        if ("CORRELATION".equals(row.domain())) {
+            return findCorrelationOverride(tenant, row);
+        }
+
+        return OverrideInfo.inactive();
+    }
+
+    private OverrideInfo findClusterNormalizationOverride(Tenant tenant, QualityIssueRow row) {
+        String sourceType = normalizeClusterSourceType(row.sourceObjectType());
+        if (sourceType == null || row.sourceObjectId() == null || row.sourceObjectId().isBlank()) {
+            return OverrideInfo.inactive();
+        }
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId())
+                .addValue("sourceType", sourceType)
+                .addValue("sourceKey", row.sourceObjectId());
+
+        return jdbcTemplate.query("""
+                SELECT confirmed_by, confirmed_at
+                FROM software_identity_cluster_link
+                WHERE tenant_id = :tenantId
+                  AND source_type = :sourceType
+                  AND source_key = :sourceKey
+                  AND revoked_at IS NULL
+                ORDER BY confirmed_at DESC
+                LIMIT 1
+                """, params, rs -> rs.next()
+                ? new OverrideInfo(true, blankToNull(rs.getString("confirmed_by")), getInstant(rs, "confirmed_at"))
+                : OverrideInfo.inactive());
+    }
+
+    private OverrideInfo findComponentNormalizationOverride(Tenant tenant, QualityIssueRow row) {
+        if (row.componentId() == null) {
+            return OverrideInfo.inactive();
+        }
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId())
+                .addValue("componentId", row.componentId());
+
+        return jdbcTemplate.query("""
+                SELECT manual_identity_confirmed_by, manual_identity_confirmed_at
+                FROM inventory_components
+                WHERE tenant_id = :tenantId
+                  AND id = :componentId
+                  AND manual_identity_confirmed_at IS NOT NULL
+                """, params, rs -> rs.next()
+                ? new OverrideInfo(
+                        true,
+                        blankToNull(rs.getString("manual_identity_confirmed_by")),
+                        getInstant(rs, "manual_identity_confirmed_at"))
+                : OverrideInfo.inactive());
+    }
+
+    private OverrideInfo findSoftwareInstanceNormalizationOverride(Tenant tenant, QualityIssueRow row) {
+        if (!"SOFTWARE_INSTANCE".equals(row.sourceObjectType())
+                || row.sourceObjectId() == null
+                || row.sourceObjectId().isBlank()) {
+            return OverrideInfo.inactive();
+        }
+
+        UUID softwareInstanceId;
+        try {
+            softwareInstanceId = UUID.fromString(row.sourceObjectId());
+        } catch (IllegalArgumentException ignored) {
+            return OverrideInfo.inactive();
+        }
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId())
+                .addValue("softwareInstanceId", softwareInstanceId);
+
+        return jdbcTemplate.query("""
+                SELECT manual_identity_confirmed_by, manual_identity_confirmed_at
+                FROM software_instances
+                WHERE tenant_id = :tenantId
+                  AND id = :softwareInstanceId
+                  AND manual_identity_confirmed_at IS NOT NULL
+                """, params, rs -> rs.next()
+                ? new OverrideInfo(
+                        true,
+                        blankToNull(rs.getString("manual_identity_confirmed_by")),
+                        getInstant(rs, "manual_identity_confirmed_at"))
+                : OverrideInfo.inactive());
+    }
+
+    private OverrideInfo findCorrelationOverride(Tenant tenant, QualityIssueRow row) {
+        if (row.componentId() == null) {
+            return OverrideInfo.inactive();
+        }
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId())
+                .addValue("componentId", row.componentId());
+
+        return jdbcTemplate.query("""
+                SELECT analyst_updated_by, analyst_updated_at
+                FROM component_vulnerability_states
+                WHERE tenant_id = :tenantId
+                  AND component_id = :componentId
+                  AND analyst_updated_at IS NOT NULL
+                ORDER BY analyst_updated_at DESC
+                LIMIT 1
+                """, params, rs -> rs.next()
+                ? new OverrideInfo(
+                        true,
+                        blankToNull(rs.getString("analyst_updated_by")),
+                        getInstant(rs, "analyst_updated_at"))
+                : OverrideInfo.inactive());
+    }
+
+    private String normalizeClusterSourceType(String sourceObjectType) {
+        if (sourceObjectType == null || sourceObjectType.isBlank()) {
+            return null;
+        }
+        return switch (sourceObjectType) {
+            case "CLUSTER_DISCOVERY_MODEL", "DISCOVERY_MODEL" -> "DISCOVERY_MODEL";
+            case "CLUSTER_PACKAGE_PATTERN", "PACKAGE_PATTERN" -> "PACKAGE_PATTERN";
+            default -> null;
+        };
+    }
+
     private Map<String, Object> parseEvidence(String evidenceJson) {
         if (evidenceJson == null || evidenceJson.isBlank()) {
             return Map.of();
@@ -749,6 +891,16 @@ public class OperationalQualityReadService {
             String whereClause,
             MapSqlParameterSource params
     ) {
+    }
+
+    private record OverrideInfo(
+            boolean active,
+            String actor,
+            Instant at
+    ) {
+        private static OverrideInfo inactive() {
+            return new OverrideInfo(false, null, null);
+        }
     }
 
     /** Lightweight projection used by OperationsOverrideController to resolve issue → source IDs. */

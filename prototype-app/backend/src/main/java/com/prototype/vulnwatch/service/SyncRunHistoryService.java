@@ -106,7 +106,10 @@ public class SyncRunHistoryService {
 
     private boolean isInventoryRunType(String syncType) {
         String normalizedType = safe(syncType).toUpperCase(Locale.ROOT);
-        return normalizedType.startsWith("GITHUB_") || "SERVICENOW_CMDB".equals(normalizedType);
+        return normalizedType.startsWith("GITHUB_")
+                || "SERVICENOW_CMDB".equals(normalizedType)
+                || "SCCM_CMDB".equals(normalizedType)
+                || "AWS_DISCOVERY".equals(normalizedType);
     }
 
     private String normalizeCategory(String category) {

@@ -29,6 +29,12 @@ export type HostAssetSummary = {
   state?: string;
   lastInventoryAt?: string;
   lastCmdbSyncAt?: string;
+  ssmManaged?: boolean;
+  ssmPingStatus?: string;
+  ssmLastPingAt?: string;
+  ssmInventoryAvailable?: boolean;
+  ssmInventoryLastCapturedAt?: string;
+  missingIamInstanceProfile?: boolean;
   aliasCount: number;
   installedSoftwareCount: number;
   openFindingCount: number;
