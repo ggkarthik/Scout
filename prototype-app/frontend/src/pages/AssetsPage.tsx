@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
 import type {
+  ServiceNowCmdbAuthType,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
   ServiceNowCmdbConnectionTest,
