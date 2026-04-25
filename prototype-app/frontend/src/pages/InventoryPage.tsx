@@ -359,12 +359,17 @@ export function InventoryPage(_: Props) {
 
   const hostDetailsQuery = useQuery({
     queryKey: ['inventory-host-assets-detail', hostAssets.map((asset) => asset.id)],
-    queryFn: async () => Promise.all(
-      hostAssets.map(async (asset) => ({
-        asset,
-        detail: await api.getHostAssetDetail(asset.id)
-      }))
-    ),
+    queryFn: async () => {
+      const results = await Promise.allSettled(
+        hostAssets.map(async (asset) => ({
+          asset,
+          detail: await api.getHostAssetDetail(asset.id)
+        }))
+      );
+      return results
+        .filter((r): r is PromiseFulfilledResult<{ asset: Asset; detail: HostAssetDetail }> => r.status === 'fulfilled')
+        .map((r) => r.value);
+    },
     enabled: hostAssets.length > 0
   });
 

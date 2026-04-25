@@ -91,7 +91,7 @@ export type IngestionEvidence = {
   evidenceJson?: string;
 };
 export type CmdbAssetRecord = {
-  assetType: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
+  assetType: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE' | 'CLOUD_RESOURCE';
   assetName: string;
   assetIdentifier: string;
   serviceName?: string;
@@ -269,6 +269,81 @@ export type VulnerabilitySourceFilterConfigRequest = {
   severity?: string;
   cvssScore?: number;
   cvss3Score?: number;
+};
+
+// ── AWS Cloud Discovery ────────────────────────────────────────────────────────
+
+export type AwsAuthType = 'INSTANCE_METADATA' | 'ACCESS_KEY' | 'CROSS_ACCOUNT_ROLE';
+
+export type AwsDiscoveryConfig = {
+  id?: string;
+  sourceSystem: string;
+  configured: boolean;
+  authType: AwsAuthType;
+  accessKeyId: string;
+  hasCredential: boolean;
+  crossAccountRoleArn: string;
+  externalId: string;
+  awsAccountId?: string;
+  regionsJson: string;
+  resourceTypesJson: string;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: number;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+  lastSyncAt?: string;
+};
+
+export type AwsDiscoveryConfigRequest = {
+  authType?: AwsAuthType;
+  accessKeyId?: string;
+  credentialSecret?: string;
+  crossAccountRoleArn?: string;
+  externalId?: string;
+  regionsJson?: string;
+  resourceTypesJson?: string;
+  enabled?: boolean;
+  autoSyncEnabled?: boolean;
+  intervalMinutes?: number;
+};
+
+export type AwsDiscoveryTarget = {
+  id: string;
+  accountId?: string;
+  accountName?: string;
+  roleArn?: string;
+  externalId?: string;
+  enabled: boolean;
+  regionsJson: string;
+  resourceTypesJson: string;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+  lastSyncAt?: string;
+  hostCount: number;
+  ssmManagedHostCount: number;
+  missingIamInstanceProfileCount: number;
+  softwareInventoryHostCount: number;
+};
+
+export type AwsDiscoveryTargetRequest = {
+  accountId?: string;
+  accountName?: string;
+  roleArn?: string;
+  externalId?: string;
+  enabled?: boolean;
+  regionsJson?: string;
+  resourceTypesJson?: string;
+};
+
+export type AwsConnectionTestResponse = {
+  status: 'SUCCESS' | 'FAILED';
+  message: string;
+  resolvedAccountId?: string;
+  reachableRegions: string[];
+  testedAt: string;
 };
 
 export type GithubSbomSource = {

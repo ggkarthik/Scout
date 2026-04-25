@@ -379,16 +379,6 @@ function ConnectRoute() {
   );
 }
 
-function matchTabFromInput(value: string, allowedTabs: AppTab[]): AppTab | null {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  const labels = allowedTabs.map((tab) => ({ key: tab, label: titleForTab(tab) }));
-  const exact = labels.find((tab) => tab.label.toLowerCase() === normalized || tab.key.toLowerCase() === normalized);
-  if (exact) return exact.key;
-  const partial = labels.find((tab) => tab.label.toLowerCase().includes(normalized));
-  return partial ? partial.key : null;
-}
-
 function routeLoadingFallback() {
   return (
     <div className="page-grid">

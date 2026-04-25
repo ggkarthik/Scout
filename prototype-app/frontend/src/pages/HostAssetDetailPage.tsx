@@ -592,6 +592,38 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
         </div>
       </div>
 
+      {(hostDetail.host.ssmManaged !== undefined || hostDetail.host.missingIamInstanceProfile !== undefined) && (
+        <div className="host-ownership-bar">
+          <span className="host-ownership-bar-title">SSM</span>
+          <div className="host-ownership-bar-fields">
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Managed</span>
+              <span className="host-ownership-bar-value">{hostDetail.host.ssmManaged ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Ping</span>
+              <span className="host-ownership-bar-value">{hostDetail.host.ssmPingStatus ?? '—'}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Last Ping</span>
+              <span className="host-ownership-bar-value">{formatTimestamp(hostDetail.host.ssmLastPingAt)}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Software Inventory</span>
+              <span className="host-ownership-bar-value">{hostDetail.host.ssmInventoryAvailable ? 'Available' : 'Not available'}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">IAM Profile</span>
+              <span className="host-ownership-bar-value">{hostDetail.host.missingIamInstanceProfile ? 'Missing' : 'Present'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="host-detail-tabs" role="tablist" aria-label="Host detail sections">
         <button
           type="button"
