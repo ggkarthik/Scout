@@ -63,3 +63,18 @@ export function useSccmCmdbConfigQuery() {
     queryFn: api.getSccmCmdbConfig
   });
 }
+
+export function useAwsDiscoveryConfigQuery() {
+  return useQuery({
+    queryKey: ['aws-discovery-config'],
+    queryFn: api.getAwsDiscoveryConfig
+  });
+}
+
+export function useAwsDiscoveryTargetsQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['aws-discovery-targets'],
+    queryFn: api.listAwsDiscoveryTargets,
+    enabled
+  });
+}

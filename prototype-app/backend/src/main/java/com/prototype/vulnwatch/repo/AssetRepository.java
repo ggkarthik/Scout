@@ -34,4 +34,35 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     @Query("select distinct a.assignedTo from Asset a where a.tenant = :tenant and a.assignedTo is not null order by a.assignedTo")
     List<String> findDistinctAssignedToByTenant(@Param("tenant") Tenant tenant);
+
+    @Query("select a from Asset a where a.tenant = :tenant and a.cloudProvider is not null order by a.name")
+    List<Asset> findByTenantAndCloudProviderNotNull(@Param("tenant") Tenant tenant);
+
+    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndType(
+            UUID tenantId,
+            String cloudProvider,
+            String cloudAccountId,
+            com.prototype.vulnwatch.domain.AssetType type
+    );
+
+    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmManagedTrue(
+            UUID tenantId,
+            String cloudProvider,
+            String cloudAccountId,
+            com.prototype.vulnwatch.domain.AssetType type
+    );
+
+    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndMissingIamInstanceProfileTrue(
+            UUID tenantId,
+            String cloudProvider,
+            String cloudAccountId,
+            com.prototype.vulnwatch.domain.AssetType type
+    );
+
+    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmInventoryAvailableTrue(
+            UUID tenantId,
+            String cloudProvider,
+            String cloudAccountId,
+            com.prototype.vulnwatch.domain.AssetType type
+    );
 }

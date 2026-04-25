@@ -7,10 +7,10 @@ import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
-import { VulnIntelConfigPage } from './VulnIntelConfigPage';
+import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
 import { api } from '../api/client';
 import type { VulnIntelSourcesSummary } from '../api/client';
-import type { ServiceNowCmdbConfig, SccmCmdbConfig } from '../features/connect/types';
+import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
 
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
@@ -29,6 +29,7 @@ type ConnectorId =
   | 'sbom-github'
   | 'servicenow-cmdb'
   | 'sccm-cmdb'
+  | 'aws-discovery'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -71,6 +72,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'SCCM / MECM',
     summary: 'Ingest hardware asset and installed software inventory from Microsoft Endpoint Configuration Manager (SCCM/MECM) via direct SQL Server connection.',
     icon: '🖥️'
+  },
+  {
+    id: 'aws-discovery',
+    name: 'AWS Cloud Discovery',
+    summary: 'Discover EC2 compute instances from AWS accounts and ingest SSM package inventory into Host Inventory.',
+    icon: '☁️'
   },
   {
     id: 'nvd-api',
@@ -126,11 +133,20 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
   'endoflife-date'
 ];
 
-const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
+const CMDB_CONNECTOR_IDS: ConnectorId[] = [
   'sbom-endpoint',
   'sbom-github',
   'servicenow-cmdb',
   'sccm-cmdb'
+];
+
+const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
+  'aws-discovery'
+];
+
+const INVENTORY_SOURCE_CONNECTOR_IDS: ConnectorId[] = [
+  ...CMDB_CONNECTOR_IDS,
+  ...CLOUD_CONNECTOR_IDS
 ];
 
 function isConnectorId(value: string | null): value is ConnectorId {
@@ -150,7 +166,7 @@ type ConnectorDetailsProps = {
   vulnSummary?: VulnIntelSourcesSummary | null;
 };
 
-function ConnectorDetailContent({ connectorId, vulnSummary }: ConnectorDetailsProps) {
+function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   if (connectorId === 'sbom-endpoint') {
     return (
       <IngestionPage
@@ -169,15 +185,65 @@ function ConnectorDetailContent({ connectorId, vulnSummary }: ConnectorDetailsPr
       />
     );
   }
-  if (
-    connectorId === 'nvd-api' ||
-    connectorId === 'cisa-kev' ||
-    connectorId === 'ghsa-feed' ||
-    connectorId === 'microsoft-csaf-vex' ||
-    connectorId === 'redhat-csaf-vex' ||
-    connectorId === 'advisory-feed'
-  ) {
-    return <VulnIntelConfigPage vulnSummary={vulnSummary} />;
+  if (connectorId === 'nvd-api') {
+    return (
+      <SourcesPage
+        focusSource="nvd"
+        title="NVD Vulnerability Feed"
+        caption="Configure NVD input filters and run NVD delta or full corpus syncs."
+        showQueue={false}
+      />
+    );
+  }
+  if (connectorId === 'cisa-kev') {
+    return (
+      <SourcesPage
+        focusSource="kev"
+        title="CISA KEV Feed"
+        caption="Configure KEV input filters and run the known-exploited vulnerability feed."
+        showQueue={false}
+      />
+    );
+  }
+  if (connectorId === 'ghsa-feed') {
+    return (
+      <SourcesPage
+        focusSource="ghsa"
+        title="GitHub Advisory Database (GHSA)"
+        caption="Configure GHSA severity filters and run package advisory ingestion."
+        showQueue={false}
+      />
+    );
+  }
+  if (connectorId === 'microsoft-csaf-vex') {
+    return (
+      <SourcesPage
+        focusSource="microsoft-csaf"
+        title="Microsoft CSAF + VEX"
+        caption="Run Microsoft CSAF advisories and VEX applicability ingestion."
+        showQueue={false}
+      />
+    );
+  }
+  if (connectorId === 'redhat-csaf-vex') {
+    return (
+      <SourcesPage
+        focusSource="redhat-csaf"
+        title="Red Hat CSAF + VEX"
+        caption="Configure Red Hat input filters and run CSAF/VEX ingestion."
+        showQueue={false}
+      />
+    );
+  }
+  if (connectorId === 'advisory-feed') {
+    return (
+      <SourcesPage
+        focusSource="advisories"
+        title="Advisory Imports"
+        caption="Import curated advisories and seed demo advisory data."
+        showQueue={false}
+      />
+    );
   }
   if (connectorId === 'endoflife-date') {
     return (
@@ -192,6 +258,9 @@ function ConnectorDetailContent({ connectorId, vulnSummary }: ConnectorDetailsPr
   }
   if (connectorId === 'sccm-cmdb') {
     return <SccmConnectorPage />;
+  }
+  if (connectorId === 'aws-discovery') {
+    return <AwsDiscoveryConnectorPage />;
   }
 
   return (
@@ -218,11 +287,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
   const [snConfig, setSnConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
   const [sccmConfig, setSccmConfig] = React.useState<SccmCmdbConfig | null>(null);
+  const [awsConfig, setAwsConfig] = React.useState<AwsDiscoveryConfig | null>(null);
   const [vulnSummary, setVulnSummary] = React.useState<VulnIntelSourcesSummary | null>(null);
 
   React.useEffect(() => {
     api.getServiceNowCmdbConfig().then(setSnConfig).catch(() => {});
     api.getSccmCmdbConfig().then(setSccmConfig).catch(() => {});
+    api.getAwsDiscoveryConfig().then(setAwsConfig).catch(() => {});
     api.getVulnIntelSourcesSummary().then(setVulnSummary).catch(() => {});
   }, []);
 
@@ -258,21 +329,33 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const vulnerabilityConnectors = CONNECTORS
     .filter((connector) => VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(connector.id));
 
-  const inventoryConnectors = CONNECTORS
-    .filter((connector) => INVENTORY_SOURCE_CONNECTOR_IDS.includes(connector.id));
+  const cmdbConnectors = CONNECTORS
+    .filter((connector) => CMDB_CONNECTOR_IDS.includes(connector.id));
+
+  const cloudConnectors = CONNECTORS
+    .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
 
   const visibleSections = [
     {
-      key: 'inventory' as const,
-      title: 'Inventory Sources',
-      connectors: inventoryConnectors,
-      caption: 'SBOM, CMDB, cloud and platform integrations that ingest asset/component inventory.'
+      key: 'cmdb-sbom' as const,
+      title: 'CMDB & SBOM',
+      connectors: cmdbConnectors,
+      caption: 'SBOM file upload, GitHub, ServiceNow CMDB, and SCCM/MECM inventory sources.',
+      parentTitle: 'Inventory Sources'
+    },
+    {
+      key: 'cloud-sources' as const,
+      title: 'Cloud Sources',
+      connectors: cloudConnectors,
+      caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
+      parentTitle: null
     },
     {
       key: 'vulnerability' as const,
       title: 'Vulnerability Intelligence Sources',
       connectors: vulnerabilityConnectors,
-      caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.'
+      caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.',
+      parentTitle: null
     }
   ];
 
@@ -306,8 +389,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
           <div className="connect-sections-layout">
             {visibleSections.map((section) => (
                 <div key={section.key} className="connect-source-section">
-                  <div className="connect-source-section-head">
-                    <h4>{section.title}</h4>
+                  {section.parentTitle && (
+                    <div className="connect-source-section-head">
+                      <h4>{section.parentTitle}</h4>
+                    </div>
+                  )}
+                  <div className="connect-source-section-head connect-source-section-head--sub">
+                    <h5>{section.title}</h5>
                     <span className="panel-caption">{section.caption}</span>
                   </div>
                   {section.connectors.length === 0 ? (
@@ -332,6 +420,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                         const lastSyncAt =
                           connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt :
                           connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt :
+                          connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt :
                           vulnRun?.completedAt ?? undefined;
 
                         const lastSync = timeAgo(lastSyncAt);
@@ -342,6 +431,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                         const hasSynced =
                           connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt != null :
                           connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt != null :
+                          connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt != null :
                           vulnRun != null && vulnRun.status !== 'never';
 
                         const dotClass = isFailed ? 'connect-source-dot--fail' :

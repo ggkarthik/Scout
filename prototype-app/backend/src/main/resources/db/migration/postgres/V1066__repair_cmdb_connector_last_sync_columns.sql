@@ -1,0 +1,3 @@
+ALTER TABLE IF EXISTS servicenow_cmdb_configs ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ;
+
+ALTER TABLE IF EXISTS sccm_cmdb_configs ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ;
