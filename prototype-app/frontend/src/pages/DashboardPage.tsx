@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   CveInventoryMappingRecord,
   DashboardCveInventoryMap,
@@ -14,6 +15,7 @@ import {
   useDashboardCveInventoryMapQuery,
   useDashboardSummaryQuery
 } from '../features/dashboard/queries';
+import { pathForConnectView } from '../app/routes';
 
 function summarizeList(values: string[], maxItems = 3): string {
   if (!values || values.length === 0) {
@@ -101,8 +103,25 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
   const highConfidenceExposures = data.highConfidenceOpenFindings;
   const securityScore = Math.round(Math.max(0, 100 - (avgRisk / 10) * 100));
 
+  const isFirstRun = data.assets === 0 && data.components === 0 && data.openFindings === 0;
+
   return (
     <div className="page-grid">
+      {isFirstRun && (
+        <div className="first-run-banner">
+          <div className="first-run-banner-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </div>
+          <div className="first-run-banner-body">
+            <strong>Welcome to Scout.ai</strong>
+            <p>No inventory data has been ingested yet. Connect a data source to start discovering vulnerabilities across your software stack.</p>
+            <div className="first-run-banner-actions">
+              <Link to={pathForConnectView('sources')} className="btn btn-primary">Configure Sources</Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="stats-grid">
         <StatCard title="Assets" value={data.assets} />
         <StatCard title="Installed Components" value={data.components} />

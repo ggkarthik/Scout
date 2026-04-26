@@ -501,6 +501,13 @@
   flex: 1;
 }
 
+.fpl-th-info {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: help;
+  flex-shrink: 0;
+}
+
 .fpl-th-icons {
   display: flex;
   align-items: center;

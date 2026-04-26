@@ -543,31 +543,37 @@ export function AwsDiscoveryConnectorPage() {
       {/* ── SECTION 2: Regions ── */}
       <div className="form-section">
         <h4 className="form-section-title">Regions</h4>
-        <div className="form-grid">
-          <label>
-            <span>
-              AWS Regions <span className="sn-required">*</span>{' '}
-              <Tooltip text="Hold Ctrl / Cmd to select multiple regions. At least one region is required." />
-            </span>
-            <select
-              multiple
-              size={Math.min(AWS_REGIONS.length, 8)}
-              value={selectedRegions}
-              onChange={(e) => {
-                const chosen = Array.from(e.target.selectedOptions, (o) => o.value);
-                if (chosen.length > 0) setSelectedRegions(chosen);
-              }}
-              style={{ height: 'auto' }}
-            >
-              {AWS_REGIONS.map((region) => (
-                <option key={region} value={region}>{region}</option>
-              ))}
-            </select>
-            <span className="panel-caption" style={{ marginTop: 4, display: 'block' }}>
-              Selected: {selectedRegions.join(', ') || '—'}
-            </span>
-          </label>
-        </div>
+        <fieldset className="aws-region-fieldset">
+          <legend className="aws-region-legend">
+            AWS Regions <span className="sn-required">*</span>{' '}
+            <Tooltip text="Select one or more AWS regions to discover resources in." />
+          </legend>
+          <div className="aws-region-actions">
+            <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([...AWS_REGIONS])}>Select all</button>
+            <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([AWS_REGIONS[0]])}>Clear</button>
+          </div>
+          <div className="aws-region-grid">
+            {AWS_REGIONS.map((region) => (
+              <label key={region} className="aws-region-checkbox">
+                <input
+                  type="checkbox"
+                  checked={selectedRegions.includes(region)}
+                  onChange={(e) => {
+                    setSelectedRegions((prev) => {
+                      if (e.target.checked) return [...prev, region];
+                      const next = prev.filter((r) => r !== region);
+                      return next.length > 0 ? next : prev;
+                    });
+                  }}
+                />
+                <span>{region}</span>
+              </label>
+            ))}
+          </div>
+          <span className="panel-caption" style={{ marginTop: 4, display: 'block' }}>
+            Selected: {selectedRegions.join(', ') || '—'}
+          </span>
+        </fieldset>
       </div>
 
       {/* ── SECTION 4: Sync Settings ── */}
@@ -630,7 +636,7 @@ export function AwsDiscoveryConnectorPage() {
       </div>
 
       {testResult && (
-        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? '' : 'error'}`}>
+        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? 'success' : 'error'}`}>
           <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
           {' — '}{testResult.message}
           {testResult.status === 'SUCCESS' && testResult.reachableRegions.length > 0 && (

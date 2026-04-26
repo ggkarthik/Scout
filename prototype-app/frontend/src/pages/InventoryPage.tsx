@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { FilterValueSelectCard, type FilterValueOption } from '../components/FilterValueSelectCard';
 import { api } from '../api/client';
-import { pathForInventoryHostAsset } from '../app/routes';
+import { pathForInventoryHostAsset, pathForConnectView } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
 import { formatInventorySourceSystem } from '../features/inventory/helpers';
 import {
@@ -728,7 +728,15 @@ export function InventoryPage(_: Props) {
                 {filteredRecords.length === 0 ? (
                   <tr>
                     <td colSpan={10}>
-                      <div className="empty-state"><p>No hosts matched the current filters.</p></div>
+                      {hostRecords.length === 0 ? (
+                        <div className="empty-state">
+                          <strong>No hosts discovered yet</strong>
+                          <p>Connect an inventory source such as SCCM, ServiceNow CMDB, or AWS Cloud Discovery to populate host data.</p>
+                          <Link to={pathForConnectView('sources')} className="btn btn-secondary btn-inline">Configure Sources</Link>
+                        </div>
+                      ) : (
+                        <div className="empty-state"><p>No hosts matched the current filters.</p></div>
+                      )}
                     </td>
                   </tr>
                 ) : paginatedRecords.map((record) => (
