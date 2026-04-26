@@ -1,14 +1,14 @@
 import React from 'react';
 import '../styles/findings-list.css';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { pathForFindingDetail } from '../app/routes';
-import type { Finding } from '../features/findings/types';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { pathForFindingDetail, pathForConnectView } from '../app/routes';
+import type { Finding, FindingBulkWorkflowRequest } from '../features/findings/types';
 import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
-import { apiRequest } from '../api/client';
+import { api, apiRequest } from '../api/client';
 import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -276,6 +276,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     status:   searchParams.getAll('status').length   ? searchParams.getAll('status')   : DEFAULT_COL_FILTERS.status,
     cveId:    searchParams.get('vulnerabilityId') ?? '',
     package:  searchParams.get('packageName') ?? '',
+    asset:    searchParams.get('assetName') ?? '',
   }));
   const [dueDateBand, setDueDateBand] = React.useState<DueDateBand>(null);
   const [openColFilter, setOpenColFilter] = React.useState<ColKey | null>(null);
@@ -506,7 +507,15 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setIncidentAssignmentGroup(''); setIncidentDueDate('');
   }
   async function execAll(payload: Record<string,unknown>) {
-    await Promise.all(selectedFindings.map(f=>updateWorkflow(f.id,payload)));
+    await api.bulkUpdateFindingWorkflow({
+      findingIds: selectedFindings.map(f => f.id),
+      workflowStatus: payload.status as FindingBulkWorkflowRequest['workflowStatus'],
+      assignedTo: payload.assignedTo as string | undefined,
+      dueAt: payload.dueAt as string | undefined,
+      suppressionReason: payload.suppressionReason as string | undefined,
+      suppressedUntil: payload.suppressedUntil as string | undefined,
+      actor: payload.actor as string | undefined,
+    });
     void findingsQuery.refetch(); setSelectedIds(new Set());
   }
   async function handleResolve()     { setActionLoading(true); try { await execAll({status:'RESOLVED',actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
@@ -599,6 +608,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       <th className={`fpl-th${active?' fpl-th--filtered':''}`}>
         <div className="fpl-th-inner">
           <span className="fpl-th-label">{label}</span>
+          {colKey === 'priority' && (
+            <span className="fpl-th-info" title="Scout AI-computed priority score (0\u201310) based on exploitability, SLA proximity, EOL risk, and blast radius">&#9432;</span>
+          )}
           <button className="fpl-filter-btn" title={`Filter ${label}`}
             onClick={e=>{e.stopPropagation();setOpenColFilter(p=>p===colKey?null:colKey);setShowColVis(false);}}>
             <svg viewBox="0 0 12 12" width="11" height="11" fill={active?'var(--accent,#3b82f6)':'currentColor'} aria-hidden>
@@ -615,10 +627,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   function renderCell(row: Finding, key: ColKey): React.ReactNode {
     const now = Date.now();
     if (key==='findingId') return (
-      <button type="button" className="finding-id-link mono"
-        onClick={()=>navigate(pathForFindingDetail(row.displayId||row.id),{state:{finding:row}})}>
+      <Link to={pathForFindingDetail(row.displayId||row.id)} state={{finding:row}} className="finding-id-link mono">
         {row.displayId||row.id}
-      </button>
+      </Link>
     );
     if (key==='cveId') return onOpenCveWorkbench
       ? <button type="button" className="fpl-cve-link" onClick={()=>onOpenCveWorkbench(row.vulnerabilityId)}>{row.vulnerabilityId}</button>
@@ -975,8 +986,18 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <tr><td colSpan={visColDefs.length+1} className="fpl-loading-row">Loading findings…</td></tr>
               ) : rows.length===0 ? (
                 <tr><td colSpan={visColDefs.length+1} className="fpl-empty-row">
-                  No findings matched the current filters.{' '}
-                  {activeChips.length>0 && <button className="fpl-link-btn" onClick={clearAllFilters}>Clear filters</button>}
+                  {(widgetQuery.data?.totalItems ?? 0) === 0 && activeChips.length === 0 ? (
+                    <div className="empty-state-inline">
+                      <strong>No findings yet</strong>
+                      <p>Findings are generated when ingested vulnerabilities are correlated with your software inventory.</p>
+                      <Link to={pathForConnectView('sources')} className="btn btn-secondary btn-inline">Configure Sources</Link>
+                    </div>
+                  ) : (
+                    <>
+                      No findings matched the current filters.{' '}
+                      {activeChips.length>0 && <button className="fpl-link-btn" onClick={clearAllFilters}>Clear filters</button>}
+                    </>
+                  )}
                 </td></tr>
               ) : rows.map(row=>(
                 <tr key={row.id} className={`fpl-tr${selectedIds.has(row.id)?' fpl-tr--selected':''}`} onClick={()=>toggleSelect(row.id)}>

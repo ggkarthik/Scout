@@ -241,6 +241,25 @@ export function pathForConnectView(view: ConnectRouteView): string {
   return `/connect/${normalizeConnectRouteView(view)}`;
 }
 
+export type FindingsFilterParams = {
+  vulnerabilityId?: string;
+  severity?: string[];
+  status?: string[];
+  packageName?: string;
+  assetName?: string;
+};
+
+export function pathForFindingsWithFilters(params?: FindingsFilterParams): string {
+  if (!params) return '/findings';
+  const values: Record<string, RouteSearchValue> = {};
+  if (params.vulnerabilityId) values.vulnerabilityId = params.vulnerabilityId;
+  if (params.severity?.length) values.severity = params.severity;
+  if (params.status?.length) values.status = params.status;
+  if (params.packageName) values.packageName = params.packageName;
+  if (params.assetName) values.assetName = params.assetName;
+  return appendSearchToPath('/findings', values);
+}
+
 export function pathForFindingDetail(displayId: string, returnTo?: string): string {
   const encodedId = encodeURIComponent(displayId);
   if (!returnTo || returnTo.trim().length === 0) {

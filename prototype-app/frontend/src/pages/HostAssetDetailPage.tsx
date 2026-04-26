@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { pathForVulnRepoView } from '../app/routes';
+import { pathForVulnRepoView, pathForFindingsWithFilters } from '../app/routes';
 import { api } from '../api/client';
 import {
   DataTable,
@@ -750,12 +750,23 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
               <p>No findings are currently attached to this host.</p>
             </div>
           ) : (
-            <div id="host-findings" className="table-scroll">
-              <DataTable
-                storageKey="host-detail-findings-table-widths"
-                columns={FINDING_COLUMNS}
-                rows={findingRows}
-              />
+            <div id="host-findings">
+              <div className="host-findings-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => navigate(pathForFindingsWithFilters({ assetName: hostDetail?.host.name ?? undefined }))}
+                >
+                  View all in Findings →
+                </button>
+              </div>
+              <div className="table-scroll">
+                <DataTable
+                  storageKey="host-detail-findings-table-widths"
+                  columns={FINDING_COLUMNS}
+                  rows={findingRows}
+                />
+              </div>
             </div>
           )
         ) : null}

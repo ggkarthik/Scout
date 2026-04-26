@@ -51,10 +51,10 @@ const DOMAIN_DESCRIPTIONS: Record<string, string> = {
 const HIDDEN_DOMAINS = new Set(['INGESTION', 'PROJECTION_FRESHNESS']);
 
 const SEVERITY_CLASS: Record<string, string> = {
-  CRITICAL: 'quality-severity quality-severity-critical',
-  HIGH: 'quality-severity quality-severity-high',
-  MEDIUM: 'quality-severity quality-severity-medium',
-  LOW: 'quality-severity quality-severity-low'
+  CRITICAL: 'severity-pill severity-critical',
+  HIGH: 'severity-pill severity-high',
+  MEDIUM: 'severity-pill severity-medium',
+  LOW: 'severity-pill severity-low'
 };
 
 function formatLabel(value: string): string {
