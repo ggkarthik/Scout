@@ -3,6 +3,8 @@ import type {
   RiskPolicy
 } from '../features/configurations/types';
 import type {
+  FindingBulkWorkflowRequest,
+  FindingBulkWorkflowResponse,
   FindingFilterValues,
   FindingPage
 } from '../features/findings/types';
@@ -492,6 +494,11 @@ export const api = {
   cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
     method: 'POST'
   }),
+  bulkUpdateFindingWorkflow: (payload: FindingBulkWorkflowRequest) =>
+    request<FindingBulkWorkflowResponse>('/findings/bulk-workflow', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
   getVulnIntelSourcesSummary: () => request<VulnIntelSourcesSummary>('/sync-runs/sources-summary'),
   syncNvd: (lookbackHours = 24) => request<SyncTriggerResponse>(`/ingestion/nvd-sync?lookbackHours=${lookbackHours}`, { method: 'POST' }),
   syncNvdFull: (payload?: { apiKey?: string }) => request<SyncTriggerResponse>('/ingestion/nvd-full-sync', {

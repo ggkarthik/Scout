@@ -374,7 +374,7 @@ export function SccmConnectorPage() {
       </div>
 
       {testResult && (
-        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? '' : 'error'}`}>
+        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? 'success' : 'error'}`}>
           <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
           {' — '}{testResult.message}
           <span className="sn-table-checks">

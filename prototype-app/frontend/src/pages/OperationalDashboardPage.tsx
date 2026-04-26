@@ -823,6 +823,10 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
 
   return (
     <OperationsSectionErrorBoundary viewKey={normalizedView}>
+      <div className="ops-context-bar">
+        <span className="ops-context-label">Operations</span>
+        <span className="ops-context-view">{normalizedView === 'pipeline' ? 'Pipeline Analytics' : 'Platform Health'}</span>
+      </div>
       {content}
     </OperationsSectionErrorBoundary>
   );

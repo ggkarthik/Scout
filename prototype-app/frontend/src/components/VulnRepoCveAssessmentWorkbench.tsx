@@ -4,7 +4,7 @@ import { CveRiskScorePanel } from './CveRiskScorePanel';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from './CVEInvestigationSummary';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
-import { pathForFindingDetail, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
+import { pathForFindingDetail, pathForFindingsWithFilters, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
 import { cveWorkbenchApi, type AiSolutionData, type AiRequiredAction } from '../features/cve-workbench/api';
 import { api } from '../api/client';
 import { buildAssetRowsFromMatchedSoftware, type DerivedAssetRow } from '../features/cve-workbench/asset-report';
@@ -3613,7 +3613,7 @@ function CveOverviewExperience({
                               {displaySoftwareCount} software →
                             </button>
                           )}
-                          <button type="button" className="cvd-metric-link-sm" onClick={() => navigate(`/findings?vulnerabilityId=${encodeURIComponent(item.externalId)}`)}>
+                          <button type="button" className="cvd-metric-link-sm" onClick={() => navigate(pathForFindingsWithFilters({ vulnerabilityId: item.externalId, severity: item.severity ? [item.severity.toUpperCase()] : undefined }))}>
                             {item.openFindings} open findings →
                           </button>
                         </div>

@@ -243,6 +243,54 @@
   border-bottom: none;
 }
 
+.aws-region-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin: 0;
+}
+
+.aws-region-legend {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--title);
+  padding: 0 6px;
+}
+
+.aws-region-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--space-2);
+}
+
+.aws-region-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px 16px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.aws-region-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.aws-region-checkbox input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.aws-region-checkbox:hover {
+  color: var(--title);
+}
+
 .section-tab-row {
   display: flex;
   flex-wrap: wrap;
@@ -1204,6 +1252,10 @@ table {
   background: var(--panel-solid);
 }
 
+.data-table {
+  table-layout: fixed;
+}
+
 tr.table-row-selected {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
@@ -1319,28 +1371,39 @@ th {
 .severity-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 28px;
+  min-width: 74px;
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 0.74rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  border: 1px solid currentColor;
+  border: 1px solid transparent;
 }
 
 .severity-critical {
+  background: color-mix(in srgb, var(--critical) 18%, transparent);
+  border-color: color-mix(in srgb, var(--critical) 38%, transparent);
   color: var(--critical);
 }
 
 .severity-high {
+  background: color-mix(in srgb, var(--high) 18%, transparent);
+  border-color: color-mix(in srgb, var(--high) 38%, transparent);
   color: var(--high);
 }
 
 .severity-medium {
+  background: color-mix(in srgb, var(--medium) 18%, transparent);
+  border-color: color-mix(in srgb, var(--medium) 38%, transparent);
   color: var(--medium);
 }
 
 .severity-low {
+  background: color-mix(in srgb, var(--low) 18%, transparent);
+  border-color: color-mix(in srgb, var(--low) 38%, transparent);
   color: var(--low);
 }
 

@@ -44,8 +44,100 @@ type ConnectorDefinition = {
   id: ConnectorId;
   name: string;
   summary: string;
-  icon: string;
+  icon: React.ReactNode;
 };
+
+/* ── Inline SVG connector icons ─────────────────────────────────────────────
+   Cross-platform consistent icons replacing OS-dependent emoji.
+   Each icon is 20×20, stroke-based, using currentColor for theme support. */
+
+const IconGlobe = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="10" r="8" />
+    <ellipse cx="10" cy="10" rx="4" ry="8" />
+    <path d="M2.5 10h15" />
+    <path d="M3.5 5.5h13" />
+    <path d="M3.5 14.5h13" />
+  </svg>
+);
+
+const IconGitHub = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M10 1.5a8.5 8.5 0 0 0-2.69 16.56c.43.08.58-.18.58-.4v-1.51c-2.37.52-2.87-1.01-2.87-1.01a2.26 2.26 0 0 0-.95-1.25c-.77-.53.06-.52.06-.52a1.8 1.8 0 0 1 1.31.88 1.82 1.82 0 0 0 2.49.71 1.82 1.82 0 0 1 .54-1.14c-1.89-.22-3.88-.95-3.88-4.22a3.3 3.3 0 0 1 .88-2.29 3.07 3.07 0 0 1 .08-2.26s.72-.23 2.35.88a8.1 8.1 0 0 1 4.28 0c1.63-1.1 2.35-.88 2.35-.88a3.07 3.07 0 0 1 .08 2.26 3.3 3.3 0 0 1 .88 2.29c0 3.28-2 4-3.9 4.21a2.04 2.04 0 0 1 .58 1.58v2.35c0 .22.15.49.59.4A8.5 8.5 0 0 0 10 1.5Z" />
+  </svg>
+);
+
+const IconServiceNow = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="3" width="12" height="14" rx="2" />
+    <path d="M7 7h6" />
+    <path d="M7 10h6" />
+    <path d="M7 13h4" />
+  </svg>
+);
+
+const IconDesktop = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="3" width="16" height="11" rx="2" />
+    <path d="M7 17h6" />
+    <path d="M10 14v3" />
+  </svg>
+);
+
+const IconCloud = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5.5 15.5a3.5 3.5 0 0 1-.4-6.97 5.5 5.5 0 0 1 10.64 1.22A3 3 0 0 1 15 15.5H5.5Z" />
+  </svg>
+);
+
+const IconShield = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 2 4 5v4.5c0 4.14 2.56 7.02 6 8.5 3.44-1.48 6-4.36 6-8.5V5l-6-3Z" />
+    <path d="M7.5 10l2 2 3.5-4" />
+  </svg>
+);
+
+const IconWarning = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 3 2 17h16L10 3Z" />
+    <path d="M10 8v4" />
+    <circle cx="10" cy="14.5" r="0.5" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const IconWindow = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="14" height="14" rx="2" />
+    <path d="M3 7h14" />
+    <path d="M10 7v10" />
+  </svg>
+);
+
+const IconHat = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 14c0-2 3.13-5 7-5s7 3 7 5" />
+    <ellipse cx="10" cy="14" rx="8" ry="2.5" />
+    <path d="M6 9.5C6 7.5 7.8 5 10 5s4 2.5 4 4.5" />
+  </svg>
+);
+
+const IconBrain = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 17V8" />
+    <path d="M7 4a3 3 0 0 0-3 3c0 1.1.6 2 1.5 2.5a3 3 0 0 0 1 5.5" />
+    <path d="M13 4a3 3 0 0 1 3 3c0 1.1-.6 2-1.5 2.5a3 3 0 0 1-1 5.5" />
+    <path d="M7 4c0-1.1.9-2 2-2h2c1.1 0 2 .9 2 2" />
+  </svg>
+);
+
+const IconCalendar = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="14" height="13" rx="2" />
+    <path d="M3 8h14" />
+    <path d="M7 2v4" />
+    <path d="M13 2v4" />
+  </svg>
+);
 
 const CONNECT_SOURCE_QUERY_KEY = 'connectSource';
 const CONNECTORS: ConnectorDefinition[] = [
@@ -53,73 +145,73 @@ const CONNECTORS: ConnectorDefinition[] = [
     id: 'sbom-endpoint',
     name: 'SBOM API Endpoint',
     summary: 'Pull SBOM JSON from authenticated API endpoints.',
-    icon: '🌐'
+    icon: IconGlobe
   },
   {
     id: 'sbom-github',
     name: 'GitHub SBOM',
     summary: 'Run repository or GHCR SBOM ingestion and manage reusable GitHub ingestion pipelines.',
-    icon: '🐙'
+    icon: IconGitHub
   },
   {
     id: 'servicenow-cmdb',
     name: 'ServiceNow CMDB',
     summary: 'Pull host inventory from ServiceNow Table APIs and review ingestion history in Connect.',
-    icon: '🧾'
+    icon: IconServiceNow
   },
   {
     id: 'sccm-cmdb',
     name: 'SCCM / MECM',
     summary: 'Ingest hardware asset and installed software inventory from Microsoft Endpoint Configuration Manager (SCCM/MECM) via direct SQL Server connection.',
-    icon: '🖥️'
+    icon: IconDesktop
   },
   {
     id: 'aws-discovery',
     name: 'AWS Cloud Discovery',
     summary: 'Discover EC2 compute instances from AWS accounts and ingest SSM package inventory into Host Inventory.',
-    icon: '☁️'
+    icon: IconCloud
   },
   {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
     summary: '',
-    icon: '🛡️'
+    icon: IconShield
   },
   {
     id: 'cisa-kev',
     name: 'CISA KEV Feed',
     summary: 'Ingest known-exploited vulnerabilities and update prioritization.',
-    icon: '⚠️'
+    icon: IconWarning
   },
   {
     id: 'ghsa-feed',
     name: 'GitHub Advisory Database (GHSA)',
     summary: 'Ingest GHSA advisories with package-version applicability for correlation.',
-    icon: '🐙'
+    icon: IconGitHub
   },
   {
     id: 'microsoft-csaf-vex',
     name: 'Microsoft CSAF + VEX',
     summary: 'Ingest Microsoft CSAF advisories and VEX applicability data.',
-    icon: '🪟'
+    icon: IconWindow
   },
   {
     id: 'redhat-csaf-vex',
     name: 'Red Hat CSAF + VEX',
     summary: 'Ingest Red Hat CSAF advisories and VEX applicability data.',
-    icon: '🎩'
+    icon: IconHat
   },
   {
     id: 'advisory-feed',
     name: 'Advisory Imports',
     summary: 'Import curated advisories for package and product mappings.',
-    icon: '🧠'
+    icon: IconBrain
   },
   {
     id: 'endoflife-date',
     name: 'endoflife.date EOL Feed',
     summary: 'Run endoflife.date catalog, release, mapping, and denormalization jobs.',
-    icon: '📅'
+    icon: IconCalendar
   }
 ];
 
@@ -333,24 +425,21 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const visibleSections = [
     {
       key: 'cmdb-sbom' as const,
-      title: 'CMDB & SBOM',
+      title: 'Inventory — CMDB & SBOM',
       connectors: cmdbConnectors,
       caption: 'SBOM file upload, GitHub, ServiceNow CMDB, and SCCM/MECM inventory sources.',
-      parentTitle: 'Inventory Sources'
     },
     {
       key: 'cloud-sources' as const,
-      title: 'Cloud Sources',
+      title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
       caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
-      parentTitle: null
     },
     {
       key: 'vulnerability' as const,
       title: 'Vulnerability Intelligence Sources',
       connectors: vulnerabilityConnectors,
       caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.',
-      parentTitle: null
     }
   ];
 
@@ -384,13 +473,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
           <div className="connect-sections-layout">
             {visibleSections.map((section) => (
                 <div key={section.key} className="connect-source-section">
-                  {section.parentTitle && (
-                    <div className="connect-source-section-head">
-                      <h4>{section.parentTitle}</h4>
-                    </div>
-                  )}
-                  <div className="connect-source-section-head connect-source-section-head--sub">
-                    <h5>{section.title}</h5>
+                  <div className="connect-source-section-head">
+                    <h4>{section.title}</h4>
                     <span className="panel-caption">{section.caption}</span>
                   </div>
                   {section.connectors.length === 0 ? (

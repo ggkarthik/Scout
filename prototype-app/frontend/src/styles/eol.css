@@ -684,42 +684,6 @@
   color: var(--accent);
 }
 
-.quality-severity {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 74px;
-  border-radius: 999px;
-  padding: 5px 10px;
-  border: 1px solid transparent;
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.quality-severity-critical {
-  background: color-mix(in srgb, var(--critical) 18%, transparent);
-  border-color: color-mix(in srgb, var(--critical) 38%, transparent);
-  color: color-mix(in srgb, var(--critical) 82%, var(--text));
-}
-
-.quality-severity-high {
-  background: color-mix(in srgb, #f97316 18%, transparent);
-  border-color: color-mix(in srgb, #f97316 40%, transparent);
-  color: color-mix(in srgb, #f97316 82%, var(--text));
-}
-
-.quality-severity-medium {
-  background: color-mix(in srgb, #facc15 18%, transparent);
-  border-color: color-mix(in srgb, #facc15 42%, transparent);
-  color: color-mix(in srgb, #eab308 80%, var(--text));
-}
-
-.quality-severity-low {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-  color: color-mix(in srgb, var(--accent) 78%, var(--text));
-}
 
 .quality-pagination {
   display: flex;
