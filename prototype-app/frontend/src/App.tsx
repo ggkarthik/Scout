@@ -5,17 +5,30 @@ import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './ap
 import {
   activeTabForPath,
   buildLegacyCompatiblePath,
+  CONNECT_DEFAULT_VIEW,
   normalizeConnectRouteView,
   normalizeInventoryRouteView,
   normalizeOperationsRouteView,
+  normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryView,
   pathForOperationsView,
+  pathForPlatformView,
   pathForTab,
   pathForVulnRepoView,
   titleForTab
 } from './app/routes';
-import { ActorProvider } from './features/auth/provider';
+import { clearStoredAuthToken, setStoredAuthToken } from './api/client';
+import { ActorContextState, useActor } from './features/auth/context';
+import { useActorQuery } from './features/auth/queries';
+import {
+  canAccessPlatformConsole,
+  canManageInventorySources,
+  canManageRiskPolicy,
+  canManageTenant,
+  canRunSecurityWorkflow,
+  canViewReadOnly
+} from './features/auth/roles';
 import './styles/index.css';
 import './styles/finding-detail.css';
 
@@ -73,19 +86,17 @@ const ConnectPage = React.lazy(async () => ({
 const ConfigurationsPage = React.lazy(async () => ({
   default: (await import('./pages/ConfigurationsPage')).ConfigurationsPage
 }));
+const UserManagementPage = React.lazy(async () => ({
+  default: (await import('./pages/UserManagementPage')).UserManagementPage
+}));
+const PlatformConsolePage = React.lazy(async () => ({
+  default: (await import('./pages/PlatformConsolePage')).PlatformConsolePage
+}));
 
 type Theme = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'scoutai-theme';
-const PRIMARY_NAV_TABS: AppTab[] = [
-  'dashboard',
-  'findings',
-  'operations',
-  'vuln-repo',
-  'inventory',
-  'end-of-life'
-];
-const BOTTOM_NAV_TABS: AppTab[] = ['connect', 'configurations'];
+const BOTTOM_NAV_TABS: AppTab[] = [];
 const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: InventoryViewKey; label: string }> }> = [
   {
     title: 'Summary',
@@ -193,6 +204,24 @@ function TabIcon({ tab }: { tab: AppTab }) {
       </svg>
     );
   }
+  if (tab === 'platform') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3 4.5 6.8v5.6c0 4 3 6.8 7.5 8.6 4.5-1.8 7.5-4.6 7.5-8.6V6.8z" />
+        <path d="M9 12h6" />
+        <path d="M12 9v6" />
+      </svg>
+    );
+  }
+  if (tab === 'admin') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M16.5 8.5a4.5 4.5 0 0 1-9 0 4.5 4.5 0 0 1 9 0Z" />
+        <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+        <path d="M18.5 4.5 20 6l2.2-2.5" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 3.5v9.2" />
@@ -216,6 +245,15 @@ function MoonIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9.7 3.4h4.6l.5 2.4c.5.2 1 .4 1.4.8l2.3-.8 2.3 4-1.8 1.6v1.2l1.8 1.6-2.3 4-2.3-.8c-.4.3-.9.6-1.4.8l-.5 2.4H9.7l-.5-2.4c-.5-.2-1-.5-1.4-.8l-2.3.8-2.3-4L5 12.6v-1.2L3.2 9.8l2.3-4 2.3.8c.4-.3.9-.6 1.4-.8z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
@@ -379,6 +417,21 @@ function ConnectRoute() {
   );
 }
 
+function PlatformRoute() {
+  const actor = useActor();
+  const params = useParams<{ platformView?: string }>();
+  if (!canAccessPlatformConsole(actor)) {
+    return (
+      <section className="panel">
+        <div className="notice error" role="alert">
+          Platform console access requires the Platform Owner role.
+        </div>
+      </section>
+    );
+  }
+  return <PlatformConsolePage selectedView={normalizePlatformRouteView(params.platformView)} />;
+}
+
 function routeLoadingFallback() {
   return (
     <div className="page-grid">
@@ -389,18 +442,86 @@ function routeLoadingFallback() {
   );
 }
 
-export default function App() {
+function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
+  const actorQuery = useActorQuery();
+  const [tokenInput, setTokenInput] = React.useState('');
+
+  const submitToken = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStoredAuthToken(tokenInput);
+    void actorQuery.refetch();
+  };
+
+  const clearToken = () => {
+    clearStoredAuthToken();
+    setTokenInput('');
+    void actorQuery.refetch();
+  };
+
+  if (actorQuery.isLoading || actorQuery.isFetching && !actorQuery.data) {
+    return routeLoadingFallback();
+  }
+
+  if (actorQuery.isError || !actorQuery.data) {
+    return (
+      <div className="auth-gate">
+        <section className="panel auth-gate-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Sign In Required</h3>
+              <div className="panel-caption">VulnWatch uses your authenticated identity, tenant, and role before loading customer data.</div>
+            </div>
+          </div>
+          <form className="auth-token-form" onSubmit={submitToken}>
+            <label>
+              Bearer token
+              <input
+                type="password"
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
+                placeholder="Paste a pre-prod or development JWT"
+                autoComplete="off"
+              />
+            </label>
+            <div className="button-row">
+              <button type="submit" className="btn btn-primary" disabled={tokenInput.trim().length === 0}>
+                Continue
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={clearToken}>
+                Clear token
+              </button>
+            </div>
+          </form>
+          {actorQuery.error instanceof Error && (
+            <div className="notice error" role="alert">
+              {actorQuery.error.message}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <ActorContextState.Provider value={actorQuery.data}>
+      {children}
+    </ActorContextState.Provider>
+  );
+}
+
+function AppShell() {
+  const actor = useActor();
   const location = useLocation();
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
 
   const activeTab = activeTabForPath(location.pathname);
-  const activeTitle = titleForTab(activeTab);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
@@ -412,6 +533,17 @@ export default function App() {
     : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
       : 'dashboard';
+  const visiblePrimaryNavTabs = React.useMemo(() => {
+    const tabs: AppTab[] = ['dashboard'];
+    if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
+      tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
+    }
+    if (canAccessPlatformConsole(actor)) {
+      tabs.push('operations');
+    }
+    return tabs;
+  }, [actor]);
+
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -419,6 +551,7 @@ export default function App() {
 
   React.useEffect(() => {
     setNavOpen(false);
+    setSettingsMenuOpen(false);
   }, [location.pathname]);
 
 
@@ -477,6 +610,18 @@ export default function App() {
     }
   };
 
+  const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
+  const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
+  const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
+
+  const pageTitle = React.useMemo(() => {
+    if (activeTab === 'admin') return 'Tenant Administration';
+    if (activeTab === 'connect') return 'Inventory Source Settings';
+    if (activeTab === 'configurations') return 'Tenant Configuration';
+    if (activeTab === 'platform') return 'Platform Console';
+    return titleForTab(activeTab);
+  }, [activeTab]);
+
   const renderNavButton = (tab: AppTab): React.ReactNode => (
     <button
       key={tab}
@@ -491,7 +636,7 @@ export default function App() {
   );
 
   return (
-    <ActorProvider>
+    <>
       <LegacyQueryRedirect />
       <div className="app-shell">
         <aside className={navOpen ? 'sidebar open' : 'sidebar'}>
@@ -501,7 +646,7 @@ export default function App() {
           </div>
 
           <div className="nav-main-section">
-            {PRIMARY_NAV_TABS.map((tab) => {
+            {visiblePrimaryNavTabs.map((tab) => {
               if (tab === 'operations') {
                 return (
                   <div
@@ -612,15 +757,79 @@ export default function App() {
           <header className="topbar">
             <div className="topbar-copy">
               <div className="eyebrow">Enterprise Vulnerability Operations</div>
-              <h1>{activeTitle}</h1>
+              <h1>{pageTitle}</h1>
             </div>
             <div className="topbar-actions">
+              <div className="tenant-context-pill" title={`${actorLabel} · ${displayRole}`}>
+                <span>{tenantLabel}</span>
+                <small>{displayRole}</small>
+              </div>
               <button
                 className="btn btn-secondary nav-toggle"
                 onClick={() => setNavOpen((current) => !current)}
               >
                 {navOpen ? 'Close Menu' : 'Menu'}
               </button>
+              <div className="settings-menu-wrap">
+                <button
+                  className={settingsMenuOpen || ['admin', 'connect', 'configurations', 'platform'].includes(activeTab) ? 'btn btn-secondary theme-icon-btn active' : 'btn btn-secondary theme-icon-btn'}
+                  onClick={() => setSettingsMenuOpen((open) => !open)}
+                  aria-label="Open settings menu"
+                  aria-expanded={settingsMenuOpen}
+                  title="Settings"
+                >
+                  <SettingsIcon />
+                </button>
+                {settingsMenuOpen && (
+                  <div className="settings-menu" role="menu">
+                    <div className="settings-menu-header">
+                      <div className="brand-mark settings-menu-mark">SA</div>
+                      <strong>Settings</strong>
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-menu-item"
+                      role="menuitem"
+                      onClick={() => navigate('/admin/users')}
+                      disabled={!canManageTenant(actor)}
+                    >
+                      <span>Tenant Administration</span>
+                      <small>Users, roles, service accounts and audit</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-menu-item"
+                      role="menuitem"
+                      onClick={() => navigate(pathForConnectView(CONNECT_DEFAULT_VIEW))}
+                      disabled={!canManageInventorySources(actor)}
+                    >
+                      <span>Inventory Sources</span>
+                      <small>Customer-owned connectors and ingestion queues</small>
+                    </button>
+                    {canAccessPlatformConsole(actor) && (
+                      <button
+                        type="button"
+                        className="settings-menu-item"
+                        role="menuitem"
+                        onClick={() => navigate(pathForPlatformView('tenants'))}
+                      >
+                        <span>Platform Console</span>
+                        <small>Tenants, central feeds and support access</small>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="settings-menu-item"
+                      role="menuitem"
+                      onClick={() => navigate('/configurations')}
+                      disabled={!canManageRiskPolicy(actor)}
+                    >
+                      <span>Tenant Configuration</span>
+                      <small>Risk policy, SLA and workflow automation</small>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 className="btn btn-secondary theme-icon-btn"
                 onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
@@ -667,6 +876,8 @@ export default function App() {
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EolPage />} />
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />
+              <Route path="/admin/:adminView?" element={<UserManagementPage />} />
+              <Route path="/platform/:platformView?" element={<PlatformRoute />} />
               <Route path="/configurations" element={<ConfigurationsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -675,6 +886,14 @@ export default function App() {
 
         {navOpen && <button type="button" className="mobile-nav-backdrop" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
       </div>
-    </ActorProvider>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthSessionBoundary>
+      <AppShell />
+    </AuthSessionBoundary>
   );
 }

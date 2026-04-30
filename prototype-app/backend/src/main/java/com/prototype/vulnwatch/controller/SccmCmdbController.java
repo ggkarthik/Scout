@@ -5,9 +5,11 @@ import com.prototype.vulnwatch.dto.SccmCmdbConfigRequest;
 import com.prototype.vulnwatch.dto.SccmCmdbConfigResponse;
 import com.prototype.vulnwatch.dto.SccmConnectionTestResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.SccmCmdbConfigService;
 import com.prototype.vulnwatch.service.SccmCmdbSyncService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -22,15 +24,18 @@ public class SccmCmdbController {
     private final WorkspaceService workspaceService;
     private final SccmCmdbConfigService sccmCmdbConfigService;
     private final SccmCmdbSyncService sccmCmdbSyncService;
+    private final AuditEventService auditEventService;
 
     public SccmCmdbController(
             WorkspaceService workspaceService,
             SccmCmdbConfigService sccmCmdbConfigService,
-            SccmCmdbSyncService sccmCmdbSyncService
+            SccmCmdbSyncService sccmCmdbSyncService,
+            AuditEventService auditEventService
     ) {
         this.workspaceService = workspaceService;
         this.sccmCmdbConfigService = sccmCmdbConfigService;
         this.sccmCmdbSyncService = sccmCmdbSyncService;
+        this.auditEventService = auditEventService;
     }
 
     /** GET /api/connectors/sccm-cmdb — returns the current connector config (never null). */
@@ -42,22 +47,33 @@ public class SccmCmdbController {
 
     /** PUT /api/connectors/sccm-cmdb — create or update the connector config. */
     @PutMapping
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SccmCmdbConfigResponse save(@RequestBody SccmCmdbConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
-        return sccmCmdbConfigService.save(tenant, request);
+        SccmCmdbConfigResponse response = sccmCmdbConfigService.save(tenant, request);
+        auditEventService.record("connector.sccm_cmdb.saved", "connector_config", tenant.getId().toString(), null);
+        return response;
     }
 
     /** POST /api/connectors/sccm-cmdb/test — test the current connector config. */
     @PostMapping("/test")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SccmConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
-        return sccmCmdbConfigService.test(tenant);
+        SccmConnectionTestResponse response = sccmCmdbConfigService.test(tenant);
+        auditEventService.record("connector.sccm_cmdb.tested", "connector_config", tenant.getId().toString(),
+                "{\"status\":\"" + response.status() + "\"}");
+        return response;
     }
 
     /** POST /api/connectors/sccm-cmdb/sync — manually trigger a sync run. */
     @PostMapping("/sync")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse sync() {
-        return sccmCmdbSyncService.trigger();
+        SyncTriggerResponse response = sccmCmdbSyncService.trigger();
+        auditEventService.record("connector.sccm_cmdb.sync_triggered", "sync_run",
+                response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     /** GET /api/connectors/sccm-cmdb/sync/status — check whether a run is active. */

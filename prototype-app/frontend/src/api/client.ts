@@ -63,6 +63,16 @@ import type {
   VulnerabilityIntelPage
 } from '../features/vulnerability-intel/types';
 import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
+import type {
+  AuditEvent,
+  AuthContext,
+  ServiceAccount,
+  ServiceAccountRequest,
+  Tenant,
+  TenantCreateRequest,
+  TenantMember,
+  TenantMemberRequest
+} from '../features/admin/types';
 
 export type VulnIntelSourceStatus = {
   status: 'completed' | 'failed' | 'running' | 'never';
@@ -94,6 +104,8 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
 const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
+const STATIC_AUTH_TOKEN = import.meta.env.VITE_AUTH_TOKEN ?? '';
+const AUTH_TOKEN_STORAGE_KEY = 'vulnwatch.authToken';
 
 type ApiErrorPayload = {
   code?: string;
@@ -130,13 +142,51 @@ async function parseApiError(response: Response): Promise<Error> {
   return new Error(text || fallback);
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = new Headers(options?.headers ?? {});
-  headers.set('Content-Type', 'application/json');
+export function getStoredAuthToken(): string {
+  return typeof window === 'undefined' ? '' : window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? '';
+}
+
+export function setStoredAuthToken(token: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const normalized = token.trim();
+  if (normalized.length === 0) {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
+}
+
+export function clearStoredAuthToken(): void {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  }
+}
+
+function applyAuthHeaders(headers: Headers): void {
+  const authToken = getStoredAuthToken().trim() || STATIC_AUTH_TOKEN.trim();
+  if (authToken.length > 0) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+    return;
+  }
   headers.set('X-API-Key', API_KEY);
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
   }
+}
+
+function buildApiHeaders(base?: HeadersInit, includeJsonContentType = true): Headers {
+  const headers = new Headers(base ?? {});
+  if (includeJsonContentType) {
+    headers.set('Content-Type', 'application/json');
+  }
+  applyAuthHeaders(headers);
+  return headers;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = buildApiHeaders(options?.headers);
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers
@@ -608,5 +658,37 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }
-  )
+  ),
+  getAuthContext: () => request<AuthContext>('/me'),
+  listTenants: () => request<Tenant[]>('/tenants'),
+  createTenant: (payload: TenantCreateRequest) =>
+    request<Tenant>('/platform/tenants', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  listTenantMembers: (tenantId: string) =>
+    request<TenantMember[]>(`/tenants/${encodeURIComponent(tenantId)}/members`),
+  addTenantMember: (tenantId: string, payload: TenantMemberRequest) =>
+    request<TenantMember>(`/tenants/${encodeURIComponent(tenantId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  listServiceAccounts: () => request<ServiceAccount[]>('/service-accounts'),
+  createServiceAccount: (payload: ServiceAccountRequest) =>
+    request<ServiceAccount>('/service-accounts', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  listAuditEvents: () => request<AuditEvent[]>('/audit-events'),
+  exportAuditEventsCsv: async (): Promise<{ filename: string; csv: string }> => {
+    const headers = buildApiHeaders(undefined, false);
+    const response = await fetch(`${API_BASE}/audit-events/export`, { headers });
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    const filename = match?.[1] ?? 'vulnwatch-audit-events.csv';
+    return { filename, csv: await response.text() };
+  }
 };

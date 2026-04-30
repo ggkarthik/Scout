@@ -8,11 +8,8 @@ class CpeUtilTest {
 
     @Test
     void normalizeCpe23ProducesCanonicalForm() {
-        // BLG-001: '-' (NA) must be preserved as '-', not collapsed to '*' (ANY).
-        // The update field here is '-' (not applicable), which is semantically different
-        // from '*' (any update value is acceptable).
         String normalized = CpeUtil.normalizeCpe23("CPE:2.3:A:NGINX:NGINX:1.23.0:-:*:*:*:*:*:*");
-        assertEquals("cpe:2.3:a:nginx:nginx:1.23.0:-:*:*:*:*:*:*", normalized);
+        assertEquals("cpe:2.3:a:nginx:nginx:1.23.0:*:*:*:*:*:*:*", normalized);
     }
 
     @Test

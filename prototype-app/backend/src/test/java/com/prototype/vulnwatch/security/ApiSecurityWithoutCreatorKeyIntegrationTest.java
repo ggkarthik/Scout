@@ -7,12 +7,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
+import com.prototype.vulnwatch.config.RequestCorrelationFilter;
 import com.prototype.vulnwatch.config.SecurityConfig;
 import com.prototype.vulnwatch.controller.ApiExceptionHandler;
 import com.prototype.vulnwatch.controller.AuthContextController;
 import com.prototype.vulnwatch.controller.OperationalDashboardController;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.OperationalDashboardResponse;
+import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
@@ -42,7 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "spring.mvc.throw-exception-if-no-handler-found=true",
         "spring.web.resources.add-mappings=false"
 })
-@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
+@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, RequestCorrelationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
 class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @Autowired
@@ -56,6 +58,9 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @MockBean
     private TenantService tenantService;
+
+    @MockBean
+    private TenantRepository tenantRepository;
 
     @MockBean
     private WorkspaceService workspaceService;

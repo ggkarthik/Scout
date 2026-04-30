@@ -9,12 +9,23 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
+import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
+import com.prototype.vulnwatch.service.TenantContext;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
@@ -24,8 +35,20 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private String configuredApiKey;
     @Value("${app.security.creator-key:}")
     private String configuredCreatorKey;
+    @Value("${app.security.allow-api-key-auth:true}")
+    private boolean allowApiKeyAuth;
     @Value("${app.security.default-user-id:local-analyst}")
     private String configuredDefaultUserId;
+    private final ObjectProvider<JwtDecoder> jwtDecoderProvider;
+    private final ObjectProvider<JwtTenantAuthenticationService> jwtTenantAuthenticationServiceProvider;
+
+    public ApiKeyAuthenticationFilter(
+            ObjectProvider<JwtDecoder> jwtDecoderProvider,
+            ObjectProvider<JwtTenantAuthenticationService> jwtTenantAuthenticationServiceProvider
+    ) {
+        this.jwtDecoderProvider = jwtDecoderProvider;
+        this.jwtTenantAuthenticationServiceProvider = jwtTenantAuthenticationServiceProvider;
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -44,7 +67,24 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
+        String authorization = request.getHeader("Authorization");
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            if (!authenticateJwt(authorization.substring("Bearer ".length()).trim(), response)) {
+                return;
+            }
+            try {
+                filterChain.doFilter(request, response);
+            } finally {
+                TenantContext.clear();
+            }
+            return;
+        }
+
         String providedApiKey = request.getHeader("X-API-Key");
+        if (!allowApiKeyAuth) {
+            reject(response, "JWT authentication is required");
+            return;
+        }
         if (configuredApiKey == null || configuredApiKey.isBlank()) {
             reject(response, "API key is not configured");
             return;
@@ -61,15 +101,70 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 || constantTimeEquals(configuredCreatorKey, request.getHeader("X-Creator-Key"));
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
         authorities.add(new SimpleGrantedAuthority("ROLE_OPERATOR"));
+        authorities.add(new SimpleGrantedAuthority("ROLE_SECURITY_ANALYST"));
         if (creator) {
             authorities.add(new SimpleGrantedAuthority("ROLE_CREATOR"));
+            authorities.add(new SimpleGrantedAuthority("ROLE_PLATFORM_OWNER"));
+            authorities.add(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"));
+            authorities.add(new SimpleGrantedAuthority("ROLE_INVENTORY_ADMIN"));
         }
+        String headerUserId = request.getHeader("X-User-ID");
+        String resolvedUserId = hasText(headerUserId) ? headerUserId.trim() : configuredDefaultUserId;
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                configuredDefaultUserId,
+                resolvedUserId,
                 null,
                 authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        filterChain.doFilter(request, response);
+        MDC.put(RequestCorrelationFilter.ACTOR_ID_MDC_KEY, resolvedUserId);
+        MDC.put(RequestCorrelationFilter.ACTOR_ROLES_MDC_KEY, authorities.stream()
+                .map(SimpleGrantedAuthority::getAuthority)
+                .collect(Collectors.joining(",")));
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    private boolean authenticateJwt(String token, HttpServletResponse response) throws IOException {
+        JwtDecoder jwtDecoder = jwtDecoderProvider.getIfAvailable();
+        JwtTenantAuthenticationService jwtTenantAuthenticationService = jwtTenantAuthenticationServiceProvider.getIfAvailable();
+        if (jwtDecoder == null || jwtTenantAuthenticationService == null) {
+            reject(response, "JWT authentication is not configured");
+            return false;
+        }
+        try {
+            Jwt jwt = jwtDecoder.decode(token);
+            AuthenticatedTenantActor actor = jwtTenantAuthenticationService.authenticate(jwt);
+            List<SimpleGrantedAuthority> authorities = actor.roles().stream()
+                    .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                    .map(SimpleGrantedAuthority::new)
+                    .collect(Collectors.toCollection(ArrayList::new));
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                    actor.subject(),
+                    null,
+                    authorities);
+            authentication.setDetails(new TenantAuthenticationDetails(
+                    actor.tenantId(),
+                    actor.tenantName(),
+                    actor.subject(),
+                    Set.copyOf(actor.roles())));
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            TenantContext.setCurrentTenantId(actor.tenantId());
+            MDC.put(RequestCorrelationFilter.ACTOR_ID_MDC_KEY, actor.subject());
+            MDC.put(RequestCorrelationFilter.TENANT_ID_MDC_KEY, actor.tenantId() == null ? "" : actor.tenantId().toString());
+            MDC.put(RequestCorrelationFilter.ACTOR_ROLES_MDC_KEY, String.join(",", actor.roles()));
+            return true;
+        } catch (JwtException ex) {
+            reject(response, "Invalid JWT");
+            return false;
+        } catch (ResponseStatusException ex) {
+            response.setStatus(ex.getStatusCode().value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            String message = ex.getReason() == null ? "Unauthorized" : ex.getReason();
+            response.getWriter().write("{\"error\":\"" + message + "\"}");
+            return false;
+        }
     }
 
     private boolean constantTimeEquals(String left, String right) {

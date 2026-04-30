@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-03-27
+Last updated: 2026-04-29
 
 ## Why This Fourth Document Exists
 
@@ -103,10 +103,15 @@ What is actively exposed in the UI today:
 - inventory component views (Software Identities, Hosts, Container Images, Repositories)
 - host asset detail page with CI metadata, aliases, software instances, and findings
 - ServiceNow CMDB live connector setup, connection testing, and live sync trigger
+- SCCM/MECM CMDB live connector setup and sync trigger
+- AWS Cloud Discovery connector (EC2-only via SSM) with multi-account targets
+- Vulnerability source filter configuration (per-tenant feed filtering)
 - Inventory Run Queue showing all host/container/SBOM ingestion run history
 - risk policy and GitHub pipeline configuration
 - End-of-Life component tracking (EolPage) with filter tabs, CSV export, and unresolved-mapping review
 - EOL source panel in Connect UI for manual pipeline stage triggers
+- AI-assisted CVE workflow (investigation summary, AI solution, AI actions) — gated by `OPENAI_ENABLED`, persisted on `org_cve_records`
+- Tenant administration, service-account management, audit-event browser, and support bundle export
 
 What exists in code but is not fully surfaced or is still transitional:
 
@@ -115,6 +120,14 @@ What exists in code but is not fully surfaced or is still transitional:
 - several conceptual inventory categories without dedicated backend models
 
 ## Major Architectural Decisions
+
+### Managed SaaS, Modular Monolith First
+
+The production direction is an AWS-hosted managed SaaS. The first customer-ready version should keep the Spring Boot backend as one deployable modular monolith while enforcing internal boundaries for identity/tenant management, inventory, vulnerability intelligence, correlation/projection, findings/workflow, connectors, and operations. Vulnerability-feed ingestion and inventory ingestion are the most likely future service extractions once scale or blast-radius demands it.
+
+### Platform-Owned Vulnerability Repository
+
+Canonical vulnerability intelligence is platform-owned and global. The platform owner runs and validates NVD, KEV, GHSA, CSAF/VEX, EPSS, EOL, advisory, and archive refreshes. Tenants own inventory configuration, source filters, risk policy, workflow decisions, and tenant-scoped exposure refreshes.
 
 ### Deterministic Matching First
 
@@ -166,11 +179,14 @@ The repository has strong feature breadth, but the delivery model is still proto
 
 Important built-in jobs:
 
-- daily feed syncs starting at `01:00`
+- daily feed syncs starting at `01:00` (NVD+KEV `01:00`, GHSA `01:15`, CSAF `01:45`)
 - stale asset inactivation at `02:05`
 - nightly VEX freshness sweep at `02:30` (queue-driven)
+- daily EPSS refresh at `03:15`
+- ServiceNow incident status sync at `07:00` (one-way pull-back of incident state onto findings)
 - lifecycle date sweep at `00:15`
-- GitHub SBOM source execution every `5` minutes
+- GitHub SBOM, ServiceNow, SCCM, and AWS Discovery scheduled syncs every `5` minutes
+- delta queue drained every `2` seconds (batches of 100)
 - suppression expiry reopening every `15` minutes
 - hourly policy-based auto-close sweep
 - weekly EOL pipeline (Sunday): catalog `02:00`, releases `03:00`, slug resolution `03:30`, denormalization `04:00`

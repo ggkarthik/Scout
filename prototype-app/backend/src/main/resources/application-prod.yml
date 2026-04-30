@@ -1,0 +1,48 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:30}
+      minimum-idle: ${DB_MIN_IDLE:5}
+  flyway:
+    validate-on-migrate: true
+    out-of-order: false
+  jpa:
+    open-in-view: false
+    show-sql: false
+
+server:
+  forward-headers-strategy: framework
+  shutdown: graceful
+
+app:
+  security:
+    require-production-secrets: true
+    allow-api-key-auth: false
+  tenancy:
+    allow-header-tenant-selection: false
+    require-tenant-context: true
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
+  archive:
+    storage-backend: s3
+    s3-bucket: ${ARCHIVE_S3_BUCKET}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%level thread=%thread logger=%logger{36} traceId=%X{traceId:-} requestId=%X{requestId:-} tenantId=%X{tenantId:-} actorId=%X{actorId:-} message=%msg%n"

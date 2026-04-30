@@ -1,6 +1,6 @@
 # VulnWatch Prototype
 
-Last updated: 2026-03-26
+Last updated: 2026-04-29
 
 VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection.
 
@@ -12,6 +12,9 @@ The repository documentation is intentionally consolidated into four maintained 
 - [Frontend](docs/frontend.md)
 - [Backend](docs/backend.md)
 - [Database](docs/database.md)
+- [Business logic guide](docs/business-logic-guide.md)
+- [Production readiness](docs/production-readiness.md)
+- [AWS deployment runbook](docs/runbooks/aws-deployment.md)
 
 Historical implementation summaries, design notes, report cards, and migration checklists were folded into those files so the repo only has one source of truth per area.
 

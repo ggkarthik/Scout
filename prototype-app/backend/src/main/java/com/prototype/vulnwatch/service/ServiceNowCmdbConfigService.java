@@ -73,6 +73,8 @@ public class ServiceNowCmdbConfigService {
     private final OutboundHttpClient outboundHttpClient;
     private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
+    private final TenantQuotaService tenantQuotaService;
+    private final CredentialEncryptionService credentialEncryptionService;
 
     @Value("${app.cmdb.servicenow.base-url:}")
     private String fallbackBaseUrl;
@@ -87,12 +89,16 @@ public class ServiceNowCmdbConfigService {
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
             OutboundHttpClient outboundHttpClient,
             OutboundPolicyFactory outboundPolicyFactory,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantQuotaService tenantQuotaService,
+            CredentialEncryptionService credentialEncryptionService
     ) {
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
         this.outboundHttpClient = outboundHttpClient;
         this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
+        this.tenantQuotaService = tenantQuotaService;
+        this.credentialEncryptionService = credentialEncryptionService;
     }
 
     @Transactional(readOnly = true)
@@ -110,6 +116,7 @@ public class ServiceNowCmdbConfigService {
                 tenant.getId(),
                 "servicenow"
         ).orElseGet(() -> {
+            tenantQuotaService.assertCanCreateConnector(tenant, "servicenow");
             ServiceNowCmdbConfig created = new ServiceNowCmdbConfig();
             created.setTenant(tenant);
             created.setSourceSystem("servicenow");
@@ -171,7 +178,7 @@ public class ServiceNowCmdbConfigService {
                     trimToNull(config.getBaseUrl()),
                     config.getAuthType() == null ? ServiceNowAuthType.BASIC : config.getAuthType(),
                     trimToNull(config.getUsername()),
-                    trimToNull(config.getCredentialSecret()),
+                    trimToNull(credentialEncryptionService.decrypt(config.getCredentialSecret())),
                     defaultIfBlank(config.getInstallTable(), "cmdb_sam_sw_install"),
                     defaultIfBlank(config.getDiscoveryModelTable(), "cmdb_sam_sw_discovery_model"),
                     defaultIfBlank(config.getCiTable(), "cmdb_ci"),
@@ -213,7 +220,7 @@ public class ServiceNowCmdbConfigService {
         config.setAuthType(authType);
         config.setUsername(trimToNull(request.username()));
         if (hasText(request.credentialSecret())) {
-            config.setCredentialSecret(request.credentialSecret().trim());
+            config.setCredentialSecret(credentialEncryptionService.encrypt(request.credentialSecret().trim()));
         }
         config.setInstallTable(defaultIfBlank(request.installTable(), "cmdb_sam_sw_install"));
         config.setDiscoveryModelTable(defaultIfBlank(request.discoveryModelTable(), "cmdb_sam_sw_discovery_model"));

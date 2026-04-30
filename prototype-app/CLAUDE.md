@@ -8,10 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 cd backend
-mvn spring-boot:run          # start the API server (port 8080)
-mvn test                     # unit tests
-mvn -Ppostgres-it test       # unit + PostgreSQL integration tests
+mvn spring-boot:run             # start the API server (port 8080)
+mvn test                        # unit tests (Surefire) + JaCoCo report at target/site/jacoco/index.html
+mvn -Ppostgres-it verify        # unit tests + Postgres integration tests (Failsafe, requires running Postgres)
 ```
+
+Surefire excludes `**/*PostgresIntegrationTest.java`; Failsafe picks them up at the `integration-test` / `verify` phase. `mvn -Ppostgres-it test` runs unit tests only — use `verify` to also run the Postgres ITs.
 
 To repair Flyway history after schema drift:
 ```bash
@@ -34,7 +36,9 @@ npm run build    # tsc -b --force && vite build
 npm run test:unit  # vitest run (non-watch)
 ```
 
-There is no lint script in `package.json`.
+Frontend CI gates: `npm run lint` → `npm run typecheck` (`tsc -b --noEmit`) → `npm run build` → `npm run test:coverage` (vitest with coverage thresholds enforced).
+
+Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs.
 
 ## Architecture
 
@@ -51,12 +55,12 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 
 | Package | Contents |
 |---|---|
-| `controller/` | ~20 REST controllers under `/api/**` |
-| `service/` | ~54 business-logic services |
-| `domain/` | JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM) |
+| `controller/` | 29 REST controllers under `/api/**` |
+| `service/` | ~118 business-logic services |
+| `domain/` | JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
 | `dto/` | API request/response objects |
 | `repo/` | Spring Data JPA repositories |
-| `client/` | External API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date) |
+| `client/` | External API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
 | `config/` | Spring beans and security configuration |
 | `util/` | CPE handling, version comparison, SBOM parsing |
 
@@ -171,15 +175,18 @@ All sections persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
 
 **Connector categories:**
 
-- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`
-- **Inventory Sources** — `sbom-endpoint`, `sbom-github`, `servicenow-cmdb`, `sccm-cmdb`, `endoflife-date`
+- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`, `endoflife-date`
+- **CMDB / Inventory Sources** — `sbom-endpoint`, `sbom-github`, `servicenow-cmdb`, `sccm-cmdb`
+- **Cloud Discovery** — `aws-discovery`
 
-Clicking a connector card renders `ConnectorDetailContent` which delegates to a focused component per connector. Adding a new connector requires: add to `ConnectorId` union, `CONNECTORS` array, the appropriate category list (`VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS` or `INVENTORY_SOURCE_CONNECTOR_IDS`), and a `ConnectorDetailContent` case.
+Clicking a connector card renders `ConnectorDetailContent` which delegates to a focused component per connector. Adding a new connector requires: add to `ConnectorId` union, `CONNECTORS` array, the appropriate category list, and a `ConnectorDetailContent` case.
 
 Key connector components:
 - `SccmConnectorPage` — SCCM/MECM CMDB sync (discovery, auth, field mapping, sync schedule)
+- `AwsDiscoveryConnectorPage` — AWS EC2 discovery via SSM (regions, auth, scoped to EC2 in V1069)
 - `VulnIntelConnectorPage` / `VulnIntelConfigPage` — NVD, GHSA, KEV, CSAF source configuration
-- `IntegrationRunQueuePage` — live run queue for all connector sync jobs
+- `NvdConnectorPage`, `KevConnectorPage`, `GhsaConnectorPage`, `MicrosoftCsafConnectorPage`, `RedhatCsafConnectorPage`, `AdvisoryConnectorPage` — per-feed configuration pages
+- `IntegrationRunQueuePage` / `InventoryRunQueuePage` — live run queue surfaces
 - `GithubPipelineManager` — GitHub SBOM source management
 - `IngestionPage` — SBOM endpoint / file upload
 
@@ -187,7 +194,7 @@ Key connector components:
 
 Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
 
-**Current watermark: V1062** (`sccm_cmdb_last_sync_at`). The next migration must be **V1063**.
+**Current watermark: V1074** (`finding_evidence_text_preserving_json`). The next migration must be **V1075**.
 
 ### Scheduled Jobs
 
@@ -200,12 +207,15 @@ Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sq
 | `02:05` daily | Mark stale assets inactive |
 | `02:30` daily | VEX staleness recompute |
 | `03:15` daily | EPSS score refresh |
+| `07:00` daily | ServiceNow incident status sync (`FindingIncidentSyncService`) |
 | `02:00` Sunday | EOL catalog refresh (stage 1) |
 | `03:00` Sunday | EOL release data refresh (stage 2) |
 | `03:30` Sunday | EOL slug resolution (stage 3) |
 | `04:00` Sunday | EOL denormalization (stage 4) |
 | Every 5 min | Run enabled GitHub SBOM sources |
+| Every 5 min | Run enabled ServiceNow / SCCM / AWS Discovery scheduled syncs |
 | Every 15 min | Reopen expired suppressions |
+| Every 2 sec | Drain `finding_delta_queue` (batches of 100) |
 | Hourly | Policy-based auto-close findings |
 
 ### Known Limitations
@@ -214,11 +224,73 @@ Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sq
 - Schema is tenant-aware but runtime is effectively single-tenant; most controllers call `TenantService.getDefaultTenant()`.
 - The live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves`. `CveDetailPage.tsx` exists but is not mounted in the router.
 - GHCR attestation ingestion does not yet perform cryptographic signature verification.
-- AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` so subsequent reads do not re-call the API.
-- ServiceNow incident creation (`POST /api/cve-detail/{cveId}/servicenow-incident`) is one-way — changes in ServiceNow are not reflected back.
+- AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` (see V1047, V1052, V1053) so subsequent reads do not re-call the API.
+- ServiceNow incident creation (`POST /api/cve-detail/{cveId}/servicenow-incident`) writes `incident_id` / `incident_status` onto findings (V1054). The `FindingIncidentSyncService` daily 07:00 job pulls incident state changes back, so the integration is no longer fully one-way — but it is read-only on the ServiceNow side.
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser from existing API data — they are not stored in the database and recalculate on every render.
 - SCCM sync (`SccmCmdbSyncService`) performs asset discovery and field mapping but does not yet support incremental delta sync — each run is a full sweep.
+- AWS Discovery (`aws-discovery` connector, V1063/V1067/V1069) is currently scoped to EC2 instances only via SSM. Multi-account is supported via `aws_discovery_targets` with cross-account role ARN + external ID. RDS/Lambda/S3/ECS/EKS were dropped in V1069.
 
 ### GitHub Token
 
 For GitHub SBOM / GHCR / GHSA features, place a token in `backend/secrets/github-api-token` (gitignored). Resolution order: `GITHUB_API_TOKEN_FILE` → `backend/secrets/github-api-token` → `GITHUB_API_TOKEN`.
+
+## Conventions
+
+These are prescriptive. PRs that violate them will be rejected.
+
+### What counts as "done"
+
+A change is done when **all** of these are true:
+
+1. **Behavior is verified.** Backend: at least one test exercises the changed code path (unit, controller IT via `@PostgresControllerIntegrationTest`, or service IT). Frontend: at least one vitest test exercises the changed page or hook. "Verified by manual testing" is not done.
+2. **CI is green.** All gates above pass: lint, typecheck, build, coverage thresholds, JaCoCo line floor, SpotBugs, Failsafe ITs.
+3. **No new warnings introduced.** ESLint or `tsc` warnings on touched files block merge — fix them in the same PR.
+4. **PR template is filled in.** Scope, why, repro, test added/changed, blast radius, rollback. Empty sections = reject.
+5. **For UI changes, a screenshot is attached.** Type-check passing is not the same as feature working — see the global guidance on UI changes.
+
+### When to add a test
+
+| Change | Test required |
+|---|---|
+| Bug fix | Yes — a regression test that fails before the fix and passes after. |
+| New API endpoint | Controller IT covering happy path + at least one auth/error case. |
+| New service method called from a controller | Service-layer IT or a controller IT that exercises it end-to-end. |
+| New frontend page / new top-level component | Vitest page test asserting render + at least one interaction. |
+| Refactor with no behavior change | No new test, but existing tests must still pass. If they don't exist, that's a separate gap — file it as an issue, don't silently leave the code uncovered. |
+| Migration-only PR | A repo IT that asserts the new schema state, OR a service IT that exercises the new column. |
+| Frontend-only style/copy change | No test required if no logic changed. |
+
+### When to refactor vs. leave alone
+
+- **Bug fix scope is the bug.** Don't refactor surrounding code in the same PR even if it's tempting. File a follow-up issue.
+- **If you must refactor to fix the bug**, keep the refactor and the fix in **separate commits** so the fix is reviewable without the noise.
+- **Don't migrate old code to new patterns opportunistically.** The scaffolding READMEs (`backend/src/test/java/com/prototype/vulnwatch/support/README.md`, `frontend/src/test/README.md`) explicitly say: migrate when you're already in the file for another reason. Otherwise, leave it.
+- **Premature abstraction is rejected.** Three similar lines is fine. Don't introduce a helper for two callers, an interface for one implementation, or a feature flag for hypothetical future configurability.
+
+### Naming and commit conventions
+
+- **Migrations**: `V<next>__short_snake_case.sql`. Edit the watermark in this file in the same PR.
+- **Tests**: backend Postgres ITs end with `PostgresIntegrationTest.java` (Surefire-excluded, Failsafe-included). Frontend page tests live next to the page as `<Page>.test.tsx`.
+- **Commits**: imperative subject ≤72 chars. Body explains the *why*, not the *what* — the diff already shows the what.
+- **Branch names**: `<type>/<short-slug>` where type is `fix`, `feat`, `refactor`, `chore`, `docs`. Example: `fix/correlation-applicable-state-filter`.
+
+### Never-touch list (require explicit approval before changing)
+
+- **Already-applied Flyway migrations** (`backend/src/main/resources/db/migration/postgres/V*.sql`). Add a new migration; never edit an applied one.
+- **Security config** (`com.prototype.vulnwatch.config.SecurityConfig`, `ApiKeyFilter`, anything that decides who's authenticated or authorized).
+- **Tenant scoping** (`TenantService`, `TenantContext`, multi-tenant filter logic). Cross-tenant leaks are the worst class of bug.
+- **Deploy infra** (`infra/`, `Dockerfile`, `.github/workflows/`). Changes here affect deploy/build for everyone — flag in PR description.
+- **Golden contract fixtures** (`backend/src/test/resources/fixtures/golden/*.sha256`). Changing a hash means the canonicalized output changed — that's an API contract change. Justify in the PR.
+- **`scripts/`** — operator scripts that touch the running database or production-like state.
+
+### Things that get rejected on sight
+
+- Edits to applied migrations (re-edit V1042 instead of writing V1075).
+- New `console.log` / `System.out.println` left in shipped code.
+- `// TODO` comments without an owner or linked issue.
+- Mocking the database in integration tests instead of using `@PostgresIntegrationTest`.
+- Adding `--no-verify` / `--no-gpg-sign` to git commands in CI or scripts.
+- Coverage thresholds lowered without justification (raising them is fine).
+- New `any` types in TypeScript or `@SuppressWarnings("unchecked")` in Java without a comment explaining why.
+- New external HTTP calls without a corresponding `MockRestServiceServer` test (see `ApiContractGoldenPostgresIntegrationTest`).
+- Files added to `frontend/src/components/` larger than ~300 lines — split into a feature directory under `frontend/src/features/<feature>/`.
