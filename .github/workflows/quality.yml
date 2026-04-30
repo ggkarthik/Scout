@@ -22,8 +22,9 @@ jobs:
           cache-dependency-path: prototype-app/frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm run build
-      - run: npm run test:unit
+      - run: npm run test:coverage
 
   backend:
     runs-on: ubuntu-latest
@@ -38,3 +39,15 @@ jobs:
           java-version: 17
           cache: maven
       - run: mvn -q verify
+
+  images:
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -f prototype-app/backend/Dockerfile -t vulnwatch-backend:${{ github.sha }} prototype-app/backend
+      - name: Build frontend image
+        run: docker build -f prototype-app/frontend/Dockerfile -t vulnwatch-frontend:${{ github.sha }} prototype-app/frontend

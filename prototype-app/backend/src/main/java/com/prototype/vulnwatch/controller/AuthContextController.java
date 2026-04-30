@@ -25,7 +25,8 @@ public class AuthContextController {
                 actor.userId(),
                 actor.userId(),
                 actor.tenantId() == null ? null : actor.tenantId().toString(),
-                actor.tenantName()
+                actor.tenantName(),
+                actor.roles()
         );
     }
 }

@@ -16,6 +16,8 @@ describe('routes', () => {
     expect(pathForTab('operations')).toBe('/operations/pipeline');
     expect(pathForTab('inventory')).toBe('/inventory');
     expect(pathForTab('end-of-life')).toBe('/end-of-life');
+    expect(pathForTab('admin')).toBe('/admin/users');
+    expect(pathForTab('platform')).toBe('/platform/tenants');
     expect(pathForConnectView('integration-run-queue')).toBe('/connect/integration-run-queue');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
     expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
@@ -42,6 +44,8 @@ describe('routes', () => {
     expect(activeTabForPath('/operations/platform-health')).toBe('operations');
     expect(activeTabForPath('/inventory/hosts')).toBe('inventory');
     expect(activeTabForPath('/connect/sources')).toBe('connect');
+    expect(activeTabForPath('/admin/users')).toBe('admin');
+    expect(activeTabForPath('/platform/feeds')).toBe('platform');
   });
 
   it('redirects legacy operations deep links to canonical routes', () => {

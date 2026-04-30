@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-03-22
+Last updated: 2026-04-29
 
 ## Purpose
 
@@ -11,9 +11,9 @@ The frontend is a React single-page operations console. It drives SBOM ingestion
 - React 18
 - TypeScript
 - Vite 5
-- Plain React state/hooks; no external state library
-- Query-param-driven navigation in `src/App.tsx`
-- No React Router
+- TanStack Query (`@tanstack/react-query`) for server state — no global client store
+- React Router v6 for path-based routing
+- Vitest for unit tests (`npm run test:unit`)
 
 Run locally:
 
@@ -27,7 +27,7 @@ Default URL: `http://localhost:5173`
 
 ## API Client
 
-Primary client: `src/api/client.ts`.
+Primary client: `src/api/client.ts` (~600 lines, 70+ exported functions).
 
 Environment variables:
 
@@ -44,32 +44,49 @@ Every JSON request includes:
 - `X-User-ID`
 - `X-Creator-Key` when configured
 
-The client also handles:
+Functions are grouped by domain in the client (with the matching backend endpoint):
 
-- JSON error-envelope parsing into readable messages
-- multipart SBOM uploads
-- org-CVE drill-down calls
-- risk policy, GitHub source, sync run, and prototype reset calls
-- ServiceNow CMDB connector config, connection test, live sync, and sample sync calls
-- host asset detail and host inventory calls
-- EOL status summary, component statuses, product catalog, release cycles, mapping confirmation, unresolved mappings, and admin refresh triggers
+- **Dashboard** — `getDashboard`, `getVulnRepoDashboard`, `listApplicableSoftware`, `listImpactedCves`, `getCveInventoryMap`
+- **Findings** — `listFindings`, `listFindingFilters`, `bulkUpdateFindingWorkflow`
+- **Operations** — `getOperationalDashboard`, `getOperationalIngestionEfficiency`, `getOperationalNormalizationQuality`, `getOperationalCorrelationEffectiveness`, `getOperationalNoiseLifecycle`, `getOperationalApiReadPath`, `getOperationalFreshnessDrift`, `getOperationalMetricCatalog`, `getOperationalQualitySummary`/`Issues`/`Filters`, `getNormalizationImpact`, `applyNormalizationOverride`/`revokeNormalizationOverride`, `applyCorrelationOverride`/`revokeCorrelationOverride`, `searchSoftwareIdentities`, `getSloStatus`
+- **Inventory & Assets** — `listAssets`, `getHostAssetDetail`, `listInventoryComponents`, `listInventoryComponentFilters`, `listSoftwareIdentities`, `getSoftwareIdentityDetail`, `getVulnRepoSoftwareAssets`
+- **Vulnerability intelligence** — `listVulnerabilityIntelligence`, `listVulnerabilityIntelligenceSources`, `listVulnerabilityIntelligenceFilters`, `getVulnerabilityIntelligenceDetail`
+- **Connectors** — ServiceNow, SCCM, AWS Discovery (config + targets), GitHub SBOM (sources + GHCR/repository runs), vulnerability-source filters
+- **Risk policy** — `getRiskPolicy`, `updateRiskPolicy`, `cleanAllPrototypeData`
+- **Ingestion / sync** — `syncNvd`, `syncNvdFull`, `syncKev`, `syncGhsa`, `syncMicrosoftCsaf`, `syncRedhatCsaf`, `triggerVexAssertionRepair`, `triggerVexRolloutBackfill`, `getVexAssertionRepairSummary`, `ingestAdvisories`, `getUpgradeRecommendation`, `seedDemo`, `listSyncRuns`, `listIngestions`, `fetchSbomFromEndpoint`
+- **EOL** — summary, component statuses, product catalog, release cycles, mapping confirmation, mapping suggestions, package statuses/assets, plus four admin refresh triggers and `triggerEolFullRefresh`
+
+The client also parses JSON error envelopes into readable messages and handles multipart SBOM uploads.
 
 ## Navigation Model
 
-`src/App.tsx` renders a sidebar shell with query-param state for `tab`, `inventoryView`, `vulnIntelView`, and connector state.
+`src/App.tsx` mounts React Router v6. All path-builders and route normalization helpers live in `src/app/routes.ts`. Legacy query-param URLs (`?tab=inventory`, `?vulnIntelView=org-cves`, etc.) are redirected to canonical paths via `buildLegacyCompatiblePath()` on first render.
 
-Current top-level sections:
+### Top-level routes
 
-- Overview
-- Findings
-- Operational Dashboard
-- Vulnerability Intelligence
-- Inventory
-- Connect
-- Configurations
-- End-of-Life (tab key: `end-of-life`, nav label: `EOL`)
+| Path | Component | Purpose |
+|------|-----------|---------|
+| `/` | `DashboardPage` | Risk-focused overview |
+| `/findings` | `FindingsPage` | Active findings list with filters |
+| `/findings/:displayId` | `FindingDetailPage` | Single finding workflow + comments |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `quality`, `pipeline`, `platform-health` |
+| `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability repository dashboard |
+| `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | **Unified Records** — org-correlated CVEs (CVE Assessment Workbench) |
+| `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | **Intelligence** — all ingested CVEs (global feed) |
+| `/vuln-repo/org-cves/:cveId/assets` | `VulnRepoCveAssetsPage` | Per-CVE affected asset breakdown |
+| `/vuln-repo/org-cves/:cveId/software` | `VulnRepoCveSoftwarePage` | Per-CVE affected software breakdown |
+| `/vuln-repo/host-assets/:assetId` | `HostAssetDetailPage` | Asset detail reached from vuln-repo context |
+| `/vuln-repo/software-assets` | `VulnRepoSoftwareAssetsPage` | Software-identity-scoped asset list |
+| `/inventory/:inventoryView?` | varies (see below) | Default `overview`; many sub-views |
+| `/inventory/hosts/:assetId` | `HostAssetDetailPage` | Host detail from inventory context |
+| `/end-of-life` | `EolPage` | EOL status, lifecycle filters, slug mappings |
+| `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `integration-run-queue`, `processing-jobs` |
+| `/admin/:adminView?` | `UserManagementPage` | Tenant + service-account administration |
+| `/configurations` | `ConfigurationsPage` | Risk policy, SLA, scoring, automation, dev tools |
 
-The active app is organized as a shell, not route-based pages. Most drill-downs happen inline in tables, drawers, and modals.
+### Inventory sub-views
+
+Driven by the `inventoryView` path segment. Recognised keys: `overview`, `software-identities`, `manage-software`, `hosts`, `container-images`, `secured-image-catalog`, `container-registries`, `sbom`, `hosted-technologies`, `code-repositories`, `source-mappings`, `developers`, `kubernetes-clusters`, `datastores`, `subscriptions`, `iam`, `api-endpoints`, `application-endpoints`, `vulnerability-intelligence`. Several of these are aliases that map to the same component with different default filters; the canonical four data-bearing views are `software-identities`, `hosts`, `container-images`, and `sbom`.
 
 The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-to-page search input. The theme toggle is an icon-only button (sun/moon SVG) rather than a text label.
 
@@ -135,18 +152,25 @@ The Hosts, Container Images, and Repositories views continue to sit on top of `/
 
 ### Connect
 
-`ConnectPage` is a connector catalog with three top-level views: Sources, Inventory Run Queue, and Vuln Intel Run Queue.
+`ConnectPage` is a connector catalog with three top-level views (path: `/connect/:connectView?`): `sources` (default), `integration-run-queue`, and `processing-jobs`.
 
-**Sources** swaps in focused workflow pages per connector:
+Connector categories rendered in the catalog:
 
-- `IngestionPage` for SBOM upload, endpoint fetch, and GitHub-generated SBOM ingestion
-- `GithubPipelineManager` for reusable GitHub SBOM pipeline configuration and GHCR batch ingestion
-- `AssetsPage` for the full ServiceNow CMDB live connector — base URL, auth (Basic/Bearer), table config, field selection, sync scheduling, connection testing, and live sync trigger
-- `SourcesPage` for NVD, KEV, GHSA, CSAF/VEX, and advisory ingestion runs
+- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`, `endoflife-date`
+- **CMDB / Inventory Sources** — `sbom-endpoint`, `sbom-github`, `servicenow-cmdb`, `sccm-cmdb`
+- **Cloud Discovery** — `aws-discovery`
 
-**Inventory Run Queue** is `InventoryRunQueuePage`, a shared table of all host/container/SBOM ingestion run history (ServiceNow CMDB, GitHub SBOM, GitHub GHCR), showing type, status, started time, duration, assets, components, findings, and an expandable details panel per run.
+Per-connector pages in `src/pages/`:
 
-**Vuln Intel Run Queue** surfaces `SourcesPage` in queue-only mode for NVD/KEV/GHSA/CSAF run history.
+- `IngestionPage` — SBOM upload, endpoint fetch, and GitHub-generated SBOM ingestion
+- `GithubPipelineManager` (component) — GitHub SBOM pipeline configuration and GHCR batch ingestion
+- `AssetsPage` — ServiceNow CMDB connector (base URL, auth, table config, field selection, scheduling, test, live sync)
+- `SccmConnectorPage` — SCCM/MECM CMDB connector
+- `AwsDiscoveryConnectorPage` — AWS EC2 discovery via SSM, multi-account through `aws_discovery_targets`
+- `NvdConnectorPage`, `KevConnectorPage`, `GhsaConnectorPage`, `MicrosoftCsafConnectorPage`, `RedhatCsafConnectorPage`, `AdvisoryConnectorPage`, `VulnIntelConnectorPage`, `VulnIntelConfigPage` — per-feed configuration
+- `SourcesPage` — embedded vuln-intel run history view
+
+`InventoryRunQueuePage` is the `integration-run-queue` view: a shared table of all host/container/SBOM ingestion run history (ServiceNow CMDB, SCCM, AWS Discovery, GitHub SBOM, GitHub GHCR) with expandable per-run details. `IntegrationRunQueuePage` covers both inventory and vuln-intel queues.
 
 ### End-of-Life
 
@@ -187,10 +211,30 @@ Supporting components:
 - `SoftwareIdentityDetailDrawer` is a slide-over for per-identity detail, EOL status, and slug mapping; used from `SoftwareIdentitiesPage`
 - Most long-running actions surface inline status text instead of global toasts
 
+## Feature Directories
+
+Types and queries are colocated per feature under `src/features/`:
+
+| Feature | Notable contents |
+|---------|------------------|
+| `auth/` | `AuthProvider`, identity context, `queries.tsx`, `types.ts` |
+| `cve-workbench/` | `CveAssessmentWorkbench` and panels (Investigation, Applicability, Findings, Sidebar), assessment/eol/formatting helpers, hooks |
+| `configurations/` | `RiskPolicy` types (includes the 6 triage weight fields) |
+| `connect/` | Per-connector queries (ServiceNow, SCCM, AWS, GitHub, vuln sources), shared types |
+| `dashboard/` | Dashboard, ApplicableSoftware, ImpactedCves types + queries |
+| `eol/` | EolSummary, EolComponentPage, EolRelease, EolProductCatalog types + queries |
+| `findings/` | `Finding`, `FindingPage`, `FindingFilterValues` types + queries |
+| `inventory/` | View-key types, filter values, inventory hooks (`useInventoryData`), table panels, modals |
+| `operations/` | OperationalDashboard, OperationalQuality, SloStatus types + queries |
+| `software-identities/` | SoftwareIdentityPage, SoftwareIdentityDetail types + queries |
+| `vulnerability-intel/` | Vulnerability list/detail types |
+| `vuln-repo-dashboard/` | VulnRepoDashboard types + queries |
+
+`src/types/index.ts` re-exports for convenience but the source of truth is each feature directory. `src/types/ownership.ts` holds the cross-feature `OwnershipSummary`.
+
 ## Current Caveats
 
-- There is no route-level page system; deep links depend on query params and mounted shell state.
-- `CveDetailPage.tsx` exists but is not mounted in `App.tsx`; the live CVE workflow is the org-CVE drawer (CVE Assessment Workbench).
+- `CveDetailPage.tsx` exists but is not mounted in the router; the live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves/:cveId?`.
 - The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
 - The inventory UI exposes more conceptual categories than the backend currently models explicitly; several filter-based views share the same `/inventory/components` endpoint.
 - The frontend package ships `dev`, `build`, `preview`, and `test:unit` scripts. `test:unit` runs Vitest in non-watch mode (`vitest run`). There is no dedicated lint script in `package.json`.

@@ -1,6 +1,8 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useActor } from '../features/auth/context';
+import { canAccessPlatformConsole, canManageSourceFilters } from '../features/auth/roles';
 import type {
   SyncRun,
   SyncRunSnapshot,
@@ -284,6 +286,7 @@ export function SourcesPage({
   showQueue = true,
   refreshSignal = 0
 }: Props) {
+  const actor = useActor();
   const queryClient = useQueryClient();
   const [message, setMessage] = React.useState('');
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -307,6 +310,8 @@ export function SourcesPage({
   const shouldLoadRuns = showQueue || showConnectorStatus || showNvdStatus;
   const showNvdConnectorHero = showTriggers && focusSource === 'nvd' && !showQueue;
   const showSourceFilters = showTriggers && !showQueue && activeSourceFilterKey != null;
+  const canEditSourceFilters = canManageSourceFilters(actor);
+  const canRunPlatformFeeds = canAccessPlatformConsole(actor);
   const currentNvdFullSyncApiKey = nvdFullSyncApiKey.trim();
   const syncRunsQuery = useSyncRunsQuery(
     focusSource === 'github'
@@ -445,6 +450,12 @@ export function SourcesPage({
     if (activeSourceFilterKey == null) {
       return true;
     }
+    if (!canEditSourceFilters) {
+      if (!silent) {
+        setMessage('Your role can view tenant source filters, but cannot update them.');
+      }
+      return false;
+    }
     setSavingSourceFilters(true);
     try {
       const saved = await api.saveVulnerabilitySourceFilterConfig(
@@ -471,12 +482,16 @@ export function SourcesPage({
     } finally {
       setSavingSourceFilters(false);
     }
-  }, [activeSourceFilterKey, queryClient, sourceFilters]);
+  }, [activeSourceFilterKey, canEditSourceFilters, queryClient, sourceFilters]);
 
   const runSourceAction = React.useCallback(async (
     label: string,
     fn: () => Promise<{ runId?: string; status?: string; message?: string } | unknown>
   ): Promise<void> => {
+    if (!canRunPlatformFeeds) {
+      setMessage('Central vulnerability repository sync is restricted to Platform Owners.');
+      return;
+    }
     if (activeSourceFilterKey != null) {
       const saved = await saveSourceFilters(true);
       if (!saved) {
@@ -484,7 +499,7 @@ export function SourcesPage({
       }
     }
     await runAction(label, fn);
-  }, [activeSourceFilterKey, runAction, saveSourceFilters]);
+  }, [activeSourceFilterKey, canRunPlatformFeeds, runAction, saveSourceFilters]);
 
   const runNvdFullSync = (): void => {
     if (!currentNvdFullSyncApiKey) {
@@ -946,13 +961,16 @@ export function SourcesPage({
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    disabled={savingSourceFilters || busy !== null}
+                    disabled={savingSourceFilters || busy !== null || !canEditSourceFilters}
                     onClick={() => {
                       void saveSourceFilters();
                     }}
                   >
                     {savingSourceFilters ? 'Saving...' : 'Save Filters'}
                   </button>
+                  {!canEditSourceFilters && (
+                    <span className="filter-unsaved-indicator">Read-only for your role</span>
+                  )}
                   {isDirty && (
                     <span className="filter-unsaved-indicator">Unsaved changes</span>
                   )}
@@ -977,7 +995,7 @@ export function SourcesPage({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy !== null || savingSourceFilters}
+              disabled={busy !== null || savingSourceFilters || !canRunPlatformFeeds}
               onClick={() => runSourceAction('NVD Sync', () => api.syncNvd())}
             >
               {busy === 'NVD Sync' ? 'Running...' : 'Run 24h Sync'}
@@ -1085,7 +1103,7 @@ export function SourcesPage({
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  disabled={busy !== null || savingSourceFilters || !confirmFullSync}
+                  disabled={busy !== null || savingSourceFilters || !confirmFullSync || !canRunPlatformFeeds}
                   onClick={runNvdFullSync}
                 >
                   {busy === 'NVD Full Sync' ? 'Running...' : 'Run NVD Full Sync'}

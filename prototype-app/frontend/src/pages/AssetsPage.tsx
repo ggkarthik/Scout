@@ -2,6 +2,8 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
+import { useActor } from '../features/auth/context';
+import { canManageInventorySources } from '../features/auth/roles';
 import type {
   ServiceNowCmdbAuthType,
   ServiceNowCmdbConfig,
@@ -110,6 +112,8 @@ function Tooltip({ text }: { text: string }) {
 }
 
 export function AssetsPage() {
+  const actor = useActor();
+  const canManageConnector = canManageInventorySources(actor);
   const queryClient = useQueryClient();
   const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
   const config = serviceNowConfigQuery.data ?? null;
@@ -381,17 +385,17 @@ export function AssetsPage() {
 
       {/* ── Action bar ── */}
       <div className="button-row section-actions sn-action-bar">
-        <button type="button" className="btn btn-primary" onClick={() => void saveConnector()} disabled={saving || testing}>
+        <button type="button" className="btn btn-primary" onClick={() => void saveConnector()} disabled={!canManageConnector || saving || testing}>
           {saving ? 'Saving...' : 'Save Connector'}
         </button>
-        <button type="button" className="btn btn-secondary" onClick={() => void testConnection()} disabled={testing || saving}>
+        <button type="button" className="btn btn-secondary" onClick={() => void testConnection()} disabled={!canManageConnector || testing || saving}>
           {testing ? 'Testing...' : 'Test Connection'}
         </button>
         <button
           type="button"
           className="btn btn-secondary"
           onClick={() => void queueLiveSync()}
-          disabled={syncingLive || saving || testing || serviceNowConfigQuery.isFetching}
+          disabled={!canManageConnector || syncingLive || saving || testing || serviceNowConfigQuery.isFetching}
         >
           {syncingLive ? 'Running...' : 'Run Integration now'}
         </button>

@@ -1,0 +1,5 @@
+target
+data
+secrets
+.env*
+.DS_Store

@@ -8,9 +8,12 @@
     "build": "tsc -b --force && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:unit": "vitest run"
+    "typecheck": "tsc -b --noEmit",
+    "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sentry/react": "^10.51.0",
     "@tanstack/react-query": "^5.95.2",
     "@tanstack/react-table": "^8.21.3",
     "docx": "^9.6.1",
@@ -25,6 +28,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/coverage-v8": "^4.1.5",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

@@ -62,10 +62,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
@@ -82,10 +79,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                     """
     )
@@ -105,10 +99,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and o.externalId = :externalId
                     order by
@@ -126,10 +117,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and o.externalId = :externalId
                     """
@@ -152,10 +140,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         upper(o.externalId) like concat('%', :queryUpper, '%')
@@ -179,10 +164,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and (:inKev is null or o.inKev = :inKev)
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         upper(o.externalId) like concat('%', :queryUpper, '%')
@@ -210,10 +192,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and upper(coalesce(o.severity, 'UNKNOWN')) = :severity
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
@@ -231,10 +210,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       and upper(coalesce(o.severity, 'UNKNOWN')) = :severity
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                     """
     )
@@ -257,11 +233,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         o.inKev = true
                         or coalesce(o.epssScore, 0.0) >= 0.9
                       )
-                      and (
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
-                      )
+                      and o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
                       case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
@@ -279,11 +251,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         o.inKev = true
                         or coalesce(o.epssScore, 0.0) >= 0.9
                       )
-                      and (
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
-                      )
+                      and o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                     """
     )
     Page<OrgCveRecord> findExposurePageExploitOnly(
@@ -338,10 +306,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         :queryPattern is null
@@ -402,10 +367,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         :queryPattern is null
@@ -477,10 +439,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         :queryPattern is null
@@ -541,10 +500,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         :includeAll = true
-                        or
-                        o.impacted = true
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                        or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
                       and (
                         :queryPattern is null
@@ -573,10 +529,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
     @Query("""
             select
               count(o) as reviewQueueCount,
-              sum(case when o.impactState in (
-                    com.prototype.vulnwatch.domain.ImpactState.UNKNOWN,
-                    com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
-                  ) then 1 else 0 end) as applicableCount,
+              count(o) as applicableCount,
               sum(case when o.impacted = true then 1 else 0 end) as impactedCount,
               sum(case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end) as underInvestigationCount,
               sum(case when o.impactState in (
@@ -585,11 +538,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                   ) then 1 else 0 end) as resolvedCount
             from OrgCveRecord o
             where o.tenant = :tenant
-              and (
-                o.impacted = true
-                or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNKNOWN
-                or o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION
-              )
+              and o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
             """)
     Optional<ExposureSummaryRow> summarizeExposureCounts(@Param("tenant") Tenant tenant);
 

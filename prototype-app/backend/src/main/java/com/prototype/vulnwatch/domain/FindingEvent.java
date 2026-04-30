@@ -11,8 +11,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -40,8 +38,7 @@ public class FindingEvent {
     @Column(nullable = false, length = 1000)
     private String summary;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "details_json", columnDefinition = "jsonb")
+    @Column(name = "details_json", columnDefinition = "text")
     private String detailsJson;
 
     @Column(nullable = false)

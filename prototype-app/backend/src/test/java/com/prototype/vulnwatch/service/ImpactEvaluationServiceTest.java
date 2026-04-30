@@ -1,7 +1,6 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.prototype.vulnwatch.domain.FindingDecisionState;
@@ -17,7 +16,7 @@ class ImpactEvaluationServiceTest {
     private final ImpactEvaluationService service = new ImpactEvaluationService();
 
     @Test
-    void applicableWithoutExactVexRemainsUnknown() {
+    void applicableWithoutVexProducesImpactedFinding() {
         PrecedenceResolverService.CandidateDecision selected = candidate(
                 ApplicabilityDecisionService.ApplicabilityResult.TRUE,
                 "within_constraints"
@@ -34,10 +33,10 @@ class ImpactEvaluationServiceTest {
         ImpactEvaluationService.ImpactAssessment assessment =
                 service.evaluate(resolution, selected, ImpactEvaluationService.VexOverlayOutcome.none());
 
-        assertEquals(ImpactState.UNKNOWN, assessment.impactState());
-        assertEquals("awaiting_vex_assessment", assessment.impactReason());
-        assertFalse(assessment.findingEligible());
-        assertEquals(FindingDecisionState.UNDER_INVESTIGATION, assessment.findingDecisionState());
+        assertEquals(ImpactState.IMPACTED, assessment.impactState());
+        assertEquals("applicable_no_vex", assessment.impactReason());
+        assertTrue(assessment.findingEligible());
+        assertEquals(FindingDecisionState.AFFECTED, assessment.findingDecisionState());
     }
 
     @Test

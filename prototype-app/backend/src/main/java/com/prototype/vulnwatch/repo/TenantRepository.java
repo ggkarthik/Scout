@@ -8,5 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     Optional<Tenant> findByNameIgnoreCase(String name);
+    Optional<Tenant> findBySlugIgnoreCase(String slug);
     List<Tenant> findAllByOrderByCreatedAtAsc();
 }

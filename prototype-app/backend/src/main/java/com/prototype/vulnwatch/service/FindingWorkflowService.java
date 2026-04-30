@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,7 @@ public class FindingWorkflowService {
     private final RiskPolicyRepository riskPolicyRepository;
     private final AssetRepository assetRepository;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<AuditEventService> auditEventServiceProvider;
 
     public FindingWorkflowService(
             FindingRepository findingRepository,
@@ -46,7 +48,8 @@ public class FindingWorkflowService {
             FindingEventRepository findingEventRepository,
             RiskPolicyRepository riskPolicyRepository,
             AssetRepository assetRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ObjectProvider<AuditEventService> auditEventServiceProvider
     ) {
         this.findingRepository = findingRepository;
         this.findingCommentRepository = findingCommentRepository;
@@ -54,6 +57,7 @@ public class FindingWorkflowService {
         this.riskPolicyRepository = riskPolicyRepository;
         this.assetRepository = assetRepository;
         this.objectMapper = objectMapper;
+        this.auditEventServiceProvider = auditEventServiceProvider;
     }
 
     @Transactional
@@ -62,6 +66,7 @@ public class FindingWorkflowService {
                 .orElseThrow(() -> new EntityNotFoundException("Finding not found: " + findingId));
         applyWorkflowUpdate(finding, request);
         finding.touch();
+        audit("finding.workflow.updated", "finding", finding.getId().toString(), null);
         return findingRepository.save(finding);
     }
 
@@ -75,8 +80,15 @@ public class FindingWorkflowService {
         }
         if (!findings.isEmpty()) {
             findingRepository.saveAll(findings);
+            audit("finding.workflow.bulk_updated", "finding", null,
+                    "{\"updated\":" + updated + "}");
         }
         return updated;
+    }
+
+    @Transactional
+    public int updateWorkflowBulkByIds(List<UUID> findingIds, FindingWorkflowUpdateRequest request) {
+        return updateWorkflowBulk(findingRepository.findAllById(findingIds), request);
     }
 
     private void applyWorkflowUpdate(Finding finding, FindingWorkflowUpdateRequest request) {
@@ -145,6 +157,13 @@ public class FindingWorkflowService {
                     actor,
                     "Suppression metadata updated",
                     details);
+        }
+    }
+
+    private void audit(String action, String targetType, String targetId, String detailsJson) {
+        AuditEventService auditEventService = auditEventServiceProvider.getIfAvailable();
+        if (auditEventService != null) {
+            auditEventService.record(action, targetType, targetId, detailsJson);
         }
     }
 

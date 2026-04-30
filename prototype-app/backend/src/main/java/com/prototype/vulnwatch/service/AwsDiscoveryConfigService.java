@@ -31,15 +31,21 @@ public class AwsDiscoveryConfigService {
     private final AwsDiscoveryConfigRepository repo;
     private final AwsDiscoveryClient awsDiscoveryClient;
     private final ObjectMapper objectMapper;
+    private final TenantQuotaService tenantQuotaService;
+    private final CredentialEncryptionService credentialEncryptionService;
 
     public AwsDiscoveryConfigService(
             AwsDiscoveryConfigRepository repo,
             AwsDiscoveryClient awsDiscoveryClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantQuotaService tenantQuotaService,
+            CredentialEncryptionService credentialEncryptionService
     ) {
         this.repo = repo;
         this.awsDiscoveryClient = awsDiscoveryClient;
         this.objectMapper = objectMapper;
+        this.tenantQuotaService = tenantQuotaService;
+        this.credentialEncryptionService = credentialEncryptionService;
     }
 
     @Transactional(readOnly = true)
@@ -53,6 +59,7 @@ public class AwsDiscoveryConfigService {
     public AwsDiscoveryConfigResponse save(Tenant tenant, AwsDiscoveryConfigRequest request) {
         AwsDiscoveryConfig config = repo.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
                 .orElseGet(() -> {
+                    tenantQuotaService.assertCanCreateConnector(tenant, "aws");
                     AwsDiscoveryConfig c = new AwsDiscoveryConfig();
                     c.setTenant(tenant);
                     c.setSourceSystem("aws");
@@ -72,7 +79,7 @@ public class AwsDiscoveryConfigService {
         Instant testedAt = Instant.now();
         AwsCredentialsProvider creds;
         try {
-            creds = AwsCredentialProvider.from(config);
+            creds = AwsCredentialProvider.from(configWithDecryptedCredential(config));
         } catch (Exception e) {
             persistTestResult(config, "FAILED", e.getMessage(), testedAt, null);
             return new AwsConnectionTestResponse("FAILED", e.getMessage(), null, Collections.emptyList(), testedAt);
@@ -103,7 +110,7 @@ public class AwsDiscoveryConfigService {
         }
         config.setAccessKeyId(trimToNull(request.accessKeyId()));
         if (hasText(request.credentialSecret())) {
-            config.setCredentialSecret(request.credentialSecret().trim());
+            config.setCredentialSecret(credentialEncryptionService.encrypt(request.credentialSecret().trim()));
         }
         config.setCrossAccountRoleArn(trimToNull(request.crossAccountRoleArn()));
         config.setExternalId(trimToNull(request.externalId()));
@@ -179,6 +186,27 @@ public class AwsDiscoveryConfigService {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(BAD_REQUEST, "Unsupported AWS auth type: " + value);
         }
+    }
+
+    AwsDiscoveryConfig configWithDecryptedCredential(AwsDiscoveryConfig config) {
+        if (config == null || !hasText(config.getCredentialSecret())) {
+            return config;
+        }
+        AwsDiscoveryConfig runtimeConfig = new AwsDiscoveryConfig();
+        runtimeConfig.setTenant(config.getTenant());
+        runtimeConfig.setSourceSystem(config.getSourceSystem());
+        runtimeConfig.setAuthType(config.getAuthType());
+        runtimeConfig.setAccessKeyId(config.getAccessKeyId());
+        runtimeConfig.setCredentialSecret(credentialEncryptionService.decrypt(config.getCredentialSecret()));
+        runtimeConfig.setCrossAccountRoleArn(config.getCrossAccountRoleArn());
+        runtimeConfig.setExternalId(config.getExternalId());
+        runtimeConfig.setAwsAccountId(config.getAwsAccountId());
+        runtimeConfig.setRegionsJson(config.getRegionsJson());
+        runtimeConfig.setResourceTypesJson(config.getResourceTypesJson());
+        runtimeConfig.setEnabled(config.isEnabled());
+        runtimeConfig.setAutoSyncEnabled(config.isAutoSyncEnabled());
+        runtimeConfig.setIntervalMinutes(config.getIntervalMinutes());
+        return runtimeConfig;
     }
 
     private boolean hasText(String value) {

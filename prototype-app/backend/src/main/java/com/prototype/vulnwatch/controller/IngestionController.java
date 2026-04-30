@@ -9,12 +9,14 @@ import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,15 +32,18 @@ public class IngestionController {
     private final WorkspaceService workspaceService;
     private final SbomIngestionService sbomIngestionService;
     private final VulnerabilityIngestionService vulnerabilityIngestionService;
+    private final AuditEventService auditEventService;
 
     public IngestionController(
             WorkspaceService workspaceService,
             SbomIngestionService sbomIngestionService,
-            VulnerabilityIngestionService vulnerabilityIngestionService
+            VulnerabilityIngestionService vulnerabilityIngestionService,
+            AuditEventService auditEventService
     ) {
         this.workspaceService = workspaceService;
         this.sbomIngestionService = sbomIngestionService;
         this.vulnerabilityIngestionService = vulnerabilityIngestionService;
+        this.auditEventService = auditEventService;
     }
 
     @PostMapping("/sbom-fetch")
@@ -46,7 +51,9 @@ public class IngestionController {
             @Valid @RequestBody SbomEndpointIngestionRequest request
     ) throws IOException {
         Tenant tenant = workspaceService.getWorkspace();
-        return sbomIngestionService.ingestFromEndpoint(tenant, request);
+        SbomIngestionResponse response = sbomIngestionService.ingestFromEndpoint(tenant, request);
+        auditEventService.record("inventory.sbom.fetch", "sbom_fetch", response.sbomUploadId() == null ? null : response.sbomUploadId().toString(), null);
+        return response;
     }
 
     @GetMapping("/ingestions")
@@ -58,48 +65,76 @@ public class IngestionController {
     }
 
     @PostMapping("/ingestion/nvd-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncNvd(@RequestParam(defaultValue = "24") int lookbackHours) {
-        return vulnerabilityIngestionService.triggerNvdSync(lookbackHours);
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerNvdSync(lookbackHours);
+        auditEventService.record("platform.vulnerability_feed.nvd_sync", "sync_run", response.runId() == null ? null : response.runId().toString(),
+                "{\"lookbackHours\":" + lookbackHours + "}");
+        return response;
     }
 
     @PostMapping("/ingestion/nvd-full-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncNvdFull(@RequestBody(required = false) NvdFullSyncRequest request) {
-        return vulnerabilityIngestionService.triggerNvdFullSync(request == null ? null : request.apiKey());
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerNvdFullSync(request == null ? null : request.apiKey());
+        auditEventService.record("platform.vulnerability_feed.nvd_full_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/nvd-cve/{cveId}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public IngestionResult refreshCveFromNvd(@PathVariable String cveId) {
-        return vulnerabilityIngestionService.refreshSingleCveFromNvd(cveId);
+        IngestionResult response = vulnerabilityIngestionService.refreshSingleCveFromNvd(cveId);
+        auditEventService.record("platform.vulnerability_feed.nvd_cve_refresh", "vulnerability", cveId, null);
+        return response;
     }
 
     @PostMapping("/ingestion/kev-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncKev() {
-        return vulnerabilityIngestionService.triggerKevSync();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerKevSync();
+        auditEventService.record("platform.vulnerability_feed.kev_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/ghsa-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncGhsa() {
-        return vulnerabilityIngestionService.triggerGhsaSync();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerGhsaSync();
+        auditEventService.record("platform.vulnerability_feed.ghsa_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/csaf/microsoft-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncMicrosoftCsaf() {
-        return vulnerabilityIngestionService.triggerMicrosoftCsafSync();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerMicrosoftCsafSync();
+        auditEventService.record("platform.vulnerability_feed.microsoft_csaf_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/csaf/redhat-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncRedhatCsaf() {
-        return vulnerabilityIngestionService.triggerRedhatCsafSync();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerRedhatCsafSync();
+        auditEventService.record("platform.vulnerability_feed.redhat_csaf_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/vex-assertion-repair")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse repairVexAssertions() {
-        return vulnerabilityIngestionService.triggerVexAssertionRepair();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerVexAssertionRepair();
+        auditEventService.record("platform.vulnerability_feed.vex_assertion_repair", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/ingestion/vex-rollout-backfill")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse runVexRolloutBackfill() {
-        return vulnerabilityIngestionService.triggerVexRolloutBackfill();
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerVexRolloutBackfill();
+        auditEventService.record("platform.vulnerability_feed.vex_rollout_backfill", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @GetMapping("/ingestion/vex-assertion-repair/summary")
@@ -108,8 +143,11 @@ public class IngestionController {
     }
 
     @PostMapping("/ingestion/advisories")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public IngestionResult ingestAdvisories(@Valid @RequestBody AdvisoryBatchRequest request) {
-        return vulnerabilityIngestionService.ingestAdvisories(request);
+        IngestionResult response = vulnerabilityIngestionService.ingestAdvisories(request);
+        auditEventService.record("platform.vulnerability_feed.advisory_ingest", "advisory_batch", null, null);
+        return response;
     }
 
 }

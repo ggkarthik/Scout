@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import {
   pathForInventoryHostAsset,
-  pathForInventoryView,
   pathForInventoryViewWithSearch,
 } from '../app/routes';
 import { InventoryQualityWorkspace } from '../components/InventoryQualityWorkspace';
@@ -104,6 +103,11 @@ type AssetTypePortfolioSummary = {
   normalizedAssetCount: number;
   notNormalizedAssetCount: number;
   componentCount: number;
+};
+
+type OverviewSoftwareSummary = SoftwareIdentitySummary & {
+  collapsedIdentityCount: number;
+  softwareFilterQuery: string;
 };
 
 type OverviewFocusTab = 'assets' | 'software';
@@ -506,6 +510,111 @@ function softwareLifecycleSummary(identity: SoftwareIdentitySummary): { label: s
   return { label: 'Supported', className: 'status-pill status-success' };
 }
 
+function normalizeSoftwareText(value?: string): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function overviewSoftwareGroup(identity: SoftwareIdentitySummary): {
+  key: string;
+  displayName: string;
+  filterQuery: string;
+  product?: string;
+} {
+  const vendor = normalizeSoftwareText(identity.vendor);
+  const product = normalizeSoftwareText(identity.product);
+
+  if (vendor === 'microsoft') {
+    const officeMuiMatch = product.match(/^(access|excel|infopath|lync|office|onenote|outlook|powerpoint|project|publisher|visio|word)_mui_(\d{4})$/);
+    if (officeMuiMatch) {
+      const collapsedProduct = `office_${officeMuiMatch[2]}`;
+      return {
+        key: `${vendor}::${collapsedProduct}`,
+        displayName: `${vendor}/${collapsedProduct}`,
+        filterQuery: `_mui_${officeMuiMatch[2]}`,
+        product: collapsedProduct
+      };
+    }
+  }
+
+  return {
+    key: identity.normalizedKey || `${vendor}::${product}` || identity.canonicalKey || identity.id,
+    displayName: identity.displayName,
+    filterQuery: identity.displayName,
+    product: identity.product
+  };
+}
+
+function mergeStringValues(left: string[], right: string[]): string[] {
+  return Array.from(new Set([...left, ...right])).sort((a, b) => a.localeCompare(b));
+}
+
+function latestObservedAt(left?: string, right?: string): string | undefined {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return new Date(left).getTime() >= new Date(right).getTime() ? left : right;
+}
+
+function collapseOverviewSoftwareRows(rows: SoftwareIdentitySummary[]): OverviewSoftwareSummary[] {
+  const grouped = new Map<string, OverviewSoftwareSummary>();
+
+  rows.forEach((identity) => {
+    const group = overviewSoftwareGroup(identity);
+    const current = grouped.get(group.key);
+
+    if (!current) {
+      grouped.set(group.key, {
+        ...identity,
+        displayName: group.displayName,
+        product: group.product,
+        normalizedKey: group.key,
+        collapsedIdentityCount: 1,
+        softwareFilterQuery: group.filterQuery
+      });
+      return;
+    }
+
+    const representative = identity.assetCount > current.assetCount
+      || (identity.assetCount === current.assetCount && identity.componentCount > current.componentCount)
+      ? identity
+      : current;
+
+    grouped.set(group.key, {
+      ...current,
+      id: representative.id,
+      canonicalKey: representative.canonicalKey,
+      displayName: group.displayName,
+      product: group.product,
+      assetTypes: mergeStringValues(current.assetTypes, identity.assetTypes),
+      ecosystems: mergeStringValues(current.ecosystems, identity.ecosystems),
+      sourceSystems: mergeStringValues(current.sourceSystems, identity.sourceSystems),
+      eolSlug: current.eolSlug === identity.eolSlug ? current.eolSlug : undefined,
+      mappingConfirmed: current.mappingConfirmed && identity.mappingConfirmed,
+      needsEolMapping: current.needsEolMapping || identity.needsEolMapping,
+      assetCount: Math.max(current.assetCount, identity.assetCount),
+      componentCount: Math.max(current.componentCount, identity.componentCount),
+      versionCount: Math.max(current.versionCount, identity.versionCount),
+      eolComponentCount: Math.max(current.eolComponentCount, identity.eolComponentCount),
+      nearEolComponentCount: Math.max(current.nearEolComponentCount, identity.nearEolComponentCount),
+      unknownEolComponentCount: Math.max(current.unknownEolComponentCount, identity.unknownEolComponentCount),
+      openFindingCount: current.openFindingCount + identity.openFindingCount,
+      openVulnerabilityCount: current.openVulnerabilityCount + identity.openVulnerabilityCount,
+      lastObservedAt: latestObservedAt(current.lastObservedAt, identity.lastObservedAt),
+      collapsedIdentityCount: current.collapsedIdentityCount + 1,
+      softwareFilterQuery: group.filterQuery
+    });
+  });
+
+  return Array.from(grouped.values()).sort((left, right) =>
+    right.componentCount - left.componentCount
+    || right.assetCount - left.assetCount
+    || left.displayName.localeCompare(right.displayName)
+  );
+}
+
 function firstErrorMessage(errors: Array<unknown>): string | null {
   for (const error of errors) {
     if (error instanceof Error) {
@@ -515,10 +624,10 @@ function firstErrorMessage(errors: Array<unknown>): string | null {
   return null;
 }
 
-function softwareIdentityDetailPath(identityId: string): string {
-  const searchParams = new URLSearchParams();
-  searchParams.set('softwareIdentityId', identityId);
-  return `${pathForInventoryView('software-identities')}?${searchParams.toString()}`;
+function softwareIdentityFilterPath(identity: OverviewSoftwareSummary): string {
+  return pathForInventoryViewWithSearch('software-identities', {
+    query: identity.softwareFilterQuery || identity.displayName
+  });
 }
 
 function qualityDomainCount(summary: OperationalQualitySummary | null, domain: string): number {
@@ -681,7 +790,7 @@ export function InventoryOverviewPage() {
   );
 
   const softwareRows = React.useMemo(
-    () => softwarePage?.content ?? [],
+    () => collapseOverviewSoftwareRows(softwarePage?.content ?? []),
     [softwarePage?.content]
   );
   const _assetNormalizationSummary = React.useMemo(
@@ -1189,7 +1298,7 @@ export function InventoryOverviewPage() {
                               <button
                                 type="button"
                                 className="inventory-link-button inventory-link-button-primary"
-                                onClick={() => navigate(softwareIdentityDetailPath(identity.id))}
+                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
                               >
                                 {identity.displayName}
                               </button>
@@ -1197,7 +1306,10 @@ export function InventoryOverviewPage() {
                             </td>
                             <td>
                               <div className="inventory-primary-text">{identity.assetCount.toLocaleString()} assets</div>
-                              <div className="panel-caption">{identity.componentCount.toLocaleString()} components · {identity.versionCount.toLocaleString()} versions</div>
+                              <div className="panel-caption">
+                                {identity.componentCount.toLocaleString()} components · {identity.versionCount.toLocaleString()} versions
+                                {identity.collapsedIdentityCount > 1 ? ` · ${identity.collapsedIdentityCount.toLocaleString()} identities` : ''}
+                              </div>
                             </td>
                             <td>
                               <span className={lifecycle.className}>{lifecycle.label}</span>
@@ -1211,7 +1323,7 @@ export function InventoryOverviewPage() {
                               <button
                                 type="button"
                                 className="inventory-link-button inventory-link-button-primary"
-                                onClick={() => navigate(softwareIdentityDetailPath(identity.id))}
+                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
                               >
                                 Inspect
                               </button>

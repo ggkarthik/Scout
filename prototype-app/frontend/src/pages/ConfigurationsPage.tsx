@@ -1,6 +1,8 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useActor } from '../features/auth/context';
+import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
 import type { RiskPolicy } from '../features/configurations/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 
@@ -220,6 +222,42 @@ function applyTriageDefaults(data: RiskPolicy): RiskPolicy {
   };
 }
 
+const DEFAULT_RISK_POLICY: RiskPolicy = applyTriageDefaults({
+  cvssWeight: 1.0,
+  kevBoost: 2.0,
+  epssWeight: 1.0,
+  vexNotAffectedFreshnessDays: 30,
+  vexFixedFreshnessDays: 30,
+  vexKnownAffectedBoost: 0.4,
+  vexUnderInvestigationPenalty: 0.2,
+  vexNotAffectedReduction: 0.8,
+  vexStalePenalty: 0.5,
+  criticalThreshold: 9.0,
+  highThreshold: 7.0,
+  assetCriticalRiskBoost: 1.5,
+  assetHighRiskBoost: 1.0,
+  assetMediumRiskBoost: 0.5,
+  assetLowRiskBoost: 0.0,
+  criticalSlaDays: 7,
+  highSlaDays: 14,
+  mediumSlaDays: 30,
+  lowSlaDays: 60,
+  assetCriticalSlaMultiplier: 0.5,
+  assetHighSlaMultiplier: 0.75,
+  assetMediumSlaMultiplier: 1.0,
+  assetLowSlaMultiplier: 1.25,
+  autoCloseEnabled: false,
+  autoCloseAssetIdentifier: '',
+  autoCloseAfterDays: 0,
+  findingGenerationMode: 'MANUAL',
+  triageExploitabilityWeight: 1.0,
+  triageBlastRadiusWeight: 1.0,
+  triageEolRiskWeight: 0.8,
+  triageSlaBreachWeight: 1.2,
+  triageMissingOwnerBoost: 0.5,
+  triagePatchGapBoost: 0.3,
+});
+
 function scoreSeverityLabel(score: number): { label: string; color: string } {
   if (score >= 9) return { label: 'Critical', color: 'var(--critical)' };
   if (score >= 7) return { label: 'High', color: 'var(--high)' };
@@ -232,6 +270,7 @@ function fmt2(n: number): string {
 }
 
 export function ConfigurationsPage() {
+  const actor = useActor();
   const queryClient = useQueryClient();
   const riskPolicyQuery = useRiskPolicyQuery();
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
@@ -241,6 +280,8 @@ export function ConfigurationsPage() {
   const [resetMessage, setResetMessage] = React.useState('');
   const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
   const [showAdvancedVex, setShowAdvancedVex] = React.useState(false);
+  const canEditRiskPolicy = canManageRiskPolicy(actor);
+  const canUseDevTools = hasRole(actor, 'PLATFORM_OWNER');
 
   // Risk score live simulator state
   const [simCvss, setSimCvss] = React.useState(7.5);
@@ -267,6 +308,13 @@ export function ConfigurationsPage() {
       setPolicy(applyTriageDefaults(riskPolicyQuery.data));
     }
   }, [riskPolicyQuery.data]);
+
+  React.useEffect(() => {
+    if (!policy && riskPolicyQuery.error) {
+      setPolicy(DEFAULT_RISK_POLICY);
+      setPolicyMessage('Using local defaults because the backend configuration API is unavailable. Saving will retry the API.');
+    }
+  }, [policy, riskPolicyQuery.error]);
 
   const updatePolicy = (key: keyof RiskPolicy, value: number | boolean | string): void => {
     if (!policy) return;
@@ -376,9 +424,6 @@ export function ConfigurationsPage() {
   ]);
 
   if (!policy) {
-    if (riskPolicyQuery.error instanceof Error) {
-      return <div className="panel">Failed to load configuration: {riskPolicyQuery.error.message}</div>;
-    }
     return <div className="panel">Loading configuration...</div>;
   }
 
@@ -406,7 +451,7 @@ export function ConfigurationsPage() {
             type="button"
             className="btn btn-primary"
             onClick={savePolicy}
-            disabled={policySaving || errs.length > 0}
+            disabled={!canEditRiskPolicy || policySaving || errs.length > 0}
           >
             {policySaving ? 'Saving…' : 'Save'}
           </button>
@@ -970,7 +1015,7 @@ export function ConfigurationsPage() {
             type="button"
             className="btn btn-secondary"
             onClick={cleanAllPrototypeData}
-            disabled={resetBusy}
+            disabled={!canUseDevTools || resetBusy}
           >
             {resetBusy ? 'Cleaning…' : 'Clean All Prototype Data'}
           </button>

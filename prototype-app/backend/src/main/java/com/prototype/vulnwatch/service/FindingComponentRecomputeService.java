@@ -100,6 +100,10 @@ public class FindingComponentRecomputeService {
             return 0;
         }
         FlushModeType previousFlushMode = entityManager.getFlushMode();
+        // Flush any pending writes from the caller's transaction before switching to COMMIT mode,
+        // otherwise queries inside this method won't observe entities that the caller just persisted
+        // (notably affects @Transactional integration tests that share the EM with the recompute call).
+        entityManager.flush();
         entityManager.setFlushMode(FlushModeType.COMMIT);
         try {
             List<InventoryComponent> components = inventoryComponentRepository.findAllById(componentIds).stream()
