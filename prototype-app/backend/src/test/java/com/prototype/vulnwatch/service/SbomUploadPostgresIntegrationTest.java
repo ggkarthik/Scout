@@ -251,6 +251,7 @@ class SbomUploadPostgresIntegrationTest {
 
     private JsonNode fetchSbom(String filename, String payload) throws Exception {
         String sourceUrl = "https://example.com/sbom/" + filename;
+        server.reset();
         server.expect(once(), requestTo(sourceUrl))
                 .andExpect(method(GET))
                 .andRespond(withSuccess(payload, MediaType.APPLICATION_JSON));

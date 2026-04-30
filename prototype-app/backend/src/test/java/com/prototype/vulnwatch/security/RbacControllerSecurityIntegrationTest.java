@@ -1,0 +1,139 @@
+package com.prototype.vulnwatch.security;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
+import com.prototype.vulnwatch.config.RequestCorrelationFilter;
+import com.prototype.vulnwatch.config.SecurityConfig;
+import com.prototype.vulnwatch.controller.ApiExceptionHandler;
+import com.prototype.vulnwatch.controller.RiskPolicyController;
+import com.prototype.vulnwatch.controller.ServiceNowCmdbConfigController;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.service.AuditEventService;
+import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
+import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
+import com.prototype.vulnwatch.service.OperationalMetricsService;
+import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.RiskPolicyService;
+import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
+import com.prototype.vulnwatch.service.ServiceNowCmdbSyncService;
+import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.WorkspaceService;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.web.servlet.MockMvc;
+
+@WebMvcTest(
+        controllers = {
+                RiskPolicyController.class,
+                ServiceNowCmdbConfigController.class
+        },
+        excludeAutoConfiguration = UserDetailsServiceAutoConfiguration.class,
+        properties = {
+                "app.security.api-key=test-api-key",
+                "spring.mvc.throw-exception-if-no-handler-found=true",
+                "spring.web.resources.add-mappings=false"
+        })
+@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, RequestCorrelationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
+class RbacControllerSecurityIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private TenantService tenantService;
+    @MockBean
+    private TenantRepository tenantRepository;
+    @MockBean
+    private WorkspaceService workspaceService;
+    @MockBean
+    private RiskPolicyService riskPolicyService;
+    @MockBean
+    private ServiceNowCmdbConfigService serviceNowCmdbConfigService;
+    @MockBean
+    private ServiceNowCmdbSyncService serviceNowCmdbSyncService;
+    @MockBean
+    private AuditEventService auditEventService;
+    @MockBean
+    private OperationalMetricsService operationalMetricsService;
+    @MockBean
+    private JwtDecoder jwtDecoder;
+    @MockBean
+    private JwtTenantAuthenticationService jwtTenantAuthenticationService;
+
+    private UUID tenantId;
+
+    @BeforeEach
+    void setUp() {
+        tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Customer A");
+        tenant.setStatus("ACTIVE");
+        when(tenantService.getDefaultTenant()).thenReturn(tenant);
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+    }
+
+    @Test
+    void riskPolicyUpdateRequiresTenantAdmin() throws Exception {
+        authenticateJwt("analyst.jwt", "analyst-1", "SECURITY_ANALYST");
+
+        mockMvc.perform(post("/api/risk-policy")
+                        .header("Authorization", "Bearer analyst.jwt")
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void inventoryAdminCanManageConnectorConfiguration() throws Exception {
+        authenticateJwt("inventory.jwt", "inventory-1", "INVENTORY_ADMIN");
+
+        mockMvc.perform(put("/api/connectors/servicenow-cmdb")
+                        .header("Authorization", "Bearer inventory.jwt")
+                        .contentType("application/json")
+                        .content("{\"baseUrl\":\"https://example.service-now.com\",\"authType\":\"BASIC\",\"username\":\"api\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void securityAnalystCannotManageConnectorConfiguration() throws Exception {
+        authenticateJwt("analyst.jwt", "analyst-1", "SECURITY_ANALYST");
+
+        mockMvc.perform(put("/api/connectors/servicenow-cmdb")
+                        .header("Authorization", "Bearer analyst.jwt")
+                        .contentType("application/json")
+                        .content("{\"baseUrl\":\"https://example.service-now.com\",\"authType\":\"BASIC\",\"username\":\"api\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    private void authenticateJwt(String token, String subject, String role) {
+        Jwt jwt = Jwt.withTokenValue(token)
+                .header("alg", "none")
+                .subject(subject)
+                .build();
+        when(jwtDecoder.decode(token)).thenReturn(jwt);
+        when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
+                subject,
+                UUID.randomUUID(),
+                tenantId,
+                "Customer A",
+                Set.of(role)));
+    }
+}

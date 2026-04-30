@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DataTable,
   type DataTableColumn,
@@ -22,7 +22,9 @@ import {
   useOrgSpecificCvesQuery,
   useRiskPolicyQuery
 } from '../features/cve-workbench/queries';
+import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { useActor } from '../features/auth/context';
+import { canRefreshTenantExposure } from '../features/auth/roles';
 import { computeCveRiskScore, riskScoreLabel } from '../lib/riskScoring';
 
 const PAGE_SIZE = 25;
@@ -191,6 +193,17 @@ export function VulnRepoOrgCvePage({
   const selectedDetail = detailQuery.data ?? null;
   const detailLoading = detailQuery.isLoading || detailQuery.isFetching;
   const detailError = detailQuery.error instanceof Error ? detailQuery.error.message : null;
+  const canRefreshExposure = canRefreshTenantExposure(actor);
+  const refreshExposureMutation = useMutation({
+    mutationFn: cveWorkbenchApi.refreshTenantExposure,
+    onSuccess: async () => {
+      await Promise.all([
+        orgCveQuery.refetch(),
+        policyQuery.refetch(),
+        automationStatusQuery.refetch()
+      ]);
+    }
+  });
 
   const openRecord = React.useCallback((record: OrgSpecificCveExposureRecord) => {
     setSelectedRecord(record);
@@ -420,6 +433,17 @@ export function VulnRepoOrgCvePage({
             <h3>{WORKBENCH_LABEL}</h3>
           </div>
           <div className="button-row">
+            {canRefreshExposure && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => refreshExposureMutation.mutate()}
+                disabled={refreshExposureMutation.isPending}
+                title="Refresh tenant exposure from the current central vulnerability repository"
+              >
+                {refreshExposureMutation.isPending ? 'Queueing...' : 'Refresh My Exposure'}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-secondary"
@@ -430,6 +454,17 @@ export function VulnRepoOrgCvePage({
             </button>
           </div>
         </div>
+
+        {refreshExposureMutation.isSuccess && (
+          <div className="notice">
+            Tenant exposure refresh queued from the current central vulnerability repository.
+          </div>
+        )}
+        {refreshExposureMutation.isError && (
+          <div className="notice error" role="alert">
+            {refreshExposureMutation.error instanceof Error ? refreshExposureMutation.error.message : 'Failed to queue tenant exposure refresh'}
+          </div>
+        )}
 
 
         {summary && (

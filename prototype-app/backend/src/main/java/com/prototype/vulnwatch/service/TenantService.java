@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,32 @@ public class TenantService {
                 .orElseGet(this::getDefaultTenant);
     }
 
+    @Transactional(readOnly = true)
+    public List<Tenant> listTenants() {
+        return tenantRepository.findAllByOrderByCreatedAtAsc();
+    }
+
+    @Transactional
+    public Tenant createTenant(String name, String slug, String planCode, String billingRef) {
+        Tenant tenant = new Tenant();
+        tenant.setName(requireText(name, "name"));
+        tenant.setSlug(normalizeSlug(slug == null || slug.isBlank() ? name : slug));
+        tenant.setPlanCode(planCode == null || planCode.isBlank() ? "pilot" : planCode.trim());
+        tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
+        return tenantRepository.save(tenant);
+    }
+
+    @Transactional
+    public Tenant updateStatus(UUID tenantId, String status) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        String normalizedStatus = requireText(status, "status").toUpperCase();
+        tenant.setStatus(normalizedStatus);
+        tenant.setUpdatedAt(Instant.now());
+        tenant.setSuspendedAt("SUSPENDED".equals(normalizedStatus) ? Instant.now() : null);
+        return tenantRepository.save(tenant);
+    }
+
     private Tenant resolveExistingTenantOrCreateDefault() {
         List<Tenant> existingTenants = tenantRepository.findAllByOrderByCreatedAtAsc();
         if (!existingTenants.isEmpty()) {
@@ -51,6 +78,25 @@ public class TenantService {
 
         Tenant tenant = new Tenant();
         tenant.setName(DEFAULT_TENANT_NAME);
+        tenant.setSlug("default-workspace");
         return tenantRepository.save(tenant);
+    }
+
+    private String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim();
+    }
+
+    private String normalizeSlug(String value) {
+        String slug = requireText(value, "slug")
+                .toLowerCase()
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-|-$)", "");
+        if (slug.isBlank()) {
+            throw new IllegalArgumentException("slug must contain at least one letter or digit");
+        }
+        return slug;
     }
 }

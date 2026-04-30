@@ -24,7 +24,7 @@ class WorkspaceServiceTest {
         Tenant tenant = tenant("Primary Workspace");
         when(tenantService.getDefaultTenant()).thenReturn(tenant);
 
-        WorkspaceService workspaceService = new WorkspaceService(tenantService);
+        WorkspaceService workspaceService = new WorkspaceService(tenantService, false);
 
         Tenant first = workspaceService.getWorkspace();
         Tenant second = workspaceService.getWorkspace();
@@ -41,7 +41,7 @@ class WorkspaceServiceTest {
         Tenant refreshed = tenant("Workspace B");
         when(tenantService.getDefaultTenant()).thenReturn(initial, refreshed);
 
-        WorkspaceService workspaceService = new WorkspaceService(tenantService);
+        WorkspaceService workspaceService = new WorkspaceService(tenantService, false);
 
         assertSame(initial, workspaceService.getWorkspace());
         assertSame(refreshed, workspaceService.refreshWorkspace());

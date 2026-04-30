@@ -19,13 +19,19 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
  *
  * set_config(name, value, FALSE) sets a session-level variable that persists for
  * the life of the connection. The reset on close() restores it to an empty string,
- * which the RLS policies treat as "no tenant constraint" (allowing unrestricted
- * access for background jobs and Flyway migrations).
+ * which the RLS policies treat as "no tenant constraint" in local/dev mode.
+ * In production mode, missing tenant context is converted to a sentinel UUID
+ * so tenant-scoped RLS policies match no tenant rows.
  */
 public class TenantAwareDataSource extends DelegatingDataSource {
 
-    public TenantAwareDataSource(javax.sql.DataSource targetDataSource) {
+    private static final String NO_TENANT_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
+    private final boolean requireTenantContext;
+
+    public TenantAwareDataSource(javax.sql.DataSource targetDataSource, boolean requireTenantContext) {
         super(targetDataSource);
+        this.requireTenantContext = requireTenantContext;
     }
 
     @Override
@@ -44,7 +50,7 @@ public class TenantAwareDataSource extends DelegatingDataSource {
 
     private void applyTenantContext(Connection conn) throws SQLException {
         UUID tenantId = TenantContext.getCurrentTenantId();
-        String value = tenantId != null ? tenantId.toString() : "";
+        String value = tenantId != null ? tenantId.toString() : requireTenantContext ? NO_TENANT_SENTINEL : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
             ps.setString(1, value);

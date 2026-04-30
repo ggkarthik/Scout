@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.controller;
 
+import com.prototype.vulnwatch.service.QuotaExceededException;
 import jakarta.persistence.EntityNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
@@ -12,6 +13,8 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -98,6 +101,22 @@ public class ApiExceptionHandler {
     public Map<String, Object> handleLockContention(Exception ex) {
         log.warn("Lock contention while handling API request: {}", ex.getMessage(), ex);
         return error("RESOURCE_BUSY", "Another ingestion is in progress for this asset. Please retry shortly.");
+    }
+
+    @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Map<String, Object> handleAccessDenied(Exception ex) {
+        log.warn("Access denied while handling API request: {}", ex.getMessage());
+        return error("PERMISSION_DENIED", "Permission denied");
+    }
+
+    @ExceptionHandler(QuotaExceededException.class)
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    public Map<String, Object> handleQuotaExceeded(QuotaExceededException ex) {
+        log.warn("Tenant quota exceeded while handling API request: {}", ex.getMessage());
+        Map<String, Object> payload = error("QUOTA_EXCEEDED", ex.getMessage());
+        payload.put("quotaCode", ex.getQuotaCode());
+        return payload;
     }
 
     @ExceptionHandler(Exception.class)

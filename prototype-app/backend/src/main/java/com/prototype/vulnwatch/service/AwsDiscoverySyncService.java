@@ -48,6 +48,7 @@ public class AwsDiscoverySyncService {
     private final ObjectMapper objectMapper;
     private final TaskExecutor integrationQueueExecutor;
     private final TransactionTemplate transactionTemplate;
+    private final CredentialEncryptionService credentialEncryptionService;
 
     public AwsDiscoverySyncService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
@@ -58,7 +59,8 @@ public class AwsDiscoverySyncService {
             SyncRunRepository syncRunRepository,
             ObjectMapper objectMapper,
             @Qualifier("integrationQueueExecutor") TaskExecutor integrationQueueExecutor,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate,
+            CredentialEncryptionService credentialEncryptionService
     ) {
         this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
@@ -69,6 +71,7 @@ public class AwsDiscoverySyncService {
         this.objectMapper = objectMapper;
         this.integrationQueueExecutor = integrationQueueExecutor;
         this.transactionTemplate = transactionTemplate;
+        this.credentialEncryptionService = credentialEncryptionService;
     }
 
     public SyncTriggerResponse trigger() {
@@ -236,9 +239,10 @@ public class AwsDiscoverySyncService {
         metadata.put("accountId", defaultIfBlank(accountId, "unknown"));
         metadata.put("accountName", defaultIfBlank(target.getAccountName(), "AWS Account"));
         try {
+            AwsDiscoveryConfig runtimeConfig = configWithDecryptedCredential(config);
             AwsCredentialsProvider creds = target.getId() == null
-                    ? AwsCredentialProvider.from(config)
-                    : AwsCredentialProvider.from(config, target);
+                    ? AwsCredentialProvider.from(runtimeConfig)
+                    : AwsCredentialProvider.from(runtimeConfig, target);
             List<String> regions = parseRegions(defaultIfBlank(target.getRegionsJson(), config.getRegionsJson()));
             List<String> resourceTypes = parseResourceTypes(defaultIfBlank(target.getResourceTypesJson(), config.getResourceTypesJson()));
             List<AwsResourceRecord> allRecords = fetchTargetRecords(creds, regions);
@@ -398,6 +402,27 @@ public class AwsDiscoverySyncService {
             case CROSS_ACCOUNT_ROLE -> hasText(config.getCrossAccountRoleArn())
                     || awsDiscoveryTargetRepository.countByConfig(config) > 0;
         };
+    }
+
+    private AwsDiscoveryConfig configWithDecryptedCredential(AwsDiscoveryConfig config) {
+        if (config == null || !hasText(config.getCredentialSecret())) {
+            return config;
+        }
+        AwsDiscoveryConfig runtimeConfig = new AwsDiscoveryConfig();
+        runtimeConfig.setTenant(config.getTenant());
+        runtimeConfig.setSourceSystem(config.getSourceSystem());
+        runtimeConfig.setAuthType(config.getAuthType());
+        runtimeConfig.setAccessKeyId(config.getAccessKeyId());
+        runtimeConfig.setCredentialSecret(credentialEncryptionService.decrypt(config.getCredentialSecret()));
+        runtimeConfig.setCrossAccountRoleArn(config.getCrossAccountRoleArn());
+        runtimeConfig.setExternalId(config.getExternalId());
+        runtimeConfig.setAwsAccountId(config.getAwsAccountId());
+        runtimeConfig.setRegionsJson(config.getRegionsJson());
+        runtimeConfig.setResourceTypesJson(config.getResourceTypesJson());
+        runtimeConfig.setEnabled(config.isEnabled());
+        runtimeConfig.setAutoSyncEnabled(config.isAutoSyncEnabled());
+        runtimeConfig.setIntervalMinutes(config.getIntervalMinutes());
+        return runtimeConfig;
     }
 
     private List<AwsDiscoveryTarget> resolveTargets(AwsDiscoveryConfig config, UUID onlyTargetId) {

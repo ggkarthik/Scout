@@ -7,12 +7,12 @@ import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
-import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,18 +29,15 @@ public class FindingController {
     private final WorkspaceService workspaceService;
     private final FindingQueryService findingQueryService;
     private final FindingWorkflowService findingWorkflowService;
-    private final FindingRepository findingRepository;
 
     public FindingController(
             WorkspaceService workspaceService,
             FindingQueryService findingQueryService,
-            FindingWorkflowService findingWorkflowService,
-            FindingRepository findingRepository
+            FindingWorkflowService findingWorkflowService
     ) {
         this.workspaceService = workspaceService;
         this.findingQueryService = findingQueryService;
         this.findingWorkflowService = findingWorkflowService;
-        this.findingRepository = findingRepository;
     }
 
     @GetMapping
@@ -85,6 +82,7 @@ public class FindingController {
     }
 
     @PutMapping("/{findingId}/workflow")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public Finding updateWorkflow(
             @PathVariable UUID findingId,
             @RequestBody FindingWorkflowUpdateRequest request
@@ -93,13 +91,13 @@ public class FindingController {
     }
 
     @PostMapping("/bulk-workflow")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public FindingBulkWorkflowResponse bulkUpdateWorkflow(
             @RequestBody FindingBulkWorkflowRequest request
     ) {
         if (request.findingIds() == null || request.findingIds().isEmpty()) {
             return new FindingBulkWorkflowResponse(0, 0, 0, "No finding IDs provided");
         }
-        List<Finding> findings = findingRepository.findAllById(request.findingIds());
         int targeted = request.findingIds().size();
         FindingWorkflowUpdateRequest workflowUpdate = new FindingWorkflowUpdateRequest(
                 request.workflowStatus(),
@@ -109,7 +107,7 @@ public class FindingController {
                 request.suppressedUntil(),
                 request.actor()
         );
-        int updated = findingWorkflowService.updateWorkflowBulk(findings, workflowUpdate);
+        int updated = findingWorkflowService.updateWorkflowBulkByIds(request.findingIds(), workflowUpdate);
         int failed = targeted - updated;
         return new FindingBulkWorkflowResponse(targeted, updated, failed, "Bulk workflow update completed");
     }

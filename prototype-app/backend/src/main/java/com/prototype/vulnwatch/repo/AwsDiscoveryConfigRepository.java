@@ -11,4 +11,6 @@ public interface AwsDiscoveryConfigRepository extends JpaRepository<AwsDiscovery
     Optional<AwsDiscoveryConfig> findByTenant_IdAndSourceSystemIgnoreCase(UUID tenantId, String sourceSystem);
 
     List<AwsDiscoveryConfig> findByEnabledTrueAndAutoSyncEnabledTrueOrderByUpdatedAtAsc();
+
+    long countByTenant_Id(UUID tenantId);
 }

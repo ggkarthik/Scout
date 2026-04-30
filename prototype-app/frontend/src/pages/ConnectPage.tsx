@@ -9,7 +9,6 @@ import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
 import { api } from '../api/client';
-import type { VulnIntelSourcesSummary } from '../api/client';
 import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
 
 function timeAgo(iso?: string): string | null {
@@ -250,7 +249,6 @@ function readConnectorFromSearch(searchParams: URLSearchParams): ConnectorId | n
 
 type ConnectorDetailsProps = {
   connectorId: ConnectorId;
-  vulnSummary?: VulnIntelSourcesSummary | null;
 };
 
 function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
@@ -375,13 +373,11 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const [snConfig, setSnConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
   const [sccmConfig, setSccmConfig] = React.useState<SccmCmdbConfig | null>(null);
   const [awsConfig, setAwsConfig] = React.useState<AwsDiscoveryConfig | null>(null);
-  const [vulnSummary, setVulnSummary] = React.useState<VulnIntelSourcesSummary | null>(null);
 
   React.useEffect(() => {
     api.getServiceNowCmdbConfig().then(setSnConfig).catch(() => {});
     api.getSccmCmdbConfig().then(setSccmConfig).catch(() => {});
     api.getAwsDiscoveryConfig().then(setAwsConfig).catch(() => {});
-    api.getVulnIntelSourcesSummary().then(setVulnSummary).catch(() => {});
   }, []);
 
   React.useEffect(() => {
@@ -413,9 +409,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
 
-  const vulnerabilityConnectors = CONNECTORS
-    .filter((connector) => VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(connector.id));
-
   const cmdbConnectors = CONNECTORS
     .filter((connector) => CMDB_CONNECTOR_IDS.includes(connector.id));
 
@@ -434,21 +427,16 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
       caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
-    },
-    {
-      key: 'vulnerability' as const,
-      title: 'Vulnerability Intelligence Sources',
-      connectors: vulnerabilityConnectors,
-      caption: 'NVD, KEV, GHSA, CSAF/VEX and advisory feeds that normalize into central CVE intelligence.',
     }
   ];
 
   const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
+  const selectedConnectorAllowed = selectedConnector != null && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
 
   return (
     <div className="page-grid">
       <div className="connect-filter-bar connect-filter-bar--standalone">
-        {(['sources', 'integration-run-queue', 'processing-jobs'] as const).map((view) => (
+        {(['sources', 'integration-run-queue'] as const).map((view) => (
           <button
             key={view}
             type="button"
@@ -463,7 +451,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
           >
             {view === 'sources' && 'Sources'}
             {view === 'integration-run-queue' && 'Integration Run Queue'}
-            {view === 'processing-jobs' && 'Processing Jobs'}
           </button>
         ))}
       </div>
@@ -484,34 +471,20 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                   ) : (
                     <div className="connect-card-grid">
                       {section.connectors.map((connector) => {
-                        // Map connector IDs to sync summary keys
-                        const vulnKeyMap: Record<string, string> = {
-                          'nvd-api': 'NVD',
-                          'cisa-kev': 'KEV',
-                          'ghsa-feed': 'GHSA',
-                          'microsoft-csaf-vex': 'CSAF_MICROSOFT',
-                          'redhat-csaf-vex': 'CSAF_REDHAT',
-                          'advisory-feed': 'ADVISORY'
-                        };
-                        const vulnKey = vulnKeyMap[connector.id];
-                        const vulnRun = vulnKey ? vulnSummary?.sources[vulnKey] : undefined;
-
                         const lastSyncAt =
                           connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt :
                           connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt :
                           connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt :
-                          vulnRun?.completedAt ?? undefined;
+                          undefined;
 
                         const lastSync = timeAgo(lastSyncAt);
-                        const runStatus = vulnRun?.status;
-                        const isFailed = runStatus === 'failed';
-                        const totalRecords = vulnRun ? (vulnRun.recordsInserted + vulnRun.recordsUpdated) : null;
+                        const isFailed = false;
 
                         const hasSynced =
                           connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt != null :
                           connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt != null :
                           connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt != null :
-                          vulnRun != null && vulnRun.status !== 'never';
+                          false;
 
                         const dotClass = isFailed ? 'connect-source-dot--fail' :
                                          hasSynced ? 'connect-source-dot--ok' :
@@ -539,7 +512,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                               {!isFailed && lastSync && (
                                 <div className="connect-source-lastsync">
                                   Last sync · {lastSync}
-                                  {totalRecords !== null && totalRecords > 0 && ` · ${totalRecords.toLocaleString()} records`}
                                 </div>
                               )}
                             </div>
@@ -557,14 +529,25 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       {activeView === 'integration-run-queue' && <IntegrationRunQueuePage />}
 
       {activeView === 'processing-jobs' && (
-        <SourcesPage
-          focusSource="processing"
-          title="Processing Jobs"
-          caption="Internal maintenance and rebuild jobs such as persisted VEX repair and vendor rollout backfills."
-        />
+        <section className="panel">
+          <div className="notice" role="note">
+            Processing jobs are platform-owned maintenance work. Use the Platform console to run or inspect repair and rollout jobs.
+          </div>
+        </section>
       )}
 
-      {activeConnector && selectedConnector && (
+      {activeConnector && selectedConnector && !selectedConnectorAllowed && (
+        <section className="panel">
+          <div className="notice" role="note">
+            Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => setActiveConnector(null)}>
+            Back to customer sources
+          </button>
+        </section>
+      )}
+
+      {activeConnector && selectedConnector && selectedConnectorAllowed && (
         <section className="panel">
           <div className="connector-page-back-row">
             <button
@@ -576,7 +559,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
             </button>
             <span className="connector-page-title">{selectedConnector.name}</span>
           </div>
-          <ConnectorDetailContent connectorId={activeConnector} vulnSummary={vulnSummary} />
+          <ConnectorDetailContent connectorId={activeConnector} />
         </section>
       )}
     </div>

@@ -48,7 +48,25 @@ app:
   security:
     api-key: ${APP_API_KEY:change-me-in-prod}
     creator-key: ${APP_CREATOR_KEY:}
+    allow-api-key-auth: ${APP_ALLOW_API_KEY_AUTH:true}
+    credential-encryption-key: ${APP_CREDENTIAL_ENCRYPTION_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
     default-user-id: ${APP_DEFAULT_USER_ID:local-analyst}
+    require-production-secrets: ${APP_REQUIRE_PRODUCTION_SECRETS:false}
+    jwt:
+      issuer-uri: ${APP_JWT_ISSUER_URI:}
+      jwk-set-uri: ${APP_JWT_JWK_SET_URI:}
+      hmac-secret: ${APP_JWT_HMAC_SECRET:}
+      tenant-id-claim: ${APP_JWT_TENANT_ID_CLAIM:tenant_id}
+      tenant-slug-claim: ${APP_JWT_TENANT_SLUG_CLAIM:tenant_slug}
+      email-claim: ${APP_JWT_EMAIL_CLAIM:email}
+      name-claim: ${APP_JWT_NAME_CLAIM:name}
+      roles-claim: ${APP_JWT_ROLES_CLAIM:roles}
+    headers:
+      content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
+      permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}
+  tenancy:
+    allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:true}
+    require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:false}
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
   sbom-fetch:
@@ -132,6 +150,8 @@ app:
     storage-backend: ${ARCHIVE_STORAGE_BACKEND:filesystem}
     # S3 bucket name (only used when storage-backend=s3)
     s3-bucket: ${ARCHIVE_S3_BUCKET:}
+    # Optional; defaults to the AWS SDK region provider chain when blank.
+    s3-region: ${ARCHIVE_S3_REGION:${AWS_REGION:}}
     # Local filesystem path (only used when storage-backend=filesystem)
     local-path: ${ARCHIVE_LOCAL_PATH:./data/vulnerability-archives}
   eol:

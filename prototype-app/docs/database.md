@@ -1,6 +1,6 @@
 # VulnWatch Database
 
-Last updated: 2026-03-22
+Last updated: 2026-04-29
 
 The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
 
@@ -24,6 +24,7 @@ Tenant-scoped tables include:
 - `org_cve_records`
 - `findings`
 - `risk_policies`
+- `audit_events` for tenant-visible administration, tenant exposure refresh usage counting, and workflow audit trails
 
 Global or mostly global intelligence tables include:
 
@@ -35,11 +36,25 @@ Global or mostly global intelligence tables include:
 - `vulnerability_rules`
 - `vulnerability_config_expr`
 
+Identity and administration tables include:
+
+- `app_users`
+- `tenant_memberships`
+- `service_accounts`
+- tenant lifecycle metadata on `tenants`
+
 ## Major Table Groups
 
 ### Inventory and Identity
 
 - `tenants`
+  - production lifecycle fields include slug, status, plan code, billing reference, suspension/deletion timestamps, quota limits, and updated timestamp
+- `app_users`
+  - one row per authenticated external subject
+- `tenant_memberships`
+  - maps users to tenants and roles
+- `service_accounts`
+  - tenant-scoped machine identities for automation and future API access
 - `assets`
   - unique key on `(tenant_id, identifier)`
   - stores asset type, owner metadata, and lifecycle state
@@ -143,6 +158,12 @@ EOL summary columns added to `org_cve_records` (V1040):
 - `finding_delta_queue`
   - durable background projection queue for workbench freshness
   - stores `event_type`, tenant/component/vulnerability scope, source metadata, dedupe key, retry state, visibility timestamps, completion timestamps, and failure text
+
+## Production Isolation Controls
+
+`APP_REQUIRE_TENANT_CONTEXT=true` hardens the tenant-aware datasource for production. When a request or worker path reaches the normal datasource without a resolved tenant, the datasource sets `app.current_tenant_id` to `00000000-0000-0000-0000-000000000000`. Existing tenant-scoped RLS policies then match no tenant rows instead of using the legacy unset-tenant fallback.
+
+The platform still needs deliberate cross-tenant paths for administration and feed maintenance. Those should use a separate platform datasource or job role rather than the normal request datasource.
   - active event types are `SOFTWARE_DELTA`, `CVE_DELTA`, `CVE_METADATA_DELTA`, `VEX_DELTA`, `LIFECYCLE_DELTA`, and `NOISE_REDUCTION_REFRESH`
 - `sync_runs`
   - extended by V1029 with `metadata_json` for structured run metrics
@@ -180,6 +201,50 @@ Added to support the Software Identities inventory view and the Operations Quali
   - one row per tenant
   - stores `never_opened_not_applicable`, `deferred_under_investigation`, `category_counts_json`, and `last_computed_at`
   - powers the executive dashboard noise-reduction widget without re-running correlation logic on read
+
+### Schema Evolution V1046–V1072
+
+The current Flyway watermark is **V1072** (`tenant_exposure_refresh_quota`). The next migration must be `V1073__*.sql`.
+
+New tables added in this range:
+
+- `vulnerability_source_filter_configs` (V1046)
+  - per-tenant source feed filter rules
+  - stores `tenant_id`, `source_system`, `filters_json`
+- `software_identity_cluster_link` (V1059)
+  - cluster-level normalization overrides with audit trail
+  - stores `source_type`, `source_key`, `target_identity_id`, `apply_to_future`, `reason`, `confirmed_by`, `confirmed_at`, `revoked_at`, `revoked_by`
+- `sccm_cmdb_configs` (V1060)
+  - SCCM/MECM CMDB connector configuration
+  - stores `jdbc_url`, `auth_type`, `credential_secret`, `site_code`, `database_name`, `fetch_size`, `query_timeout_seconds`, `mock_mode`, scheduling fields, last test status, and `last_sync_at` (V1062)
+- `aws_discovery_configs` (V1063)
+  - AWS Cloud Discovery connector settings
+  - stores `auth_type`, `access_key_id`, `credential_secret`, `cross_account_role_arn`, `external_id`, `aws_account_id`, `regions_json`, `resource_types_json`, scope fields, scheduling, and last sync status
+- `aws_discovery_targets` (V1067)
+  - cross-account / multi-region AWS discovery targets
+  - paired with an `ssm_readiness` column on `assets` for SSM-based EC2 discovery health
+- `app_users` (V1070)
+  - first-class user identity table backing `tenant_memberships`
+  - stores external subject, email, display name, status, and lifecycle timestamps
+
+New columns added in this range, grouped by target table:
+
+- **`org_cve_records`** — V1047 added `investigation_summary_input_json`, `investigation_summary_output_json`, `investigation_summary_mode`, `investigation_summary_generated_at`. V1052 added `ai_solution_json`, `ai_solution_generated_at`. V1053 added `ai_actions_json`, `ai_actions_generated_at`. These power the AI investigation summary, AI solution, and AI actions panels in the workbench (gated by `OPENAI_ENABLED`).
+- **`findings`** — V1048 added `display_id` backed by a sequence (analyst-friendly IDs). V1054 added `incident_id` and `incident_status` (ServiceNow incident tracking).
+- **`assets`** — V1049 added ServiceNow ownership fields `managed_by`, `department`, `support_group`, `assigned_to`. V1064 added cloud-asset metadata `cloud_provider`, `cloud_region`, `cloud_availability_zone`, `cloud_account_id`, `cloud_resource_type`, `cloud_instance_type`, `cloud_vpc_id`, `cloud_subnet_id`, `cloud_arn`, `cloud_tags_json`. V1067 added `ssm_readiness`.
+- **`cis`** — V1049 mirrored the ServiceNow ownership fields onto CMDB CIs.
+- **`vulnerabilities`** — V1050/V1051 added `kev_date_added`, `kev_due_date`, `kev_required_action`.
+- **`inventory_components`** — V1056 added manual identity override fields: `manual_identity_id`, `manual_identity_reason`, `manual_identity_confirmed_by`, `manual_identity_confirmed_at`. V1058 is an idempotent backstop.
+- **`software_instances`** — V1057 mirrored the manual identity override fields.
+- **`software_eol_mapping`** — V1055 added `confirmed_by`, `confirmed_at`, `previous_slug`.
+- **`servicenow_cmdb_configs`** — V1061 added `last_sync_at`. V1066 is an idempotent repair.
+- **`tenants`** — V1070 added `slug`, `status`, `plan_code`, `billing_ref`, `suspended_at`, `deleted_at`, `updated_at`. V1071 added `max_connector_count`, `max_service_account_count`, `max_daily_sbom_uploads`, `max_export_rows` with CHECK constraints. V1072 added `max_daily_exposure_refreshes`.
+
+Other notable migrations in this range:
+
+- V1065 — `cloud_asset_summary` view backing the cloud-asset overview panel
+- V1068 — drop AWS tag filter scope columns
+- V1069 — narrow AWS discovery to EC2-only (RDS/Lambda/S3/ECS/EKS scope removed)
 
 ## Key Relationships
 

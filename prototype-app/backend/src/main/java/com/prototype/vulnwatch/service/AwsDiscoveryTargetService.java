@@ -36,19 +36,22 @@ public class AwsDiscoveryTargetService {
     private final AssetRepository assetRepository;
     private final AwsDiscoveryClient awsDiscoveryClient;
     private final ObjectMapper objectMapper;
+    private final TenantQuotaService tenantQuotaService;
 
     public AwsDiscoveryTargetService(
             AwsDiscoveryConfigRepository configRepository,
             AwsDiscoveryTargetRepository targetRepository,
             AssetRepository assetRepository,
             AwsDiscoveryClient awsDiscoveryClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantQuotaService tenantQuotaService
     ) {
         this.configRepository = configRepository;
         this.targetRepository = targetRepository;
         this.assetRepository = assetRepository;
         this.awsDiscoveryClient = awsDiscoveryClient;
         this.objectMapper = objectMapper;
+        this.tenantQuotaService = tenantQuotaService;
     }
 
     @Transactional(readOnly = true)
@@ -62,6 +65,7 @@ public class AwsDiscoveryTargetService {
     @Transactional
     public AwsDiscoveryTargetResponse create(Tenant tenant, AwsDiscoveryTargetRequest request) {
         AwsDiscoveryConfig config = requireConfig(tenant);
+        tenantQuotaService.assertCanCreateConnector(tenant, "aws-target");
         AwsDiscoveryTarget target = new AwsDiscoveryTarget();
         target.setTenant(tenant);
         target.setConfig(config);

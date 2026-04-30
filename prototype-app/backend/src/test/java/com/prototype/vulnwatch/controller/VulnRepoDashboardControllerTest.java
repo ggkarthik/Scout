@@ -13,7 +13,10 @@ import com.prototype.vulnwatch.dto.OrgSpecificCveExposurePageResponse;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureRecomputeResponse;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureRecordResponse;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureSummaryResponse;
+import com.prototype.vulnwatch.dto.TenantExposureRefreshResponse;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.OrgCveAutomationStatusService;
+import com.prototype.vulnwatch.service.TenantQuotaService;
 import com.prototype.vulnwatch.service.VulnRepoDashboardService;
 import com.prototype.vulnwatch.service.VulnRepoVulnerabilityQueryService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelMaintenanceService;
@@ -48,6 +51,10 @@ class VulnRepoDashboardControllerTest {
     private VulnerabilityIntelMaintenanceService vulnerabilityIntelMaintenanceService;
     @Mock
     private OrgCveAutomationStatusService orgCveAutomationStatusService;
+    @Mock
+    private AuditEventService auditEventService;
+    @Mock
+    private TenantQuotaService tenantQuotaService;
 
     private MockMvc mockMvc;
     private Tenant tenant;
@@ -60,7 +67,9 @@ class VulnRepoDashboardControllerTest {
                 vulnRepoVulnerabilityQueryService,
                 vulnerabilityIntelQueryService,
                 vulnerabilityIntelMaintenanceService,
-                orgCveAutomationStatusService
+                orgCveAutomationStatusService,
+                auditEventService,
+                tenantQuotaService
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
@@ -254,5 +263,38 @@ class VulnRepoDashboardControllerTest {
                 .andExpect(jsonPath("$.stateRowsChanged").value(5));
 
         verify(vulnerabilityIntelMaintenanceService).recomputeOrgSpecificCveExposure(tenant, true);
+    }
+
+    @Test
+    void tenantRefreshAliasDelegatesToMaintenanceService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        OrgSpecificCveExposureRecomputeResponse refresh = new OrgSpecificCveExposureRecomputeResponse(
+                "targeted",
+                4L,
+                3,
+                2,
+                8L,
+                1L,
+                Instant.parse("2026-04-10T12:00:00Z")
+        );
+        TenantExposureRefreshResponse response = new TenantExposureRefreshResponse(
+                tenant.getId(),
+                "completed",
+                "Tenant exposure refreshed from the current central vulnerability repository.",
+                refresh,
+                Instant.parse("2026-04-10T12:00:01Z")
+        );
+        when(vulnerabilityIntelMaintenanceService.refreshTenantExposureFromCentralRepository(tenant))
+                .thenReturn(response);
+
+        mockMvc.perform(post("/api/vuln-repo/org-cves/refresh"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("completed"))
+                .andExpect(jsonPath("$.tenantId").value(tenant.getId().toString()))
+                .andExpect(jsonPath("$.refresh.scope").value("targeted"));
+
+        verify(vulnerabilityIntelMaintenanceService).refreshTenantExposureFromCentralRepository(tenant);
+        verify(tenantQuotaService).assertCanRefreshTenantExposure(tenant);
+        verify(auditEventService).recordTenantExposureRefresh(tenant, "/api/vuln-repo/org-cves/refresh", response);
     }
 }

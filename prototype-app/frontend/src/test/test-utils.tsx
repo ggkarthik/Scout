@@ -13,24 +13,30 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
+type InitialEntry = string | { pathname: string; state?: unknown; search?: string; hash?: string };
+
 type ProviderProps = {
   children: React.ReactNode;
   route?: string;
+  initialEntries?: InitialEntry[];
   queryClient?: QueryClient;
 };
 
 type ExtendedRenderOptions = Omit<RenderOptions, 'wrapper'> & {
   route?: string;
+  initialEntries?: InitialEntry[];
   queryClient?: QueryClient;
 };
 
 export function renderWithProviders(
   ui: React.ReactElement,
-  { route, queryClient, ...options }: ExtendedRenderOptions = {}
+  { route, initialEntries, queryClient, ...options }: ExtendedRenderOptions = {}
 ) {
+  const entries = initialEntries ?? [route ?? '/'];
+
   const Wrapper = ({ children }: ProviderProps) => (
     <QueryClientProvider client={queryClient ?? createTestQueryClient()}>
-      <MemoryRouter initialEntries={[route ?? '/']}>
+      <MemoryRouter initialEntries={entries}>
         {children}
       </MemoryRouter>
     </QueryClientProvider>

@@ -1,4 +1,5 @@
 .DS_Store
+.sentry-local/
 
 # Local runtime data and secrets
 prototype-app/backend/data/
@@ -11,6 +12,8 @@ prototype-app/frontend/.env.*
 # Build artifacts
 prototype-app/backend/target/
 prototype-app/frontend/dist/
+prototype-app/frontend/coverage/
 
 # Dependency caches
+node_modules/
 prototype-app/frontend/node_modules/

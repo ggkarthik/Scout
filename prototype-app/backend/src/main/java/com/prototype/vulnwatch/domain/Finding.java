@@ -16,8 +16,6 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -97,8 +95,7 @@ public class Finding {
     private Instant suppressedUntil;
 
     @Basic(fetch = FetchType.LAZY)
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
+    @Column(columnDefinition = "text")
     private String evidence;
 
     @Column(name = "vex_status", length = 64)

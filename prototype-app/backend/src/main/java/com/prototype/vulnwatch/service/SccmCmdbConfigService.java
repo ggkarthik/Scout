@@ -21,6 +21,8 @@ public class SccmCmdbConfigService {
 
     private final SccmCmdbConfigRepository sccmCmdbConfigRepository;
     private final SccmQueryService sccmQueryService;
+    private final TenantQuotaService tenantQuotaService;
+    private final CredentialEncryptionService credentialEncryptionService;
 
     @Value("${app.cmdb.sccm.jdbc-url:}")
     private String fallbackJdbcUrl;
@@ -36,10 +38,14 @@ public class SccmCmdbConfigService {
 
     public SccmCmdbConfigService(
             SccmCmdbConfigRepository sccmCmdbConfigRepository,
-            SccmQueryService sccmQueryService
+            SccmQueryService sccmQueryService,
+            TenantQuotaService tenantQuotaService,
+            CredentialEncryptionService credentialEncryptionService
     ) {
         this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
         this.sccmQueryService = sccmQueryService;
+        this.tenantQuotaService = tenantQuotaService;
+        this.credentialEncryptionService = credentialEncryptionService;
     }
 
     @Transactional(readOnly = true)
@@ -55,6 +61,7 @@ public class SccmCmdbConfigService {
         SccmCmdbConfig config = sccmCmdbConfigRepository
                 .findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
                 .orElseGet(() -> {
+                    tenantQuotaService.assertCanCreateConnector(tenant, "sccm");
                     SccmCmdbConfig created = new SccmCmdbConfig();
                     created.setTenant(tenant);
                     created.setSourceSystem("sccm");
@@ -113,7 +120,7 @@ public class SccmCmdbConfigService {
                     trimToNull(config.getJdbcUrl()),
                     config.getAuthType() == null ? SccmAuthType.SQL_AUTH : config.getAuthType(),
                     trimToNull(config.getUsername()),
-                    trimToNull(config.getCredentialSecret()),
+                    trimToNull(credentialEncryptionService.decrypt(config.getCredentialSecret())),
                     trimToNull(config.getSiteCode()),
                     defaultIfBlank(config.getDatabaseName(), "CM_P01"),
                     config.getFetchSize() == null ? 500 : Math.max(1, config.getFetchSize()),
@@ -151,7 +158,7 @@ public class SccmCmdbConfigService {
         config.setAuthType(parseAuthType(request.authType()));
         config.setUsername(trimToNull(request.username()));
         if (hasText(request.credentialSecret())) {
-            config.setCredentialSecret(request.credentialSecret().trim());
+            config.setCredentialSecret(credentialEncryptionService.encrypt(request.credentialSecret().trim()));
         }
         config.setSiteCode(trimToNull(request.siteCode()));
         config.setDatabaseName(defaultIfBlank(request.databaseName(), "CM_P01"));
