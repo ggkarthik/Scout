@@ -1,0 +1,11 @@
+spring:
+  config:
+    import: optional:classpath:application-prod.yml
+
+app:
+  security:
+    require-production-secrets: true
+    allow-api-key-auth: false
+  tenancy:
+    allow-header-tenant-selection: false
+    require-tenant-context: true

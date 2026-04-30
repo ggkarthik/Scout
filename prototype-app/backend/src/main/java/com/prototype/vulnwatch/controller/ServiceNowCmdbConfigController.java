@@ -5,10 +5,12 @@ import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigRequest;
 import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigResponse;
 import com.prototype.vulnwatch.dto.ServiceNowCmdbConnectionTestResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbSyncService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -23,15 +25,18 @@ public class ServiceNowCmdbConfigController {
     private final WorkspaceService workspaceService;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     private final ServiceNowCmdbSyncService serviceNowCmdbSyncService;
+    private final AuditEventService auditEventService;
 
     public ServiceNowCmdbConfigController(
             WorkspaceService workspaceService,
             ServiceNowCmdbConfigService serviceNowCmdbConfigService,
-            ServiceNowCmdbSyncService serviceNowCmdbSyncService
+            ServiceNowCmdbSyncService serviceNowCmdbSyncService,
+            AuditEventService auditEventService
     ) {
         this.workspaceService = workspaceService;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
         this.serviceNowCmdbSyncService = serviceNowCmdbSyncService;
+        this.auditEventService = auditEventService;
     }
 
     @GetMapping
@@ -41,19 +46,29 @@ public class ServiceNowCmdbConfigController {
     }
 
     @PutMapping
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public ServiceNowCmdbConfigResponse save(@Valid @RequestBody ServiceNowCmdbConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
-        return serviceNowCmdbConfigService.save(tenant, request);
+        ServiceNowCmdbConfigResponse response = serviceNowCmdbConfigService.save(tenant, request);
+        auditEventService.record("connector.servicenow_cmdb.saved", "connector_config", tenant.getId().toString(), null);
+        return response;
     }
 
     @PostMapping("/test")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public ServiceNowCmdbConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
-        return serviceNowCmdbConfigService.test(tenant);
+        ServiceNowCmdbConnectionTestResponse response = serviceNowCmdbConfigService.test(tenant);
+        auditEventService.record("connector.servicenow_cmdb.tested", "connector_config", tenant.getId().toString(),
+                "{\"status\":\"" + response.status() + "\"}");
+        return response;
     }
 
     @PostMapping("/sync")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse sync() {
-        return serviceNowCmdbSyncService.trigger();
+        SyncTriggerResponse response = serviceNowCmdbSyncService.trigger();
+        auditEventService.record("connector.servicenow_cmdb.sync_triggered", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 }

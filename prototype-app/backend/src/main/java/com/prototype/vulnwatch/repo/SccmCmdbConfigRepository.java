@@ -9,4 +9,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface SccmCmdbConfigRepository extends JpaRepository<SccmCmdbConfig, UUID> {
     Optional<SccmCmdbConfig> findByTenant_IdAndSourceSystemIgnoreCase(UUID tenantId, String sourceSystem);
     List<SccmCmdbConfig> findByEnabledTrueAndAutoSyncEnabledTrueOrderByUpdatedAtAsc();
+    long countByTenant_Id(UUID tenantId);
 }

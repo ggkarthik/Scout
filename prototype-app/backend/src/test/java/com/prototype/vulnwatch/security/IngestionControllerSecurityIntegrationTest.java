@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
+import com.prototype.vulnwatch.config.RequestCorrelationFilter;
 import com.prototype.vulnwatch.config.SecurityConfig;
 import com.prototype.vulnwatch.controller.ApiExceptionHandler;
 import com.prototype.vulnwatch.controller.IngestionController;
@@ -15,7 +16,9 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.IngestionResult;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
+import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
@@ -42,7 +45,7 @@ import org.springframework.test.web.servlet.MockMvc;
                 "spring.mvc.throw-exception-if-no-handler-found=true",
                 "spring.web.resources.add-mappings=false"
         })
-@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
+@Import({SecurityConfig.class, ApiKeyAuthenticationFilter.class, RequestCorrelationFilter.class, ApiExceptionHandler.class, RequestActorService.class})
 class IngestionControllerSecurityIntegrationTest {
 
     @Autowired
@@ -50,6 +53,9 @@ class IngestionControllerSecurityIntegrationTest {
 
     @MockBean
     private TenantService tenantService;
+
+    @MockBean
+    private TenantRepository tenantRepository;
 
     @MockBean
     private WorkspaceService workspaceService;
@@ -62,6 +68,9 @@ class IngestionControllerSecurityIntegrationTest {
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;
+
+    @MockBean
+    private AuditEventService auditEventService;
 
     @BeforeEach
     void setUp() {
@@ -86,11 +95,20 @@ class IngestionControllerSecurityIntegrationTest {
 
         mockMvc.perform(post("/api/ingestion/nvd-sync")
                         .queryParam("lookbackHours", "12")
-                        .header("X-API-Key", "test-api-key"))
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
                 .andExpect(jsonPath("$.status").value("queued"))
                 .andExpect(jsonPath("$.message").value("NVD incremental sync queued"));
+    }
+
+    @Test
+    void centralFeedSyncRequiresPlatformOwnerRole() throws Exception {
+        mockMvc.perform(post("/api/ingestion/nvd-sync")
+                        .queryParam("lookbackHours", "12")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -118,6 +136,7 @@ class IngestionControllerSecurityIntegrationTest {
 
         mockMvc.perform(post("/api/ingestion/advisories")
                         .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
                         .contentType("application/json")
                         .content("{\"advisories\":[{\"externalId\":\"ADV-1\",\"title\":\"Test advisory\",\"rules\":[]}]}"))
                 .andExpect(status().isOk())

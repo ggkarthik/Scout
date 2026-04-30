@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.config;
 
+import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.Filter;
@@ -47,8 +48,11 @@ public class TenantIsolationConfig {
      */
     @Bean
     @Primary
-    public DataSource dataSource(HikariDataSource hikariDataSource) {
-        return new TenantAwareDataSource(hikariDataSource);
+    public DataSource dataSource(
+            HikariDataSource hikariDataSource,
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
+    ) {
+        return new TenantAwareDataSource(hikariDataSource, requireTenantContext);
     }
 
     /**
@@ -84,9 +88,14 @@ public class TenantIsolationConfig {
      * @WebMvcTest slice tests do not try to load it without JPA context available.
      */
     @Bean
-    public FilterRegistrationBean<Filter> tenantResolutionFilter(WorkspaceService workspaceService) {
+    public FilterRegistrationBean<Filter> tenantResolutionFilter(
+            WorkspaceService workspaceService,
+            TenantService tenantService,
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.allow-header-tenant-selection:true}") boolean allowHeaderTenantSelection,
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
+    ) {
         FilterRegistrationBean<Filter> reg = new FilterRegistrationBean<>(
-                new TenantResolutionFilter(workspaceService));
+                new TenantResolutionFilter(workspaceService, tenantService, allowHeaderTenantSelection, requireTenantContext));
         reg.addUrlPatterns("/*");
         reg.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         reg.setName("tenantResolutionFilter");

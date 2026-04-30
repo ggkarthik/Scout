@@ -4,15 +4,19 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.OrgCveAutomationStatusResponse;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposurePageResponse;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureRecomputeResponse;
+import com.prototype.vulnwatch.dto.TenantExposureRefreshResponse;
 import com.prototype.vulnwatch.dto.VulnRepoDashboardResponse;
 import com.prototype.vulnwatch.dto.VulnRepoSoftwareAssetsResponse;
 import java.util.UUID;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.OrgCveAutomationStatusService;
+import com.prototype.vulnwatch.service.TenantQuotaService;
 import com.prototype.vulnwatch.service.VulnRepoDashboardService;
 import com.prototype.vulnwatch.service.VulnRepoVulnerabilityQueryService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelMaintenanceService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelQueryService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +34,8 @@ public class VulnRepoDashboardController {
     private final VulnerabilityIntelQueryService vulnerabilityIntelQueryService;
     private final VulnerabilityIntelMaintenanceService vulnerabilityIntelMaintenanceService;
     private final OrgCveAutomationStatusService orgCveAutomationStatusService;
+    private final AuditEventService auditEventService;
+    private final TenantQuotaService tenantQuotaService;
 
     public VulnRepoDashboardController(
             WorkspaceService workspaceService,
@@ -37,7 +43,9 @@ public class VulnRepoDashboardController {
             VulnRepoVulnerabilityQueryService vulnRepoVulnerabilityQueryService,
             VulnerabilityIntelQueryService vulnerabilityIntelQueryService,
             VulnerabilityIntelMaintenanceService vulnerabilityIntelMaintenanceService,
-            OrgCveAutomationStatusService orgCveAutomationStatusService
+            OrgCveAutomationStatusService orgCveAutomationStatusService,
+            AuditEventService auditEventService,
+            TenantQuotaService tenantQuotaService
     ) {
         this.workspaceService = workspaceService;
         this.vulnRepoDashboardService = vulnRepoDashboardService;
@@ -45,6 +53,8 @@ public class VulnRepoDashboardController {
         this.vulnerabilityIntelQueryService = vulnerabilityIntelQueryService;
         this.vulnerabilityIntelMaintenanceService = vulnerabilityIntelMaintenanceService;
         this.orgCveAutomationStatusService = orgCveAutomationStatusService;
+        this.auditEventService = auditEventService;
+        this.tenantQuotaService = tenantQuotaService;
     }
 
     @GetMapping("/dashboard")
@@ -119,14 +129,31 @@ public class VulnRepoDashboardController {
     }
 
     @PostMapping("/org-cves/recompute")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public OrgSpecificCveExposureRecomputeResponse recomputeOrgSpecificCves(
             @RequestParam(defaultValue = "targeted") String mode
     ) {
         boolean fullRecompute = "full".equalsIgnoreCase(mode);
-        return vulnerabilityIntelMaintenanceService.recomputeOrgSpecificCveExposure(
-                workspaceService.getWorkspace(),
-                fullRecompute
-        );
+        Tenant tenant = workspaceService.getWorkspace();
+        OrgSpecificCveExposureRecomputeResponse response =
+                vulnerabilityIntelMaintenanceService.recomputeOrgSpecificCveExposure(
+                        tenant,
+                        fullRecompute
+                );
+        auditEventService.record("platform.org_cves.recompute", "tenant", tenant.getId().toString(),
+                "{\"mode\":\"" + mode + "\"}");
+        return response;
+    }
+
+    @PostMapping("/org-cves/refresh")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public TenantExposureRefreshResponse refreshTenantExposure() {
+        Tenant tenant = workspaceService.getWorkspace();
+        tenantQuotaService.assertCanRefreshTenantExposure(tenant);
+        TenantExposureRefreshResponse response =
+                vulnerabilityIntelMaintenanceService.refreshTenantExposureFromCentralRepository(tenant);
+        auditEventService.recordTenantExposureRefresh(tenant, "/api/vuln-repo/org-cves/refresh", response);
+        return response;
     }
 
     @GetMapping("/software-assets/{softwareIdentityId}")

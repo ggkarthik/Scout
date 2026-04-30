@@ -5,10 +5,12 @@ import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceRequest;
 import com.prototype.vulnwatch.dto.GithubSbomSourceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.GithubSbomSourceService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,9 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class GithubSbomSourceController {
 
     private final GithubSbomSourceService githubSbomSourceService;
+    private final AuditEventService auditEventService;
 
-    public GithubSbomSourceController(GithubSbomSourceService githubSbomSourceService) {
+    public GithubSbomSourceController(
+            GithubSbomSourceService githubSbomSourceService,
+            AuditEventService auditEventService
+    ) {
         this.githubSbomSourceService = githubSbomSourceService;
+        this.auditEventService = auditEventService;
     }
 
     @GetMapping
@@ -34,32 +41,52 @@ public class GithubSbomSourceController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public GithubSbomSourceResponse create(@Valid @RequestBody GithubSbomSourceRequest request) {
-        return githubSbomSourceService.create(request);
+        GithubSbomSourceResponse response = githubSbomSourceService.create(request);
+        auditEventService.record("connector.github_sbom_source.created", "github_sbom_source", response.id().toString(), null);
+        return response;
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public GithubSbomSourceResponse update(@PathVariable UUID id, @Valid @RequestBody GithubSbomSourceRequest request) {
-        return githubSbomSourceService.update(id, request);
+        GithubSbomSourceResponse response = githubSbomSourceService.update(id, request);
+        auditEventService.record("connector.github_sbom_source.updated", "github_sbom_source", id.toString(), null);
+        return response;
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public void delete(@PathVariable UUID id) {
         githubSbomSourceService.delete(id);
+        auditEventService.record("connector.github_sbom_source.deleted", "github_sbom_source", id.toString(), null);
     }
 
     @PostMapping("/ghcr/run")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse runGhcrOnce(@Valid @RequestBody GithubGhcrSbomIngestionRequest request) {
-        return githubSbomSourceService.triggerGhcrRunOnce(request.owner());
+        SyncTriggerResponse response = githubSbomSourceService.triggerGhcrRunOnce(request.owner());
+        auditEventService.record("connector.github_sbom_source.ghcr_run_triggered", "sync_run",
+                response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/repository/run")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse runRepositoryOnce(@Valid @RequestBody GithubSbomIngestionRequest request) {
-        return githubSbomSourceService.triggerRepositoryRunOnce(request);
+        SyncTriggerResponse response = githubSbomSourceService.triggerRepositoryRunOnce(request);
+        auditEventService.record("connector.github_sbom_source.repository_run_triggered", "sync_run",
+                response.runId() == null ? null : response.runId().toString(), null);
+        return response;
     }
 
     @PostMapping("/{id}/run")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse run(@PathVariable UUID id) {
-        return githubSbomSourceService.trigger(id);
+        SyncTriggerResponse response = githubSbomSourceService.trigger(id);
+        auditEventService.record("connector.github_sbom_source.run_triggered", "sync_run",
+                response.runId() == null ? null : response.runId().toString(), "{\"sourceId\":\"" + id + "\"}");
+        return response;
     }
 }

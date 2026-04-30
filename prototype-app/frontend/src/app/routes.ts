@@ -10,15 +10,21 @@ export type AppTab =
   | 'inventory'
   | 'end-of-life'
   | 'connect'
+  | 'admin'
+  | 'platform'
   | 'configurations';
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'integration-run-queue' | 'processing-jobs';
+export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
+export type PlatformRouteView = 'tenants' | 'feeds' | 'runs' | 'support';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
 export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
+export const ADMIN_DEFAULT_VIEW: AdminRouteView = 'users';
+export const PLATFORM_DEFAULT_VIEW: PlatformRouteView = 'tenants';
 
 const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
   dashboard: 'pipeline',
@@ -72,6 +78,21 @@ const CONNECT_VIEWS = new Set<ConnectRouteView>([
   'processing-jobs'
 ]);
 
+const ADMIN_VIEWS = new Set<AdminRouteView>([
+  'users',
+  'invites',
+  'roles',
+  'service-accounts',
+  'audit'
+]);
+
+const PLATFORM_VIEWS = new Set<PlatformRouteView>([
+  'tenants',
+  'feeds',
+  'runs',
+  'support'
+]);
+
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {
     return OPERATIONS_DEFAULT_VIEW;
@@ -117,6 +138,28 @@ export function normalizeConnectRouteView(value: string | null | undefined): Con
   return CONNECT_VIEWS.has(value as ConnectRouteView) ? value as ConnectRouteView : CONNECT_DEFAULT_VIEW;
 }
 
+export function normalizeAdminRouteView(value: string | null | undefined): AdminRouteView {
+  if (!value) {
+    return ADMIN_DEFAULT_VIEW;
+  }
+  return ADMIN_VIEWS.has(value as AdminRouteView) ? value as AdminRouteView : ADMIN_DEFAULT_VIEW;
+}
+
+export function normalizePlatformRouteView(value: string | null | undefined): PlatformRouteView {
+  if (!value) {
+    return PLATFORM_DEFAULT_VIEW;
+  }
+  return PLATFORM_VIEWS.has(value as PlatformRouteView) ? value as PlatformRouteView : PLATFORM_DEFAULT_VIEW;
+}
+
+export function pathForAdminView(view: AdminRouteView): string {
+  return `/admin/${normalizeAdminRouteView(view)}`;
+}
+
+export function pathForPlatformView(view: PlatformRouteView): string {
+  return `/platform/${normalizePlatformRouteView(view)}`;
+}
+
 export function pathForTab(tab: AppTab): string {
   switch (tab) {
     case 'dashboard':
@@ -133,6 +176,10 @@ export function pathForTab(tab: AppTab): string {
       return '/end-of-life';
     case 'connect':
       return `/connect/${CONNECT_DEFAULT_VIEW}`;
+    case 'admin':
+      return pathForAdminView(ADMIN_DEFAULT_VIEW);
+    case 'platform':
+      return pathForPlatformView(PLATFORM_DEFAULT_VIEW);
     case 'configurations':
       return '/configurations';
   }
@@ -278,6 +325,8 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
   if (pathname.startsWith('/connect')) return 'connect';
+  if (pathname.startsWith('/admin')) return 'admin';
+  if (pathname.startsWith('/platform')) return 'platform';
   if (pathname.startsWith('/configurations')) return 'configurations';
   return 'dashboard';
 }
@@ -298,6 +347,10 @@ export function titleForTab(tab: AppTab): string {
       return 'End-of-Life';
     case 'connect':
       return 'Connect';
+    case 'admin':
+      return 'Administration';
+    case 'platform':
+      return 'Platform';
     case 'configurations':
       return 'Configurations';
   }
@@ -342,6 +395,10 @@ export function buildLegacyCompatiblePath(search: string): string | null {
     nextPath = pathForInventoryView(normalizeInventoryRouteView(inventoryView));
   } else if (tab === 'connect' || tab === 'ingestion' || tab === 'sources') {
     nextPath = pathForConnectView(normalizeConnectRouteView(connectView));
+  } else if (tab === 'admin' || tab === 'users' || tab === 'identity') {
+    nextPath = '/admin/users';
+  } else if (tab === 'platform') {
+    nextPath = pathForPlatformView(PLATFORM_DEFAULT_VIEW);
   } else if (tab === 'configurations') {
     nextPath = '/configurations';
   } else if (tab === 'end-of-life') {

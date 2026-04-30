@@ -2,6 +2,8 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
+import { useActor } from '../features/auth/context';
+import { canManageInventorySources } from '../features/auth/roles';
 import type {
   AwsAuthType,
   AwsDiscoveryConfig,
@@ -98,6 +100,8 @@ function targetToForm(target: AwsDiscoveryTarget): AwsDiscoveryTargetRequest {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AwsDiscoveryConnectorPage() {
+  const actor = useActor();
+  const canManageConnector = canManageInventorySources(actor);
   const queryClient = useQueryClient();
   const configQuery = useAwsDiscoveryConfigQuery();
   const config = configQuery.data ?? null;
@@ -363,10 +367,10 @@ export function AwsDiscoveryConnectorPage() {
                   <td>{formatTimestamp(target.lastSyncAt)}</td>
                   <td>
                     <div className="button-row">
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => editTarget(target)}>Edit</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void testTarget(target.id)} disabled={Boolean(targetBusy)}>Test</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void syncTarget(target.id)} disabled={Boolean(targetBusy)}>Sync</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void deleteTarget(target.id)} disabled={Boolean(targetBusy)}>Delete</button>
+                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => editTarget(target)} disabled={!canManageConnector}>Edit</button>
+                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void testTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Test</button>
+                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void syncTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Sync</button>
+                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void deleteTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -613,7 +617,7 @@ export function AwsDiscoveryConnectorPage() {
           type="button"
           className="btn btn-primary"
           onClick={() => void saveConnector()}
-          disabled={saving || testing || syncing}
+          disabled={!canManageConnector || saving || testing || syncing}
         >
           {saving ? 'Saving...' : 'Save Connector'}
         </button>
@@ -621,7 +625,7 @@ export function AwsDiscoveryConnectorPage() {
           type="button"
           className="btn btn-secondary"
           onClick={() => void testConnection()}
-          disabled={testing || saving || syncing}
+          disabled={!canManageConnector || testing || saving || syncing}
         >
           {testing ? 'Testing...' : 'Test Connection'}
         </button>
@@ -629,7 +633,7 @@ export function AwsDiscoveryConnectorPage() {
           type="button"
           className="btn btn-secondary"
           onClick={() => void triggerSync()}
-          disabled={syncing || saving || testing}
+          disabled={!canManageConnector || syncing || saving || testing}
         >
           {syncing ? 'Running...' : 'Run Integration Now'}
         </button>

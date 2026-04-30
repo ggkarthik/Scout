@@ -33,6 +33,11 @@ import org.springframework.stereotype.Service;
 public class SccmQueryService {
 
     private static final Logger LOG = LoggerFactory.getLogger(SccmQueryService.class);
+    private final CredentialEncryptionService credentialEncryptionService;
+
+    public SccmQueryService(CredentialEncryptionService credentialEncryptionService) {
+        this.credentialEncryptionService = credentialEncryptionService;
+    }
 
     /**
      * Full JOIN query used for production syncs. Fetches all active hosts with their installed
@@ -200,7 +205,7 @@ public class SccmQueryService {
             props.setProperty("authenticationScheme", "NativeAuthentication");
         } else {
             String username = config.getUsername();
-            String password = config.getCredentialSecret();
+            String password = credentialEncryptionService.decrypt(config.getCredentialSecret());
             if (username == null || username.isBlank()) {
                 throw new IllegalStateException("SCCM username is required for SQL_AUTH");
             }

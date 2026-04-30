@@ -96,8 +96,12 @@ public class ImpactEvaluationService {
                 impactReason = "awaiting_vex_assessment";
             }
         } else {
-            impactState = ImpactState.UNKNOWN;
-            impactReason = "awaiting_vex_assessment";
+            // Applicability is APPLICABLE and no VEX overlay is available. Default to IMPACTED
+            // so CPE-correlated CVEs from sources without VEX (NVD, KEV, advisory feeds) still
+            // produce findings. Vendors who later publish VEX assertions can override via
+            // the vexOverlay branch above.
+            impactState = ImpactState.IMPACTED;
+            impactReason = "applicable_no_vex";
         }
 
         return new ImpactAssessment(

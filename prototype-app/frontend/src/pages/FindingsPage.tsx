@@ -1,6 +1,6 @@
 import React from 'react';
 import '../styles/findings-list.css';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForConnectView } from '../app/routes';
 import type { Finding, FindingBulkWorkflowRequest } from '../features/findings/types';
 import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
@@ -8,7 +8,9 @@ import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
-import { api, apiRequest } from '../api/client';
+import { useActor } from '../features/auth/context';
+import { canRunSecurityWorkflow } from '../features/auth/roles';
+import { api } from '../api/client';
 import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -167,10 +169,6 @@ function applyColFilters(rows: Finding[], f: ColFilters, dueDateBand: DueDateBan
   });
 }
 
-async function updateWorkflow(findingId: string, payload: Record<string, unknown>) {
-  return apiRequest(`/findings/${findingId}/workflow`, { method: 'PUT', body: JSON.stringify(payload) });
-}
-
 // ─── chart primitives ─────────────────────────────────────────────────────────
 
 type DonutSeg = { key: string; label: string; value: number; color: string; onClick: () => void };
@@ -265,7 +263,8 @@ function WidgetCard({ title, children, active }: { title: string; children: Reac
 type FindingsPageProps = { onOpenCveWorkbench?: (vulnerabilityId: string) => void };
 
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
-  const navigate = useNavigate();
+  const actor = useActor();
+  const canMutateFindings = canRunSecurityWorkflow(actor);
   const [searchParams] = useSearchParams();
 
   // ── filter state ───────────────────────────────────────────────────────────
@@ -905,8 +904,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       <div className="fpl-list-bar">
         <div className="fpl-list-bar-left">
           {/* Resolve — primary standalone action */}
-          <button className={`fpl-action-btn fpl-action-btn--resolve${!hasSelection?' fpl-action-btn--disabled':''}`}
-            onClick={()=>openAction('resolve')}>Resolve</button>
+          <button className={`fpl-action-btn fpl-action-btn--resolve${!hasSelection || !canMutateFindings?' fpl-action-btn--disabled':''}`}
+            onClick={()=>openAction('resolve')} disabled={!hasSelection || !canMutateFindings}>Resolve</button>
 
           {/* More actions "..." dropdown */}
           <div className="fpl-more-wrap" ref={moreActionsRef}>
@@ -916,12 +915,12 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             </button>
             {showMoreActions && (
               <div className="fpl-more-menu">
-                <button className="fpl-more-item" onClick={()=>openAction('create-incident')} disabled={!hasSelection}>+ Create Incident</button>
-                <button className="fpl-more-item" onClick={()=>openAction('defer')} disabled={!hasSelection}>Defer</button>
-                <button className="fpl-more-item" onClick={()=>openAction('false-positive')} disabled={!hasSelection}>False Positive</button>
-                <button className="fpl-more-item" onClick={()=>openAction('duplicate')} disabled={!hasSelection}>Duplicate</button>
+                <button className="fpl-more-item" onClick={()=>openAction('create-incident')} disabled={!hasSelection || !canMutateFindings}>+ Create Incident</button>
+                <button className="fpl-more-item" onClick={()=>openAction('defer')} disabled={!hasSelection || !canMutateFindings}>Defer</button>
+                <button className="fpl-more-item" onClick={()=>openAction('false-positive')} disabled={!hasSelection || !canMutateFindings}>False Positive</button>
+                <button className="fpl-more-item" onClick={()=>openAction('duplicate')} disabled={!hasSelection || !canMutateFindings}>Duplicate</button>
                 <div className="fpl-more-sep"/>
-                <button className="fpl-more-item" onClick={()=>void handleReopen()} disabled={!hasSelection}>Re-open</button>
+                <button className="fpl-more-item" onClick={()=>void handleReopen()} disabled={!hasSelection || !canMutateFindings}>Re-open</button>
               </div>
             )}
           </div>

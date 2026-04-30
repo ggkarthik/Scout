@@ -22,6 +22,7 @@ import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
+import com.prototype.vulnwatch.domain.VulnerabilityConfigExpr;
 import com.prototype.vulnwatch.domain.VulnerabilityConstraintType;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
@@ -32,6 +33,7 @@ import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.RiskPolicyRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityConfigExprRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
@@ -90,6 +92,9 @@ class FindingServiceCorrelationPostgresIntegrationTest {
 
     @Autowired
     private VulnerabilityTargetRepository vulnerabilityTargetRepository;
+
+    @Autowired
+    private VulnerabilityConfigExprRepository vulnerabilityConfigExprRepository;
 
     @Autowired
     private InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
@@ -193,9 +198,9 @@ class FindingServiceCorrelationPostgresIntegrationTest {
                 tenant,
                 "auto-mode-pg",
                 "maven",
-                "log4j-core",
+                "log4j",
                 "2.14.1",
-                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j@2.14.1",
                 "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
         );
 
@@ -322,6 +327,40 @@ class FindingServiceCorrelationPostgresIntegrationTest {
         target.setEndInclusive(Boolean.TRUE);
         target.setKbVersion("test-kb");
         vulnerabilityTargetRepository.save(target);
+
+        if ("nvd".equalsIgnoreCase(source)) {
+            saveNvdConfigExpr(vulnerability, normalizedCpe, versionStart, versionEnd);
+        }
+    }
+
+    private void saveNvdConfigExpr(
+            Vulnerability vulnerability,
+            String cpe,
+            String versionStart,
+            String versionEnd
+    ) {
+        StringBuilder json = new StringBuilder();
+        json.append("{\"operator\":\"OR\",\"negate\":false,\"cpeMatch\":[{\"criteria\":\"")
+                .append(cpe)
+                .append("\",\"vulnerable\":true");
+        if (versionStart != null) {
+            json.append(",\"versionStartIncluding\":\"").append(versionStart).append("\"");
+        }
+        if (versionEnd != null) {
+            json.append(",\"versionEndIncluding\":\"").append(versionEnd).append("\"");
+        }
+        json.append("}]}");
+
+        VulnerabilityConfigExpr expr = new VulnerabilityConfigExpr();
+        expr.setVulnerability(vulnerability);
+        expr.setSource("nvd");
+        expr.setConfigIndex(0);
+        expr.setNodePath("0");
+        expr.setOperator("OR");
+        expr.setMatchCriteriaCount(1);
+        expr.setChildNodeCount(0);
+        expr.setExprJson(json.toString());
+        vulnerabilityConfigExprRepository.save(expr);
     }
 
     private record TestFixture(Asset asset, InventoryComponent component) {
