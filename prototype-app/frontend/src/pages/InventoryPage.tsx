@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
-import { FilterValueSelectCard, type FilterValueOption } from '../components/FilterValueSelectCard';
 import { api } from '../api/client';
 import { pathForInventoryHostAsset, pathForConnectView } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
@@ -48,7 +47,6 @@ type HostOsSummary = {
   totalSoftware: number;
 };
 
-type HostInventoryTab = 'all-hosts' | 'by-os';
 type HostQuickFilter = 'all' | 'online' | 'with-findings' | 'linux' | 'windows';
 const HOST_GROUP_BY_OPTIONS: MultiGroupByOption[] = [
   { key: 'operatingSystem', label: 'Operating System' },
@@ -338,7 +336,6 @@ export function InventoryPage(_: Props) {
     () => readInventoryGroupByFromSearch(searchParams),
     [searchParams]
   );
-  const [activeTab, setActiveTab] = React.useState<HostInventoryTab>('all-hosts');
   const [searchValue, setSearchValue] = React.useState(initialSearchValue);
   const [quickFilter, setQuickFilter] = React.useState<HostQuickFilter>(initialQuickFilter);
   const [selectedEnvironments, setSelectedEnvironments] = React.useState<string[]>(initialEnvironments);
@@ -377,25 +374,6 @@ export function InventoryPage(_: Props) {
     (hostDetailsQuery.data ?? []).map(({ asset, detail }) => toInventoryRecord(asset, detail))
       .sort((left, right) => left.asset.name.localeCompare(right.asset.name))
   ), [hostDetailsQuery.data]);
-
-  const environmentOptions = React.useMemo<FilterValueOption[]>(() => (
-    Array.from(new Set(hostRecords.map((record) => hostEnvironment(record))))
-      .sort((left, right) => left.localeCompare(right))
-      .map((value) => ({ value, label: value }))
-  ), [hostRecords]);
-  const operatingSystemOptions = React.useMemo<FilterValueOption[]>(() => (
-    Array.from(new Set(hostRecords.map((record) => record.operatingSystem)))
-      .sort((left, right) => left.localeCompare(right))
-      .map((value) => ({ value, label: value }))
-  ), [hostRecords]);
-  const sourceSystemOptions = React.useMemo<FilterValueOption[]>(() => (
-    Array.from(new Set(hostRecords.flatMap((record) => hostSourceSystems(record))))
-      .sort((left, right) => left.localeCompare(right))
-      .map((value) => ({
-        value,
-        label: formatInventorySourceSystem(value)
-      }))
-  ), [hostRecords]);
 
   React.useEffect(() => {
     const nextSearchValue = readInventoryQueryFromSearch(searchParams);
@@ -525,6 +503,87 @@ export function InventoryPage(_: Props) {
     () => filteredRecords.filter((record) => record.isOnline).length,
     [filteredRecords]
   );
+  const assetsWithExposure = React.useMemo(
+    () => filteredRecords.filter((record) => record.openFindingCount > 0 || record.applicableCveCount > 0).length,
+    [filteredRecords]
+  );
+  const topOperatingSystems = React.useMemo(
+    () => osSummaries.slice(0, 5),
+    [osSummaries]
+  );
+  const statusBreakdown = React.useMemo(() => {
+    const online = filteredRecords.filter((record) => record.isOnline).length;
+    return [
+      { label: 'Online', count: online, tone: 'success' },
+      { label: 'Offline / inactive', count: Math.max(0, filteredRecords.length - online), tone: 'muted' },
+      { label: 'With findings', count: filteredRecords.filter((record) => record.openFindingCount > 0).length, tone: 'warning' },
+      { label: 'With CVEs', count: filteredRecords.filter((record) => record.applicableCveCount > 0).length, tone: 'accent' }
+    ];
+  }, [filteredRecords]);
+  const topRiskAssets = React.useMemo(
+    () => [...filteredRecords]
+      .sort((left, right) => (
+        right.openFindingCount - left.openFindingCount
+        || right.applicableCveCount - left.applicableCveCount
+        || right.deployedSoftwareCount - left.deployedSoftwareCount
+        || left.asset.name.localeCompare(right.asset.name)
+      ))
+      .slice(0, 5),
+    [filteredRecords]
+  );
+  const inventoryHealth = React.useMemo(() => {
+    const noSoftware = filteredRecords.filter((record) => record.deployedSoftwareCount === 0).length;
+    const unknownOs = filteredRecords.filter((record) => record.operatingSystem === 'Unknown').length;
+    const missingOwner = filteredRecords.filter((record) => hostOwner(record) === 'Unassigned').length;
+    const highExposure = filteredRecords.filter((record) => record.applicableCveCount > 0 || record.openFindingCount > 0).length;
+    return [
+      { label: 'No software', count: noSoftware, tone: 'muted' },
+      { label: 'Unknown OS', count: unknownOs, tone: 'warning' },
+      { label: 'Missing owner', count: missingOwner, tone: 'warning' },
+      { label: 'Exposed', count: highExposure, tone: 'accent' }
+    ];
+  }, [filteredRecords]);
+  const osMax = React.useMemo(
+    () => Math.max(1, ...topOperatingSystems.map((item) => item.hostCount)),
+    [topOperatingSystems]
+  );
+  const statusMax = React.useMemo(
+    () => Math.max(1, ...statusBreakdown.map((item) => item.count)),
+    [statusBreakdown]
+  );
+  const activeFilterChips = React.useMemo<Array<{ key: string; label: string; onRemove: () => void }>>(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+    if (quickFilter !== 'all') {
+      chips.push({
+        key: 'quick',
+        label: `View: ${quickFilter.replace(/-/g, ' ')}`,
+        onRemove: () => setQuickFilter('all')
+      });
+    }
+    if (searchValue.trim()) {
+      chips.push({
+        key: 'search',
+        label: `Search: ${searchValue.trim()}`,
+        onRemove: () => setSearchValue('')
+      });
+    }
+    selectedEnvironments.forEach((value) => chips.push({
+      key: `environment:${value}`,
+      label: `Environment: ${value}`,
+      onRemove: () => setSelectedEnvironments((current) => current.filter((entry) => entry !== value))
+    }));
+    selectedOperatingSystems.forEach((value) => chips.push({
+      key: `os:${value}`,
+      label: `OS: ${value}`,
+      onRemove: () => setSelectedOperatingSystems((current) => current.filter((entry) => entry !== value))
+    }));
+    selectedSourceSystems.forEach((value) => chips.push({
+      key: `source:${value}`,
+      label: `Source: ${formatInventorySourceSystem(value)}`,
+      onRemove: () => setSelectedSourceSystems((current) => current.filter((entry) => entry !== value))
+    }));
+    return chips;
+  }, [quickFilter, searchValue, selectedEnvironments, selectedOperatingSystems, selectedSourceSystems]);
 
   const loading = assetsQuery.isPending || hostDetailsQuery.isPending;
   const errorMessage = assetsQuery.error instanceof Error
@@ -546,106 +605,7 @@ export function InventoryPage(_: Props) {
 
   return (
     <section className="inventory-page-shell">
-      <header className="inventory-page-header">
-        <div>
-          <h1>Hosts</h1>
-          <p className="panel-caption">
-            Enterprise host inventory with correlated deployed software, applicable CVEs, and open findings.
-          </p>
-        </div>
-        <div className="inventory-page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              void assetsQuery.refetch();
-              void hostDetailsQuery.refetch();
-            }}
-          >
-            Refresh
-          </button>
-        </div>
-      </header>
-
-      <div className="inventory-summary-grid">
-        <SummaryCard label="Total Hosts" value={filteredRecords.length.toLocaleString()} subtext="Correlated from current enterprise inventory" />
-        <SummaryCard label="Online Hosts" value={onlineHosts.toLocaleString()} subtext="Active hosts currently reporting inventory" />
-        <SummaryCard label="Deployed Software" value={totalSoftware.toLocaleString()} subtext="Installed software rows correlated to hosts" />
-        <SummaryCard label="Applicable CVEs" value={totalCves.toLocaleString()} subtext="CVEs matched against deployed host software" />
-        <SummaryCard label="Open Findings" value={totalFindings.toLocaleString()} subtext="Existing findings tied to these host records" />
-      </div>
-
-      <div className="inventory-toolbar">
-        <div className="inventory-tab-row">
-          <button
-            type="button"
-            className={`inventory-tab-button ${activeTab === 'all-hosts' ? 'active' : ''}`}
-            onClick={() => setActiveTab('all-hosts')}
-          >
-            All hosts
-          </button>
-          <button
-            type="button"
-            className={`inventory-tab-button ${activeTab === 'by-os' ? 'active' : ''}`}
-            onClick={() => setActiveTab('by-os')}
-          >
-            By OS
-          </button>
-        </div>
-
-        <div className="inventory-search-row inventory-search-row-stacked">
-          <label className="inventory-search-field">
-            <span className="panel-caption">Search hostname, owner, OS, software…</span>
-            <input
-              value={searchValue}
-              onChange={(event) => setSearchValue(event.target.value)}
-              placeholder="prod-web-01, SQL Server, JBoss, WebLogic…"
-            />
-          </label>
-          <div className="inventory-chip-row">
-            {([
-              ['all', 'All hosts'],
-              ['online', 'Online'],
-              ['with-findings', 'With findings'],
-              ['linux', 'Linux'],
-              ['windows', 'Windows']
-            ] as const).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`inventory-chip ${quickFilter === value ? 'active' : ''}`}
-                onClick={() => setQuickFilter(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="inventory-filter-card-grid">
-          <FilterValueSelectCard
-            label="Environment"
-            selectedValues={selectedEnvironments}
-            options={environmentOptions}
-            onChange={setSelectedEnvironments}
-          />
-          <FilterValueSelectCard
-            label="Operating System"
-            selectedValues={selectedOperatingSystems}
-            options={operatingSystemOptions}
-            onChange={setSelectedOperatingSystems}
-          />
-          <FilterValueSelectCard
-            label="Source System"
-            selectedValues={selectedSourceSystems}
-            options={sourceSystemOptions}
-            onChange={setSelectedSourceSystems}
-          />
-        </div>
-        <div className="inventory-toolbar-actions">
-          <button type="button" className="btn btn-secondary btn-inline" onClick={clearFilters}>
-            Clear Filters
-          </button>
-        </div>
+      <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy
             options={HOST_GROUP_BY_OPTIONS}
@@ -654,9 +614,149 @@ export function InventoryPage(_: Props) {
             label="GROUP BY"
             placeholder="No secondary grouping"
             allowEmptyPrimary
-            emptyPrimaryLabel="Select..."
+            emptyPrimaryLabel="None"
             showSelectorsByDefault={false}
           />
+        </div>
+        {activeFilterChips.length > 0 ? (
+          <div className="fpl-active-chips inventory-active-chips">
+            {activeFilterChips.map((chip) => (
+              <span key={chip.key} className="fpl-chip">
+                {chip.label}
+                <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label}`}>x</button>
+              </span>
+            ))}
+            <button type="button" className="fpl-chip-clear" onClick={clearFilters}>Clear all</button>
+          </div>
+        ) : null}
+        <label className="findings-filter-chip inventory-fpl-search">
+          <span className="panel-caption">Search hosts</span>
+          <input
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            placeholder="hostname, OS, software..."
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-secondary inventory-refresh-btn"
+          onClick={() => {
+            void assetsQuery.refetch();
+            void hostDetailsQuery.refetch();
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="fpl-widgets inventory-fpl-widgets">
+        <button type="button" className="fpl-widget" onClick={() => setQuickFilter('all')}>
+          <div className="fpl-widget-title">Host Exposure</div>
+          <div className="inventory-donut-widget">
+            <div className="inventory-donut" style={{ '--donut-fill': `${filteredRecords.length > 0 ? Math.round((assetsWithExposure / filteredRecords.length) * 100) : 0}%` } as React.CSSProperties}>
+              <strong>{assetsWithExposure.toLocaleString()}</strong>
+              <span>exposed</span>
+            </div>
+            <div className="fpl-widget-body">
+              <div className="fpl-legend-row">
+                <span className="fpl-legend-label">Total hosts</span>
+                <strong className="fpl-legend-val">{filteredRecords.length.toLocaleString()}</strong>
+              </div>
+              <div className="fpl-legend-row">
+                <span className="fpl-legend-label">Applicable CVEs</span>
+                <strong className="fpl-legend-val">{totalCves.toLocaleString()}</strong>
+              </div>
+              <div className="fpl-legend-row">
+                <span className="fpl-legend-label">Open findings</span>
+                <strong className="fpl-legend-val">{totalFindings.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        </button>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Hosts By Status</div>
+          <div className="fpl-widget-body">
+            {statusBreakdown.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => {
+                  if (item.label === 'Online') setQuickFilter('online');
+                  if (item.label === 'With findings') setQuickFilter('with-findings');
+                }}
+              >
+                <span className="fpl-hbar-label">{item.label}</span>
+                <span className="fpl-hbar-track">
+                  <span className={`fpl-hbar-fill inventory-hbar-${item.tone}`} style={{ width: `${(item.count / statusMax) * 100}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{item.count.toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Top Assets At Risk</div>
+          <div className="fpl-widget-body">
+            {topRiskAssets.map((record) => (
+              <button
+                key={record.asset.id}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => handleOpenHost(record.asset.id)}
+              >
+                <span className="fpl-hbar-label">{record.asset.name}</span>
+                <span className="fpl-hbar-track">
+                  <span className="fpl-hbar-fill" style={{ width: `${Math.max(8, Math.min(100, (record.applicableCveCount + record.openFindingCount) * 12))}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{(record.applicableCveCount + record.openFindingCount).toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Operating Systems</div>
+          <div className="fpl-widget-body">
+            {topOperatingSystems.map((item) => (
+              <button
+                key={item.os}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => setSelectedOperatingSystems([item.os])}
+              >
+                <span className="fpl-hbar-label">{item.os}</span>
+                <span className="fpl-hbar-track">
+                  <span className="fpl-hbar-fill inventory-hbar-accent" style={{ width: `${(item.hostCount / osMax) * 100}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{item.hostCount.toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Asset Indicators</div>
+          <div className="fpl-kpi-grid">
+            <button type="button" className="fpl-kpi-card" onClick={() => setQuickFilter('with-findings')}>
+              <strong className="fpl-kpi-num">{totalFindings.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Open findings</span>
+            </button>
+            <button type="button" className="fpl-kpi-card" onClick={() => setQuickFilter('online')}>
+              <strong className="fpl-kpi-num">{onlineHosts.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Online</span>
+            </button>
+            <button type="button" className="fpl-kpi-card" onClick={() => setSelectedOperatingSystems(['Unknown'])}>
+              <strong className="fpl-kpi-num">{inventoryHealth.find((item) => item.label === 'Unknown OS')?.count.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Unknown OS</span>
+            </button>
+            <button type="button" className="fpl-kpi-card" onClick={() => setQuickFilter('all')}>
+              <strong className="fpl-kpi-num">{totalSoftware.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Software rows</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -698,7 +798,7 @@ export function InventoryPage(_: Props) {
 
       {loading ? (
         <div className="empty-state"><p>Loading host inventory…</p></div>
-      ) : activeTab === 'all-hosts' ? (
+      ) : (
         <div className="inventory-section-card">
           <div className="inventory-section-header">
             <div>
@@ -765,49 +865,6 @@ export function InventoryPage(_: Props) {
               </button>
             </div>
           )}
-        </div>
-      ) : (
-        <div className="inventory-section-card">
-          <div className="inventory-section-header">
-            <div>
-              <h2>Hosts by operating system</h2>
-              <p className="panel-caption">OS coverage across enterprise hosts with correlated software, CVEs, and findings.</p>
-            </div>
-            <span className="panel-caption">{osSummaries.length.toLocaleString()} OS groups</span>
-          </div>
-
-          <div className="inventory-table-shell">
-            <table className="inventory-table">
-              <thead>
-                <tr>
-                  <th>OS</th>
-                  <th>Hosts</th>
-                  <th>Online</th>
-                  <th>Deployed Software</th>
-                  <th>Applicable CVEs</th>
-                  <th>Open Findings</th>
-                </tr>
-              </thead>
-              <tbody>
-                {osSummaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>
-                      <div className="empty-state"><p>No operating-system groups matched the current filters.</p></div>
-                    </td>
-                  </tr>
-                ) : osSummaries.map((summary) => (
-                  <tr key={summary.os}>
-                    <td>{summary.os}</td>
-                    <td>{summary.hostCount.toLocaleString()}</td>
-                    <td>{summary.activeCount.toLocaleString()}</td>
-                    <td>{summary.totalSoftware.toLocaleString()}</td>
-                    <td>{summary.totalApplicableCves.toLocaleString()}</td>
-                    <td>{summary.totalOpenFindings.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
     </section>

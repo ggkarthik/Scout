@@ -16,6 +16,12 @@ public record VulnRepoDashboardResponse(
     public record SummaryCards(
             long trackedCount,
             long trackedAddedLastWeek,
+            long applicableCount,
+            long applicableAddedLastWeek,
+            long impactedInvestigationDoneCount,
+            long impactedAddedLastWeek,
+            long remediationCveCount,
+            long needsAttentionCount,
             long criticalCount,
             long exploitCount,
             int exploitCoveragePercent

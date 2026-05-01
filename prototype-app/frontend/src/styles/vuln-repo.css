@@ -3,26 +3,6 @@
   gap: var(--space-4);
 }
 
-.vuln-repo-dashboard-header {
-  align-items: flex-start;
-}
-
-.vuln-repo-dashboard-header-copy {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.vuln-repo-dashboard-search {
-  flex: 0 1 360px;
-  width: min(360px, 100%);
-  margin-left: auto;
-}
-
-.vuln-repo-dashboard-search input {
-  width: 100%;
-}
-
 .vuln-repo-dashboard-stats-grid {
   grid-template-columns: repeat(4, minmax(160px, 1fr));
 }
@@ -50,6 +30,63 @@
 
 .vuln-repo-dashboard-stat-button:focus-visible {
   outline: none;
+}
+
+.vuln-repo-dashboard-generated-at {
+  justify-self: end;
+}
+
+.vuln-repo-dashboard-funnel-card .stat-card {
+  display: grid;
+  gap: 10px;
+}
+
+.vuln-repo-dashboard-funnel-card .stat-card-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vuln-repo-dashboard-funnel {
+  display: grid;
+  gap: 8px;
+}
+
+.vuln-repo-dashboard-funnel-row {
+  display: grid;
+  gap: 4px;
+}
+
+.vuln-repo-dashboard-funnel-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.vuln-repo-dashboard-funnel-copy strong {
+  color: var(--title);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+}
+
+.vuln-repo-dashboard-funnel-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-muted) 76%, var(--panel-solid));
+}
+
+.vuln-repo-dashboard-funnel-track span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: var(--accent);
 }
 
 .vuln-repo-dashboard-main-grid {
@@ -391,6 +428,61 @@
   color: var(--critical);
 }
 
+.vuln-repo-dashboard-filter-chips {
+  align-self: center;
+  min-width: 0;
+}
+
+.vuln-repo-intel-toolbar {
+  margin: 8px 0 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+
+.vuln-repo-intel-toolbar .fpl-toolbar-left {
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.vuln-repo-intel-search {
+  flex: 0 1 280px;
+  width: min(280px, 100%);
+  margin-left: auto;
+}
+
+.vuln-repo-intel-search input {
+  width: 100%;
+}
+
+.vuln-repo-filter-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vuln-repo-filter-select span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vuln-repo-filter-select select {
+  min-height: 36px;
+  min-width: 160px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--title);
+  padding: 0 32px 0 10px;
+  font-weight: 700;
+}
+
 .vuln-repo-vulnerabilities-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -641,6 +733,7 @@
   .vuln-repo-vulnerabilities-layout {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 700px) {

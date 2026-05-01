@@ -25,6 +25,7 @@ public class VulnRepoDashboardService {
     private static final List<String> SEVERITY_ORDER = List.of("CRITICAL", "HIGH", "MEDIUM", "LOW");
     private static final List<String> RESOLVED_STATES = List.of("FIXED", "NOT_IMPACTED");
     private static final List<String> UNRESOLVED_STATES = List.of("IMPACTED", "NO_PATCH", "UNKNOWN");
+    private static final List<String> IMPACTED_STATES = List.of("IMPACTED", "NO_PATCH");
     private static final int LIST_LIMIT = 5;
     private static final int IMPACTED_ASSET_LIMIT = 9;
 
@@ -49,6 +50,12 @@ public class VulnRepoDashboardService {
 
         long trackedCount = orgCveRecordRepository.countByTenant(tenant);
         long trackedAddedLastWeek = countTrackedAddedLastWeek(tenantId, now.minus(7, ChronoUnit.DAYS));
+        long applicableCount = countApplicableCves(tenantId, null);
+        long applicableAddedLastWeek = countApplicableCves(tenantId, now.minus(7, ChronoUnit.DAYS));
+        long impactedInvestigationDoneCount = countByImpactStates(tenantId, IMPACTED_STATES);
+        long impactedAddedLastWeek = countImpactedAddedSince(tenantId, now.minus(7, ChronoUnit.DAYS));
+        long remediationCveCount = countCvesWithFindings(tenantId);
+        long needsAttentionCount = countNeedsAttention(tenantId);
         long criticalCount = countBySeverity(tenantId, "CRITICAL");
         long exploitCount = countExploitAvailable(tenantId);
         int exploitCoveragePercent = trackedCount <= 0L
@@ -60,6 +67,12 @@ public class VulnRepoDashboardService {
                 new VulnRepoDashboardResponse.SummaryCards(
                         trackedCount,
                         trackedAddedLastWeek,
+                        applicableCount,
+                        applicableAddedLastWeek,
+                        impactedInvestigationDoneCount,
+                        impactedAddedLastWeek,
+                        remediationCveCount,
+                        needsAttentionCount,
                         criticalCount,
                         exploitCount,
                         exploitCoveragePercent
@@ -184,6 +197,88 @@ public class VulnRepoDashboardService {
                 new MapSqlParameterSource()
                         .addValue("tenantId", tenantId)
                         .addValue("start", Timestamp.from(start)),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countApplicableCves(UUID tenantId, Instant createdSince) {
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+        String createdSinceFilter = "";
+        if (createdSince != null) {
+            createdSinceFilter = " and o.created_at >= :createdSince";
+            params.addValue("createdSince", Timestamp.from(createdSince));
+        }
+        Long count = jdbcTemplate.queryForObject(
+                ("""
+                select count(distinct o.vulnerability_id)
+                from org_cve_records o
+                join component_vulnerability_states cvs
+                  on cvs.tenant_id = o.tenant_id
+                 and cvs.vulnerability_id = o.vulnerability_id
+                join inventory_components ic
+                  on ic.id = cvs.component_id
+                 and ic.tenant_id = cvs.tenant_id
+                 and ic.component_status = 'ACTIVE'
+                where o.tenant_id = :tenantId
+                """ + createdSinceFilter),
+                params,
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countImpactedAddedSince(UUID tenantId, Instant start) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(*)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and o.created_at >= :start
+                  and upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("start", Timestamp.from(start))
+                        .addValue("states", IMPACTED_STATES),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countCvesWithFindings(UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(distinct f.vulnerability_id)
+                from findings f
+                join org_cve_records o
+                  on o.tenant_id = f.tenant_id
+                 and o.vulnerability_id = f.vulnerability_id
+                where f.tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource().addValue("tenantId", tenantId),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countNeedsAttention(UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(*)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
+                  and not exists (
+                    select 1
+                    from findings f
+                    where f.tenant_id = o.tenant_id
+                      and f.vulnerability_id = o.vulnerability_id
+                  )
+                """,
+                new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("states", IMPACTED_STATES),
                 Long.class
         );
         return count == null ? 0L : count;
@@ -464,7 +559,6 @@ public class VulnRepoDashboardService {
                   on o.tenant_id = cvs.tenant_id
                  and o.vulnerability_id = cvs.vulnerability_id
                 where cvs.tenant_id = :tenantId
-                  and upper(coalesce(o.severity, 'UNKNOWN')) = 'CRITICAL'
                   and upper(coalesce(o.impact_state, 'UNKNOWN')) not in ('FIXED', 'NOT_IMPACTED')
                 group by a.id, a.name, a.type, a.identifier, a.environment
                 order by count(distinct cvs.vulnerability_id) desc, a.name asc
