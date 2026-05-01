@@ -12,6 +12,14 @@ export function useSoftwareIdentitiesQuery(params: SoftwareIdentitiesQueryParams
   });
 }
 
+export function useSoftwareIdentityFunnelQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['software-identity-funnel'],
+    queryFn: () => api.getSoftwareIdentityFunnel(),
+    enabled
+  });
+}
+
 export function useSoftwareIdentityDetailQuery(softwareIdentityId: string | null, enabled = true) {
   return useQuery({
     queryKey: ['software-identity-detail', softwareIdentityId],
