@@ -119,7 +119,6 @@ const OPERATIONS_NAV_ITEMS = [
 ] as const;
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
-  { key: 'org-cves', label: 'Unified Records' },
   { key: 'vulnerabilities', label: 'Intelligence' },
 ];
 
