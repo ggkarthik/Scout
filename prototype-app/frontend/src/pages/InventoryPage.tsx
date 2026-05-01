@@ -250,24 +250,6 @@ function matchesSearch(record: HostInventoryRecord, query: string): boolean {
   return haystack.includes(normalizedQuery);
 }
 
-function SummaryCard({
-  label,
-  value,
-  subtext
-}: {
-  label: string;
-  value: string;
-  subtext: string;
-}) {
-  return (
-    <article className="inventory-summary-card">
-      <span className="inventory-summary-label">{label}</span>
-      <strong className="inventory-summary-value">{value}</strong>
-      <span className="inventory-summary-subtext">{subtext}</span>
-    </article>
-  );
-}
-
 function HostRow({
   record,
   onOpen

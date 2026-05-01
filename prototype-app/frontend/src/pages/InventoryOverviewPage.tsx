@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import {
   pathForInventoryHostAsset,
+  pathForInventoryView,
   pathForInventoryViewWithSearch,
 } from '../app/routes';
 import { InventoryQualityWorkspace } from '../components/InventoryQualityWorkspace';
@@ -1004,40 +1005,9 @@ export function InventoryOverviewPage() {
       focusWidgetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
-  const summaryCards = [
-    {
-      key: 'exposure',
-      title: 'Assets With Exposure',
-      value: assetsWithExposure,
-      caption: `${percentOf(assetsWithExposure, totalKnownAssets)}% of known assets have CVEs or findings`,
-      tone: assetsWithExposure > 0 ? 'warn' as const : 'neutral' as const,
-      onClick: () => openAssetFocus('exposed')
-    },
-    {
-      key: 'findings',
-      title: 'Open Findings',
-      value: totalOpenFindings,
-      caption: `${formatNumber(totalApplicableCves)} applicable CVEs across inventory`,
-      tone: totalOpenFindings > 0 ? 'critical' as const : 'neutral' as const,
-      onClick: () => openAssetFocus('exposed')
-    },
-    {
-      key: 'lifecycle',
-      title: 'Lifecycle Risk',
-      value: lifecycleRiskTotal,
-      caption: `${formatNumber(eolComponentCount)} EOL · ${formatNumber(unknownLifecycleCount)} unknown lifecycle`,
-      tone: lifecycleRiskTotal > 0 ? 'warn' as const : 'neutral' as const,
-      onClick: () => openWorkspaceTab(INVENTORY_EOL_TAB)
-    },
-    {
-      key: 'quality',
-      title: 'Inventory Quality Gaps',
-      value: qualitySummary?.totalIssues ?? (normalizationIssueCount + correlationIssueCount + unmatchedEolCount + vexIssueCount),
-      caption: `${normalizationCoverage}% assets fully normalized`,
-      tone: (qualitySummary?.totalIssues ?? 0) > 0 ? 'warn' as const : 'neutral' as const,
-      onClick: () => openWorkspaceTab(INVENTORY_NORMALIZATION_TAB)
-    }
-  ];
+  const qualityIssueCount = qualitySummary?.totalIssues ?? (
+    normalizationIssueCount + correlationIssueCount + unmatchedEolCount + vexIssueCount
+  );
   const focusWidgetRowCount = focusTab === 'assets'
     ? topAssets.length
     : topSoftwareByDeployment.length;
@@ -1148,16 +1118,54 @@ export function InventoryOverviewPage() {
                   </div>
                 </div>
               </button>
-              {summaryCards.map((card) => (
-                <button
-                  key={card.key}
-                  type="button"
-                  className="vuln-repo-dashboard-stat-button"
-                  onClick={card.onClick}
-                >
-                  <StatCard title={card.title} value={card.value} tone={card.tone} caption={card.caption} />
-                </button>
-              ))}
+              <button
+                type="button"
+                className="vuln-repo-dashboard-stat-button"
+                onClick={() => openAssetFocus('exposed')}
+              >
+                <StatCard
+                  title="Assets With Exposure"
+                  value={assetsWithExposure}
+                  tone={assetsWithExposure > 0 ? 'warn' : 'neutral'}
+                  caption={`${percentOf(assetsWithExposure, totalKnownAssets)}% of known assets have CVEs or findings`}
+                />
+              </button>
+              <button
+                type="button"
+                className="vuln-repo-dashboard-stat-button"
+                onClick={() => openAssetFocus('exposed')}
+              >
+                <StatCard
+                  title="Open Findings"
+                  value={totalOpenFindings}
+                  tone={totalOpenFindings > 0 ? 'critical' : 'neutral'}
+                  caption={`${formatNumber(totalApplicableCves)} applicable CVEs across inventory`}
+                />
+              </button>
+              <button
+                type="button"
+                className="vuln-repo-dashboard-stat-button"
+                onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}
+              >
+                <StatCard
+                  title="Lifecycle Risk"
+                  value={lifecycleRiskTotal}
+                  tone={lifecycleRiskTotal > 0 ? 'warn' : 'neutral'}
+                  caption={`${formatNumber(eolComponentCount)} EOL · ${formatNumber(unknownLifecycleCount)} unknown lifecycle`}
+                />
+              </button>
+              <button
+                type="button"
+                className="vuln-repo-dashboard-stat-button"
+                onClick={() => openWorkspaceTab(INVENTORY_NORMALIZATION_TAB)}
+              >
+                <StatCard
+                  title="Inventory Quality Gaps"
+                  value={qualityIssueCount}
+                  tone={qualityIssueCount > 0 ? 'warn' : 'neutral'}
+                  caption={`${normalizationCoverage}% assets fully normalized`}
+                />
+              </button>
             </div>
 
             <div className="dashboard-grid vuln-repo-dashboard-main-grid">
@@ -1325,14 +1333,14 @@ export function InventoryOverviewPage() {
                             <button
                               type="button"
                               className="btn-link vuln-repo-dashboard-count-link"
-                              onClick={() => navigate(softwareIdentityDetailPath(identity.id))}
+                              onClick={() => navigate(softwareIdentityFilterPath(identity))}
                             >
                               {formatNumber(riskCount)}
                             </button>
                             <button
                               type="button"
                               className="btn-link vuln-repo-dashboard-count-link vuln-repo-dashboard-asset-link"
-                              onClick={() => navigate(softwareIdentityDetailPath(identity.id))}
+                              onClick={() => navigate(softwareIdentityFilterPath(identity))}
                             >
                               {formatNumber(identity.assetCount)} assets
                             </button>
