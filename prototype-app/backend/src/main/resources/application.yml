@@ -67,6 +67,9 @@ app:
   tenancy:
     allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:true}
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:false}
+  test-personas:
+    enabled: ${APP_TEST_PERSONAS_ENABLED:false}
+    token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
   sbom-fetch:

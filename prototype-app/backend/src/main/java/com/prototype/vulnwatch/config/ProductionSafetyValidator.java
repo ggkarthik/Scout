@@ -20,6 +20,7 @@ public class ProductionSafetyValidator {
     private final String archiveStorageBackend;
     private final String archiveS3Bucket;
     private final String corsAllowedOrigins;
+    private final boolean testPersonasEnabled;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -33,7 +34,8 @@ public class ProductionSafetyValidator {
             @Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext,
             @Value("${app.archive.storage-backend:filesystem}") String archiveStorageBackend,
             @Value("${app.archive.s3-bucket:}") String archiveS3Bucket,
-            @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins
+            @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins,
+            @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled
     ) {
         this.requireProductionSecrets = requireProductionSecrets;
         this.apiKey = apiKey;
@@ -47,6 +49,7 @@ public class ProductionSafetyValidator {
         this.archiveStorageBackend = archiveStorageBackend;
         this.archiveS3Bucket = archiveS3Bucket;
         this.corsAllowedOrigins = corsAllowedOrigins;
+        this.testPersonasEnabled = testPersonasEnabled;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -81,6 +84,9 @@ public class ProductionSafetyValidator {
         }
         if (corsAllowedOrigins == null || corsAllowedOrigins.isBlank() || corsAllowedOrigins.contains("*")) {
             throw new IllegalStateException("APP_CORS_ALLOWED_ORIGINS must be set to explicit production origins.");
+        }
+        if (testPersonasEnabled) {
+            throw new IllegalStateException("APP_TEST_PERSONAS_ENABLED must be false for production startup.");
         }
     }
 

@@ -109,6 +109,24 @@ class ProductionSafetyValidatorTest {
         assertThrows(IllegalStateException.class, validator::validate);
     }
 
+    @Test
+    void validateRejectsEnabledTestPersonasForProduction() {
+        ProductionSafetyValidator validator = validator(
+                "",
+                false,
+                "https://issuer.example.com",
+                "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                false,
+                true,
+                "s3",
+                "vulnwatch-prod-archive",
+                "https://app.example.com",
+                true);
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
+
     private ProductionSafetyValidator validator(
             String creatorKey,
             boolean allowApiKeyAuth,
@@ -120,6 +138,33 @@ class ProductionSafetyValidatorTest {
             String archiveStorageBackend,
             String archiveS3Bucket,
             String corsAllowedOrigins
+    ) {
+        return validator(
+                creatorKey,
+                allowApiKeyAuth,
+                jwtIssuerUri,
+                jwtJwkSetUri,
+                credentialEncryptionKey,
+                allowHeaderTenantSelection,
+                requireTenantContext,
+                archiveStorageBackend,
+                archiveS3Bucket,
+                corsAllowedOrigins,
+                false);
+    }
+
+    private ProductionSafetyValidator validator(
+            String creatorKey,
+            boolean allowApiKeyAuth,
+            String jwtIssuerUri,
+            String jwtJwkSetUri,
+            String credentialEncryptionKey,
+            boolean allowHeaderTenantSelection,
+            boolean requireTenantContext,
+            String archiveStorageBackend,
+            String archiveS3Bucket,
+            String corsAllowedOrigins,
+            boolean testPersonasEnabled
     ) {
         return new ProductionSafetyValidator(
                 true,
@@ -133,6 +178,7 @@ class ProductionSafetyValidatorTest {
                 requireTenantContext,
                 archiveStorageBackend,
                 archiveS3Bucket,
-                corsAllowedOrigins);
+                corsAllowedOrigins,
+                testPersonasEnabled);
     }
 }
