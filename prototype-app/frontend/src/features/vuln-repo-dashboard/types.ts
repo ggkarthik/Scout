@@ -1,6 +1,12 @@
 export type VulnRepoDashboardSummaryCards = {
   trackedCount: number;
   trackedAddedLastWeek: number;
+  applicableCount: number;
+  applicableAddedLastWeek: number;
+  impactedInvestigationDoneCount: number;
+  impactedAddedLastWeek: number;
+  remediationCveCount: number;
+  needsAttentionCount: number;
   criticalCount: number;
   exploitCount: number;
   exploitCoveragePercent: number;
