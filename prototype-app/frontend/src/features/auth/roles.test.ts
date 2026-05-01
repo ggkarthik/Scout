@@ -31,13 +31,17 @@ describe('role helpers', () => {
   });
 
   it('maps tenant-owned configuration permissions by role', () => {
+    expect(canManageUsers(actor(['PLATFORM_OWNER']))).toBe(true);
     expect(canManageUsers(actor(['TENANT_ADMIN']))).toBe(true);
     expect(canManageServiceAccounts(actor(['TENANT_ADMIN']))).toBe(true);
     expect(canManageRiskPolicy(actor(['INVENTORY_ADMIN']))).toBe(false);
     expect(canManageInventorySources(actor(['INVENTORY_ADMIN']))).toBe(true);
+    expect(canManageUsers(actor(['INVENTORY_ADMIN']))).toBe(false);
     expect(canManageSourceFilters(actor(['SECURITY_ANALYST']))).toBe(true);
     expect(canRunSecurityWorkflow(actor(['SECURITY_ANALYST']))).toBe(true);
     expect(canRefreshTenantExposure(actor(['SECURITY_ANALYST']))).toBe(true);
+    expect(canManageInventorySources(actor(['SECURITY_ANALYST']))).toBe(false);
+    expect(canManageRiskPolicy(actor(['SECURITY_ANALYST']))).toBe(false);
   });
 
   it('allows read-only actors to view but not mutate', () => {

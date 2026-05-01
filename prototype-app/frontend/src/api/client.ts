@@ -109,6 +109,22 @@ const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
 const STATIC_AUTH_TOKEN = import.meta.env.VITE_AUTH_TOKEN ?? '';
 const AUTH_TOKEN_STORAGE_KEY = 'vulnwatch.authToken';
 
+export type TestPersona = {
+  key: string;
+  label: string;
+  subject: string;
+  tenantSlug: string | null;
+  tenantName: string | null;
+  roles: string[];
+};
+
+export type TestPersonaToken = {
+  token: string;
+  tokenType: 'Bearer';
+  expiresAt: string;
+  persona: TestPersona;
+};
+
 type ApiErrorPayload = {
   code?: string;
   error?: string;
@@ -665,6 +681,11 @@ export const api = {
     }
   ),
   getAuthContext: () => request<AuthContext>('/me'),
+  listTestPersonas: () => request<TestPersona[]>('/dev/test-personas'),
+  issueTestPersonaToken: (personaKey: string) =>
+    request<TestPersonaToken>(`/dev/test-personas/${encodeURIComponent(personaKey)}/token`, {
+      method: 'POST'
+    }),
   listTenants: () => request<Tenant[]>('/tenants'),
   createTenant: (payload: TenantCreateRequest) =>
     request<Tenant>('/platform/tenants', {
