@@ -24,6 +24,8 @@ const VULN_REPO_COLUMNS: DataTableColumn[] = [
 ];
 
 const RUNBOOK_TASK_IDS = ['review-asset-inventory', 'find-false-positive', 'end-of-life-analysis', 'solutions', 'installed-patch-info'];
+const SEVERITY_FILTER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+const STATUS_FILTER_OPTIONS = ['OPEN', 'APPLICABLE', 'NOT_APPLICABLE', 'IN_PROGRESS', 'NOT_STARTED', 'DONE'];
 
 function getInvestigationStatus(cveId: string): 'not-started' | 'in-progress' | 'done' {
   try {
@@ -48,6 +50,20 @@ function getLocalSummaryMode(cveId: string): 'ai' | 'deterministic' | null {
   } catch {
     return null;
   }
+}
+
+function parseCsvParam(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(',')
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function serializeCsvParam(values: string[]): string {
+  return values.map((value) => value.trim().toUpperCase()).filter(Boolean).join(',');
 }
 
 type SoftwareDrawerRow = {
@@ -90,6 +106,48 @@ function formatDateTime(value?: string): string {
 
 function isApplicableByInventory(record: OrgSpecificCveExposureRecord): boolean {
   return record.matchedSoftwareCount > 0;
+}
+
+function statusForRecord(record: OrgSpecificCveExposureRecord): string {
+  if (record.openFindings > 0) {
+    return 'OPEN';
+  }
+  const investigationStatus = getInvestigationStatus(record.externalId);
+  if (investigationStatus === 'done') {
+    return 'DONE';
+  }
+  if (investigationStatus === 'in-progress') {
+    return 'IN_PROGRESS';
+  }
+  if (isApplicableByInventory(record)) {
+    return 'APPLICABLE';
+  }
+  if (record.applicability === 'NOT_APPLICABLE') {
+    return 'NOT_APPLICABLE';
+  }
+  return 'NOT_STARTED';
+}
+
+function dashboardFilterLabel(key: string, value: string): string {
+  if (key === 'severity') {
+    return `Severity: ${value.split(',').map((item) => formatLabel(item)).join(', ')}`;
+  }
+  if (key === 'exploitOnly' && value === 'true') {
+    return 'Exploit: Available';
+  }
+  if (key === 'createdSinceDays') {
+    return `Added: Last ${value} days`;
+  }
+  if (key === 'software') {
+    return `Software: ${value}`;
+  }
+  if (key === 'softwareScope') {
+    return `Software scope: ${formatLabel(value)}`;
+  }
+  if (key === 'includeAll' && value === 'true') {
+    return 'Scope: All tracked CVEs';
+  }
+  return `${formatLabel(key)}: ${value}`;
 }
 
 function buildSoftwareDrawerRows(detail: CveDetail | null): SoftwareDrawerRow[] {
@@ -138,6 +196,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = React.useMemo(() => searchParams.get('query')?.trim() ?? '', [searchParams]);
   const initialSeverity = React.useMemo(() => searchParams.get('severity')?.trim() ?? '', [searchParams]);
+  const initialStatuses = React.useMemo(() => parseCsvParam(searchParams.get('status')), [searchParams]);
   const initialExploitOnly = React.useMemo(() => searchParams.get('exploitOnly') === 'true', [searchParams]);
   const initialCreatedSinceDays = React.useMemo(() => {
     const raw = searchParams.get('createdSinceDays');
@@ -154,13 +213,16 @@ export function VulnRepoVulnerabilitiesPage() {
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState(initialQuery);
   const [query, setQuery] = React.useState(initialQuery);
+  const [severityFilters, setSeverityFilters] = React.useState<string[]>(parseCsvParam(initialSeverity));
+  const [statusFilters, setStatusFilters] = React.useState<string[]>(initialStatuses);
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
+  const serverSeverityFilter = severityFilters.length === 1 ? severityFilters[0] : undefined;
   const vulnRepoQuery = useVulnRepoVulnerabilitiesQuery({
     page,
     size: PAGE_SIZE,
     query: query || undefined,
-    severity: initialSeverity || undefined,
+    severity: serverSeverityFilter,
     exploitOnly: initialExploitOnly || undefined,
     createdSinceDays: initialCreatedSinceDays,
     software: initialSoftware || undefined,
@@ -194,11 +256,56 @@ export function VulnRepoVulnerabilitiesPage() {
   React.useEffect(() => {
     setQueryInput(initialQuery);
     setQuery(initialQuery);
+    setSeverityFilters(parseCsvParam(initialSeverity));
+    setStatusFilters(initialStatuses);
     setPage(0);
-  }, [initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope]);
+  }, [initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses]);
+
+  const filteredItems = React.useMemo(() => (
+    items.filter((item) => {
+      if (severityFilters.length > 0 && !severityFilters.includes((item.severity || 'UNKNOWN').toUpperCase())) {
+        return false;
+      }
+      if (statusFilters.length > 0 && !statusFilters.includes(statusForRecord(item))) {
+        return false;
+      }
+      return true;
+    })
+  ), [items, severityFilters, statusFilters]);
+
+  const writeFilterParams = React.useCallback((updates: {
+    severity?: string[];
+    status?: string[];
+  }) => {
+    const nextParams = new URLSearchParams(searchParams);
+    const nextSeverity = updates.severity ?? severityFilters;
+    const nextStatus = updates.status ?? statusFilters;
+    if (nextSeverity.length > 0) {
+      nextParams.set('severity', serializeCsvParam(nextSeverity));
+    } else {
+      nextParams.delete('severity');
+    }
+    if (nextStatus.length > 0) {
+      nextParams.set('status', serializeCsvParam(nextStatus));
+    } else {
+      nextParams.delete('status');
+    }
+    setPage(0);
+    setSearchParams(nextParams);
+  }, [searchParams, setSearchParams, severityFilters, statusFilters]);
+
+  const updateSeverityFilters = React.useCallback((next: string[]) => {
+    setSeverityFilters(next);
+    writeFilterParams({ severity: next });
+  }, [writeFilterParams]);
+
+  const updateStatusFilters = React.useCallback((next: string[]) => {
+    setStatusFilters(next);
+    writeFilterParams({ status: next });
+  }, [writeFilterParams]);
 
   const tableRows = React.useMemo<DataTableRow[]>(() => (
-    items.map((item) => {
+    filteredItems.map((item) => {
       const applicable = isApplicableByInventory(item);
       return {
         id: item.recordId,
@@ -310,140 +417,148 @@ export function VulnRepoVulnerabilitiesPage() {
         },
       };
     })
-  ), [items, navigate]);
+  ), [filteredItems, navigate]);
 
-  const applySearch = React.useCallback(() => {
-    const parsed = parseCombinedSearchInput(queryInput);
-    const nextParams = new URLSearchParams();
+  const activeChips = React.useMemo<Array<{ label: string; onRemove: () => void }>>(() => {
+    const chips: Array<{ label: string; onRemove: () => void }> = [];
+    if (severityFilters.length > 0) {
+      chips.push({
+        label: `Severity: ${severityFilters.map(formatLabel).join(', ')}`,
+        onRemove: () => updateSeverityFilters([]),
+      });
+    }
+    if (statusFilters.length > 0) {
+      chips.push({
+        label: `Status: ${statusFilters.map(formatLabel).join(', ')}`,
+        onRemove: () => updateStatusFilters([]),
+      });
+    }
+    return chips;
+  }, [severityFilters, statusFilters, updateSeverityFilters, updateStatusFilters]);
+
+  const dashboardFilterChips = React.useMemo(() => {
+    const keys = ['exploitOnly', 'createdSinceDays', 'software', 'softwareScope', 'includeAll'];
+    return keys
+      .map((key) => {
+        const value = searchParams.get(key);
+        return value ? { key, label: dashboardFilterLabel(key, value) } : null;
+      })
+      .filter((item): item is { key: string; label: string } => item != null);
+  }, [searchParams]);
+
+  const clearAllFilters = React.useCallback(() => {
+    updateSeverityFilters([]);
+    updateStatusFilters([]);
+  }, [updateSeverityFilters, updateStatusFilters]);
+
+  const updateSearchFilter = React.useCallback((value: string) => {
+    setQueryInput(value);
+    const parsed = parseCombinedSearchInput(value);
+    const nextParams = new URLSearchParams(searchParams);
     if (parsed.query) {
       nextParams.set('query', parsed.query);
+    } else {
+      nextParams.delete('query');
     }
     if (parsed.software) {
       nextParams.set('software', parsed.software);
-    } else if (initialSoftware) {
-      nextParams.set('software', initialSoftware);
-    }
-    if (initialSoftwareIdentityId) {
-      nextParams.set('softwareIdentityId', initialSoftwareIdentityId);
-    }
-    if (initialSoftwareScope) {
-      nextParams.set('softwareScope', initialSoftwareScope);
-    }
-    if (initialIncludeAll) {
-      nextParams.set('includeAll', 'true');
-    }
-    if (initialSeverity) {
-      nextParams.set('severity', initialSeverity);
-    }
-    if (initialExploitOnly) {
-      nextParams.set('exploitOnly', 'true');
-    }
-    if (initialCreatedSinceDays) {
-      nextParams.set('createdSinceDays', String(initialCreatedSinceDays));
     }
     setPage(0);
     setQuery(parsed.query ?? '');
     setSelectedSoftwareRecord(null);
     setDrawerMode('software');
     setSearchParams(nextParams);
-  }, [
-    initialCreatedSinceDays,
-    initialExploitOnly,
-    initialIncludeAll,
-    initialSeverity,
-    initialSoftware,
-    initialSoftwareIdentityId,
-    initialSoftwareScope,
-    queryInput,
-    setSearchParams,
-  ]);
-
-  const clearSearch = React.useCallback(() => {
-    const nextParams = new URLSearchParams();
-    if (initialSeverity) {
-      nextParams.set('severity', initialSeverity);
-    }
-    if (initialExploitOnly) {
-      nextParams.set('exploitOnly', 'true');
-    }
-    if (initialCreatedSinceDays) {
-      nextParams.set('createdSinceDays', String(initialCreatedSinceDays));
-    }
-    if (initialSoftwareIdentityId) {
-      nextParams.set('softwareIdentityId', initialSoftwareIdentityId);
-    }
-    if (initialSoftwareScope) {
-      nextParams.set('softwareScope', initialSoftwareScope);
-    }
-    if (initialIncludeAll) {
-      nextParams.set('includeAll', 'true');
-    }
-    setPage(0);
-    setQueryInput('');
-    setQuery('');
-    setSelectedSoftwareRecord(null);
-    setDrawerMode('software');
-    setSearchParams(nextParams);
-  }, [initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialSeverity, initialSoftwareIdentityId, initialSoftwareScope, setSearchParams]);
+  }, [searchParams, setSearchParams]);
 
   return (
     <section className="panel vuln-repo-vulnerabilities-shell">
-      <div className="panel-header">
-        <div>
-          <h3>Vulnerability Intelligence</h3>
-          <span className="panel-caption">
-            Full CVE feed from NVD, GHSA, and CISA KEV. Use <strong>Unified Records</strong> to see only CVEs matched to your org's software inventory.
-          </span>
-        </div>
-        <div className="button-row">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => void vulnRepoQuery.refetch()}
-            disabled={loading}
-          >
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
-
-      <div className="org-cve-filter-row">
-        <div className="findings-filter-chip org-cve-filter-chip">
-          <label htmlFor="vuln-repo-vuln-search">Search CVE / Description</label>
-          <input
-            id="vuln-repo-vuln-search"
-            value={queryInput}
-            onChange={(event) => setQueryInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                applySearch();
-              }
-            }}
-            placeholder="CVE-2026-1526, internet_explorer"
-          />
-        </div>
-        <div className="button-row org-cve-filter-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={applySearch}
-            disabled={loading}
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={clearSearch}
-            disabled={loading && !query}
-          >
-            Clear
-          </button>
-        </div>
-      </div>
-
       {error && <div className="notice error">Failed to load vuln repo vulnerabilities: {error}</div>}
+
+      <div className="fpl-toolbar vuln-repo-intel-toolbar">
+        <div className="fpl-toolbar-left">
+          <label className="vuln-repo-filter-select">
+            <span>Severity</span>
+            <select
+              value=""
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next && !severityFilters.includes(next)) {
+                  updateSeverityFilters([...severityFilters, next]);
+                }
+              }}
+            >
+              <option value="">Add severity...</option>
+              {SEVERITY_FILTER_OPTIONS.map((option) => (
+                <option key={option} value={option} disabled={severityFilters.includes(option)}>
+                  {formatLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="vuln-repo-filter-select">
+            <span>Status</span>
+            <select
+              value=""
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next && !statusFilters.includes(next)) {
+                  updateStatusFilters([...statusFilters, next]);
+                }
+              }}
+            >
+              <option value="">Add status...</option>
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option} value={option} disabled={statusFilters.includes(option)}>
+                  {formatLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {activeChips.length > 0 && (
+            <div className="fpl-active-chips">
+              {activeChips.map((chip) => (
+                <span key={chip.label} className="fpl-chip">
+                  {chip.label}
+                  <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label} filter`}>x</button>
+                </span>
+              ))}
+              {activeChips.length > 1 && (
+                <button type="button" className="fpl-chip-clear" onClick={clearAllFilters}>Clear all</button>
+              )}
+            </div>
+          )}
+          {dashboardFilterChips.length > 0 && (
+            <div className="fpl-active-chips vuln-repo-dashboard-filter-chips" aria-label="Dashboard filters">
+              {dashboardFilterChips.map((chip) => (
+                <span key={`${chip.key}:${chip.label}`} className="fpl-chip">
+                  {chip.label}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextParams = new URLSearchParams(searchParams);
+                      nextParams.delete(chip.key);
+                      setPage(0);
+                      setSearchParams(nextParams);
+                    }}
+                    aria-label={`Remove ${chip.label} filter`}
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="findings-filter-chip org-cve-filter-chip vuln-repo-intel-search">
+            <label htmlFor="vuln-repo-vuln-search">Search CVE / Description</label>
+            <input
+              id="vuln-repo-vuln-search"
+              value={queryInput}
+              onChange={(event) => updateSearchFilter(event.target.value)}
+              placeholder="CVE-2026-1526"
+            />
+          </div>
+        </div>
+      </div>
 
       <div className={`vuln-repo-vulnerabilities-layout${selectedSoftwareRecord ? ' is-drawer-open' : ''}`}>
         <div className="table-scroll">
