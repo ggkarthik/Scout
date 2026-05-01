@@ -2804,6 +2804,29 @@ label {
   text-transform: uppercase;
 }
 
+.fpl-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 6px;
+  padding: 3px 4px;
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.fpl-stat-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fpl-stat-row strong {
+  color: var(--title);
+  font-size: 0.78rem;
+}
+
 .fpl-legend-row,
 .fpl-hbar-row {
   appearance: none;
