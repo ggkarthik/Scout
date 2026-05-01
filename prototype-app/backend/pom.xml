@@ -229,9 +229,11 @@
                     </execution>
                     <!--
                       Global line-coverage floor. Set just below current measured
-                      coverage (~43% lines as of 2026-05) so this catches
-                      regressions without blocking the current state. Ratchet up
-                      as service-layer tests are added.
+                      clean unit-suite coverage (~25% lines as of 2026-05).
+                      Postgres integration tests are gated behind the postgres-it
+                      profile, so the default CI verify path should be measured
+                      against the unit/in-memory suite only. Ratchet up as
+                      service-layer tests are added.
                     -->
                     <execution>
                         <id>jacoco-check</id>
@@ -247,7 +249,7 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.40</minimum>
+                                            <minimum>0.24</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
