@@ -18,9 +18,10 @@ import {
   pathForVulnRepoView,
   titleForTab
 } from './app/routes';
-import { clearStoredAuthToken, setStoredAuthToken } from './api/client';
+import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
 import { ActorContextState, useActor } from './features/auth/context';
 import { useActorQuery } from './features/auth/queries';
+import type { ActorContext } from './features/auth/types';
 import {
   canAccessPlatformConsole,
   canManageInventorySources,
@@ -94,8 +95,39 @@ const PlatformConsolePage = React.lazy(async () => ({
 }));
 
 type Theme = 'light' | 'dark';
+type TestPersonaMode = 'backend' | 'preview';
+type ActiveTestPersona = {
+  mode: TestPersonaMode;
+  persona: TestPersona;
+};
+
+type TestPersonaControls = {
+  enabled: boolean;
+  personas: TestPersona[];
+  activePersona: ActiveTestPersona | null;
+  loading: boolean;
+  error: string | null;
+  loadPersonas: () => void;
+  impersonateBackend: (persona: TestPersona) => void;
+  previewPersona: (persona: TestPersona) => void;
+  resetPersona: () => void;
+};
 
 const THEME_STORAGE_KEY = 'scoutai-theme';
+const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
+const TEST_PERSONA_PREVIOUS_TOKEN_KEY = 'vulnwatch.testPersona.previousToken';
+const EMPTY_TEST_PERSONA_CONTROLS: TestPersonaControls = {
+  enabled: false,
+  personas: [],
+  activePersona: null,
+  loading: false,
+  error: null,
+  loadPersonas: () => undefined,
+  impersonateBackend: () => undefined,
+  previewPersona: () => undefined,
+  resetPersona: () => undefined
+};
+const TestPersonaControlsState = React.createContext<TestPersonaControls>(EMPTY_TEST_PERSONA_CONTROLS);
 const BOTTOM_NAV_TABS: AppTab[] = [];
 const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: InventoryViewKey; label: string }> }> = [
   {
@@ -441,9 +473,46 @@ function routeLoadingFallback() {
   );
 }
 
+function actorFromPersona(persona: TestPersona): ActorContext {
+  return {
+    creator: persona.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER'),
+    principal: persona.subject,
+    userId: persona.subject,
+    tenantId: persona.tenantSlug ? `preview:${persona.tenantSlug}` : null,
+    tenantName: persona.tenantName,
+    roles: persona.roles
+  };
+}
+
+function savePreviousAuthTokenForPersona(): void {
+  if (typeof window === 'undefined' || window.localStorage.getItem(TEST_PERSONA_PREVIOUS_TOKEN_KEY) != null) {
+    return;
+  }
+  window.localStorage.setItem(TEST_PERSONA_PREVIOUS_TOKEN_KEY, getStoredAuthToken());
+}
+
+function restorePreviousAuthTokenForPersona(): void {
+  if (typeof window === 'undefined') {
+    clearStoredAuthToken();
+    return;
+  }
+  const previous = window.localStorage.getItem(TEST_PERSONA_PREVIOUS_TOKEN_KEY);
+  window.localStorage.removeItem(TEST_PERSONA_PREVIOUS_TOKEN_KEY);
+  if (previous && previous.trim().length > 0) {
+    setStoredAuthToken(previous);
+  } else {
+    clearStoredAuthToken();
+  }
+}
+
 function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const actorQuery = useActorQuery();
   const [tokenInput, setTokenInput] = React.useState('');
+  const [personas, setPersonas] = React.useState<TestPersona[]>([]);
+  const [personaLoading, setPersonaLoading] = React.useState(false);
+  const [personaError, setPersonaError] = React.useState<string | null>(null);
+  const [activePersona, setActivePersona] = React.useState<ActiveTestPersona | null>(null);
+  const [previewActor, setPreviewActor] = React.useState<ActorContext | null>(null);
 
   const submitToken = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -454,8 +523,63 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const clearToken = () => {
     clearStoredAuthToken();
     setTokenInput('');
+    setActivePersona(null);
+    setPreviewActor(null);
     void actorQuery.refetch();
   };
+
+  const loadPersonas = React.useCallback(() => {
+    if (!TEST_PERSONAS_ENABLED || personaLoading || personas.length > 0) {
+      return;
+    }
+    setPersonaLoading(true);
+    setPersonaError(null);
+    api.listTestPersonas()
+      .then(setPersonas)
+      .catch((error) => setPersonaError(error instanceof Error ? error.message : 'Failed to load test personas'))
+      .finally(() => setPersonaLoading(false));
+  }, [personaLoading, personas.length]);
+
+  const impersonateBackend = React.useCallback((persona: TestPersona) => {
+    savePreviousAuthTokenForPersona();
+    setPersonaLoading(true);
+    setPersonaError(null);
+    api.issueTestPersonaToken(persona.key)
+      .then((response) => {
+        setStoredAuthToken(response.token);
+        setPreviewActor(null);
+        setActivePersona({ mode: 'backend', persona: response.persona });
+        return actorQuery.refetch();
+      })
+      .catch((error) => setPersonaError(error instanceof Error ? error.message : 'Failed to issue test persona token'))
+      .finally(() => setPersonaLoading(false));
+  }, [actorQuery]);
+
+  const previewPersona = React.useCallback((persona: TestPersona) => {
+    setPreviewActor(actorFromPersona(persona));
+    setActivePersona({ mode: 'preview', persona });
+    setPersonaError(null);
+  }, []);
+
+  const resetPersona = React.useCallback(() => {
+    restorePreviousAuthTokenForPersona();
+    setPreviewActor(null);
+    setActivePersona(null);
+    setPersonaError(null);
+    void actorQuery.refetch();
+  }, [actorQuery]);
+
+  const personaControls = React.useMemo<TestPersonaControls>(() => ({
+    enabled: TEST_PERSONAS_ENABLED,
+    personas,
+    activePersona,
+    loading: personaLoading,
+    error: personaError,
+    loadPersonas,
+    impersonateBackend,
+    previewPersona,
+    resetPersona
+  }), [activePersona, impersonateBackend, loadPersonas, personaError, personaLoading, personas, previewPersona, resetPersona]);
 
   if (actorQuery.isLoading || actorQuery.isFetching && !actorQuery.data) {
     return routeLoadingFallback();
@@ -502,14 +626,17 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ActorContextState.Provider value={actorQuery.data}>
-      {children}
-    </ActorContextState.Provider>
+    <TestPersonaControlsState.Provider value={personaControls}>
+      <ActorContextState.Provider value={previewActor ?? actorQuery.data}>
+        {children}
+      </ActorContextState.Provider>
+    </TestPersonaControlsState.Provider>
   );
 }
 
 function AppShell() {
   const actor = useActor();
+  const testPersonas = React.useContext(TestPersonaControlsState);
   const location = useLocation();
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
@@ -517,6 +644,7 @@ function AppShell() {
   const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
+  const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
   const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
 
@@ -551,7 +679,14 @@ function AppShell() {
   React.useEffect(() => {
     setNavOpen(false);
     setSettingsMenuOpen(false);
+    setPersonaDialogOpen(false);
   }, [location.pathname]);
+
+  React.useEffect(() => {
+    if (personaDialogOpen && testPersonas.enabled && testPersonas.personas.length === 0 && !testPersonas.loading) {
+      testPersonas.loadPersonas();
+    }
+  }, [personaDialogOpen, testPersonas]);
 
 
   React.useEffect(() => () => {
@@ -612,6 +747,29 @@ function AppShell() {
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
+  const activePersonaLabel = testPersonas.activePersona
+    ? `Impersonating: ${testPersonas.activePersona.persona.label}`
+    : null;
+
+  const openPersonaDialog = (): void => {
+    setSettingsMenuOpen(false);
+    setPersonaDialogOpen(true);
+  };
+
+  const selectBackendPersona = (persona: TestPersona): void => {
+    testPersonas.impersonateBackend(persona);
+    setPersonaDialogOpen(false);
+  };
+
+  const selectPreviewPersona = (persona: TestPersona): void => {
+    testPersonas.previewPersona(persona);
+    setPersonaDialogOpen(false);
+  };
+
+  const resetPersona = (): void => {
+    testPersonas.resetPersona();
+    setPersonaDialogOpen(false);
+  };
 
   const pageTitle = React.useMemo(() => {
     if (activeTab === 'admin') return 'Tenant Administration';
@@ -763,6 +921,17 @@ function AppShell() {
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
               </div>
+              {activePersonaLabel && (
+                <div className={`tenant-context-pill test-persona-pill ${testPersonas.activePersona?.mode === 'preview' ? 'preview' : ''}`}>
+                  <span>{activePersonaLabel}</span>
+                  <small>{testPersonas.activePersona?.mode === 'preview' ? 'UI preview only' : 'Backend-backed'}</small>
+                </div>
+              )}
+              {testPersonas.activePersona?.mode === 'preview' && (
+                <div className="test-persona-inline-warning" role="status">
+                  UI preview only - backend authorization still uses the current real session.
+                </div>
+              )}
               <button
                 className="btn btn-secondary nav-toggle"
                 onClick={() => setNavOpen((current) => !current)}
@@ -826,6 +995,17 @@ function AppShell() {
                       <span>Tenant Configuration</span>
                       <small>Risk policy, SLA and workflow automation</small>
                     </button>
+                    {testPersonas.enabled && (
+                      <button
+                        type="button"
+                        className="settings-menu-item"
+                        role="menuitem"
+                        onClick={openPersonaDialog}
+                      >
+                        <span>Impersonate User</span>
+                        <small>Open non-production test personas</small>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -885,6 +1065,83 @@ function AppShell() {
 
         {navOpen && <button type="button" className="mobile-nav-backdrop" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
       </div>
+      {personaDialogOpen && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setPersonaDialogOpen(false)}>
+          <section
+            className="test-persona-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="test-persona-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="test-persona-dialog-header">
+              <div>
+                <h2 id="test-persona-dialog-title">Non-production test personas</h2>
+                <p>Choose a persona for backend-backed authorization, or preview role-gated UI only.</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary theme-icon-btn"
+                onClick={() => setPersonaDialogOpen(false)}
+                aria-label="Close persona dialog"
+                title="Close"
+              >
+                X
+              </button>
+            </div>
+            {testPersonas.loading && testPersonas.personas.length === 0 && (
+              <div className="test-persona-empty">Loading personas...</div>
+            )}
+            {testPersonas.error && (
+              <div className="test-persona-warning" role="alert">{testPersonas.error}</div>
+            )}
+            <div className="test-persona-list">
+              {testPersonas.personas.map((persona) => (
+                <div className="test-persona-row" key={persona.key}>
+                  <div>
+                    <strong>{persona.label}</strong>
+                    <small>{persona.tenantName ?? 'Platform'} · {persona.roles.map((role) => role.replace(/^ROLE_/, '').replace(/_/g, ' ')).join(', ')}</small>
+                  </div>
+                  <div className="test-persona-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => selectBackendPersona(persona)}
+                      disabled={testPersonas.loading}
+                    >
+                      Use
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => selectPreviewPersona(persona)}
+                      disabled={testPersonas.loading}
+                    >
+                      Preview
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {testPersonas.activePersona?.mode === 'preview' && (
+              <div className="test-persona-warning">
+                UI preview only - backend authorization still uses the current real session.
+              </div>
+            )}
+            {testPersonas.activePersona && (
+              <div className="test-persona-dialog-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={resetPersona}
+                >
+                  Reset to real user
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </>
   );
 }
