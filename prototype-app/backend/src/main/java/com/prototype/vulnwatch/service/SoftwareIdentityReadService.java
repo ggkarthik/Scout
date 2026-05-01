@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.SoftwareIdentityAssetResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityDetailResponse;
+import com.prototype.vulnwatch.dto.SoftwareIdentityFunnelResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityPageResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentitySummaryResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityVersionResponse;
@@ -51,6 +52,7 @@ public class SoftwareIdentityReadService {
             String query,
             String lifecycle,
             String mappingState,
+            String coverage,
             int page,
             int size
     ) {
@@ -59,7 +61,7 @@ public class SoftwareIdentityReadService {
 
         int safePage = Math.max(0, page);
         int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
-        ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState);
+        ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState, coverage);
         MapSqlParameterSource params = filters.params()
                 .addValue("limit", safeSize)
                 .addValue("offset", (long) safePage * safeSize);
@@ -84,6 +86,75 @@ public class SoftwareIdentityReadService {
                 totalElements,
                 totalElements == 0L ? 0 : (int) Math.ceil((double) totalElements / (double) safeSize)
         );
+    }
+
+    public SoftwareIdentityFunnelResponse getFunnel(Tenant tenant) {
+        requireTenant(tenant);
+        projectionService.ensureTenantProjection(tenant);
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenant.getId());
+
+        return jdbcTemplate.query("""
+                WITH active_components AS (
+                    SELECT
+                        ic.id AS component_id,
+                        ic.software_identity_id,
+                        COALESCE(
+                            NULLIF(lower(coalesce(u.ingestion_source_system, '')), ''),
+                            (
+                                SELECT lower(si.source_system)
+                                FROM software_instances si
+                                WHERE si.inventory_component_id = ic.id
+                                  AND si.source_system IS NOT NULL
+                                  AND trim(si.source_system) <> ''
+                                ORDER BY si.updated_at DESC
+                                LIMIT 1
+                            )
+                        ) AS source_system
+                    FROM inventory_components ic
+                    LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
+                    WHERE ic.tenant_id = :tenantId
+                      AND ic.component_status = 'ACTIVE'
+                      AND ic.software_identity_id IS NOT NULL
+                ),
+                vulnerable_software AS (
+                    SELECT DISTINCT ac.software_identity_id
+                    FROM active_components ac
+                    JOIN findings f
+                      ON f.component_id = ac.component_id
+                     AND f.tenant_id = :tenantId
+                     AND f.status = 'OPEN'
+                     AND f.vulnerability_id IS NOT NULL
+                ),
+                finding_software AS (
+                    SELECT DISTINCT ac.software_identity_id
+                    FROM active_components ac
+                    JOIN findings f
+                      ON f.component_id = ac.component_id
+                     AND f.tenant_id = :tenantId
+                     AND f.status = 'OPEN'
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM active_components) AS records_found,
+                    (SELECT COUNT(*) FROM software_identity_summary sis WHERE sis.tenant_id = :tenantId) AS unique_software,
+                    (SELECT COUNT(*) FROM vulnerable_software) AS software_with_vulnerabilities,
+                    (SELECT COUNT(*) FROM finding_software) AS software_with_findings,
+                    (SELECT COUNT(DISTINCT source_system) FROM active_components WHERE source_system IS NOT NULL) AS source_count,
+                    (SELECT MAX(summary_updated_at) FROM software_identity_summary sis WHERE sis.tenant_id = :tenantId) AS updated_at
+                """, params, rs -> {
+            if (!rs.next()) {
+                return new SoftwareIdentityFunnelResponse(0L, 0L, 0L, 0L, 0L, null);
+            }
+            return new SoftwareIdentityFunnelResponse(
+                    rs.getLong("records_found"),
+                    rs.getLong("unique_software"),
+                    rs.getLong("software_with_vulnerabilities"),
+                    rs.getLong("software_with_findings"),
+                    rs.getLong("source_count"),
+                    getInstant(rs, "updated_at")
+            );
+        });
     }
 
     public SoftwareIdentityDetailResponse getDetail(Tenant tenant, UUID softwareIdentityId) {
@@ -254,7 +325,8 @@ public class SoftwareIdentityReadService {
             List<String> ecosystems,
             String query,
             String lifecycle,
-            String mappingState
+            String mappingState,
+            String coverage
     ) {
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
         StringBuilder where = new StringBuilder("""
@@ -352,6 +424,39 @@ public class SoftwareIdentityReadService {
                 case "automatic" -> """
                          AND sis.eol_slug IS NOT NULL
                          AND sis.mapping_confirmed = false
+                        """;
+                default -> "";
+            });
+        }
+
+        String normalizedCoverage = normalizeCoverage(coverage);
+        if (normalizedCoverage != null) {
+            where.append(switch (normalizedCoverage) {
+                case "with-vulnerabilities" -> """
+                         AND EXISTS (
+                             SELECT 1
+                             FROM inventory_components ic_cov
+                             JOIN component_vulnerability_states cvs_cov
+                               ON cvs_cov.component_id = ic_cov.id
+                              AND cvs_cov.tenant_id = :tenantId
+                              AND cvs_cov.impact_state = 'IMPACTED'
+                             WHERE ic_cov.tenant_id = :tenantId
+                               AND ic_cov.component_status = 'ACTIVE'
+                               AND ic_cov.software_identity_id = sis.software_identity_id
+                         )
+                        """;
+                case "with-findings" -> """
+                         AND EXISTS (
+                             SELECT 1
+                             FROM inventory_components ic_cov
+                             JOIN findings f_cov
+                               ON f_cov.component_id = ic_cov.id
+                              AND f_cov.tenant_id = :tenantId
+                              AND f_cov.status = 'OPEN'
+                             WHERE ic_cov.tenant_id = :tenantId
+                               AND ic_cov.component_status = 'ACTIVE'
+                               AND ic_cov.software_identity_id = sis.software_identity_id
+                         )
                         """;
                 default -> "";
             });
@@ -663,6 +768,17 @@ public class SoftwareIdentityReadService {
             return null;
         }
         return mappingState.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeCoverage(String coverage) {
+        if (coverage == null || coverage.isBlank()) {
+            return null;
+        }
+        String normalized = coverage.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "records-found", "unique-software", "with-vulnerabilities", "with-findings" -> normalized;
+            default -> null;
+        };
     }
 
     private record ProjectionFilters(String whereClause, MapSqlParameterSource params) {

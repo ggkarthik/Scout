@@ -96,7 +96,9 @@ import type {
   UnresolvedEolMappingPage
 } from '../features/eol/types';
 import type {
+  SoftwareIdentityCoverage,
   SoftwareIdentityDetail,
+  SoftwareIdentityFunnel,
   SoftwareIdentityPage,
   VulnRepoSoftwareAssetsDetail
 } from '../features/software-identities/types';
@@ -379,6 +381,7 @@ export const api = {
       ecosystem?: string[];
       lifecycle?: 'eol' | 'near-eol' | 'unknown' | 'supported';
       mappingState?: 'needs-review' | 'mapped' | 'manual' | 'automatic';
+      coverage?: SoftwareIdentityCoverage;
       query?: string;
       page?: number;
       size?: number;
@@ -390,12 +393,14 @@ export const api = {
     params?.ecosystem?.forEach((value) => searchParams.append('ecosystem', value));
     if (params?.lifecycle) searchParams.set('lifecycle', params.lifecycle);
     if (params?.mappingState) searchParams.set('mappingState', params.mappingState);
+    if (params?.coverage) searchParams.set('coverage', params.coverage);
     if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
     if (params?.page != null) searchParams.set('page', String(params.page));
     if (params?.size != null) searchParams.set('size', String(params.size));
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<SoftwareIdentityPage>(`/inventory/software-identities${suffix}`);
   },
+  getSoftwareIdentityFunnel: () => request<SoftwareIdentityFunnel>('/inventory/software-identities/funnel'),
   getSoftwareIdentityDetail: (softwareIdentityId: string) => request<SoftwareIdentityDetail>(
     `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`
   ),

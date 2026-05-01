@@ -6,6 +6,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.InventoryComponentFilterValuesResponse;
 import com.prototype.vulnwatch.dto.InventoryComponentPageResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityDetailResponse;
+import com.prototype.vulnwatch.dto.SoftwareIdentityFunnelResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityPageResponse;
 import com.prototype.vulnwatch.service.InventoryService;
 import com.prototype.vulnwatch.service.SoftwareIdentityReadService;
@@ -64,12 +65,19 @@ public class InventoryController {
             @RequestParam(required = false) List<String> ecosystem,
             @RequestParam(required = false) String lifecycle,
             @RequestParam(required = false) String mappingState,
+            @RequestParam(required = false) String coverage,
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size
     ) {
         Tenant tenant = workspaceService.getWorkspace();
-        return softwareIdentityReadService.listPage(tenant, assetType, sourceSystem, ecosystem, query, lifecycle, mappingState, page, size);
+        return softwareIdentityReadService.listPage(tenant, assetType, sourceSystem, ecosystem, query, lifecycle, mappingState, coverage, page, size);
+    }
+
+    @GetMapping("/software-identities/funnel")
+    public SoftwareIdentityFunnelResponse softwareIdentityFunnel() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return softwareIdentityReadService.getFunnel(tenant);
     }
 
     @GetMapping("/software-identities/{softwareIdentityId}")

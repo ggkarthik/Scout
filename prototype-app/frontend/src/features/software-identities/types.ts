@@ -30,6 +30,21 @@ export type SoftwareIdentityPage = {
   totalPages: number;
 };
 
+export type SoftwareIdentityCoverage =
+  | 'records-found'
+  | 'unique-software'
+  | 'with-vulnerabilities'
+  | 'with-findings';
+
+export type SoftwareIdentityFunnel = {
+  recordsFound: number;
+  uniqueSoftware: number;
+  softwareWithVulnerabilities: number;
+  softwareWithFindings: number;
+  sourceCount: number;
+  updatedAt?: string;
+};
+
 export type SoftwareIdentityVersion = {
   version: string;
   eolSlug?: string;

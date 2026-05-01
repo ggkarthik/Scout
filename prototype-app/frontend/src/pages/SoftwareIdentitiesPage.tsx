@@ -1,6 +1,8 @@
 import React from 'react';
+import '../styles/findings-list.css';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
+import { DonutChart, HBarChart, WidgetCard } from '../features/widgets/FplWidgets';
 import { pathForInventoryHostAsset, pathForInventoryViewWithSearch } from '../app/routes';
 import {
   formatAssetType,
@@ -21,11 +23,19 @@ import {
   writeSearchValueToSearch,
   writeSearchValuesToSearch
 } from '../features/inventory/searchState';
-import { useSoftwareIdentitiesQuery, useSoftwareIdentityDetailQuery } from '../features/software-identities/queries';
+import {
+  useSoftwareIdentitiesQuery,
+  useSoftwareIdentityDetailQuery,
+  useSoftwareIdentityFunnelQuery
+} from '../features/software-identities/queries';
 import { EolBadge } from '../components/EolBadge';
-import type { SoftwareIdentitySummary } from '../features/software-identities/types';
+import type {
+  SoftwareIdentityCoverage,
+  SoftwareIdentitySummary
+} from '../features/software-identities/types';
 
 const COL_SPAN = 7;
+const SOFTWARE_COVERAGE_QUERY_KEY = 'coverage';
 const SOFTWARE_GROUP_BY_OPTIONS: MultiGroupByOption[] = [
   { key: 'sourceSystem', label: 'Source System' },
   { key: 'ecosystem', label: 'Ecosystem' },
@@ -109,6 +119,29 @@ function eolSummaryClass(identity: SoftwareIdentitySummary): string {
   if (identity.eolComponentCount > 0) return 'si-eol-summary si-eol-summary-risk';
   if (identity.nearEolComponentCount > 0) return 'si-eol-summary si-eol-summary-warn';
   return 'si-eol-summary';
+}
+
+function readCoverageFromSearch(searchParams: URLSearchParams): SoftwareIdentityCoverage | '' {
+  const value = searchParams.get(SOFTWARE_COVERAGE_QUERY_KEY);
+  if (
+    value === 'records-found'
+    || value === 'unique-software'
+    || value === 'with-vulnerabilities'
+    || value === 'with-findings'
+  ) {
+    return value;
+  }
+  return '';
+}
+
+function writeCoverageToSearch(searchParams: URLSearchParams, coverage: SoftwareIdentityCoverage | ''): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  if (coverage) {
+    next.set(SOFTWARE_COVERAGE_QUERY_KEY, coverage);
+  } else {
+    next.delete(SOFTWARE_COVERAGE_QUERY_KEY);
+  }
+  return next;
 }
 
 // ─── Active panel state ────────────────────────────────────────────────────
@@ -371,6 +404,10 @@ export function SoftwareIdentitiesPage() {
     () => readSearchValueFromSearch(searchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY),
     [searchParams]
   );
+  const initialCoverage = React.useMemo(
+    () => readCoverageFromSearch(searchParams),
+    [searchParams]
+  );
   const initialGroupBy = React.useMemo(
     () => readInventoryGroupByFromSearch(searchParams),
     [searchParams]
@@ -380,6 +417,7 @@ export function SoftwareIdentitiesPage() {
   const [ecosystems, setEcosystems] = React.useState<string[]>(initialEcosystems);
   const [lifecycle, setLifecycle] = React.useState(initialLifecycle);
   const [mappingState, setMappingState] = React.useState(initialMappingState);
+  const [coverage, setCoverage] = React.useState<SoftwareIdentityCoverage | ''>(initialCoverage);
   const [groupBy, setGroupBy] = React.useState<string[]>(initialGroupBy);
   const [page, setPage] = React.useState(0);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
@@ -392,8 +430,10 @@ export function SoftwareIdentitiesPage() {
     sourceSystem: sourceSystems.length > 0 ? sourceSystems : undefined,
     ecosystem: ecosystems.length > 0 ? ecosystems : undefined,
     lifecycle: lifecycle ? lifecycle as 'eol' | 'near-eol' | 'unknown' | 'supported' : undefined,
-    mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined
+    mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined,
+    coverage: coverage || undefined
   });
+  const funnelQuery = useSoftwareIdentityFunnelQuery();
 
   const identities = React.useMemo(() => (
     (identitiesQuery.data?.content ?? [])
@@ -405,30 +445,14 @@ export function SoftwareIdentitiesPage() {
       })
   ), [identitiesQuery.data?.content]);
 
-  const totalAssets = React.useMemo(
-    () => identities.reduce((sum, i) => sum + i.assetCount, 0),
-    [identities]
-  );
-  const totalOpenCves = React.useMemo(
-    () => identities.reduce((sum, i) => sum + i.openVulnerabilityCount, 0),
-    [identities]
-  );
-  const totalOpenFindings = React.useMemo(
-    () => identities.reduce((sum, i) => sum + i.openFindingCount, 0),
-    [identities]
-  );
   const totalIdentityCount = identitiesQuery.data?.totalElements ?? identities.length;
   const totalPages = identitiesQuery.data?.totalPages ?? 0;
-  const identitiesWithExposure = React.useMemo(
-    () => identities.filter((identity) => identity.openVulnerabilityCount > 0 || identity.openFindingCount > 0).length,
-    [identities]
-  );
   const lifecycleBreakdown = React.useMemo(() => {
     const values = [
-      { label: 'EOL', count: 0, tone: 'warning' },
-      { label: 'Near EOL', count: 0, tone: 'muted' },
-      { label: 'Unknown', count: 0, tone: 'accent' },
-      { label: 'Supported', count: 0, tone: 'success' }
+      { label: 'EOL', count: 0 },
+      { label: 'Near EOL', count: 0 },
+      { label: 'Unknown', count: 0 },
+      { label: 'Supported', count: 0 }
     ];
     identities.forEach((identity) => {
       const lifecycleValue = identityLifecycle(identity);
@@ -439,24 +463,6 @@ export function SoftwareIdentitiesPage() {
     });
     return values;
   }, [identities]);
-  const lifecycleMax = React.useMemo(
-    () => Math.max(1, ...lifecycleBreakdown.map((item) => item.count)),
-    [lifecycleBreakdown]
-  );
-  const topRiskSoftware = React.useMemo(() => {
-    return [...identities]
-      .map((identity) => ({
-        identity,
-        score: identity.openVulnerabilityCount + identity.openFindingCount
-      }))
-      .filter((entry) => entry.score > 0)
-      .sort((left, right) => right.score - left.score || right.identity.assetCount - left.identity.assetCount)
-      .slice(0, 5);
-  }, [identities]);
-  const topRiskMax = React.useMemo(
-    () => Math.max(1, ...topRiskSoftware.map((entry) => entry.score)),
-    [topRiskSoftware]
-  );
   const ecosystemBreakdown = React.useMemo(() => {
     const counts = new Map<string, { value: string; label: string; count: number }>();
     identities.forEach((identity) => {
@@ -476,14 +482,6 @@ export function SoftwareIdentitiesPage() {
       .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
       .slice(0, 5);
   }, [identities]);
-  const ecosystemMax = React.useMemo(
-    () => Math.max(1, ...ecosystemBreakdown.map((item) => item.count)),
-    [ecosystemBreakdown]
-  );
-  const needsReviewCount = React.useMemo(
-    () => identities.filter((identity) => identityMappingState(identity) === 'Needs review').length,
-    [identities]
-  );
   const activeFilterChips = React.useMemo(() => {
     const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
     const trimmedQuery = query.trim();
@@ -512,8 +510,11 @@ export function SoftwareIdentitiesPage() {
       const label = MAPPING_STATE_OPTIONS.find((option) => option.value === mappingState)?.label ?? mappingState;
       chips.push({ key: 'mapping', label: `Mapping: ${label}`, onRemove: () => setMappingState('') });
     }
+    if (coverage === 'with-vulnerabilities') {
+      chips.push({ key: 'coverage', label: 'Coverage: Software with CVEs', onRemove: () => setCoverage('') });
+    }
     return chips;
-  }, [ecosystems, lifecycle, mappingState, query, sourceSystems]);
+  }, [coverage, ecosystems, lifecycle, mappingState, query, sourceSystems]);
   const groupedCards = React.useMemo(() => (
     groupBy
       .map((key) => {
@@ -544,6 +545,7 @@ export function SoftwareIdentitiesPage() {
     const nextEcosystems = readSearchValuesFromSearch(searchParams, INVENTORY_ECOSYSTEM_QUERY_KEY);
     const nextLifecycle = readSearchValueFromSearch(searchParams, SOFTWARE_LIFECYCLE_QUERY_KEY);
     const nextMappingState = readSearchValueFromSearch(searchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY);
+    const nextCoverage = readCoverageFromSearch(searchParams);
     const nextGroupBy = readInventoryGroupByFromSearch(searchParams);
 
     setQuery((current) => (current === nextQuery ? current : nextQuery));
@@ -551,6 +553,7 @@ export function SoftwareIdentitiesPage() {
     setEcosystems((current) => (sameValues(current, nextEcosystems) ? current : nextEcosystems));
     setLifecycle((current) => (current === nextLifecycle ? current : nextLifecycle));
     setMappingState((current) => (current === nextMappingState ? current : nextMappingState));
+    setCoverage((current) => (current === nextCoverage ? current : nextCoverage));
     setGroupBy((current) => (sameValues(current, nextGroupBy) ? current : nextGroupBy));
   }, [searchParams]);
 
@@ -561,18 +564,19 @@ export function SoftwareIdentitiesPage() {
     nextSearchParams = writeSearchValuesToSearch(nextSearchParams, INVENTORY_ECOSYSTEM_QUERY_KEY, ecosystems);
     nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_LIFECYCLE_QUERY_KEY, lifecycle);
     nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY, mappingState);
+    nextSearchParams = writeCoverageToSearch(nextSearchParams, coverage);
     nextSearchParams = writeInventoryGroupByToSearch(nextSearchParams, groupBy);
 
     if (nextSearchParams.toString() !== searchParams.toString()) {
       setSearchParams(nextSearchParams, { replace: true });
     }
-  }, [ecosystems, groupBy, lifecycle, mappingState, query, searchParams, setSearchParams, sourceSystems]);
+  }, [coverage, ecosystems, groupBy, lifecycle, mappingState, query, searchParams, setSearchParams, sourceSystems]);
 
   React.useEffect(() => {
     setPage(0);
     setExpandedIds(new Set());
     setActivePanel(null);
-  }, [query, sourceSystems, ecosystems, lifecycle, mappingState]);
+  }, [query, sourceSystems, ecosystems, lifecycle, mappingState, coverage]);
 
   React.useEffect(() => {
     setExpandedIds(new Set());
@@ -615,6 +619,10 @@ export function SoftwareIdentitiesPage() {
     setEcosystems([]);
     setLifecycle('');
     setMappingState('');
+    setCoverage('');
+  }, []);
+  const toggleCoverage = React.useCallback((nextCoverage: SoftwareIdentityCoverage) => {
+    setCoverage((current) => current === nextCoverage || nextCoverage !== 'with-vulnerabilities' ? '' : nextCoverage);
   }, []);
 
   return (
@@ -656,125 +664,138 @@ export function SoftwareIdentitiesPage() {
         <button
           type="button"
           className="btn btn-secondary inventory-refresh-btn"
-          onClick={() => void identitiesQuery.refetch()}
+          onClick={() => {
+            void identitiesQuery.refetch();
+            void funnelQuery.refetch();
+          }}
           disabled={identitiesQuery.isFetching}
         >
           {identitiesQuery.isFetching ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
-      <div className="fpl-widgets inventory-fpl-widgets">
-        <button type="button" className="fpl-widget" onClick={() => clearFilters()}>
-          <div className="fpl-widget-title">Software Exposure</div>
-          <div className="inventory-donut-widget">
-            <div className="inventory-donut" style={{ '--donut-fill': `${identities.length > 0 ? Math.round((identitiesWithExposure / identities.length) * 100) : 0}%` } as React.CSSProperties}>
-              <strong>{identitiesWithExposure.toLocaleString()}</strong>
-              <span>exposed</span>
+      <div className="fpl-widgets">
+
+        <WidgetCard title="Software Exposure" active={coverage === 'with-vulnerabilities'}>
+          <div className="fpl-widget-donut-layout">
+            <DonutChart
+              size={90}
+              sw={16}
+              centerLabel="software"
+              segs={[
+                {
+                  key: 'with-cves',
+                  label: 'With CVEs',
+                  value: funnelQuery.data?.softwareWithVulnerabilities ?? 0,
+                  color: '#ef4444',
+                  onClick: () => toggleCoverage('with-vulnerabilities')
+                },
+                {
+                  key: 'clean',
+                  label: 'Clean',
+                  value: Math.max(
+                    0,
+                    (funnelQuery.data?.uniqueSoftware ?? 0) - (funnelQuery.data?.softwareWithVulnerabilities ?? 0)
+                  ),
+                  color: '#22c55e',
+                  onClick: () => setCoverage('')
+                }
+              ]}
+            />
+            <div className="fpl-widget-legend">
+              <div
+                className={`fpl-legend-row${coverage === 'with-vulnerabilities' ? ' fpl-legend-row--active' : ''}`}
+                onClick={() => toggleCoverage('with-vulnerabilities')}
+              >
+                <span className="fpl-legend-dot" style={{ background: '#ef4444' }} />
+                <span className="fpl-legend-label">With CVEs</span>
+                <strong className="fpl-legend-val">{(funnelQuery.data?.softwareWithVulnerabilities ?? 0).toLocaleString()}</strong>
+              </div>
+              <div className="fpl-legend-row" onClick={() => setCoverage('')}>
+                <span className="fpl-legend-dot" style={{ background: '#22c55e' }} />
+                <span className="fpl-legend-label">Clean</span>
+                <strong className="fpl-legend-val">{Math.max(
+                  0,
+                  (funnelQuery.data?.uniqueSoftware ?? 0) - (funnelQuery.data?.softwareWithVulnerabilities ?? 0)
+                ).toLocaleString()}</strong>
+              </div>
             </div>
-            <div className="fpl-widget-body">
-              <div className="fpl-stat-row">
-                <span>Software identities</span>
-                <strong>{totalIdentityCount.toLocaleString()}</strong>
-              </div>
-              <div className="fpl-stat-row">
-                <span>Asset deployments</span>
-                <strong>{totalAssets.toLocaleString()}</strong>
-              </div>
-              <div className="fpl-stat-row">
-                <span>Open CVEs</span>
-                <strong>{totalOpenCves.toLocaleString()}</strong>
-              </div>
-            </div>
           </div>
-        </button>
+        </WidgetCard>
 
-        <div className="fpl-widget">
-          <div className="fpl-widget-title">Lifecycle Status</div>
-          <div className="fpl-widget-body">
-            {lifecycleBreakdown.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className="fpl-hbar-row"
-                onClick={() => setLifecycle(
-                  item.label === 'EOL' ? 'eol' :
-                    item.label === 'Near EOL' ? 'near-eol' :
-                      item.label === 'Unknown' ? 'unknown' : 'supported'
-                )}
-              >
-                <span className="fpl-hbar-label">{item.label}</span>
-                <span className="fpl-hbar-track">
-                  <span className={`fpl-hbar-fill inventory-hbar-${item.tone}`} style={{ width: `${(item.count / lifecycleMax) * 100}%` }} />
-                </span>
-                <strong className="fpl-hbar-val">{item.count.toLocaleString()}</strong>
-              </button>
-            ))}
-          </div>
-        </div>
+        <WidgetCard title="Lifecycle Status" active={!!lifecycle}>
+          <HBarChart
+            activeKey={lifecycle ? (
+              lifecycle === 'eol' ? 'EOL' :
+                lifecycle === 'near-eol' ? 'Near EOL' :
+                  lifecycle === 'unknown' ? 'Unknown' : 'Supported'
+            ) : undefined}
+            items={[
+              { key: 'EOL',       label: 'EOL',       value: lifecycleBreakdown.find(b => b.label === 'EOL')?.count ?? 0,       color: '#f97316', onClick: () => setLifecycle('eol') },
+              { key: 'Near EOL',  label: 'Near EOL',  value: lifecycleBreakdown.find(b => b.label === 'Near EOL')?.count ?? 0,  color: '#facc15', onClick: () => setLifecycle('near-eol') },
+              { key: 'Unknown',   label: 'Unknown',   value: lifecycleBreakdown.find(b => b.label === 'Unknown')?.count ?? 0,   color: '#9ca3af', onClick: () => setLifecycle('unknown') },
+              { key: 'Supported', label: 'Supported', value: lifecycleBreakdown.find(b => b.label === 'Supported')?.count ?? 0, color: '#22c55e', onClick: () => setLifecycle('supported') }
+            ]}
+          />
+        </WidgetCard>
 
-        <div className="fpl-widget">
-          <div className="fpl-widget-title">Top Software At Risk</div>
-          <div className="fpl-widget-body">
-            {topRiskSoftware.length === 0 ? (
-              <span className="panel-caption">No software with open risk in this view.</span>
-            ) : topRiskSoftware.map(({ identity, score }) => (
-              <button
-                key={identity.id}
-                type="button"
-                className="fpl-hbar-row"
-                onClick={() => setQuery(identity.displayName)}
-              >
-                <span className="fpl-hbar-label">{identity.displayName}</span>
-                <span className="fpl-hbar-track">
-                  <span className="fpl-hbar-fill inventory-hbar-accent" style={{ width: `${(score / topRiskMax) * 100}%` }} />
-                </span>
-                <strong className="fpl-hbar-val">{score.toLocaleString()}</strong>
-              </button>
-            ))}
-          </div>
-        </div>
+        <WidgetCard title="Ecosystems" active={ecosystems.length > 0}>
+          {ecosystemBreakdown.length === 0 ? (
+            <div className="fpl-widget-empty">No ecosystems in this view</div>
+          ) : (
+            <HBarChart
+              activeKey={ecosystems.length === 1 ? ecosystems[0] : undefined}
+              items={ecosystemBreakdown.map((item, i) => ({
+                key: item.value,
+                label: item.label.length > 18 ? item.label.slice(0, 16) + '…' : item.label,
+                value: item.count,
+                color: ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe'][i] ?? '#6366f1',
+                onClick: () => setEcosystems(item.value === 'Unknown' ? [] : [item.value])
+              }))}
+            />
+          )}
+        </WidgetCard>
 
-        <div className="fpl-widget">
-          <div className="fpl-widget-title">Ecosystems</div>
-          <div className="fpl-widget-body">
-            {ecosystemBreakdown.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className="fpl-hbar-row"
-                onClick={() => setEcosystems(item.value === 'Unknown' ? [] : [item.value])}
-              >
-                <span className="fpl-hbar-label">{item.label}</span>
-                <span className="fpl-hbar-track">
-                  <span className="fpl-hbar-fill inventory-hbar-accent" style={{ width: `${(item.count / ecosystemMax) * 100}%` }} />
-                </span>
-                <strong className="fpl-hbar-val">{item.count.toLocaleString()}</strong>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="fpl-widget">
-          <div className="fpl-widget-title">Software Indicators</div>
+        <WidgetCard title="Software Indicators">
           <div className="fpl-kpi-grid">
-            <div className="fpl-kpi-card">
-              <strong className="fpl-kpi-num">{totalOpenCves.toLocaleString()}</strong>
-              <span className="fpl-kpi-label">Open CVEs</span>
-            </div>
-            <div className="fpl-kpi-card">
-              <strong className="fpl-kpi-num">{totalOpenFindings.toLocaleString()}</strong>
-              <span className="fpl-kpi-label">Open findings</span>
-            </div>
-            <div className="fpl-kpi-card">
-              <strong className="fpl-kpi-num">{needsReviewCount.toLocaleString()}</strong>
-              <span className="fpl-kpi-label">Needs review</span>
-            </div>
-            <div className="fpl-kpi-card">
-              <strong className="fpl-kpi-num">{totalAssets.toLocaleString()}</strong>
-              <span className="fpl-kpi-label">Deployments</span>
-            </div>
+            {[
+              {
+                label: 'Software Identities',
+                value: funnelQuery.data?.recordsFound ?? 0,
+                color: '#3b82f6',
+                onClick: () => clearFilters()
+              },
+              {
+                label: 'Unique Software',
+                value: funnelQuery.data?.uniqueSoftware ?? 0,
+                color: '#6366f1',
+                onClick: () => clearFilters()
+              },
+              {
+                label: 'With CVEs',
+                value: funnelQuery.data?.softwareWithVulnerabilities ?? 0,
+                color: '#ef4444',
+                onClick: () => toggleCoverage('with-vulnerabilities')
+              },
+              {
+                label: 'Sources',
+                value: funnelQuery.data?.sourceCount ?? 0,
+                color: '#22c55e'
+              }
+            ].map((kpi) => (
+              <div
+                key={kpi.label}
+                className="fpl-kpi-card"
+                onClick={kpi.onClick}
+                style={{ '--kpi-color': kpi.color } as React.CSSProperties}
+              >
+                <div className="fpl-kpi-num">{kpi.value.toLocaleString()}</div>
+                <div className="fpl-kpi-label">{kpi.label}</div>
+              </div>
+            ))}
           </div>
-        </div>
+        </WidgetCard>
+
       </div>
 
       {errorMessage && (
