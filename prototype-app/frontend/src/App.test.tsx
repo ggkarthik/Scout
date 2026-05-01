@@ -22,8 +22,9 @@ describe('App test persona switcher', () => {
 
   it('shows non-production personas from the gear menu and supports UI preview mode', async () => {
     vi.stubEnv('VITE_ENABLE_TEST_PERSONAS', 'true');
+    const auth = await import('./features/auth/api');
     const client = await import('./api/client');
-    vi.spyOn(client.api, 'getAuthContext').mockResolvedValue(TENANT_ADMIN);
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
     vi.spyOn(client.api, 'listTestPersonas').mockResolvedValue([
       {
         key: 'tenant-a-admin',
@@ -58,8 +59,8 @@ describe('App test persona switcher', () => {
 
   it('hides the gear-menu persona option unless explicitly enabled', async () => {
     vi.stubEnv('VITE_ENABLE_TEST_PERSONAS', 'false');
-    const client = await import('./api/client');
-    vi.spyOn(client.api, 'getAuthContext').mockResolvedValue(TENANT_ADMIN);
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
 
     const { default: App } = await import('./App');
     renderWithProviders(<App />);
