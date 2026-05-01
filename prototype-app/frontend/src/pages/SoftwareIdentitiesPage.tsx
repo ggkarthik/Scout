@@ -1,7 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
-import { FilterValueSelectCard, type FilterValueOption } from '../components/FilterValueSelectCard';
 import { pathForInventoryHostAsset, pathForInventoryViewWithSearch } from '../app/routes';
 import {
   formatAssetType,
@@ -110,16 +109,6 @@ function eolSummaryClass(identity: SoftwareIdentitySummary): string {
   if (identity.eolComponentCount > 0) return 'si-eol-summary si-eol-summary-risk';
   if (identity.nearEolComponentCount > 0) return 'si-eol-summary si-eol-summary-warn';
   return 'si-eol-summary';
-}
-
-function SummaryCard({ label, value, subtext }: { label: string; value: string; subtext: string }) {
-  return (
-    <article className="inventory-summary-card">
-      <span className="inventory-summary-label">{label}</span>
-      <strong className="inventory-summary-value">{value}</strong>
-      <span className="inventory-summary-subtext">{subtext}</span>
-    </article>
-  );
 }
 
 // ─── Active panel state ────────────────────────────────────────────────────
@@ -430,34 +419,101 @@ export function SoftwareIdentitiesPage() {
   );
   const totalIdentityCount = identitiesQuery.data?.totalElements ?? identities.length;
   const totalPages = identitiesQuery.data?.totalPages ?? 0;
-  const sourceSystemOptions = React.useMemo<FilterValueOption[]>(() => {
-    const values = new Set<string>(sourceSystems);
-    identities.forEach((identity) => identity.sourceSystems.forEach((value) => {
-      if (value?.trim().length) {
-        values.add(value.trim());
+  const identitiesWithExposure = React.useMemo(
+    () => identities.filter((identity) => identity.openVulnerabilityCount > 0 || identity.openFindingCount > 0).length,
+    [identities]
+  );
+  const lifecycleBreakdown = React.useMemo(() => {
+    const values = [
+      { label: 'EOL', count: 0, tone: 'warning' },
+      { label: 'Near EOL', count: 0, tone: 'muted' },
+      { label: 'Unknown', count: 0, tone: 'accent' },
+      { label: 'Supported', count: 0, tone: 'success' }
+    ];
+    identities.forEach((identity) => {
+      const lifecycleValue = identityLifecycle(identity);
+      const entry = values.find((item) => item.label === lifecycleValue);
+      if (entry) {
+        entry.count += 1;
       }
-    }));
-    return Array.from(values)
-      .sort((left, right) => left.localeCompare(right))
-      .map((value) => ({
-        value,
-        label: formatInventorySourceSystem(value)
-      }));
-  }, [identities, sourceSystems]);
-  const ecosystemOptions = React.useMemo<FilterValueOption[]>(() => {
-    const values = new Set<string>(ecosystems);
-    identities.forEach((identity) => identity.ecosystems.forEach((value) => {
-      if (value?.trim().length) {
-        values.add(value.trim());
-      }
-    }));
-    return Array.from(values)
-      .sort((left, right) => left.localeCompare(right))
-      .map((value) => ({
-        value,
-        label: formatInventoryLabel(value)
-      }));
-  }, [ecosystems, identities]);
+    });
+    return values;
+  }, [identities]);
+  const lifecycleMax = React.useMemo(
+    () => Math.max(1, ...lifecycleBreakdown.map((item) => item.count)),
+    [lifecycleBreakdown]
+  );
+  const topRiskSoftware = React.useMemo(() => {
+    return [...identities]
+      .map((identity) => ({
+        identity,
+        score: identity.openVulnerabilityCount + identity.openFindingCount
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || right.identity.assetCount - left.identity.assetCount)
+      .slice(0, 5);
+  }, [identities]);
+  const topRiskMax = React.useMemo(
+    () => Math.max(1, ...topRiskSoftware.map((entry) => entry.score)),
+    [topRiskSoftware]
+  );
+  const ecosystemBreakdown = React.useMemo(() => {
+    const counts = new Map<string, { value: string; label: string; count: number }>();
+    identities.forEach((identity) => {
+      const values = identity.ecosystems.length > 0 ? identity.ecosystems : ['Unknown'];
+      values.forEach((value) => {
+        const normalized = value?.trim() || 'Unknown';
+        const current = counts.get(normalized) ?? {
+          value: normalized,
+          label: formatInventoryLabel(normalized),
+          count: 0
+        };
+        current.count += 1;
+        counts.set(normalized, current);
+      });
+    });
+    return Array.from(counts.values())
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+      .slice(0, 5);
+  }, [identities]);
+  const ecosystemMax = React.useMemo(
+    () => Math.max(1, ...ecosystemBreakdown.map((item) => item.count)),
+    [ecosystemBreakdown]
+  );
+  const needsReviewCount = React.useMemo(
+    () => identities.filter((identity) => identityMappingState(identity) === 'Needs review').length,
+    [identities]
+  );
+  const activeFilterChips = React.useMemo(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) {
+      chips.push({ key: 'search', label: `Search: ${trimmedQuery}`, onRemove: () => setQuery('') });
+    }
+    sourceSystems.forEach((value) => {
+      chips.push({
+        key: `source:${value}`,
+        label: `Source: ${formatInventorySourceSystem(value)}`,
+        onRemove: () => setSourceSystems((current) => current.filter((entry) => entry !== value))
+      });
+    });
+    ecosystems.forEach((value) => {
+      chips.push({
+        key: `ecosystem:${value}`,
+        label: `Ecosystem: ${formatInventoryLabel(value)}`,
+        onRemove: () => setEcosystems((current) => current.filter((entry) => entry !== value))
+      });
+    });
+    if (lifecycle) {
+      const label = LIFECYCLE_OPTIONS.find((option) => option.value === lifecycle)?.label ?? lifecycle;
+      chips.push({ key: 'lifecycle', label: `Lifecycle: ${label}`, onRemove: () => setLifecycle('') });
+    }
+    if (mappingState) {
+      const label = MAPPING_STATE_OPTIONS.find((option) => option.value === mappingState)?.label ?? mappingState;
+      chips.push({ key: 'mapping', label: `Mapping: ${label}`, onRemove: () => setMappingState('') });
+    }
+    return chips;
+  }, [ecosystems, lifecycle, mappingState, query, sourceSystems]);
   const groupedCards = React.useMemo(() => (
     groupBy
       .map((key) => {
@@ -563,101 +619,7 @@ export function SoftwareIdentitiesPage() {
 
   return (
     <section className="inventory-page-shell">
-      <header className="inventory-page-header">
-        <div>
-          <h1>Software identities</h1>
-          <p className="panel-caption">
-            Third-party software deployed across hosts, applications, and container images, correlated to inventory, CVEs, and findings.
-          </p>
-        </div>
-        <div className="inventory-page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => void identitiesQuery.refetch()}
-          >
-            Refresh
-          </button>
-        </div>
-      </header>
-
-      <div className="inventory-summary-grid">
-        <SummaryCard
-          label="Software Identities"
-          value={totalIdentityCount.toLocaleString()}
-          subtext="Matching deployed software identities across the full result set"
-        />
-        <SummaryCard
-          label="Asset Deployments"
-          value={totalAssets.toLocaleString()}
-          subtext="Asset-to-software deployments shown on the current page"
-        />
-        <SummaryCard
-          label="Open CVEs"
-          value={totalOpenCves.toLocaleString()}
-          subtext="Applicable CVEs shown on the current page"
-        />
-        <SummaryCard
-          label="Open Findings"
-          value={totalOpenFindings.toLocaleString()}
-          subtext="Findings tied to the software identities shown on this page"
-        />
-      </div>
-
-      <div className="inventory-toolbar">
-        <div className="inventory-search-row inventory-search-row-stacked">
-          <label className="inventory-search-field">
-            <span className="panel-caption">Search software, vendor, product, or identity…</span>
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="SQL Server, WebLogic, JBoss, Palo Alto, Fortinet…"
-            />
-          </label>
-          <label className="inventory-select-field">
-            <span className="panel-caption">Lifecycle</span>
-            <select value={lifecycle} onChange={(event) => setLifecycle(event.target.value)}>
-              {LIFECYCLE_OPTIONS.map((option) => (
-                <option key={option.value || 'any'} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="inventory-select-field">
-            <span className="panel-caption">Mapping state</span>
-            <select value={mappingState} onChange={(event) => setMappingState(event.target.value)}>
-              {MAPPING_STATE_OPTIONS.map((option) => (
-                <option key={option.value || 'any'} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="inventory-filter-card-grid">
-          <FilterValueSelectCard
-            label="Source System"
-            selectedValues={sourceSystems}
-            options={sourceSystemOptions}
-            onChange={setSourceSystems}
-          />
-          <FilterValueSelectCard
-            label="Ecosystem"
-            selectedValues={ecosystems}
-            options={ecosystemOptions}
-            onChange={setEcosystems}
-          />
-        </div>
-        <div className="inventory-toolbar-actions">
-          <button type="button" className="btn btn-secondary btn-inline" onClick={clearFilters}>
-            Clear Filters
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-inline"
-            onClick={() => void identitiesQuery.refetch()}
-            disabled={identitiesQuery.isFetching}
-          >
-            {identitiesQuery.isFetching ? 'Refreshing...' : 'Refresh Software Identities'}
-          </button>
-        </div>
+      <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy
             options={SOFTWARE_GROUP_BY_OPTIONS}
@@ -666,9 +628,152 @@ export function SoftwareIdentitiesPage() {
             label="GROUP BY"
             placeholder="No secondary grouping"
             allowEmptyPrimary
-            emptyPrimaryLabel="Select..."
+            emptyPrimaryLabel="None"
             showSelectorsByDefault={false}
           />
+        </div>
+        {activeFilterChips.length > 0 && (
+          <div className="fpl-active-chips inventory-active-chips">
+            {activeFilterChips.map((chip) => (
+              <span key={chip.key} className="fpl-chip">
+                {chip.label}
+                <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label}`}>x</button>
+              </span>
+            ))}
+            <button type="button" className="fpl-chip-clear" onClick={clearFilters}>
+              Clear all
+            </button>
+          </div>
+        )}
+        <label className="findings-filter-chip inventory-fpl-search">
+          <span className="panel-caption">Search software</span>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="software, vendor, product..."
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-secondary inventory-refresh-btn"
+          onClick={() => void identitiesQuery.refetch()}
+          disabled={identitiesQuery.isFetching}
+        >
+          {identitiesQuery.isFetching ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+
+      <div className="fpl-widgets inventory-fpl-widgets">
+        <button type="button" className="fpl-widget" onClick={() => clearFilters()}>
+          <div className="fpl-widget-title">Software Exposure</div>
+          <div className="inventory-donut-widget">
+            <div className="inventory-donut" style={{ '--donut-fill': `${identities.length > 0 ? Math.round((identitiesWithExposure / identities.length) * 100) : 0}%` } as React.CSSProperties}>
+              <strong>{identitiesWithExposure.toLocaleString()}</strong>
+              <span>exposed</span>
+            </div>
+            <div className="fpl-widget-body">
+              <div className="fpl-stat-row">
+                <span>Software identities</span>
+                <strong>{totalIdentityCount.toLocaleString()}</strong>
+              </div>
+              <div className="fpl-stat-row">
+                <span>Asset deployments</span>
+                <strong>{totalAssets.toLocaleString()}</strong>
+              </div>
+              <div className="fpl-stat-row">
+                <span>Open CVEs</span>
+                <strong>{totalOpenCves.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        </button>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Lifecycle Status</div>
+          <div className="fpl-widget-body">
+            {lifecycleBreakdown.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => setLifecycle(
+                  item.label === 'EOL' ? 'eol' :
+                    item.label === 'Near EOL' ? 'near-eol' :
+                      item.label === 'Unknown' ? 'unknown' : 'supported'
+                )}
+              >
+                <span className="fpl-hbar-label">{item.label}</span>
+                <span className="fpl-hbar-track">
+                  <span className={`fpl-hbar-fill inventory-hbar-${item.tone}`} style={{ width: `${(item.count / lifecycleMax) * 100}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{item.count.toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Top Software At Risk</div>
+          <div className="fpl-widget-body">
+            {topRiskSoftware.length === 0 ? (
+              <span className="panel-caption">No software with open risk in this view.</span>
+            ) : topRiskSoftware.map(({ identity, score }) => (
+              <button
+                key={identity.id}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => setQuery(identity.displayName)}
+              >
+                <span className="fpl-hbar-label">{identity.displayName}</span>
+                <span className="fpl-hbar-track">
+                  <span className="fpl-hbar-fill inventory-hbar-accent" style={{ width: `${(score / topRiskMax) * 100}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{score.toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Ecosystems</div>
+          <div className="fpl-widget-body">
+            {ecosystemBreakdown.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className="fpl-hbar-row"
+                onClick={() => setEcosystems(item.value === 'Unknown' ? [] : [item.value])}
+              >
+                <span className="fpl-hbar-label">{item.label}</span>
+                <span className="fpl-hbar-track">
+                  <span className="fpl-hbar-fill inventory-hbar-accent" style={{ width: `${(item.count / ecosystemMax) * 100}%` }} />
+                </span>
+                <strong className="fpl-hbar-val">{item.count.toLocaleString()}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Software Indicators</div>
+          <div className="fpl-kpi-grid">
+            <div className="fpl-kpi-card">
+              <strong className="fpl-kpi-num">{totalOpenCves.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Open CVEs</span>
+            </div>
+            <div className="fpl-kpi-card">
+              <strong className="fpl-kpi-num">{totalOpenFindings.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Open findings</span>
+            </div>
+            <div className="fpl-kpi-card">
+              <strong className="fpl-kpi-num">{needsReviewCount.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Needs review</span>
+            </div>
+            <div className="fpl-kpi-card">
+              <strong className="fpl-kpi-num">{totalAssets.toLocaleString()}</strong>
+              <span className="fpl-kpi-label">Deployments</span>
+            </div>
+          </div>
         </div>
       </div>
 
