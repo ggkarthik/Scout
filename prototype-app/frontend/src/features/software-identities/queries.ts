@@ -28,6 +28,14 @@ export function useSoftwareIdentityDetailQuery(softwareIdentityId: string | null
   });
 }
 
+export function useSoftwareIdentityMetadataQuery(softwareIdentityId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['software-identity-metadata', softwareIdentityId],
+    queryFn: () => api.getSoftwareIdentityMetadata(softwareIdentityId ?? ''),
+    enabled: enabled && Boolean(softwareIdentityId)
+  });
+}
+
 export function useVulnRepoSoftwareAssetsQuery(softwareIdentityId: string | null, enabled = true) {
   return useQuery({
     queryKey: ['vuln-repo-software-assets', softwareIdentityId],

@@ -191,6 +191,47 @@ export type FindingPriorityScoreResult = {
   topReasons: string[];
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Org Impact  (LOW | MEDIUM | HIGH)
+//
+// Classifies the organisational impact of a CVE using CVSS, exploitability
+// signals (KEV/EPSS), external-facing asset exposure, and the relationship
+// between the S.AI risk score and raw CVSS score.
+//
+// Rules (priority order):
+//   HIGH   – CVSS >= 9.0 (critical), OR in CISA KEV, OR EPSS >= 0.3,
+//             OR S.AI > CVSS + 1 (context elevates risk),
+//             OR any external-facing asset is affected
+//   MEDIUM – S.AI is within ±1 of CVSS AND none of the HIGH conditions apply
+//   LOW    – S.AI is more than 1 below CVSS AND no HIGH conditions apply
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function computeOrgImpact(
+  item: OrgSpecificCveExposureRecord,
+  saiScore: number,
+  externalFacingCount: number,
+): 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (item.matchedAssetCount === 0) {
+    return 'NONE';
+  }
+
+  const cvss = item.cvssScore ?? 0;
+  const epss = item.epssScore ?? 0;
+
+  const isCritical = cvss >= 9.0;
+  const isExploitable = item.inKev || epss >= 0.3;
+  const saiAboveCvss = saiScore > cvss + 1.0;
+  const hasExternalFacing = externalFacingCount > 0;
+
+  if (isCritical || isExploitable || saiAboveCvss || hasExternalFacing) {
+    return 'HIGH';
+  }
+  if (Math.abs(saiScore - cvss) <= 1.0) {
+    return 'MEDIUM';
+  }
+  return 'LOW';
+}
+
 export function computeFindingPriorityScore(
   finding: Finding,
   policy: PolicyWeights = DEFAULT_POLICY,

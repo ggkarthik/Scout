@@ -99,6 +99,8 @@ import type {
   SoftwareIdentityCoverage,
   SoftwareIdentityDetail,
   SoftwareIdentityFunnel,
+  SoftwareIdentityMetadata,
+  SoftwareIdentityMetadataRequest,
   SoftwareIdentityPage,
   VulnRepoSoftwareAssetsDetail
 } from '../features/software-identities/types';
@@ -398,6 +400,7 @@ export const api = {
       lifecycle?: 'eol' | 'near-eol' | 'unknown' | 'supported';
       mappingState?: 'needs-review' | 'mapped' | 'manual' | 'automatic';
       coverage?: SoftwareIdentityCoverage;
+      operatingSystem?: string;
       query?: string;
       page?: number;
       size?: number;
@@ -410,6 +413,7 @@ export const api = {
     if (params?.lifecycle) searchParams.set('lifecycle', params.lifecycle);
     if (params?.mappingState) searchParams.set('mappingState', params.mappingState);
     if (params?.coverage) searchParams.set('coverage', params.coverage);
+    if (params?.operatingSystem && params.operatingSystem.trim().length > 0) searchParams.set('operatingSystem', params.operatingSystem.trim());
     if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
     if (params?.page != null) searchParams.set('page', String(params.page));
     if (params?.size != null) searchParams.set('size', String(params.size));
@@ -419,6 +423,13 @@ export const api = {
   getSoftwareIdentityFunnel: () => request<SoftwareIdentityFunnel>('/inventory/software-identities/funnel'),
   getSoftwareIdentityDetail: (softwareIdentityId: string) => request<SoftwareIdentityDetail>(
     `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`
+  ),
+  getSoftwareIdentityMetadata: (softwareIdentityId: string) => request<SoftwareIdentityMetadata>(
+    `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}/metadata`
+  ),
+  saveSoftwareIdentityMetadata: (softwareIdentityId: string, req: SoftwareIdentityMetadataRequest) => request<SoftwareIdentityMetadata>(
+    `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}/metadata`,
+    { method: 'PUT', body: JSON.stringify(req) }
   ),
   getVulnRepoSoftwareAssets: (softwareIdentityId: string) => request<VulnRepoSoftwareAssetsDetail>(
     `/vuln-repo/software-assets/${encodeURIComponent(softwareIdentityId)}`

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { InventoryViewKey } from './features/inventory/types';
 import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
@@ -33,6 +34,9 @@ import {
 import './styles/index.css';
 import './styles/finding-detail.css';
 
+const ExposureDashboardPage = React.lazy(async () => ({
+  default: (await import('./pages/ExposureDashboardPage')).ExposureDashboardPage
+}));
 const DashboardPage = React.lazy(async () => ({
   default: (await import('./pages/DashboardPage')).DashboardPage
 }));
@@ -77,6 +81,9 @@ const InventoryOverviewPage = React.lazy(async () => ({
 }));
 const SoftwareIdentitiesPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentitiesPage')).SoftwareIdentitiesPage
+}));
+const SoftwareIdentityDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/SoftwareIdentityDetailPage')).SoftwareIdentityDetailPage
 }));
 const EolPage = React.lazy(async () => ({
   default: (await import('./pages/EolPage')).EolPage
@@ -129,32 +136,12 @@ const EMPTY_TEST_PERSONA_CONTROLS: TestPersonaControls = {
 };
 const TestPersonaControlsState = React.createContext<TestPersonaControls>(EMPTY_TEST_PERSONA_CONTROLS);
 const BOTTOM_NAV_TABS: AppTab[] = [];
-const INVENTORY_FLYOUT_GROUPS: Array<{ title: string; items: Array<{ key: InventoryViewKey; label: string }> }> = [
-  {
-    title: 'Summary',
-    items: [
-      { key: 'overview', label: 'Overview' },
-      { key: 'software-identities', label: 'Software Identities' }
-    ]
-  },
-  {
-    title: 'Applications',
-    items: [
-      { key: 'sbom', label: 'Applications' }
-    ]
-  },
-  {
-    title: 'Infrastructure',
-    items: [
-      { key: 'hosts', label: 'Hosts' }
-    ]
-  },
-  {
-    title: 'Cloud',
-    items: [
-      { key: 'container-images', label: 'Container Images' }
-    ]
-  }
+const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countKey?: 'hosts' | 'software' | 'containerImages' | 'applications' }> = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'hosts', label: 'Hosts', countKey: 'hosts' },
+  { key: 'software-identities', label: 'Software Entities', countKey: 'software' },
+  { key: 'container-images', label: 'Container Images', countKey: 'containerImages' },
+  { key: 'sbom', label: 'Applications', countKey: 'applications' }
 ];
 const OPERATIONS_NAV_ITEMS = [
   { key: 'pipeline', label: 'Pipeline' },
@@ -174,6 +161,16 @@ function getInitialTheme(): Theme {
 }
 
 function TabIcon({ tab }: { tab: AppTab }) {
+  if (tab === 'exposure') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5.5" />
+        <circle cx="12" cy="12" r="2" fill="currentColor" />
+        <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21" />
+      </svg>
+    );
+  }
   if (tab === 'dashboard') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -306,6 +303,10 @@ function LegacyQueryRedirect() {
   return null;
 }
 
+function ExposureDashboardRoute() {
+  return <ExposureDashboardPage />;
+}
+
 function DashboardRoute() {
   const navigate = useNavigate();
   return <DashboardPage onViewEol={() => navigate('/end-of-life')} />;
@@ -416,6 +417,17 @@ function InventoryHostAssetRoute() {
   }
 
   return <HostAssetDetailPage assetId={assetId} />;
+}
+
+function SoftwareIdentityDetailRoute() {
+  const params = useParams<{ softwareIdentityId?: string }>();
+  const softwareIdentityId = params.softwareIdentityId ? decodeURIComponent(params.softwareIdentityId) : null;
+
+  if (!softwareIdentityId) {
+    return <Navigate to={pathForInventoryView('software-identities')} replace />;
+  }
+
+  return <SoftwareIdentityDetailPage softwareIdentityId={softwareIdentityId} />;
 }
 
 function InventoryRoute() {
@@ -641,11 +653,9 @@ function AppShell() {
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
-  const [inventoryFlyoutOpen, setInventoryFlyoutOpen] = React.useState(false);
   const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
-  const inventoryFlyoutTimer = React.useRef<number | null>(null);
   const operationsFlyoutTimer = React.useRef<number | null>(null);
 
   const activeTab = activeTabForPath(location.pathname);
@@ -661,15 +671,44 @@ function AppShell() {
       ? 'org-cves'
       : 'dashboard';
   const visiblePrimaryNavTabs = React.useMemo(() => {
-    const tabs: AppTab[] = ['dashboard'];
+    const tabs: AppTab[] = ['exposure', 'dashboard'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
     }
     if (canAccessPlatformConsole(actor)) {
       tabs.push('operations');
     }
+    if (canManageInventorySources(actor)) {
+      tabs.push('connect');
+    }
+    if (canManageRiskPolicy(actor)) {
+      tabs.push('configurations');
+    }
     return tabs;
   }, [actor]);
+  const inventoryAssetsQuery = useQuery({
+    queryKey: ['inventory-nav-assets'],
+    queryFn: api.listAssets,
+    enabled: activeTab === 'inventory'
+  });
+  const inventorySoftwareQuery = useQuery({
+    queryKey: ['inventory-nav-software-identities'],
+    queryFn: () => api.listSoftwareIdentities({ page: 0, size: 1 }),
+    enabled: activeTab === 'inventory'
+  });
+  const inventoryPillCounts = React.useMemo(() => {
+    const assets = inventoryAssetsQuery.data ?? [];
+    return {
+      hosts: assets.filter((asset) => asset.type.toUpperCase() === 'HOST').length,
+      applications: assets.filter((asset) => asset.type.toUpperCase() === 'APPLICATION').length,
+      containerImages: assets.filter((asset) => asset.type.toUpperCase() === 'CONTAINER_IMAGE').length,
+      software: inventorySoftwareQuery.data?.totalElements ?? 0
+    };
+  }, [inventoryAssetsQuery.data, inventorySoftwareQuery.data?.totalElements]);
+  const visibleInventoryPills = React.useMemo(
+    () => INVENTORY_PILL_ORDER.filter((item) => !item.countKey || inventoryPillCounts[item.countKey] > 0),
+    [inventoryPillCounts]
+  );
 
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -690,31 +729,10 @@ function AppShell() {
 
 
   React.useEffect(() => () => {
-    if (inventoryFlyoutTimer.current != null) {
-      window.clearTimeout(inventoryFlyoutTimer.current);
-    }
     if (operationsFlyoutTimer.current != null) {
       window.clearTimeout(operationsFlyoutTimer.current);
     }
   }, []);
-
-  const openInventoryFlyout = (): void => {
-    if (inventoryFlyoutTimer.current != null) {
-      window.clearTimeout(inventoryFlyoutTimer.current);
-      inventoryFlyoutTimer.current = null;
-    }
-    setInventoryFlyoutOpen(true);
-  };
-
-  const closeInventoryFlyoutWithDelay = (): void => {
-    if (inventoryFlyoutTimer.current != null) {
-      window.clearTimeout(inventoryFlyoutTimer.current);
-    }
-    inventoryFlyoutTimer.current = window.setTimeout(() => {
-      setInventoryFlyoutOpen(false);
-      inventoryFlyoutTimer.current = null;
-    }, 180);
-  };
 
   const openOperationsFlyout = (): void => {
     if (operationsFlyoutTimer.current != null) {
@@ -736,9 +754,6 @@ function AppShell() {
 
   const navigateToTab = (tab: AppTab): void => {
     navigate(pathForTab(tab));
-    if (tab !== 'inventory') {
-      setInventoryFlyoutOpen(false);
-    }
     if (tab !== 'operations') {
       setOperationsFlyoutOpen(false);
     }
@@ -772,9 +787,10 @@ function AppShell() {
   };
 
   const pageTitle = React.useMemo(() => {
+    if (activeTab === 'exposure') return 'Exposure Dashboard';
     if (activeTab === 'admin') return 'Tenant Administration';
-    if (activeTab === 'connect') return 'Inventory Source Settings';
-    if (activeTab === 'configurations') return 'Tenant Configuration';
+    if (activeTab === 'connect') return 'Connectors';
+    if (activeTab === 'configurations') return 'Configurations';
     if (activeTab === 'platform') return 'Platform Console';
     return titleForTab(activeTab);
   }, [activeTab]);
@@ -858,50 +874,7 @@ function AppShell() {
               if (tab !== 'inventory') {
                 return renderNavButton(tab);
               }
-              return (
-                <div
-                  key={tab}
-                  className="inventory-nav-wrap"
-                  onMouseEnter={openInventoryFlyout}
-                  onMouseLeave={closeInventoryFlyoutWithDelay}
-                >
-                  {renderNavButton(tab)}
-                  {inventoryFlyoutOpen && (
-                    <div
-                      className="inventory-flyout"
-                      onMouseEnter={openInventoryFlyout}
-                      onMouseLeave={closeInventoryFlyoutWithDelay}
-                    >
-                      <div className="inventory-flyout-header">
-                        <span>Inventory</span>
-                        <span aria-hidden="true">→</span>
-                      </div>
-                      <div className="inventory-flyout-scroll">
-                        {INVENTORY_FLYOUT_GROUPS.map((group) => (
-                          <div key={group.title} className="inventory-flyout-group">
-                            <div className="inventory-flyout-group-title">{group.title}</div>
-                            <div className="inventory-flyout-items">
-                              {group.items.map((item) => (
-                                <button
-                                  key={item.key}
-                                  type="button"
-                                  className={activeInventoryView === item.key ? 'inventory-flyout-item active' : 'inventory-flyout-item'}
-                                  onClick={() => {
-                                    navigate(pathForInventoryView(item.key));
-                                    setInventoryFlyoutOpen(false);
-                                  }}
-                                >
-                                  <span>{item.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
+              return renderNavButton(tab);
             })}
           </div>
 
@@ -940,7 +913,7 @@ function AppShell() {
               </button>
               <div className="settings-menu-wrap">
                 <button
-                  className={settingsMenuOpen || ['admin', 'connect', 'configurations', 'platform'].includes(activeTab) ? 'btn btn-secondary theme-icon-btn active' : 'btn btn-secondary theme-icon-btn'}
+                  className={settingsMenuOpen || ['admin', 'platform'].includes(activeTab) ? 'btn btn-secondary theme-icon-btn active' : 'btn btn-secondary theme-icon-btn'}
                   onClick={() => setSettingsMenuOpen((open) => !open)}
                   aria-label="Open settings menu"
                   aria-expanded={settingsMenuOpen}
@@ -964,16 +937,6 @@ function AppShell() {
                       <span>Tenant Administration</span>
                       <small>Users, roles, service accounts and audit</small>
                     </button>
-                    <button
-                      type="button"
-                      className="settings-menu-item"
-                      role="menuitem"
-                      onClick={() => navigate(pathForConnectView(CONNECT_DEFAULT_VIEW))}
-                      disabled={!canManageInventorySources(actor)}
-                    >
-                      <span>Inventory Sources</span>
-                      <small>Customer-owned connectors and ingestion queues</small>
-                    </button>
                     {canAccessPlatformConsole(actor) && (
                       <button
                         type="button"
@@ -985,16 +948,6 @@ function AppShell() {
                         <small>Tenants, central feeds and support access</small>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="settings-menu-item"
-                      role="menuitem"
-                      onClick={() => navigate('/configurations')}
-                      disabled={!canManageRiskPolicy(actor)}
-                    >
-                      <span>Tenant Configuration</span>
-                      <small>Risk policy, SLA and workflow automation</small>
-                    </button>
                     {testPersonas.enabled && (
                       <button
                         type="button"
@@ -1035,8 +988,24 @@ function AppShell() {
             </div>
           )}
 
+          {activeTab === 'inventory' && (
+            <div className="section-tab-row">
+              {visibleInventoryPills.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={activeInventoryView === item.key ? 'section-tab-btn active' : 'section-tab-btn'}
+                  onClick={() => navigate(pathForInventoryView(item.key))}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
+              <Route path="/exposure" element={<ExposureDashboardRoute />} />
               <Route path="/" element={<DashboardRoute />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
@@ -1052,6 +1021,7 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EolPage />} />
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />

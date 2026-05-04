@@ -108,6 +108,25 @@ export type SoftwareIdentityDetail = {
   assets: SoftwareIdentityAsset[];
 };
 
+export type SoftwareIdentityMetadata = {
+  softwareIdentityId: string;
+  owner: string;
+  licensed: string;
+  licenseType: string;
+  supportGroup: string;
+  recommendation: string;
+  recommendationUpdatedAt?: string;
+  updatedAt?: string;
+};
+
+export type SoftwareIdentityMetadataRequest = {
+  owner?: string;
+  licensed?: string;
+  licenseType?: string;
+  supportGroup?: string;
+  recommendation?: string;
+};
+
 export type VulnRepoSoftwareAsset = {
   assetId: string;
   assetName: string;

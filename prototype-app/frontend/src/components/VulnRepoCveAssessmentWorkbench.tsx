@@ -1,10 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CveRiskScorePanel } from './CveRiskScorePanel';
+import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
+import { computeCveRiskScore, computeOrgImpact } from '../lib/riskScoring';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from './CVEInvestigationSummary';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
-import { pathForFindingDetail, pathForFindingsWithFilters, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
+import { pathForFindingDetail, pathForFindingsWithFilters, pathForInventoryViewWithSearch, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
 import { cveWorkbenchApi, type AiSolutionData, type AiRequiredAction } from '../features/cve-workbench/api';
 import { api } from '../api/client';
 import { buildAssetRowsFromMatchedSoftware, type DerivedAssetRow } from '../features/cve-workbench/asset-report';
@@ -1855,7 +1857,8 @@ function InvestigationCanvas({
   onNewLogMessageChange,
   onAddLogEntry,
   onClose,
-  onSaveDraft: _onSaveDraft
+  onSaveDraft: _onSaveDraft,
+  createdFindings = [],
 }: {
   isOpen: boolean;
   item: OrgSpecificCveExposureRecord;
@@ -1864,7 +1867,7 @@ function InvestigationCanvas({
   runbookTasks: RunbookTask[];
   onRunTask: (taskId: string) => void;
   onOpenAssetList: (filter?: { scope?: 'external-facing' | 'critical'; os?: string; software?: string }) => void;
-  onOpenFindingsStep: (filter?: { scope?: 'external-facing' | 'critical' | 'all'; software?: string; os?: string }) => void;
+  onOpenFindingsStep: (filter?: { scope?: 'external-facing' | 'critical' | 'all'; software?: string; os?: string; openConfig?: boolean }) => void;
   logEntries: InvestigationLogEntry[];
   newLogType: InvestigationLogType;
   onNewLogTypeChange: (value: InvestigationLogType) => void;
@@ -1873,6 +1876,7 @@ function InvestigationCanvas({
   onAddLogEntry: () => void;
   onClose: () => void;
   onSaveDraft: () => void;
+  createdFindings?: InvestigationSummaryInput['createdFindings'];
 }) {
   const completedCount = runbookTasks.filter((task) => task.state === 'DONE').length;
   const isEolTask = (taskId: string) => taskId === 'end-of-life-analysis' || taskId === 'end-of-life';
@@ -1951,7 +1955,7 @@ function InvestigationCanvas({
   );
   const [resolvedInventory, setResolvedInventory] = React.useState<ResolvedInventorySoftware[]>(initialResolvedInventory);
   const [summaryVisible, setSummaryVisible] = React.useState(false);
-  const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>('review-asset-inventory');
   const [, setSavedAt] = React.useState<Date | null>(null);
   const [solutionEntries, setSolutionEntries] = React.useState<Record<string, string>>(
     persistedRunbookState?.solutionEntries ?? {}
@@ -2051,6 +2055,7 @@ function InvestigationCanvas({
 
   React.useEffect(() => {
     // Reset local investigation state only when the user navigates to a different CVE.
+    setSelectedTaskId('review-asset-inventory');
     setAssetCriteria(initialCriteria);
     setAssetResults(initialResults);
     setAssetResultsExpanded(initialResults.length > 0);
@@ -2272,7 +2277,8 @@ function InvestigationCanvas({
       impactedAssets: row.count,
       solutionDetail: solutionEntries[`${row.software}@${row.version}`] ?? '',
     })),
-  }), [assetResults, detail, eolResults, falsePositiveResults, analystFpOverrides, analystFpEvidence, item.externalId, item.inKev, item.severity, leadAnalyst, runbookTasks, solutionRows, solutionEntries]);
+    createdFindings,
+  }), [assetResults, createdFindings, detail, eolResults, falsePositiveResults, analystFpOverrides, analystFpEvidence, item.externalId, item.inKev, item.severity, leadAnalyst, runbookTasks, solutionRows, solutionEntries]);
   const osWheelStops = React.useMemo(() => {
     if (osBreakdown.length === 0) return 'conic-gradient(#273248 0deg 360deg)';
     const palette = ['#53d7ff', '#8a7dff', '#ffb24a', '#22d37f', '#ff6f91', '#9dd6ff'];
@@ -2327,6 +2333,8 @@ function InvestigationCanvas({
     setAssetResultsExpanded(true);
     setAssetAssessmentRan(true);
     onRunTask('review-asset-inventory');
+    setAssessmentDirty(false);
+    setAssessmentUnsavedWarning(false);
 
     // Cascade: keep downstream steps in sync with the updated software list.
     if (falsePositiveRan) {
@@ -2466,6 +2474,30 @@ function InvestigationCanvas({
     onRunTask(taskId);
   }
 
+  const selectedTaskIndex = React.useMemo(
+    () => runbookTasks.findIndex((task) => task.id === selectedTaskId),
+    [runbookTasks, selectedTaskId]
+  );
+
+  const openTask = React.useCallback((taskId: string): void => {
+    if (assessmentDirty && selectedTaskId === 'review-asset-inventory' && taskId !== 'review-asset-inventory') {
+      setAssessmentUnsavedWarning(true);
+      return;
+    }
+    if (taskId === 'find-false-positive' && !falsePositiveRan && assetAssessmentRan) {
+      void runFalsePositiveAssessment();
+    }
+    setSelectedTaskId(taskId);
+  }, [assessmentDirty, assetAssessmentRan, falsePositiveRan, selectedTaskId]);
+
+  const moveTask = React.useCallback((direction: -1 | 1): void => {
+    if (selectedTaskIndex < 0) return;
+    const nextIndex = selectedTaskIndex + direction;
+    if (nextIndex < 0 || nextIndex >= runbookTasks.length) return;
+    const nextTask = runbookTasks[nextIndex];
+    if (nextTask) openTask(nextTask.id);
+  }, [openTask, runbookTasks, selectedTaskIndex]);
+
   const triggerSummary = React.useCallback(() => {
     setSummaryVisible(true);
     onRunTask('generate-summary');
@@ -2569,6 +2601,15 @@ function InvestigationCanvas({
           {task.state !== 'DONE' && (
             <button type="button" className="btn btn-secondary btn-inline" onClick={() => handleRunbookAction(task.id)}>
               Mark Done
+            </button>
+          )}
+          {task.state === 'DONE' && (
+            <button
+              type="button"
+              className="btn btn-primary btn-inline"
+              onClick={() => onOpenFindingsStep({ scope: 'all', openConfig: true })}
+            >
+              Create Findings
             </button>
           )}
         </div>
@@ -3011,9 +3052,6 @@ function InvestigationCanvas({
               {completedCount === runbookTasks.length ? 'Completed' : 'In Progress'}
             </span>
           </nav>
-          <div className="investigation-header-actions">
-            <button type="button" className="btn btn-secondary" onClick={closeCanvas}>Close</button>
-          </div>
         </div>
       </div>
 
@@ -3062,17 +3100,7 @@ function InvestigationCanvas({
                     disabled={!isUnlocked}
                     onClick={() => {
                       if (!isUnlocked) return;
-                      // If leaving the assessment step with unsaved changes, show warning
-                      if (assessmentDirty && selectedTaskId === 'review-asset-inventory' && task.id !== 'review-asset-inventory') {
-                        setAssessmentUnsavedWarning(true);
-                        return;
-                      }
-                      const next = isSelected ? null : task.id;
-                      setSelectedTaskId(next);
-                      // Auto-run FP step when navigating to it after step 1 is done
-                      if (next === 'find-false-positive' && !falsePositiveRan && assetAssessmentRan) {
-                        void runFalsePositiveAssessment();
-                      }
+                      openTask(task.id);
                     }}
                   >
                     <span className="inv-step-icon" aria-hidden="true">
@@ -3082,6 +3110,28 @@ function InvestigationCanvas({
                   </button>
                 );
               })}
+            </div>
+            <div className="inv-steps-nav">
+              {selectedTaskIndex > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => moveTask(-1)}
+                  title="Previous step"
+                >
+                  ←
+                </button>
+              )}
+              {selectedTaskIndex >= 0 && selectedTaskIndex < runbookTasks.length - 1 && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => moveTask(1)}
+                  title="Next step"
+                >
+                  →
+                </button>
+              )}
             </div>
 
             {/* Detail panel for the selected step */}
@@ -3235,6 +3285,12 @@ function CveOverviewExperience({
   persistedRunbookState?: PersistedInvestigationRunbookState | null;
 }) {
   const navigate = useNavigate();
+  const riskPolicyQuery = useRiskPolicyQuery();
+  const riskResult = React.useMemo(
+    () => computeCveRiskScore(item, riskPolicyQuery.data),
+    [item, riskPolicyQuery.data],
+  );
+  const riskJourney = riskResult.journey.filter(ev => !ev.isNote);
   const affectedProducts = React.useMemo(() => buildAffectedProducts(detail, softwareGroups), [detail, softwareGroups]);
   const [activeTab, setActiveTab] = React.useState<'assets' | 'refs' | 'timeline'>('assets');
   const [aiSolutionData, setAiSolutionData] = React.useState<AiSolutionData | null>(null);
@@ -3354,7 +3410,7 @@ function CveOverviewExperience({
   return (
     <div className="cve-detail-page">
 
-      {/* ── Hero Panel ────── */}
+      {/* ── Overview Card ── */}
       {(() => {
         const epss = detail.summary.epssScore ?? item.epssScore;
         const nowMs = Date.now();
@@ -3362,266 +3418,206 @@ function CveOverviewExperience({
         const kevMs = detail.summary.kevDueDate ? new Date(detail.summary.kevDueDate).getTime() : null;
         const daysAgo = publishedMs != null ? Math.floor((nowMs - publishedMs) / 86400000) : null;
         const kevOverdue = kevMs != null && kevMs < nowMs;
-        const kevDaysLabel = kevMs != null
-          ? (kevOverdue
-              ? `Overdue by ${Math.floor((nowMs - kevMs) / 86400000)} days`
-              : `Due in ${Math.ceil((kevMs - nowMs) / 86400000)} days`)
-          : null;
 
-        const statusPillClass = ((): string => {
-          switch (item.impactState) {
-            case 'IMPACTED': return 'cvd-status-pill cvd-status-impacted';
-            case 'UNDER_INVESTIGATION': return 'cvd-status-pill cvd-status-investigating';
-            case 'NOT_IMPACTED': case 'FIXED': return 'cvd-status-pill cvd-status-ok';
-            case 'NO_PATCH': return 'cvd-status-pill cvd-status-warn';
-            default: return 'cvd-status-pill cvd-status-neutral';
-          }
-        })();
-        const statusPillLabel = ((): string => {
-          switch (item.impactState) {
-            case 'IMPACTED': return 'Impacted';
-            case 'UNDER_INVESTIGATION': return 'Under Investigation';
-            case 'NOT_IMPACTED': return 'Not Impacted';
-            case 'FIXED': return 'Fixed';
-            case 'NO_PATCH': return 'No Patch Available';
-            default: return latestInvestigation ? formatLabel(latestInvestigation.status) : 'Not Reviewed';
-          }
-        })();
+        // Derive a unified display status from available signals
+        // Mirror the same invDone logic used by the Workflow badge below
+        const invDoneForStatus =
+          (persistedRunbookState?.assetAssessmentRan ?? false) ||
+          latestInvestigation?.status === 'CLOSED' ||
+          latestInvestigation?.status === 'PENDING_REVIEW';
 
-        // Static recommendations shown until AI actions are generated
-        type StaticAction = { tone: 'danger' | 'warn' | 'neutral'; title: string; rationale: string; onClick: () => void };
-        const staticActions: StaticAction[] = [];
-        const invStatus = latestInvestigation?.status;
-        if (!invStatus || invStatus === 'OPEN') {
-          staticActions.push({ tone: 'warn', title: 'Start Investigation', rationale: 'No active investigation — assign and begin tracking this CVE.', onClick: () => onStepChange(1) });
-        }
-        {
-          const invAssetCount = persistedRunbookState?.assetAssessmentRan
-            ? (persistedRunbookState.investigationAssetCount ?? detail.signals.assetCount)
-            : detail.signals.assetCount;
-          if (invAssetCount > 0 && item.openFindings === 0) {
-            staticActions.push({ tone: 'warn', title: 'Create Findings', rationale: `${invAssetCount} impacted asset${invAssetCount !== 1 ? 's' : ''} have no findings — create to track remediation.`, onClick: () => onStepChange(3) });
-          }
-        }
-        if (detail.signals.patchAvailable) {
-          staticActions.push({ tone: 'neutral', title: 'Apply Available Patch', rationale: `Vendor patch available${detail.signals.patchVersions ? ` (${detail.signals.patchVersions})` : ''} — schedule deployment on impacted assets.`, onClick: () => onStepChange(2) });
-        }
-        if (kevMs != null && kevOverdue) {
-          staticActions.push({ tone: 'danger', title: 'Notify Remediation Teams', rationale: `CISA KEV deadline has passed (${kevDaysLabel?.toLowerCase()}) — escalate to remediation owners immediately.`, onClick: () => {} });
-        } else if (kevMs != null && Math.ceil((kevMs - nowMs) / 86400000) <= 14) {
-          staticActions.push({ tone: 'danger', title: 'Notify Remediation Teams', rationale: `CISA KEV deadline approaching (${kevDaysLabel?.toLowerCase()}) — escalate to remediation owners.`, onClick: () => {} });
-        }
-        if (staticActions.length === 0) {
-          staticActions.push({ tone: 'neutral', title: 'Review Exposure', rationale: 'Review affected assets and verify applicability assessments are up to date.', onClick: () => onStepChange(2) });
-        }
+        const isNotApplicable =
+          item.applicability === 'NOT_APPLICABLE' ||
+          (item.matchedAssetCount === 0 && item.applicableComponentCount === 0);
+        // No Impact: S.AI score < 1 and all findings are closed
+        const isNoImpact =
+          !isNotApplicable &&
+          riskResult.score < 1 &&
+          item.openFindings === 0;
+        // Reviewed: investigation workflow marked done
+        const isReviewed =
+          !isNotApplicable &&
+          !isNoImpact &&
+          invDoneForStatus;
+        // Applicable = matched but not yet reviewed / no-impact
+        const isApplicable = !isNotApplicable && !isNoImpact && !isReviewed;
 
-        const actionCardTone = (urgency: string): 'danger' | 'warn' | 'neutral' =>
-          urgency === 'CRITICAL' || urgency === 'IMMEDIATE' ? 'danger'
-          : urgency === 'HIGH' ? 'warn'
-          : 'neutral';
+        const statusPillLabel = isNotApplicable
+          ? 'Not Applicable'
+          : isNoImpact
+            ? 'No Impact'
+            : isReviewed
+              ? 'Reviewed'
+              : 'Applicable';
 
-        const urgencyLabel = (urgency: string) =>
-          urgency === 'CRITICAL' ? 'Immediate'
-          : urgency === 'HIGH' ? 'High'
-          : urgency === 'MEDIUM' ? 'Medium'
-          : urgency === 'LOW' ? 'Low'
-          : urgency;
+        const statusPillClass = isNotApplicable
+          ? 'cvd-status-pill cvd-status-neutral'
+          : isNoImpact
+            ? 'cvd-status-pill cvd-status-ok'
+            : isReviewed
+              ? 'cvd-status-pill cvd-status-investigating'
+              : isApplicable
+                ? 'cvd-status-pill cvd-status-impacted'
+                : 'cvd-status-pill cvd-status-neutral';
 
-        // Actions to display: AI if available, else static
-        const displayAiActions = !aiActionsLoading && aiActions && aiActions.length > 0;
+        const externalFacingTokens = ['public', 'internet', 'edge', 'gateway', 'vpn', 'dmz', 'web', 'api', 'proxy'];
+        const externalFacingCount = softwareGroups.reduce((sum, g) => {
+          const uniqueAssetIds = new Set<string>();
+          g.assets.forEach(a => {
+            const haystack = [a.assetName, a.assetIdentifier, a.packageName].filter(Boolean).join(' ').toLowerCase();
+            if (externalFacingTokens.some(t => haystack.includes(t))) {
+              uniqueAssetIds.add(a.assetIdentifier ?? a.assetId ?? a.componentId);
+            }
+          });
+          return sum + uniqueAssetIds.size;
+        }, 0);
+
+        const invRan = persistedRunbookState?.assetAssessmentRan ?? false;
+        const displayAssetCount = invRan
+          ? (persistedRunbookState?.investigationAssetCount ?? detail.signals.assetCount)
+          : detail.signals.assetCount;
+        const displaySoftwareCount = invRan
+          ? (persistedRunbookState?.investigationSoftwareCount ?? detail.signals.softwareCount)
+          : detail.signals.softwareCount;
 
         return (
-          <div className="cvd-hero-panel">
-            <div className="cvd-hero-body">
-              {/* ── Left: description + actions ── */}
-              <div className="cvd-hero-left">
-                <div className="cvd-hero-badges-row">
-                  <div className="cvd-hero-badges">
-                    <span className={statusPillClass}>{statusPillLabel}</span>
-                  </div>
-                  {item.lastEvaluatedAt && (
-                    <span className="cvd-hero-last-eval">Last evaluated {formatDate(item.lastEvaluatedAt)}</span>
-                  )}
-                </div>
-
-                <h2 className="cvd-hero-title">{detail.summary.title || item.externalId}</h2>
-                <p className="cvd-hero-description">{detail.summary.description || 'No description available.'}</p>
-
-                {/* Required Actions row */}
-                <div className="cvd-ra-section">
-                  <div className="cvd-ra-section-header">
-                    <span className="cvd-metric-label">Required Actions</span>
-                    {!aiActionsLoading && !displayAiActions && (
-                      <button type="button" className="cvd-ra-ai-btn" onClick={generateAiActions}>
-                        ✦ Generate AI Actions
-                      </button>
-                    )}
-                    {aiActionsLoading && (
-                      <span className="cvd-ra-generating">
-                        <span className="cvd-actions-spinner" /> Generating AI actions…
-                      </span>
-                    )}
-                    {displayAiActions && (
-                      <button type="button" className="cvd-actions-regen" onClick={generateAiActions} title="Regenerate">↻</button>
-                    )}
-                  </div>
-
-                  {aiActionsError && !aiActions && (
-                    <p className="cvd-ra-error">{aiActionsError} — <button type="button" className="cvd-ra-ai-btn" onClick={generateAiActions}>Retry</button></p>
-                  )}
-
-                  <div className="cvd-ra-cards-row">
-                    {displayAiActions
-                      ? aiActions!.map((a, i) => {
-                          const tone = actionCardTone(a.urgency);
-                          const onClick = () => {
-                            const t = (a.action_type ?? '').toUpperCase();
-                            if (t.includes('INVEST')) onStepChange(1);
-                            else if (t.includes('FINDING') || t.includes('ASSESS')) onStepChange(3);
-                          };
-                          return (
-                            <button key={i} type="button" className={`cvd-ra-card cvd-ra-card-${tone}`} onClick={onClick}>
-                              <div className="cvd-ra-card-head">
-                                <span className="cvd-ra-card-title">{a.title}</span>
-                                <span className={`cvd-ra-badge cvd-ra-badge-${tone}`}>{urgencyLabel(a.urgency)}</span>
-                              </div>
-                              <span className="cvd-ra-card-note">{a.rationale}</span>
-                              <span className="cvd-ra-card-action">↗</span>
-                            </button>
-                          );
-                        })
-                      : staticActions.map((a, i) => (
-                          <button key={i} type="button" className={`cvd-ra-card cvd-ra-card-${a.tone}`} onClick={a.onClick}>
-                            <span className="cvd-ra-card-title">{a.title}</span>
-                            <span className="cvd-ra-card-note">{a.rationale}</span>
-                            <span className="cvd-ra-card-action">↗</span>
-                          </button>
-                        ))
-                    }
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Right: metric cards ── */}
-              <div className="cvd-hero-right">
-                {/* 1. Severity + AI Score */}
-                <button type="button" className="cvd-metric-widget cvd-metric-clickable" onClick={() => onStepChange(2)}>
-                  <span className="cvd-metric-label">Severity</span>
-                  <div className="cvd-sev-scores-row">
-                    <div className="cvd-metric-main">
-                      <span className={`cvd-metric-score cvd-sev-${item.severity?.toLowerCase()}`}>
-                        {detail.summary.cvssScore != null ? detail.summary.cvssScore.toFixed(1) : formatLabel(item.severity)}
-                      </span>
-                      {detail.summary.cvssScore != null && (
-                        <span className="cvd-metric-denom">{formatLabel(item.severity)}</span>
-                      )}
-                    </div>
-                    <div className="cvd-ai-score-block">
-                      <span className="cvd-ai-score-value">8.5 <span className="cvd-ai-score-symbol">✦</span></span>
-                    </div>
-                  </div>
-                </button>
-
-                <div className="cvd-metric-divider" />
-
-                {/* 2. Exploit Status + CISA KEV Due Date side by side */}
-                <div className="cvd-exploit-kev-row">
-                  <div className="cvd-metric-widget cvd-exploit-col">
-                    <span className="cvd-metric-label">Exploit Status</span>
-                    <div className="cvd-metric-main">
-                      <span className={detail.signals.exploitAvailable ? 'cvd-metric-danger' : 'cvd-metric-muted'}>
-                        {detail.signals.exploitAvailable
-                          ? (item.inKev ? 'In KEV catalog' : detail.signals.exploitReason || 'Active exploit')
-                          : 'None known'}
-                      </span>
-                    </div>
-                    <span className="cvd-metric-sub">
-                      EPSS {epss != null ? `${(epss * 100).toFixed(1)}%` : 'N/A'}
-                      {detail.signals.exploitAvailable ? ' · Public PoC' : ''}
-                    </span>
-                  </div>
-                  {kevMs != null && (
-                    <div className="cvd-metric-widget cvd-kev-col">
-                      <span className="cvd-date-label">CISA KEV Due Date</span>
-                      <strong className={`cvd-date-val${kevOverdue ? ' cvd-date-danger' : ''}`}>
-                        {formatDate(detail.summary.kevDueDate!)}
-                      </strong>
-                      {kevDaysLabel && (
-                        <span className={`cvd-date-sub${kevOverdue ? ' cvd-date-danger' : ''}`}>{kevDaysLabel}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="cvd-metric-divider" />
-
-                {/* 3. First Seen */}
-                {publishedMs != null && (
-                  <div className="cvd-metric-widget">
-                    <span className="cvd-date-label">First Seen</span>
-                    <strong className="cvd-date-val">{formatDate(detail.summary.publishedAt!)}</strong>
-                    {daysAgo != null && <span className="cvd-date-sub">{daysAgo} days ago</span>}
-                  </div>
+          <div className="cvd-overview-card">
+            {/* ── Left column ── */}
+            <div className="cvd-ov-left">
+              {/* Status + last evaluated */}
+              <div className="cvd-ov-meta">
+                <span className={statusPillClass}>{statusPillLabel}</span>
+                {item.lastEvaluatedAt && (
+                  <span className="cvd-ov-meta-eval">· Last evaluated {formatDate(item.lastEvaluatedAt)}</span>
                 )}
+              </div>
+              {publishedMs != null && daysAgo != null && (
+                <div className="cvd-ov-first-seen">
+                  First seen {formatDate(detail.summary.publishedAt!)}
+                  {kevMs != null && (
+                    <span className={kevOverdue ? ' cvd-ov-kev-overdue' : ''}>
+                      {' '}· CISA KEV {kevOverdue
+                        ? `overdue by ${Math.floor((nowMs - kevMs) / 86400000)}d`
+                        : `due in ${Math.ceil((kevMs - nowMs) / 86400000)}d`}
+                    </span>
+                  )}
+                </div>
+              )}
 
-                <div className="cvd-metric-divider" />
+              {/* Large CVE ID */}
+              <h1 className="cvd-ov-cve-id">{item.externalId}</h1>
 
-                {/* 4. Exposure — 2-column: left assets/external, right software/findings */}
-                {(() => {
-                  const externalFacingTokens = ['public', 'internet', 'edge', 'gateway', 'vpn', 'dmz', 'web', 'api', 'proxy'];
-                  const externalFacingCount = softwareGroups.reduce((sum, g) => {
-                    const uniqueAssetIds = new Set<string>();
-                    g.assets.forEach(a => {
-                      const haystack = [a.assetName, a.assetIdentifier, a.packageName].filter(Boolean).join(' ').toLowerCase();
-                      if (externalFacingTokens.some(t => haystack.includes(t))) {
-                        uniqueAssetIds.add(a.assetIdentifier ?? a.assetId ?? a.componentId);
-                      }
-                    });
-                    return sum + uniqueAssetIds.size;
-                  }, 0);
-                  // Use investigation counts when the runbook assessment has been run
-                  const invRan = persistedRunbookState?.assetAssessmentRan ?? false;
-                  const displayAssetCount = invRan
-                    ? (persistedRunbookState?.investigationAssetCount ?? detail.signals.assetCount)
-                    : null; // null = show software, not assets (investigation not yet run)
-                  const displaySoftwareCount = invRan
-                    ? (persistedRunbookState?.investigationSoftwareCount ?? detail.signals.softwareCount)
-                    : detail.signals.softwareCount;
-                  return (
-                    <div className="cvd-metric-widget">
-                      <span className="cvd-metric-label">Exposure</span>
-                      <div className="cvd-exposure-grid">
-                        <div className="cvd-exposure-col">
-                          {displayAssetCount !== null ? (
-                            <button type="button" className="cvd-metric-link cvd-exposure-asset-count" onClick={() => onStepChange(3)}>
-                              {displayAssetCount} assets →
-                            </button>
-                          ) : (
-                            <button type="button" className="cvd-metric-link cvd-exposure-asset-count" onClick={onOpenImpactedSoftware}>
-                              {displaySoftwareCount} software →
-                            </button>
-                          )}
-                          {externalFacingCount > 0 && (
-                            <button type="button" className="cvd-metric-sub cvd-metric-link-sm" style={{ marginTop: 4 }} onClick={onOpenExternalFacingAssets}>
-                              {externalFacingCount} external facing →
-                            </button>
-                          )}
-                        </div>
-                        <div className="cvd-exposure-col cvd-exposure-right">
-                          {displayAssetCount !== null && (
-                            <button type="button" className="cvd-metric-link-sm" onClick={onOpenImpactedSoftware}>
-                              {displaySoftwareCount} software →
-                            </button>
-                          )}
-                          <button type="button" className="cvd-metric-link-sm" onClick={() => navigate(pathForFindingsWithFilters({ vulnerabilityId: item.externalId, severity: item.severity ? [item.severity.toUpperCase()] : undefined }))}>
-                            {item.openFindings} open findings →
-                          </button>
-                        </div>
+              {/* Badge pills */}
+              <div className="cvd-ov-badges">
+                <div className="cvd-score-wrap">
+                  <div className="cvd-score-badge" style={{ background: riskResult.color }}>
+                    <span className="cvd-score-num">{riskResult.score.toFixed(1)}</span>
+                    <span className="cvd-score-label">{riskResult.label}</span>
+                    <span className="cvd-score-symbol">✦</span>
+                  </div>
+                  <div className="cvd-score-tooltip" role="tooltip">
+                    <div className="cvd-score-tooltip-heading">Why this score?</div>
+                    {riskJourney.length > 0 && (
+                      <div className="cvd-score-tooltip-journey">
+                        {riskJourney.map((ev, i) => (
+                          <div key={i} className="cvd-score-tooltip-row">
+                            <span className="cvd-score-tooltip-stage">{ev.stage}</span>
+                            {ev.delta !== 0 && (
+                              <span className={`cvd-score-tooltip-delta${ev.delta > 0 ? ' up' : ' down'}`}>
+                                {ev.delta > 0 ? '+' : ''}{ev.delta.toFixed(1)}
+                              </span>
+                            )}
+                            <span className="cvd-score-tooltip-val">→ {ev.score.toFixed(1)}</span>
+                          </div>
+                        ))}
                       </div>
-                    </div>
+                    )}
+                    {riskResult.topReasons.length > 0 && (
+                      <>
+                        <div className="cvd-score-tooltip-divider" />
+                        <div className="cvd-score-tooltip-heading">Key drivers</div>
+                        {riskResult.topReasons.map((r, i) => (
+                          <div key={i} className="cvd-score-tooltip-reason">· {r}</div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+                {item.cvssScore != null && (
+                  <span className="cvd-signal-pill">
+                    CVSS {item.cvssScore.toFixed(1)}{item.severity ? ` · ${item.severity.toLowerCase()}` : ''}
+                  </span>
+                )}
+                {epss != null && (
+                  <span className="cvd-signal-pill">EPSS {(epss * 100).toFixed(1)}%</span>
+                )}
+                {item.matchedAssetCount > 0 && (
+                  <span className="cvd-signal-pill">{item.matchedAssetCount} assets impacted</span>
+                )}
+                <span className="cvd-signal-pill">
+                  Exploit: {detail.signals.exploitAvailable
+                    ? (item.inKev ? 'in KEV' : 'active')
+                    : 'none known'}
+                </span>
+                {item.inKev && <span className="cvd-signal-pill cvd-signal-pill--kev">CISA KEV</span>}
+                {(() => {
+                  const impact = computeOrgImpact(item, riskResult.score, externalFacingCount);
+                  const impactStyle: React.CSSProperties =
+                    impact === 'HIGH'
+                      ? { background: '#9b233522', color: '#9b2335', border: '1px solid #9b233544' }
+                      : impact === 'MEDIUM'
+                        ? { background: '#b7791f22', color: '#b7791f', border: '1px solid #b7791f44' }
+                        : impact === 'LOW'
+                          ? { background: '#2d6a4f22', color: '#2d6a4f', border: '1px solid #2d6a4f44' }
+                          : { background: 'var(--panel-muted)', color: 'var(--muted)', border: '1px solid var(--border)' };
+                  const impactLabel = impact === 'NONE' ? 'No' : impact.charAt(0) + impact.slice(1).toLowerCase();
+                  return (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '2px 10px', borderRadius: 12,
+                      fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+                      ...impactStyle,
+                    }}>
+                      Impact: {impactLabel}
+                    </span>
                   );
                 })()}
               </div>
+
+              {/* Description */}
+              <p className="cvd-ov-description">{detail.summary.description || 'No description available.'}</p>
+
+              <div className="cvd-ov-divider" />
+
+              {/* Links row */}
+              <div className="cvd-ov-links">
+                <button type="button" className="cvd-ov-link"
+                  onClick={() => navigate(pathForVulnRepoCveAssets(item.externalId))}>
+                  {displayAssetCount} assets →
+                </button>
+                <button type="button" className="cvd-ov-link"
+                  onClick={() => navigate(pathForVulnRepoCveSoftware(item.externalId))}>
+                  {displaySoftwareCount} software →
+                </button>
+                {externalFacingCount > 0 && (
+                  <button type="button" className="cvd-ov-link"
+                    onClick={() => navigate(pathForInventoryViewWithSearch('hosts', { quickFilter: 'external-with-cves' }))}>
+                    {externalFacingCount} external facing →
+                  </button>
+                )}
+                <button type="button" className="cvd-ov-link"
+                  onClick={() => navigate(pathForFindingsWithFilters({ vulnerabilityId: item.externalId }))}>
+                  {item.openFindings} open findings →
+                </button>
+                {aiActionsError && !aiActionsLoading && (
+                  <span className="cvd-ov-err">{aiActionsError}</span>
+                )}
+              </div>
+            </div>
+
+            {/* ── Right column: S.AI mini chart ── */}
+            <div className="cvd-ov-right">
+              <CveRiskScorePanel item={item} mini />
             </div>
           </div>
         );
@@ -5793,6 +5789,12 @@ export function VulnRepoCveAssessmentWorkbench({
   const latestInvestigation = React.useMemo(() => latestByDate(detail?.investigations ?? []), [detail]);
   const latestAssessment = React.useMemo(() => latestByDate(detail?.assessments ?? []), [detail]);
 
+  const riskPolicyQuery = useRiskPolicyQuery();
+  const riskResult = React.useMemo(
+    () => computeCveRiskScore(item, riskPolicyQuery.data),
+    [item, riskPolicyQuery.data],
+  );
+
   // Investigation state
   const [, setInvestigationId] = React.useState<number | null>(null);
   const [investigationNotes, setInvestigationNotes] = React.useState('');
@@ -5836,6 +5838,19 @@ export function VulnRepoCveAssessmentWorkbench({
   const [findingConfigOpen, setFindingConfigOpen] = React.useState(false);
   const [findingIdsByComponentId, setFindingIdsByComponentId] = React.useState<Map<string, string>>(new Map());
   const [findingsByDisplayId, setFindingsByDisplayId] = React.useState<Map<string, Finding>>(new Map());
+  const createdFindings = React.useMemo(() => Array.from(findingsByDisplayId.values()).map((finding) => ({
+    displayId: finding.displayId || finding.id,
+    assetName: finding.assetName,
+    assetIdentifier: finding.assetIdentifier,
+    packageName: finding.packageName,
+    packageVersion: finding.packageVersion,
+    severity: finding.severity,
+    status: finding.status,
+    decisionState: finding.decisionState,
+    assignedTo: finding.assignedTo,
+    dueAt: finding.dueAt,
+    incidentId: finding.incidentId,
+  })), [findingsByDisplayId]);
 
   React.useEffect(() => {
     if ((!findingConfigOpen && activeStep !== 4) || availableGroups.length > 0) return;
@@ -6077,6 +6092,21 @@ export function VulnRepoCveAssessmentWorkbench({
         at: new Date().toISOString(),
       }
     ]);
+
+    // When Solutions is marked Done and assets are matched, persist applicability as AFFECTED
+    if (taskId === 'solutions' && item.matchedAssetCount > 0 && item.applicability !== 'APPLICABLE') {
+      void (async () => {
+        try {
+          await cveWorkbenchApi.submitCveAssessment(item.externalId, {
+            finalResult: 'AFFECTED',
+            confidenceLevel: 'MEDIUM',
+            softwareDetected: true,
+            vulnerableVersionPresent: true,
+          });
+          await onRefreshDetail({ includeList: true });
+        } catch { /* best-effort */ }
+      })();
+    }
   }
 
   function handleAddInvestigationLogEntry(): void {
@@ -6492,17 +6522,101 @@ export function VulnRepoCveAssessmentWorkbench({
     onRefreshDetail();
   }
 
+  const riskJourney = riskResult.journey.filter(ev => !ev.isNote);
+
   return (
     <div className="cve-assessment-page">
-      <div className="cve-assessment-breadcrumb">
-        {currentBreadcrumbStep && (
-          <>
-            <button type="button" onClick={() => guardedNav(() => setActiveStep(1))}>{item.externalId}</button>
-            <span aria-hidden="true">›</span>
-            <span>{currentBreadcrumbStep}</span>
-          </>
-        )}
-      </div>
+
+      {/* ── CVE headline: shown only on sub-steps (breadcrumb) ── */}
+      {currentBreadcrumbStep && <div className="cvd-headline">
+        <div className="cvd-headline-id-row">
+          {currentBreadcrumbStep ? (
+            <>
+              <button type="button" className="cvd-headline-cve-id cvd-headline-cve-link" onClick={() => guardedNav(() => setActiveStep(1))}>
+                {item.externalId}
+              </button>
+              <span className="cvd-headline-sep" aria-hidden="true">›</span>
+              <span className="cvd-headline-step">{currentBreadcrumbStep}</span>
+            </>
+          ) : (
+            <span className="cvd-headline-cve-id">{item.externalId}</span>
+          )}
+        </div>
+
+        <div className="cvd-headline-badges">
+          {/* S.AI score badge — hover reveals score reasoning tooltip */}
+          <div className="cvd-score-wrap">
+            <div className="cvd-score-badge" style={{ background: riskResult.color }}>
+              <span className="cvd-score-num">{riskResult.score.toFixed(1)}</span>
+              <span className="cvd-score-label">{riskResult.label}</span>
+              <span className="cvd-score-symbol">✦</span>
+            </div>
+            {/* Hover tooltip */}
+            <div className="cvd-score-tooltip" role="tooltip">
+              <div className="cvd-score-tooltip-heading">Why this score?</div>
+              {riskJourney.length > 0 && (
+                <div className="cvd-score-tooltip-journey">
+                  {riskJourney.map((ev, i) => (
+                    <div key={i} className="cvd-score-tooltip-row">
+                      <span className="cvd-score-tooltip-stage">{ev.stage}</span>
+                      {ev.delta !== 0 && (
+                        <span className={`cvd-score-tooltip-delta${ev.delta > 0 ? ' up' : ' down'}`}>
+                          {ev.delta > 0 ? '+' : ''}{ev.delta.toFixed(1)}
+                        </span>
+                      )}
+                      <span className="cvd-score-tooltip-val">→ {ev.score.toFixed(1)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {riskResult.topReasons.length > 0 && (
+                <>
+                  <div className="cvd-score-tooltip-divider" />
+                  <div className="cvd-score-tooltip-heading">Key drivers</div>
+                  {riskResult.topReasons.map((r, i) => (
+                    <div key={i} className="cvd-score-tooltip-reason">· {r}</div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* CVSS · EPSS */}
+          {item.cvssScore != null && (
+            <span className="cvd-signal-pill">
+              CVSS {item.cvssScore.toFixed(1)}{item.severity ? ` · ${item.severity.toLowerCase()}` : ''}
+            </span>
+          )}
+          {item.epssScore != null && (
+            <span className="cvd-signal-pill">EPSS {(item.epssScore * 100).toFixed(1)}%</span>
+          )}
+          {item.matchedAssetCount > 0 && (
+            <span className="cvd-signal-pill">
+              {item.matchedAssetCount} asset{item.matchedAssetCount !== 1 ? 's' : ''} impacted
+            </span>
+          )}
+          {item.inKev && <span className="cvd-signal-pill cvd-signal-pill--kev">CISA KEV</span>}
+          {(() => {
+            const impact = computeOrgImpact(item, riskResult.score, 0);
+            const impactStyle: React.CSSProperties =
+              impact === 'HIGH'
+                ? { background: '#9b233522', color: '#9b2335', border: '1px solid #9b233544' }
+                : impact === 'MEDIUM'
+                  ? { background: '#b7791f22', color: '#b7791f', border: '1px solid #b7791f44' }
+                  : { background: '#2d6a4f22', color: '#2d6a4f', border: '1px solid #2d6a4f44' };
+            return (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 10px', borderRadius: 12,
+                fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+                ...impactStyle,
+              }}>
+                Impact: {impact.charAt(0) + impact.slice(1).toLowerCase()}
+              </span>
+            );
+          })()}
+        </div>
+      </div>}
 
       {loading ? (
         <div className="notice">Loading CVE details...</div>
@@ -6514,9 +6628,6 @@ export function VulnRepoCveAssessmentWorkbench({
         <>
           {actionNotice && <div className="notice">{actionNotice}</div>}
           {actionError && <div className="notice error">{actionError}</div>}
-
-          {/* CVE Risk Score journey — visible on all steps except full-screen investigation canvas */}
-          {!investigationCanvasOpen && <CveRiskScorePanel item={item} />}
 
           {/* Investigation page — full page, replaces step content */}
           {investigationCanvasOpen && detail && (
@@ -6540,6 +6651,7 @@ export function VulnRepoCveAssessmentWorkbench({
                 if (filter?.software) setFindingSearchQuery(filter.software);
                 setInvestigationCanvasOpen(false);
                 setActiveStep(3);
+                setFindingConfigOpen(Boolean(filter?.openConfig));
               }}
               logEntries={investigationLogEntries}
               newLogType={newInvestigationLogType}
@@ -6551,6 +6663,7 @@ export function VulnRepoCveAssessmentWorkbench({
               onSaveDraft={() => {
                 /* flushRunbookState is called inside InvestigationCanvas via useEffect */
               }}
+              createdFindings={createdFindings}
             />
           )}
 

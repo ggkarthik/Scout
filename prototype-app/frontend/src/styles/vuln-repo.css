@@ -28,6 +28,92 @@
   transform: translateY(-1px);
 }
 
+.stat-caption-link {
+  display: block;
+  font-size: inherit;
+  color: var(--text-secondary, #6b7280);
+  text-align: left;
+  text-decoration: none;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.stat-caption-link:hover {
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
+}
+.vuln-repo-attention-subscores {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.vuln-repo-attention-subscore {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.vuln-repo-attention-subscore-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.vuln-repo-attention-subscore-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.3;
+}
+
+.vuln-repo-attention-subscore--critical .vuln-repo-attention-subscore-value {
+  color: var(--critical, #dc2626);
+}
+.vuln-repo-attention-subscore--critical:hover .vuln-repo-attention-subscore-label {
+  color: var(--critical, #dc2626);
+}
+
+.vuln-repo-attention-subscore--kev .vuln-repo-attention-subscore-value {
+  color: var(--severity-high, #d97706);
+}
+.vuln-repo-attention-subscore--kev:hover .vuln-repo-attention-subscore-label {
+  color: var(--severity-high, #d97706);
+}
+
+.stat-caption-link--critical {
+  color: var(--critical, #dc2626);
+}
+.stat-caption-link--critical:hover {
+  color: var(--severity-critical, #b91c1c);
+}
+.stat-caption-link--kev {
+  color: var(--severity-high, #d97706);
+}
+.stat-caption-link--kev:hover {
+  color: var(--severity-critical, #dc2626);
+}
+
+.vuln-repo-added-week-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.vuln-repo-added-week-breakdown .severity-pill,
+.vuln-repo-added-week-breakdown .status-pill {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+}
+
 .vuln-repo-dashboard-stat-button:focus-visible {
   outline: none;
 }
@@ -57,6 +143,18 @@
 .vuln-repo-dashboard-funnel-row {
   display: grid;
   gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+
+.vuln-repo-dashboard-funnel-row:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .vuln-repo-dashboard-funnel-copy {
@@ -90,7 +188,8 @@
 }
 
 .vuln-repo-dashboard-main-grid {
-  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .vuln-repo-dashboard-overview-stack {
@@ -138,7 +237,7 @@
 
 .vuln-repo-dashboard-context-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -184,12 +283,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
-  align-items: center;
+  align-items: start;
 }
 
 .vuln-repo-dashboard-unresolved-copy {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .vuln-repo-dashboard-unresolved-copy p,
@@ -203,6 +303,7 @@
 .vuln-repo-dashboard-advisory-copy p {
   color: var(--text);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .vuln-repo-dashboard-item-tags {
@@ -265,6 +366,59 @@
   overflow: hidden;
 }
 
+.vuln-repo-dashboard-risk-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.vuln-repo-dashboard-risk-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.vuln-repo-dashboard-risk-row--link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+  cursor: pointer;
+  width: calc(100% + 8px);
+  text-align: left;
+}
+.vuln-repo-dashboard-risk-row--link:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
+}
+
+.vuln-repo-dashboard-risk-row span:first-child {
+  color: var(--text-secondary, #6b7280);
+}
+
+.vuln-repo-dashboard-risk-row strong {
+  text-align: right;
+  font-size: 0.78rem;
+}
+
+.vuln-repo-dashboard-risk-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-muted, #e5e7eb) 80%, transparent);
+  overflow: hidden;
+}
+
+.vuln-repo-dashboard-risk-footer {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
 .vuln-repo-inline-bar {
   display: block;
   height: 100%;
@@ -301,6 +455,11 @@
 .vuln-repo-dashboard-asset-card {
   cursor: pointer;
   transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.vuln-repo-dashboard-advisory-item {
+  display: grid;
+  align-items: start;
 }
 
 .vuln-repo-dashboard-advisory-item:hover,
@@ -356,9 +515,26 @@
 
 .vuln-repo-dashboard-software-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 70px 80px 80px 140px;
   gap: var(--space-3);
   align-items: center;
+}
+
+.vuln-repo-dashboard-software-row--header {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vuln-repo-dashboard-software-row--header span:not(:first-child),
+.vuln-repo-dashboard-software-row > .vuln-repo-dashboard-count-link {
+  justify-self: end;
+}
+
+.vuln-repo-dashboard-software-row > .status-pill {
+  justify-self: end;
 }
 
 .vuln-repo-dashboard-software-copy {
@@ -401,7 +577,8 @@
 
 .vuln-repo-dashboard-advisory-copy {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .vuln-repo-dashboard-assets-grid {
@@ -435,41 +612,71 @@
 
 .vuln-repo-intel-toolbar {
   margin: 8px 0 12px;
-  padding: 8px 0;
+  padding: 10px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: transparent;
 }
 
 .vuln-repo-intel-toolbar .fpl-toolbar-left {
-  align-items: end;
-  flex-wrap: wrap;
-  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  gap: 12px;
   width: 100%;
+  min-width: 0;
+}
+
+.vuln-repo-intel-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  padding-bottom: 2px;
 }
 
 .vuln-repo-intel-search {
-  flex: 0 1 280px;
-  width: min(280px, 100%);
+  flex: 0 1 260px;
+  width: min(260px, 100%);
   margin-left: auto;
+  align-self: flex-end;
+}
+
+.vuln-repo-intel-search label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
 }
 
 .vuln-repo-intel-search input {
   width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--panel);
+  color: var(--title);
+  font-size: 0.875rem;
 }
 
 .vuln-repo-filter-select {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .vuln-repo-filter-select span {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .vuln-repo-filter-select select {
@@ -479,8 +686,30 @@
   border-radius: 8px;
   background: var(--panel);
   color: var(--title);
-  padding: 0 32px 0 10px;
+  padding: 0 32px 0 12px;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.intel-col-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+}
+
+.intel-col-label {
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .vuln-repo-vulnerabilities-layout {
@@ -746,6 +975,16 @@
   .vuln-repo-dashboard-unresolved-item,
   .vuln-repo-dashboard-software-row {
     grid-template-columns: 1fr;
+  }
+
+  .vuln-repo-dashboard-software-row--header {
+    display: none;
+  }
+
+  .vuln-repo-dashboard-software-row--header span:not(:first-child),
+  .vuln-repo-dashboard-software-row > .vuln-repo-dashboard-count-link,
+  .vuln-repo-dashboard-software-row > .status-pill {
+    justify-self: start;
   }
 
   .vuln-repo-dashboard-findings-count {

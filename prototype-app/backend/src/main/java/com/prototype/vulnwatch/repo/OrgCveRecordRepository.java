@@ -308,6 +308,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         :includeAll = true
                         or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
                       and (
                         :queryPattern is null
                         or upper(o.externalId) like :queryPattern
@@ -369,6 +370,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         :includeAll = true
                         or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
                       and (
                         :queryPattern is null
                         or upper(o.externalId) like :queryPattern
@@ -390,6 +392,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("softwareIdentityId") UUID softwareIdentityId,
             @Param("softwarePattern") String softwarePattern,
             @Param("includeAll") boolean includeAll,
+            @Param("impactedOnly") boolean impactedOnly,
             Pageable pageable
     );
 
@@ -441,6 +444,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         :includeAll = true
                         or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
                       and (
                         :queryPattern is null
                         or upper(o.externalId) like :queryPattern
@@ -502,6 +506,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         :includeAll = true
                         or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
                       )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
                       and (
                         :queryPattern is null
                         or upper(o.externalId) like :queryPattern
@@ -523,6 +528,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("softwareIdentityId") UUID softwareIdentityId,
             @Param("softwarePattern") String softwarePattern,
             @Param("includeAll") boolean includeAll,
+            @Param("impactedOnly") boolean impactedOnly,
             Pageable pageable
     );
 

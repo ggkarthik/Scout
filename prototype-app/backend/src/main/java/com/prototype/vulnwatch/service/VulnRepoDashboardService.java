@@ -52,15 +52,19 @@ public class VulnRepoDashboardService {
         long trackedAddedLastWeek = countTrackedAddedLastWeek(tenantId, now.minus(7, ChronoUnit.DAYS));
         long applicableCount = countApplicableCves(tenantId, null);
         long applicableAddedLastWeek = countApplicableCves(tenantId, now.minus(7, ChronoUnit.DAYS));
-        long impactedInvestigationDoneCount = countByImpactStates(tenantId, IMPACTED_STATES);
+        long impactedInvestigationDoneCount = countApplicableWithMatchedAssets(tenantId);
         long impactedAddedLastWeek = countImpactedAddedSince(tenantId, now.minus(7, ChronoUnit.DAYS));
+        long kevAddedLastWeek = countKevAddedSince(tenantId, now.minus(7, ChronoUnit.DAYS));
         long remediationCveCount = countCvesWithFindings(tenantId);
         long needsAttentionCount = countNeedsAttention(tenantId);
+        long criticalUninvestigatedCount = countCriticalUninvestigated(tenantId);
+        long kevReinvestigationCount = countKevReinvestigation(tenantId);
         long criticalCount = countBySeverity(tenantId, "CRITICAL");
         long exploitCount = countExploitAvailable(tenantId);
         int exploitCoveragePercent = trackedCount <= 0L
                 ? 0
                 : (int) Math.round((double) exploitCount * 100.0d / (double) trackedCount);
+        ImpactedBreakdown impactedBreakdown = loadImpactedBreakdown(tenantId);
 
         return new VulnRepoDashboardResponse(
                 now,
@@ -75,7 +79,15 @@ public class VulnRepoDashboardService {
                         needsAttentionCount,
                         criticalCount,
                         exploitCount,
-                        exploitCoveragePercent
+                        exploitCoveragePercent,
+                        impactedBreakdown.critical(),
+                        impactedBreakdown.high(),
+                        impactedBreakdown.medium(),
+                        impactedBreakdown.low(),
+                        impactedBreakdown.kev(),
+                        kevAddedLastWeek,
+                        criticalUninvestigatedCount,
+                        kevReinvestigationCount
                 ),
                 loadSeverityBreakdown(tenantId),
                 loadResolutionStatus(tenantId),
@@ -213,16 +225,56 @@ public class VulnRepoDashboardService {
                 ("""
                 select count(distinct o.vulnerability_id)
                 from org_cve_records o
-                join component_vulnerability_states cvs
-                  on cvs.tenant_id = o.tenant_id
-                 and cvs.vulnerability_id = o.vulnerability_id
-                join inventory_components ic
-                  on ic.id = cvs.component_id
-                 and ic.tenant_id = cvs.tenant_id
-                 and ic.component_status = 'ACTIVE'
                 where o.tenant_id = :tenantId
+                  and o.applicability_state = 'APPLICABLE'
                 """ + createdSinceFilter),
                 params,
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private record ImpactedBreakdown(long critical, long high, long medium, long low, long kev) {}
+
+    private ImpactedBreakdown loadImpactedBreakdown(UUID tenantId) {
+        ImpactedBreakdown result = jdbcTemplate.queryForObject(
+                """
+                select
+                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'CRITICAL' then 1 end) as critical_count,
+                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'HIGH' then 1 end) as high_count,
+                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'MEDIUM' then 1 end) as medium_count,
+                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'LOW' then 1 end) as low_count,
+                  count(case when o.in_kev = true then 1 end) as kev_count
+                from (
+                  select distinct o.vulnerability_id, o.severity, o.in_kev
+                  from org_cve_records o
+                  where o.tenant_id = :tenantId
+                    and o.applicability_state = 'APPLICABLE'
+                    and o.matched_asset_count > 0
+                ) o
+                """,
+                new MapSqlParameterSource().addValue("tenantId", tenantId),
+                (rs, rowNum) -> new ImpactedBreakdown(
+                        rs.getLong("critical_count"),
+                        rs.getLong("high_count"),
+                        rs.getLong("medium_count"),
+                        rs.getLong("low_count"),
+                        rs.getLong("kev_count")
+                )
+        );
+        return result != null ? result : new ImpactedBreakdown(0L, 0L, 0L, 0L, 0L);
+    }
+
+    private long countApplicableWithMatchedAssets(UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(distinct o.vulnerability_id)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and o.applicability_state = 'APPLICABLE'
+                  and o.matched_asset_count > 0
+                """,
+                new MapSqlParameterSource().addValue("tenantId", tenantId),
                 Long.class
         );
         return count == null ? 0L : count;
@@ -231,7 +283,7 @@ public class VulnRepoDashboardService {
     private long countImpactedAddedSince(UUID tenantId, Instant start) {
         Long count = jdbcTemplate.queryForObject(
                 """
-                select count(*)
+                select count(distinct o.vulnerability_id)
                 from org_cve_records o
                 where o.tenant_id = :tenantId
                   and o.created_at >= :start
@@ -241,6 +293,23 @@ public class VulnRepoDashboardService {
                         .addValue("tenantId", tenantId)
                         .addValue("start", Timestamp.from(start))
                         .addValue("states", IMPACTED_STATES),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countKevAddedSince(UUID tenantId, Instant start) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(distinct o.vulnerability_id)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and o.created_at >= :start
+                  and o.in_kev = true
+                """,
+                new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("start", Timestamp.from(start)),
                 Long.class
         );
         return count == null ? 0L : count;
@@ -265,7 +334,7 @@ public class VulnRepoDashboardService {
     private long countNeedsAttention(UUID tenantId) {
         Long count = jdbcTemplate.queryForObject(
                 """
-                select count(*)
+                select count(distinct o.vulnerability_id)
                 from org_cve_records o
                 where o.tenant_id = :tenantId
                   and upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
@@ -279,6 +348,51 @@ public class VulnRepoDashboardService {
                 new MapSqlParameterSource()
                         .addValue("tenantId", tenantId)
                         .addValue("states", IMPACTED_STATES),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countCriticalUninvestigated(UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(distinct o.vulnerability_id)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and upper(coalesce(o.severity, 'UNKNOWN')) = 'CRITICAL'
+                  and o.applicability_state = 'APPLICABLE'
+                  and upper(coalesce(o.impact_state, 'UNKNOWN')) = 'UNKNOWN'
+                  and not exists (
+                    select 1
+                    from findings f
+                    where f.tenant_id = o.tenant_id
+                      and f.vulnerability_id = o.vulnerability_id
+                  )
+                """,
+                new MapSqlParameterSource().addValue("tenantId", tenantId),
+                Long.class
+        );
+        return count == null ? 0L : count;
+    }
+
+    private long countKevReinvestigation(UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                select count(distinct o.vulnerability_id)
+                from org_cve_records o
+                where o.tenant_id = :tenantId
+                  and o.in_kev = true
+                  and o.applicability_state = 'APPLICABLE'
+                  and o.matched_asset_count > 0
+                  and upper(coalesce(o.impact_state, 'UNKNOWN')) not in ('FIXED', 'NOT_IMPACTED')
+                  and not exists (
+                    select 1
+                    from findings f
+                    where f.tenant_id = o.tenant_id
+                      and f.vulnerability_id = o.vulnerability_id
+                  )
+                """,
+                new MapSqlParameterSource().addValue("tenantId", tenantId),
                 Long.class
         );
         return count == null ? 0L : count;
@@ -367,7 +481,7 @@ public class VulnRepoDashboardService {
     private long countByImpactStates(UUID tenantId, List<String> states) {
         Long count = jdbcTemplate.queryForObject(
                 """
-                select count(*)
+                select count(distinct o.vulnerability_id)
                 from org_cve_records o
                 where o.tenant_id = :tenantId
                   and upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
