@@ -4,28 +4,40 @@ import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../comp
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForVulnRepoView } from '../app/routes';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
-import { useCveDetailQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
+import { useCveDetailQuery, useRiskPolicyQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
 import type { AiSolutionData } from '../features/cve-workbench/api';
+import { computeCveRiskScore, computeOrgImpact, riskScoreLabel } from '../lib/riskScoring';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
 
 const PAGE_SIZE = 25;
 
-const VULN_REPO_COLUMNS: DataTableColumn[] = [
-  { id: 'cve', label: 'Vulnerability ID', header: 'Vulnerability ID', initialSize: 200 },
-  { id: 'title', label: 'Description', header: 'Description', initialSize: 360 },
-  { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
-  { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
-  { id: 'applicable', label: 'Applicable', header: 'Applicable', initialSize: 110 },
-  { id: 'investigationStatus', label: 'Investigation Status', header: 'Investigation Status', initialSize: 170 },
-  { id: 'impactedSoftware', label: 'Impacted Software', header: 'Impacted Software', initialSize: 180 },
-  { id: 'investigationSummary', label: 'AI Summaries', header: 'AI Summaries', initialSize: 140 },
-  { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
-  { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 },
-];
-
 const RUNBOOK_TASK_IDS = ['review-asset-inventory', 'find-false-positive', 'end-of-life-analysis', 'solutions', 'installed-patch-info'];
 const SEVERITY_FILTER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
-const STATUS_FILTER_OPTIONS = ['OPEN', 'APPLICABLE', 'NOT_APPLICABLE', 'IN_PROGRESS', 'NOT_STARTED', 'DONE'];
+const STATUS_FILTER_OPTIONS = ['OPEN', 'IN_PROGRESS', 'NOT_STARTED', 'DONE'];
+const RISK_TIER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+
+// Column-level filter types
+type IntelColKey = 'cve' | 'severity' | 'cvss' | 'epss' | 'cveRisk' | 'applicable' | 'investigationStatus';
+type IntelColFilters = {
+  cve: string;
+  severity: string[];
+  cvss: string;
+  epss: string;
+  cveRisk: string[];
+  applicable: string;
+  investigationStatus: string[];
+};
+const DEFAULT_INTEL_COL_FILTERS: IntelColFilters = {
+  cve: '', severity: [], cvss: '', epss: '', cveRisk: [], applicable: '', investigationStatus: [],
+};
+
+// Funnel SVG icon used in column headers
+const FunnelIcon = ({ active }: { active: boolean }) => (
+  <svg viewBox="0 0 12 12" width="11" height="11"
+    fill={active ? 'var(--accent,#3b82f6)' : 'currentColor'} aria-hidden="true">
+    <path d="M1 2h10l-4 5v3l-2-1V7z" />
+  </svg>
+);
 
 function getInvestigationStatus(cveId: string): 'not-started' | 'in-progress' | 'done' {
   try {
@@ -108,24 +120,24 @@ function isApplicableByInventory(record: OrgSpecificCveExposureRecord): boolean 
   return record.matchedSoftwareCount > 0;
 }
 
-function statusForRecord(record: OrgSpecificCveExposureRecord): string {
-  if (record.openFindings > 0) {
-    return 'OPEN';
-  }
-  const investigationStatus = getInvestigationStatus(record.externalId);
-  if (investigationStatus === 'done') {
-    return 'DONE';
-  }
-  if (investigationStatus === 'in-progress') {
-    return 'IN_PROGRESS';
-  }
-  if (isApplicableByInventory(record)) {
-    return 'APPLICABLE';
-  }
-  if (record.applicability === 'NOT_APPLICABLE') {
+function cveDisplayStatus(record: OrgSpecificCveExposureRecord): 'NOT_APPLICABLE' | 'NO_IMPACT' | 'REVIEWED' | 'APPLICABLE' {
+  if (record.applicability === 'NOT_APPLICABLE' || (record.matchedAssetCount === 0 && record.applicableComponentCount === 0)) {
     return 'NOT_APPLICABLE';
   }
-  return 'NOT_STARTED';
+  // No Impact: all findings closed and no remaining open exposure
+  if (record.openFindings === 0 && record.impactedComponentCount === 0 && record.underInvestigationComponentCount === 0) {
+    return 'NO_IMPACT';
+  }
+  // Reviewed: investigation workflow marked done (mirrors workbench invDone logic)
+  const investigationStatus = getInvestigationStatus(record.externalId);
+  if (investigationStatus === 'done') {
+    return 'REVIEWED';
+  }
+  return 'APPLICABLE';
+}
+
+function statusForRecord(record: OrgSpecificCveExposureRecord): string {
+  return cveDisplayStatus(record);
 }
 
 function dashboardFilterLabel(key: string, value: string): string {
@@ -134,6 +146,9 @@ function dashboardFilterLabel(key: string, value: string): string {
   }
   if (key === 'exploitOnly' && value === 'true') {
     return 'Exploit: Available';
+  }
+  if (key === 'inKev' && value === 'true') {
+    return 'CISA KEV: Yes';
   }
   if (key === 'createdSinceDays') {
     return `Added: Last ${value} days`;
@@ -146,6 +161,12 @@ function dashboardFilterLabel(key: string, value: string): string {
   }
   if (key === 'includeAll' && value === 'true') {
     return 'Scope: All tracked CVEs';
+  }
+  if (key === 'impactedOnly' && value === 'true') {
+    return 'Impact: High / Medium / Low';
+  }
+  if (key === 'hasFindings' && value === 'true') {
+    return 'Open Findings: Yes';
   }
   return `${formatLabel(key)}: ${value}`;
 }
@@ -198,6 +219,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const initialSeverity = React.useMemo(() => searchParams.get('severity')?.trim() ?? '', [searchParams]);
   const initialStatuses = React.useMemo(() => parseCsvParam(searchParams.get('status')), [searchParams]);
   const initialExploitOnly = React.useMemo(() => searchParams.get('exploitOnly') === 'true', [searchParams]);
+  const initialInKev = React.useMemo(() => searchParams.get('inKev') === 'true', [searchParams]);
   const initialCreatedSinceDays = React.useMemo(() => {
     const raw = searchParams.get('createdSinceDays');
     if (!raw) {
@@ -210,6 +232,9 @@ export function VulnRepoVulnerabilitiesPage() {
   const initialSoftwareScope = React.useMemo(() => searchParams.get('softwareScope')?.trim() ?? '', [searchParams]);
   const initialSoftwareIdentityId = React.useMemo(() => searchParams.get('softwareIdentityId')?.trim() ?? '', [searchParams]);
   const initialIncludeAll = React.useMemo(() => searchParams.get('includeAll') === 'true', [searchParams]);
+  const initialApplicable = React.useMemo(() => searchParams.get('applicable') === 'true', [searchParams]);
+  const initialImpactedOnly = React.useMemo(() => searchParams.get('impactedOnly') === 'true', [searchParams]);
+  const initialHasFindings = React.useMemo(() => searchParams.get('hasFindings') === 'true', [searchParams]);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState(initialQuery);
   const [query, setQuery] = React.useState(initialQuery);
@@ -217,6 +242,9 @@ export function VulnRepoVulnerabilitiesPage() {
   const [statusFilters, setStatusFilters] = React.useState<string[]>(initialStatuses);
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
+  const [colFilters, setColFilters] = React.useState<IntelColFilters>(DEFAULT_INTEL_COL_FILTERS);
+  const [openColFilter, setOpenColFilter] = React.useState<IntelColKey | null>(null);
+  const colFilterRef = React.useRef<HTMLDivElement | null>(null);
   const serverSeverityFilter = severityFilters.length === 1 ? severityFilters[0] : undefined;
   const vulnRepoQuery = useVulnRepoVulnerabilitiesQuery({
     page,
@@ -224,12 +252,19 @@ export function VulnRepoVulnerabilitiesPage() {
     query: query || undefined,
     severity: serverSeverityFilter,
     exploitOnly: initialExploitOnly || undefined,
+    inKev: initialInKev || undefined,
     createdSinceDays: initialCreatedSinceDays,
     software: initialSoftware || undefined,
     softwareScope: initialSoftwareScope || undefined,
     softwareIdentityId: initialSoftwareIdentityId || undefined,
-    includeAll: initialIncludeAll || undefined,
+    // Omit includeAll when applicable filter is active (URL, column filter, or legacy status filter)
+    // so the server returns only applicabilityState=APPLICABLE rows
+    includeAll: (initialApplicable || initialImpactedOnly || colFilters.applicable === 'YES' || statusFilters.includes('APPLICABLE'))
+      ? undefined
+      : (initialIncludeAll || undefined),
+    impactedOnly: initialImpactedOnly || undefined,
   });
+  const policyQuery = useRiskPolicyQuery();
   const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
   const totalItems = vulnRepoQuery.data?.totalItems ?? 0;
   const totalPages = vulnRepoQuery.data?.totalPages ?? 0;
@@ -259,19 +294,171 @@ export function VulnRepoVulnerabilitiesPage() {
     setSeverityFilters(parseCsvParam(initialSeverity));
     setStatusFilters(initialStatuses);
     setPage(0);
-  }, [initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses]);
+  }, [initialApplicable, initialImpactedOnly, initialInKev, initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses]);
+
+  // Reset to page 0 when applicable column filter changes (server query changes)
+  React.useEffect(() => {
+    setPage(0);
+  }, [colFilters.applicable]);
+
+  // Close column filter popover on outside click
+  React.useEffect(() => {
+    if (!openColFilter) return;
+    function handleClick(e: MouseEvent) {
+      if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node)) {
+        setOpenColFilter(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [openColFilter]);
+
+  function hasColFilter(key: IntelColKey): boolean {
+    const f = colFilters;
+    if (key === 'cve') return f.cve !== '';
+    if (key === 'severity') return f.severity.length > 0;
+    if (key === 'cvss') return f.cvss !== '';
+    if (key === 'epss') return f.epss !== '';
+    if (key === 'cveRisk') return f.cveRisk.length > 0;
+    if (key === 'applicable') return f.applicable !== '';
+    if (key === 'investigationStatus') return f.investigationStatus.length > 0;
+    return false;
+  }
+
+  function clearColFilter(key: IntelColKey) {
+    const empty = ['severity', 'cveRisk', 'investigationStatus'].includes(key) ? [] : '';
+    setColFilters((f) => ({ ...f, [key]: empty }));
+    setOpenColFilter(null);
+  }
+
+  function toggleColArr(key: 'severity' | 'cveRisk' | 'investigationStatus', value: string) {
+    setColFilters((f) => {
+      const arr = f[key] as string[];
+      return { ...f, [key]: arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value] };
+    });
+    setPage(0);
+  }
+
+  function renderColFilterPopover(colKey: IntelColKey): React.ReactNode {
+    if (openColFilter !== colKey) return null;
+    const colLabel: Record<IntelColKey, string> = {
+      cve: 'Vulnerability ID', severity: 'Severity', cvss: 'CVSS',
+      epss: 'EPSS', cveRisk: 'S.AI Risk', applicable: 'Applicable',
+      investigationStatus: 'Investigation Status',
+    };
+    return (
+      <div className="fpl-col-filter-popover" ref={colFilterRef}>
+        <div className="fpl-col-filter-header">
+          <span>{colLabel[colKey]}</span>
+          {hasColFilter(colKey) && (
+            <button type="button" className="fpl-col-filter-clear" onClick={() => clearColFilter(colKey)}>Clear</button>
+          )}
+        </div>
+        {colKey === 'cve' && (
+          <input autoFocus className="fpl-col-filter-input" placeholder="Search CVE ID…"
+            value={colFilters.cve}
+            onChange={(e) => { setColFilters((f) => ({ ...f, cve: e.target.value })); setPage(0); }} />
+        )}
+        {colKey === 'severity' && (
+          <div className="fpl-col-filter-checks">
+            {SEVERITY_FILTER_OPTIONS.map((v) => (
+              <label key={v} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.severity.includes(v)} onChange={() => toggleColArr('severity', v)} />
+                <span className={severityClassName(v)} style={{ fontSize: 11 }}>{formatLabel(v)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {colKey === 'cvss' && (
+          <input autoFocus type="number" min={0} max={10} step={0.1} className="fpl-col-filter-input"
+            placeholder="Min CVSS score (0–10)" value={colFilters.cvss}
+            onChange={(e) => { setColFilters((f) => ({ ...f, cvss: e.target.value })); setPage(0); }} />
+        )}
+        {colKey === 'epss' && (
+          <input autoFocus type="number" min={0} max={100} step={0.1} className="fpl-col-filter-input"
+            placeholder="Min EPSS % (0–100)" value={colFilters.epss}
+            onChange={(e) => { setColFilters((f) => ({ ...f, epss: e.target.value })); setPage(0); }} />
+        )}
+        {colKey === 'cveRisk' && (
+          <div className="fpl-col-filter-checks">
+            {RISK_TIER_OPTIONS.map((tier) => (
+              <label key={tier} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.cveRisk.includes(tier)} onChange={() => toggleColArr('cveRisk', tier)} />
+                <span>{formatLabel(tier)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {colKey === 'applicable' && (
+          <div className="fpl-col-filter-checks">
+            {(['YES', 'NO'] as const).map((v) => (
+              <label key={v} className="fpl-col-filter-check">
+                <input type="radio" name="intel-applicable-filter"
+                  checked={colFilters.applicable === v}
+                  onChange={() => { setColFilters((f) => ({ ...f, applicable: f.applicable === v ? '' : v })); setPage(0); }} />
+                <span>{v === 'YES' ? 'Applicable (inventory matched)' : 'Not Applicable'}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {colKey === 'investigationStatus' && (
+          <div className="fpl-col-filter-checks">
+            {STATUS_FILTER_OPTIONS.map((v) => (
+              <label key={v} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.investigationStatus.includes(v)} onChange={() => toggleColArr('investigationStatus', v)} />
+                <span>{formatLabel(v)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const filteredItems = React.useMemo(() => (
     items.filter((item) => {
       if (severityFilters.length > 0 && !severityFilters.includes((item.severity || 'UNKNOWN').toUpperCase())) {
         return false;
       }
-      if (statusFilters.length > 0 && !statusFilters.includes(statusForRecord(item))) {
+      // APPLICABLE/NOT_APPLICABLE are not in STATUS_FILTER_OPTIONS; skip them to avoid empty results
+      const clientStatusFilters = statusFilters.filter((s) => s !== 'APPLICABLE' && s !== 'NOT_APPLICABLE');
+      if (clientStatusFilters.length > 0 && !clientStatusFilters.includes(statusForRecord(item))) {
+        return false;
+      }
+      // Guard: applicable filter is server-side but add client-side guard for items that slip through
+      if (initialApplicable && !isApplicableByInventory(item)) {
+        return false;
+      }
+      if (initialHasFindings && item.openFindings === 0) {
+        return false;
+      }
+      // Column-level filters
+      if (colFilters.cve && !item.externalId.toLowerCase().includes(colFilters.cve.toLowerCase())) {
+        return false;
+      }
+      if (colFilters.severity.length > 0 && !colFilters.severity.includes((item.severity || 'UNKNOWN').toUpperCase())) {
+        return false;
+      }
+      if (colFilters.cvss !== '') {
+        const min = parseFloat(colFilters.cvss);
+        if (!Number.isNaN(min) && (item.cvssScore ?? 0) < min) return false;
+      }
+      if (colFilters.epss !== '') {
+        const min = parseFloat(colFilters.epss);
+        if (!Number.isNaN(min) && (item.epssScore ?? 0) * 100 < min) return false;
+      }
+      if (colFilters.cveRisk.length > 0) {
+        const r = computeCveRiskScore(item, policyQuery.data);
+        if (!colFilters.cveRisk.includes(riskScoreLabel(r.score).toUpperCase())) return false;
+      }
+      if (colFilters.applicable === 'YES' && !isApplicableByInventory(item)) return false;
+      if (colFilters.applicable === 'NO' && isApplicableByInventory(item)) return false;
+      if (colFilters.investigationStatus.length > 0 && !colFilters.investigationStatus.includes(statusForRecord(item))) {
         return false;
       }
       return true;
     })
-  ), [items, severityFilters, statusFilters]);
+  ), [items, severityFilters, statusFilters, initialApplicable, initialHasFindings, colFilters, policyQuery.data]);
 
   const writeFilterParams = React.useCallback((updates: {
     severity?: string[];
@@ -332,6 +519,39 @@ export function VulnRepoVulnerabilitiesPage() {
           cvss: {
             content: item.cvssScore?.toFixed(1) ?? '-',
           },
+          epss: {
+            content: item.epssScore != null ? `${(item.epssScore * 100).toFixed(1)}%` : '-',
+          },
+          ...(() => {
+            const r = computeCveRiskScore(item, policyQuery.data);
+            const orgImpact = computeOrgImpact(item, r.score, 0);
+            const orgImpactStyle: React.CSSProperties =
+              orgImpact === 'HIGH'
+                ? { background: '#9b233522', color: '#9b2335', border: '1px solid #9b233544' }
+                : orgImpact === 'MEDIUM'
+                  ? { background: '#b7791f22', color: '#b7791f', border: '1px solid #b7791f44' }
+                  : orgImpact === 'LOW'
+                    ? { background: '#2d6a4f22', color: '#2d6a4f', border: '1px solid #2d6a4f44' }
+                    : { background: 'var(--panel-muted)', color: 'var(--muted)', border: '1px solid var(--border)' };
+            const orgImpactLabel = orgImpact === 'NONE' ? 'No' : orgImpact.charAt(0) + orgImpact.slice(1).toLowerCase();
+            const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(r.score).toLowerCase()}`;
+            return {
+              cveRisk: {
+                content: (
+                  <span className={cls} title={r.topReasons.join(' · ')}>
+                    {r.score.toFixed(1)}
+                  </span>
+                ),
+              },
+              orgImpact: {
+                content: (
+                  <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', ...orgImpactStyle }}>
+                    {orgImpactLabel}
+                  </span>
+                ),
+              },
+            };
+          })(),
           applicable: {
             content: applicable
               ? <span className="status-pill status-open">Yes</span>
@@ -339,10 +559,11 @@ export function VulnRepoVulnerabilitiesPage() {
           },
           investigationStatus: {
             content: (() => {
-              const status = getInvestigationStatus(item.externalId);
-              if (status === 'done') return <span className="inv-status-badge inv-status-done">Done</span>;
-              if (status === 'in-progress') return <span className="inv-status-badge inv-status-in-progress">In Progress</span>;
-              return <span className="inv-status-badge inv-status-not-started">Not Started</span>;
+              const s = cveDisplayStatus(item);
+              if (s === 'NOT_APPLICABLE') return <span className="inv-status-badge inv-status-not-started">Not Applicable</span>;
+              if (s === 'NO_IMPACT') return <span className="inv-status-badge inv-status-done">No Impact</span>;
+              if (s === 'REVIEWED') return <span className="inv-status-badge inv-status-in-progress">Reviewed</span>;
+              return <span className="inv-status-badge inv-status-applicable">Applicable</span>;
             })(),
           },
           impactedSoftware: {
@@ -417,27 +638,60 @@ export function VulnRepoVulnerabilitiesPage() {
         },
       };
     })
-  ), [filteredItems, navigate]);
+  ), [filteredItems, navigate, policyQuery.data]);
 
   const activeChips = React.useMemo<Array<{ label: string; onRemove: () => void }>>(() => {
     const chips: Array<{ label: string; onRemove: () => void }> = [];
-    if (severityFilters.length > 0) {
+    if (initialApplicable) {
       chips.push({
-        label: `Severity: ${severityFilters.map(formatLabel).join(', ')}`,
-        onRemove: () => updateSeverityFilters([]),
+        label: 'Applicable: Yes',
+        onRemove: () => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.delete('applicable');
+          setPage(0);
+          setSearchParams(nextParams);
+        },
       });
     }
-    if (statusFilters.length > 0) {
+    severityFilters.forEach((s) => {
       chips.push({
-        label: `Status: ${statusFilters.map(formatLabel).join(', ')}`,
-        onRemove: () => updateStatusFilters([]),
+        label: `Severity: ${formatLabel(s)}`,
+        onRemove: () => updateSeverityFilters(severityFilters.filter((x) => x !== s)),
       });
+    });
+    statusFilters.forEach((s) => {
+      chips.push({
+        label: `Status: ${formatLabel(s)}`,
+        onRemove: () => updateStatusFilters(statusFilters.filter((x) => x !== s)),
+      });
+    });
+    // Column-level filter chips
+    if (colFilters.cve) {
+      chips.push({ label: `CVE ID: ${colFilters.cve}`, onRemove: () => { setColFilters((f) => ({ ...f, cve: '' })); setPage(0); } });
     }
+    colFilters.severity.forEach((s) => {
+      chips.push({ label: `Severity: ${formatLabel(s)}`, onRemove: () => { setColFilters((f) => ({ ...f, severity: f.severity.filter((x) => x !== s) })); setPage(0); } });
+    });
+    if (colFilters.cvss) {
+      chips.push({ label: `CVSS ≥ ${colFilters.cvss}`, onRemove: () => { setColFilters((f) => ({ ...f, cvss: '' })); setPage(0); } });
+    }
+    if (colFilters.epss) {
+      chips.push({ label: `EPSS ≥ ${colFilters.epss}%`, onRemove: () => { setColFilters((f) => ({ ...f, epss: '' })); setPage(0); } });
+    }
+    colFilters.cveRisk.forEach((tier) => {
+      chips.push({ label: `S.AI Risk: ${formatLabel(tier)}`, onRemove: () => { setColFilters((f) => ({ ...f, cveRisk: f.cveRisk.filter((x) => x !== tier) })); setPage(0); } });
+    });
+    if (colFilters.applicable) {
+      chips.push({ label: `Applicable: ${colFilters.applicable === 'YES' ? 'Yes' : 'No'}`, onRemove: () => { setColFilters((f) => ({ ...f, applicable: '' })); setPage(0); } });
+    }
+    colFilters.investigationStatus.forEach((s) => {
+      chips.push({ label: `Inv. Status: ${formatLabel(s)}`, onRemove: () => { setColFilters((f) => ({ ...f, investigationStatus: f.investigationStatus.filter((x) => x !== s) })); setPage(0); } });
+    });
     return chips;
-  }, [severityFilters, statusFilters, updateSeverityFilters, updateStatusFilters]);
+  }, [initialApplicable, initialImpactedOnly, initialHasFindings, severityFilters, statusFilters, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters]);
 
   const dashboardFilterChips = React.useMemo(() => {
-    const keys = ['exploitOnly', 'createdSinceDays', 'software', 'softwareScope', 'includeAll'];
+    const keys = ['exploitOnly', 'inKev', 'createdSinceDays', 'software', 'softwareScope', 'includeAll', 'impactedOnly', 'hasFindings'];
     return keys
       .map((key) => {
         const value = searchParams.get(key);
@@ -447,9 +701,57 @@ export function VulnRepoVulnerabilitiesPage() {
   }, [searchParams]);
 
   const clearAllFilters = React.useCallback(() => {
-    updateSeverityFilters([]);
-    updateStatusFilters([]);
-  }, [updateSeverityFilters, updateStatusFilters]);
+    setSeverityFilters([]);
+    setStatusFilters([]);
+    setColFilters(DEFAULT_INTEL_COL_FILTERS);
+    setOpenColFilter(null);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('severity');
+    nextParams.delete('status');
+    nextParams.delete('applicable');
+    nextParams.delete('impactedOnly');
+    nextParams.delete('hasFindings');
+    setPage(0);
+    setSearchParams(nextParams);
+  }, [searchParams, setSearchParams]);
+
+  // Column defs with inline filter headers — recreated when filter state changes
+  const vuln_repo_columns = React.useMemo<DataTableColumn[]>(() => {
+    const filterable = (colKey: IntelColKey, label: string): React.ReactNode => {
+      const active = hasColFilter(colKey);
+      return (
+        <span className="intel-col-header-inner">
+          <span className="intel-col-label">{label}</span>
+          <button
+            type="button"
+            className={`fpl-filter-btn${active ? ' fpl-filter-btn--active' : ''}`}
+            title={`Filter ${label}`}
+            onClick={(e) => { e.stopPropagation(); setOpenColFilter((p) => (p === colKey ? null : colKey)); }}
+          >
+            <FunnelIcon active={active} />
+          </button>
+          {openColFilter === colKey && renderColFilterPopover(colKey)}
+        </span>
+      );
+    };
+    const relStyle: React.CSSProperties = { position: 'relative' };
+    return [
+      { id: 'cve', label: 'Vulnerability ID', initialSize: 200, headerProps: { style: relStyle }, header: filterable('cve', 'Vulnerability ID') },
+      { id: 'title', label: 'Description', header: 'Description', initialSize: 360 },
+      { id: 'severity', label: 'Severity', initialSize: 120, headerProps: { style: relStyle }, header: filterable('severity', 'Severity') },
+      { id: 'cvss', label: 'CVSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('cvss', 'CVSS') },
+      { id: 'epss', label: 'EPSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('epss', 'EPSS') },
+      { id: 'cveRisk', label: 'S.AI Risk', initialSize: 100, headerProps: { style: relStyle }, header: filterable('cveRisk', 'S.AI Risk') },
+      { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 110 },
+      { id: 'applicable', label: 'Applicable', initialSize: 110, headerProps: { style: relStyle }, header: filterable('applicable', 'Applicable') },
+      { id: 'investigationStatus', label: 'Investigation Status', initialSize: 170, headerProps: { style: relStyle }, header: filterable('investigationStatus', 'Investigation Status') },
+      { id: 'impactedSoftware', label: 'Impacted Software', header: 'Impacted Software', initialSize: 180 },
+      { id: 'investigationSummary', label: 'AI Summaries', header: 'AI Summaries', initialSize: 140 },
+      { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
+      { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 },
+    ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openColFilter, colFilters]);
 
   const updateSearchFilter = React.useCallback((value: string) => {
     setQueryInput(value);
@@ -476,6 +778,7 @@ export function VulnRepoVulnerabilitiesPage() {
 
       <div className="fpl-toolbar vuln-repo-intel-toolbar">
         <div className="fpl-toolbar-left">
+          {/* Column-level inline filter: Severity */}
           <label className="vuln-repo-filter-select">
             <span>Severity</span>
             <select
@@ -495,6 +798,8 @@ export function VulnRepoVulnerabilitiesPage() {
               ))}
             </select>
           </label>
+
+          {/* Column-level inline filter: Status */}
           <label className="vuln-repo-filter-select">
             <span>Status</span>
             <select
@@ -514,21 +819,16 @@ export function VulnRepoVulnerabilitiesPage() {
               ))}
             </select>
           </label>
-          {activeChips.length > 0 && (
-            <div className="fpl-active-chips">
+
+          {/* Active filter chips — one chip per selected value */}
+          {(activeChips.length > 0 || dashboardFilterChips.length > 0) && (
+            <div className="vuln-repo-intel-chips-row">
               {activeChips.map((chip) => (
                 <span key={chip.label} className="fpl-chip">
                   {chip.label}
-                  <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label} filter`}>x</button>
+                  <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label} filter`}>×</button>
                 </span>
               ))}
-              {activeChips.length > 1 && (
-                <button type="button" className="fpl-chip-clear" onClick={clearAllFilters}>Clear all</button>
-              )}
-            </div>
-          )}
-          {dashboardFilterChips.length > 0 && (
-            <div className="fpl-active-chips vuln-repo-dashboard-filter-chips" aria-label="Dashboard filters">
               {dashboardFilterChips.map((chip) => (
                 <span key={`${chip.key}:${chip.label}`} className="fpl-chip">
                   {chip.label}
@@ -542,13 +842,18 @@ export function VulnRepoVulnerabilitiesPage() {
                     }}
                     aria-label={`Remove ${chip.label} filter`}
                   >
-                    x
+                    ×
                   </button>
                 </span>
               ))}
+              {activeChips.length + dashboardFilterChips.length > 1 && (
+                <button type="button" className="fpl-chip-clear" onClick={clearAllFilters}>Clear all</button>
+              )}
             </div>
           )}
-          <div className="findings-filter-chip org-cve-filter-chip vuln-repo-intel-search">
+
+          {/* Search — pushed to far right */}
+          <div className="vuln-repo-intel-search">
             <label htmlFor="vuln-repo-vuln-search">Search CVE / Description</label>
             <input
               id="vuln-repo-vuln-search"
@@ -563,8 +868,8 @@ export function VulnRepoVulnerabilitiesPage() {
       <div className={`vuln-repo-vulnerabilities-layout${selectedSoftwareRecord ? ' is-drawer-open' : ''}`}>
         <div className="table-scroll">
           <DataTable
-            storageKey="vuln-repo-vulnerabilities-table-widths"
-            columns={VULN_REPO_COLUMNS}
+            storageKey="vuln-repo-vulnerabilities-table-v2"
+            columns={vuln_repo_columns}
             rows={tableRows}
           />
         </div>

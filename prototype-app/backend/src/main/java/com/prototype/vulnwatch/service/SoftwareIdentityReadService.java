@@ -53,6 +53,7 @@ public class SoftwareIdentityReadService {
             String lifecycle,
             String mappingState,
             String coverage,
+            String operatingSystem,
             int page,
             int size
     ) {
@@ -61,7 +62,7 @@ public class SoftwareIdentityReadService {
 
         int safePage = Math.max(0, page);
         int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
-        ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState, coverage);
+        ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState, coverage, operatingSystem);
         MapSqlParameterSource params = filters.params()
                 .addValue("limit", safeSize)
                 .addValue("offset", (long) safePage * safeSize);
@@ -74,7 +75,11 @@ public class SoftwareIdentityReadService {
                 (rs, rowNum) -> toProjectionRow(rs)
         );
 
-        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(tenant.getId(), rows.stream().map(SoftwareIdentityProjectionRow::id).toList());
+        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(
+                tenant.getId(),
+                rows.stream().map(SoftwareIdentityProjectionRow::id).toList(),
+                operatingSystem != null && !operatingSystem.isBlank()
+        );
         List<SoftwareIdentitySummaryResponse> content = rows.stream()
                 .map(row -> toSummaryResponse(row, exposureCounts.getOrDefault(row.id(), ExposureCounts.ZERO)))
                 .toList();
@@ -121,11 +126,11 @@ public class SoftwareIdentityReadService {
                 vulnerable_software AS (
                     SELECT DISTINCT ac.software_identity_id
                     FROM active_components ac
-                    JOIN findings f
-                      ON f.component_id = ac.component_id
-                     AND f.tenant_id = :tenantId
-                     AND f.status = 'OPEN'
-                     AND f.vulnerability_id IS NOT NULL
+                    JOIN component_vulnerability_states cvs
+                      ON cvs.component_id = ac.component_id
+                     AND cvs.tenant_id = :tenantId
+                     AND cvs.applicability_state = 'APPLICABLE'
+                     AND upper(coalesce(cvs.impact_state, 'UNKNOWN')) NOT IN ('FIXED', 'NOT_IMPACTED')
                 ),
                 finding_software AS (
                     SELECT DISTINCT ac.software_identity_id
@@ -181,7 +186,7 @@ public class SoftwareIdentityReadService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Software identity not found in active inventory");
         }
 
-        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(tenant.getId(), List.of(softwareIdentityId));
+        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(tenant.getId(), List.of(softwareIdentityId), false);
         ExposureCounts counts = exposureCounts.getOrDefault(softwareIdentityId, ExposureCounts.ZERO);
 
         SqlFilters filters = buildIdentityScope(tenant, softwareIdentityId);
@@ -326,7 +331,8 @@ public class SoftwareIdentityReadService {
             String query,
             String lifecycle,
             String mappingState,
-            String coverage
+            String coverage,
+            String operatingSystem
     ) {
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
         StringBuilder where = new StringBuilder("""
@@ -462,7 +468,89 @@ public class SoftwareIdentityReadService {
             });
         }
 
+        OsFilter osFilter = buildOperatingSystemFilter(operatingSystem);
+        if (osFilter != null) {
+            params.addValue("operatingSystemPattern", osFilter.pattern());
+            where.append(osFilter.sql());
+        }
+
         return new ProjectionFilters(where.toString(), params);
+    }
+
+    private OsFilter buildOperatingSystemFilter(String operatingSystem) {
+        if (operatingSystem == null || operatingSystem.isBlank()) {
+            return null;
+        }
+        String normalized = operatingSystem.trim().toLowerCase(Locale.ROOT);
+        if (normalized.equals("unknown")) {
+            return new OsFilter(null, """
+                     AND EXISTS (
+                         SELECT 1
+                         FROM inventory_components ic_os
+                         JOIN assets a_os
+                           ON a_os.id = ic_os.asset_id
+                         JOIN cis ci_os
+                           ON ci_os.asset_id = a_os.id
+                          AND ci_os.tenant_id = :tenantId
+                         WHERE ic_os.tenant_id = :tenantId
+                           AND ic_os.component_status = 'ACTIVE'
+                           AND ic_os.software_identity_id = sis.software_identity_id
+                           AND NOT EXISTS (
+                               SELECT 1
+                               FROM software_instances si_os
+                               WHERE si_os.tenant_id = :tenantId
+                                 AND si_os.ci_id = ci_os.id
+                                 AND lower(concat_ws(' ',
+                                   si_os.display_name,
+                                   si_os.publisher,
+                                   si_os.normalized_product,
+                                   si_os.normalized_publisher
+                                 )) SIMILAR TO '%(windows|ubuntu|debian|amazon linux|red hat|rhel|centos|rocky|alma|suse|mac os|macos|os x|linux)%'
+                           )
+                     )
+                    """);
+        }
+
+        String pattern;
+        if (normalized.contains("windows server")) {
+            pattern = "%windows server%";
+        } else if (normalized.contains("windows")) {
+            pattern = "%windows%";
+        } else if (normalized.contains("ubuntu")) {
+            pattern = "%ubuntu%";
+        } else if (normalized.contains("debian")) {
+            pattern = "%debian%";
+        } else if (normalized.contains("amazon linux")) {
+            pattern = "%amazon linux%";
+        } else if (normalized.equals("rhel") || normalized.contains("red hat")) {
+            pattern = "%red hat%";
+        } else if (normalized.contains("centos")) {
+            pattern = "%centos%";
+        } else if (normalized.contains("rocky")) {
+            pattern = "%rocky%";
+        } else if (normalized.contains("alma")) {
+            pattern = "%alma%";
+        } else if (normalized.contains("suse")) {
+            pattern = "%suse%";
+        } else if (normalized.contains("mac")) {
+            pattern = "%mac%";
+        } else if (normalized.contains("linux")) {
+            pattern = "%linux%";
+        } else {
+            pattern = "%" + normalized + "%";
+        }
+
+        return new OsFilter(pattern, """
+                 AND lower(replace(replace(concat_ws(' ',
+                   sis.display_name,
+                   sis.canonical_key,
+                   sis.vendor,
+                   sis.product,
+                   sis.normalized_key,
+                   sis.purl,
+                   sis.cpe23
+                 ), '_', ' '), '-', ' ')) LIKE :operatingSystemPattern
+                """);
     }
 
     private SqlFilters buildIdentityScope(Tenant tenant, UUID softwareIdentityId) {
@@ -476,7 +564,7 @@ public class SoftwareIdentityReadService {
                 """, params);
     }
 
-    private Map<UUID, ExposureCounts> loadExposureCounts(UUID tenantId, List<UUID> softwareIdentityIds) {
+    private Map<UUID, ExposureCounts> loadExposureCounts(UUID tenantId, List<UUID> softwareIdentityIds, boolean assetScopedVulnerabilities) {
         if (tenantId == null || softwareIdentityIds == null || softwareIdentityIds.isEmpty()) {
             return Map.of();
         }
@@ -488,12 +576,25 @@ public class SoftwareIdentityReadService {
                 SELECT
                     ic.software_identity_id,
                     COUNT(DISTINCT f.id) AS open_finding_count,
-                    COUNT(DISTINCT f.vulnerability_id) AS open_vulnerability_count
+                    COUNT(DISTINCT CASE
+                        WHEN cvs.applicability_state = 'APPLICABLE'
+                         AND upper(coalesce(cvs.impact_state, 'UNKNOWN')) NOT IN ('FIXED', 'NOT_IMPACTED')
+                        THEN cvs.vulnerability_id
+                    END) AS open_vulnerability_count
                 FROM inventory_components ic
-                JOIN findings f
+                LEFT JOIN findings f
                     ON f.component_id = ic.id
                    AND f.tenant_id = :tenantId
                    AND f.status = 'OPEN'
+                """ + (assetScopedVulnerabilities ? """
+                LEFT JOIN inventory_components exposure_ic
+                    ON exposure_ic.tenant_id = ic.tenant_id
+                   AND exposure_ic.asset_id = ic.asset_id
+                   AND exposure_ic.component_status = 'ACTIVE'
+                """ : "") + """
+                LEFT JOIN component_vulnerability_states cvs
+                    ON cvs.component_id = """ + (assetScopedVulnerabilities ? "exposure_ic.id" : "ic.id") + """
+                   AND cvs.tenant_id = :tenantId
                 WHERE ic.tenant_id = :tenantId
                   AND ic.component_status = 'ACTIVE'
                   AND ic.software_identity_id IN (:softwareIdentityIds)
@@ -785,6 +886,9 @@ public class SoftwareIdentityReadService {
     }
 
     private record SqlFilters(String whereClause, MapSqlParameterSource params) {
+    }
+
+    private record OsFilter(String pattern, String sql) {
     }
 
     private record ExposureCounts(long openFindingCount, long openVulnerabilityCount) {

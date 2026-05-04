@@ -6,9 +6,9 @@ import {
   pathForInventoryHostAsset,
   pathForInventoryView,
   pathForInventoryViewWithSearch,
+  pathForSoftwareIdentityDetail,
 } from '../app/routes';
 import { InventoryQualityWorkspace } from '../components/InventoryQualityWorkspace';
-import { StatCard } from '../components/StatCard';
 import { useDashboardSummaryQuery } from '../features/dashboard/queries';
 import type { ApplicableSoftwareRecord } from '../features/dashboard/types';
 import { useEolSummaryQuery, useEolUnresolvedMappingsQuery } from '../features/eol/queries';
@@ -22,7 +22,7 @@ import type { SoftwareIdentitySummary } from '../features/software-identities/ty
 const HOST_STALE_DAYS = 30;
 const HOST_AGING_DAYS = 7;
 const INVENTORY_COMPONENT_PAGE_SIZE = 250;
-const SOFTWARE_PAGE_SIZE = 50;
+const SOFTWARE_PAGE_SIZE = 200;
 const SOFTWARE_TABLE_ROWS = 8;
 const HOST_TABLE_ROWS = 8;
 
@@ -112,8 +112,15 @@ type OverviewSoftwareSummary = SoftwareIdentitySummary & {
   softwareFilterQuery: string;
 };
 
-type OverviewFocusTab = 'assets' | 'software';
-type OverviewAssetFocus = 'all' | 'exposed' | 'stale';
+type InventoryWidgetRow = {
+  label: string;
+  value: number;
+  percent: number;
+  caption?: string;
+  className?: string;
+  actionPath?: string;
+};
+
 type QualityInventoryWorkspaceTab = 'quality-normalization' | 'quality-correlation' | 'quality-eol' | 'quality-vex';
 type InventoryWorkspaceTab = 'overview' | QualityInventoryWorkspaceTab;
 
@@ -249,6 +256,33 @@ function inferOperatingSystem(detail: HostAssetDetail): string {
   }
 
   return 'Unknown';
+}
+
+function normalizedSoftwareIdentityText(identity: SoftwareIdentitySummary): string {
+  return [
+    identity.displayName,
+    identity.canonicalKey,
+    identity.vendor,
+    identity.product,
+    identity.normalizedKey
+  ]
+    .filter(hasValue)
+    .join(' ')
+    .replace(/[_-]/g, ' ')
+    .toLowerCase();
+}
+
+function softwareIdentityMatchesOperatingSystem(identity: SoftwareIdentitySummary, operatingSystem: string): boolean {
+  const normalized = operatingSystem.trim().toLowerCase();
+  const identityText = normalizedSoftwareIdentityText(identity);
+  if (normalized === 'unknown') {
+    return !OS_MATCHERS.some((matcher) => matcher.test(identityText));
+  }
+  if (normalized.includes('windows server')) {
+    return identityText.includes('windows server');
+  }
+  const matcher = OS_MATCHERS.find((entry) => entry.label.toLowerCase() === normalized);
+  return matcher ? matcher.test(identityText) : identityText.includes(normalized);
 }
 
 function hostLastSeen(asset: Asset, detail: HostAssetDetail): string | undefined {
@@ -487,6 +521,17 @@ function assetDrilldownPath(record: AssetOverviewRecord, returnTo: string): stri
   });
 }
 
+function isExternalFacingAsset(record: AssetOverviewRecord): boolean {
+  const searchable = [
+    record.asset.name,
+    record.asset.identifier,
+    record.asset.serviceName,
+    record.asset.environment,
+    record.asset.businessCriticality
+  ].join(' ').toLowerCase();
+  return /\b(external|internet|public|dmz|edge|web)\b/.test(searchable);
+}
+
 function softwareLifecycleSummary(identity: SoftwareIdentitySummary): { label: string; className: string } {
   if (identity.eolComponentCount > 0) {
     return { label: `${identity.eolComponentCount} EOL`, className: 'status-pill status-failure' };
@@ -661,9 +706,6 @@ function parseInventoryWorkspaceTabs(value: string | null): QualityInventoryWork
 export function InventoryOverviewPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [focusTab, setFocusTab] = React.useState<OverviewFocusTab>('assets');
-  const [assetFocus, setAssetFocus] = React.useState<OverviewAssetFocus>('all');
-  const focusWidgetRef = React.useRef<HTMLElement | null>(null);
 
   const dashboardQuery = useDashboardSummaryQuery();
   const softwareQuery = useSoftwareIdentitiesQuery({ page: 0, size: SOFTWARE_PAGE_SIZE });
@@ -891,32 +933,6 @@ export function InventoryOverviewPage() {
       .sort((left, right) => right.attentionScore - left.attentionScore || left.asset.name.localeCompare(right.asset.name))
   ), [allAssets, applicableCvesByAssetId, componentStatsByAssetId, hostSignalsByAssetId]);
 
-  const assetsWithExposure = React.useMemo(
-    () => assetRecords.filter((record) => record.openFindingCount > 0 || record.applicableCveCount > 0).length,
-    [assetRecords]
-  );
-
-  const filteredAssetRecords = React.useMemo(() => {
-    if (assetFocus === 'exposed') {
-      return assetRecords.filter((record) => record.openFindingCount > 0 || record.applicableCveCount > 0);
-    }
-    if (assetFocus === 'stale') {
-      return assetRecords.filter((record) => record.freshness.label === 'Stale');
-    }
-    return assetRecords;
-  }, [assetFocus, assetRecords]);
-
-  const topAssets = React.useMemo(
-    () => filteredAssetRecords.slice(0, HOST_TABLE_ROWS),
-    [filteredAssetRecords]
-  );
-  const topExposedAssets = React.useMemo(
-    () => assetRecords
-      .filter((record) => record.attentionScore > 0)
-      .slice(0, 5),
-    [assetRecords]
-  );
-
   const softwareLoading = dashboardQuery.isPending
     || softwareQuery.isPending
     || eolSummaryQuery.isPending
@@ -974,16 +990,19 @@ export function InventoryOverviewPage() {
   const normalizationCoverage = assetNormalizationSummary.trackedAssetCount > 0
     ? Math.round(assetNormalizationSummary.normalizedAssetCoveragePercent)
     : 0;
-  const assetTypeExposureRows = assetTypeSummaries.map((summary) => {
-    const exposedCount = assetRecords.filter((record) =>
-      record.assetType === summary.type && (record.openFindingCount > 0 || record.applicableCveCount > 0)
-    ).length;
-    return {
-      ...summary,
-      exposedCount
-    };
-  });
-  const assetTypeExposureMax = Math.max(1, ...assetTypeExposureRows.map((row) => row.totalAssetCount));
+  const unknownPublisherCount = softwareRows.filter((identity) => {
+    const vendor = identity.vendor?.trim().toLowerCase();
+    return !vendor || vendor === 'unknown' || vendor === 'unknown vendor';
+  }).length;
+  const identifierMappedRows = (inventoryComponentsQuery.data ?? []).filter((component) =>
+    hasValue(component.purl)
+  ).length;
+  const standardIdentifierMatchRate = percentOf(identifierMappedRows, activeComponentCount);
+  const eolCoverageRows = (inventoryComponentsQuery.data ?? []).filter((component) =>
+    hasValue(component.eolSlug)
+  ).length;
+  const eolCoverageRate = percentOf(eolCoverageRows, activeComponentCount);
+  const licenseCoverageRate = 0;
   const lifecycleBreakdownRows = [
     { label: 'EOL', count: eolComponentCount, className: 'vuln-repo-inline-bar vuln-repo-inline-bar--critical' },
     { label: 'Near EOL', count: nearEolComponentCount, className: 'vuln-repo-inline-bar vuln-repo-inline-bar--high' },
@@ -998,19 +1017,156 @@ export function InventoryOverviewPage() {
     { label: 'VEX', count: vexIssueCount, tab: INVENTORY_VEX_TAB }
   ];
   const qualityBreakdownMax = Math.max(1, ...qualityBreakdownRows.map((row) => row.count));
-  const openAssetFocus = React.useCallback((focus: OverviewAssetFocus) => {
-    setAssetFocus(focus);
-    setFocusTab('assets');
-    requestAnimationFrame(() => {
-      focusWidgetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const assetsWithEolSoftware = assetRecords.filter((record) => record.eolSoftwareCount > 0).length;
+  const assetsWithCveExposure = assetRecords.filter((record) => record.applicableCveCount > 0).length;
+  const externalFacingWithCves = assetRecords.filter((record) => isExternalFacingAsset(record) && record.applicableCveCount > 0).length;
+  const inventoryFunnelRows: InventoryWidgetRow[] = [
+    {
+      label: 'Total assets',
+      value: totalKnownAssets,
+      percent: 100,
+      className: 'vuln-repo-inline-bar vuln-repo-inline-bar--low',
+      actionPath: pathForInventoryView('hosts')
+    },
+    {
+      label: 'Assets with EOL software',
+      value: assetsWithEolSoftware,
+      percent: percentOf(assetsWithEolSoftware, totalKnownAssets),
+      className: 'vuln-repo-inline-bar vuln-repo-inline-bar--critical',
+      actionPath: pathForInventoryViewWithSearch('hosts', { quickFilter: 'with-eol' })
+    },
+    {
+      label: 'Assets with CVE exposure',
+      value: assetsWithCveExposure,
+      percent: percentOf(assetsWithCveExposure, totalKnownAssets),
+      className: 'vuln-repo-inline-bar vuln-repo-inline-bar--high',
+      actionPath: pathForInventoryViewWithSearch('hosts', { quickFilter: 'with-cves' })
+    },
+    {
+      label: 'External facing with CVEs',
+      value: externalFacingWithCves,
+      percent: percentOf(externalFacingWithCves, totalKnownAssets),
+      className: 'vuln-repo-inline-bar vuln-repo-inline-bar--critical',
+      actionPath: pathForInventoryViewWithSearch('hosts', { quickFilter: 'external-with-cves' })
+    },
+    {
+      label: 'Assets with findings',
+      value: assetRecords.filter((record) => record.openFindingCount > 0).length,
+      percent: percentOf(assetRecords.filter((record) => record.openFindingCount > 0).length, totalKnownAssets),
+      className: 'vuln-repo-inline-bar vuln-repo-inline-bar--critical',
+      actionPath: pathForInventoryViewWithSearch('hosts', { quickFilter: 'with-findings' })
+    }
+  ];
+  const osRows: InventoryWidgetRow[] = React.useMemo(() => {
+    const osStats = new Map<string, { assets: number; cves: number; eol: number }>();
+    hostRecords.forEach((record) => {
+      const os = record.operatingSystem || 'Unknown';
+      const current = osStats.get(os) ?? { assets: 0, cves: 0, eol: 0 };
+      current.assets += 1;
+      current.cves += record.applicableCveCount;
+      if (record.eolSoftwareCount > 0) {
+        current.eol += 1;
+      }
+      osStats.set(os, current);
     });
-  }, []);
+    const maxAssets = Math.max(1, ...Array.from(osStats.values()).map((entry) => entry.assets));
+    return Array.from(osStats.entries())
+      .map(([label, entry]) => ({
+        label,
+        value: entry.assets,
+        percent: percentOf(entry.assets, maxAssets),
+        caption: `${formatNumber(entry.cves)} CVEs · ${formatNumber(entry.eol)} with EOL OS/software`,
+        className: entry.cves > 0
+          ? 'vuln-repo-inline-bar vuln-repo-inline-bar--high'
+          : 'vuln-repo-inline-bar vuln-repo-inline-bar--low',
+        actionPath: pathForInventoryViewWithSearch('software-identities', { operatingSystem: label })
+      }))
+      .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+      .slice(0, 4);
+  }, [hostRecords]);
+  const highRiskVendorRows: InventoryWidgetRow[] = React.useMemo(() => {
+    const vendorStats = new Map<string, { cves: number; assets: number }>();
+    softwareRows.forEach((identity) => {
+      const vendor = identity.vendor?.trim() || 'Unknown vendor';
+      const current = vendorStats.get(vendor) ?? { cves: 0, assets: 0 };
+      current.cves += identity.openVulnerabilityCount;
+      current.assets += identity.assetCount;
+      vendorStats.set(vendor, current);
+    });
+    const maxCves = Math.max(1, ...Array.from(vendorStats.values()).map((entry) => entry.cves));
+    return Array.from(vendorStats.entries())
+      .map(([label, entry]) => ({
+        label,
+        value: entry.cves,
+        percent: percentOf(entry.cves, maxCves),
+        caption: `${formatNumber(entry.assets)} assets running vendor software`,
+        className: entry.cves > 0
+          ? 'vuln-repo-inline-bar vuln-repo-inline-bar--high'
+          : 'vuln-repo-inline-bar vuln-repo-inline-bar--low',
+        actionPath: pathForInventoryViewWithSearch('software-identities', { query: label })
+      }))
+      .filter((entry) => entry.value > 0 || entry.caption !== '0 assets running vendor software')
+      .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+      .slice(0, 4);
+  }, [softwareRows]);
+  const eolSoftwareRows: InventoryWidgetRow[] = React.useMemo(() => {
+    const riskySoftware = softwareRows
+      .filter((identity) => identity.eolComponentCount > 0 || identity.nearEolComponentCount > 0)
+      .map((identity) => ({
+        label: identity.displayName,
+        value: identity.eolComponentCount + identity.nearEolComponentCount,
+        percent: 0,
+        caption: `${formatNumber(identity.assetCount)} assets · ${formatNumber(identity.openVulnerabilityCount)} CVEs`,
+        className: identity.eolComponentCount > 0
+          ? 'vuln-repo-inline-bar vuln-repo-inline-bar--critical'
+          : 'vuln-repo-inline-bar vuln-repo-inline-bar--high',
+        actionPath: pathForSoftwareIdentityDetail(identity.id)
+      }))
+      .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+      .slice(0, 4);
+    const maxLifecycle = Math.max(1, ...riskySoftware.map((entry) => entry.value));
+    return riskySoftware.map((entry) => ({
+      ...entry,
+      percent: percentOf(entry.value, maxLifecycle)
+    }));
+  }, [softwareRows]);
   const qualityIssueCount = qualitySummary?.totalIssues ?? (
     normalizationIssueCount + correlationIssueCount + unmatchedEolCount + vexIssueCount
   );
-  const focusWidgetRowCount = focusTab === 'assets'
-    ? topAssets.length
-    : topSoftwareByDeployment.length;
+  const renderWidgetRows = (rows: InventoryWidgetRow[], emptyLabel: string): React.ReactNode => (
+    <div className="vuln-repo-dashboard-funnel">
+      {rows.length === 0 ? (
+        <div className="empty-state">{emptyLabel}</div>
+      ) : rows.map((item) => {
+        const content = (
+          <>
+            <div className="vuln-repo-dashboard-funnel-copy">
+              <span>{item.label}</span>
+              <strong>{formatNumber(item.value)}</strong>
+            </div>
+            {item.caption ? <div className="panel-caption">{item.caption}</div> : null}
+            <div className="vuln-repo-dashboard-funnel-track">
+              <span className={item.className} style={{ width: `${Math.max(3, item.percent)}%` }} />
+            </div>
+          </>
+        );
+        return item.actionPath ? (
+          <button
+            key={item.label}
+            type="button"
+            className="vuln-repo-dashboard-funnel-row inventory-overview-funnel-action"
+            onClick={() => navigate(item.actionPath ?? pathForInventoryView('hosts'))}
+          >
+            {content}
+          </button>
+        ) : (
+          <div key={item.label} className="vuln-repo-dashboard-funnel-row">
+            {content}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <section className="inventory-overview-shell vuln-repo-dashboard-page">
@@ -1075,141 +1231,55 @@ export function InventoryOverviewPage() {
             ) : (
               <>
             <div className="stats-grid vuln-repo-dashboard-stats-grid inventory-overview-dashboard-stats">
-              <button
-                type="button"
-                className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card"
-                onClick={() => navigate(pathForInventoryView('hosts'))}
-              >
+              <article className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card">
                 <div className="stat-card">
                   <div className="stat-card-label">Inventory Funnel</div>
-                  <div className="vuln-repo-dashboard-funnel">
-                    {[
-                      {
-                        label: 'Known assets',
-                        value: totalKnownAssets,
-                        percent: 100
-                      },
-                      {
-                        label: 'Inventoried assets',
-                        value: assetNormalizationSummary.trackedAssetCount,
-                        percent: percentOf(assetNormalizationSummary.trackedAssetCount, totalKnownAssets)
-                      },
-                      {
-                        label: 'Assets with exposure',
-                        value: assetsWithExposure,
-                        percent: percentOf(assetsWithExposure, totalKnownAssets)
-                      },
-                      {
-                        label: 'Open findings',
-                        value: totalOpenFindings,
-                        percent: percentOf(totalOpenFindings, Math.max(1, totalApplicableCves))
-                      }
-                    ].map((item) => (
-                      <div key={item.label} className="vuln-repo-dashboard-funnel-row">
-                        <div className="vuln-repo-dashboard-funnel-copy">
-                          <span>{item.label}</span>
-                          <strong>{formatNumber(item.value)}</strong>
-                        </div>
-                        <div className="vuln-repo-dashboard-funnel-track">
-                          <span style={{ width: `${item.percent}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  {renderWidgetRows(inventoryFunnelRows, 'No asset inventory is available yet.')}
                 </div>
-              </button>
-              <button
-                type="button"
-                className="vuln-repo-dashboard-stat-button"
-                onClick={() => openAssetFocus('exposed')}
-              >
-                <StatCard
-                  title="Assets With Exposure"
-                  value={assetsWithExposure}
-                  tone={assetsWithExposure > 0 ? 'warn' : 'neutral'}
-                  caption={`${percentOf(assetsWithExposure, totalKnownAssets)}% of known assets have CVEs or findings`}
-                />
-              </button>
-              <button
-                type="button"
-                className="vuln-repo-dashboard-stat-button"
-                onClick={() => openAssetFocus('exposed')}
-              >
-                <StatCard
-                  title="Open Findings"
-                  value={totalOpenFindings}
-                  tone={totalOpenFindings > 0 ? 'critical' : 'neutral'}
-                  caption={`${formatNumber(totalApplicableCves)} applicable CVEs across inventory`}
-                />
-              </button>
-              <button
-                type="button"
-                className="vuln-repo-dashboard-stat-button"
-                onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}
-              >
-                <StatCard
-                  title="Lifecycle Risk"
-                  value={lifecycleRiskTotal}
-                  tone={lifecycleRiskTotal > 0 ? 'warn' : 'neutral'}
-                  caption={`${formatNumber(eolComponentCount)} EOL · ${formatNumber(unknownLifecycleCount)} unknown lifecycle`}
-                />
-              </button>
-              <button
-                type="button"
-                className="vuln-repo-dashboard-stat-button"
-                onClick={() => openWorkspaceTab(INVENTORY_NORMALIZATION_TAB)}
-              >
-                <StatCard
-                  title="Inventory Quality Gaps"
-                  value={qualityIssueCount}
-                  tone={qualityIssueCount > 0 ? 'warn' : 'neutral'}
-                  caption={`${normalizationCoverage}% assets fully normalized`}
-                />
-              </button>
+              </article>
+              <article className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card">
+                <div className="stat-card">
+                  <div className="stat-card-label">Assets by OS</div>
+                  {renderWidgetRows(osRows, 'No host operating system data is available yet.')}
+                </div>
+              </article>
+              <article className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card">
+                <div className="stat-card">
+                  <div className="stat-card-label">High Risk Vendors</div>
+                  {renderWidgetRows(highRiskVendorRows, 'No vendor CVE exposure is available yet.')}
+                </div>
+              </article>
+              <article className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card">
+                <div className="stat-card">
+                  <div className="stat-card-label">Softwares with EOS/EOL</div>
+                  {renderWidgetRows(eolSoftwareRows, 'No EOS/EOL software is currently detected.')}
+                </div>
+              </article>
             </div>
 
             <div className="dashboard-grid vuln-repo-dashboard-main-grid">
               <section className="panel vuln-repo-dashboard-panel">
                 <div className="panel-header">
                   <div className="vuln-repo-dashboard-section-copy">
-                    <h3>Most exposed assets</h3>
-                    <div className="panel-caption">Assets concentrated by findings, applicable CVEs, lifecycle, and freshness risk.</div>
+                    <h3>Lifecycle breakdown</h3>
+                    <div className="panel-caption">Component lifecycle status</div>
                   </div>
-                  <button type="button" className="btn-link" onClick={() => openAssetFocus('exposed')}>View all</button>
                 </div>
-                <div className="vuln-repo-dashboard-unresolved-list">
-                  {topExposedAssets.length === 0 ? (
-                    <div className="empty-state">No exposed assets are available right now.</div>
-                  ) : topExposedAssets.map((record) => (
-                    <article key={record.asset.id} className="vuln-repo-dashboard-unresolved-item inventory-overview-risk-item">
-                      <div className="vuln-repo-dashboard-unresolved-copy">
-                        <button
-                          type="button"
-                          className="btn-link vuln-repo-dashboard-cve-link"
-                          onClick={() => navigate(assetDrilldownPath(record, `${location.pathname}${location.search}`))}
-                        >
-                          {record.asset.name}
-                        </button>
-                        <div className="vuln-repo-dashboard-item-tags">
-                          <span className={record.freshness.className}>{record.freshness.label}</span>
-                          <span className={record.normalization.className}>{record.normalization.label}</span>
-                          {record.eolSoftwareCount > 0 ? <span className="status-pill status-failure">{record.eolSoftwareCount} EOL</span> : null}
-                        </div>
-                        <p>
-                          {formatAssetTypeSingleLabel(record.assetType)}
-                          {record.operatingSystem ? ` · ${record.operatingSystem}` : ''}
-                          {` · ${formatNumber(record.deployedSoftwareCount)} software rows`}
-                        </p>
+                <div className="vuln-repo-dashboard-breakdown-list">
+                  {lifecycleBreakdownRows.map((item) => (
+                    <div key={item.label} className="vuln-repo-dashboard-breakdown-row">
+                      <span>{item.label}</span>
+                      <div className="vuln-repo-dashboard-breakdown-bar">
+                        <span className={item.className} style={{ width: `${(item.count / lifecycleBreakdownMax) * 100}%` }} />
                       </div>
                       <button
                         type="button"
-                        className="vuln-repo-dashboard-findings-count btn-link"
-                        onClick={() => navigate(assetDrilldownPath(record, `${location.pathname}${location.search}`))}
+                        className="btn-link vuln-repo-dashboard-count-link"
+                        onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}
                       >
-                        <strong>{formatNumber(record.applicableCveCount + record.openFindingCount)}</strong>
-                        <span>risk signals</span>
+                        {formatNumber(item.count)}
                       </button>
-                    </article>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -1217,85 +1287,26 @@ export function InventoryOverviewPage() {
               <section className="panel vuln-repo-dashboard-panel">
                 <div className="panel-header">
                   <div className="vuln-repo-dashboard-section-copy">
-                    <h3>Inventory risk overview</h3>
-                    <div className="panel-caption">Exposure, lifecycle, and data quality posture across assets and software entities.</div>
+                    <h3>Quality gaps</h3>
+                    <div className="panel-caption">Issues blocking reliable risk decisions</div>
                   </div>
                 </div>
-                <div className="vuln-repo-dashboard-overview-stack">
-                  <div className="vuln-repo-dashboard-panel-block">
-                    <div className="vuln-repo-dashboard-panel-block-header">
-                      <h4>Asset portfolio</h4>
-                      <span className="panel-caption">Known assets by type and exposure</span>
+                <div className="vuln-repo-dashboard-breakdown-list">
+                  {qualityBreakdownRows.map((item) => (
+                    <div key={item.label} className="vuln-repo-dashboard-breakdown-row">
+                      <span>{item.label}</span>
+                      <div className="vuln-repo-dashboard-breakdown-bar">
+                        <span className="vuln-repo-inline-bar vuln-repo-inline-bar--medium" style={{ width: `${(item.count / qualityBreakdownMax) * 100}%` }} />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-link vuln-repo-dashboard-count-link"
+                        onClick={() => openWorkspaceTab(item.tab)}
+                      >
+                        {formatNumber(item.count)}
+                      </button>
                     </div>
-                    <div className="vuln-repo-dashboard-breakdown-list">
-                      {assetTypeExposureRows.map((item) => (
-                        <div key={item.type} className="vuln-repo-dashboard-breakdown-row">
-                          <span>{item.label}</span>
-                          <div className="vuln-repo-dashboard-breakdown-bar">
-                            <span
-                              className="vuln-repo-inline-bar vuln-repo-inline-bar--high"
-                              style={{ width: `${(item.totalAssetCount / assetTypeExposureMax) * 100}%` }}
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            className="btn-link vuln-repo-dashboard-count-link"
-                            onClick={() => navigate(pathForInventoryView(inventoryViewForAssetType(item.type)))}
-                          >
-                            {formatNumber(item.totalAssetCount)}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="vuln-repo-dashboard-panel-block">
-                    <div className="vuln-repo-dashboard-panel-block-header">
-                      <h4>Lifecycle breakdown</h4>
-                      <span className="panel-caption">Component lifecycle status</span>
-                    </div>
-                    <div className="vuln-repo-dashboard-breakdown-list">
-                      {lifecycleBreakdownRows.map((item) => (
-                        <div key={item.label} className="vuln-repo-dashboard-breakdown-row">
-                          <span>{item.label}</span>
-                          <div className="vuln-repo-dashboard-breakdown-bar">
-                            <span className={item.className} style={{ width: `${(item.count / lifecycleBreakdownMax) * 100}%` }} />
-                          </div>
-                          <button
-                            type="button"
-                            className="btn-link vuln-repo-dashboard-count-link"
-                            onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}
-                          >
-                            {formatNumber(item.count)}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="vuln-repo-dashboard-panel-block">
-                    <div className="vuln-repo-dashboard-panel-block-header">
-                      <h4>Quality gaps</h4>
-                      <span className="panel-caption">Issues blocking reliable risk decisions</span>
-                    </div>
-                    <div className="vuln-repo-dashboard-breakdown-list">
-                      {qualityBreakdownRows.map((item) => (
-                        <div key={item.label} className="vuln-repo-dashboard-breakdown-row">
-                          <span>{item.label}</span>
-                          <div className="vuln-repo-dashboard-breakdown-bar">
-                            <span className="vuln-repo-inline-bar vuln-repo-inline-bar--medium" style={{ width: `${(item.count / qualityBreakdownMax) * 100}%` }} />
-                          </div>
-                          <button
-                            type="button"
-                            className="btn-link vuln-repo-dashboard-count-link"
-                            onClick={() => openWorkspaceTab(item.tab)}
-                          >
-                            {formatNumber(item.count)}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </section>
             </div>
@@ -1317,38 +1328,56 @@ export function InventoryOverviewPage() {
                   <div className="vuln-repo-dashboard-software-list">
                     {topSoftwareByDeployment.length === 0 ? (
                       <div className="empty-state">No software inventory is available yet.</div>
-                    ) : topSoftwareByDeployment.slice(0, 5).map((identity) => {
-                      const lifecycle = softwareLifecycleSummary(identity);
-                      const riskCount = identity.openVulnerabilityCount + identity.openFindingCount;
-                      return (
-                        <div key={identity.id} className="vuln-repo-dashboard-software-row">
-                          <div className="vuln-repo-dashboard-software-copy">
-                            <strong>{identity.displayName}</strong>
-                            <span>{identity.vendor || 'Unknown vendor'}</span>
-                          </div>
-                          <div className="vuln-repo-dashboard-software-metrics">
-                            <div className="vuln-repo-dashboard-breakdown-bar">
-                              <span className="vuln-repo-inline-bar vuln-repo-inline-bar--high" style={{ width: `${Math.max(8, percentOf(riskCount, Math.max(1, totalApplicableCves + totalOpenFindings)))}%` }} />
-                            </div>
-                            <button
-                              type="button"
-                              className="btn-link vuln-repo-dashboard-count-link"
-                              onClick={() => navigate(softwareIdentityFilterPath(identity))}
-                            >
-                              {formatNumber(riskCount)}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-link vuln-repo-dashboard-count-link vuln-repo-dashboard-asset-link"
-                              onClick={() => navigate(softwareIdentityFilterPath(identity))}
-                            >
-                              {formatNumber(identity.assetCount)} assets
-                            </button>
-                            <span className={lifecycle.className}>{lifecycle.label}</span>
-                          </div>
+                    ) : (
+                      <>
+                        <div className="vuln-repo-dashboard-software-row vuln-repo-dashboard-software-row--header">
+                          <span>Software</span>
+                          <span>CVEs</span>
+                          <span>Assets</span>
+                          <span>Findings</span>
+                          <span>Lifecycle</span>
                         </div>
-                      );
-                    })}
+                        {topSoftwareByDeployment.slice(0, 5).map((identity) => {
+                          const lifecycle = softwareLifecycleSummary(identity);
+                          return (
+                            <div key={identity.id} className="vuln-repo-dashboard-software-row">
+                              <div className="vuln-repo-dashboard-software-copy">
+                                <button
+                                  type="button"
+                                  className="btn-link inventory-primary-text vuln-repo-dashboard-software-link"
+                                  onClick={() => navigate(pathForSoftwareIdentityDetail(identity.id))}
+                                >
+                                  <strong>{identity.displayName}</strong>
+                                </button>
+                                <span>{identity.vendor || 'Unknown vendor'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn-link vuln-repo-dashboard-count-link"
+                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
+                              >
+                                {formatNumber(identity.openVulnerabilityCount)}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-link vuln-repo-dashboard-count-link"
+                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
+                              >
+                                {formatNumber(identity.assetCount)}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-link vuln-repo-dashboard-count-link"
+                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
+                              >
+                                {formatNumber(identity.openFindingCount)}
+                              </button>
+                              <span className={lifecycle.className}>{lifecycle.label}</span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1366,213 +1395,27 @@ export function InventoryOverviewPage() {
                       <strong>{formatNumber(activeComponentCount)}</strong>
                       <span>Active software rows</span>
                     </button>
-                    <button type="button" className="vuln-repo-dashboard-resolution-card vuln-repo-dashboard-resolution-card--success" onClick={() => navigate(pathForInventoryView('hosts'))}>
-                      <strong>{normalizationCoverage}%</strong>
-                      <span>Asset normalization</span>
+                    <button type="button" className="vuln-repo-dashboard-resolution-card vuln-repo-dashboard-resolution-card--info" onClick={() => navigate(pathForInventoryViewWithSearch('software-identities', { query: 'unknown' }))}>
+                      <strong>{formatNumber(unknownPublisherCount)}</strong>
+                      <span>Unknown publisher</span>
                     </button>
-                    <button type="button" className="vuln-repo-dashboard-resolution-card vuln-repo-dashboard-resolution-card--info" onClick={() => openWorkspaceTab(INVENTORY_VEX_TAB)}>
-                      <strong>{formatNumber(vexIssueCount)}</strong>
-                      <span>VEX gaps</span>
+                    <button type="button" className="vuln-repo-dashboard-resolution-card vuln-repo-dashboard-resolution-card--success" onClick={() => navigate(pathForInventoryView('software-identities'))}>
+                      <strong>{standardIdentifierMatchRate}%</strong>
+                      <span>CPE/PURL match rate</span>
+                    </button>
+                    <button type="button" className="vuln-repo-dashboard-resolution-card vuln-repo-dashboard-resolution-card--success" onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}>
+                      <strong>{eolCoverageRate}%</strong>
+                      <span>EOL/EOS coverage</span>
+                    </button>
+                    <button type="button" className="vuln-repo-dashboard-resolution-card" onClick={() => navigate(pathForInventoryView('software-identities'))}>
+                      <strong>{licenseCoverageRate}%</strong>
+                      <span>License coverage</span>
                     </button>
                   </div>
                 </div>
               </div>
             </section>
 
-            <article className="inventory-section-card" ref={focusWidgetRef}>
-              <div className="inventory-section-header">
-                <div>
-                  <h3>Most exposed</h3>
-                </div>
-                <span className="panel-caption">{focusWidgetRowCount} rows</span>
-              </div>
-
-              <div className="inventory-tab-row inventory-overview-focus-tabs">
-                <button
-                  type="button"
-                  className={`inventory-tab-button ${focusTab === 'assets' ? 'active' : ''}`}
-                  onClick={() => setFocusTab('assets')}
-                >
-                  Assets
-                </button>
-                <button
-                  type="button"
-                  className={`inventory-tab-button ${focusTab === 'software' ? 'active' : ''}`}
-                  onClick={() => setFocusTab('software')}
-                >
-                  Software
-                </button>
-              </div>
-
-              {focusTab === 'assets' ? (
-                <div className="inventory-chip-row inventory-overview-focus-filters">
-                  {([
-                    ['all', 'All assets'],
-                    ['exposed', 'With exposure'],
-                    ['stale', 'Stale']
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`inventory-chip ${assetFocus === value ? 'active' : ''}`}
-                      onClick={() => setAssetFocus(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {focusTab === 'assets' ? (
-                <div className="inventory-table-shell">
-                  <table className="inventory-table inventory-overview-table">
-                    <thead>
-                      <tr>
-                        <th>Asset</th>
-                        <th>Freshness</th>
-                        <th>Software</th>
-                        <th>Normalization</th>
-                        <th>Exposure</th>
-                        <th>Lifecycle</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topAssets.length === 0 ? (
-                        <tr>
-                          <td colSpan={7}>
-                            <div className="empty-state">
-                              <p>
-                                {assetFocus === 'exposed'
-                                  ? 'No exposed assets matched the current view.'
-                                  : assetFocus === 'stale'
-                                    ? 'No stale assets matched the current view.'
-                                    : 'No assets are available yet.'}
-                              </p>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : topAssets.map((record) => (
-                        <tr key={record.asset.id}>
-                          <td>
-                            <button
-                              type="button"
-                              className="inventory-link-button inventory-link-button-primary"
-                              onClick={() => navigate(assetDrilldownPath(record, `${location.pathname}${location.search}`))}
-                            >
-                              {record.asset.name}
-                            </button>
-                            <div className="panel-caption">
-                              {[
-                                formatAssetTypeSingleLabel(record.assetType),
-                                record.asset.environment || 'Unspecified environment',
-                                record.operatingSystem
-                              ].filter(Boolean).join(' · ')}
-                            </div>
-                          </td>
-                          <td>
-                            <span className={record.freshness.className}>{record.freshness.label}</span>
-                            <div className="panel-caption">{summarizeAge(record.lastSeenAt)}</div>
-                          </td>
-                          <td>
-                            <div className="inventory-primary-text">{record.deployedSoftwareCount.toLocaleString()} rows</div>
-                            <div className="panel-caption">{record.reviewGapCount.toLocaleString()} review gaps</div>
-                          </td>
-                          <td>
-                            <span className={record.normalization.className}>{record.normalization.label}</span>
-                            <div className="panel-caption">
-                              {record.deployedSoftwareCount === 0
-                                ? 'Waiting for software inventory'
-                                : `${record.normalizedSoftwareCount.toLocaleString()} of ${record.deployedSoftwareCount.toLocaleString()} rows fully normalized`}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="inventory-primary-text">{record.openFindingCount.toLocaleString()} findings</div>
-                            <div className="panel-caption">{record.applicableCveCount.toLocaleString()} applicable CVEs</div>
-                          </td>
-                          <td>
-                            <div className="inventory-primary-text">{record.eolSoftwareCount.toLocaleString()} EOL</div>
-                            <div className="panel-caption">{record.unknownLifecycleCount.toLocaleString()} unknown lifecycle</div>
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="inventory-link-button inventory-link-button-primary"
-                              onClick={() => navigate(assetDrilldownPath(record, `${location.pathname}${location.search}`))}
-                            >
-                              Inspect
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="inventory-table-shell">
-                  <table className="inventory-table inventory-overview-table">
-                    <thead>
-                      <tr>
-                        <th>Software</th>
-                        <th>Footprint</th>
-                        <th>Lifecycle</th>
-                        <th>Exposure</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topSoftwareByDeployment.length === 0 ? (
-                        <tr>
-                          <td colSpan={5}>
-                            <div className="empty-state"><p>No software inventory is available yet.</p></div>
-                          </td>
-                        </tr>
-                      ) : topSoftwareByDeployment.map((identity) => {
-                        const lifecycle = softwareLifecycleSummary(identity);
-                        return (
-                          <tr key={identity.id}>
-                            <td>
-                              <button
-                                type="button"
-                                className="inventory-link-button inventory-link-button-primary"
-                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
-                              >
-                                {identity.displayName}
-                              </button>
-                              <div className="panel-caption">{identity.vendor || 'Unknown vendor'} / {identity.product || 'Unknown product'}</div>
-                            </td>
-                            <td>
-                              <div className="inventory-primary-text">{identity.assetCount.toLocaleString()} assets</div>
-                              <div className="panel-caption">
-                                {identity.componentCount.toLocaleString()} components · {identity.versionCount.toLocaleString()} versions
-                                {identity.collapsedIdentityCount > 1 ? ` · ${identity.collapsedIdentityCount.toLocaleString()} identities` : ''}
-                              </div>
-                            </td>
-                            <td>
-                              <span className={lifecycle.className}>{lifecycle.label}</span>
-                              <div className="panel-caption">{identity.eolSlug || 'No mapped lifecycle slug'}</div>
-                            </td>
-                            <td>
-                              <div className="inventory-primary-text">{identity.openVulnerabilityCount.toLocaleString()} open CVEs</div>
-                              <div className="panel-caption">{identity.openFindingCount.toLocaleString()} open findings</div>
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="inventory-link-button inventory-link-button-primary"
-                                onClick={() => navigate(softwareIdentityFilterPath(identity))}
-                              >
-                                Inspect
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </article>
               </>
             )}
           </>

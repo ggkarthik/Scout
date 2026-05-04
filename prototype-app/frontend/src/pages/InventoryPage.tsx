@@ -33,6 +33,7 @@ type HostInventoryRecord = {
   detail: HostAssetDetail;
   operatingSystem: string;
   deployedSoftwareCount: number;
+  eolSoftwareCount: number;
   openFindingCount: number;
   applicableCveCount: number;
   isOnline: boolean;
@@ -47,7 +48,7 @@ type HostOsSummary = {
   totalSoftware: number;
 };
 
-type HostQuickFilter = 'all' | 'online' | 'with-findings' | 'linux' | 'windows';
+type HostQuickFilter = 'all' | 'online' | 'with-findings' | 'with-cves' | 'with-eol' | 'external-with-cves' | 'linux' | 'windows';
 const HOST_GROUP_BY_OPTIONS: MultiGroupByOption[] = [
   { key: 'operatingSystem', label: 'Operating System' },
   { key: 'environment', label: 'Environment' },
@@ -170,10 +171,24 @@ function toInventoryRecord(asset: Asset, detail: HostAssetDetail): HostInventory
     detail,
     operatingSystem: inferOperatingSystem(detail),
     deployedSoftwareCount: detail.software.length,
+    eolSoftwareCount: detail.software.filter((software) => software.isEol === true).length,
     openFindingCount,
     applicableCveCount: detail.applicableCves.length,
     isOnline
   };
+}
+
+function isExternalFacingHost(record: HostInventoryRecord): boolean {
+  const searchable = [
+    record.asset.name,
+    record.asset.identifier,
+    record.asset.serviceName,
+    record.asset.environment,
+    record.asset.businessCriticality,
+    record.detail.host.environment,
+    record.detail.host.supportGroup
+  ].join(' ').toLowerCase();
+  return /\b(external|internet|public|dmz|edge|web)\b/.test(searchable);
 }
 
 function buildOsSummary(records: HostInventoryRecord[]): HostOsSummary[] {
@@ -211,6 +226,12 @@ function matchesQuickFilter(record: HostInventoryRecord, filter: HostQuickFilter
       return record.isOnline;
     case 'with-findings':
       return record.openFindingCount > 0;
+    case 'with-cves':
+      return record.applicableCveCount > 0;
+    case 'with-eol':
+      return record.eolSoftwareCount > 0;
+    case 'external-with-cves':
+      return isExternalFacingHost(record) && record.applicableCveCount > 0;
     case 'linux':
       return record.operatingSystem.toLowerCase().includes('linux')
         || record.operatingSystem.toLowerCase().includes('ubuntu')
@@ -298,7 +319,13 @@ export function InventoryPage(_: Props) {
   const initialSearchValue = React.useMemo(() => readInventoryQueryFromSearch(searchParams), [searchParams]);
   const initialQuickFilter = React.useMemo<HostQuickFilter>(() => {
     const value = readSearchValueFromSearch(searchParams, HOST_QUICK_FILTER_QUERY_KEY);
-    return value === 'online' || value === 'with-findings' || value === 'linux' || value === 'windows'
+    return value === 'online'
+      || value === 'with-findings'
+      || value === 'with-cves'
+      || value === 'with-eol'
+      || value === 'external-with-cves'
+      || value === 'linux'
+      || value === 'windows'
       ? value
       : 'all';
   }, [searchParams]);
@@ -362,6 +389,9 @@ export function InventoryPage(_: Props) {
     const nextQuickFilterValue = readSearchValueFromSearch(searchParams, HOST_QUICK_FILTER_QUERY_KEY);
     const nextQuickFilter = nextQuickFilterValue === 'online'
       || nextQuickFilterValue === 'with-findings'
+      || nextQuickFilterValue === 'with-cves'
+      || nextQuickFilterValue === 'with-eol'
+      || nextQuickFilterValue === 'external-with-cves'
       || nextQuickFilterValue === 'linux'
       || nextQuickFilterValue === 'windows'
       ? nextQuickFilterValue
@@ -536,9 +566,18 @@ export function InventoryPage(_: Props) {
   const activeFilterChips = React.useMemo<Array<{ key: string; label: string; onRemove: () => void }>>(() => {
     const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
     if (quickFilter !== 'all') {
+      const quickFilterLabels: Record<Exclude<HostQuickFilter, 'all'>, string> = {
+        online: 'Online',
+        'with-findings': 'Assets with findings',
+        'with-cves': 'Assets with CVE exposure',
+        'with-eol': 'Assets with EOL software',
+        'external-with-cves': 'External facing with CVEs',
+        linux: 'Linux',
+        windows: 'Windows'
+      };
       chips.push({
         key: 'quick',
-        label: `View: ${quickFilter.replace(/-/g, ' ')}`,
+        label: `View: ${quickFilterLabels[quickFilter]}`,
         onRemove: () => setQuickFilter('all')
       });
     }
@@ -667,6 +706,7 @@ export function InventoryPage(_: Props) {
                 onClick={() => {
                   if (item.label === 'Online') setQuickFilter('online');
                   if (item.label === 'With findings') setQuickFilter('with-findings');
+                  if (item.label === 'With CVEs') setQuickFilter('with-cves');
                 }}
               >
                 <span className="fpl-hbar-label">{item.label}</span>
