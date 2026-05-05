@@ -25,7 +25,7 @@ import {
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { useActor } from '../features/auth/context';
 import { canRefreshTenantExposure } from '../features/auth/roles';
-import { computeCveRiskScore, riskScoreLabel } from '../lib/riskScoring';
+import { computeCveRiskScore, computeOrgImpact, riskScoreLabel } from '../lib/riskScoring';
 
 const PAGE_SIZE = 25;
 const WORKBENCH_LABEL = 'Unified Vulnerability Records';
@@ -37,7 +37,7 @@ const ORG_CVE_COLUMNS: DataTableColumn[] = [
   { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
   { id: 'cveRisk', label: 'S.AI Risk', header: 'S.AI Risk', initialSize: 110 },
   { id: 'applicability', label: 'Applicability', header: 'Applicability', initialSize: 160 },
-  { id: 'impact', label: 'Impact', header: 'Impact', initialSize: 160 },
+  { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 130 },
   { id: 'matched', label: 'Matched Software / Assets', header: 'Matched Software / Assets', initialSize: 200 },
   { id: 'eol', label: 'EOL', header: 'EOL', initialSize: 120 },
   { id: 'eos', label: 'EOS', header: 'EOS', initialSize: 120 },
@@ -64,16 +64,6 @@ function applicabilityClass(value: OrgSpecificCveExposureRecord['applicability']
     return 'status-auto_closed';
   }
   return 'status-suppressed';
-}
-
-function impactedClass(value: OrgSpecificCveExposureRecord['impactState']): string {
-  if (value === 'IMPACTED' || value === 'NO_PATCH') {
-    return 'status-open';
-  }
-  if (value === 'FIXED' || value === 'NOT_IMPACTED') {
-    return 'status-resolved';
-  }
-  return 'status-in-progress';
 }
 
 
@@ -321,7 +311,19 @@ export function VulnRepoOrgCvePage({
           }
         }
       },
-      cells: {
+      cells: (() => {
+        const riskResult = computeCveRiskScore(item, policyQuery.data);
+        const orgImpact = computeOrgImpact(item, riskResult.score, 0);
+        const orgImpactStyle: React.CSSProperties =
+          orgImpact === 'HIGH'
+            ? { background: '#9b233522', color: '#9b2335', border: '1px solid #9b233544' }
+            : orgImpact === 'MEDIUM'
+              ? { background: '#b7791f22', color: '#b7791f', border: '1px solid #b7791f44' }
+              : orgImpact === 'LOW'
+                ? { background: '#2d6a4f22', color: '#2d6a4f', border: '1px solid #2d6a4f44' }
+                : { background: 'var(--panel-muted)', color: 'var(--muted)', border: '1px solid var(--border)' };
+        const orgImpactLabel = orgImpact === 'NONE' ? 'No' : orgImpact.charAt(0) + orgImpact.slice(1).toLowerCase();
+        return {
         cve: {
           content: (
             <>
@@ -341,15 +343,14 @@ export function VulnRepoOrgCvePage({
         cvss: { content: item.cvssScore?.toFixed(1) ?? '-' },
         epss: { content: item.epssScore != null ? `${(item.epssScore * 100).toFixed(1)}%` : '-' },
         cveRisk: {
-          content: (() => {
-            const r = computeCveRiskScore(item, policyQuery.data);
-            const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(r.score).toLowerCase()}`;
-            return (
-              <span className={cls} title={r.topReasons.join(' · ')}>
-                {r.score.toFixed(1)}
-              </span>
-            );
-          })()
+          content: (
+            <span
+              className={`risk-score-badge risk-score-badge--${riskScoreLabel(riskResult.score).toLowerCase()}`}
+              title={riskResult.topReasons.join(' · ')}
+            >
+              {riskResult.score.toFixed(1)}
+            </span>
+          )
         },
         applicability: {
           content: (
@@ -358,10 +359,14 @@ export function VulnRepoOrgCvePage({
             </span>
           )
         },
-        impact: {
+        orgImpact: {
           content: (
-            <span className={`status-pill ${impactedClass(item.impactState)}`}>
-              {formatLabel(item.impactState)}
+            <span style={{
+              display: 'inline-block', padding: '2px 10px', borderRadius: 12,
+              fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+              ...orgImpactStyle,
+            }}>
+              {orgImpactLabel}
             </span>
           )
         },
@@ -399,8 +404,10 @@ export function VulnRepoOrgCvePage({
         },
         openFindings: { content: item.openFindings.toLocaleString() },
         lastEvaluated: { content: formatDateTime(item.lastEvaluatedAt) }
-      }
-    }))
+        };
+      })()
+    }
+  ))
   ), [openRecord, policyQuery.data, selectedRecord?.recordId, visibleItems]);
 
   if (selectedRecord) {

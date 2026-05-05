@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.OrgCveRecord;
+import com.prototype.vulnwatch.domain.OrgImpact;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
@@ -192,6 +193,14 @@ public class OrgCveRecordService {
                     applicabilityState,
                     agg
             );
+            OrgImpact orgImpact = computeOrgImpact(
+                    vulnerability.getCvssScore(),
+                    vulnerability.getEpssScore(),
+                    vulnerability.isInKev(),
+                    matchedAssetCount,
+                    eolComponentCount,
+                    noPatchComponentCount
+            );
             OrgCveSnapshot snapshot = new OrgCveSnapshot(
                     resolveExternalId(vulnerability),
                     normalizeSeverity(vulnerability.getSeverity()),
@@ -215,7 +224,8 @@ public class OrgCveRecordService {
                     underInvestigationComponentCount,
                     unknownComponentCount,
                     eolComponentCount,
-                    eosComponentCount
+                    eosComponentCount,
+                    orgImpact
             );
 
             OrgCveRecord record = existingByVulnerability.get(vulnerabilityId);
@@ -309,7 +319,61 @@ public class OrgCveRecordService {
         changed |= setIfChanged(record.getUnknownComponentCount(), snapshot.unknownComponentCount(), record::setUnknownComponentCount);
         changed |= setIfChanged(record.getEolComponentCount(), snapshot.eolComponentCount(), record::setEolComponentCount);
         changed |= setIfChanged(record.getEosComponentCount(), snapshot.eosComponentCount(), record::setEosComponentCount);
+        changed |= setIfChanged(record.getOrgImpact(), snapshot.orgImpact(), record::setOrgImpact);
         return changed;
+    }
+
+    /**
+     * Computes org-level impact (LOW/MEDIUM/HIGH) from available evaluation signals.
+     *
+     * Rules (evaluated in priority order):
+     *   HIGH   – CVSS >= 9.0 (critical), OR in CISA KEV, OR EPSS >= 0.3,
+     *             OR S.AI score exceeds CVSS by more than 1.0
+     *   MEDIUM – S.AI score is within ±1.0 of CVSS (comparable risk context),
+     *             AND none of the HIGH conditions apply
+     *   LOW    – S.AI score is more than 1.0 below CVSS (context reduces risk),
+     *             AND none of the HIGH conditions apply
+     *
+     * Note: external-facing asset count is not yet tracked on org_cve_records and
+     * is therefore omitted from this server-side computation. The frontend incorporates
+     * it for the display value via computeOrgImpact() in riskScoring.ts.
+     */
+    static OrgImpact computeOrgImpact(
+            Double cvssScore,
+            Double epssScore,
+            boolean inKev,
+            long matchedAssetCount,
+            long eolComponentCount,
+            long noPatchComponentCount
+    ) {
+        double cvss = cvssScore != null ? cvssScore : 0.0;
+        double epss = epssScore != null ? epssScore : 0.0;
+
+        // Approximate S.AI score using the same formula as the frontend riskScoring.ts
+        double sai = 0.0;
+        sai += (cvss / 10.0) * 3.0;
+        sai += Math.min(epss * 10.0, 2.0);
+        if (inKev) sai += 1.5;
+        if (matchedAssetCount > 0) sai += Math.min(matchedAssetCount / 15.0, 1.5);
+        if (eolComponentCount > 0) sai += 1.0;
+        if (noPatchComponentCount > 0) sai += 1.0;
+        sai = Math.min(10.0, sai);
+
+        if (matchedAssetCount == 0) {
+            return OrgImpact.NONE;
+        }
+
+        boolean isCritical = cvss >= 9.0;
+        boolean isExploitable = inKev || epss >= 0.3;
+        boolean saiAboveCvss = sai > cvss + 1.0;
+
+        if (isCritical || isExploitable || saiAboveCvss) {
+            return OrgImpact.HIGH;
+        }
+        if (Math.abs(sai - cvss) <= 1.0) {
+            return OrgImpact.MEDIUM;
+        }
+        return OrgImpact.LOW;
     }
 
     private OrgCveRecord initializeRecord(Tenant tenant, Vulnerability vulnerability, Instant now) {
@@ -453,7 +517,8 @@ public class OrgCveRecordService {
             long underInvestigationComponentCount,
             long unknownComponentCount,
             long eolComponentCount,
-            long eosComponentCount
+            long eosComponentCount,
+            OrgImpact orgImpact
     ) {
     }
 }

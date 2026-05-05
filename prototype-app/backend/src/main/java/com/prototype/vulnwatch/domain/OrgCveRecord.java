@@ -164,6 +164,10 @@ public class OrgCveRecord {
     @Column(name = "ai_actions_generated_at")
     private Instant aiActionsGeneratedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "org_impact", length = 10)
+    private OrgImpact orgImpact;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -495,6 +499,14 @@ public class OrgCveRecord {
 
     public void setAiActionsGeneratedAt(Instant aiActionsGeneratedAt) {
         this.aiActionsGeneratedAt = aiActionsGeneratedAt;
+    }
+
+    public OrgImpact getOrgImpact() {
+        return orgImpact;
+    }
+
+    public void setOrgImpact(OrgImpact orgImpact) {
+        this.orgImpact = orgImpact;
     }
 
     public Instant getCreatedAt() {

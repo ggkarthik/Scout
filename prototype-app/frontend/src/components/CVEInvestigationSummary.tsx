@@ -104,6 +104,19 @@ export type InvestigationSummaryInput = {
     solutionDetail?: string;
     targetVersion?: string;
   }>;
+  createdFindings?: Array<{
+    displayId: string;
+    assetName: string;
+    assetIdentifier: string;
+    packageName: string;
+    packageVersion: string;
+    severity: string;
+    status: string;
+    decisionState: string;
+    assignedTo?: string;
+    dueAt?: string;
+    incidentId?: string;
+  }>;
 };
 
 type SummaryMode = 'deterministic' | 'ai';
@@ -156,13 +169,14 @@ function tonedBorder(color: string, strength = 26): string {
 }
 
 function buildDeterministicSummary(input: InvestigationSummaryInput): InvestigationSummaryResponse {
-  const { summary, affectedAssets, falsePositiveRows, eolRows } = input;
+  const { summary, affectedAssets, falsePositiveRows, eolRows, createdFindings = [] } = input;
   const totalAffected = affectedAssets.length;
   const falsePositives = falsePositiveRows.filter((r) => r.falsePositive).length;
   const truePositives = totalAffected - falsePositives;
   const externalFacing = affectedAssets.filter((a) => a.externalFacing).length;
   const internalAssetCount = totalAffected - externalFacing;
   const eolAtRisk = eolRows.filter((r) => r.lifecycle && r.lifecycle.toLowerCase() !== 'supported' && r.lifecycle.toLowerCase() !== 'unknown').length;
+  const createdFindingCount = createdFindings.length;
   const unpatchedVulnerable = summary.patchAvailable ? truePositives : 0;
   const sev = summary.severity.toUpperCase();
   const cvss = summary.cvssScore ?? 0;
@@ -172,6 +186,9 @@ function buildDeterministicSummary(input: InvestigationSummaryInput): Investigat
     `${summary.cveId} is currently assessed as ${sev.toLowerCase()} risk.`,
     `The investigation identified ${totalAffected} impacted asset${totalAffected !== 1 ? 's' : ''}, including ${externalFacing} external-facing system${externalFacing !== 1 ? 's' : ''}.`,
     `${truePositives} asset${truePositives !== 1 ? 's' : ''} remain true positive${truePositives !== 1 ? 's' : ''} after vendor-advisory review, while ${falsePositives} asset${falsePositives !== 1 ? 's' : ''} were cleared as false positive${falsePositives !== 1 ? 's' : ''}.`,
+    createdFindingCount > 0
+      ? `${createdFindingCount} finding${createdFindingCount === 1 ? ' was' : 's were'} created during the investigation workflow and ${createdFindingCount === 1 ? 'is' : 'are'} included in the report.`
+      : null,
     eolAtRisk > 0
       ? `${eolAtRisk} software version${eolAtRisk !== 1 ? 's' : ''} carry end-of-life risk, and the recommended remediation path is to prioritize containment, patching, and lifecycle upgrades in that order.`
       : `No end-of-life software risk was identified. The recommended remediation path is to apply the available patch as soon as possible.`,
@@ -218,13 +235,6 @@ function buildDeterministicSummary(input: InvestigationSummaryInput): Investigat
       owner: 'IT Operations', timeframe: 'Medium-term (30–90 days)', type: 'UPGRADE',
     });
   }
-  remediationPlan.push({
-    priority: remediationPlan.length + 1, priorityLabel: `P${remediationPlan.length + 1}`,
-    title: 'Validate remediation and close findings',
-    detail: 'Re-scan patched systems to confirm remediation and close associated findings in the vulnerability tracking system.',
-    owner: 'Security Operations', timeframe: 'Short-term (1–2 weeks)', type: 'VALIDATE',
-  });
-
   const keyFindings: string[] = [];
   keyFindings.push(`${totalAffected} asset${totalAffected !== 1 ? 's' : ''} matched CVE criteria; ${truePositives} confirmed true positive${truePositives !== 1 ? 's' : ''}.`);
   if (externalFacing > 0) keyFindings.push(`${externalFacing} external-facing asset${externalFacing !== 1 ? 's' : ''} at elevated risk of exploitation.`);
@@ -232,6 +242,27 @@ function buildDeterministicSummary(input: InvestigationSummaryInput): Investigat
   if (eolAtRisk > 0) keyFindings.push(`${eolAtRisk} software version${eolAtRisk !== 1 ? 's' : ''} are end-of-life and should be prioritized for upgrade.`);
   if (falsePositives > 0) keyFindings.push(`${falsePositives} asset${falsePositives !== 1 ? 's' : ''} cleared as false positives based on vendor advisory.`);
   if (!summary.patchAvailable) keyFindings.push('No vendor patch available — compensating controls required.');
+  if (createdFindingCount > 0) {
+    const sampleFindings = createdFindings.slice(0, 3).map((finding) => {
+      const bits = [
+        finding.displayId,
+        finding.assetName || finding.assetIdentifier,
+        finding.packageName,
+        finding.packageVersion || '—',
+        finding.severity,
+      ].filter(Boolean);
+      return bits.join(' · ');
+    });
+    keyFindings.push(
+      `${createdFindingCount} finding${createdFindingCount !== 1 ? 's' : ''} created: ${sampleFindings.join('; ')}${createdFindingCount > sampleFindings.length ? '…' : ''}`
+    );
+  }
+  remediationPlan.push({
+    priority: remediationPlan.length + 1, priorityLabel: `P${remediationPlan.length + 1}`,
+    title: 'Validate remediation and close findings',
+    detail: 'Re-scan patched systems to confirm remediation and close associated findings in the vulnerability tracking system.',
+    owner: 'Security Operations', timeframe: 'Short-term (1–2 weeks)', type: 'VALIDATE',
+  });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -351,6 +382,7 @@ async function exportWordDocument(
     const internalAssetCount = Math.max(0, input.affectedAssets.length - externalAssets.length);
     const falsePositiveRows = input.falsePositiveRows.filter((row) => row.falsePositive);
     const eolRows = input.eolRows.filter((row) => (row.lifecycle ?? '').toLowerCase() !== 'supported');
+    const createdFindings = input.createdFindings ?? [];
 
     bodyChildren = [
       new Paragraph({
@@ -376,6 +408,21 @@ async function exportWordDocument(
         ['Asset / Software', 'Vendor advisory', 'Reason', 'Confidence'],
         ...falsePositiveRows.map((row) => [row.software, row.vendorAdvisory || '—', row.vendorGuidance || 'Vendor guidance matched', 'High']),
       ]),
+      new Paragraph({ text: 'Created Findings', heading: HeadingLevel.HEADING_2 }),
+      createdFindings.length > 0
+        ? buildTable([
+            ['Finding', 'Asset', 'Software', 'Version', 'Severity', 'Status', 'Assignee'],
+            ...createdFindings.map((finding) => [
+              finding.displayId,
+              finding.assetName || finding.assetIdentifier || '—',
+              finding.packageName,
+              finding.packageVersion || '—',
+              finding.severity,
+              finding.status,
+              finding.assignedTo || '—',
+            ]),
+          ])
+        : new Paragraph('No findings were created during this investigation.'),
       new Paragraph({ text: 'End-of-Life Assets', heading: HeadingLevel.HEADING_2 }),
       buildTable([
         ['Hostname / Software', 'Product Version', 'EOL Date', 'Status'],
@@ -947,6 +994,38 @@ export function CVEInvestigationSummary({
               ))}
             </ul>
           </div>
+
+          {input.createdFindings?.length ? (
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Created Findings</div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {input.createdFindings.map((finding) => (
+                  <div key={finding.displayId} style={{
+                    border: `1px solid ${COLORS.border}`,
+                    borderRadius: 16,
+                    padding: 14,
+                    background: COLORS.background,
+                    display: 'grid',
+                    gap: 6,
+                  }}>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <strong style={{ color: COLORS.text }}>{finding.displayId}</strong>
+                      <span style={pillStyle(COLORS.text, false, { background: COLORS.surfaceMuted, borderColor: COLORS.border })}>{finding.status}</span>
+                      <span style={pillStyle(severityColor(finding.severity), false)}>{finding.severity}</span>
+                    </div>
+                    <div style={{ color: COLORS.text }}>
+                      {finding.assetName} · {finding.packageName} {finding.packageVersion || '—'}
+                    </div>
+                    <div style={{ color: COLORS.muted, fontSize: 12 }}>
+                      Decision: {finding.decisionState}
+                      {finding.assignedTo ? ` · Assignee: ${finding.assignedTo}` : ''}
+                      {finding.incidentId ? ` · Incident: ${finding.incidentId}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div style={{
             display: 'grid',

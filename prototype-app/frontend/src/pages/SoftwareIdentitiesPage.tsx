@@ -3,7 +3,7 @@ import '../styles/findings-list.css';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { DonutChart, HBarChart, WidgetCard } from '../features/widgets/FplWidgets';
-import { pathForInventoryHostAsset, pathForInventoryViewWithSearch } from '../app/routes';
+import { pathForInventoryHostAsset, pathForInventoryViewWithSearch, pathForSoftwareIdentityDetail } from '../app/routes';
 import {
   formatAssetType,
   formatInventoryLabel,
@@ -12,6 +12,7 @@ import {
 import {
   INVENTORY_ECOSYSTEM_QUERY_KEY,
   INVENTORY_SOURCE_SYSTEM_QUERY_KEY,
+  HOST_OPERATING_SYSTEM_QUERY_KEY,
   SOFTWARE_LIFECYCLE_QUERY_KEY,
   SOFTWARE_MAPPING_STATE_QUERY_KEY,
   readInventoryGroupByFromSearch,
@@ -59,7 +60,7 @@ const MAPPING_STATE_OPTIONS = [
   { value: 'manual', label: 'Manual mapping' },
   { value: 'automatic', label: 'Automatic mapping' }
 ] as const;
-const SOFTWARE_IDENTITIES_PAGE_SIZE = 50;
+const SOFTWARE_IDENTITIES_PAGE_SIZE = 200;
 
 function sameValues(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -409,6 +410,10 @@ export function SoftwareIdentitiesPage() {
     () => readCoverageFromSearch(searchParams),
     [searchParams]
   );
+  const initialOperatingSystem = React.useMemo(
+    () => readSearchValueFromSearch(searchParams, HOST_OPERATING_SYSTEM_QUERY_KEY),
+    [searchParams]
+  );
   const initialGroupBy = React.useMemo(
     () => readInventoryGroupByFromSearch(searchParams),
     [searchParams]
@@ -419,6 +424,7 @@ export function SoftwareIdentitiesPage() {
   const [lifecycle, setLifecycle] = React.useState(initialLifecycle);
   const [mappingState, setMappingState] = React.useState(initialMappingState);
   const [coverage, setCoverage] = React.useState<SoftwareIdentityCoverage | ''>(initialCoverage);
+  const [operatingSystem, setOperatingSystem] = React.useState(initialOperatingSystem);
   const [groupBy, setGroupBy] = React.useState<string[]>(initialGroupBy);
   const [page, setPage] = React.useState(0);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
@@ -432,7 +438,8 @@ export function SoftwareIdentitiesPage() {
     ecosystem: ecosystems.length > 0 ? ecosystems : undefined,
     lifecycle: lifecycle ? lifecycle as 'eol' | 'near-eol' | 'unknown' | 'supported' : undefined,
     mappingState: mappingState ? mappingState as 'needs-review' | 'mapped' | 'manual' | 'automatic' : undefined,
-    coverage: coverage || undefined
+    coverage: coverage || undefined,
+    operatingSystem: operatingSystem || undefined
   });
   const funnelQuery = useSoftwareIdentityFunnelQuery();
 
@@ -448,6 +455,30 @@ export function SoftwareIdentitiesPage() {
 
   const totalIdentityCount = identitiesQuery.data?.totalElements ?? identities.length;
   const totalPages = identitiesQuery.data?.totalPages ?? 0;
+  const currentSoftwareStats = React.useMemo(() => {
+    const sourceValues = new Set<string>();
+    let softwareRows = 0;
+    let withCves = 0;
+    identities.forEach((identity) => {
+      softwareRows += identity.componentCount;
+      if (identity.openVulnerabilityCount > 0) {
+        withCves += 1;
+      }
+      identity.sourceSystems.forEach((value) => {
+        const normalized = value?.trim();
+        if (normalized) {
+          sourceValues.add(normalized);
+        }
+      });
+    });
+    return {
+      softwareRows,
+      uniqueSoftware: totalIdentityCount,
+      withCves,
+      clean: Math.max(0, totalIdentityCount - withCves),
+      sourceCount: sourceValues.size
+    };
+  }, [identities, totalIdentityCount]);
   const lifecycleBreakdown = React.useMemo(() => {
     const values = [
       { label: 'EOL', count: 0 },
@@ -514,8 +545,15 @@ export function SoftwareIdentitiesPage() {
     if (coverage === 'with-vulnerabilities') {
       chips.push({ key: 'coverage', label: 'Coverage: Software with CVEs', onRemove: () => setCoverage('') });
     }
+    if (operatingSystem) {
+      chips.push({
+        key: 'operating-system',
+        label: `OS: ${operatingSystem}`,
+        onRemove: () => setOperatingSystem('')
+      });
+    }
     return chips;
-  }, [coverage, ecosystems, lifecycle, mappingState, query, sourceSystems]);
+  }, [coverage, ecosystems, lifecycle, mappingState, operatingSystem, query, sourceSystems]);
   const groupedCards = React.useMemo(() => (
     groupBy
       .map((key) => {
@@ -547,6 +585,7 @@ export function SoftwareIdentitiesPage() {
     const nextLifecycle = readSearchValueFromSearch(searchParams, SOFTWARE_LIFECYCLE_QUERY_KEY);
     const nextMappingState = readSearchValueFromSearch(searchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY);
     const nextCoverage = readCoverageFromSearch(searchParams);
+    const nextOperatingSystem = readSearchValueFromSearch(searchParams, HOST_OPERATING_SYSTEM_QUERY_KEY);
     const nextGroupBy = readInventoryGroupByFromSearch(searchParams);
 
     setQuery((current) => (current === nextQuery ? current : nextQuery));
@@ -555,6 +594,7 @@ export function SoftwareIdentitiesPage() {
     setLifecycle((current) => (current === nextLifecycle ? current : nextLifecycle));
     setMappingState((current) => (current === nextMappingState ? current : nextMappingState));
     setCoverage((current) => (current === nextCoverage ? current : nextCoverage));
+    setOperatingSystem((current) => (current === nextOperatingSystem ? current : nextOperatingSystem));
     setGroupBy((current) => (sameValues(current, nextGroupBy) ? current : nextGroupBy));
   }, [searchParams]);
 
@@ -566,18 +606,19 @@ export function SoftwareIdentitiesPage() {
     nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_LIFECYCLE_QUERY_KEY, lifecycle);
     nextSearchParams = writeSearchValueToSearch(nextSearchParams, SOFTWARE_MAPPING_STATE_QUERY_KEY, mappingState);
     nextSearchParams = writeCoverageToSearch(nextSearchParams, coverage);
+    nextSearchParams = writeSearchValueToSearch(nextSearchParams, HOST_OPERATING_SYSTEM_QUERY_KEY, operatingSystem);
     nextSearchParams = writeInventoryGroupByToSearch(nextSearchParams, groupBy);
 
     if (nextSearchParams.toString() !== searchParams.toString()) {
       setSearchParams(nextSearchParams, { replace: true });
     }
-  }, [coverage, ecosystems, groupBy, lifecycle, mappingState, query, searchParams, setSearchParams, sourceSystems]);
+  }, [coverage, ecosystems, groupBy, lifecycle, mappingState, operatingSystem, query, searchParams, setSearchParams, sourceSystems]);
 
   React.useEffect(() => {
     setPage(0);
     setExpandedIds(new Set());
     setActivePanel(null);
-  }, [query, sourceSystems, ecosystems, lifecycle, mappingState, coverage]);
+  }, [query, sourceSystems, ecosystems, lifecycle, mappingState, coverage, operatingSystem]);
 
   React.useEffect(() => {
     setExpandedIds(new Set());
@@ -621,6 +662,7 @@ export function SoftwareIdentitiesPage() {
     setLifecycle('');
     setMappingState('');
     setCoverage('');
+    setOperatingSystem('');
   }, []);
   const toggleCoverage = React.useCallback((nextCoverage: SoftwareIdentityCoverage) => {
     setCoverage((current) => current === nextCoverage || nextCoverage !== 'with-vulnerabilities' ? '' : nextCoverage);
@@ -692,17 +734,14 @@ export function SoftwareIdentitiesPage() {
                 {
                   key: 'with-cves',
                   label: 'With CVEs',
-                  value: funnelQuery.data?.softwareWithVulnerabilities ?? 0,
+                  value: currentSoftwareStats.withCves,
                   color: '#ef4444',
                   onClick: () => toggleCoverage('with-vulnerabilities')
                 },
                 {
                   key: 'clean',
                   label: 'Clean',
-                  value: Math.max(
-                    0,
-                    (funnelQuery.data?.uniqueSoftware ?? 0) - (funnelQuery.data?.softwareWithVulnerabilities ?? 0)
-                  ),
+                  value: currentSoftwareStats.clean,
                   color: '#22c55e',
                   onClick: () => setCoverage('')
                 }
@@ -715,15 +754,12 @@ export function SoftwareIdentitiesPage() {
               >
                 <span className="fpl-legend-dot" style={{ background: '#ef4444' }} />
                 <span className="fpl-legend-label">With CVEs</span>
-                <strong className="fpl-legend-val">{(funnelQuery.data?.softwareWithVulnerabilities ?? 0).toLocaleString()}</strong>
+                <strong className="fpl-legend-val">{currentSoftwareStats.withCves.toLocaleString()}</strong>
               </div>
               <div className="fpl-legend-row" onClick={() => setCoverage('')}>
                 <span className="fpl-legend-dot" style={{ background: '#22c55e' }} />
                 <span className="fpl-legend-label">Clean</span>
-                <strong className="fpl-legend-val">{Math.max(
-                  0,
-                  (funnelQuery.data?.uniqueSoftware ?? 0) - (funnelQuery.data?.softwareWithVulnerabilities ?? 0)
-                ).toLocaleString()}</strong>
+                <strong className="fpl-legend-val">{currentSoftwareStats.clean.toLocaleString()}</strong>
               </div>
             </div>
           </div>
@@ -766,26 +802,26 @@ export function SoftwareIdentitiesPage() {
           <div className="fpl-kpi-grid">
             {[
               {
-                label: 'Software Identities',
-                value: funnelQuery.data?.recordsFound ?? 0,
+                label: 'Software Rows',
+                value: currentSoftwareStats.softwareRows,
                 color: '#3b82f6',
                 onClick: () => clearFilters()
               },
               {
                 label: 'Unique Software',
-                value: funnelQuery.data?.uniqueSoftware ?? 0,
+                value: currentSoftwareStats.uniqueSoftware,
                 color: '#6366f1',
                 onClick: () => clearFilters()
               },
               {
                 label: 'With CVEs',
-                value: funnelQuery.data?.softwareWithVulnerabilities ?? 0,
+                value: currentSoftwareStats.withCves,
                 color: '#ef4444',
                 onClick: () => toggleCoverage('with-vulnerabilities')
               },
               {
                 label: 'Sources',
-                value: funnelQuery.data?.sourceCount ?? 0,
+                value: currentSoftwareStats.sourceCount,
                 color: '#22c55e'
               }
             ].map((kpi) => (
@@ -888,7 +924,16 @@ export function SoftwareIdentitiesPage() {
                           <div className="si-identity-name-cell">
                             <span className={`si-expand-toggle${isExpanded ? ' si-expand-toggle-open' : ''}`}>▶</span>
                             <div>
-                              <div className="inventory-primary-text">{identity.displayName}</div>
+                              <button
+                                type="button"
+                                className="btn-link inventory-primary-text"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  navigate(pathForSoftwareIdentityDetail(identity.id));
+                                }}
+                              >
+                                {identity.displayName}
+                              </button>
                               <div className="panel-caption mono">{identity.normalizedKey}</div>
                             </div>
                           </div>
