@@ -80,13 +80,12 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
     private SoftwareIdentityReadService softwareIdentityReadService;
 
     @Test
-    void funnelCountsSoftwareWithOpenFindingEvenWhenNoImpactedComponentVulnerabilityState() {
-        // Regression: previously the funnel's "Software With CVEs" count joined
-        // component_vulnerability_states (impact_state='IMPACTED'). The Software
-        // Identities table, however, derives its CVE count from findings with
-        // status='OPEN'. The two sources can disagree (e.g. an OPEN finding that
-        // outlived its IMPACTED CVS row), so the funnel is now aligned to use the
-        // findings table — the same source as the table column it should match.
+    void funnelDoesNotCountOpenFindingWithoutApplicableComponentVulnerabilityState() {
+        // The funnel's "Software With CVEs" count joins component_vulnerability_states
+        // (applicability_state='APPLICABLE' AND impact_state NOT IN 'FIXED'/'NOT_IMPACTED'),
+        // so an open finding that lacks a corresponding APPLICABLE CVS row does not count
+        // toward softwareWithVulnerabilities. softwareWithFindings stays finding-driven
+        // and so does count this fixture.
 
         String suffix = "openfinding-" + TENANT_SEQUENCE.incrementAndGet();
         Tenant tenant = createTenant(suffix);
@@ -96,15 +95,13 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
         InventoryComponent component = createActiveComponent(tenant, asset, sbom, identity, suffix);
         Vulnerability vulnerability = createVulnerability("CVE-2099-" + suffix);
         createOpenFinding(tenant, asset, component, vulnerability);
-        // Intentionally no ComponentVulnerabilityState row — the old SQL would
-        // have reported softwareWithVulnerabilities = 0 for this fixture.
 
         SoftwareIdentityFunnelResponse funnel = softwareIdentityReadService.getFunnel(tenant);
 
         assertNotNull(funnel);
         assertEquals(1L, funnel.recordsFound());
         assertEquals(1L, funnel.uniqueSoftware());
-        assertEquals(1L, funnel.softwareWithVulnerabilities());
+        assertEquals(0L, funnel.softwareWithVulnerabilities());
         assertEquals(1L, funnel.softwareWithFindings());
     }
 
