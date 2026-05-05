@@ -13,4 +13,5 @@ public interface SbomUploadRepository extends JpaRepository<SbomUpload, UUID> {
     List<SbomUpload> findByTenantOrderByUploadedAtDesc(Tenant tenant);
     List<SbomUpload> findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(Tenant tenant, String ingestionSourceSystem);
     List<SbomUpload> findByTenantAndUploadedAtGreaterThanEqualOrderByUploadedAtDesc(Tenant tenant, Instant fromInclusive);
+    long countByTenantAndUploadedAtGreaterThanEqual(Tenant tenant, Instant fromInclusive);
 }

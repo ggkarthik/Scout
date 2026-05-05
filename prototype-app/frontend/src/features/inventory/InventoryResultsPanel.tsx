@@ -8,12 +8,10 @@ import { EolBadge } from '../../components/EolBadge';
 import type {
   InventoryComponentRecord
 } from './api-types';
-import type { VulnerabilityIntelRecord } from '../vulnerability-intel/types';
 import {
   buildHostReviewLabels,
   formatAssetType,
-  formatInventorySourceSystem,
-  formatSourceSystem
+  formatInventorySourceSystem
 } from './helpers';
 import type { InventoryViewKey } from './types';
 
@@ -28,28 +26,7 @@ type Props = {
   onOpenHostDetail: (assetId: string) => void;
   onPreviousComponentPage: () => void;
   onNextComponentPage: () => void;
-  vulnerabilityIntelRows: VulnerabilityIntelRecord[];
-  vulnerabilityIntelPage: number;
-  vulnerabilityIntelTotalPages: number;
-  selectedVulnerabilityIntelId: string | null;
-  onOpenVulnerabilityIntelDetail: (externalId: string) => void;
-  onPreviousVulnerabilityIntelPage: () => void;
-  onNextVulnerabilityIntelPage: () => void;
 };
-
-const VULNERABILITY_INTEL_COLUMNS: DataTableColumn[] = [
-  { id: 'vulnerabilityId', label: 'Vulnerability ID', header: 'Vulnerability ID', initialSize: 160 },
-  { id: 'description', label: 'Description', header: 'Description', initialSize: 280 },
-  { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
-  { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
-  { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
-  { id: 'affectedPackages', label: 'Affected Packages', header: 'Affected Packages', initialSize: 240 },
-  { id: 'primarySource', label: 'Primary Source', header: 'Primary Source', initialSize: 160 },
-  { id: 'allSources', label: 'All Sources', header: 'All Sources', initialSize: 200 },
-  { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
-  { id: 'published', label: 'Published', header: 'Published', initialSize: 180 },
-  { id: 'lastModified', label: 'Last Modified', header: 'Last Modified', initialSize: 180 }
-];
 
 const COMPONENT_COLUMNS: DataTableColumn[] = [
   { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 220 },
@@ -71,57 +48,6 @@ const COMPONENT_COLUMNS: DataTableColumn[] = [
 
 function formatDateTime(value?: string): string {
   return value ? new Date(value).toLocaleString() : '-';
-}
-
-function renderAffectedPackages(record: VulnerabilityIntelRecord): string {
-  if (!record.affectedPackages || record.affectedPackages.length === 0) {
-    return '-';
-  }
-  const summary = record.affectedPackages.slice(0, 3).map((pkg) => (
-    pkg.packageName
-      ? `${pkg.packageName}${pkg.ecosystem ? ` (${pkg.ecosystem})` : ''}`
-      : pkg.cpe ?? '-'
-  )).join(', ');
-  return record.affectedPackages.length > 3
-    ? `${summary} +${record.affectedPackages.length - 3} more`
-    : summary;
-}
-
-function buildVulnerabilityIntelRows(
-  rows: VulnerabilityIntelRecord[],
-  selectedId: string | null,
-  onOpenDetail: (externalId: string) => void
-): DataTableRow[] {
-  return rows.map((record) => ({
-    id: record.id,
-    rowProps: {
-      className: `table-row-clickable ${selectedId === record.externalId ? 'table-row-selected' : ''}`,
-      onClick: () => onOpenDetail(record.externalId),
-      onKeyDown: (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onOpenDetail(record.externalId);
-        }
-      },
-      tabIndex: 0,
-      'aria-label': `Open vulnerability intelligence detail ${record.externalId}`
-    },
-    cells: {
-      vulnerabilityId: {
-        content: <span className="mono">{record.externalId}</span>
-      },
-      description: { content: record.descriptionSnippet || '-' },
-      severity: { content: record.severity || '-' },
-      cvss: { content: record.cvssScore ?? '-' },
-      epss: { content: record.epssScore ?? '-' },
-      affectedPackages: { content: renderAffectedPackages(record) },
-      primarySource: { content: record.sources.length > 0 ? formatSourceSystem(record.sources[0]) : '-' },
-      allSources: { content: record.sources.length > 0 ? record.sources.map(formatSourceSystem).join(', ') : '-' },
-      openFindings: { content: record.openFindings },
-      published: { content: formatDateTime(record.publishedAt) },
-      lastModified: { content: formatDateTime(record.lastModifiedAt) }
-    }
-  }));
 }
 
 function buildComponentRows(
@@ -215,156 +141,6 @@ function buildComponentRows(
   }));
 }
 
-function VulnerabilityIntelTable({
-  rows,
-  loading,
-  page,
-  totalPages,
-  selectedId,
-  onOpenDetail,
-  onPreviousPage,
-  onNextPage
-}: {
-  rows: VulnerabilityIntelRecord[];
-  loading: boolean;
-  page: number;
-  totalPages: number;
-  selectedId: string | null;
-  onOpenDetail: (externalId: string) => void;
-  onPreviousPage: () => void;
-  onNextPage: () => void;
-}) {
-  const tableRows = React.useMemo(
-    () => buildVulnerabilityIntelRows(rows, selectedId, onOpenDetail),
-    [onOpenDetail, rows, selectedId]
-  );
-
-  if (loading && rows.length === 0) {
-    return <div className="notice">Loading vulnerability intelligence records...</div>;
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="empty-state">
-        <p>
-          No vulnerability intelligence records found. Run source sync from <span className="mono">Connect</span>.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="table-scroll">
-        <DataTable
-          storageKey="inventory-vulnerability-intel-table-widths"
-          columns={VULNERABILITY_INTEL_COLUMNS}
-          rows={tableRows}
-        />
-      </div>
-      <div className="pagination-row">
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={onPreviousPage}
-          disabled={page <= 0 || loading}
-        >
-          Previous
-        </button>
-        <span className="panel-caption pagination-caption">
-          Page {totalPages === 0 ? 0 : page + 1} of {Math.max(totalPages, 1)}
-        </span>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={onNextPage}
-          disabled={loading || totalPages === 0 || page + 1 >= totalPages}
-        >
-          Next
-        </button>
-      </div>
-    </>
-  );
-}
-
-function ComponentInventoryTable({
-  selectedView,
-  rows,
-  loading,
-  page,
-  totalPages,
-  selectedHostAssetId,
-  onOpenHostDetail,
-  onPreviousPage,
-  onNextPage
-}: {
-  selectedView: InventoryViewKey;
-  rows: InventoryComponentRecord[];
-  loading: boolean;
-  page: number;
-  totalPages: number;
-  selectedHostAssetId: string | null;
-  onOpenHostDetail: (assetId: string) => void;
-  onPreviousPage: () => void;
-  onNextPage: () => void;
-}) {
-  const tableColumns = React.useMemo(
-    () => COMPONENT_COLUMNS.filter((column) => selectedView === 'hosts' || column.id !== 'review'),
-    [selectedView]
-  );
-  const tableRows = React.useMemo(
-    () => buildComponentRows(selectedView, rows, selectedHostAssetId, onOpenHostDetail),
-    [onOpenHostDetail, rows, selectedHostAssetId, selectedView]
-  );
-
-  if (loading && rows.length === 0) {
-    return <div className="notice">Loading inventory records...</div>;
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="empty-state">
-        <p>
-          No inventory records found for this view. Connect an SBOM source from <span className="mono">Connect &gt; Inventory Sources</span>.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="table-scroll">
-        <DataTable
-          storageKey="inventory-components-table-widths"
-          columns={tableColumns}
-          rows={tableRows}
-        />
-      </div>
-      <div className="pagination-row">
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={onPreviousPage}
-          disabled={page <= 0 || loading}
-        >
-          Previous
-        </button>
-        <span className="panel-caption pagination-caption">
-          Page {totalPages === 0 ? 0 : page + 1} of {Math.max(totalPages, 1)}
-        </span>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={onNextPage}
-          disabled={loading || totalPages === 0 || page + 1 >= totalPages}
-        >
-          Next
-        </button>
-      </div>
-    </>
-  );
-}
-
 export function InventoryResultsPanel({
   selectedView,
   error,
@@ -375,55 +151,67 @@ export function InventoryResultsPanel({
   selectedHostAssetId,
   onOpenHostDetail,
   onPreviousComponentPage,
-  onNextComponentPage,
-  vulnerabilityIntelRows,
-  vulnerabilityIntelPage,
-  vulnerabilityIntelTotalPages,
-  selectedVulnerabilityIntelId,
-  onOpenVulnerabilityIntelDetail,
-  onPreviousVulnerabilityIntelPage,
-  onNextVulnerabilityIntelPage
+  onNextComponentPage
 }: Props) {
+  const tableColumns = React.useMemo(
+    () => COMPONENT_COLUMNS.filter((column) => selectedView === 'hosts' || column.id !== 'review'),
+    [selectedView]
+  );
+  const tableRows = React.useMemo(
+    () => buildComponentRows(selectedView, rows, selectedHostAssetId, onOpenHostDetail),
+    [onOpenHostDetail, rows, selectedHostAssetId, selectedView]
+  );
+
   return (
     <section className="panel">
       <div className="panel-header">
-        <h3>
-          {selectedView === 'vulnerability-intelligence'
-            ? 'Unified Vulnerability Records'
-            : 'Component Inventory Records'}
-        </h3>
-        {selectedView !== 'vulnerability-intelligence' && (
-          <span className="panel-caption">
-            Inventory records are normalized and persisted consistently across application, container-image, and host inventory views.
-          </span>
-        )}
+        <h3>Component Inventory Records</h3>
+        <span className="panel-caption">
+          Inventory records are normalized and persisted consistently across application, container-image, and host inventory views.
+        </span>
       </div>
 
       {error && <div className="notice error">Failed to load inventory: {error}</div>}
 
-      {selectedView === 'vulnerability-intelligence' ? (
-        <VulnerabilityIntelTable
-          rows={vulnerabilityIntelRows}
-          loading={loading}
-          page={vulnerabilityIntelPage}
-          totalPages={vulnerabilityIntelTotalPages}
-          selectedId={selectedVulnerabilityIntelId}
-          onOpenDetail={onOpenVulnerabilityIntelDetail}
-          onPreviousPage={onPreviousVulnerabilityIntelPage}
-          onNextPage={onNextVulnerabilityIntelPage}
-        />
+      {loading && rows.length === 0 ? (
+        <div className="notice">Loading inventory records...</div>
+      ) : rows.length === 0 ? (
+        <div className="empty-state">
+          <p>
+            No inventory records found for this view. Connect an SBOM source from <span className="mono">Connect &gt; Inventory Sources</span>.
+          </p>
+        </div>
       ) : (
-        <ComponentInventoryTable
-          selectedView={selectedView}
-          rows={rows}
-          loading={loading}
-          page={componentPage}
-          totalPages={componentTotalPages}
-          selectedHostAssetId={selectedHostAssetId}
-          onOpenHostDetail={onOpenHostDetail}
-          onPreviousPage={onPreviousComponentPage}
-          onNextPage={onNextComponentPage}
-        />
+        <>
+          <div className="table-scroll">
+            <DataTable
+              storageKey="inventory-components-table-widths"
+              columns={tableColumns}
+              rows={tableRows}
+            />
+          </div>
+          <div className="pagination-row">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onPreviousComponentPage}
+              disabled={componentPage <= 0 || loading}
+            >
+              Previous
+            </button>
+            <span className="panel-caption pagination-caption">
+              Page {componentTotalPages === 0 ? 0 : componentPage + 1} of {Math.max(componentTotalPages, 1)}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onNextComponentPage}
+              disabled={loading || componentTotalPages === 0 || componentPage + 1 >= componentTotalPages}
+            >
+              Next
+            </button>
+          </div>
+        </>
       )}
     </section>
   );

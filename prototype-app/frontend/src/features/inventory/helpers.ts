@@ -1,10 +1,6 @@
 import type {
   InventoryComponentRecord
 } from './api-types';
-import type {
-  VulnerabilityIntelDetail,
-  VulnerabilityIntelRecord
-} from '../vulnerability-intel/types';
 import {
   HOST_REVIEW_CATEGORIES,
   HostReviewCategory,
@@ -12,41 +8,14 @@ import {
   InventoryViewKey
 } from './types';
 
-const SOURCE_LABELS: Record<string, string> = {
-  nvd: 'NVD',
-  kev: 'KEV (CISA)',
-  ghsa: 'GHSA',
-  msrc: 'MSRC',
-  redhat: 'Red Hat',
-  'csaf-microsoft': 'MSRC CSAF',
-  'vex-microsoft': 'MSRC VEX',
-  'csaf-redhat': 'Red Hat CSAF',
-  'vex-redhat': 'Red Hat VEX',
-  advisory: 'Advisory'
-};
-
 export function defaultAssetTypeForView(view: InventoryViewKey): InventoryScopedAssetType {
-  if (view === 'container-images' || view === 'secured-image-catalog' || view === 'container-registries') {
+  if (view === 'container-images') {
     return 'CONTAINER_IMAGE';
   }
-  if (
-    view === 'sbom'
-    || view === 'hosted-technologies'
-    || view === 'code-repositories'
-    || view === 'source-mappings'
-    || view === 'developers'
-  ) {
+  if (view === 'sbom') {
     return 'APPLICATION';
   }
-  if (
-    view === 'hosts'
-    || view === 'kubernetes-clusters'
-    || view === 'datastores'
-    || view === 'subscriptions'
-    || view === 'iam'
-    || view === 'api-endpoints'
-    || view === 'application-endpoints'
-  ) {
+  if (view === 'hosts') {
     return 'HOST';
   }
   return 'ALL';
@@ -56,49 +25,6 @@ export function formatAssetType(value: InventoryComponentRecord['assetType']): s
   if (value === 'CONTAINER_IMAGE') return 'Container Image';
   if (value === 'APPLICATION') return 'Application';
   return 'Host';
-}
-
-export function canonicalVulnerabilitySource(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, '-');
-  if (normalized === 'microsoft-csaf' || normalized === 'msrc-csaf' || normalized === 'msrc-csaf-advisory') return 'csaf-microsoft';
-  if (normalized === 'microsoft-vex' || normalized === 'msrc-vex') return 'vex-microsoft';
-  if (normalized === 'redhat-csaf' || normalized === 'red-hat-csaf') return 'csaf-redhat';
-  if (normalized === 'redhat-vex' || normalized === 'red-hat-vex') return 'vex-redhat';
-  if (normalized === 'cisa-kev' || normalized === 'cisa-kve' || normalized === 'kve') return 'kev';
-  if (normalized === 'github-advisory') return 'ghsa';
-  if (normalized === 'advisories' || normalized === 'vendor-advisory') return 'advisory';
-  return normalized;
-}
-
-export function vulnerabilitySourceFilterValue(value: string): string {
-  const canonical = canonicalVulnerabilitySource(value);
-  if (canonical === 'csaf-microsoft' || canonical === 'vex-microsoft') return 'msrc';
-  if (canonical === 'csaf-redhat' || canonical === 'vex-redhat') return 'redhat';
-  return canonical;
-}
-
-export function expandVulnerabilitySourceFilters(values: string[]): string[] {
-  const expanded = new Set<string>();
-  values.forEach((value) => {
-    const normalized = vulnerabilitySourceFilterValue(value);
-    if (normalized === 'msrc') {
-      expanded.add('csaf-microsoft');
-      expanded.add('vex-microsoft');
-      return;
-    }
-    if (normalized === 'redhat') {
-      expanded.add('csaf-redhat');
-      expanded.add('vex-redhat');
-      return;
-    }
-    expanded.add(normalized);
-  });
-  return Array.from(expanded);
-}
-
-export function formatSourceSystem(value: string): string {
-  const canonical = canonicalVulnerabilitySource(value);
-  return SOURCE_LABELS[canonical] ?? value;
 }
 
 export function formatInventorySourceSystem(value: string): string {
@@ -116,22 +42,6 @@ export function formatInventoryLabel(value: string): string {
     .replace(/[_-]+/g, ' ')
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-export function formatVexCoverage(value?: VulnerabilityIntelRecord['vexCoverage'] | VulnerabilityIntelDetail['vexCoverage']): string {
-  if (!value) {
-    return 'None';
-  }
-  if (value === 'EXACT_MATCH') return 'Exact Match';
-  if (value === 'VENDOR_ONLY') return 'Vendor Only';
-  return formatInventoryLabel(value);
-}
-
-export function vexCoverageClass(value?: VulnerabilityIntelRecord['vexCoverage'] | VulnerabilityIntelDetail['vexCoverage']): string {
-  if (value === 'EXACT_MATCH') return 'status-open';
-  if (value === 'MIXED') return 'status-in-progress';
-  if (value === 'VENDOR_ONLY') return 'status-suppressed';
-  return 'status-auto_closed';
 }
 
 export function formatHostReviewLabel(value: HostReviewCategory): string {

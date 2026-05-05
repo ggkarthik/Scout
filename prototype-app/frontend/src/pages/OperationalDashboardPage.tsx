@@ -747,7 +747,20 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
   const error = operationsViewQuery.error instanceof Error ? operationsViewQuery.error.message : null;
 
   if (normalizedView === 'quality') {
-    return <Navigate to={`/inventory/manage-software${redirectSearch}`} replace />;
+    const nextParams = new URLSearchParams(redirectSearch);
+    const domain = (nextParams.get('domain') ?? '').trim().toUpperCase();
+    const tab = domain === 'CORRELATION'
+      ? 'quality-correlation'
+      : domain === 'EOL'
+        ? 'quality-eol'
+        : domain === 'VEX'
+          ? 'quality-vex'
+          : 'quality-normalization';
+    nextParams.delete('domain');
+    nextParams.set('inventoryTabs', tab);
+    nextParams.set('inventoryActiveTab', tab);
+    const nextSearch = nextParams.toString();
+    return <Navigate to={`/inventory${nextSearch ? `?${nextSearch}` : ''}`} replace />;
   }
 
   if (error) {
