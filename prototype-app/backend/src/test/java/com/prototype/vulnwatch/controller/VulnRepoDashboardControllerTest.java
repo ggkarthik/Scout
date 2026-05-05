@@ -93,6 +93,7 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null,
+                null,
                 null
         )).thenReturn(new OrgSpecificCveExposurePageResponse(
                 new OrgSpecificCveExposureSummaryResponse(7L, 5L, 3L, 1L, 2L),
@@ -129,6 +130,7 @@ class VulnRepoDashboardControllerTest {
                         null,
                         null,
                         false,
+                        null,
                         null
                 )),
                 1,
@@ -161,6 +163,7 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null,
+                null,
                 null
         );
     }
@@ -180,7 +183,8 @@ class VulnRepoDashboardControllerTest {
                 "openssl",
                 "broad",
                 "00000000-0000-0000-0000-000000000099",
-                true
+                true,
+                false
         )).thenReturn(new OrgSpecificCveExposurePageResponse(
                 new OrgSpecificCveExposureSummaryResponse(1L, 1L, 1L, 0L, 0L),
                 List.of(),
@@ -215,7 +219,8 @@ class VulnRepoDashboardControllerTest {
                 "openssl",
                 "broad",
                 "00000000-0000-0000-0000-000000000099",
-                true
+                true,
+                false
         );
     }
 

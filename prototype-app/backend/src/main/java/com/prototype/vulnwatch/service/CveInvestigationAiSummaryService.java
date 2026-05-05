@@ -434,6 +434,31 @@ public class CveInvestigationAiSummaryService {
         Map<String, Object> solutionsResults = new LinkedHashMap<>();
         solutionsResults.put("per_software_solutions", solutionsList);
 
+        // --- created_findings ---
+        List<Map<String, Object>> createdFindings = raw.get("createdFindings") instanceof List<?> l
+                ? l.stream().filter(e -> e instanceof Map<?, ?>).map(e -> (Map<String, Object>) e).collect(Collectors.toList())
+                : List.of();
+
+        List<Map<String, Object>> createdFindingsList = createdFindings.stream().map(row -> {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("finding_id", row.getOrDefault("displayId", "unknown"));
+            entry.put("asset_name", row.getOrDefault("assetName", "—"));
+            entry.put("asset_identifier", row.getOrDefault("assetIdentifier", "—"));
+            entry.put("software", row.getOrDefault("packageName", "unknown"));
+            entry.put("version", row.getOrDefault("packageVersion", "—"));
+            entry.put("severity", row.getOrDefault("severity", "UNKNOWN"));
+            entry.put("status", row.getOrDefault("status", "UNKNOWN"));
+            entry.put("decision_state", row.getOrDefault("decisionState", "UNKNOWN"));
+            entry.put("assigned_to", row.getOrDefault("assignedTo", null));
+            entry.put("due_date", row.getOrDefault("dueAt", null));
+            entry.put("incident_id", row.getOrDefault("incidentId", null));
+            return entry;
+        }).collect(Collectors.toList());
+
+        Map<String, Object> createdFindingsResults = new LinkedHashMap<>();
+        createdFindingsResults.put("created_count", createdFindingsList.size());
+        createdFindingsResults.put("per_finding", createdFindingsList);
+
         // --- patch_compliance ---
         Map<String, Object> patchCompliance = new LinkedHashMap<>();
         patchCompliance.put("patch_available", Boolean.TRUE.equals(summaryRaw.get("patchAvailable")));
@@ -447,6 +472,7 @@ public class CveInvestigationAiSummaryService {
         structured.put("false_positive_results", fpResults);
         structured.put("eol_analysis_results", eolResults);
         structured.put("solutions_results", solutionsResults);
+        structured.put("created_findings", createdFindingsResults);
         structured.put("patch_compliance", patchCompliance);
         return structured;
     }

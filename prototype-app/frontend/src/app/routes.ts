@@ -3,6 +3,7 @@ import type { InventoryViewKey } from '../features/inventory/types';
 export type RouteSearchValue = string | number | boolean | null | undefined | Array<string | number | boolean>;
 
 export type AppTab =
+  | 'exposure'
   | 'dashboard'
   | 'findings'
   | 'operations'
@@ -149,6 +150,8 @@ export function pathForPlatformView(view: PlatformRouteView): string {
 
 export function pathForTab(tab: AppTab): string {
   switch (tab) {
+    case 'exposure':
+      return '/exposure';
     case 'dashboard':
       return '/';
     case 'findings':
@@ -177,6 +180,10 @@ export function pathForInventoryView(view: InventoryViewKey): string {
     return '/inventory';
   }
   return view === 'software-identities' ? '/inventory/software-identities' : `/inventory/${view}`;
+}
+
+export function pathForSoftwareIdentityDetail(softwareIdentityId: string): string {
+  return `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`;
 }
 
 export function appendSearchToPath(
@@ -305,6 +312,7 @@ export function pathForFindingDetail(displayId: string, returnTo?: string): stri
 }
 
 export function activeTabForPath(pathname: string): AppTab {
+  if (pathname.startsWith('/exposure')) return 'exposure';
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
@@ -320,6 +328,8 @@ export function activeTabForPath(pathname: string): AppTab {
 
 export function titleForTab(tab: AppTab): string {
   switch (tab) {
+    case 'exposure':
+      return 'Exposure';
     case 'dashboard':
       return 'Overview';
     case 'findings':
@@ -333,7 +343,7 @@ export function titleForTab(tab: AppTab): string {
     case 'end-of-life':
       return 'End-of-Life';
     case 'connect':
-      return 'Connect';
+      return 'Connectors';
     case 'admin':
       return 'Administration';
     case 'platform':

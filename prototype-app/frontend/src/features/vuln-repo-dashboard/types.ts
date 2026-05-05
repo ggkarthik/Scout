@@ -10,6 +10,14 @@ export type VulnRepoDashboardSummaryCards = {
   criticalCount: number;
   exploitCount: number;
   exploitCoveragePercent: number;
+  impactedCriticalCount: number;
+  impactedHighCount: number;
+  impactedMediumCount: number;
+  impactedLowCount: number;
+  impactedKevCount: number;
+  kevAddedLastWeek: number;
+  criticalUninvestigatedCount: number;
+  kevReinvestigationCount: number;
 };
 
 export type VulnRepoDashboardSeverityBreakdownItem = {

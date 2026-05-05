@@ -254,6 +254,31 @@ public class CveDetailController {
             @RequestBody Map<String, Object> recommendationContext) {
         assertDemoAllowsAiAction();
 
+        String softwarePrompt = stringValue(recommendationContext.get("softwareRecommendationPrompt"));
+        if (softwarePrompt != null && !softwarePrompt.isBlank()) {
+            AiSolutionResponse r = new AiSolutionResponse();
+            if (!openAiClient.isAvailable()) {
+                r.setSuccess(false);
+                r.setRecommendation(trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200));
+                return ResponseEntity.ok(r);
+            }
+
+            String systemPrompt = """
+                    You are a cybersecurity remediation advisor writing for an enterprise IT operations team.
+                    Follow the user's instructions exactly. Return direct operational guidance only.
+                    Keep the final answer to 200 words or fewer.
+                    """;
+            String raw = openAiClient.chatCompletion(systemPrompt, softwarePrompt, 800);
+            if (raw == null || raw.isBlank()) {
+                r.setSuccess(false);
+                r.setRecommendation(trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200));
+                return ResponseEntity.ok(r);
+            }
+            r.setSuccess(true);
+            r.setRecommendation(trimWords(raw.trim(), 200));
+            return ResponseEntity.ok(r);
+        }
+
         if (!openAiClient.isAvailable()) {
             AiSolutionResponse r = new AiSolutionResponse();
             r.setSuccess(false);
@@ -413,6 +438,52 @@ public class CveDetailController {
             r.setRecommendation(raw.trim());
             return ResponseEntity.ok(r);
         }
+    }
+
+    private String buildSoftwareFallbackRecommendation(Map<String, Object> recommendationContext) {
+        Object softwareObj = recommendationContext.get("software");
+        Object vulnObj = recommendationContext.get("vulnerability");
+        String softwareName = softwareObj instanceof Map<?, ?> softwareMap ? stringValue(softwareMap.get("name")) : null;
+        String softwareVersion = softwareObj instanceof Map<?, ?> softwareMap ? stringValue(softwareMap.get("version")) : null;
+        String cveId = vulnObj instanceof Map<?, ?> vulnMap ? stringValue(vulnMap.get("id")) : null;
+        String cveSummary = vulnObj instanceof Map<?, ?> vulnMap ? stringValue(vulnMap.get("summary")) : null;
+        String affectedAssets = stringValue(recommendationContext.get("affected_assets"));
+        String severity = stringValue(recommendationContext.get("severity"));
+        return String.join(" ",
+                "Review",
+                nonBlankJoin(" ", softwareName, softwareVersion),
+                "for",
+                nonBlankJoin(" ", cveId, cveSummary),
+                severity == null ? "" : "Severity " + severity + ".",
+                affectedAssets == null ? "" : affectedAssets + " assets are affected.",
+                "Apply the vendor fix first, use network or access restrictions if patching is delayed, verify the corrected version, and test rollback on a non-production host before broad rollout.");
+    }
+
+    private String nonBlankJoin(String separator, String... values) {
+        return java.util.Arrays.stream(values)
+                .filter(value -> value != null && !value.isBlank())
+                .reduce((left, right) -> left + separator + right)
+                .orElse("");
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value).trim();
+    }
+
+    private String trimWords(String value, int limit) {
+        if (value == null || value.isBlank() || limit <= 0) {
+            return value == null ? "" : value.trim();
+        }
+        String[] words = value.trim().split("\\s+");
+        if (words.length <= limit) {
+            return value.trim();
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) builder.append(' ');
+            builder.append(words[i]);
+        }
+        return builder.toString().trim();
     }
 
     /**

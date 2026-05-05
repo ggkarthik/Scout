@@ -24,7 +24,15 @@ public record VulnRepoDashboardResponse(
             long needsAttentionCount,
             long criticalCount,
             long exploitCount,
-            int exploitCoveragePercent
+            int exploitCoveragePercent,
+            long impactedCriticalCount,
+            long impactedHighCount,
+            long impactedMediumCount,
+            long impactedLowCount,
+            long impactedKevCount,
+            long kevAddedLastWeek,
+            long criticalUninvestigatedCount,
+            long kevReinvestigationCount
     ) {
     }
 
