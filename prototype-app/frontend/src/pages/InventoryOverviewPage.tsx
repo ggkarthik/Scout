@@ -24,7 +24,7 @@ const HOST_AGING_DAYS = 7;
 const INVENTORY_COMPONENT_PAGE_SIZE = 250;
 const SOFTWARE_PAGE_SIZE = 200;
 const SOFTWARE_TABLE_ROWS = 8;
-const HOST_TABLE_ROWS = 8;
+const _HOST_TABLE_ROWS = 8;
 
 const OS_MATCHERS: Array<{ label: string; test: (value: string) => boolean }> = [
   { label: 'Windows Server', test: (value) => value.includes('windows server') },
@@ -176,7 +176,7 @@ function formatAssetTypeLabel(value: SupportedAssetType): string {
   return 'Hosts';
 }
 
-function formatAssetTypeSingleLabel(value: SupportedAssetType): string {
+function _formatAssetTypeSingleLabel(value: SupportedAssetType): string {
   if (value === 'APPLICATION') {
     return 'Application';
   }
@@ -222,7 +222,7 @@ function freshnessStateFor(value?: string): FreshnessState {
   return { label: 'Fresh', className: 'status-pill status-success' };
 }
 
-function summarizeAge(value?: string): string {
+function _summarizeAge(value?: string): string {
   const age = daysSince(value);
   if (age == null) {
     return 'Waiting for inventory signal';
@@ -272,7 +272,7 @@ function normalizedSoftwareIdentityText(identity: SoftwareIdentitySummary): stri
     .toLowerCase();
 }
 
-function softwareIdentityMatchesOperatingSystem(identity: SoftwareIdentitySummary, operatingSystem: string): boolean {
+function _softwareIdentityMatchesOperatingSystem(identity: SoftwareIdentitySummary, operatingSystem: string): boolean {
   const normalized = operatingSystem.trim().toLowerCase();
   const identityText = normalizedSoftwareIdentityText(identity);
   if (normalized === 'unknown') {
@@ -511,7 +511,7 @@ function toHostOverviewRecord(asset: Asset, detail: HostAssetDetail): HostOvervi
   };
 }
 
-function assetDrilldownPath(record: AssetOverviewRecord, returnTo: string): string {
+function _assetDrilldownPath(record: AssetOverviewRecord, returnTo: string): string {
   if (record.assetType === 'HOST') {
     return pathForInventoryHostAsset(record.asset.id, returnTo);
   }
@@ -980,14 +980,14 @@ export function InventoryOverviewPage() {
   const correlationIssueCount = qualityDomainCount(qualitySummary, 'CORRELATION');
   const unmatchedEolCount = qualityDomainCount(qualitySummary, 'EOL');
   const vexIssueCount = qualityDomainCount(qualitySummary, 'VEX');
-  const totalOpenFindings = assetRecords.reduce((sum, record) => sum + record.openFindingCount, 0);
-  const totalApplicableCves = assetRecords.reduce((sum, record) => sum + record.applicableCveCount, 0);
+  const _totalOpenFindings = assetRecords.reduce((sum, record) => sum + record.openFindingCount, 0);
+  const _totalApplicableCves = assetRecords.reduce((sum, record) => sum + record.applicableCveCount, 0);
   const eolComponentCount = eolSummaryQuery.data?.eolCount ?? assetRecords.reduce((sum, record) => sum + record.eolSoftwareCount, 0);
   const nearEolComponentCount = eolSummaryQuery.data?.nearEolCount ?? 0;
   const unknownLifecycleCount = eolSummaryQuery.data?.unknownCount ?? assetRecords.reduce((sum, record) => sum + record.unknownLifecycleCount, 0);
   const supportedLifecycleCount = eolSummaryQuery.data?.supportedCount ?? Math.max(0, activeComponentCount - eolComponentCount - nearEolComponentCount - unknownLifecycleCount);
-  const lifecycleRiskTotal = eolComponentCount + nearEolComponentCount + unknownLifecycleCount;
-  const normalizationCoverage = assetNormalizationSummary.trackedAssetCount > 0
+  const _lifecycleRiskTotal = eolComponentCount + nearEolComponentCount + unknownLifecycleCount;
+  const _normalizationCoverage = assetNormalizationSummary.trackedAssetCount > 0
     ? Math.round(assetNormalizationSummary.normalizedAssetCoveragePercent)
     : 0;
   const unknownPublisherCount = softwareRows.filter((identity) => {
@@ -1130,7 +1130,7 @@ export function InventoryOverviewPage() {
       percent: percentOf(entry.value, maxLifecycle)
     }));
   }, [softwareRows]);
-  const qualityIssueCount = qualitySummary?.totalIssues ?? (
+  const _qualityIssueCount = qualitySummary?.totalIssues ?? (
     normalizationIssueCount + correlationIssueCount + unmatchedEolCount + vexIssueCount
   );
   const renderWidgetRows = (rows: InventoryWidgetRow[], emptyLabel: string): React.ReactNode => (

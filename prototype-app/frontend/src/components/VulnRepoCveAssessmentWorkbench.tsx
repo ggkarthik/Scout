@@ -3263,8 +3263,8 @@ function CveOverviewExperience({
   analystId: _analystId,
   onStepChange,
   onOpenAffectedEntities,
-  onOpenImpactedSoftware,
-  onOpenExternalFacingAssets,
+  onOpenImpactedSoftware: _onOpenImpactedSoftware,
+  onOpenExternalFacingAssets: _onOpenExternalFacingAssets,
   leadAnalyst: _leadAnalyst,
   onLeadAnalystChange: _onLeadAnalystChange,
   persistedRunbookState,
@@ -3301,7 +3301,7 @@ function CveOverviewExperience({
   const [aiTraceOpen, setAiTraceOpen] = React.useState(false);
   const [solutionCollapsed, setSolutionCollapsed] = React.useState(false);
 
-  const [aiActions, setAiActions] = React.useState<AiRequiredAction[] | null>(null);
+  const [_aiActions, setAiActions] = React.useState<AiRequiredAction[] | null>(null);
   const [aiActionsLoading, setAiActionsLoading] = React.useState(false);
   const [aiActionsError, setAiActionsError] = React.useState<string | null>(null);
   const [, setAiActionsGeneratedAt] = React.useState<string | null>(null);
@@ -3318,7 +3318,7 @@ function CveOverviewExperience({
       .catch(() => { /* no saved actions — normal */ });
   }, [detail.summary.externalId]);
 
-  const generateAiActions = React.useCallback(() => {
+  const _generateAiActions = React.useCallback(() => {
     setAiActionsLoading(true);
     setAiActionsError(null);
     const context = {

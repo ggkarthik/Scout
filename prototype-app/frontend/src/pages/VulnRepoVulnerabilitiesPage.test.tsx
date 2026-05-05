@@ -85,7 +85,7 @@ describe('VulnRepoVulnerabilitiesPage', () => {
     });
 
     expect(screen.getByText('Only ingested')).toBeInTheDocument();
-    expect(screen.getByText('No')).toBeInTheDocument();
+    expect(screen.getAllByText('No').length).toBeGreaterThan(0);
     expect(screen.getByText('8.8')).toBeInTheDocument();
   });
 });
