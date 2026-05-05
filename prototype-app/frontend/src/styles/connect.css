@@ -308,6 +308,30 @@
   cursor: pointer;
 }
 
+.vi-source-filters {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-alt, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.vi-source-filters-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--space-2);
+}
+
+.vi-source-filters-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 /* Connector inline page */
 .connector-page-back-row {
   display: flex;
@@ -373,3 +397,10 @@
   font-style: italic;
 }
 
+.connect-source-card--disabled {
+  opacity: 0.68;
+}
+
+.connect-source-card--disabled .connect-source-dot {
+  background: var(--border-strong);
+}

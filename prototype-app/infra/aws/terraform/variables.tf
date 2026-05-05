@@ -36,11 +36,6 @@ variable "backend_image" {
   type        = string
 }
 
-variable "frontend_image" {
-  description = "Frontend container image URI."
-  type        = string
-}
-
 variable "certificate_arn" {
   description = "ACM certificate ARN for HTTPS listener. Leave empty to create HTTP only for non-production experiments."
   type        = string
@@ -56,19 +51,19 @@ variable "db_username" {
 variable "db_instance_class" {
   description = "RDS instance class."
   type        = string
-  default     = "db.t4g.medium"
+  default     = "db.t4g.small"
 }
 
 variable "db_allocated_storage_gb" {
   description = "Initial RDS storage in GiB."
   type        = number
-  default     = 100
+  default     = 20
 }
 
 variable "desired_count" {
   description = "Desired ECS task count."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "jwt_issuer_uri" {

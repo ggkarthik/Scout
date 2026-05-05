@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { pathForInventoryHostAsset, pathForConnectView } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
 import { formatInventorySourceSystem } from '../features/inventory/helpers';
+import { InventoryShell } from '../features/inventory/InventoryShell';
 import {
   HOST_ENVIRONMENT_QUERY_KEY,
   HOST_OPERATING_SYSTEM_QUERY_KEY,
@@ -586,7 +587,12 @@ export function InventoryPage(_: Props) {
   }, []);
 
   return (
-    <section className="inventory-page-shell">
+    <InventoryShell
+      eyebrow="Inventory"
+      title="Hosts"
+      description="Discovered hosts, their installed software, and current exposure."
+      legacyClassName="inventory-page-shell"
+    >
       <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy
@@ -631,7 +637,7 @@ export function InventoryPage(_: Props) {
         </button>
       </div>
 
-      <div className="fpl-widgets inventory-fpl-widgets">
+      <div className="fpl-widgets">
         <button type="button" className="fpl-widget" onClick={() => setQuickFilter('all')}>
           <div className="fpl-widget-title">Host Exposure</div>
           <div className="inventory-donut-widget">
@@ -849,6 +855,6 @@ export function InventoryPage(_: Props) {
           )}
         </div>
       )}
-    </section>
+    </InventoryShell>
   );
 }

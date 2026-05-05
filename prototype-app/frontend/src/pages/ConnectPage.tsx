@@ -10,6 +10,7 @@ import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
 import { api } from '../api/client';
 import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
+import { useActor } from '../features/auth/context';
 
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
@@ -367,6 +368,7 @@ type ConnectPageProps = {
 };
 
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
+  const actor = useActor();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
@@ -431,7 +433,10 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   ];
 
   const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
-  const selectedConnectorAllowed = selectedConnector != null && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
+  const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
+  const selectedConnectorAllowed = selectedConnector != null
+    && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id)
+    && (!isDemoTenant || selectedConnector.id === 'sbom-endpoint');
 
   return (
     <div className="page-grid">
@@ -489,12 +494,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                         const dotClass = isFailed ? 'connect-source-dot--fail' :
                                          hasSynced ? 'connect-source-dot--ok' :
                                          'connect-source-dot--warn';
+                        const demoDisabled = isDemoTenant && connector.id !== 'sbom-endpoint';
 
                         return (
                           <button
                             key={connector.id}
                             type="button"
-                            className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}`}
+                            className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}${demoDisabled ? ' connect-source-card--disabled' : ''}`}
                             onClick={() => setActiveConnector(connector.id)}
                           >
                             <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
@@ -504,6 +510,9 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                                 <span className={`connect-source-dot ${dotClass}`} />
                               </div>
                               <div className="panel-caption">{connector.summary}</div>
+                              {demoDisabled && (
+                                <div className="connect-source-lastsync">Unavailable in 7-day demo</div>
+                              )}
                               {isFailed && lastSync && (
                                 <div className="connect-source-lastsync connect-source-lastsync--fail">
                                   Failed · {lastSync}
@@ -539,7 +548,9 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       {activeConnector && selectedConnector && !selectedConnectorAllowed && (
         <section className="panel">
           <div className="notice" role="note">
-            Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.
+            {isDemoTenant
+              ? 'Free demo workspaces allow limited SBOM ingestion only. Live external connectors are disabled for customer validation.'
+              : 'Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.'}
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setActiveConnector(null)}>
             Back to customer sources

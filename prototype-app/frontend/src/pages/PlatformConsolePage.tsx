@@ -4,11 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
-import { SourcesPage } from './SourcesPage';
+import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
+  { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'feeds', label: 'Central Repository', helper: 'Global CVE and advisory feed sync' },
   { key: 'runs', label: 'Run History', helper: 'Feed, inventory, and processing runs' },
   { key: 'support', label: 'Support', helper: 'Audited support access workspace' }
@@ -47,6 +48,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
         </div>
 
         {selectedView === 'tenants' && <TenantLifecyclePanel />}
+        {selectedView === 'demo-requests' && <DemoRequestsPanel />}
         {selectedView === 'feeds' && <PlatformFeedsPanel />}
         {selectedView === 'runs' && <PlatformRunsPanel />}
         {selectedView === 'support' && <PlatformSupportPanel />}
@@ -122,6 +124,7 @@ function TenantLifecyclePanel() {
                 <th>Status</th>
                 <th>Plan</th>
                 <th>Daily Exposure Refreshes</th>
+                <th>Demo Expires</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -133,6 +136,7 @@ function TenantLifecyclePanel() {
                   <td>{tenant.status}</td>
                   <td>{tenant.planCode ?? 'manual'}</td>
                   <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
+                  <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
                 </tr>
               ))}
@@ -144,15 +148,103 @@ function TenantLifecyclePanel() {
   );
 }
 
-function PlatformFeedsPanel() {
+function DemoRequestsPanel() {
+  const queryClient = useQueryClient();
+  const requestsQuery = useQuery({
+    queryKey: ['platform-demo-requests'],
+    queryFn: api.listDemoRequests
+  });
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['platform-demo-requests'] });
+    await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+  };
+  const approve = useMutation({ mutationFn: api.approveDemoRequest, onSuccess: refresh });
+  const reject = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.rejectDemoRequest(id, reason), onSuccess: refresh });
+  const resend = useMutation({ mutationFn: api.resendDemoInvite, onSuccess: refresh });
+  const requests = requestsQuery.data ?? [];
+
   return (
     <div className="section-block">
-      <SourcesPage
-        title="Central Vulnerability Repository"
-        caption="Platform-owned NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, and repair operations. Customer tenants consume this repository but do not mutate it."
-        focusSource="all"
-        showQueue={true}
-      />
+      <div className="section-title-row">
+        <h4 className="section-title">Demo Request Queue</h4>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void requestsQuery.refetch()}>
+          Refresh
+        </button>
+      </div>
+      {requestsQuery.isError ? (
+        <div className="notice error">{requestsQuery.error instanceof Error ? requestsQuery.error.message : 'Failed to load demo requests'}</div>
+      ) : requestsQuery.isLoading ? (
+        <div className="empty-state"><p>Loading demo requests...</p></div>
+      ) : requests.length === 0 ? (
+        <div className="empty-state"><p>No demo requests yet.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Requester</th>
+                <th>Company</th>
+                <th>Use Case</th>
+                <th>Status</th>
+                <th>Invite</th>
+                <th>Requested</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((request) => (
+                <tr key={request.id}>
+                  <td>
+                    <strong>{request.fullName}</strong>
+                    <div className="muted-small">{request.email}</div>
+                  </td>
+                  <td>{request.company}</td>
+                  <td>{request.useCase ?? '-'}</td>
+                  <td>{request.status}</td>
+                  <td>
+                    {request.latestInvite ? (
+                      <a href={request.latestInvite.inviteUrl}>{request.latestInvite.status}</a>
+                    ) : '-'}
+                  </td>
+                  <td>{new Date(request.requestedAt).toLocaleDateString()}</td>
+                  <td>
+                    <div className="button-row compact">
+                      <button className="btn btn-secondary btn-sm" disabled={approve.isPending || request.status === 'PROVISIONED'} onClick={() => approve.mutate(request.id)}>
+                        Approve
+                      </button>
+                      <button className="btn btn-secondary btn-sm" disabled={resend.isPending || !request.tenantId} onClick={() => resend.mutate(request.id)}>
+                        Resend
+                      </button>
+                      <button className="btn btn-secondary btn-sm" disabled={reject.isPending || request.status === 'REJECTED'} onClick={() => reject.mutate({ id: request.id, reason: 'Not a fit for current validation wave' })}>
+                        Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(approve.isError || reject.isError || resend.isError) && (
+        <div className="notice error" role="alert">
+          {[approve.error, reject.error, resend.error].find(Boolean) instanceof Error
+            ? ([approve.error, reject.error, resend.error].find(Boolean) as Error).message
+            : 'Demo request action failed'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlatformFeedsPanel() {
+  const summaryQuery = useQuery({
+    queryKey: ['vuln-intel-sources-summary'],
+    queryFn: api.getVulnIntelSourcesSummary
+  });
+  return (
+    <div className="section-block">
+      <VulnIntelConfigPage vulnSummary={summaryQuery.data ?? null} />
     </div>
   );
 }

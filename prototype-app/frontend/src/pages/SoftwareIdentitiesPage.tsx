@@ -29,6 +29,7 @@ import {
   useSoftwareIdentityFunnelQuery
 } from '../features/software-identities/queries';
 import { EolBadge } from '../components/EolBadge';
+import { InventoryShell } from '../features/inventory/InventoryShell';
 import type {
   SoftwareIdentityCoverage,
   SoftwareIdentitySummary
@@ -626,7 +627,12 @@ export function SoftwareIdentitiesPage() {
   }, []);
 
   return (
-    <section className="inventory-page-shell">
+    <InventoryShell
+      eyebrow="Inventory"
+      title="Software Identities"
+      description="Distinct software products derived from inventory components, with deployment, coverage, and lifecycle posture."
+      legacyClassName="inventory-page-shell"
+    >
       <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy
@@ -992,6 +998,6 @@ export function SoftwareIdentitiesPage() {
           onClose={() => setActivePanel(null)}
         />
       )}
-    </section>
+    </InventoryShell>
   );
 }

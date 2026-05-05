@@ -10,12 +10,14 @@ import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
 import com.prototype.vulnwatch.service.AuditEventService;
+import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,17 +35,20 @@ public class IngestionController {
     private final SbomIngestionService sbomIngestionService;
     private final VulnerabilityIngestionService vulnerabilityIngestionService;
     private final AuditEventService auditEventService;
+    private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
 
     public IngestionController(
             WorkspaceService workspaceService,
             SbomIngestionService sbomIngestionService,
             VulnerabilityIngestionService vulnerabilityIngestionService,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider
     ) {
         this.workspaceService = workspaceService;
         this.sbomIngestionService = sbomIngestionService;
         this.vulnerabilityIngestionService = vulnerabilityIngestionService;
         this.auditEventService = auditEventService;
+        this.demoLifecycleServiceProvider = demoLifecycleServiceProvider;
     }
 
     @PostMapping("/sbom-fetch")
@@ -51,6 +56,10 @@ public class IngestionController {
             @Valid @RequestBody SbomEndpointIngestionRequest request
     ) throws IOException {
         Tenant tenant = workspaceService.getWorkspace();
+        DemoLifecycleService demoLifecycleService = demoLifecycleServiceProvider.getIfAvailable();
+        if (demoLifecycleService != null) {
+            demoLifecycleService.assertCanUploadSbom(tenant);
+        }
         SbomIngestionResponse response = sbomIngestionService.ingestFromEndpoint(tenant, request);
         auditEventService.record("inventory.sbom.fetch", "sbom_fetch", response.sbomUploadId() == null ? null : response.sbomUploadId().toString(), null);
         return response;

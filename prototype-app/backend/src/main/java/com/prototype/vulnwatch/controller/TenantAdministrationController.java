@@ -121,6 +121,9 @@ public class TenantAdministrationController {
                 tenant.getMaxDailySbomUploads(),
                 tenant.getMaxExportRows(),
                 tenant.getMaxDailyExposureRefreshes(),
+                tenant.getDemoExpiresAt(),
+                tenant.getDemoCreatedBy(),
+                tenant.getDemoSource(),
                 tenant.getCreatedAt(),
                 tenant.getUpdatedAt());
     }

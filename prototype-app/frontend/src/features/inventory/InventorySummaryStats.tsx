@@ -1,5 +1,4 @@
 import React from 'react';
-import { StatCard } from '../../components/StatCard';
 import type { InventoryViewKey } from './types';
 
 type Props = {
@@ -11,6 +10,18 @@ type Props = {
   needsReviewCount: number;
 };
 
+function StatWidget({ title, value, caption = 'Current tenant' }: { title: string; value: number; caption?: string }) {
+  return (
+    <div className="fpl-widget">
+      <div className="fpl-widget-title">{title}</div>
+      <div className="fpl-widget-body">
+        <div className="fpl-stat-num">{value.toLocaleString()}</div>
+        <div className="fpl-stat-caption">{caption}</div>
+      </div>
+    </div>
+  );
+}
+
 export function InventorySummaryStats({
   selectedView,
   componentTotalItems,
@@ -19,18 +30,14 @@ export function InventorySummaryStats({
   assetCount,
   needsReviewCount
 }: Props) {
-  if (selectedView === 'vulnerability-intelligence') {
-    return null;
-  }
-
   return (
-    <div className="stats-grid">
-      <StatCard title="Inventory Records" value={componentTotalItems} />
-      <StatCard title="Active Components" value={activeCount} />
-      <StatCard title="Retired Components" value={retiredCount} />
-      <StatCard title="Assets Represented" value={assetCount} />
+    <div className="fpl-widgets">
+      <StatWidget title="Inventory Records" value={componentTotalItems} />
+      <StatWidget title="Active Components" value={activeCount} />
+      <StatWidget title="Retired Components" value={retiredCount} />
+      <StatWidget title="Assets Represented" value={assetCount} />
       {selectedView === 'hosts' && (
-        <StatCard title="Rows Needing Review" value={needsReviewCount} />
+        <StatWidget title="Rows Needing Review" value={needsReviewCount} />
       )}
     </div>
   );

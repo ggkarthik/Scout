@@ -18,7 +18,7 @@ export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'integration-run-queue' | 'processing-jobs';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'feeds' | 'runs' | 'support';
+export type PlatformRouteView = 'tenants' | 'demo-requests' | 'feeds' | 'runs' | 'support';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -53,23 +53,9 @@ const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
 const INVENTORY_VIEWS = new Set<InventoryViewKey>([
   'overview',
   'software-identities',
-  'manage-software',
   'hosts',
   'container-images',
-  'secured-image-catalog',
-  'container-registries',
-  'sbom',
-  'hosted-technologies',
-  'code-repositories',
-  'source-mappings',
-  'developers',
-  'kubernetes-clusters',
-  'datastores',
-  'subscriptions',
-  'iam',
-  'api-endpoints',
-  'application-endpoints',
-  'vulnerability-intelligence'
+  'sbom'
 ]);
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
@@ -88,6 +74,7 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
 
 const PLATFORM_VIEWS = new Set<PlatformRouteView>([
   'tenants',
+  'demo-requests',
   'feeds',
   'runs',
   'support'

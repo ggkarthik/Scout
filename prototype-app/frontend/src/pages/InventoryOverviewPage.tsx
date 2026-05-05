@@ -8,8 +8,8 @@ import {
   pathForInventoryViewWithSearch,
 } from '../app/routes';
 import { InventoryQualityWorkspace } from '../components/InventoryQualityWorkspace';
-import { StatCard } from '../components/StatCard';
 import { useDashboardSummaryQuery } from '../features/dashboard/queries';
+import { InventoryShell } from '../features/inventory/InventoryShell';
 import type { ApplicableSoftwareRecord } from '../features/dashboard/types';
 import { useEolSummaryQuery, useEolUnresolvedMappingsQuery } from '../features/eol/queries';
 import type { Asset, HostAssetDetail, HostSoftwareInstanceRecord, InventoryComponentRecord } from '../features/inventory/api-types';
@@ -1013,10 +1013,13 @@ export function InventoryOverviewPage() {
     : topSoftwareByDeployment.length;
 
   return (
-    <section className="inventory-overview-shell vuln-repo-dashboard-page">
-      <div className="inventory-overview-status-row vuln-repo-dashboard-generated-at">
-        <span className="panel-caption">{formatRefetchedAt(lastUpdated || undefined)}</span>
-      </div>
+    <InventoryShell
+      eyebrow="Inventory"
+      title="Overview"
+      description="Risk-focused snapshot of inventory exposure, lifecycle, and remediation workload."
+      actions={<span className="panel-caption">{formatRefetchedAt(lastUpdated || undefined)}</span>}
+      legacyClassName="inventory-overview-shell vuln-repo-dashboard-page"
+    >
 
       {(openWorkspaceTabs.length > 0 || activeWorkspaceTab !== 'overview') ? (
       <div className="inventory-workspace-tabs" role="tablist" aria-label="Inventory workspace tabs">
@@ -1074,21 +1077,17 @@ export function InventoryOverviewPage() {
               <div className="empty-state"><p>Loading combined inventory overview…</p></div>
             ) : (
               <>
-            <div className="stats-grid vuln-repo-dashboard-stats-grid inventory-overview-dashboard-stats">
+            <div className="fpl-widgets">
               <button
                 type="button"
-                className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card"
+                className="fpl-widget"
                 onClick={() => navigate(pathForInventoryView('hosts'))}
               >
-                <div className="stat-card">
-                  <div className="stat-card-label">Inventory Funnel</div>
-                  <div className="vuln-repo-dashboard-funnel">
+                <div className="fpl-widget-title">Inventory Funnel</div>
+                <div className="fpl-widget-body">
+                  <div className="fpl-hbar">
                     {[
-                      {
-                        label: 'Known assets',
-                        value: totalKnownAssets,
-                        percent: 100
-                      },
+                      { label: 'Known assets', value: totalKnownAssets, percent: 100 },
                       {
                         label: 'Inventoried assets',
                         value: assetNormalizationSummary.trackedAssetCount,
@@ -1105,14 +1104,15 @@ export function InventoryOverviewPage() {
                         percent: percentOf(totalOpenFindings, Math.max(1, totalApplicableCves))
                       }
                     ].map((item) => (
-                      <div key={item.label} className="vuln-repo-dashboard-funnel-row">
-                        <div className="vuln-repo-dashboard-funnel-copy">
-                          <span>{item.label}</span>
-                          <strong>{formatNumber(item.value)}</strong>
+                      <div key={item.label} className="fpl-hbar-row">
+                        <div className="fpl-hbar-label" title={item.label}>{item.label}</div>
+                        <div className="fpl-hbar-track">
+                          <div
+                            className="fpl-hbar-fill"
+                            style={{ width: `${item.percent}%`, background: 'var(--accent, #3b82f6)' }}
+                          />
                         </div>
-                        <div className="vuln-repo-dashboard-funnel-track">
-                          <span style={{ width: `${item.percent}%` }} />
-                        </div>
+                        <div className="fpl-hbar-val">{formatNumber(item.value)}</div>
                       </div>
                     ))}
                   </div>
@@ -1120,51 +1120,63 @@ export function InventoryOverviewPage() {
               </button>
               <button
                 type="button"
-                className="vuln-repo-dashboard-stat-button"
+                className="fpl-widget"
                 onClick={() => openAssetFocus('exposed')}
               >
-                <StatCard
-                  title="Assets With Exposure"
-                  value={assetsWithExposure}
-                  tone={assetsWithExposure > 0 ? 'warn' : 'neutral'}
-                  caption={`${percentOf(assetsWithExposure, totalKnownAssets)}% of known assets have CVEs or findings`}
-                />
+                <div className="fpl-widget-title">Assets With Exposure</div>
+                <div className="fpl-widget-body">
+                  <div className={`fpl-stat-num${assetsWithExposure > 0 ? ' fpl-stat-num--warn' : ''}`}>
+                    {formatNumber(assetsWithExposure)}
+                  </div>
+                  <div className="fpl-stat-caption">
+                    {percentOf(assetsWithExposure, totalKnownAssets)}% of known assets have CVEs or findings
+                  </div>
+                </div>
               </button>
               <button
                 type="button"
-                className="vuln-repo-dashboard-stat-button"
+                className="fpl-widget"
                 onClick={() => openAssetFocus('exposed')}
               >
-                <StatCard
-                  title="Open Findings"
-                  value={totalOpenFindings}
-                  tone={totalOpenFindings > 0 ? 'critical' : 'neutral'}
-                  caption={`${formatNumber(totalApplicableCves)} applicable CVEs across inventory`}
-                />
+                <div className="fpl-widget-title">Open Findings</div>
+                <div className="fpl-widget-body">
+                  <div className={`fpl-stat-num${totalOpenFindings > 0 ? ' fpl-stat-num--critical' : ''}`}>
+                    {formatNumber(totalOpenFindings)}
+                  </div>
+                  <div className="fpl-stat-caption">
+                    {formatNumber(totalApplicableCves)} applicable CVEs across inventory
+                  </div>
+                </div>
               </button>
               <button
                 type="button"
-                className="vuln-repo-dashboard-stat-button"
+                className="fpl-widget"
                 onClick={() => openWorkspaceTab(INVENTORY_EOL_TAB)}
               >
-                <StatCard
-                  title="Lifecycle Risk"
-                  value={lifecycleRiskTotal}
-                  tone={lifecycleRiskTotal > 0 ? 'warn' : 'neutral'}
-                  caption={`${formatNumber(eolComponentCount)} EOL · ${formatNumber(unknownLifecycleCount)} unknown lifecycle`}
-                />
+                <div className="fpl-widget-title">Lifecycle Risk</div>
+                <div className="fpl-widget-body">
+                  <div className={`fpl-stat-num${lifecycleRiskTotal > 0 ? ' fpl-stat-num--warn' : ''}`}>
+                    {formatNumber(lifecycleRiskTotal)}
+                  </div>
+                  <div className="fpl-stat-caption">
+                    {formatNumber(eolComponentCount)} EOL · {formatNumber(unknownLifecycleCount)} unknown lifecycle
+                  </div>
+                </div>
               </button>
               <button
                 type="button"
-                className="vuln-repo-dashboard-stat-button"
+                className="fpl-widget"
                 onClick={() => openWorkspaceTab(INVENTORY_NORMALIZATION_TAB)}
               >
-                <StatCard
-                  title="Inventory Quality Gaps"
-                  value={qualityIssueCount}
-                  tone={qualityIssueCount > 0 ? 'warn' : 'neutral'}
-                  caption={`${normalizationCoverage}% assets fully normalized`}
-                />
+                <div className="fpl-widget-title">Inventory Quality Gaps</div>
+                <div className="fpl-widget-body">
+                  <div className={`fpl-stat-num${qualityIssueCount > 0 ? ' fpl-stat-num--warn' : ''}`}>
+                    {formatNumber(qualityIssueCount)}
+                  </div>
+                  <div className="fpl-stat-caption">
+                    {normalizationCoverage}% assets fully normalized
+                  </div>
+                </div>
               </button>
             </div>
 
@@ -1578,6 +1590,6 @@ export function InventoryOverviewPage() {
           </>
         )}
       </section>
-    </section>
+    </InventoryShell>
   );
 }

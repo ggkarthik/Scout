@@ -57,15 +57,15 @@ import type {
   InventoryComponentFilterValues,
   InventoryComponentPage
 } from '../features/inventory/api-types';
-import type {
-  VulnerabilityIntelDetail,
-  VulnerabilityIntelFilterValues,
-  VulnerabilityIntelPage
-} from '../features/vulnerability-intel/types';
 import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
 import type {
   AuditEvent,
   AuthContext,
+  DemoInvite,
+  DemoInviteValidationResponse,
+  DemoRequest,
+  DemoRequestCreateRequest,
+  DemoStatus,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -226,7 +226,42 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export { request as apiRequest };
 
+async function publicRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers ?? {});
+  if (!(options?.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  const contentType = response.headers.get('content-type') ?? '';
+  return contentType.includes('application/json') ? response.json() : undefined as T;
+}
+
 export const api = {
+  createDemoRequest: (payload: DemoRequestCreateRequest) => publicRequest<DemoRequest>('/demo-requests', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  validateDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}`),
+  acceptDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}/accept`, {
+    method: 'POST'
+  }),
+  getDemoStatus: () => request<DemoStatus>('/demo/status'),
+  listDemoRequests: () => request<DemoRequest[]>('/platform/demo-requests'),
+  approveDemoRequest: (requestId: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/approve`, { method: 'POST' }),
+  rejectDemoRequest: (requestId: string, reason?: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason ?? '' })
+  }),
+  resendDemoInvite: (requestId: string) => request<DemoInvite>(`/platform/demo-requests/${requestId}/resend-invite`, { method: 'POST' }),
   getDashboard: () => request<Dashboard>('/dashboard'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {
@@ -422,39 +457,6 @@ export const api = {
   ),
   getVulnRepoSoftwareAssets: (softwareIdentityId: string) => request<VulnRepoSoftwareAssetsDetail>(
     `/vuln-repo/software-assets/${encodeURIComponent(softwareIdentityId)}`
-  ),
-  listVulnerabilityIntelligence: (
-    params?: {
-      page?: number;
-      size?: number;
-      query?: string;
-      affectedPackage?: string;
-      minCvssExclusive?: number;
-      severity?: string[];
-      source?: string[];
-      vulnStatus?: string[];
-      inKev?: boolean;
-    }
-  ) => {
-    const searchParams = new URLSearchParams();
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    if (params?.query && params.query.trim().length > 0) searchParams.set('query', params.query.trim());
-    if (params?.affectedPackage && params.affectedPackage.trim().length > 0) {
-      searchParams.set('affectedPackage', params.affectedPackage.trim());
-    }
-    if (params?.minCvssExclusive != null) searchParams.set('minCvssExclusive', String(params.minCvssExclusive));
-    params?.severity?.forEach((value) => searchParams.append('severity', value));
-    params?.source?.forEach((value) => searchParams.append('source', value));
-    params?.vulnStatus?.forEach((value) => searchParams.append('vulnStatus', value));
-    if (params?.inKev != null) searchParams.set('inKev', String(params.inKev));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<VulnerabilityIntelPage>(`/vulnerability-intelligence${suffix}`);
-  },
-  listVulnerabilityIntelligenceSources: () => request<string[]>('/vulnerability-intelligence/sources'),
-  listVulnerabilityIntelligenceFilters: () => request<VulnerabilityIntelFilterValues>('/vulnerability-intelligence/filters'),
-  getVulnerabilityIntelligenceDetail: (externalId: string) => request<VulnerabilityIntelDetail>(
-    `/vulnerability-intelligence/${encodeURIComponent(externalId)}`
   ),
   syncAssetsFromCmdb: (assets: CmdbAssetRecord[]) => request<CmdbAssetSyncResponse>('/assets/cmdb-sync', {
     method: 'POST',
