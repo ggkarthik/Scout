@@ -2,7 +2,6 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 
 export type InventoryComponentsQueryParams = Parameters<typeof api.listInventoryComponents>[0];
-export type VulnerabilityIntelQueryParams = Parameters<typeof api.listVulnerabilityIntelligence>[0];
 
 export function useInventoryComponentsQuery(params: InventoryComponentsQueryParams, enabled = true) {
   return useQuery({
@@ -18,31 +17,6 @@ export function useInventoryComponentFiltersQuery(enabled = true) {
     queryKey: ['inventory-component-filters'],
     queryFn: api.listInventoryComponentFilters,
     enabled
-  });
-}
-
-export function useVulnerabilityIntelligenceQuery(params: VulnerabilityIntelQueryParams, enabled = true) {
-  return useQuery({
-    queryKey: ['vulnerability-intelligence', params],
-    queryFn: () => api.listVulnerabilityIntelligence(params),
-    enabled,
-    placeholderData: keepPreviousData
-  });
-}
-
-export function useVulnerabilityIntelligenceFiltersQuery(enabled = true) {
-  return useQuery({
-    queryKey: ['vulnerability-intelligence-filters'],
-    queryFn: api.listVulnerabilityIntelligenceFilters,
-    enabled
-  });
-}
-
-export function useVulnerabilityIntelligenceDetailQuery(externalId: string | null, enabled = true) {
-  return useQuery({
-    queryKey: ['vulnerability-intelligence-detail', externalId],
-    queryFn: () => api.getVulnerabilityIntelligenceDetail(externalId ?? ''),
-    enabled: enabled && Boolean(externalId)
   });
 }
 

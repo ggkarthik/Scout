@@ -42,6 +42,14 @@ public class Tenant {
 
     private Instant deletedAt;
 
+    private Instant demoExpiresAt;
+
+    @Column(length = 255)
+    private String demoCreatedBy;
+
+    @Column(length = 64)
+    private String demoSource;
+
     @Column(nullable = false)
     private Integer maxConnectorCount = 10;
 
@@ -143,6 +151,30 @@ public class Tenant {
 
     public void setDeletedAt(Instant deletedAt) {
         this.deletedAt = deletedAt;
+    }
+
+    public Instant getDemoExpiresAt() {
+        return demoExpiresAt;
+    }
+
+    public void setDemoExpiresAt(Instant demoExpiresAt) {
+        this.demoExpiresAt = demoExpiresAt;
+    }
+
+    public String getDemoCreatedBy() {
+        return demoCreatedBy;
+    }
+
+    public void setDemoCreatedBy(String demoCreatedBy) {
+        this.demoCreatedBy = demoCreatedBy;
+    }
+
+    public String getDemoSource() {
+        return demoSource;
+    }
+
+    public void setDemoSource(String demoSource) {
+        this.demoSource = demoSource;
     }
 
     public Integer getMaxConnectorCount() {

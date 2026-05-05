@@ -16,7 +16,9 @@ import com.prototype.vulnwatch.service.CveDetailQueryFacade;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryService;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryPersistenceService;
 import com.prototype.vulnwatch.service.CveWorkflowFacade;
+import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.InvestigationService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,6 +26,7 @@ import java.util.Map;
 import java.util.UUID;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +55,8 @@ public class CveDetailController {
     private final AdvisoryFetchService advisoryFetchService;
     private final OpenAiClient openAiClient;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final WorkspaceService workspaceService;
+    private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -204,6 +209,7 @@ public class CveDetailController {
     public ResponseEntity<CveInvestigationSummaryResponse> generateInvestigationAiSummary(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> request) {
+        assertDemoAllowsAiAction();
         CveInvestigationSummaryResponse summary = aiSummaryService.generateAiSummary(cveId, request);
         summaryPersistenceService.saveSummary(cveId, request, summary, "ai");
         return ResponseEntity.ok(summary);
@@ -246,6 +252,7 @@ public class CveDetailController {
     public ResponseEntity<AiSolutionResponse> generateAiSolution(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> recommendationContext) {
+        assertDemoAllowsAiAction();
 
         String softwarePrompt = stringValue(recommendationContext.get("softwareRecommendationPrompt"));
         if (softwarePrompt != null && !softwarePrompt.isBlank()) {
@@ -515,6 +522,7 @@ public class CveDetailController {
     public ResponseEntity<AiActionsResponse> generateAiActions(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> context) {
+        assertDemoAllowsAiAction();
 
         if (!openAiClient.isAvailable()) {
             AiActionsResponse r = new AiActionsResponse();
@@ -609,6 +617,13 @@ public class CveDetailController {
         private Map<String, Object> data;
         private String error;
         private Instant generatedAt;
+    }
+
+    private void assertDemoAllowsAiAction() {
+        DemoLifecycleService demoLifecycleService = demoLifecycleServiceProvider.getIfAvailable();
+        if (demoLifecycleService != null) {
+            demoLifecycleService.assertDemoAllowsAiAction(workspaceService.getWorkspace());
+        }
     }
 
     @Data

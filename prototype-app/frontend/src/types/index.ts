@@ -4,6 +4,5 @@ export type * from '../features/dashboard/types';
 export type * from '../features/operations/types';
 export type * from '../features/connect/types';
 export type * from '../features/inventory/api-types';
-export type * from '../features/vulnerability-intel/types';
 export type * from '../features/software-identities/types';
 export type * from '../features/eol/types';

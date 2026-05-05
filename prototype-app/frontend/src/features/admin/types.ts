@@ -28,6 +28,9 @@ export type Tenant = {
   maxDailySbomUploads: number | null;
   maxExportRows: number | null;
   maxDailyExposureRefreshes: number | null;
+  demoExpiresAt?: string | null;
+  demoCreatedBy?: string | null;
+  demoSource?: string | null;
   createdAt: string;
   updatedAt: string | null;
 };
@@ -77,4 +80,72 @@ export type AuthContext = {
   tenantId: string | null;
   tenantName: string | null;
   roles: string[];
+  planCode?: string | null;
+  demoExpiresAt?: string | null;
+  demoDaysRemaining?: number | null;
+  demoCapabilities?: Record<string, boolean> | null;
+  demoUsage?: Record<string, number> | null;
+};
+
+export type DemoInvite = {
+  id: string;
+  requestId: string | null;
+  tenantId: string;
+  tenantName: string;
+  email: string;
+  status: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  lastSentAt: string | null;
+  inviteUrl: string;
+};
+
+export type DemoRequest = {
+  id: string;
+  email: string;
+  fullName: string;
+  company: string;
+  roleTitle: string | null;
+  companySize: string | null;
+  useCase: string | null;
+  notes: string | null;
+  status: string;
+  requestedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  rejectionReason: string | null;
+  tenantId: string | null;
+  latestInvite: DemoInvite | null;
+};
+
+export type DemoRequestCreateRequest = {
+  fullName: string;
+  email: string;
+  company: string;
+  roleTitle?: string;
+  companySize?: string;
+  useCase?: string;
+  notes?: string;
+  acceptedTerms: boolean;
+};
+
+export type DemoInviteValidationResponse = {
+  valid: boolean;
+  status: string;
+  email: string;
+  tenantId: string;
+  tenantName: string;
+  demoExpiresAt: string;
+  inviteExpiresAt: string;
+  loginUrl: string;
+  message: string;
+};
+
+export type DemoStatus = {
+  demo: boolean;
+  planCode: string | null;
+  demoExpiresAt: string | null;
+  demoDaysRemaining: number | null;
+  demoCapabilities: Record<string, boolean>;
+  demoUsage: Record<string, number>;
 };

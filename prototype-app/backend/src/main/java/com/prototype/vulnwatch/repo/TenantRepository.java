@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.repo;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,4 +11,5 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     Optional<Tenant> findByNameIgnoreCase(String name);
     Optional<Tenant> findBySlugIgnoreCase(String slug);
     List<Tenant> findAllByOrderByCreatedAtAsc();
+    List<Tenant> findByPlanCodeIgnoreCaseAndStatusIgnoreCaseAndDemoExpiresAtBefore(String planCode, String status, Instant now);
 }

@@ -39,6 +39,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/demo-invites/**").permitAll()
                         .requestMatchers("/api/platform/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/**").authenticated()
