@@ -11,9 +11,11 @@ import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.AwsDiscoveryConfigService;
 import com.prototype.vulnwatch.service.AwsDiscoverySyncService;
 import com.prototype.vulnwatch.service.AwsDiscoveryTargetService;
+import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,19 +35,22 @@ public class AwsDiscoveryController {
     private final AwsDiscoverySyncService awsDiscoverySyncService;
     private final AwsDiscoveryTargetService awsDiscoveryTargetService;
     private final AuditEventService auditEventService;
+    private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
 
     public AwsDiscoveryController(
             WorkspaceService workspaceService,
             AwsDiscoveryConfigService awsDiscoveryConfigService,
             AwsDiscoverySyncService awsDiscoverySyncService,
             AwsDiscoveryTargetService awsDiscoveryTargetService,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider
     ) {
         this.workspaceService = workspaceService;
         this.awsDiscoveryConfigService = awsDiscoveryConfigService;
         this.awsDiscoverySyncService = awsDiscoverySyncService;
         this.awsDiscoveryTargetService = awsDiscoveryTargetService;
         this.auditEventService = auditEventService;
+        this.demoLifecycleServiceProvider = demoLifecycleServiceProvider;
     }
 
     /** GET /api/connectors/aws-discovery — returns the current connector config (never null). */
@@ -60,6 +65,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public AwsDiscoveryConfigResponse save(@RequestBody AwsDiscoveryConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         AwsDiscoveryConfigResponse response = awsDiscoveryConfigService.save(tenant, request);
         auditEventService.record("connector.aws_discovery.saved", "connector_config", tenant.getId().toString(), null);
         return response;
@@ -70,6 +76,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public AwsConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         AwsConnectionTestResponse response = awsDiscoveryConfigService.test(tenant);
         auditEventService.record("connector.aws_discovery.tested", "connector_config", tenant.getId().toString(),
                 "{\"status\":\"" + response.status() + "\"}");
@@ -80,6 +87,8 @@ public class AwsDiscoveryController {
     @PostMapping("/sync")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse sync() {
+        Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         SyncTriggerResponse response = awsDiscoverySyncService.trigger();
         auditEventService.record("connector.aws_discovery.sync_triggered", "sync_run",
                 response.runId() == null ? null : response.runId().toString(), null);
@@ -96,6 +105,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public AwsDiscoveryTargetResponse createTarget(@RequestBody AwsDiscoveryTargetRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         AwsDiscoveryTargetResponse response = awsDiscoveryTargetService.create(tenant, request);
         auditEventService.record("connector.aws_discovery.target_created", "connector_target", response.id().toString(), null);
         return response;
@@ -108,6 +118,7 @@ public class AwsDiscoveryController {
             @RequestBody AwsDiscoveryTargetRequest request
     ) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         AwsDiscoveryTargetResponse response = awsDiscoveryTargetService.update(tenant, targetId, request);
         auditEventService.record("connector.aws_discovery.target_updated", "connector_target", targetId.toString(), null);
         return response;
@@ -117,6 +128,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public void deleteTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         awsDiscoveryTargetService.delete(tenant, targetId);
         auditEventService.record("connector.aws_discovery.target_deleted", "connector_target", targetId.toString(), null);
     }
@@ -125,6 +137,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public AwsConnectionTestResponse testTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         AwsConnectionTestResponse response = awsDiscoveryTargetService.test(tenant, targetId);
         auditEventService.record("connector.aws_discovery.target_tested", "connector_target", targetId.toString(),
                 "{\"status\":\"" + response.status() + "\"}");
@@ -135,6 +148,7 @@ public class AwsDiscoveryController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public SyncTriggerResponse syncTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
+        assertDemoAllowsLiveConnector(tenant);
         SyncTriggerResponse response = awsDiscoverySyncService.triggerTarget(tenant, targetId);
         auditEventService.record("connector.aws_discovery.target_sync_triggered", "sync_run",
                 response.runId() == null ? null : response.runId().toString(), "{\"targetId\":\"" + targetId + "\"}");
@@ -149,4 +163,11 @@ public class AwsDiscoveryController {
     }
 
     public record AwsSyncStatusResponse(boolean active, String status) {}
+
+    private void assertDemoAllowsLiveConnector(Tenant tenant) {
+        DemoLifecycleService demoLifecycleService = demoLifecycleServiceProvider.getIfAvailable();
+        if (demoLifecycleService != null) {
+            demoLifecycleService.assertDemoAllowsLiveConnector(tenant);
+        }
+    }
 }

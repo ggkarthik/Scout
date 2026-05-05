@@ -93,6 +93,24 @@ const UserManagementPage = React.lazy(async () => ({
 const PlatformConsolePage = React.lazy(async () => ({
   default: (await import('./pages/PlatformConsolePage')).PlatformConsolePage
 }));
+const DemoLandingPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).DemoLandingPage
+}));
+const DemoRequestPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).DemoRequestPage
+}));
+const DemoRequestSuccessPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).DemoRequestSuccessPage
+}));
+const DemoInvitePage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).DemoInvitePage
+}));
+const LoginPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).LoginPage
+}));
+const DemoExpiredPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).DemoExpiredPage
+}));
 
 type Theme = 'light' | 'dark';
 type TestPersonaMode = 'backend' | 'preview';
@@ -162,6 +180,7 @@ const OPERATIONS_NAV_ITEMS = [
 ] as const;
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
+  { key: 'org-cves', label: 'Unified Records' },
   { key: 'vulnerabilities', label: 'Intelligence' },
 ];
 
@@ -335,24 +354,6 @@ function OperationsRoute() {
   return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} redirectSearch={location.search} />;
 }
 
-function inventoryManageSoftwareRedirectPath(search: string): string {
-  const nextParams = new URLSearchParams(search);
-  const domain = (nextParams.get('domain') ?? '').trim().toUpperCase();
-  const tab = domain === 'CORRELATION'
-    ? 'quality-correlation'
-    : domain === 'EOL'
-      ? 'quality-eol'
-      : domain === 'VEX'
-        ? 'quality-vex'
-        : 'quality-normalization';
-
-  nextParams.delete('domain');
-  nextParams.set('inventoryTabs', tab);
-  nextParams.set('inventoryActiveTab', tab);
-  const nextSearch = nextParams.toString();
-  return `/inventory${nextSearch ? `?${nextSearch}` : ''}`;
-}
-
 function LegacyVulnerabilityIntelVulnerabilitiesRoute() {
   const location = useLocation();
   return <Navigate to={`${pathForVulnRepoView('vulnerabilities')}${location.search}`} replace />;
@@ -420,16 +421,12 @@ function InventoryHostAssetRoute() {
 
 function InventoryRoute() {
   const params = useParams<{ inventoryView?: string }>();
-  const location = useLocation();
   const selectedView = normalizeInventoryRouteView(params.inventoryView);
   if (selectedView === 'overview') {
     return <InventoryOverviewPage />;
   }
   if (selectedView === 'software-identities') {
     return <SoftwareIdentitiesPage />;
-  }
-  if (selectedView === 'manage-software') {
-    return <Navigate to={inventoryManageSoftwareRedirectPath(location.search)} replace />;
   }
   if (selectedView === 'hosts') {
     return <InventoryPage selectedView={selectedView} />;
@@ -480,7 +477,12 @@ function actorFromPersona(persona: TestPersona): ActorContext {
     userId: persona.subject,
     tenantId: persona.tenantSlug ? `preview:${persona.tenantSlug}` : null,
     tenantName: persona.tenantName,
-    roles: persona.roles
+    roles: persona.roles,
+    planCode: null,
+    demoExpiresAt: null,
+    demoDaysRemaining: null,
+    demoCapabilities: null,
+    demoUsage: null
   };
 }
 
@@ -507,26 +509,11 @@ function restorePreviousAuthTokenForPersona(): void {
 
 function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const actorQuery = useActorQuery();
-  const [tokenInput, setTokenInput] = React.useState('');
   const [personas, setPersonas] = React.useState<TestPersona[]>([]);
   const [personaLoading, setPersonaLoading] = React.useState(false);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
   const [activePersona, setActivePersona] = React.useState<ActiveTestPersona | null>(null);
   const [previewActor, setPreviewActor] = React.useState<ActorContext | null>(null);
-
-  const submitToken = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setStoredAuthToken(tokenInput);
-    void actorQuery.refetch();
-  };
-
-  const clearToken = () => {
-    clearStoredAuthToken();
-    setTokenInput('');
-    setActivePersona(null);
-    setPreviewActor(null);
-    void actorQuery.refetch();
-  };
 
   const loadPersonas = React.useCallback(() => {
     if (!TEST_PERSONAS_ENABLED || personaLoading || personas.length > 0) {
@@ -586,43 +573,7 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   }
 
   if (actorQuery.isError || !actorQuery.data) {
-    return (
-      <div className="auth-gate">
-        <section className="panel auth-gate-panel">
-          <div className="panel-header">
-            <div>
-              <h3>Sign In Required</h3>
-              <div className="panel-caption">VulnWatch uses your authenticated identity, tenant, and role before loading customer data.</div>
-            </div>
-          </div>
-          <form className="auth-token-form" onSubmit={submitToken}>
-            <label>
-              Bearer token
-              <input
-                type="password"
-                value={tokenInput}
-                onChange={(event) => setTokenInput(event.target.value)}
-                placeholder="Paste a pre-prod or development JWT"
-                autoComplete="off"
-              />
-            </label>
-            <div className="button-row">
-              <button type="submit" className="btn btn-primary" disabled={tokenInput.trim().length === 0}>
-                Continue
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={clearToken}>
-                Clear token
-              </button>
-            </div>
-          </form>
-          {actorQuery.error instanceof Error && (
-            <div className="notice error" role="alert">
-              {actorQuery.error.message}
-            </div>
-          )}
-        </section>
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -747,6 +698,7 @@ function AppShell() {
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
+  const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
@@ -921,6 +873,12 @@ function AppShell() {
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
               </div>
+              {isDemoTenant && (
+                <div className="tenant-context-pill demo-status-pill" title={actor.demoExpiresAt ? `Expires ${actor.demoExpiresAt}` : 'Demo workspace'}>
+                  <span>Demo</span>
+                  <small>{actor.demoDaysRemaining == null ? 'Limited access' : `${actor.demoDaysRemaining} days left`}</small>
+                </div>
+              )}
               {activePersonaLabel && (
                 <div className={`tenant-context-pill test-persona-pill ${testPersonas.activePersona?.mode === 'preview' ? 'preview' : ''}`}>
                   <span>{activePersonaLabel}</span>
@@ -1148,8 +1106,20 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AuthSessionBoundary>
-      <AppShell />
-    </AuthSessionBoundary>
+    <React.Suspense fallback={routeLoadingFallback()}>
+      <Routes>
+        <Route path="/demo" element={<DemoLandingPage />} />
+        <Route path="/demo/request" element={<DemoRequestPage />} />
+        <Route path="/demo/request/success" element={<DemoRequestSuccessPage />} />
+        <Route path="/demo/expired" element={<DemoExpiredPage />} />
+        <Route path="/invite/:token" element={<DemoInvitePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/*" element={
+          <AuthSessionBoundary>
+            <AppShell />
+          </AuthSessionBoundary>
+        } />
+      </Routes>
+    </React.Suspense>
   );
 }

@@ -15,6 +15,9 @@ public record TenantResponse(
         Integer maxDailySbomUploads,
         Integer maxExportRows,
         Integer maxDailyExposureRefreshes,
+        Instant demoExpiresAt,
+        String demoCreatedBy,
+        String demoSource,
         Instant createdAt,
         Instant updatedAt
 ) {

@@ -120,8 +120,6 @@ The vulnerability archive backend now supports S3 through AWS SDK v2. Production
 
 Deployment operators should use `docs/runbooks/aws-deployment.md` and `scripts/smoke-test.sh` for the first smoke gate after ECS service stabilization.
 
-The live production backlog and pre-prod checklist are tracked in `docs/production-backlog.md`.
-
 ## Operations Observability Baseline
 
 API requests now receive an `X-Request-ID` response header. If a safe `X-Request-ID` is supplied by a caller or load balancer, VulnWatch echoes it; otherwise the backend generates a UUID.
@@ -139,7 +137,6 @@ Audit events also persist `requestId`, allowing support and incident review to c
 
 ## Required Next Hardening
 
-- Complete the pre-prod multi-tenant isolation checklist in `docs/production-backlog.md` before the first customer pilot.
 - Replace API-key mode in production with verified OIDC/JWT validation and membership-derived tenant context.
 - Replace remaining default-workspace-only connector paths with request-derived tenant context.
 - Extend audit coverage to investigations, suppressions, and remaining connector edits.

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.service.QuotaExceededException;
+import com.prototype.vulnwatch.service.DemoAccessException;
 import jakarta.persistence.EntityNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
@@ -117,6 +118,12 @@ public class ApiExceptionHandler {
         Map<String, Object> payload = error("QUOTA_EXCEEDED", ex.getMessage());
         payload.put("quotaCode", ex.getQuotaCode());
         return payload;
+    }
+
+    @ExceptionHandler(DemoAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleDemoAccess(DemoAccessException ex) {
+        log.warn("Demo access boundary rejected API request: {}", ex.getMessage());
+        return ResponseEntity.status(ex.getStatus()).body(error(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)

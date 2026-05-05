@@ -1201,16 +1201,6 @@
   margin-left: auto;
 }
 
-.vuln-intel-filter-row {
-  margin-top: -2px;
-}
-
-.vuln-intel-filter-row .findings-filter-actions {
-  justify-content: flex-start;
-  margin-left: 0;
-  width: 100%;
-}
-
 .table-scroll {
   overflow-x: auto;
   overflow-y: auto;
