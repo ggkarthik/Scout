@@ -85,7 +85,7 @@ function lifecycleLabel(eolCount: number, nearEolCount: number, unknownCount: nu
   return 'Supported';
 }
 
-function lifecycleClassName(detail: SoftwareIdentityDetail): string {
+function _lifecycleClassName(detail: SoftwareIdentityDetail): string {
   if (detail.eolComponentCount > 0) return 'status-pill status-failure';
   if (detail.nearEolComponentCount > 0) return 'status-pill status-warning';
   if (detail.unknownEolComponentCount > 0) return 'status-pill status-unknown';
@@ -275,7 +275,7 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
     }
   }, [selectedCves.size, vulnerabilities]);
 
-  const selectedAssets = React.useMemo(
+  const _selectedAssets = React.useMemo(
     () => (detail?.assets ?? []).filter((asset) => selectedComponentIds.has(asset.componentId)),
     [detail?.assets, selectedComponentIds]
   );

@@ -6,7 +6,6 @@ import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './ap
 import {
   activeTabForPath,
   buildLegacyCompatiblePath,
-  CONNECT_DEFAULT_VIEW,
   normalizeConnectRouteView,
   normalizeInventoryRouteView,
   normalizeOperationsRouteView,
