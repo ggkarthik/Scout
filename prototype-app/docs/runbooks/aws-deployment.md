@@ -9,6 +9,7 @@
 - Confirm `APP_ALLOW_HEADER_TENANT_SELECTION=false`.
 - Confirm JWT issuer/JWK settings point to the production identity provider.
 - Confirm `APP_CORS_ALLOWED_ORIGINS` contains only explicit customer-facing HTTPS origins; do not use `*`.
+- Confirm `APP_BASE_URL` points to the hosted frontend origin that serves SPA deep links such as `/login` and `/demo/*`.
 - Confirm Secrets Manager values are not placeholders.
 - Confirm `APP_CREDENTIAL_ENCRYPTION_KEY` is a non-default base64-encoded 32-byte key.
 - Confirm `ARCHIVE_STORAGE_BACKEND=s3`, `ARCHIVE_S3_BUCKET` points to the Terraform-managed archive bucket, and the ECS task role can `s3:GetObject`/`s3:PutObject` on it.
@@ -24,7 +25,8 @@
 4. Wait for the backend ECS service to become stable.
 5. Run `BASE_URL=https://<app-host> ./scripts/smoke-test.sh`.
 6. Upload frontend build assets to the Terraform-managed frontend bucket and invalidate CloudFront.
-7. Check CloudWatch logs for startup validation, Flyway migration, and readiness status.
+7. If the frontend is hosted on Vercel instead of CloudFront, deploy from the directory whose `vercel.json` Vercel will treat as the project root so SPA rewrites for `/login` and `/demo/*` resolve to `index.html`.
+8. Check CloudWatch logs for startup validation, Flyway migration, and readiness status.
 
 ## Rollback
 

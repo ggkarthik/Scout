@@ -9,7 +9,8 @@ import {
   canManageUsers,
   canRefreshTenantExposure,
   canRunSecurityWorkflow,
-  canViewReadOnly
+  canViewReadOnly,
+  isPlatformOwnerSession
 } from './roles';
 
 function actor(roles: string[]): ActorContext {
@@ -28,6 +29,8 @@ describe('role helpers', () => {
     expect(canAccessPlatformConsole(actor(['PLATFORM_OWNER']))).toBe(true);
     expect(canAccessPlatformConsole(actor(['TENANT_ADMIN']))).toBe(false);
     expect(canAccessPlatformConsole(actor(['SECURITY_ANALYST']))).toBe(false);
+    expect(isPlatformOwnerSession({ ...actor(['PLATFORM_OWNER']), tenantId: null, tenantName: null })).toBe(true);
+    expect(isPlatformOwnerSession(actor(['PLATFORM_OWNER']))).toBe(false);
   });
 
   it('maps tenant-owned configuration permissions by role', () => {

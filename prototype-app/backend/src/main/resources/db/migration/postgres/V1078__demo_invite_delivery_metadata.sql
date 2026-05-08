@@ -1,0 +1,4 @@
+ALTER TABLE demo_invites
+    ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(32) NOT NULL DEFAULT 'EMAIL_SKIPPED',
+    ADD COLUMN IF NOT EXISTS delivery_message VARCHAR(500),
+    ADD COLUMN IF NOT EXISTS delivery_attempted_at TIMESTAMPTZ;
