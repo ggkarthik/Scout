@@ -47,14 +47,6 @@ public class DemoInvite {
 
     private Instant lastSentAt;
 
-    @Column(nullable = false, length = 32)
-    private String deliveryStatus = "EMAIL_SKIPPED";
-
-    @Column(length = 500)
-    private String deliveryMessage;
-
-    private Instant deliveryAttemptedAt;
-
     public UUID getId() {
         return id;
     }
@@ -125,29 +117,5 @@ public class DemoInvite {
 
     public void setLastSentAt(Instant lastSentAt) {
         this.lastSentAt = lastSentAt;
-    }
-
-    public String getDeliveryStatus() {
-        return deliveryStatus;
-    }
-
-    public void setDeliveryStatus(String deliveryStatus) {
-        this.deliveryStatus = deliveryStatus;
-    }
-
-    public String getDeliveryMessage() {
-        return deliveryMessage;
-    }
-
-    public void setDeliveryMessage(String deliveryMessage) {
-        this.deliveryMessage = deliveryMessage;
-    }
-
-    public Instant getDeliveryAttemptedAt() {
-        return deliveryAttemptedAt;
-    }
-
-    public void setDeliveryAttemptedAt(Instant deliveryAttemptedAt) {
-        this.deliveryAttemptedAt = deliveryAttemptedAt;
     }
 }

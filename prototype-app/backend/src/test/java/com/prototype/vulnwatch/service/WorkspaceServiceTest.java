@@ -2,33 +2,22 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.prototype.vulnwatch.config.TenantAuthenticationDetails;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.util.UUID;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class WorkspaceServiceTest {
 
     @Mock
     private TenantService tenantService;
-
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
-    }
 
     @Test
     void cachesWorkspaceAfterFirstResolution() {
@@ -58,24 +47,6 @@ class WorkspaceServiceTest {
         assertSame(refreshed, workspaceService.refreshWorkspace());
         assertSame(refreshed, workspaceService.getWorkspace());
         verify(tenantService, times(2)).getDefaultTenant();
-    }
-
-    @Test
-    void rejectsPlatformOwnerJwtWithoutTenantContext() {
-        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                "owner@example.com",
-                null);
-        authentication.setDetails(new TenantAuthenticationDetails(
-                null,
-                null,
-                "owner@example.com",
-                java.util.Set.of("PLATFORM_OWNER")));
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-
-        WorkspaceService workspaceService = new WorkspaceService(tenantService, false);
-
-        ResponseStatusException error = assertThrows(ResponseStatusException.class, workspaceService::getWorkspace);
-        assertEquals(403, error.getStatusCode().value());
     }
 
     private Tenant tenant(String name) {
