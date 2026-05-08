@@ -87,12 +87,6 @@ export type AuthContext = {
   demoUsage?: Record<string, number> | null;
 };
 
-export type AuthSession = {
-  token: string;
-  tokenType: 'Bearer';
-  expiresAt: string;
-};
-
 export type DemoInvite = {
   id: string;
   requestId: string | null;
@@ -100,12 +94,9 @@ export type DemoInvite = {
   tenantName: string;
   email: string;
   status: string;
-  deliveryStatus: string;
-  deliveryMessage: string | null;
   expiresAt: string;
   acceptedAt: string | null;
   lastSentAt: string | null;
-  deliveryAttemptedAt: string | null;
   inviteUrl: string;
 };
 
@@ -148,15 +139,6 @@ export type DemoInviteValidationResponse = {
   inviteExpiresAt: string;
   loginUrl: string;
   message: string;
-};
-
-export type DemoInviteAcceptRequest = {
-  password: string;
-};
-
-export type AuthLoginRequest = {
-  email: string;
-  password: string;
 };
 
 export type DemoStatus = {
