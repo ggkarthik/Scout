@@ -4,10 +4,13 @@ import com.prototype.vulnwatch.domain.DemoInvite;
 import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
+import com.prototype.vulnwatch.dto.DemoInviteAcceptRequest;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.dto.DemoStatusResponse;
+import com.prototype.vulnwatch.dto.AuthSessionResponse;
+import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.repo.DemoInviteRepository;
 import com.prototype.vulnwatch.repo.DemoRequestRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
@@ -38,8 +41,11 @@ public class DemoLifecycleService {
     private final IdentityAdministrationService identityAdministrationService;
     private final AuditEventService auditEventService;
     private final SbomUploadRepository sbomUploadRepository;
+    private final ValidationAuthService validationAuthService;
+    private final ResendEmailService resendEmailService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final String appBaseUrl;
+    private final long inviteTtlHours;
 
     public DemoLifecycleService(
             DemoRequestRepository demoRequestRepository,
@@ -49,7 +55,10 @@ public class DemoLifecycleService {
             IdentityAdministrationService identityAdministrationService,
             AuditEventService auditEventService,
             SbomUploadRepository sbomUploadRepository,
-            @Value("${app.demo.app-base-url:http://localhost:5173}") String appBaseUrl
+            ValidationAuthService validationAuthService,
+            ResendEmailService resendEmailService,
+            @Value("${app.public.base-url:${app.demo.app-base-url:http://localhost:5173}}") String appBaseUrl,
+            @Value("${app.demo.invite-ttl-hours:24}") long inviteTtlHours
     ) {
         this.demoRequestRepository = demoRequestRepository;
         this.demoInviteRepository = demoInviteRepository;
@@ -58,7 +67,10 @@ public class DemoLifecycleService {
         this.identityAdministrationService = identityAdministrationService;
         this.auditEventService = auditEventService;
         this.sbomUploadRepository = sbomUploadRepository;
+        this.validationAuthService = validationAuthService;
+        this.resendEmailService = resendEmailService;
         this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
+        this.inviteTtlHours = inviteTtlHours <= 0 ? 24 : inviteTtlHours;
     }
 
     @Transactional
@@ -96,6 +108,7 @@ public class DemoLifecycleService {
         }
         Tenant tenant = provisionTenant(request, actor);
         DemoInvite invite = createInvite(request, tenant);
+        sendInvite(invite);
         request.setStatus("PROVISIONED");
         request.setDecidedAt(Instant.now());
         request.setDecidedBy(trimToNull(actor));
@@ -120,19 +133,16 @@ public class DemoLifecycleService {
     @Transactional
     public DemoInviteResponse resendInvite(UUID requestId) {
         DemoRequest request = getRequest(requestId);
-        DemoInvite invite = latestInvite(requestId);
-        if (invite == null) {
-            if (request.getTenantId() == null) {
-                throw new DemoAccessException("DEMO_INVITE_INVALID", "Demo request has not been provisioned yet", HttpStatus.BAD_REQUEST);
-            }
-            Tenant tenant = tenantRepository.findById(request.getTenantId())
-                    .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
-            invite = createInvite(request, tenant);
+        if (request.getTenantId() == null) {
+            throw new DemoAccessException("DEMO_INVITE_INVALID", "Demo request has not been provisioned yet", HttpStatus.BAD_REQUEST);
         }
-        invite.setStatus("SENT");
-        invite.setLastSentAt(Instant.now());
+        Tenant tenant = tenantRepository.findById(request.getTenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
+        supersedeOutstandingInvites(requestId);
+        DemoInvite invite = createInvite(request, tenant);
+        sendInvite(invite);
         auditEventService.record("demo.invite.resent", "demo_invite", invite.getId().toString(), null);
-        return toInviteResponse(demoInviteRepository.save(invite));
+        return toInviteResponse(invite);
     }
 
     @Transactional(readOnly = true)
@@ -142,18 +152,19 @@ public class DemoLifecycleService {
     }
 
     @Transactional
-    public DemoInviteValidationResponse acceptInvite(String token) {
+    public AuthSessionResponse acceptInvite(String token, DemoInviteAcceptRequest request) {
         DemoInvite invite = findInvite(token);
         DemoInviteValidationResponse validation = inviteValidationResponse(invite, null);
         if (!validation.valid()) {
             throw new DemoAccessException("DEMO_INVITE_INVALID", validation.message(), HttpStatus.BAD_REQUEST);
         }
+        AppUser user = validationAuthService.requireUserByEmail(invite.getEmail());
         invite.setStatus("ACCEPTED");
         invite.setAcceptedAt(Instant.now());
         demoInviteRepository.save(invite);
         auditEventService.record("demo.invite.accepted", "demo_invite", invite.getId().toString(),
                 "{\"tenantId\":\"" + invite.getTenant().getId() + "\"}");
-        return inviteValidationResponse(invite, "Invite accepted");
+        return validationAuthService.setPasswordAndIssueSession(user, request.password());
     }
 
     @Transactional(readOnly = true)
@@ -249,9 +260,18 @@ public class DemoLifecycleService {
         invite.setTenant(tenant);
         invite.setEmail(request.getEmail());
         invite.setToken(newToken());
-        invite.setExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
-        invite.setLastSentAt(Instant.now());
+        invite.setExpiresAt(Instant.now().plus(inviteTtlHours, ChronoUnit.HOURS));
+        invite.setDeliveryStatus("PENDING");
         return demoInviteRepository.save(invite);
+    }
+
+    private void supersedeOutstandingInvites(UUID requestId) {
+        for (DemoInvite existing : demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(requestId)) {
+            if (existing.getAcceptedAt() == null && !"SUPERSEDED".equalsIgnoreCase(existing.getStatus())) {
+                existing.setStatus("SUPERSEDED");
+                demoInviteRepository.save(existing);
+            }
+        }
     }
 
     private DemoRequest getRequest(UUID requestId) {
@@ -287,7 +307,7 @@ public class DemoLifecycleService {
                 tenant.getName(),
                 tenant.getDemoExpiresAt(),
                 invite.getExpiresAt(),
-                appBaseUrl + "/login?invite=" + invite.getToken(),
+                appBaseUrl + "/login.html?invite=" + invite.getToken(),
                 message);
     }
 
@@ -330,11 +350,25 @@ public class DemoLifecycleService {
                 invite.getTenant().getName(),
                 invite.getEmail(),
                 invite.getStatus(),
+                invite.getDeliveryStatus(),
+                invite.getDeliveryMessage(),
                 invite.getExpiresAt(),
                 invite.getAcceptedAt(),
                 invite.getLastSentAt(),
-                appBaseUrl + "/invite/" + invite.getToken()
+                invite.getDeliveryAttemptedAt(),
+                appBaseUrl + "/invite.html?token=" + invite.getToken()
         );
+    }
+
+    private void sendInvite(DemoInvite invite) {
+        Instant attemptedAt = Instant.now();
+        invite.setDeliveryAttemptedAt(attemptedAt);
+        resendEmailService.sendDemoInvite(invite);
+        invite.setStatus("SENT");
+        invite.setLastSentAt(attemptedAt);
+        invite.setDeliveryStatus("EMAIL_SENT");
+        invite.setDeliveryMessage("Invite email sent.");
+        demoInviteRepository.save(invite);
     }
 
     private Long daysRemaining(Instant expiresAt) {

@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -35,6 +37,9 @@ public class WorkspaceService {
         if (currentTenantId != null) {
             return tenantService.resolveTenantUuid(currentTenantId);
         }
+        if (isPlatformOwnerJwtWithoutTenant()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant context is required");
+        }
         if (requireTenantContext) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant context is required");
         }
@@ -54,5 +59,13 @@ public class WorkspaceService {
         Tenant workspace = tenantService.getDefaultTenant();
         cachedWorkspace.set(workspace);
         return workspace;
+    }
+
+    private boolean isPlatformOwnerJwtWithoutTenant() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getDetails() instanceof com.prototype.vulnwatch.config.TenantAuthenticationDetails details)) {
+            return false;
+        }
+        return details.tenantId() == null && details.roles().contains("PLATFORM_OWNER");
     }
 }

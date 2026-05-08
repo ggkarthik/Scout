@@ -1,11 +1,13 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
+import com.prototype.vulnwatch.dto.DemoInviteAcceptRequest;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoRequestDecisionRequest;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.dto.DemoStatusResponse;
+import com.prototype.vulnwatch.dto.AuthSessionResponse;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -79,8 +81,11 @@ public class DemoLifecycleController {
     }
 
     @PostMapping("/demo-invites/{token}/accept")
-    public DemoInviteValidationResponse acceptInvite(@PathVariable String token) {
-        return demoLifecycleService.acceptInvite(token);
+    public AuthSessionResponse acceptInvite(
+            @PathVariable String token,
+            @Valid @RequestBody DemoInviteAcceptRequest request
+    ) {
+        return demoLifecycleService.acceptInvite(token, request);
     }
 
     @GetMapping("/demo/status")

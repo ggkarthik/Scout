@@ -14,12 +14,16 @@ class ProductionSafetyValidatorTest {
                 false,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "s3",
                 "vulnwatch-prod-archive",
-                "https://app.example.com");
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertDoesNotThrow(validator::validate);
     }
@@ -31,12 +35,16 @@ class ProductionSafetyValidatorTest {
                 false,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "s3",
                 "vulnwatch-prod-archive",
-                "*");
+                "*",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -48,12 +56,16 @@ class ProductionSafetyValidatorTest {
                 false,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "filesystem",
                 "vulnwatch-prod-archive",
-                "https://app.example.com");
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -65,12 +77,16 @@ class ProductionSafetyValidatorTest {
                 true,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "s3",
                 "vulnwatch-prod-archive",
-                "https://app.example.com");
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -82,12 +98,16 @@ class ProductionSafetyValidatorTest {
                 false,
                 "",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "s3",
                 "vulnwatch-prod-archive",
-                "https://app.example.com");
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -99,12 +119,16 @@ class ProductionSafetyValidatorTest {
                 false,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 false,
                 "s3",
                 "vulnwatch-prod-archive",
-                "https://app.example.com");
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -116,15 +140,40 @@ class ProductionSafetyValidatorTest {
                 false,
                 "https://issuer.example.com",
                 "",
+                "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
                 "s3",
                 "vulnwatch-prod-archive",
                 "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456",
                 true);
 
         assertThrows(IllegalStateException.class, validator::validate);
+    }
+
+    @Test
+    void validateAllowsStrongHmacSecretWithoutIssuer() {
+        ProductionSafetyValidator validator = validator(
+                "",
+                false,
+                "",
+                "",
+                "phase-1-validation-auth-secret-32-bytes",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                false,
+                true,
+                "s3",
+                "vulnwatch-prod-archive",
+                "https://app.example.com",
+                true,
+                "scout@example.com",
+                "re_abcdefghijklmnopqrstuvwxyz123456");
+
+        assertDoesNotThrow(validator::validate);
     }
 
     private ProductionSafetyValidator validator(
@@ -132,24 +181,32 @@ class ProductionSafetyValidatorTest {
             boolean allowApiKeyAuth,
             String jwtIssuerUri,
             String jwtJwkSetUri,
+            String jwtHmacSecret,
             String credentialEncryptionKey,
             boolean allowHeaderTenantSelection,
             boolean requireTenantContext,
             String archiveStorageBackend,
             String archiveS3Bucket,
-            String corsAllowedOrigins
+            String corsAllowedOrigins,
+            boolean emailEnabled,
+            String emailFrom,
+            String resendApiKey
     ) {
         return validator(
                 creatorKey,
                 allowApiKeyAuth,
                 jwtIssuerUri,
                 jwtJwkSetUri,
+                jwtHmacSecret,
                 credentialEncryptionKey,
                 allowHeaderTenantSelection,
                 requireTenantContext,
                 archiveStorageBackend,
                 archiveS3Bucket,
                 corsAllowedOrigins,
+                emailEnabled,
+                emailFrom,
+                resendApiKey,
                 false);
     }
 
@@ -158,12 +215,16 @@ class ProductionSafetyValidatorTest {
             boolean allowApiKeyAuth,
             String jwtIssuerUri,
             String jwtJwkSetUri,
+            String jwtHmacSecret,
             String credentialEncryptionKey,
             boolean allowHeaderTenantSelection,
             boolean requireTenantContext,
             String archiveStorageBackend,
             String archiveS3Bucket,
             String corsAllowedOrigins,
+            boolean emailEnabled,
+            String emailFrom,
+            String resendApiKey,
             boolean testPersonasEnabled
     ) {
         return new ProductionSafetyValidator(
@@ -173,12 +234,17 @@ class ProductionSafetyValidatorTest {
                 allowApiKeyAuth,
                 jwtIssuerUri,
                 jwtJwkSetUri,
+                jwtHmacSecret,
                 credentialEncryptionKey,
                 allowHeaderTenantSelection,
                 requireTenantContext,
                 archiveStorageBackend,
                 archiveS3Bucket,
                 corsAllowedOrigins,
-                testPersonasEnabled);
+                testPersonasEnabled,
+                emailEnabled,
+                emailFrom,
+                resendApiKey,
+                "https://app.example.com");
     }
 }
