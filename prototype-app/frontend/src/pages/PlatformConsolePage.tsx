@@ -6,6 +6,7 @@ import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
+import type { DemoInvite, DemoRequest } from '../features/admin/types';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
@@ -55,6 +56,39 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
       </section>
     </div>
   );
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function deliveryHeadline(invite: DemoInvite | null): string {
+  if (!invite) {
+    return 'Invite pending';
+  }
+  return invite.deliveryStatus === 'EMAIL_SENT' ? 'Email sent' : 'Pending delivery';
+}
+
+function deliveryDetail(invite: DemoInvite | null): string {
+  if (!invite) {
+    return 'Invite email will be generated after approval.';
+  }
+  if (invite.deliveryMessage?.trim()) {
+    return invite.deliveryMessage.trim();
+  }
+  return invite.deliveryStatus === 'EMAIL_SENT'
+    ? 'The latest invite email was sent successfully.'
+    : 'Invite delivery is still pending.';
+}
+
+function inviteNoticeMessage(invite: DemoInvite): string {
+  return invite.deliveryStatus === 'EMAIL_SENT'
+    ? 'Invite email sent successfully.'
+    : 'Invite updated.';
 }
 
 function TenantLifecyclePanel() {
@@ -150,6 +184,8 @@ function TenantLifecyclePanel() {
 
 function DemoRequestsPanel() {
   const queryClient = useQueryClient();
+  const [notice, setNotice] = React.useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [rejectDraft, setRejectDraft] = React.useState<{ request: DemoRequest; reason: string } | null>(null);
   const requestsQuery = useQuery({
     queryKey: ['platform-demo-requests'],
     queryFn: api.listDemoRequests
@@ -158,9 +194,45 @@ function DemoRequestsPanel() {
     await queryClient.invalidateQueries({ queryKey: ['platform-demo-requests'] });
     await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
   };
-  const approve = useMutation({ mutationFn: api.approveDemoRequest, onSuccess: refresh });
-  const reject = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.rejectDemoRequest(id, reason), onSuccess: refresh });
-  const resend = useMutation({ mutationFn: api.resendDemoInvite, onSuccess: refresh });
+  const approve = useMutation({
+    mutationFn: api.approveDemoRequest,
+    onSuccess: async (request) => {
+      await refresh();
+      setNotice({
+        type: 'success',
+        message: request.latestInvite ? inviteNoticeMessage(request.latestInvite) : 'Demo request approved.'
+      });
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', message: error instanceof Error ? error.message : 'Failed to approve demo request' });
+    }
+  });
+  const reject = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.rejectDemoRequest(id, reason),
+    onSuccess: async (request) => {
+      await refresh();
+      setNotice({
+        type: 'success',
+        message: request.rejectionReason?.trim()
+          ? `Demo request rejected. Reason saved: ${request.rejectionReason}`
+          : 'Demo request rejected.'
+      });
+      setRejectDraft(null);
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', message: error instanceof Error ? error.message : 'Failed to reject demo request' });
+    }
+  });
+  const resend = useMutation({
+    mutationFn: api.resendDemoInvite,
+    onSuccess: async (invite) => {
+      await refresh();
+      setNotice({ type: 'success', message: inviteNoticeMessage(invite) });
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', message: error instanceof Error ? error.message : 'Failed to resend invite' });
+    }
+  });
   const requests = requestsQuery.data ?? [];
 
   return (
@@ -171,6 +243,11 @@ function DemoRequestsPanel() {
           Refresh
         </button>
       </div>
+      {notice && (
+        <div className={`notice ${notice.type === 'success' ? 'success' : 'error'}`} role="status">
+          {notice.message}
+        </div>
+      )}
       {requestsQuery.isError ? (
         <div className="notice error">{requestsQuery.error instanceof Error ? requestsQuery.error.message : 'Failed to load demo requests'}</div>
       ) : requestsQuery.isLoading ? (
@@ -184,10 +261,10 @@ function DemoRequestsPanel() {
               <tr>
                 <th>Requester</th>
                 <th>Company</th>
+                <th>Requested</th>
                 <th>Use Case</th>
                 <th>Status</th>
-                <th>Invite</th>
-                <th>Requested</th>
+                <th>Invite Delivery</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -197,16 +274,24 @@ function DemoRequestsPanel() {
                   <td>
                     <strong>{request.fullName}</strong>
                     <div className="muted-small">{request.email}</div>
+                    {request.roleTitle && <div className="muted-small">{request.roleTitle}</div>}
                   </td>
                   <td>{request.company}</td>
+                  <td>
+                    <div>{formatTimestamp(request.requestedAt)}</div>
+                    {request.companySize && <div className="muted-small">{request.companySize}</div>}
+                  </td>
                   <td>{request.useCase ?? '-'}</td>
                   <td>{request.status}</td>
                   <td>
-                    {request.latestInvite ? (
-                      <a href={request.latestInvite.inviteUrl}>{request.latestInvite.status}</a>
-                    ) : '-'}
+                    <strong>{deliveryHeadline(request.latestInvite)}</strong>
+                    <div className="muted-small">{deliveryDetail(request.latestInvite)}</div>
+                    {request.latestInvite && (
+                      <div className="muted-small">
+                        Invite {request.latestInvite.status.toLowerCase()} · Last send {formatTimestamp(request.latestInvite.deliveryAttemptedAt ?? request.latestInvite.lastSentAt)}
+                      </div>
+                    )}
                   </td>
-                  <td>{new Date(request.requestedAt).toLocaleDateString()}</td>
                   <td>
                     <div className="button-row compact">
                       <button className="btn btn-secondary btn-sm" disabled={approve.isPending || request.status === 'PROVISIONED'} onClick={() => approve.mutate(request.id)}>
@@ -215,7 +300,7 @@ function DemoRequestsPanel() {
                       <button className="btn btn-secondary btn-sm" disabled={resend.isPending || !request.tenantId} onClick={() => resend.mutate(request.id)}>
                         Resend
                       </button>
-                      <button className="btn btn-secondary btn-sm" disabled={reject.isPending || request.status === 'REJECTED'} onClick={() => reject.mutate({ id: request.id, reason: 'Not a fit for current validation wave' })}>
+                      <button className="btn btn-secondary btn-sm" disabled={reject.isPending || request.status === 'REJECTED'} onClick={() => setRejectDraft({ request, reason: request.rejectionReason ?? '' })}>
                         Reject
                       </button>
                     </div>
@@ -226,11 +311,47 @@ function DemoRequestsPanel() {
           </table>
         </div>
       )}
-      {(approve.isError || reject.isError || resend.isError) && (
-        <div className="notice error" role="alert">
-          {[approve.error, reject.error, resend.error].find(Boolean) instanceof Error
-            ? ([approve.error, reject.error, resend.error].find(Boolean) as Error).message
-            : 'Demo request action failed'}
+      {rejectDraft && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setRejectDraft(null)}>
+          <section
+            className="panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reject-demo-request-title"
+            style={{ width: 'min(34rem, calc(100vw - 2rem))' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <div>
+                <h4 id="reject-demo-request-title">Reject Demo Request</h4>
+                <div className="panel-caption">
+                  Save an optional reason for {rejectDraft.request.fullName} at {rejectDraft.request.company}.
+                </div>
+              </div>
+            </div>
+            <label className="full-width">
+              Reason
+              <textarea
+                rows={4}
+                value={rejectDraft.reason}
+                onChange={(event) => setRejectDraft((current) => current ? { ...current, reason: event.target.value } : current)}
+                placeholder="Optional rejection reason"
+              />
+            </label>
+            <div className="button-row" style={{ marginTop: '1rem' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setRejectDraft(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={reject.isPending}
+                onClick={() => reject.mutate({ id: rejectDraft.request.id, reason: rejectDraft.reason.trim() || undefined })}
+              >
+                {reject.isPending ? 'Rejecting...' : 'Save Rejection'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>

@@ -10,9 +10,12 @@ public record DemoInviteResponse(
         String tenantName,
         String email,
         String status,
+        String deliveryStatus,
+        String deliveryMessage,
         Instant expiresAt,
         Instant acceptedAt,
         Instant lastSentAt,
+        Instant deliveryAttemptedAt,
         String inviteUrl
 ) {
 }
