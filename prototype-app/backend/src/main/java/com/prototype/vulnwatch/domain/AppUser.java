@@ -22,14 +22,6 @@ public class AppUser {
 
     private String displayName;
 
-    @Column(length = 255)
-    private String passwordHash;
-
-    private Instant passwordSetAt;
-
-    @Column(nullable = false)
-    private boolean platformOwner;
-
     @Column(nullable = false, length = 32)
     private String status = "ACTIVE";
 
@@ -71,30 +63,6 @@ public class AppUser {
 
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
-
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
-    }
-
-    public Instant getPasswordSetAt() {
-        return passwordSetAt;
-    }
-
-    public void setPasswordSetAt(Instant passwordSetAt) {
-        this.passwordSetAt = passwordSetAt;
-    }
-
-    public boolean isPlatformOwner() {
-        return platformOwner;
-    }
-
-    public void setPlatformOwner(boolean platformOwner) {
-        this.platformOwner = platformOwner;
     }
 
     public String getStatus() {

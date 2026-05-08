@@ -27,7 +27,6 @@ import {
   canManageInventorySources,
   canManageRiskPolicy,
   canManageTenant,
-  isPlatformOwnerSession,
   canRunSecurityWorkflow,
   canViewReadOnly
 } from './features/auth/roles';
@@ -613,7 +612,6 @@ function AppShell() {
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
-  const platformMode = isPlatformOwnerSession(actor);
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
@@ -623,10 +621,6 @@ function AppShell() {
       ? 'org-cves'
       : 'dashboard';
   const visiblePrimaryNavTabs = React.useMemo(() => {
-    if (platformMode) {
-      const tabs: AppTab[] = ['operations'];
-      return tabs;
-    }
     const tabs: AppTab[] = ['exposure', 'dashboard'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
@@ -641,7 +635,7 @@ function AppShell() {
       tabs.push('configurations');
     }
     return tabs;
-  }, [actor, platformMode]);
+  }, [actor]);
   const inventoryAssetsQuery = useQuery({
     queryKey: ['inventory-nav-assets'],
     queryFn: api.listAssets,
@@ -764,10 +758,6 @@ function AppShell() {
       <span className="nav-label">{titleForTab(tab)}</span>
     </button>
   );
-
-  if (platformMode && !location.pathname.startsWith('/platform') && !location.pathname.startsWith('/operations')) {
-    return <Navigate to={pathForPlatformView('demo-requests')} replace />;
-  }
 
   return (
     <>
@@ -899,7 +889,7 @@ function AppShell() {
                       className="settings-menu-item"
                       role="menuitem"
                       onClick={() => navigate('/admin/users')}
-                      disabled={!canManageTenant(actor) || platformMode}
+                      disabled={!canManageTenant(actor)}
                     >
                       <span>Tenant Administration</span>
                       <small>Users, roles, service accounts and audit</small>
