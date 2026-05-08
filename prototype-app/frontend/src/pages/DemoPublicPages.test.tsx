@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
 import { renderWithProviders } from '../test/test-utils';
-import { DemoInvitePage, DemoRequestPage } from './DemoPublicPages';
+import { DemoInvitePage, DemoRequestPage, LoginPage } from './DemoPublicPages';
 
 describe('Demo public pages', () => {
   afterEach(() => {
@@ -72,6 +72,53 @@ describe('Demo public pages', () => {
 
     expect(await screen.findByText('Example Co')).toBeInTheDocument();
     expect(screen.getByText('alex@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Accept invite/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Activate workspace/i })).toBeEnabled();
+  });
+
+  it('renders password login form', async () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+      </Routes>,
+      { route: '/login' }
+    );
+
+    expect(await screen.findByRole('button', { name: /Sign in/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Email/i)).toBeInTheDocument();
+  });
+
+  it('routes platform owners to demo requests after login', async () => {
+    vi.spyOn(api, 'login').mockResolvedValue({
+      token: 'session-token',
+      tokenType: 'Bearer',
+      expiresAt: new Date().toISOString()
+    });
+    vi.spyOn(api, 'getActorContext').mockResolvedValue({
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      planCode: null,
+      demoExpiresAt: null,
+      demoDaysRemaining: null,
+      demoCapabilities: null,
+      demoUsage: null
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/platform/demo-requests" element={<div>Platform queue</div>} />
+      </Routes>,
+      { route: '/login' }
+    );
+
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'owner@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'hunter2hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
+
+    expect(await screen.findByText('Platform queue')).toBeInTheDocument();
   });
 });
