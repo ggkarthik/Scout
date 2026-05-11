@@ -31,50 +31,11 @@ public class RiskPolicyService {
     public RiskPolicyResponse update(Tenant tenant, RiskPolicyRequest req) {
         RiskPolicy policy = getOrCreate(tenant);
 
-        if (req.cvssWeight() != null) {
-            policy.setCvssWeight(req.cvssWeight());
-        }
-        if (req.kevBoost() != null) {
-            policy.setKevBoost(req.kevBoost());
-        }
-        if (req.epssWeight() != null) {
-            policy.setEpssWeight(req.epssWeight());
-        }
-        if (req.vexNotAffectedFreshnessDays() != null) {
-            policy.setVexNotAffectedFreshnessDays(Math.max(1, req.vexNotAffectedFreshnessDays()));
-        }
-        if (req.vexFixedFreshnessDays() != null) {
-            policy.setVexFixedFreshnessDays(Math.max(1, req.vexFixedFreshnessDays()));
-        }
-        if (req.vexKnownAffectedBoost() != null) {
-            policy.setVexKnownAffectedBoost(Math.max(0.0, req.vexKnownAffectedBoost()));
-        }
-        if (req.vexUnderInvestigationPenalty() != null) {
-            policy.setVexUnderInvestigationPenalty(Math.max(0.0, req.vexUnderInvestigationPenalty()));
-        }
-        if (req.vexNotAffectedReduction() != null) {
-            policy.setVexNotAffectedReduction(Math.max(0.0, req.vexNotAffectedReduction()));
-        }
-        if (req.vexStalePenalty() != null) {
-            policy.setVexStalePenalty(Math.max(0.0, req.vexStalePenalty()));
-        }
         if (req.criticalThreshold() != null) {
             policy.setCriticalThreshold(req.criticalThreshold());
         }
         if (req.highThreshold() != null) {
             policy.setHighThreshold(req.highThreshold());
-        }
-        if (req.assetCriticalRiskBoost() != null) {
-            policy.setAssetCriticalRiskBoost(req.assetCriticalRiskBoost());
-        }
-        if (req.assetHighRiskBoost() != null) {
-            policy.setAssetHighRiskBoost(req.assetHighRiskBoost());
-        }
-        if (req.assetMediumRiskBoost() != null) {
-            policy.setAssetMediumRiskBoost(req.assetMediumRiskBoost());
-        }
-        if (req.assetLowRiskBoost() != null) {
-            policy.setAssetLowRiskBoost(req.assetLowRiskBoost());
         }
         if (req.criticalSlaDays() != null) {
             policy.setCriticalSlaDays(Math.max(0, req.criticalSlaDays()));
@@ -113,6 +74,9 @@ public class RiskPolicyService {
         if (req.findingGenerationMode() != null) {
             policy.setFindingGenerationMode(parseFindingGenerationMode(req.findingGenerationMode()));
         }
+        if (req.findingsScoreConfig() != null) {
+            policy.setFindingsScoreConfig(req.findingsScoreConfig());
+        }
 
         policy.touch();
         return toResponse(riskPolicyRepository.save(policy));
@@ -122,23 +86,17 @@ public class RiskPolicyService {
         return toResponse(getOrCreate(tenant));
     }
 
+    @Transactional(readOnly = true)
+    public String getFindingsScoreConfig(Tenant tenant) {
+        return riskPolicyRepository.findByTenant(tenant)
+                .map(RiskPolicy::getFindingsScoreConfig)
+                .orElse("[]");
+    }
+
     private RiskPolicyResponse toResponse(RiskPolicy policy) {
         return new RiskPolicyResponse(
-                policy.getCvssWeight(),
-                policy.getKevBoost(),
-                policy.getEpssWeight(),
-                policy.getVexNotAffectedFreshnessDays(),
-                policy.getVexFixedFreshnessDays(),
-                policy.getVexKnownAffectedBoost(),
-                policy.getVexUnderInvestigationPenalty(),
-                policy.getVexNotAffectedReduction(),
-                policy.getVexStalePenalty(),
                 policy.getCriticalThreshold(),
                 policy.getHighThreshold(),
-                policy.getAssetCriticalRiskBoost(),
-                policy.getAssetHighRiskBoost(),
-                policy.getAssetMediumRiskBoost(),
-                policy.getAssetLowRiskBoost(),
                 policy.getCriticalSlaDays(),
                 policy.getHighSlaDays(),
                 policy.getMediumSlaDays(),
@@ -150,7 +108,8 @@ public class RiskPolicyService {
                 policy.isAutoCloseEnabled(),
                 policy.getAutoCloseAssetIdentifier(),
                 policy.getAutoCloseAfterDays(),
-                policy.getFindingGenerationMode().name());
+                policy.getFindingGenerationMode().name(),
+                policy.getFindingsScoreConfig());
     }
 
     private RiskPolicy.FindingGenerationMode parseFindingGenerationMode(String value) {

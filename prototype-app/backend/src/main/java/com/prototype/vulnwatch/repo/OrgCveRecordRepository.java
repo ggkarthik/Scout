@@ -27,6 +27,12 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
 
     Optional<OrgCveRecord> findByTenantAndVulnerability_Id(Tenant tenant, UUID vulnerabilityId);
 
+    List<OrgCveRecord> findByTenantAndSuppressedByRuleIdIsNull(Tenant tenant);
+
+    long countByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+
+    List<OrgCveRecord> findByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+
     List<OrgCveRecord> findByTenantAndVulnerability_IdIn(Tenant tenant, Collection<UUID> vulnerabilityIds);
 
     @Query("""

@@ -221,7 +221,10 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
   'ghsa-feed',
   'microsoft-csaf-vex',
   'redhat-csaf-vex',
-  'advisory-feed',
+  'advisory-feed'
+];
+
+const LIFECYCLE_CONNECTOR_IDS: ConnectorId[] = [
   'endoflife-date'
 ];
 
@@ -417,6 +420,9 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const cloudConnectors = CONNECTORS
     .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
 
+  const lifecycleConnectors = CONNECTORS
+    .filter((connector) => LIFECYCLE_CONNECTOR_IDS.includes(connector.id));
+
   const visibleSections = [
     {
       key: 'cmdb-sbom' as const,
@@ -429,6 +435,12 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
       caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
+    },
+    {
+      key: 'lifecycle' as const,
+      title: 'Lifecycle Intelligence',
+      connectors: lifecycleConnectors,
+      caption: 'End-of-life catalog sync and component lifecycle status tracking.',
     }
   ];
 

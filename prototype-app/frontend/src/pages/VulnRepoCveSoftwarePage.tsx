@@ -4,6 +4,10 @@ import { DataTable, type DataTableColumn, type DataTableRow } from '../component
 import { pathForVulnRepoView } from '../app/routes';
 import { useCveDetailQuery } from '../features/cve-workbench/queries';
 import type { CveMatchedSoftware } from '../features/cve-workbench/types';
+import {
+  buildPersistedSoftwareSummaryRows,
+  loadPersistedInvestigationRunbookState,
+} from '../features/cve-workbench/investigation-context';
 
 type SoftwareRow = {
   id: string;
@@ -18,7 +22,7 @@ const SOFTWARE_COLUMNS: DataTableColumn[] = [
   { id: 'version', label: 'Version', header: 'Version', initialSize: 220 },
 ];
 
-function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[]): SoftwareRow[] {
+function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[], persistedRows: Array<{ software: string; vendor: string; version: string; assetCount: number }> = []): SoftwareRow[] {
   const vendorByPackage = new Map<string, string>();
   matchedSoftware.forEach((software) => {
     const pkgKey = software.packageName?.trim().toLowerCase();
@@ -47,6 +51,24 @@ function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[]): SoftwareRow[]
     }
   });
 
+  persistedRows.forEach((software) => {
+    const packageName = software.software?.trim() || 'Unknown';
+    const version = software.version?.trim() || '-';
+    const vendor = software.vendor?.trim() || vendorByPackage.get(packageName.toLowerCase()) || 'Inventory';
+    const key = `${packageName.toLowerCase()}|${version.toLowerCase()}`;
+    const existing = unique.get(key);
+    if (existing) {
+      existing.vendor = existing.vendor === 'Unknown' ? vendor : existing.vendor;
+      return;
+    }
+    unique.set(key, {
+      id: key,
+      software: packageName,
+      vendor,
+      version,
+    });
+  });
+
   return Array.from(unique.values()).sort((left, right) => (
     left.software.localeCompare(right.software)
     || left.version.localeCompare(right.version)
@@ -59,7 +81,14 @@ export function VulnRepoCveSoftwarePage() {
   const params = useParams<{ cveId?: string }>();
   const cveId = params.cveId ?? null;
   const detailQuery = useCveDetailQuery(cveId);
-  const softwareRows = React.useMemo(() => buildSoftwareRows(detailQuery.data?.matchedSoftware ?? []), [detailQuery.data?.matchedSoftware]);
+  const persistedRunbookState = React.useMemo(
+    () => (cveId ? loadPersistedInvestigationRunbookState(cveId) : null),
+    [cveId]
+  );
+  const softwareRows = React.useMemo(() => buildSoftwareRows(
+    detailQuery.data?.matchedSoftware ?? [],
+    buildPersistedSoftwareSummaryRows(persistedRunbookState)
+  ), [detailQuery.data?.matchedSoftware, persistedRunbookState]);
 
   const rows = React.useMemo<DataTableRow[]>(() => (
     softwareRows.map((software) => ({

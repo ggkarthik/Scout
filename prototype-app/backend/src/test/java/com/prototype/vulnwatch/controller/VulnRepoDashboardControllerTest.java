@@ -131,6 +131,8 @@ class VulnRepoDashboardControllerTest {
                         null,
                         false,
                         null,
+                        null,
+                        null,
                         null
                 )),
                 1,

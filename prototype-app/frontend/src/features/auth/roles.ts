@@ -17,10 +17,6 @@ export function canAccessPlatformConsole(actor: ActorContext | null): boolean {
   return hasRole(actor, 'PLATFORM_OWNER');
 }
 
-export function isPlatformOwnerSession(actor: ActorContext | null): boolean {
-  return canAccessPlatformConsole(actor) && !actor?.tenantId;
-}
-
 export function canManageUsers(actor: ActorContext | null): boolean {
   return hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN']);
 }

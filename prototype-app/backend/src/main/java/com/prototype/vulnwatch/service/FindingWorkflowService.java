@@ -91,6 +91,26 @@ public class FindingWorkflowService {
         return updateWorkflowBulk(findingRepository.findAllById(findingIds), request);
     }
 
+    @Transactional
+    public int bulkDelete(List<UUID> findingIds) {
+        if (findingIds == null || findingIds.isEmpty()) {
+            return 0;
+        }
+        List<Finding> findings = findingRepository.findAllById(findingIds);
+        if (findings.isEmpty()) {
+            return 0;
+        }
+        // Delete child records first to satisfy FK constraints
+        for (Finding finding : findings) {
+            findingCommentRepository.deleteAll(findingCommentRepository.findByFindingOrderByCreatedAtAsc(finding));
+            findingEventRepository.deleteAll(findingEventRepository.findByFindingOrderByCreatedAtAsc(finding));
+        }
+        findingRepository.deleteAll(findings);
+        audit("finding.bulk_deleted", "finding", null,
+                "{\"deleted\":" + findings.size() + "}");
+        return findings.size();
+    }
+
     private void applyWorkflowUpdate(Finding finding, FindingWorkflowUpdateRequest request) {
         String actor = actor(request.actor());
         Instant now = Instant.now();
@@ -133,6 +153,8 @@ public class FindingWorkflowService {
             } else {
                 finding.setSuppressionReason(null);
                 finding.setSuppressedUntil(null);
+                finding.setSuppressedByRuleId(null);
+                finding.setSuppressedByRuleName(null);
             }
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("from", previousStatus.name());
@@ -229,6 +251,8 @@ public class FindingWorkflowService {
             finding.setDecisionState(FindingDecisionState.AFFECTED);
             finding.setSuppressionReason(null);
             finding.setSuppressedUntil(null);
+            finding.setSuppressedByRuleId(null);
+            finding.setSuppressedByRuleName(null);
             finding.touch();
             appendEvent(
                     finding,

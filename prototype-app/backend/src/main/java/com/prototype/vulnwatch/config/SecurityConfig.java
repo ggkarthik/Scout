@@ -42,7 +42,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-invites/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers("/api/platform/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/**").authenticated()

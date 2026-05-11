@@ -72,7 +72,6 @@ class VexAssertionMatchServiceTest {
         when(vexAssertionRepository.findByTarget_IdIn(anyCollection())).thenReturn(List.of(assertion));
 
         RiskPolicy policy = new RiskPolicy();
-        policy.setVexNotAffectedFreshnessDays(14);
 
         ImpactEvaluationService.VexOverlayOutcome outcome = service.resolve(
                 component,

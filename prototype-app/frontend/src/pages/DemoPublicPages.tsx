@@ -3,10 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, setStoredAuthToken } from '../api/client';
 
-function postLoginPath(actor: Awaited<ReturnType<typeof api.getActorContext>>): string {
-  const isPlatformOwner = actor.roles.some((role) => role.replace(/^ROLE_/, '').toUpperCase() === 'PLATFORM_OWNER');
-  return isPlatformOwner && !actor.tenantId ? '/platform/demo-requests' : '/';
-}
+const IDP_LOGIN_URL = import.meta.env.VITE_IDP_LOGIN_URL ?? '';
 
 export function DemoLandingPage() {
   return (
@@ -131,7 +128,7 @@ export function DemoRequestSuccessPage() {
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Request received</h1>
-        <p>We’ll review the request and send access instructions after the demo workspace is provisioned.</p>
+        <p>We’ll review the request and send an invite link after the demo workspace is provisioned.</p>
         <Link className="btn btn-secondary" to="/demo">Back to demo overview</Link>
       </section>
     </PublicDemoShell>
@@ -140,42 +137,16 @@ export function DemoRequestSuccessPage() {
 
 export function DemoInvitePage() {
   const { token = '' } = useParams();
-  const navigate = useNavigate();
-  const [password, setPassword] = React.useState('');
-  const [confirmPassword, setConfirmPassword] = React.useState('');
-  const [formError, setFormError] = React.useState<string | null>(null);
   const inviteQuery = useQuery({
     queryKey: ['demo-invite', token],
     queryFn: () => api.validateDemoInvite(token),
     enabled: token.length > 0
   });
   const acceptInvite = useMutation({
-    mutationFn: async (nextPassword: string) => {
-      const session = await api.acceptDemoInvite(token, { password: nextPassword });
-      setStoredAuthToken(session.token);
-      const actor = await api.getActorContext();
-      return postLoginPath(actor);
-    },
-    onSuccess: (path) => {
-      navigate(path, { replace: true });
-    }
+    mutationFn: () => api.acceptDemoInvite(token)
   });
 
   const invite = inviteQuery.data;
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setFormError(null);
-    if (password.trim().length < 8) {
-      setFormError('Choose a password with at least 8 characters.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setFormError('Passwords do not match.');
-      return;
-    }
-    acceptInvite.mutate(password);
-  };
-
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
@@ -192,31 +163,19 @@ export function DemoInvitePage() {
               <div><dt>Email</dt><dd>{invite.email}</dd></div>
               <div><dt>Demo expires</dt><dd>{new Date(invite.demoExpiresAt).toLocaleString()}</dd></div>
             </dl>
-            {invite.valid ? (
-              <>
-                <form className="auth-token-form" onSubmit={submit}>
-                  <label>Create password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={acceptInvite.isPending} /></label>
-                  <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={acceptInvite.isPending} /></label>
-                  <div className="button-row">
-                    <button
-                      className="btn btn-primary"
-                      type="submit"
-                      disabled={acceptInvite.isPending}
-                    >
-                      {acceptInvite.isPending ? 'Activating...' : 'Activate workspace'}
-                    </button>
-                    <Link className="btn btn-secondary" to="/login">Already have access</Link>
-                  </div>
-                </form>
-                {formError && <div className="notice error">{formError}</div>}
-                {acceptInvite.isError && <div className="notice error">{acceptInvite.error instanceof Error ? acceptInvite.error.message : 'Accept failed'}</div>}
-              </>
-            ) : (
-              <div className="button-row">
-                <Link className="btn btn-primary" to="/login">Go to login</Link>
-                <Link className="btn btn-secondary" to="/demo/request">Request a new demo</Link>
-              </div>
-            )}
+            <div className="button-row">
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={!invite.valid || acceptInvite.isPending}
+                onClick={() => acceptInvite.mutate()}
+              >
+                {acceptInvite.isPending ? 'Accepting...' : 'Accept invite'}
+              </button>
+              <Link className="btn btn-secondary" to={`/login?invite=${encodeURIComponent(token)}`}>Continue to login</Link>
+            </div>
+            {acceptInvite.isSuccess && <div className="notice success">Invite accepted. Continue to login.</div>}
+            {acceptInvite.isError && <div className="notice error">{acceptInvite.error instanceof Error ? acceptInvite.error.message : 'Accept failed'}</div>}
           </>
         ) : null}
       </section>
@@ -227,32 +186,16 @@ export function DemoInvitePage() {
 export function LoginPage() {
   const [searchParams] = useSearchParams();
   const invite = searchParams.get('invite');
-  const [email, setEmail] = React.useState('');
-  const [password, setPassword] = React.useState('');
   const [token, setToken] = React.useState('');
   const navigate = useNavigate();
-  const inviteQuery = useQuery({
-    queryKey: ['login-invite', invite],
-    queryFn: () => invite ? api.validateDemoInvite(invite) : Promise.resolve(null),
-    enabled: Boolean(invite)
-  });
-  const login = useMutation({
-    mutationFn: async (payload: { email: string; password: string }) => {
-      const session = await api.login(payload);
-      setStoredAuthToken(session.token);
-      const actor = await api.getActorContext();
-      return postLoginPath(actor);
-    },
-    onSuccess: (path) => {
-      navigate(path, { replace: true });
-    }
-  });
 
-  React.useEffect(() => {
-    if (inviteQuery.data?.email) {
-      setEmail(inviteQuery.data.email);
-    }
-  }, [inviteQuery.data?.email]);
+  const startHostedLogin = () => {
+    const returnTo = `${window.location.origin}/`;
+    const invitePart = invite ? `&invite=${encodeURIComponent(invite)}` : '';
+    window.location.href = IDP_LOGIN_URL
+      ? `${IDP_LOGIN_URL}${IDP_LOGIN_URL.includes('?') ? '&' : '?'}returnTo=${encodeURIComponent(returnTo)}${invitePart}`
+      : '/demo';
+  };
 
   const submitDevToken = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -260,32 +203,14 @@ export function LoginPage() {
     navigate('/');
   };
 
-  const submitPasswordLogin = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    login.mutate({
-      email: email.trim(),
-      password
-    });
-  };
-
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Log in to Scout.ai</h1>
-        <p>
-          {invite
-            ? 'Finish sign-in with the invited email address and the password you set when activating your workspace.'
-            : 'Platform owners and returning demo customers can sign in here with their Scout.ai email and password.'}
-        </p>
-        <form className="auth-token-form" onSubmit={submitPasswordLogin}>
-          <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
-          <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-          <button className="btn btn-primary" type="submit" disabled={login.isPending || !email.trim() || !password}>
-            {login.isPending ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
-        {inviteQuery.isError && <div className="notice error">{inviteQuery.error instanceof Error ? inviteQuery.error.message : 'Invite lookup failed'}</div>}
-        {login.isError && <div className="notice error">{login.error instanceof Error ? login.error.message : 'Login failed'}</div>}
+        <p>Customer demo access uses the hosted identity provider configured for this environment.</p>
+        <button className="btn btn-primary" type="button" onClick={startHostedLogin}>
+          Continue with hosted login
+        </button>
         {import.meta.env.VITE_SHOW_TOKEN_LOGIN === 'true' && (
           <form className="auth-token-form dev-token-form" onSubmit={submitDevToken}>
             <label>Development bearer token<input type="password" value={token} onChange={(event) => setToken(event.target.value)} /></label>
@@ -302,11 +227,8 @@ export function DemoExpiredPage() {
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Demo expired</h1>
-        <p>This 7-day demo workspace is no longer active. Request another validation workspace or contact the Scout.ai team if you need more time.</p>
-        <div className="button-row">
-          <Link className="btn btn-primary" to="/demo/request">Request another demo</Link>
-          <Link className="btn btn-secondary" to="/demo">Back to overview</Link>
-        </div>
+        <p>This 7-day demo workspace is no longer active. Contact the team if you need more time or want to continue validation.</p>
+        <Link className="btn btn-primary" to="/demo/request">Request another demo</Link>
       </section>
     </PublicDemoShell>
   );

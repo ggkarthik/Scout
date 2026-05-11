@@ -575,6 +575,69 @@
   color: #dc2626;
 }
 
+/* ── tab bar ──────────────────────────────────────────────────────────────── */
+
+.fd3-tab-bar {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  background: var(--panel, #fff);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.fd3-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+.fd3-tab:hover { color: var(--text, #111); }
+.fd3-tab--active {
+  color: var(--accent, #3b82f6);
+  border-bottom-color: var(--accent, #3b82f6);
+  font-weight: 600;
+}
+
+.fd3-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--panel-muted, #f1f5f9);
+  border: 1px solid var(--border, #e5e7eb);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+.fd3-tab--active .fd3-tab-count {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: var(--accent, #3b82f6);
+}
+
+/* ── panel sub-title ─────────────────────────────────────────────────────── */
+
+.fd3-panel-sub-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted, #6b7280);
+  padding: 8px 0 4px;
+}
+
 /* ── finding-id-link (used in list views) ─────────────────────────────────── */
 
 .finding-id-link {

@@ -25,6 +25,7 @@ import {
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { useActor } from '../features/auth/context';
 import { canRefreshTenantExposure } from '../features/auth/roles';
+import { api } from '../api/client';
 import { computeCveRiskScore, computeOrgImpact, riskScoreLabel } from '../lib/riskScoring';
 
 const PAGE_SIZE = 25;
@@ -42,6 +43,7 @@ const ORG_CVE_COLUMNS: DataTableColumn[] = [
   { id: 'eol', label: 'EOL', header: 'EOL', initialSize: 120 },
   { id: 'eos', label: 'EOS', header: 'EOS', initialSize: 120 },
   { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
+  { id: 'suppression', label: 'Suppression', header: 'Suppression', initialSize: 160 },
   { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 }
 ];
 
@@ -195,9 +197,22 @@ export function VulnRepoOrgCvePage({
     }
   });
 
+  const [reopeningId, setReopeningId] = React.useState<string | null>(null);
+
   const openRecord = React.useCallback((record: OrgSpecificCveExposureRecord) => {
     setSelectedRecord(record);
   }, []);
+
+  const handleReopenCve = React.useCallback(async (recordId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setReopeningId(recordId);
+    try {
+      await api.reopenCveRecord(recordId);
+      await orgCveQuery.refetch();
+    } finally {
+      setReopeningId(null);
+    }
+  }, [orgCveQuery]);
 
   React.useEffect(() => {
     if (!initialCveId) {
@@ -403,12 +418,34 @@ export function VulnRepoOrgCvePage({
           )
         },
         openFindings: { content: item.openFindings.toLocaleString() },
+        suppression: {
+          content: item.suppressedByRuleId ? (
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{
+                display: 'inline-block', padding: '1px 7px', borderRadius: 10,
+                fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em',
+                background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b44',
+              }}>
+                Suppressed
+              </span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--medium)' }}>{item.suppressedByRuleName}</span>
+              <button
+                type="button"
+                style={{ fontSize: '0.7rem', padding: '1px 6px', cursor: 'pointer', marginTop: 2, border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text-1)' }}
+                disabled={reopeningId === item.recordId}
+                onClick={(e) => void handleReopenCve(item.recordId, e)}
+              >
+                {reopeningId === item.recordId ? '…' : 'Reopen'}
+              </button>
+            </span>
+          ) : <span className="cve-muted">—</span>
+        },
         lastEvaluated: { content: formatDateTime(item.lastEvaluatedAt) }
         };
       })()
     }
   ))
-  ), [openRecord, policyQuery.data, selectedRecord?.recordId, visibleItems]);
+  ), [handleReopenCve, openRecord, policyQuery.data, reopeningId, selectedRecord?.recordId, visibleItems]);
 
   if (selectedRecord) {
     return (

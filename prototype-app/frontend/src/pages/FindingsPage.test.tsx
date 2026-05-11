@@ -51,13 +51,7 @@ const FILTER_VALUES: FindingFilterValues = {
 };
 
 const RISK_POLICY: RiskPolicy = {
-  cvssWeight: 1, kevBoost: 2, epssWeight: 1,
-  vexNotAffectedFreshnessDays: 30, vexFixedFreshnessDays: 30,
-  vexKnownAffectedBoost: 0.4, vexUnderInvestigationPenalty: 0.2,
-  vexNotAffectedReduction: 0.8, vexStalePenalty: 0.5,
   criticalThreshold: 9, highThreshold: 7,
-  assetCriticalRiskBoost: 1.5, assetHighRiskBoost: 1,
-  assetMediumRiskBoost: 0.5, assetLowRiskBoost: 0,
   criticalSlaDays: 7, highSlaDays: 14, mediumSlaDays: 30, lowSlaDays: 60,
   assetCriticalSlaMultiplier: 0.5, assetHighSlaMultiplier: 0.75,
   assetMediumSlaMultiplier: 1, assetLowSlaMultiplier: 1.25,
@@ -98,10 +92,9 @@ describe('FindingsPage', () => {
 
     renderWithProviders(<FindingsPage />);
 
-    // Default filters (severity CRITICAL+HIGH, status OPEN) produce active chips,
-    // so empty state shows the "no findings matched" branch.
+    // No findings and no active chips → "No findings yet" onboarding state.
     await waitFor(() => {
-      expect(screen.getByText(/No findings matched/i)).toBeInTheDocument();
+      expect(screen.getByText(/No findings yet/i)).toBeInTheDocument();
     });
   });
 
