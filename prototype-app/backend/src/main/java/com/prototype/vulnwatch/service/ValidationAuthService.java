@@ -84,13 +84,14 @@ public class ValidationAuthService {
         Set<String> roles = new LinkedHashSet<>();
         if (user.isPlatformOwner()) {
             roles.add("PLATFORM_OWNER");
-        }
-        List<TenantMembership> memberships = membershipRepository
-                .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
-        if (!memberships.isEmpty()) {
-            TenantMembership membership = memberships.get(0);
-            tenant = membership.getTenant();
-            roles.add(membership.getRole());
+        } else {
+            List<TenantMembership> memberships = membershipRepository
+                    .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
+            if (!memberships.isEmpty()) {
+                TenantMembership membership = memberships.get(0);
+                tenant = membership.getTenant();
+                roles.add(membership.getRole());
+            }
         }
         if (tenant == null && roles.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User does not have an active workspace");
