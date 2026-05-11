@@ -36,9 +36,6 @@ import './styles/finding-detail.css';
 const ExposureDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/ExposureDashboardPage')).ExposureDashboardPage
 }));
-const DashboardPage = React.lazy(async () => ({
-  default: (await import('./pages/DashboardPage')).DashboardPage
-}));
 const FindingsPage = React.lazy(async () => ({
   default: (await import('./pages/FindingsPage')).FindingsPage
 }));
@@ -324,10 +321,6 @@ function ExposureDashboardRoute() {
   return <ExposureDashboardPage />;
 }
 
-function _DashboardRoute() {
-  const navigate = useNavigate();
-  return <DashboardPage onViewEol={() => navigate('/end-of-life')} />;
-}
 
 function FindingsRoute() {
   const navigate = useNavigate();
