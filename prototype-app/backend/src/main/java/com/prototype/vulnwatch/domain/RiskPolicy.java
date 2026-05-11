@@ -12,6 +12,8 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "risk_policies")
@@ -31,49 +33,10 @@ public class RiskPolicy {
     private Tenant tenant;
 
     @Column(nullable = false)
-    private double cvssWeight = 1.0;
-
-    @Column(nullable = false)
-    private double kevBoost = 2.0;
-
-    @Column(nullable = false)
-    private double epssWeight = 1.0;
-
-    @Column(nullable = false)
-    private int vexNotAffectedFreshnessDays = 30;
-
-    @Column(nullable = false)
-    private int vexFixedFreshnessDays = 30;
-
-    @Column(nullable = false)
-    private double vexKnownAffectedBoost = 0.4;
-
-    @Column(nullable = false)
-    private double vexUnderInvestigationPenalty = 0.2;
-
-    @Column(nullable = false)
-    private double vexNotAffectedReduction = 0.8;
-
-    @Column(nullable = false)
-    private double vexStalePenalty = 0.5;
-
-    @Column(nullable = false)
     private double criticalThreshold = 9.0;
 
     @Column(nullable = false)
     private double highThreshold = 7.0;
-
-    @Column(nullable = false)
-    private double assetCriticalRiskBoost = 1.5;
-
-    @Column(nullable = false)
-    private double assetHighRiskBoost = 1.0;
-
-    @Column(nullable = false)
-    private double assetMediumRiskBoost = 0.5;
-
-    @Column(nullable = false)
-    private double assetLowRiskBoost = 0.0;
 
     @Column(nullable = false)
     private int criticalSlaDays = 7;
@@ -112,6 +75,10 @@ public class RiskPolicy {
     @Column(name = "finding_generation_mode", nullable = false, length = 20)
     private FindingGenerationMode findingGenerationMode = FindingGenerationMode.MANUAL;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "findings_score_config", columnDefinition = "jsonb")
+    private String findingsScoreConfig = "[]";
+
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
 
@@ -125,78 +92,6 @@ public class RiskPolicy {
 
     public void setTenant(Tenant tenant) {
         this.tenant = tenant;
-    }
-
-    public double getCvssWeight() {
-        return cvssWeight;
-    }
-
-    public void setCvssWeight(double cvssWeight) {
-        this.cvssWeight = cvssWeight;
-    }
-
-    public double getKevBoost() {
-        return kevBoost;
-    }
-
-    public void setKevBoost(double kevBoost) {
-        this.kevBoost = kevBoost;
-    }
-
-    public double getEpssWeight() {
-        return epssWeight;
-    }
-
-    public void setEpssWeight(double epssWeight) {
-        this.epssWeight = epssWeight;
-    }
-
-    public int getVexNotAffectedFreshnessDays() {
-        return vexNotAffectedFreshnessDays;
-    }
-
-    public void setVexNotAffectedFreshnessDays(int vexNotAffectedFreshnessDays) {
-        this.vexNotAffectedFreshnessDays = vexNotAffectedFreshnessDays;
-    }
-
-    public int getVexFixedFreshnessDays() {
-        return vexFixedFreshnessDays;
-    }
-
-    public void setVexFixedFreshnessDays(int vexFixedFreshnessDays) {
-        this.vexFixedFreshnessDays = vexFixedFreshnessDays;
-    }
-
-    public double getVexKnownAffectedBoost() {
-        return vexKnownAffectedBoost;
-    }
-
-    public void setVexKnownAffectedBoost(double vexKnownAffectedBoost) {
-        this.vexKnownAffectedBoost = vexKnownAffectedBoost;
-    }
-
-    public double getVexUnderInvestigationPenalty() {
-        return vexUnderInvestigationPenalty;
-    }
-
-    public void setVexUnderInvestigationPenalty(double vexUnderInvestigationPenalty) {
-        this.vexUnderInvestigationPenalty = vexUnderInvestigationPenalty;
-    }
-
-    public double getVexNotAffectedReduction() {
-        return vexNotAffectedReduction;
-    }
-
-    public void setVexNotAffectedReduction(double vexNotAffectedReduction) {
-        this.vexNotAffectedReduction = vexNotAffectedReduction;
-    }
-
-    public double getVexStalePenalty() {
-        return vexStalePenalty;
-    }
-
-    public void setVexStalePenalty(double vexStalePenalty) {
-        this.vexStalePenalty = vexStalePenalty;
     }
 
     public double getCriticalThreshold() {
@@ -213,38 +108,6 @@ public class RiskPolicy {
 
     public void setHighThreshold(double highThreshold) {
         this.highThreshold = highThreshold;
-    }
-
-    public double getAssetCriticalRiskBoost() {
-        return assetCriticalRiskBoost;
-    }
-
-    public void setAssetCriticalRiskBoost(double assetCriticalRiskBoost) {
-        this.assetCriticalRiskBoost = assetCriticalRiskBoost;
-    }
-
-    public double getAssetHighRiskBoost() {
-        return assetHighRiskBoost;
-    }
-
-    public void setAssetHighRiskBoost(double assetHighRiskBoost) {
-        this.assetHighRiskBoost = assetHighRiskBoost;
-    }
-
-    public double getAssetMediumRiskBoost() {
-        return assetMediumRiskBoost;
-    }
-
-    public void setAssetMediumRiskBoost(double assetMediumRiskBoost) {
-        this.assetMediumRiskBoost = assetMediumRiskBoost;
-    }
-
-    public double getAssetLowRiskBoost() {
-        return assetLowRiskBoost;
-    }
-
-    public void setAssetLowRiskBoost(double assetLowRiskBoost) {
-        this.assetLowRiskBoost = assetLowRiskBoost;
     }
 
     public int getCriticalSlaDays() {
@@ -341,6 +204,14 @@ public class RiskPolicy {
 
     public void setFindingGenerationMode(FindingGenerationMode findingGenerationMode) {
         this.findingGenerationMode = findingGenerationMode == null ? FindingGenerationMode.MANUAL : findingGenerationMode;
+    }
+
+    public String getFindingsScoreConfig() {
+        return findingsScoreConfig == null ? "[]" : findingsScoreConfig;
+    }
+
+    public void setFindingsScoreConfig(String findingsScoreConfig) {
+        this.findingsScoreConfig = findingsScoreConfig == null ? "[]" : findingsScoreConfig;
     }
 
     public Instant getUpdatedAt() {

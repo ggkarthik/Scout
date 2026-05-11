@@ -21,6 +21,8 @@ export type Finding = {
   dueAt?: string;
   suppressionReason?: string;
   suppressedUntil?: string;
+  suppressedByRuleId?: string;
+  suppressedByRuleName?: string;
   evidence: string;
   precedenceTrace?: string;
   vexStatus?: string;
@@ -40,6 +42,7 @@ export type Finding = {
   eolDaysRemaining?: number;
   incidentId?: string;
   incidentStatus?: string;
+  findingsScore?: number;
   ownershipSyncedAt?: string;
   ownership?: OwnershipSummary;
 };

@@ -57,6 +57,9 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     long countByVulnerabilityAndStatus(Vulnerability vulnerability, FindingStatus status);
     void deleteByAsset(Asset asset);
     long countByTenantAndStatus(Tenant tenant, FindingStatus status);
+    long countByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+
+    List<Finding> findByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
     long countByTenantAndStatusAndRiskScoreGreaterThanEqual(Tenant tenant, FindingStatus status, double minRiskScore);
     long countByTenantAndStatusAndConfidenceScoreGreaterThanEqual(Tenant tenant, FindingStatus status, double minConfidence);
 

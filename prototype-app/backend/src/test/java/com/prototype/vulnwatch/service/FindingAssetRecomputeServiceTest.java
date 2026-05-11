@@ -41,7 +41,7 @@ class FindingAssetRecomputeServiceTest {
     private RiskPolicyService riskPolicyService;
 
     @Mock
-    private RiskScoringService riskScoringService;
+    private FindingsScoreService findingsScoreService;
 
     @Mock
     private FindingWorkflowService findingWorkflowService;
@@ -76,7 +76,7 @@ class FindingAssetRecomputeServiceTest {
                 inventoryComponentRepository,
                 correlationCandidateService,
                 riskPolicyService,
-                riskScoringService,
+                findingsScoreService,
                 findingWorkflowService,
                 impactEvaluationService,
                 findingEvidenceService,

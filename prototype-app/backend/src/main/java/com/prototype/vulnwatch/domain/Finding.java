@@ -88,6 +88,9 @@ public class Finding {
     @Column
     private Instant dueAt;
 
+    @Column(name = "severity_override", length = 16)
+    private String severityOverride;
+
     @Column(length = 2000)
     private String suppressionReason;
 
@@ -113,6 +116,12 @@ public class Finding {
     @Basic(fetch = FetchType.LAZY)
     @Column(name = "precedence_trace", columnDefinition = "TEXT")
     private String precedenceTrace;
+
+    @Column(name = "suppressed_by_rule_id")
+    private UUID suppressedByRuleId;
+
+    @Column(name = "suppressed_by_rule_name")
+    private String suppressedByRuleName;
 
     /** ServiceNow incident number linked to this finding (e.g. INC0010005) */
     @Column(name = "incident_id", length = 64)
@@ -334,6 +343,12 @@ public class Finding {
         return updatedAt;
     }
 
+    public UUID getSuppressedByRuleId() { return suppressedByRuleId; }
+    public void setSuppressedByRuleId(UUID suppressedByRuleId) { this.suppressedByRuleId = suppressedByRuleId; }
+
+    public String getSuppressedByRuleName() { return suppressedByRuleName; }
+    public void setSuppressedByRuleName(String suppressedByRuleName) { this.suppressedByRuleName = suppressedByRuleName; }
+
     public String getIncidentId() {
         return incidentId;
     }
@@ -348,6 +363,14 @@ public class Finding {
 
     public void setIncidentStatus(String incidentStatus) {
         this.incidentStatus = incidentStatus;
+    }
+
+    public String getSeverityOverride() {
+        return severityOverride;
+    }
+
+    public void setSeverityOverride(String severityOverride) {
+        this.severityOverride = severityOverride;
     }
 
     public void touch() {

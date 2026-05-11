@@ -27,7 +27,6 @@ import {
   canManageInventorySources,
   canManageRiskPolicy,
   canManageTenant,
-  isPlatformOwnerSession,
   canRunSecurityWorkflow,
   canViewReadOnly
 } from './features/auth/roles';
@@ -36,9 +35,6 @@ import './styles/finding-detail.css';
 
 const ExposureDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/ExposureDashboardPage')).ExposureDashboardPage
-}));
-const DashboardPage = React.lazy(async () => ({
-  default: (await import('./pages/DashboardPage')).DashboardPage
 }));
 const FindingsPage = React.lazy(async () => ({
   default: (await import('./pages/FindingsPage')).FindingsPage
@@ -167,7 +163,6 @@ const OPERATIONS_NAV_ITEMS = [
 ] as const;
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
-  { key: 'org-cves', label: 'Unified Records' },
   { key: 'vulnerabilities', label: 'Intelligence' },
 ];
 
@@ -326,10 +321,6 @@ function ExposureDashboardRoute() {
   return <ExposureDashboardPage />;
 }
 
-function DashboardRoute() {
-  const navigate = useNavigate();
-  return <DashboardPage onViewEol={() => navigate('/end-of-life')} />;
-}
 
 function FindingsRoute() {
   const navigate = useNavigate();
@@ -613,7 +604,6 @@ function AppShell() {
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
-  const platformMode = isPlatformOwnerSession(actor);
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
@@ -623,11 +613,7 @@ function AppShell() {
       ? 'org-cves'
       : 'dashboard';
   const visiblePrimaryNavTabs = React.useMemo(() => {
-    if (platformMode) {
-      const tabs: AppTab[] = ['operations'];
-      return tabs;
-    }
-    const tabs: AppTab[] = ['exposure', 'dashboard'];
+    const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
     }
@@ -641,7 +627,7 @@ function AppShell() {
       tabs.push('configurations');
     }
     return tabs;
-  }, [actor, platformMode]);
+  }, [actor]);
   const inventoryAssetsQuery = useQuery({
     queryKey: ['inventory-nav-assets'],
     queryFn: api.listAssets,
@@ -764,10 +750,6 @@ function AppShell() {
       <span className="nav-label">{titleForTab(tab)}</span>
     </button>
   );
-
-  if (platformMode && !location.pathname.startsWith('/platform') && !location.pathname.startsWith('/operations')) {
-    return <Navigate to={pathForPlatformView('demo-requests')} replace />;
-  }
 
   return (
     <>
@@ -899,7 +881,7 @@ function AppShell() {
                       className="settings-menu-item"
                       role="menuitem"
                       onClick={() => navigate('/admin/users')}
-                      disabled={!canManageTenant(actor) || platformMode}
+                      disabled={!canManageTenant(actor)}
                     >
                       <span>Tenant Administration</span>
                       <small>Users, roles, service accounts and audit</small>
@@ -973,7 +955,7 @@ function AppShell() {
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
-              <Route path="/" element={<DashboardRoute />} />
+              <Route path="/" element={<Navigate to="/exposure" replace />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />

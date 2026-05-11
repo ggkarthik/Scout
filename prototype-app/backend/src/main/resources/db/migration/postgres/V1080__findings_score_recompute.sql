@@ -1,0 +1,2 @@
+-- V1080: Introduces FindingsScoreRecomputeService and POST /api/risk-policy/recompute-findings-scores.
+-- No schema changes required; risk_score and due_at are existing columns on findings.

@@ -89,13 +89,7 @@ describe('FindingDetailPage', () => {
     vi.spyOn(cveWorkbenchApi, 'getSavedAiSolution').mockResolvedValue(null as never);
     vi.spyOn(api, 'listAssets').mockResolvedValue([]);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue({
-      cvssWeight: 1, kevBoost: 2, epssWeight: 1,
-      vexNotAffectedFreshnessDays: 30, vexFixedFreshnessDays: 30,
-      vexKnownAffectedBoost: 0.4, vexUnderInvestigationPenalty: 0.2,
-      vexNotAffectedReduction: 0.8, vexStalePenalty: 0.5,
       criticalThreshold: 9, highThreshold: 7,
-      assetCriticalRiskBoost: 1.5, assetHighRiskBoost: 1,
-      assetMediumRiskBoost: 0.5, assetLowRiskBoost: 0,
       criticalSlaDays: 7, highSlaDays: 14, mediumSlaDays: 30, lowSlaDays: 60,
       assetCriticalSlaMultiplier: 0.5, assetHighSlaMultiplier: 0.75,
       assetMediumSlaMultiplier: 1, assetLowSlaMultiplier: 1.25,

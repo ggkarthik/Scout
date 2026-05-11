@@ -1,6 +1,8 @@
 import type {
   PrototypeDataResetResponse,
-  RiskPolicy
+  RiskPolicy,
+  SuppressionRule,
+  SuppressionRuleRequest,
 } from '../features/configurations/types';
 import type {
   FindingBulkWorkflowRequest,
@@ -62,13 +64,10 @@ import type {
   AuditEvent,
   AuthContext,
   DemoInvite,
-  DemoInviteAcceptRequest,
   DemoInviteValidationResponse,
   DemoRequest,
   DemoRequestCreateRequest,
   DemoStatus,
-  AuthLoginRequest,
-  AuthSession,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -137,20 +136,6 @@ type ApiErrorPayload = {
   fields?: Record<string, string>;
 };
 
-export class ApiRequestError extends Error {
-  status: number;
-  code?: string;
-  fields?: Record<string, string>;
-
-  constructor(message: string, status: number, code?: string, fields?: Record<string, string>) {
-    super(message);
-    this.name = 'ApiRequestError';
-    this.status = status;
-    this.code = code;
-    this.fields = fields;
-  }
-}
-
 function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   const baseMessage = payload.error || payload.message || fallback;
   const codePrefix = payload.code ? `[${payload.code}] ` : '';
@@ -163,65 +148,20 @@ function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   return `${codePrefix}${baseMessage} (${fieldDetails})`;
 }
 
-function isPublicSessionRoute(pathname: string): boolean {
-  return pathname === '/login'
-    || pathname === '/demo'
-    || pathname.startsWith('/demo/')
-    || pathname.startsWith('/invite/');
-}
-
-function currentAppPathname(): string {
-  if (typeof window === 'undefined') {
-    return '/';
-  }
-  const hash = window.location.hash ?? '';
-  if (hash.startsWith('#/')) {
-    const hashPath = hash.slice(1);
-    const queryIndex = hashPath.indexOf('?');
-    return queryIndex >= 0 ? hashPath.slice(0, queryIndex) : hashPath;
-  }
-  return window.location.pathname;
-}
-
-function buildAppHref(pathname: string): string {
-  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
-  return `/#${normalized}`;
-}
-
-function handleAuthenticatedApiError(error: ApiRequestError): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  if (error.status !== 423 || error.code !== 'TENANT_SUSPENDED') {
-    return;
-  }
-  clearStoredAuthToken();
-  const pathname = currentAppPathname();
-  if (pathname === '/demo/expired' || isPublicSessionRoute(pathname)) {
-    return;
-  }
-  window.location.assign(buildAppHref('/demo/expired'));
-}
-
-async function parseApiError(response: Response): Promise<ApiRequestError> {
+async function parseApiError(response: Response): Promise<Error> {
   const fallback = `Request failed (${response.status})`;
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
     try {
       const payload = await response.json() as ApiErrorPayload;
-      return new ApiRequestError(
-        formatApiError(payload, fallback),
-        response.status,
-        payload.code,
-        payload.fields
-      );
+      return new Error(formatApiError(payload, fallback));
     } catch {
-      return new ApiRequestError(fallback, response.status);
+      return new Error(fallback);
     }
   }
 
   const text = (await response.text()).trim();
-  return new ApiRequestError(text || fallback, response.status);
+  return new Error(text || fallback);
 }
 
 export function getStoredAuthToken(): string {
@@ -275,9 +215,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const error = await parseApiError(response);
-    handleAuthenticatedApiError(error);
-    throw error;
+    throw await parseApiError(response);
   }
 
   if (response.status === 204) {
@@ -316,17 +254,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+  listAssignmentGroups: () => request<string[]>('/cve-detail/servicenow/assignment-groups'),
   validateDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}`),
-  acceptDemoInvite: (token: string, payload: DemoInviteAcceptRequest) => publicRequest<AuthSession>(`/demo-invites/${encodeURIComponent(token)}/accept`, {
+  acceptDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}/accept`, {
     method: 'POST'
-    ,
-    body: JSON.stringify(payload)
   }),
-  login: (payload: AuthLoginRequest) => publicRequest<AuthSession>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  }),
-  getActorContext: () => request<AuthContext>('/me'),
   getDemoStatus: () => request<DemoStatus>('/demo/status'),
   listDemoRequests: () => request<DemoRequest[]>('/platform/demo-requests'),
   approveDemoRequest: (requestId: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/approve`, { method: 'POST' }),
@@ -646,13 +578,34 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(policy)
   }),
+  recomputeFindingsScores: () => request<{ updated: number }>('/risk-policy/recompute-findings-scores', {
+    method: 'POST'
+  }),
   cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
     method: 'POST'
   }),
+  listSuppressionRules: () => request<SuppressionRule[]>('/suppression-rules'),
+  createSuppressionRule: (payload: SuppressionRuleRequest) => request<SuppressionRule>('/suppression-rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateSuppressionRule: (id: string, payload: SuppressionRuleRequest) => request<SuppressionRule>(`/suppression-rules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteSuppressionRule: (id: string) => request<void>(`/suppression-rules/${id}`, { method: 'DELETE' }),
+  executeSuppressionRule: (id: string) => request<{ suppressed: number; error?: string }>(`/suppression-rules/${id}/execute`, { method: 'POST' }),
+  reopenCveRecord: (recordId: string) => request<void>(`/suppression-rules/cve-reopen/${recordId}`, { method: 'POST' }),
+  reopenAllByRule: (ruleId: string) => request<{ reopened: number }>(`/suppression-rules/${ruleId}/reopen-all`, { method: 'POST' }),
   bulkUpdateFindingWorkflow: (payload: FindingBulkWorkflowRequest) =>
     request<FindingBulkWorkflowResponse>('/findings/bulk-workflow', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  bulkDeleteFindings: (findingIds: string[]) =>
+    request<{ deleted: number; message: string }>('/findings/bulk', {
+      method: 'DELETE',
+      body: JSON.stringify({ findingIds })
     }),
   getVulnIntelSourcesSummary: () => request<VulnIntelSourcesSummary>('/sync-runs/sources-summary'),
   syncNvd: (lookbackHours = 24) => request<SyncTriggerResponse>(`/ingestion/nvd-sync?lookbackHours=${lookbackHours}`, { method: 'POST' }),

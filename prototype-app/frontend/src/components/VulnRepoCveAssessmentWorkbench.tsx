@@ -1,13 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CveRiskScorePanel } from './CveRiskScorePanel';
+import { CVEInvestigationSummary, type InvestigationSummaryInput } from './CVEInvestigationSummary';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { computeCveRiskScore, computeOrgImpact } from '../lib/riskScoring';
-import { CVEInvestigationSummary, type InvestigationSummaryInput } from './CVEInvestigationSummary';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
-import { pathForFindingDetail, pathForFindingsWithFilters, pathForInventoryViewWithSearch, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
-import { cveWorkbenchApi, type AiSolutionData, type AiRequiredAction } from '../features/cve-workbench/api';
+import { pathForFindingDetail, pathForFindingsWithFilters, pathForInventoryViewWithSearch, pathForSoftwareIdentityDetail, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
+import { cveWorkbenchApi, type AiRequiredAction } from '../features/cve-workbench/api';
 import { api } from '../api/client';
 import { buildAssetRowsFromMatchedSoftware, type DerivedAssetRow } from '../features/cve-workbench/asset-report';
 import {
@@ -42,6 +42,9 @@ import {
   CveInvestigation,
   CveMatchedSoftware,
   CveVexEvidence,
+  ExistingFindingBehavior,
+  FindingCreationMode,
+  FixRecord,
   OrgSpecificCveExposureRecord,
 } from '../features/cve-workbench/types';
 import type { Finding } from '../features/findings/types';
@@ -61,6 +64,20 @@ type RunbookTask = {
   title: string;
   description: string;
   state: 'DONE' | 'READY';
+};
+
+type CreatedFindingSummary = {
+  displayId: string;
+  assetName?: string;
+  assetIdentifier?: string;
+  packageName?: string;
+  packageVersion?: string;
+  severity?: string;
+  status?: string;
+  decisionState?: string;
+  assignedTo?: string;
+  dueAt?: string;
+  incidentId?: string;
 };
 
 type AssetInventoryCriterion = {
@@ -112,6 +129,7 @@ type ResolvedInventorySoftware = {
   endOfSupport: string;
   endOfLife: string;
   recommendedUpgrade: string;
+  softwareIdentityId?: string;
 };
 
 type Props = {
@@ -328,6 +346,142 @@ function cpeVendorName(cpe?: string | null): string | undefined {
   const raw = parts[3];
   if (!raw || raw === '*' || raw === '-') return undefined;
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function buildAffectedProducts(detail: CveDetail, softwareGroups: SoftwareGroup[]): ProductSummary[] {
+  const products = new Map<string, ProductSummary>();
+
+  for (const intel of detail.vendorIntelligence ?? []) {
+    const product = intel.packageName?.trim();
+    if (!product) continue;
+    const vendor = intel.source?.trim() || 'Vendor Advisory';
+    const group = softwareGroups.find((entry) => entry.software.packageName === product);
+    const key = `${vendor}|${product}`;
+    const sw = group?.software;
+    products.set(key, {
+      vendor,
+      product,
+      vendorName: cpeVendorName(intel.cpe),
+      affectedVersions: intel.affectedVersions || intel.fixedVersion || 'See advisory',
+      cwe: detail.summary.cweIds || '-',
+      totalAssetsImpacted: group?.assets.length ?? 0,
+      isEol: sw?.isEol,
+      eolDate: sw?.eolDate,
+      eolDaysRemaining: sw?.eolDaysRemaining,
+      supportPhase: sw?.supportPhase,
+      vendorAdvisory: intel.vexStatus ?? undefined,
+      supportGroup: sw ? ownershipSupportGroup(sw) : undefined,
+    });
+  }
+
+  if (products.size === 0) {
+    for (const group of softwareGroups) {
+      const key = `${group.software.ecosystem}|${group.software.packageName}`;
+      const sw = group.software;
+      products.set(key, {
+        vendor: group.software.ecosystem || 'Inventory',
+        product: group.software.packageName,
+        affectedVersions: group.software.version || 'Detected in inventory',
+        cwe: detail.summary.cweIds || '-',
+        totalAssetsImpacted: group.assets.length,
+        isEol: sw.isEol,
+        eolDate: sw.eolDate,
+        eolDaysRemaining: sw.eolDaysRemaining,
+        supportPhase: sw.supportPhase,
+        vendorAdvisory: sw.vexStatus ?? undefined,
+        supportGroup: ownershipSupportGroup(sw),
+      });
+    }
+  }
+
+  return Array.from(products.values()).sort((a, b) => b.totalAssetsImpacted - a.totalAssetsImpacted);
+}
+
+function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: string; tags?: string[] }> {
+  const seen = new Set<string>();
+  const out: Array<{ href: string; source?: string; tags?: string[] }> = [];
+
+  if (detail.references && detail.references.length > 0) {
+    for (const ref of detail.references) {
+      if (!seen.has(ref.url)) {
+        seen.add(ref.url);
+        out.push({ href: ref.url, source: ref.source, tags: ref.tags });
+      }
+    }
+  }
+
+  if (detail.summary.sourceUrl && !seen.has(detail.summary.sourceUrl)) {
+    out.push({ href: detail.summary.sourceUrl, source: detail.summary.source ?? undefined });
+  }
+
+  const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(detail.summary.externalId)}`;
+  if (!seen.has(nvdUrl)) {
+    out.push({ href: nvdUrl, source: 'NVD', tags: ['Advisory'] });
+  }
+
+  return out;
+}
+
+function buildSignalsFallback(
+  row: { software: string; version: string; vendor: string },
+  detail: CveDetail
+): string {
+  const cveId = detail.summary.externalId;
+  const parts: string[] = [];
+  if (detail.signals.patchAvailable && detail.signals.patchVersions) {
+    parts.push(`[Patch] Upgrade ${row.software} from version ${row.version} to ${detail.signals.patchVersions} or later.`);
+    parts.push(`Source: NVD patch data for ${cveId}.`);
+  } else if (detail.signals.patchAvailable) {
+    parts.push(`[Patch] A patch is available for ${cveId}. Upgrade ${row.software} to the latest vendor-released version.`);
+  } else {
+    parts.push(`No patch is currently available for ${cveId} affecting ${row.software} ${row.version}.`);
+  }
+  if (detail.summary.inKev) {
+    parts.push('This CVE is listed in the CISA Known Exploited Vulnerabilities catalog — remediate with highest priority.');
+  }
+  if (!detail.signals.patchAvailable) {
+    parts.push('Compensating control: Isolate affected systems from untrusted networks and monitor vendor advisories for an upcoming patch.');
+  }
+  return parts.join('\n');
+}
+
+function buildCsafSolutionText(
+  software: string,
+  intel: CveDetail['vendorIntelligence']
+): string | null {
+  const vendorEntries = intel.filter((entry) => {
+    const src = (entry.source ?? '').toLowerCase();
+    return src.length > 0 && !DATA_FEED_SOURCES.has(src);
+  });
+  const matching = vendorEntries.filter((entry) => {
+    if (!entry.packageName) return true;
+    return assetInventoryFieldMatches(entry.packageName, software)
+      || assetInventoryFieldMatches(software, entry.packageName);
+  });
+  if (matching.length === 0) return null;
+  const withFix = matching.find((e) => e.fixedVersion);
+  const best = withFix ?? matching[0];
+  const sourceName = vendorDisplayName(best.source);
+  const statusLow = (best.vexStatus ?? '').toLowerCase();
+  if (statusLow.includes('not_affected') || statusLow.includes('not affected')) {
+    return `${sourceName} advisory (CSAF/VEX) confirms this software version is not affected by this CVE. No remediation action required.`;
+  }
+  if (best.fixedVersion) {
+    const lines = [
+      `[Patch] Upgrade to version ${best.fixedVersion} or later.`,
+      '',
+      `Source: ${sourceName} Security Advisory (CSAF/VEX). The vendor has confirmed a fix in version ${best.fixedVersion}.`,
+    ];
+    if (best.affectedVersions) lines.push(`Affected versions: ${best.affectedVersions}.`);
+    return lines.filter((l, i, a) => l !== '' || (i > 0 && a[i - 1] !== '')).join('\n');
+  }
+  if (statusLow.includes('workaround')) {
+    return `[Workaround] Apply vendor-recommended workaround per ${sourceName} advisory. See vendor security portal for detailed mitigation steps.`;
+  }
+  if (statusLow.includes('fix') || statusLow.includes('patch')) {
+    return `[Patch] Vendor patch available. Refer to ${sourceName} security advisory for upgrade instructions.`;
+  }
+  return null;
 }
 
 const CWE_NAMES: Record<string, string> = {
@@ -995,84 +1149,6 @@ const CWE_NAMES: Record<string, string> = {
   'CWE-1395': 'Dependency on Vulnerable Third-Party Component',
 };
 
-function buildAffectedProducts(detail: CveDetail, softwareGroups: SoftwareGroup[]): ProductSummary[] {
-  const products = new Map<string, ProductSummary>();
-
-  for (const intel of detail.vendorIntelligence ?? []) {
-    const product = intel.packageName?.trim();
-    if (!product) continue;
-    const vendor = intel.source?.trim() || 'Vendor Advisory';
-    const group = softwareGroups.find((entry) => entry.software.packageName === product);
-    const key = `${vendor}|${product}`;
-    const sw = group?.software;
-    products.set(key, {
-      vendor,
-      product,
-      vendorName: cpeVendorName(intel.cpe),
-      affectedVersions: intel.affectedVersions || intel.fixedVersion || 'See advisory',
-      cwe: detail.summary.cweIds || '-',
-      totalAssetsImpacted: group?.assets.length ?? 0,
-      isEol: sw?.isEol,
-      eolDate: sw?.eolDate,
-      eolDaysRemaining: sw?.eolDaysRemaining,
-      supportPhase: sw?.supportPhase,
-      vendorAdvisory: intel.vexStatus ?? undefined,
-      supportGroup: sw ? ownershipSupportGroup(sw) : undefined,
-    });
-  }
-
-  if (products.size === 0) {
-    for (const group of softwareGroups) {
-      const key = `${group.software.ecosystem}|${group.software.packageName}`;
-      const sw = group.software;
-      products.set(key, {
-        vendor: group.software.ecosystem || 'Inventory',
-        product: group.software.packageName,
-        affectedVersions: group.software.version || 'Detected in inventory',
-        cwe: detail.summary.cweIds || '-',
-        totalAssetsImpacted: group.assets.length,
-        isEol: sw.isEol,
-        eolDate: sw.eolDate,
-        eolDaysRemaining: sw.eolDaysRemaining,
-        supportPhase: sw.supportPhase,
-        vendorAdvisory: sw.vexStatus ?? undefined,
-        supportGroup: ownershipSupportGroup(sw),
-      });
-    }
-  }
-
-  // Sort by assets impacted descending
-  return Array.from(products.values()).sort((a, b) => b.totalAssetsImpacted - a.totalAssetsImpacted);
-}
-
-function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: string; tags?: string[] }> {
-  const seen = new Set<string>();
-  const out: Array<{ href: string; source?: string; tags?: string[] }> = [];
-
-  // NVD-sourced references with source + tags
-  if (detail.references && detail.references.length > 0) {
-    for (const ref of detail.references) {
-      if (!seen.has(ref.url)) {
-        seen.add(ref.url);
-        out.push({ href: ref.url, source: ref.source, tags: ref.tags });
-      }
-    }
-  }
-
-  // Fallback: sourceUrl advisory link if not already listed
-  if (detail.summary.sourceUrl && !seen.has(detail.summary.sourceUrl)) {
-    out.push({ href: detail.summary.sourceUrl, source: detail.summary.source ?? undefined });
-  }
-
-  // Always include NVD entry link
-  const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(detail.summary.externalId)}`;
-  if (!seen.has(nvdUrl)) {
-    out.push({ href: nvdUrl, source: 'NVD', tags: ['Advisory'] });
-  }
-
-  return out;
-}
-
 function _HeroMetric({
   value,
   label,
@@ -1458,6 +1534,7 @@ async function resolveInventorySoftware(criteria: AssetInventoryCriterion[]): Pr
           endOfSupport: '—',
           endOfLife: asset.eolDate || '—',
           recommendedUpgrade: 'Upgrade to the latest supported release',
+          softwareIdentityId: detailRow.id,
         };
         if (!current.assets.some((existing) => existing.componentId === asset.componentId)) {
           current.assets.push(asset);
@@ -1487,6 +1564,7 @@ async function resolveInventorySoftware(criteria: AssetInventoryCriterion[]): Pr
             endOfSupport: '—',
             endOfLife: asset.eolDate || '—',
             recommendedUpgrade: 'Upgrade to the latest supported release',
+            softwareIdentityId: detailRow.id,
           };
           if (!current.assets.some((existing) => existing.componentId === asset.componentId)) {
             current.assets.push(asset);
@@ -1537,83 +1615,6 @@ function buildAssetInventoryResults(
   ));
 
   return buildAssetRowsFromMatchedSoftware(matchedRows, severity);
-}
-
-/**
- * Builds a basic remediation message from NVD/KEV signals when CSAF and OpenAI are both unavailable.
- */
-function buildSignalsFallback(
-  row: { software: string; version: string; vendor: string },
-  detail: CveDetail
-): string {
-  const cveId = detail.summary.externalId;
-  const parts: string[] = [];
-
-  if (detail.signals.patchAvailable && detail.signals.patchVersions) {
-    parts.push(`[Patch] Upgrade ${row.software} from version ${row.version} to ${detail.signals.patchVersions} or later.`);
-    parts.push(`Source: NVD patch data for ${cveId}.`);
-  } else if (detail.signals.patchAvailable) {
-    parts.push(`[Patch] A patch is available for ${cveId}. Upgrade ${row.software} to the latest vendor-released version.`);
-  } else {
-    parts.push(`No patch is currently available for ${cveId} affecting ${row.software} ${row.version}.`);
-  }
-
-  if (detail.summary.inKev) {
-    parts.push('This CVE is listed in the CISA Known Exploited Vulnerabilities catalog — remediate with highest priority.');
-  }
-
-  if (!detail.signals.patchAvailable) {
-    parts.push('Compensating control: Isolate affected systems from untrusted networks and monitor vendor advisories for an upcoming patch.');
-  }
-
-  return parts.join('\n');
-}
-
-/**
- * Derives a remediation solution text from vendor CSAF/VEX intelligence entries.
- * Returns null when no matching vendor advisory is found (data-feed sources like NVD are excluded).
- */
-function buildCsafSolutionText(
-  software: string,
-  intel: CveDetail['vendorIntelligence']
-): string | null {
-  const vendorEntries = intel.filter((entry) => {
-    const src = (entry.source ?? '').toLowerCase();
-    return src.length > 0 && !DATA_FEED_SOURCES.has(src);
-  });
-
-  const matching = vendorEntries.filter((entry) => {
-    if (!entry.packageName) return true; // no package filter — advisory applies to this CVE broadly
-    return assetInventoryFieldMatches(entry.packageName, software)
-      || assetInventoryFieldMatches(software, entry.packageName);
-  });
-
-  if (matching.length === 0) return null;
-
-  const withFix = matching.find((e) => e.fixedVersion);
-  const best = withFix ?? matching[0];
-  const sourceName = vendorDisplayName(best.source);
-  const statusLow = (best.vexStatus ?? '').toLowerCase();
-
-  if (statusLow.includes('not_affected') || statusLow.includes('not affected')) {
-    return `${sourceName} advisory (CSAF/VEX) confirms this software version is not affected by this CVE. No remediation action required.`;
-  }
-  if (best.fixedVersion) {
-    const lines = [
-      `[Patch] Upgrade to version ${best.fixedVersion} or later.`,
-      '',
-      `Source: ${sourceName} Security Advisory (CSAF/VEX). The vendor has confirmed a fix in version ${best.fixedVersion}.`,
-    ];
-    if (best.affectedVersions) lines.push(`Affected versions: ${best.affectedVersions}.`);
-    return lines.filter((l, i, a) => l !== '' || (i > 0 && a[i - 1] !== '')).join('\n');
-  }
-  if (statusLow.includes('workaround')) {
-    return `[Workaround] Apply vendor-recommended workaround per ${sourceName} advisory. See vendor security portal for detailed mitigation steps.`;
-  }
-  if (statusLow.includes('fix') || statusLow.includes('patch')) {
-    return `[Patch] Vendor patch available. Refer to ${sourceName} security advisory for upgrade instructions.`;
-  }
-  return null;
 }
 
 function buildFalsePositiveResults(detail: CveDetail, resolvedInventory: ResolvedInventorySoftware[] = []): FalsePositiveResult[] {
@@ -1876,7 +1877,7 @@ function InvestigationCanvas({
   onAddLogEntry: () => void;
   onClose: () => void;
   onSaveDraft: () => void;
-  createdFindings?: InvestigationSummaryInput['createdFindings'];
+  createdFindings?: CreatedFindingSummary[];
 }) {
   const completedCount = runbookTasks.filter((task) => task.state === 'DONE').length;
   const isEolTask = (taskId: string) => taskId === 'end-of-life-analysis' || taskId === 'end-of-life';
@@ -1954,13 +1955,40 @@ function InvestigationCanvas({
     persistedRunbookState?.falsePositiveRan ?? falsePositiveTask?.state === 'DONE'
   );
   const [resolvedInventory, setResolvedInventory] = React.useState<ResolvedInventorySoftware[]>(initialResolvedInventory);
-  const [summaryVisible, setSummaryVisible] = React.useState(false);
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>('review-asset-inventory');
   const [, setSavedAt] = React.useState<Date | null>(null);
-  const [solutionEntries, setSolutionEntries] = React.useState<Record<string, string>>(
-    persistedRunbookState?.solutionEntries ?? {}
-  );
+  const [summaryVisible, setSummaryVisible] = React.useState(false);
+  const [solutionEntries, setSolutionEntries] = React.useState<Record<string, string>>(() => {
+    const persisted = persistedRunbookState?.solutionEntries ?? {};
+    // Pre-populate from existing fix records for any key not already in persisted state
+    const fromFixes: Record<string, string> = {};
+    for (const fix of detail.fixes ?? []) {
+      for (const entity of fix.softwareEntities ?? []) {
+        const key = `${entity.name}@${entity.version ?? ''}`;
+        if (!persisted[key]) {
+          const parts: string[] = [];
+          if (fix.summary?.trim()) parts.push(fix.summary.trim());
+          if (fix.fixType) parts.push(`Fix type: ${fix.fixType}`);
+          if (parts.length > 0) fromFixes[key] = parts.join('\n');
+        }
+      }
+    }
+    return { ...fromFixes, ...persisted };
+  });
   const [solutionGeneratingKeys, setSolutionGeneratingKeys] = React.useState<Set<string>>(new Set());
+  const [analystFixIds, setAnalystFixIds] = React.useState<Record<string, string>>(() => {
+    // key = `${software}@${version}` → fix UUID
+    const map: Record<string, string> = {};
+    for (const fix of detail.fixes ?? []) {
+      if (fix.recommendationSource !== 'ANALYST') continue;
+      for (const entity of fix.softwareEntities ?? []) {
+        const key = `${entity.name}@${entity.version ?? ''}`;
+        map[key] = fix.id;
+      }
+    }
+    return map;
+  });
+  const [savingFixes, setSavingFixes] = React.useState(false);
 
   // Stable list of (software, version) rows for the Solutions step — derived from matched assets.
   const solutionRows = React.useMemo(() => {
@@ -1989,6 +2017,106 @@ function InvestigationCanvas({
     }
     return assetCriteria.map((c) => ({ software: c.software, version: c.version, vendor: c.vendor, count: 0 }));
   }, [assetResults, resolvedInventory, assetCriteria, detail.vendorIntelligence]);
+
+  const investigationSummaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
+    summary: {
+      cveId: item.externalId,
+      title: detail.summary.title ?? item.externalId,
+      description: detail.summary.description ?? undefined,
+      severity: item.severity ?? detail.summary.severity ?? 'UNKNOWN',
+      cvssScore: detail.summary.cvssScore ?? item.cvssScore ?? undefined,
+      epssScore: detail.summary.epssScore ?? item.epssScore ?? undefined,
+      inKev: detail.summary.inKev ?? item.inKev ?? undefined,
+      exploitAvailable: detail.signals.exploitAvailable ?? undefined,
+      patchAvailable: detail.signals.patchAvailable ?? undefined,
+      patchVersions: detail.signals.patchVersions ?? undefined,
+    },
+    investigation: {
+      leadAnalyst: leadAnalyst || '—',
+    },
+    runbookResults: runbookTasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      state: task.state,
+    })),
+    affectedAssets: assetResults.map((asset) => ({
+      id: asset.id,
+      hostname: asset.entity,
+      ipAddress: looksLikeIpAddress(asset.identifier) ? asset.identifier : undefined,
+      os: asset.os,
+      owner: asset.ownerTeam,
+      environment: asset.environment,
+      externalFacing: asset.externalFacing,
+      critical: asset.criticality.toLowerCase() === 'critical',
+      matchedSoftware: asset.matchedSoftware.map((sw) => ({ software: sw.software, version: sw.version })),
+    })),
+    falsePositiveRows: falsePositiveResults.map((row) => {
+      const effectiveFp = row.falsePositive || analystFpOverrides.has(row.id);
+      const analystEvidence = analystFpEvidence[row.id];
+      return {
+        software: row.software,
+        version: row.version,
+        falsePositive: effectiveFp,
+        assetsNotImpacted: effectiveFp ? (row.notImpactedAssetCount || 0) : 0,
+        vendorAdvisory: row.vendorAdvisory,
+        vendorGuidance: analystEvidence ? `Analyst override: ${analystEvidence}` : row.vendorGuidance,
+      };
+    }),
+    eolRows: eolResults.map((row) => ({
+      software: row.software,
+      vendor: row.vendor,
+      version: row.version,
+      lifecycle: row.lifecycle,
+      endOfSupport: row.endOfSupport,
+      endOfLife: row.endOfLife,
+      recommendedUpgrade: row.recommendedUpgrade,
+    })),
+    solutionRows: solutionRows.map((row) => ({
+      software: row.software,
+      version: row.version,
+      vendor: row.vendor,
+      impactedAssets: row.count,
+      solutionDetail: solutionEntries[`${row.software}@${row.version}`] ?? '',
+    })),
+    createdFindings: (createdFindings ?? []).map((finding) => ({
+      displayId: finding.displayId,
+      assetName: finding.assetName ?? '',
+      assetIdentifier: finding.assetIdentifier ?? '',
+      packageName: finding.packageName ?? '',
+      packageVersion: finding.packageVersion ?? '',
+      severity: finding.severity ?? '',
+      status: finding.status ?? '',
+      decisionState: finding.decisionState ?? '',
+      assignedTo: finding.assignedTo,
+      dueAt: finding.dueAt,
+      incidentId: finding.incidentId,
+    })),
+  }), [
+    analystFpEvidence,
+    analystFpOverrides,
+    assetResults,
+    createdFindings,
+    eolResults,
+    falsePositiveResults,
+    detail.signals.exploitAvailable,
+    detail.signals.patchAvailable,
+    detail.signals.patchVersions,
+    detail.summary.cvssScore,
+    detail.summary.description,
+    detail.summary.epssScore,
+    detail.summary.inKev,
+    detail.summary.severity,
+    detail.summary.title,
+    item.cvssScore,
+    item.epssScore,
+    item.externalId,
+    item.inKev,
+    item.severity,
+    leadAnalyst,
+    runbookTasks,
+    solutionEntries,
+    solutionRows,
+  ]);
 
   const flushRunbookState = React.useCallback(() => {
     // Persist counts so the outer exposure panel can reflect investigation results.
@@ -2067,7 +2195,6 @@ function InvestigationCanvas({
     setFalsePositiveResultsExpanded((persistedRunbookState?.falsePositiveRan ?? false) || falsePositiveTask?.state === 'DONE');
     setFalsePositiveRan(persistedRunbookState?.falsePositiveRan ?? falsePositiveTask?.state === 'DONE');
     setResolvedInventory(initialResolvedInventory);
-    setSummaryVisible(false);
   }, [detail.summary.externalId, persistedRunbookState, initialCriteria, initialResults, initialEolResults, initialFalsePositiveResults, initialResolvedInventory, eolTask?.state, falsePositiveTask?.state]);
 
   React.useEffect(() => {
@@ -2104,7 +2231,6 @@ function InvestigationCanvas({
       analystFpOverrides: Array.from(analystFpOverrides),
       analystFpEvidence,
       eolAssessed,
-      solutionEntries,
     });
   }, [
     detail.summary.externalId,
@@ -2115,7 +2241,6 @@ function InvestigationCanvas({
     analystFpOverrides,
     analystFpEvidence,
     eolAssessed,
-    solutionEntries,
   ]);
 
   // When assessment is dirty: auto-save only non-assessment fields so localStorage retains the
@@ -2218,67 +2343,6 @@ function InvestigationCanvas({
   }, [assetResults]);
   const externalFacingCount = assetResults.filter((asset) => asset.externalFacing).length;
   const totalAssetCount = assetResults.length;
-  const summaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
-    summary: {
-      cveId: item.externalId,
-      title: detail.summary.title,
-      description: detail.summary.description,
-      severity: item.severity,
-      cvssScore: detail.summary.cvssScore ?? undefined,
-      epssScore: detail.summary.epssScore ?? undefined,
-      inKev: item.inKev,
-      exploitAvailable: detail.signals.exploitAvailable,
-      patchAvailable: detail.signals.patchAvailable,
-      patchVersions: detail.signals.patchVersions ?? undefined,
-    },
-    investigation: {
-      leadAnalyst,
-    },
-    runbookResults: runbookTasks.map((task) => ({ id: task.id, title: task.title, state: task.state })),
-    affectedAssets: assetResults.map((asset) => ({
-      id: asset.id,
-      hostname: asset.entity,
-      ipAddress: looksLikeIpAddress(asset.identifier) ? asset.identifier : undefined,
-      os: asset.os,
-      owner: asset.ownerTeam,
-      environment: asset.environment,
-      externalFacing: asset.externalFacing,
-      critical: asset.criticality.toLowerCase() === 'critical',
-      matchedSoftware: asset.matchedSoftware.map((sw) => ({ software: sw.software, version: sw.version })),
-    })),
-    falsePositiveRows: falsePositiveResults.map((row) => {
-      // Effective FP = vendor-detected OR manually overridden by analyst
-      const effectiveFp = row.falsePositive || analystFpOverrides.has(row.id);
-      const analystEvidence = analystFpEvidence[row.id];
-      return {
-        software: row.software,
-        version: row.version,
-        falsePositive: effectiveFp,
-        assetsNotImpacted: effectiveFp ? (row.notImpactedAssetCount || 0) : 0,
-        vendorAdvisory: row.vendorAdvisory,
-        vendorGuidance: analystEvidence
-          ? `Analyst override: ${analystEvidence}`
-          : row.vendorGuidance,
-      };
-    }),
-    eolRows: eolResults.map((row) => ({
-      software: row.software,
-      vendor: row.vendor,
-      version: row.version,
-      lifecycle: row.lifecycle,
-      endOfSupport: row.endOfSupport,
-      endOfLife: row.endOfLife,
-      recommendedUpgrade: row.recommendedUpgrade,
-    })),
-    solutionRows: solutionRows.map((row) => ({
-      software: row.software,
-      version: row.version,
-      vendor: row.vendor,
-      impactedAssets: row.count,
-      solutionDetail: solutionEntries[`${row.software}@${row.version}`] ?? '',
-    })),
-    createdFindings,
-  }), [assetResults, createdFindings, detail, eolResults, falsePositiveResults, analystFpOverrides, analystFpEvidence, item.externalId, item.inKev, item.severity, leadAnalyst, runbookTasks, solutionRows, solutionEntries]);
   const osWheelStops = React.useMemo(() => {
     if (osBreakdown.length === 0) return 'conic-gradient(#273248 0deg 360deg)';
     const palette = ['#53d7ff', '#8a7dff', '#ffb24a', '#22d37f', '#ff6f91', '#9dd6ff'];
@@ -2366,57 +2430,33 @@ function InvestigationCanvas({
   async function generateSolutionsForRows(): Promise<void> {
     const rowsToGenerate = solutionRows.filter((row) => {
       const key = `${row.software}@${row.version}`;
-      return !solutionEntries[key]?.trim(); // skip manually-entered solutions
+      return !solutionEntries[key]?.trim();
     });
     if (rowsToGenerate.length === 0) return;
-
     setSolutionGeneratingKeys(new Set(rowsToGenerate.map((r) => `${r.software}@${r.version}`)));
-
     await Promise.all(rowsToGenerate.map(async (row) => {
       const key = `${row.software}@${row.version}`;
       let solution: string;
-
-      // 1. Try vendor CSAF/VEX first
       const csafText = buildCsafSolutionText(row.software, detail.vendorIntelligence);
       if (csafText) {
         solution = csafText;
       } else {
-        // 2. OpenAI — pass rich context so the AI can tailor the recommendation
         try {
           const context = {
-            targetSoftware: row.software,
-            targetVersion: row.version,
-            targetVendor: row.vendor,
-            cveId: detail.summary.externalId,
-            severity: item.severity,
-            cvssScore: detail.summary.cvssScore,
-            patchAvailable: detail.signals.patchAvailable,
-            patchVersions: detail.signals.patchVersions,
-            description: detail.summary.description,
+            targetSoftware: row.software, targetVersion: row.version, targetVendor: row.vendor,
+            cveId: detail.summary.externalId, severity: item.severity,
+            cvssScore: detail.summary.cvssScore, patchAvailable: detail.signals.patchAvailable,
+            patchVersions: detail.signals.patchVersions, description: detail.summary.description,
             inKev: detail.summary.inKev,
-            affected_entities: [
-              {
-                software: row.software,
-                version: row.version,
-                vendor: row.vendor,
-                asset_count: row.count,
-              },
-            ],
-            vendor_intelligence: detail.vendorIntelligence.map((v) => ({
-              source: v.source,
-              vex_status: v.vexStatus,
-              fixed_version: v.fixedVersion,
-            })),
+            affected_entities: [{ software: row.software, version: row.version, vendor: row.vendor, asset_count: row.count }],
+            vendor_intelligence: detail.vendorIntelligence.map((v) => ({ source: v.source, vex_status: v.vexStatus, fixed_version: v.fixedVersion })),
           };
           const result = await cveWorkbenchApi.generateAiSolution(detail.summary.externalId, context);
           if (result.success && result.data) {
             const d = result.data;
             const parts: string[] = [];
-            if (d.primary_fix?.target_version) {
-              parts.push(`[Patch] Upgrade ${row.software} from ${row.version} to ${d.primary_fix.target_version}.`);
-            } else if (d.primary_fix?.action) {
-              parts.push(`[Patch] ${d.primary_fix.action}`);
-            }
+            if (d.primary_fix?.target_version) parts.push(`[Patch] Upgrade ${row.software} from ${row.version} to ${d.primary_fix.target_version}.`);
+            else if (d.primary_fix?.action) parts.push(`[Patch] ${d.primary_fix.action}`);
             if (d.primary_fix?.patch_id) parts.push(`Patch: ${d.primary_fix.patch_id}`);
             if (d.primary_fix?.verification) parts.push(`Verification: ${d.primary_fix.verification}`);
             if (d.primary_fix?.reboot_required) parts.push('Note: Reboot required after patching.');
@@ -2428,30 +2468,55 @@ function InvestigationCanvas({
             if (d.timeline?.length) {
               const immediate = d.timeline.find((t) => t.window?.toLowerCase().includes('24'));
               if (immediate?.actions?.length) {
-                parts.push('');
-                parts.push('Immediate actions:');
+                parts.push(''); parts.push('Immediate actions:');
                 immediate.actions.forEach((a) => parts.push(`• ${a}`));
               }
             }
             solution = parts.length > 0 ? parts.join('\n') : buildSignalsFallback(row, detail);
           } else {
-            // 3. Derive from NVD signals when OpenAI is unavailable
             solution = buildSignalsFallback(row, detail);
           }
         } catch {
           solution = buildSignalsFallback(row, detail);
         }
       }
-
       setSolutionEntries((prev) => {
-        // Only set if still empty (user may have typed something while generation was running)
         if (prev[key]?.trim()) return prev;
         return { ...prev, [key]: solution };
       });
       setSolutionGeneratingKeys((prev) => { const next = new Set(prev); next.delete(key); return next; });
     }));
-
     setSolutionGeneratingKeys(new Set());
+  }
+
+  async function saveFixesFromSolutions(): Promise<void> {
+    const rows = solutionRows
+      .map((row) => ({
+        software: row.software,
+        version: row.version || null,
+        vendor: row.vendor || undefined,
+        fixType: 'PATCH',
+        solutionText: solutionEntries[`${row.software}@${row.version}`] ?? '',
+        assetCount: row.count,
+      }))
+      .filter((r) => r.solutionText.trim().length > 0);
+    if (rows.length === 0) return;
+    setSavingFixes(true);
+    try {
+      const saved = await cveWorkbenchApi.saveAnalystFixes(detail.summary.externalId, rows);
+      const newIds: Record<string, string> = {};
+      for (const fix of saved) {
+        for (const entity of fix.softwareEntities ?? []) {
+          const key = `${entity.name}@${entity.version ?? ''}`;
+          newIds[key] = fix.id;
+        }
+      }
+      setAnalystFixIds((prev) => ({ ...prev, ...newIds }));
+    } catch {
+      // non-fatal — user can retry
+    } finally {
+      setSavingFixes(false);
+    }
   }
 
   function handleRunbookAction(taskId: string): void {
@@ -2463,12 +2528,17 @@ function InvestigationCanvas({
       onRunTask('end-of-life-analysis');
       return;
     }
+    if (taskId === 'find-false-positive') {
+      runFalsePositiveAssessment();
+      return;
+    }
     if (taskId === 'solutions') {
       onRunTask('solutions');
       return;
     }
-    if (taskId === 'find-false-positive') {
-      runFalsePositiveAssessment();
+    if (taskId === 'installed-patch-info') {
+      setSummaryVisible(true);
+      onRunTask('installed-patch-info');
       return;
     }
     onRunTask(taskId);
@@ -2498,17 +2568,12 @@ function InvestigationCanvas({
     if (nextTask) openTask(nextTask.id);
   }, [openTask, runbookTasks, selectedTaskIndex]);
 
-  const triggerSummary = React.useCallback(() => {
-    setSummaryVisible(true);
-    onRunTask('generate-summary');
-    onRunTask('installed-patch-info');
-  }, [onRunTask]);
-
+  // Auto-show summary when user navigates to the Summary Report step.
   React.useEffect(() => {
     if (selectedTaskId === 'installed-patch-info') {
-      triggerSummary();
+      setSummaryVisible(true);
     }
-  }, [selectedTaskId, triggerSummary]);
+  }, [selectedTaskId]);
 
   // Auto-run EOL analysis when the user navigates to the EOL step after completing step 1.
   React.useEffect(() => {
@@ -2598,18 +2663,42 @@ function InvestigationCanvas({
           >
             {isGenerating ? 'Generating…' : 'Generate Solutions'}
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            disabled={savingFixes}
+            onClick={() => void saveFixesFromSolutions()}
+          >
+            {savingFixes ? 'Saving…' : 'Save as Fixes'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-inline"
+            onClick={() => onOpenFindingsStep({ scope: 'all', openConfig: true })}
+          >
+            Create Findings
+          </button>
           {task.state !== 'DONE' && (
             <button type="button" className="btn btn-secondary btn-inline" onClick={() => handleRunbookAction(task.id)}>
               Mark Done
             </button>
           )}
-          {task.state === 'DONE' && (
-            <button
-              type="button"
-              className="btn btn-primary btn-inline"
-              onClick={() => onOpenFindingsStep({ scope: 'all', openConfig: true })}
-            >
-              Create Findings
+        </div>
+      );
+    }
+    if (task.id === 'installed-patch-info') {
+      return (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-inline"
+            onClick={() => { setSummaryVisible(true); onRunTask('installed-patch-info'); }}
+          >
+            {summaryVisible ? 'Refresh Report' : 'Generate Report'}
+          </button>
+          {task.state !== 'DONE' && summaryVisible && (
+            <button type="button" className="btn btn-secondary btn-inline" onClick={() => handleRunbookAction(task.id)}>
+              Mark Done
             </button>
           )}
         </div>
@@ -3086,8 +3175,7 @@ function InvestigationCanvas({
             {/* Step breadcrumb bar */}
             <div className="inv-steps-bar">
               {runbookTasks.map((task, index) => {
-                const isSummaryTask = task.id === 'installed-patch-info';
-                const isDone = task.state === 'DONE' || (isSummaryTask && summaryVisible);
+              const isDone = task.state === 'DONE' || (task.id === 'installed-patch-info' && summaryVisible);
                 const prevTask = index > 0 ? runbookTasks[index - 1] : null;
                 const isUnlocked = index === 0 || prevTask?.state === 'DONE';
                 const stepStatus = isDone ? 'done' : isUnlocked ? 'pending' : 'locked';
@@ -3140,7 +3228,7 @@ function InvestigationCanvas({
               if (!task) return null;
               return (
                 <div className="inv-step-detail">
-                  {task.id !== 'installed-patch-info' && task.id !== 'find-false-positive' && !isEolTask(task.id) && (
+                  {task.id !== 'find-false-positive' && !isEolTask(task.id) && (
                     <div className="inv-step-detail-header">
                       <div>
                         <h4 className="inv-step-detail-title">{task.title}</h4>
@@ -3211,7 +3299,9 @@ function InvestigationCanvas({
                           </tr>
                         </thead>
                         <tbody>
-                          {solutionRows.map((row) => {
+                          {solutionRows.length === 0 ? (
+                            <tr><td colSpan={5} style={{ padding: '12px', color: 'var(--muted)', textAlign: 'center' }}>Run Asset Inventory first to populate software rows.</td></tr>
+                          ) : solutionRows.map((row) => {
                             const key = `${row.software}@${row.version}`;
                             const isRowGenerating = solutionGeneratingKeys.has(key);
                             return (
@@ -3224,13 +3314,31 @@ function InvestigationCanvas({
                                   {isRowGenerating ? (
                                     <span className="solutions-generating">Generating…</span>
                                   ) : (
-                                    <textarea
-                                      className="inv-solutions-input"
-                                      rows={3}
-                                      value={solutionEntries[key] ?? ''}
-                                      onChange={(e) => setSolutionEntries((prev) => ({ ...prev, [key]: e.target.value }))}
-                                      placeholder="Describe the remediation solution..."
-                                    />
+                                    <>
+                                      <textarea
+                                        className="inv-solutions-input"
+                                        rows={3}
+                                        value={solutionEntries[key] ?? ''}
+                                        onChange={(e) => setSolutionEntries((prev) => ({ ...prev, [key]: e.target.value }))}
+                                        placeholder="Describe the remediation solution..."
+                                      />
+                                      {analystFixIds[key] && (
+                                        <div style={{ marginTop: 4 }}>
+                                          <span style={{
+                                            display: 'inline-block',
+                                            fontSize: '0.72rem',
+                                            fontFamily: 'monospace',
+                                            background: 'var(--badge-info-bg, #e0f0ff)',
+                                            color: 'var(--badge-info-text, #0060b0)',
+                                            border: '1px solid var(--badge-info-border, #90c8f8)',
+                                            borderRadius: 4,
+                                            padding: '1px 6px',
+                                          }}>
+                                            Fix {analystFixIds[key].substring(0, 8)}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </td>
                               </tr>
@@ -3241,7 +3349,7 @@ function InvestigationCanvas({
                     </div>
                   )}
                   {task.id === 'installed-patch-info' && (
-                    <CVEInvestigationSummary visible={summaryVisible} input={summaryInput} />
+                    <CVEInvestigationSummary visible={summaryVisible} input={investigationSummaryInput} />
                   )}
                 </div>
               );
@@ -3291,20 +3399,91 @@ function CveOverviewExperience({
     [item, riskPolicyQuery.data],
   );
   const riskJourney = riskResult.journey.filter(ev => !ev.isNote);
-  const affectedProducts = React.useMemo(() => buildAffectedProducts(detail, softwareGroups), [detail, softwareGroups]);
-  const [activeTab, setActiveTab] = React.useState<'assets' | 'refs' | 'timeline'>('assets');
-  const [aiSolutionData, setAiSolutionData] = React.useState<AiSolutionData | null>(null);
-  const [aiSolutionGeneratedAt, setAiSolutionGeneratedAt] = React.useState<string | null>(null);
-  const [aiSolutionFallback, setAiSolutionFallback] = React.useState<string | null>(null);
-  const [aiSolutionLoading, setAiSolutionLoading] = React.useState(false);
-  const [aiSolutionError, setAiSolutionError] = React.useState<string | null>(null);
-  const [aiTraceOpen, setAiTraceOpen] = React.useState(false);
-  const [solutionCollapsed, setSolutionCollapsed] = React.useState(false);
-
+  // Map from package name (lower-case) → softwareIdentityId for direct navigation
+  const softwareIdentityMap = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const sw of detail.matchedSoftware) {
+      if (sw.softwareIdentityId && sw.packageName) {
+        m.set(sw.packageName.toLowerCase(), sw.softwareIdentityId);
+      }
+    }
+    // Also include investigation-resolved inventory (manually added software)
+    for (const row of persistedRunbookState?.resolvedInventory ?? []) {
+      if (row.softwareIdentityId && row.software) {
+        m.set(row.software.toLowerCase(), row.softwareIdentityId);
+      }
+    }
+    return m;
+  }, [detail.matchedSoftware, persistedRunbookState?.resolvedInventory]);
+  const invRanTop = persistedRunbookState?.assetAssessmentRan ?? false;
+  const invSoftwareNames = React.useMemo<Set<string>>(() => {
+    if (!invRanTop) return new Set();
+    const list = persistedRunbookState?.investigationSoftwareSummary ??
+      (persistedRunbookState?.assetCriteria ?? [])
+        .filter((c) => c.software.trim().length > 0)
+        .map((c) => ({ software: c.software }));
+    return new Set(list.map((s) => s.software.toLowerCase()));
+  }, [invRanTop, persistedRunbookState]);
+  const [activeTab, setActiveTab] = React.useState<'overview' | 'assets' | 'fixes'>('overview');
+  const [showAllRefs, setShowAllRefs] = React.useState(false);
+  const [fixRecords, setFixRecords] = React.useState<FixRecord[]>(detail.fixes ?? []);
+  // When investigation is active, only show fixes for software in the current investigation scope
+  const scopedFixRecords = React.useMemo<FixRecord[]>(() => {
+    if (!invRanTop || invSoftwareNames.size === 0) return fixRecords;
+    return fixRecords.filter((f) =>
+      f.softwareEntities?.some((se) => invSoftwareNames.has(se.name.toLowerCase()))
+    );
+  }, [fixRecords, invRanTop, invSoftwareNames]);
+  const [fixesGenerating, setFixesGenerating] = React.useState(false);
   const [_aiActions, setAiActions] = React.useState<AiRequiredAction[] | null>(null);
   const [aiActionsLoading, setAiActionsLoading] = React.useState(false);
   const [aiActionsError, setAiActionsError] = React.useState<string | null>(null);
   const [, setAiActionsGeneratedAt] = React.useState<string | null>(null);
+
+  const _investigationSummaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
+    summary: {
+      cveId: item.externalId,
+      title: detail.summary.title,
+      description: detail.summary.description,
+      severity: detail.summary.severity ?? item.severity,
+      cvssScore: detail.summary.cvssScore ?? item.cvssScore ?? undefined,
+      epssScore: detail.summary.epssScore ?? item.epssScore ?? undefined,
+      inKev: detail.summary.inKev ?? item.inKev ?? undefined,
+      exploitAvailable: detail.signals.exploitAvailable,
+      patchAvailable: detail.signals.patchAvailable,
+      patchVersions: detail.signals.patchVersions,
+    },
+    investigation: {
+      leadAnalyst: _leadAnalyst || '—',
+    },
+    runbookResults: [],
+    affectedAssets: detail.matchedSoftware.map((software) => ({
+      id: software.componentId,
+      hostname: software.assetName ?? software.assetIdentifier ?? software.packageName,
+      ipAddress: software.assetIdentifier,
+      os: software.assetType,
+      owner: undefined,
+      environment: undefined,
+      externalFacing: false,
+      critical: false,
+      matchedSoftware: [{
+        software: software.packageName,
+        version: software.version ?? undefined,
+      }],
+    })),
+    falsePositiveRows: [],
+    eolRows: [],
+    solutionRows: scopedFixRecords.flatMap((fix) => fix.softwareEntities.map((software) => ({
+      software: software.name,
+      version: software.version,
+      vendor: software.ecosystem,
+      impactedAssets: software.assetCount,
+      solutionType: fix.fixType,
+      solutionDetail: fix.summary,
+      targetVersion: software.version,
+    }))),
+    createdFindings: [],
+  }), [detail.matchedSoftware, detail.signals.exploitAvailable, detail.signals.patchAvailable, detail.signals.patchVersions, detail.summary.cvssScore, detail.summary.description, detail.summary.epssScore, detail.summary.inKev, detail.summary.severity, detail.summary.title, item.cvssScore, item.epssScore, item.externalId, item.inKev, item.severity, _leadAnalyst, scopedFixRecords]);
 
   // Load persisted AI actions on mount
   React.useEffect(() => {
@@ -3363,20 +3542,12 @@ function CveOverviewExperience({
       .finally(() => setAiActionsLoading(false));
   }, [detail, item, latestInvestigation, latestAssessment, softwareGroups]);
 
-  React.useEffect(() => {
-    cveWorkbenchApi.getSavedAiSolution(detail.summary.externalId)
-      .then(res => {
-        if (res.success && res.data) {
-          setAiSolutionData(res.data);
-          if (res.generatedAt) setAiSolutionGeneratedAt(res.generatedAt);
-        }
-      })
-      .catch(() => { /* no saved solution — normal */ });
-  }, [detail.summary.externalId]);
-  const referenceLinks = buildReferenceLinks(detail);
-  const remediationText = detail.signals.patchAvailable
-    ? `Apply the vendor-fixed version${detail.signals.patchVersions ? ` (${detail.signals.patchVersions})` : ''} and validate the mitigation on impacted assets.`
-    : 'No vendor patch is currently available. Continue investigation and apply compensating controls until remediation guidance is published.';
+  const affectedProducts = React.useMemo(
+    () => buildAffectedProducts(detail, softwareGroups),
+    [detail, softwareGroups],
+  );
+  const referenceLinks = React.useMemo(() => buildReferenceLinks(detail), [detail]);
+
   const timelineItems = [
     detail.summary.publishedAt ? { label: 'CVE Record Created', value: formatDate(detail.summary.publishedAt), tone: 'published', sublabel: 'NVD Published Date' } : null,
     detail.summary.modifiedAt ? { label: 'CVE Record Updated', value: formatDate(detail.summary.modifiedAt), tone: 'updated', sublabel: 'NVD Last Modified' } : null,
@@ -3408,10 +3579,24 @@ function CveOverviewExperience({
   ] as const;
 
   return (
-    <div className="cve-detail-page">
+    <div className="cvd2-page">
 
-      {/* ── Overview Card ── */}
-      {(() => {
+      {/* ── Top-level tab bar ── */}
+      <div className="cvd2-tab-bar">
+        <button type="button" className={`cvd2-tab${activeTab === 'overview' ? ' active' : ''}`} onClick={() => setActiveTab('overview')}>Overview</button>
+        <button type="button" className={`cvd2-tab${activeTab === 'assets' ? ' active' : ''}`} onClick={() => setActiveTab('assets')}>
+          {persistedRunbookState?.assetAssessmentRan
+            ? `Affected Entities · ${persistedRunbookState.investigationAssetCount ?? detail.signals.assetCount}`
+            : `Affected Entities · ${detail.signals.assetCount}`}
+        </button>
+
+        <button type="button" className={`cvd2-tab${activeTab === 'fixes' ? ' active' : ''}`} onClick={() => setActiveTab('fixes')}>
+          Fixes{scopedFixRecords.length > 0 ? ` · ${scopedFixRecords.length}` : ''}
+        </button>
+      </div>
+
+      {/* ── OVERVIEW TAB ── */}
+      {activeTab === 'overview' && (() => {
         const epss = detail.summary.epssScore ?? item.epssScore;
         const nowMs = Date.now();
         const publishedMs = detail.summary.publishedAt ? new Date(detail.summary.publishedAt).getTime() : null;
@@ -3426,39 +3611,51 @@ function CveOverviewExperience({
           latestInvestigation?.status === 'CLOSED' ||
           latestInvestigation?.status === 'PENDING_REVIEW';
 
+        // Prefer fresh detail data; fall back to list item for initial render before detail loads
+        const suppressedByRuleId = detail?.suppressedByRuleId ?? item.suppressedByRuleId;
+        const suppressedByRuleName = detail?.suppressedByRuleName ?? item.suppressedByRuleName;
+        const isSuppressed = !!suppressedByRuleId;
+
         const isNotApplicable =
-          item.applicability === 'NOT_APPLICABLE' ||
-          (item.matchedAssetCount === 0 && item.applicableComponentCount === 0);
+          !isSuppressed &&
+          (item.applicability === 'NOT_APPLICABLE' ||
+          (item.matchedAssetCount === 0 && item.applicableComponentCount === 0));
         // No Impact: S.AI score < 1 and all findings are closed
         const isNoImpact =
+          !isSuppressed &&
           !isNotApplicable &&
           riskResult.score < 1 &&
           item.openFindings === 0;
         // Reviewed: investigation workflow marked done
         const isReviewed =
+          !isSuppressed &&
           !isNotApplicable &&
           !isNoImpact &&
           invDoneForStatus;
         // Applicable = matched but not yet reviewed / no-impact
-        const isApplicable = !isNotApplicable && !isNoImpact && !isReviewed;
+        const isApplicable = !isSuppressed && !isNotApplicable && !isNoImpact && !isReviewed;
 
-        const statusPillLabel = isNotApplicable
-          ? 'Not Applicable'
-          : isNoImpact
-            ? 'No Impact'
-            : isReviewed
-              ? 'Reviewed'
-              : 'Applicable';
+        const statusPillLabel = isSuppressed
+          ? 'Suppressed'
+          : isNotApplicable
+            ? 'Not Applicable'
+            : isNoImpact
+              ? 'No Impact'
+              : isReviewed
+                ? 'Reviewed'
+                : 'Applicable';
 
-        const statusPillClass = isNotApplicable
-          ? 'cvd-status-pill cvd-status-neutral'
-          : isNoImpact
-            ? 'cvd-status-pill cvd-status-ok'
-            : isReviewed
-              ? 'cvd-status-pill cvd-status-investigating'
-              : isApplicable
-                ? 'cvd-status-pill cvd-status-impacted'
-                : 'cvd-status-pill cvd-status-neutral';
+        const statusPillClass = isSuppressed
+          ? 'cvd-status-pill cvd-status-suppressed'
+          : isNotApplicable
+            ? 'cvd-status-pill cvd-status-neutral'
+            : isNoImpact
+              ? 'cvd-status-pill cvd-status-ok'
+              : isReviewed
+                ? 'cvd-status-pill cvd-status-investigating'
+                : isApplicable
+                  ? 'cvd-status-pill cvd-status-impacted'
+                  : 'cvd-status-pill cvd-status-neutral';
 
         const externalFacingTokens = ['public', 'internet', 'edge', 'gateway', 'vpn', 'dmz', 'web', 'api', 'proxy'];
         const externalFacingCount = softwareGroups.reduce((sum, g) => {
@@ -3480,13 +3677,49 @@ function CveOverviewExperience({
           ? (persistedRunbookState?.investigationSoftwareCount ?? detail.signals.softwareCount)
           : detail.signals.softwareCount;
 
+        // Workflow variables
+        const invAssetCount = invRan ? (persistedRunbookState?.investigationAssetCount ?? detail.signals.assetCount) : detail.signals.assetCount;
+        const invSwCount = invRan ? (persistedRunbookState?.investigationSoftwareCount ?? detail.signals.softwareCount) : detail.signals.softwareCount;
+        const matchedByBackend = detail.matchedSoftware.length;
+        const needsAssessment = detail.matchedSoftware.filter((s) => s.applicabilityState === 'UNKNOWN').length;
+        const openFindings = item.openFindings;
+        const findingsToCreate = invAssetCount > openFindings ? invAssetCount - openFindings : 0;
+        const hasSummaryReport = item.hasInvestigationSummary;
+        const notifiedAt = persistedRunbookState?.notifiedAt as string | undefined;
+        const invDone = invRan || latestInvestigation?.status === 'CLOSED' || latestInvestigation?.status === 'PENDING_REVIEW';
+        const invInProgress = !invDone && (latestInvestigation != null || matchedByBackend > 0);
+        const invStatus: 'done' | 'in-progress' | 'not-started' = invDone ? 'done' : invInProgress ? 'in-progress' : 'not-started';
+        const findingsDone = openFindings > 0 && findingsToCreate === 0;
+        const findingsPartial = openFindings > 0 && findingsToCreate > 0;
+        const findingsStatus: 'done' | 'partial' | 'not-created' = findingsDone ? 'done' : findingsPartial ? 'partial' : 'not-created';
+        const notifyStatus: 'communicated' | 'not-communicated' = notifiedAt ? 'communicated' : 'not-communicated';
+        // Technical details variables
+        const allSources = Array.from(new Set([
+          ...(detail.summary.source ? [detail.summary.source] : []),
+          ...detail.vendorIntelligence.map(v => v.source).filter(Boolean),
+        ]));
+        const multiSource = allSources.length > 1;
+        const altScores = detail.vendorIntelligence.reduce<Array<{ source: string; score: number }>>((scores, intel) => {
+          if (intel.source && intel.source !== detail.summary.source && typeof intel.cvssScore === 'number') {
+            scores.push({ source: intel.source, score: intel.cvssScore });
+          }
+          return scores;
+        }, []);
+
         return (
-          <div className="cvd-overview-card">
-            {/* ── Left column ── */}
+          <div className="cvd2-overview-body">
+            {/* ── Left/main column ── */}
+            <div className="cvd2-overview-main">
+
+            {/* Summary panel */}
+            <div className="cvd2-panel">
             <div className="cvd-ov-left">
               {/* Status + last evaluated */}
               <div className="cvd-ov-meta">
                 <span className={statusPillClass}>{statusPillLabel}</span>
+                {isSuppressed && suppressedByRuleName && (
+                  <span className="cvd-ov-meta-eval">· Rule: {suppressedByRuleName}</span>
+                )}
                 {item.lastEvaluatedAt && (
                   <span className="cvd-ov-meta-eval">· Last evaluated {formatDate(item.lastEvaluatedAt)}</span>
                 )}
@@ -3615,613 +3848,256 @@ function CveOverviewExperience({
               </div>
             </div>
 
-            {/* ── Right column: S.AI mini chart ── */}
-            <div className="cvd-ov-right">
-              <CveRiskScorePanel item={item} mini />
-            </div>
-          </div>
-        );
-      })()}
+            </div>{/* end cvd2-panel (summary) */}
 
-      {/* ── Workflow Panel ───────────────────────────────── */}
-      {(() => {
-        const invRan = persistedRunbookState?.assetAssessmentRan ?? false;
-        const invAssetCount = invRan ? (persistedRunbookState?.investigationAssetCount ?? detail.signals.assetCount) : detail.signals.assetCount;
-        const invSwCount = invRan ? (persistedRunbookState?.investigationSoftwareCount ?? detail.signals.softwareCount) : detail.signals.softwareCount;
-        const matchedByBackend = detail.matchedSoftware.length;
-        const needsAssessment = detail.matchedSoftware.filter((s) => s.applicabilityState === 'UNKNOWN').length;
-        const openFindings = item.openFindings;
-        const findingsToCreate = invAssetCount > openFindings ? invAssetCount - openFindings : 0;
-        const hasSummaryReport = item.hasInvestigationSummary;
-        const notifiedAt = persistedRunbookState?.notifiedAt as string | undefined;
-
-        // Investigation status: Done if asset assessment ran OR investigation closed/pending-review
-        const invDone = invRan || latestInvestigation?.status === 'CLOSED' || latestInvestigation?.status === 'PENDING_REVIEW';
-        const invInProgress = !invDone && (latestInvestigation != null || matchedByBackend > 0);
-        const invStatus: 'done' | 'in-progress' | 'not-started' = invDone ? 'done' : invInProgress ? 'in-progress' : 'not-started';
-
-        // Findings status
-        const findingsDone = openFindings > 0 && findingsToCreate === 0;
-        const findingsPartial = openFindings > 0 && findingsToCreate > 0;
-        const findingsStatus: 'done' | 'partial' | 'not-created' = findingsDone ? 'done' : findingsPartial ? 'partial' : 'not-created';
-
-        // Notify status
-        const notifyStatus: 'communicated' | 'not-communicated' = notifiedAt ? 'communicated' : 'not-communicated';
-
-        return (
-          <div className="cvd-workflow-panel">
-            <div className="cvd-workflow-header">
-              <div>
-                <span className="cvd-section-label">Workflow</span>
-                <p className="cvd-workflow-sub">Move from investigation to finding creation and group notification.</p>
-              </div>
-            </div>
-
-            <div className="cvd-wf-steps">
-              {/* Step 1 — Investigation */}
-              <button type="button" className="cvd-wf-step active" onClick={() => onStepChange(1)}>
-                <div className="cvd-wf-num">1</div>
-                <div className="cvd-wf-body">
-                  <div className="cvd-wf-title-row">
-                    <p className="cvd-wf-title">Investigation</p>
-                    <div className="cvd-wf-badges">
-                      {invStatus === 'done' && <span className="cvd-wf-badge cvd-wf-badge--done">✓ Done</span>}
-                      {invStatus === 'in-progress' && <span className="cvd-wf-badge cvd-wf-badge--progress">● In Progress</span>}
-                      {invStatus === 'not-started' && <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Started</span>}
-                      {hasSummaryReport && (
-                        <span className="cvd-wf-badge cvd-wf-badge--report" title="Investigation summary report generated">
-                          📋 Report
-                        </span>
+            {/* Technical details */}
+            {(detail.summary.cvssVector || cweList.length > 0) && (
+              <div className="cvd-tech-weakness-row">
+                {detail.summary.cvssVector && (
+                  <div className="cvd2-panel cvd-tech-col">
+                    <div className="cvd-technical-hdr">
+                      <p className="cvd-section-label">Technical details · CVSS v3.1 vector</p>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {allSources.map(src => (
+                          <span key={src} className="cvd-src-tag">{src}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="cvd-vector-bar">
+                      <code className="cvd-vector-code">{detail.summary.cvssVector}</code>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => void navigator.clipboard.writeText(detail.summary.cvssVector ?? '')}
+                      >Copy</button>
+                    </div>
+                    <div className="cvd-kv-table">
+                      {CVSS_DIMS_LOCAL.map(({ key, label, values }) => {
+                        const raw = cvssFields[key];
+                        if (!raw) return null;
+                        return (
+                          <div key={key} className="cvd-kv-row">
+                            <span className="cvd-kv-label">{label}</span>
+                            <span className="cvd-kv-value">{(values as Record<string, string>)[raw] ?? raw}</span>
+                          </div>
+                        );
+                      })}
+                      {detail.summary.cvssScore != null && (
+                        <div className="cvd-kv-row">
+                          <span className="cvd-kv-label">CVSS score</span>
+                          <span className="cvd-kv-value">
+                            {detail.summary.cvssScore.toFixed(1)}
+                            {multiSource && detail.summary.source && (
+                              <span className="cvd-kv-src-inline">{detail.summary.source}</span>
+                            )}
+                            {altScores.map(alt => (
+                              <React.Fragment key={alt.source}>
+                                {' '}
+                                <span className="cvd-kv-alt-val">
+                                  {alt.score.toFixed(1)}
+                                  <span className="cvd-kv-src-inline">{alt.source}</span>
+                                </span>
+                              </React.Fragment>
+                            ))}
+                          </span>
+                        </div>
+                      )}
+                      {detail.summary.epssScore != null && (
+                        <div className="cvd-kv-row">
+                          <span className="cvd-kv-label">EPSS score</span>
+                          <span className="cvd-kv-value">{(detail.summary.epssScore * 100).toFixed(2)}%</span>
+                        </div>
+                      )}
+                      {detail.summary.publishedAt && (
+                        <div className="cvd-kv-row">
+                          <span className="cvd-kv-label">Published</span>
+                          <span className="cvd-kv-value">{formatDate(detail.summary.publishedAt)}</span>
+                        </div>
+                      )}
+                      {detail.summary.modifiedAt && (
+                        <div className="cvd-kv-row">
+                          <span className="cvd-kv-label">Last modified</span>
+                          <span className="cvd-kv-value">{formatDate(detail.summary.modifiedAt)}</span>
+                        </div>
                       )}
                     </div>
                   </div>
-                  {invRan ? (
-                    <p className="cvd-wf-sub">
-                      {invSwCount} software · {invAssetCount} assets confirmed via asset inventory.
-                    </p>
-                  ) : (
-                    <p className="cvd-wf-sub">
-                      {matchedByBackend > 0
-                        ? `${matchedByBackend} software matched${needsAssessment > 0 ? ` · ${needsAssessment} need asset inventory review` : ''}.`
-                        : 'Open the runbook and confirm impacted assets via asset inventory.'}
-                    </p>
-                  )}
-                  {!invRan && matchedByBackend > 0 && (
-                    <p className="cvd-wf-insight">
-                      Run asset inventory in the runbook to confirm exact impacted hosts.
-                    </p>
-                  )}
-                </div>
-              </button>
-
-              {/* Step 2 — Create Findings */}
-              <button type="button" className="cvd-wf-step" onClick={() => onStepChange(3)}>
-                <div className="cvd-wf-num">2</div>
-                <div className="cvd-wf-body">
-                  <div className="cvd-wf-title-row">
-                    <p className="cvd-wf-title">Create Findings</p>
-                    <div className="cvd-wf-badges">
-                      {findingsStatus === 'done' && <span className="cvd-wf-badge cvd-wf-badge--done">✓ Created</span>}
-                      {findingsStatus === 'partial' && <span className="cvd-wf-badge cvd-wf-badge--progress">◑ Partial</span>}
-                      {findingsStatus === 'not-created' && <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Created</span>}
+                )}
+                {cweList.length > 0 && (
+                  <div className="cvd2-panel cvd-card-flush cvd-weakness-col">
+                    <div className="cvd-card-inset-hdr">
+                      <p className="cvd-section-label">Weaknesses</p>
+                      <span className="cvd-count-badge">{cweList.length} CWEs</span>
                     </div>
+                    {cweList.map(cwe => (
+                      <div key={cwe} className="cvd-entity-row">
+                        <span className="cvd-entity-name">{cwe}</span>
+                        {CWE_NAMES[cwe] && (
+                          <span className="cvd-entity-versions">{CWE_NAMES[cwe]}</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  {openFindings > 0 || invRan ? (
-                    <p className="cvd-wf-sub">
-                      {openFindings > 0 ? `${openFindings} finding${openFindings !== 1 ? 's' : ''} created` : '0 findings created'}
-                      {findingsToCreate > 0 ? ` · ${findingsToCreate} to be created` : ' · up to date'}
-                    </p>
-                  ) : (
-                    <p className="cvd-wf-sub">Add impacted assets to the backlog.</p>
-                  )}
-                </div>
-              </button>
+                )}
+              </div>
+            )}
 
-              {/* Step 3 — Notify Groups */}
-              <button type="button" className="cvd-wf-step" onClick={() => onStepChange(4)}>
-                <div className="cvd-wf-num">3</div>
-                <div className="cvd-wf-body">
-                  <div className="cvd-wf-title-row">
-                    <p className="cvd-wf-title">Notify Groups</p>
-                    <div className="cvd-wf-badges">
-                      {notifyStatus === 'communicated'
-                        ? <span className="cvd-wf-badge cvd-wf-badge--done">✓ Communicated</span>
-                        : <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Communicated</span>}
-                    </div>
-                  </div>
-                  <p className="cvd-wf-sub">
-                    {notifiedAt ? `Notified on ${formatDate(notifiedAt)}.` : 'Alert remediation owners and assignment groups.'}
-                  </p>
-                </div>
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── CVE Detail Content ───────────────────────────── */}
-      <div className="cvd-content">
-
-        {/* Technical details / CVSS  +  Weaknesses — side by side */}
-        {(detail.summary.cvssVector || cweList.length > 0) && (() => {
-          // Collect all unique sources referenced in this CVE
-          const allSources = Array.from(new Set([
-            ...(detail.summary.source ? [detail.summary.source] : []),
-            ...detail.vendorIntelligence.map(v => v.source).filter(Boolean),
-          ]));
-          const multiSource = allSources.length > 1;
-
-          // Per-source CVSS scores: primary from summary; secondary from vendorIntelligence if present
-          const altScores = detail.vendorIntelligence.reduce<Array<{ source: string; score: number }>>((scores, intel) => {
-            if (intel.source && intel.source !== detail.summary.source && typeof intel.cvssScore === 'number') {
-              scores.push({ source: intel.source, score: intel.cvssScore });
-            }
-            return scores;
-          }, []);
-
-          return (
-            <div className="cvd-tech-weakness-row">
-              {detail.summary.cvssVector && (
-                <div className="cvd-card cvd-tech-col">
-                  <div className="cvd-technical-hdr">
-                    <p className="cvd-section-label">Technical details · CVSS v3.1 vector</p>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {allSources.map(src => (
-                        <span key={src} className="cvd-src-tag">{src}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="cvd-vector-bar">
-                    <code className="cvd-vector-code">{detail.summary.cvssVector}</code>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '4px 10px', fontSize: '11px' }}
-                      onClick={() => void navigator.clipboard.writeText(detail.summary.cvssVector ?? '')}
-                    >Copy</button>
-                  </div>
-                  <div className="cvd-kv-table">
-                    {CVSS_DIMS_LOCAL.map(({ key, label, values }) => {
-                      const raw = cvssFields[key];
-                      if (!raw) return null;
-                      return (
-                        <div key={key} className="cvd-kv-row">
-                          <span className="cvd-kv-label">{label}</span>
-                          <span className="cvd-kv-value">{(values as Record<string, string>)[raw] ?? raw}</span>
-                        </div>
-                      );
-                    })}
-                    {detail.summary.cvssScore != null && (
-                      <div className="cvd-kv-row">
-                        <span className="cvd-kv-label">CVSS score</span>
-                        <span className="cvd-kv-value">
-                          {detail.summary.cvssScore.toFixed(1)}
-                          {multiSource && detail.summary.source && (
-                            <span className="cvd-kv-src-inline">{detail.summary.source}</span>
-                          )}
-                          {altScores.map(alt => (
-                            <React.Fragment key={alt.source}>
-                              {' '}
-                              <span className="cvd-kv-alt-val">
-                                {alt.score.toFixed(1)}
-                                <span className="cvd-kv-src-inline">{alt.source}</span>
-                              </span>
-                            </React.Fragment>
+            {/* References (inline) */}
+            {referenceLinks.length > 0 && (
+              <div className="cvd2-panel">
+                <div className="cvd2-panel-hdr">References · {referenceLinks.length}</div>
+                <div className="cvd-refs-list">
+                  {(showAllRefs ? referenceLinks : referenceLinks.slice(0, 3)).map(ref => (
+                    <div key={ref.href} className="cvd-ref-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <a href={ref.href} target="_blank" rel="noreferrer" className="cvd-ref-link"
+                          style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ref.href}
+                        </a>
+                        {ref.source && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.source) && (
+                          <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>{ref.source}</span>
+                        )}
+                      </div>
+                      {ref.tags && ref.tags.length > 0 && (
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flexShrink: 0 }}>
+                          {ref.tags.map(tag => (
+                            <span key={tag} className="cvd-src-tag">{tag}</span>
                           ))}
-                        </span>
-                      </div>
-                    )}
-                    {detail.summary.epssScore != null && (
-                      <div className="cvd-kv-row">
-                        <span className="cvd-kv-label">EPSS score</span>
-                        <span className="cvd-kv-value">{(detail.summary.epssScore * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {detail.summary.publishedAt && (
-                      <div className="cvd-kv-row">
-                        <span className="cvd-kv-label">Published</span>
-                        <span className="cvd-kv-value">{formatDate(detail.summary.publishedAt)}</span>
-                      </div>
-                    )}
-                    {detail.summary.modifiedAt && (
-                      <div className="cvd-kv-row">
-                        <span className="cvd-kv-label">Last modified</span>
-                        <span className="cvd-kv-value">{formatDate(detail.summary.modifiedAt)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {cweList.length > 0 && (
-                <div className="cvd-card cvd-card-flush cvd-weakness-col">
-                  <div className="cvd-card-inset-hdr">
-                    <p className="cvd-section-label">Weaknesses</p>
-                    <span className="cvd-count-badge">{cweList.length} CWEs</span>
-                  </div>
-                  {cweList.map(cwe => (
-                    <div key={cwe} className="cvd-entity-row">
-                      <span className="cvd-entity-name">{cwe}</span>
-                      {CWE_NAMES[cwe] && (
-                        <span className="cvd-entity-versions">{CWE_NAMES[cwe]}</span>
+                        </div>
                       )}
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Solution */}
-        <div className="cvd-card">
-          <div className="cvd-solution-hdr">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                className="cvd-collapse-btn"
-                onClick={() => setSolutionCollapsed(c => !c)}
-                aria-label={solutionCollapsed ? 'Expand solution' : 'Collapse solution'}
-              >
-                {solutionCollapsed ? '▸' : '▾'}
-              </button>
-              <p className="cvd-section-label" style={{ margin: 0 }}>Solution</p>
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {aiSolutionData && <span className="cvd-src-tag cvd-src-tag-ai">AI</span>}
-              <span className={`severity-pill ${detail.signals.patchAvailable ? 'severity-low' : 'severity-high'}`}>
-                {detail.signals.patchAvailable ? '✓ Available' : '⚠ Pending'}
-              </span>
-              <button
-                type="button"
-                className="cvd-ai-btn"
-                disabled={aiSolutionLoading}
-                onClick={async () => {
-                  setAiSolutionLoading(true);
-                  setAiSolutionError(null);
-                  try {
-                    const impactedProducts = affectedProducts.filter(p => p.totalAssetsImpacted > 0);
-                    const advisoryUrls = referenceLinks
-                      .filter(r =>
-                        (r.tags && (r.tags.includes('Patch') || r.tags.includes('Vendor Advisory') || r.tags.includes('Mitigation'))) ||
-                        (r.href && (
-                          r.href.includes('msrc.microsoft.com') ||
-                          r.href.includes('portal.msrc.microsoft.com') ||
-                          r.href.includes('security.microsoft.com') ||
-                          r.href.includes('access.redhat.com/security') ||
-                          r.href.includes('ubuntu.com/security') ||
-                          r.href.includes('security.gentoo.org') ||
-                          r.href.includes('support.apple.com') ||
-                          r.href.includes('cert.org')
-                        ))
-                      )
-                      .map(r => r.href)
-                      .slice(0, 5);
-                    const context = {
-                      cve_id: detail.summary.externalId,
-                      severity: detail.summary.severity,
-                      cvss_score: detail.summary.cvssScore,
-                      title: detail.summary.title,
-                      description: detail.summary.description,
-                      in_kev: detail.summary.inKev,
-                      kev_due_date: detail.summary.kevDueDate,
-                      kev_required_action: detail.summary.kevRequiredAction,
-                      patch_available: detail.signals.patchAvailable,
-                      patch_versions: detail.signals.patchVersions,
-                      exploit_available: detail.signals.exploitAvailable,
-                      impacted_only: true,
-                      affected_entities: impactedProducts.map(p => ({
-                        product: p.product,
-                        vendor: p.vendorName || p.vendor,
-                        asset_count: p.totalAssetsImpacted,
-                        affected_versions: p.affectedVersions,
-                        is_eol: p.isEol,
-                        eol_date: p.eolDate,
-                      })),
-                      vendor_intelligence: detail.vendorIntelligence?.map(v => ({
-                        source: v.source,
-                        package_name: v.packageName,
-                        affected_versions: v.affectedVersions,
-                        fixed_version: v.fixedVersion,
-                        vex_status: v.vexStatus,
-                      })),
-                      advisory_urls: advisoryUrls,
-                    };
-                    const res = await cveWorkbenchApi.generateAiSolution(detail.summary.externalId, context);
-                    if (res.success && res.data) {
-                      setAiSolutionData(res.data);
-                      setAiSolutionFallback(null);
-                      setAiSolutionGeneratedAt(new Date().toISOString());
-                      setSolutionCollapsed(false);
-                    } else if (res.success && res.recommendation) {
-                      setAiSolutionFallback(res.recommendation);
-                    } else {
-                      setAiSolutionError(res.recommendation ?? 'AI generation failed.');
-                    }
-                  } catch {
-                    setAiSolutionError('Failed to generate AI recommendation. Please try again.');
-                  } finally {
-                    setAiSolutionLoading(false);
-                  }
-                }}
-              >
-                {aiSolutionLoading ? <span className="cvd-ai-btn-spinner" /> : '✦ Generate AI Recommendation'}
-              </button>
-            </div>
-          </div>
-
-          {!solutionCollapsed && <>
-          {/* Default static card — shown when no AI data */}
-          {!aiSolutionData && !aiSolutionFallback && (
-            <div className="cvd-sol-card">
-              <div className="cvd-sol-top">
-                <span className="cvd-sol-title">{remediationText}</span>
-                {detail.summary.source && <span className="cvd-src-tag">{detail.summary.source}</span>}
-              </div>
-              {aiSolutionError && (
-                <p style={{ fontSize: 12, color: 'var(--danger, #d9534f)', marginTop: 6 }}>{aiSolutionError}</p>
-              )}
-              {detail.signals.patchAvailable && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                  <span className="severity-pill severity-low">Recommended</span>
-                  <span className="cvd-pill-neutral">Full fix</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Fallback plain text */}
-          {!aiSolutionData && aiSolutionFallback && (
-            <div className="cvd-sol-card">
-              <div className="cvd-sol-top">
-                <span className="cvd-sol-title">{aiSolutionFallback}</span>
-                <span className="cvd-src-tag cvd-src-tag-ai">AI</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <span className="severity-pill severity-low">Recommended</span>
-                <span className="cvd-pill-neutral">AI-generated</span>
-              </div>
-            </div>
-          )}
-
-          {/* Rich AI panel */}
-          {aiSolutionData && (() => {
-            const d = aiSolutionData;
-            const phaseColor = (c: string) =>
-              c === 'red' ? '#e53e3e' : c === 'amber' ? '#d97706' : '#16a34a';
-            const dotColor = phaseColor;
-            return (
-              <div className="cvd-ai-panel">
-                {/* Header with generated-at timestamp */}
-                {(d.title || aiSolutionGeneratedAt) && (
-                  <div className="cvd-ai-panel-hdr">
-                    {d.title && <p className="cvd-ai-panel-title">{d.title}</p>}
-                    {aiSolutionGeneratedAt && (
-                      <span className="cvd-ai-panel-ts">
-                        Generated {new Date(aiSolutionGeneratedAt).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {d.affected_scope && (
-                  <p className="cvd-ai-scope">{d.affected_scope}</p>
-                )}
-
-                {/* Bottom Line */}
-                {d.bottom_line && (
-                  <div className="cvd-ai-bottom-line">
-                    <p className="cvd-ai-section-hdr">The Bottom Line</p>
-                    <div className="cvd-ai-bl-badges">
-                      <span className={`severity-pill severity-${(d.bottom_line.severity || '').toLowerCase()}`}>{d.bottom_line.severity}</span>
-                      {d.bottom_line.cvss && <span className="cvd-ai-bl-badge">CVSS {d.bottom_line.cvss}</span>}
-                      {d.bottom_line.kev_status && <span className="cvd-ai-bl-badge">{d.bottom_line.kev_status}</span>}
-                      {d.bottom_line.patch_status && (
-                        <span className={`cvd-ai-bl-badge ${d.bottom_line.patch_status.includes('Available') ? 'cvd-ai-bl-badge-green' : 'cvd-ai-bl-badge-red'}`}>
-                          {d.bottom_line.patch_status}
-                        </span>
-                      )}
+                  {referenceLinks.length > 3 && (
+                    <div style={{ padding: '4px 16px 10px' }}>
+                      <button
+                        type="button"
+                        className="cvd-ov-link"
+                        onClick={() => setShowAllRefs(v => !v)}
+                      >
+                        {showAllRefs ? 'Show less ↑' : 'Show all ↓'}
+                      </button>
                     </div>
-                    {d.bottom_line.summary && <p className="cvd-ai-narrative">{d.bottom_line.summary}</p>}
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+            )}
 
-                {/* What's Happening */}
-                {d.what_is_happening && (
-                  <div className="cvd-ai-section">
-                    <p className="cvd-ai-section-hdr">What's Happening</p>
-                    <p className="cvd-ai-narrative">{d.what_is_happening.description}</p>
-                    {d.what_is_happening.attack_steps && d.what_is_happening.attack_steps.length > 0 && (
-                      <ol className="cvd-ai-attack-steps">
-                        {d.what_is_happening.attack_steps.map((s, i) => <li key={i}>{s}</li>)}
-                      </ol>
-                    )}
-                    {d.what_is_happening.interaction_note && (
-                      <p className="cvd-ai-interaction-note">{d.what_is_happening.interaction_note}</p>
-                    )}
-                  </div>
-                )}
+            </div>{/* end cvd2-overview-main */}
 
-                {/* Primary Fix */}
-                {d.primary_fix && (() => {
-                  const val = (v: string | null | undefined) => (!v || v === 'null' || v === 'N/A') ? null : v;
-                  const patchId = val(d.primary_fix.patch_id);
-                  const targetVer = val(d.primary_fix.target_version);
-                  const appliesTo = val(d.primary_fix.applies_to);
-                  const verification = val(d.primary_fix.verification);
-                  const action = val(d.primary_fix.action) ?? 'Apply';
-                  return (
-                    <div className="cvd-ai-primary-rec">
-                      <p className="cvd-ai-primary-rec-label">Primary Fix</p>
-                      <p className="cvd-ai-primary-rec-title">
-                        {action}{patchId ? ` — ${patchId}` : ''}
-                      </p>
-                      {(targetVer || appliesTo || d.primary_fix.reboot_required != null) && (
-                        <p className="cvd-ai-primary-rec-build">
-                          {targetVer && <>Target version: <code className="cvd-ai-mono">{targetVer}</code></>}
-                          {appliesTo && <span style={{ color: 'var(--muted)', marginLeft: targetVer ? 6 : 0 }}>· {appliesTo}</span>}
-                          {d.primary_fix.reboot_required != null && (
-                            <span style={{ color: 'var(--muted)', marginLeft: 6 }}>
-                              · Reboot: {d.primary_fix.reboot_required ? 'Required' : 'Not required'}
-                            </span>
+            {/* ── Right sidebar ── */}
+            <div className="cvd2-overview-sidebar">
+
+              {/* Risk score */}
+              <div className="cvd2-panel cvd2-sidebar-score">
+                <CveRiskScorePanel item={item} mini />
+              </div>
+
+              {/* Need Your Attention */}
+              <div className="cvd2-panel">
+                <div className="cvd2-panel-hdr">Need Your Attention</div>
+                <div className="cvd2-wf-cards">
+
+                  <button type="button" className="cvd2-wf-card" onClick={() => onStepChange(1)}>
+                    <div className="cvd2-wf-card-num">1</div>
+                    <div className="cvd2-wf-card-body">
+                      <div className="cvd2-wf-card-title-row">
+                        <span className="cvd2-wf-card-title">Investigation</span>
+                        <div className="cvd2-wf-card-badges">
+                          {invStatus === 'done' && <span className="cvd-wf-badge cvd-wf-badge--done">✓ Done</span>}
+                          {invStatus === 'in-progress' && <span className="cvd-wf-badge cvd-wf-badge--progress">● In Progress</span>}
+                          {invStatus === 'not-started' && <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Started</span>}
+                          {hasSummaryReport && (
+                            <span className="cvd-wf-badge cvd-wf-badge--report" title="Investigation summary report generated">📋 Report</span>
                           )}
-                        </p>
-                      )}
-                      {verification && (
-                        <div className="cvd-ai-dep-row" style={{ marginTop: 6 }}>
-                          <span className="cvd-ai-dep-badge" style={{ background: '#d1fae5', color: '#065f46', borderColor: '#6ee7b7' }}>✓ Verify</span>
-                          <code className="cvd-ai-mono" style={{ marginLeft: 6 }}>{verification}</code>
                         </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Recommended Timeline */}
-                {d.timeline && d.timeline.length > 0 && (
-                  <div className="cvd-ai-section">
-                    <p className="cvd-ai-seq-intro">Recommended Timeline</p>
-                    <div className="cvd-ai-steps">
-                      {d.timeline.map((t, i) => (
-                        <div key={i} className="cvd-ai-step">
-                          <div className="cvd-ai-step-dot" style={{ background: dotColor(t.color) }} />
-                          <div className="cvd-ai-step-body">
-                            <p className="cvd-ai-step-header">
-                              <span style={{ color: phaseColor(t.color), fontWeight: 600 }}>{t.window}</span>
-                              <span className="cvd-ai-step-dash"> — </span>
-                              <span style={{ color: phaseColor(t.color) }}>{t.label}</span>
-                            </p>
-                            {t.actions && (
-                              <ul className="cvd-ai-timeline-actions">
-                                {t.actions.map((a, j) => <li key={j}>{a}</li>)}
-                              </ul>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Compensating Controls */}
-                {d.compensating_controls && d.compensating_controls.length > 0 && (
-                  <div className="cvd-ai-section">
-                    <p className="cvd-ai-section-hdr">Compensating Controls</p>
-                    <table className="cvd-ai-ctrl-table">
-                      <thead>
-                        <tr>
-                          <th>Control</th>
-                          <th>Effort</th>
-                          <th>Effectiveness</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d.compensating_controls.map((c, i) => (
-                          <tr key={i}>
-                            <td>{c.control}</td>
-                            <td><span className="cvd-ai-ctrl-badge">{c.effort}</span></td>
-                            <td><span className="cvd-ai-ctrl-badge">{c.effectiveness}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {/* Rollback Plan */}
-                {d.rollback_plan && d.rollback_plan.length > 0 && (
-                  <div className="cvd-ai-section">
-                    <p className="cvd-ai-section-hdr">Rollback Plan</p>
-                    <ol className="cvd-ai-rollback">
-                      {d.rollback_plan.map((s, i) => <li key={i}>{s}</li>)}
-                    </ol>
-                  </div>
-                )}
-
-                {/* Lifecycle Warning */}
-                {d.lifecycle_warning && (d.lifecycle_warning.is_eol || d.lifecycle_warning.upgrade_recommendation) && (
-                  <div className="cvd-ai-lifecycle-warn">
-                    <span className="cvd-ai-lifecycle-icon">⚠</span>
-                    <div>
-                      <p className="cvd-ai-lifecycle-title">
-                        Lifecycle Warning{d.lifecycle_warning.product ? ` — ${d.lifecycle_warning.product}` : ''}
-                      </p>
-                      {d.lifecycle_warning.eol_date && (
-                        <p className="cvd-ai-lifecycle-text">
-                          End of Life: <strong>{d.lifecycle_warning.eol_date}</strong>
-                          {d.lifecycle_warning.lifecycle_status && <> · {d.lifecycle_warning.lifecycle_status}</>}
-                        </p>
-                      )}
-                      {d.lifecycle_warning.upgrade_recommendation && (
-                        <p className="cvd-ai-lifecycle-upgrade">{d.lifecycle_warning.upgrade_recommendation}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Reasoning trace */}
-                {d.reasoning_trace && d.reasoning_trace.length > 0 && (
-                  <>
-                    <div className="cvd-ai-trace" onClick={() => setAiTraceOpen(o => !o)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setAiTraceOpen(o => !o)}>
-                      <span className="cvd-ai-trace-chevron">{aiTraceOpen ? '▾' : '▸'}</span>
-                      <span className="cvd-ai-trace-label">Reasoning trace — {d.reasoning_trace.length} steps</span>
-                    </div>
-                    {aiTraceOpen && (
-                      <ol className="cvd-ai-trace-list">
-                        {d.reasoning_trace.map((step, i) => <li key={i}>{step}</li>)}
-                      </ol>
-                    )}
-                  </>
-                )}
-
-                {/* Evidence gaps */}
-                {d.evidence_gaps && (
-                  <div className="cvd-ai-gaps">
-                    <span className="cvd-ai-gaps-icon">ⓘ</span>
-                    <div>
-                      <p className="cvd-ai-gaps-title">Evidence Gaps</p>
-                      <p className="cvd-ai-gaps-text">{d.evidence_gaps}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Confidence */}
-                {d.confidence_score != null && (
-                  <div className="cvd-ai-confidence">
-                    <div className="cvd-ai-conf-left">
-                      <p className="cvd-ai-conf-label">Confidence</p>
-                      <p className="cvd-ai-conf-score">{d.confidence_score}%</p>
-                      <div className="cvd-ai-conf-bar">
-                        <div className="cvd-ai-conf-fill" style={{ width: `${d.confidence_score}%` }} />
                       </div>
+                      {invRan ? (
+                        <p className="cvd2-wf-card-sub">{invSwCount} software · {invAssetCount} assets confirmed.</p>
+                      ) : (
+                        <p className="cvd2-wf-card-sub">
+                          {matchedByBackend > 0
+                            ? `${matchedByBackend} software matched${needsAssessment > 0 ? ` · ${needsAssessment} need review` : ''}.`
+                            : 'Confirm impacted assets via asset inventory.'}
+                        </p>
+                      )}
                     </div>
-                    {d.confidence_rationale && <p className="cvd-ai-conf-rationale">{d.confidence_rationale}</p>}
-                  </div>
-                )}
+                  </button>
+
+                  <button type="button" className="cvd2-wf-card" onClick={() => navigate(`/vuln-repo/org-cves/${encodeURIComponent(item.externalId)}/assets`)}>
+                    <div className="cvd2-wf-card-num">2</div>
+                    <div className="cvd2-wf-card-body">
+                      <div className="cvd2-wf-card-title-row">
+                        <span className="cvd2-wf-card-title">Create Findings</span>
+                        <div className="cvd2-wf-card-badges">
+                          {findingsStatus === 'done' && <span className="cvd-wf-badge cvd-wf-badge--done">✓ Created</span>}
+                          {findingsStatus === 'partial' && <span className="cvd-wf-badge cvd-wf-badge--progress">◑ Partial</span>}
+                          {findingsStatus === 'not-created' && <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Created</span>}
+                        </div>
+                      </div>
+                      {openFindings > 0 || invRan ? (
+                        <p className="cvd2-wf-card-sub">
+                          {openFindings > 0 ? `${openFindings} finding${openFindings !== 1 ? 's' : ''} created` : '0 findings created'}
+                          {findingsToCreate > 0 ? ` · ${findingsToCreate} to be created` : ' · up to date'}
+                        </p>
+                      ) : (
+                        <p className="cvd2-wf-card-sub">Add impacted assets to the backlog.</p>
+                      )}
+                    </div>
+                  </button>
+
+                  <button type="button" className="cvd2-wf-card" onClick={() => onStepChange(4)}>
+                    <div className="cvd2-wf-card-num">3</div>
+                    <div className="cvd2-wf-card-body">
+                      <div className="cvd2-wf-card-title-row">
+                        <span className="cvd2-wf-card-title">Notify Groups</span>
+                        <div className="cvd2-wf-card-badges">
+                          {notifyStatus === 'communicated'
+                            ? <span className="cvd-wf-badge cvd-wf-badge--done">✓ Communicated</span>
+                            : <span className="cvd-wf-badge cvd-wf-badge--pending">○ Not Communicated</span>}
+                        </div>
+                      </div>
+                      <p className="cvd2-wf-card-sub">
+                        {notifiedAt ? `Notified on ${formatDate(notifiedAt)}.` : 'Alert remediation owners and assignment groups.'}
+                      </p>
+                    </div>
+                  </button>
+
+                </div>
               </div>
-            );
-          })()}
-          </>}
-        </div>
 
-        {/* Tabs: Affected assets / References / Timeline */}
-        <div className="cvd-card" style={{ padding: 0 }}>
-          <div className="cvd-tab-bar">
-            <button type="button" className={`cvd-tab-btn ${activeTab === 'assets' ? 'active' : ''}`} onClick={() => setActiveTab('assets')}>
-              {persistedRunbookState?.assetAssessmentRan
-                ? `Affected Entities · ${persistedRunbookState.investigationAssetCount ?? detail.signals.assetCount}`
-                : `Affected Entities · ${detail.signals.assetCount}`}
-            </button>
-            <button type="button" className={`cvd-tab-btn ${activeTab === 'refs' ? 'active' : ''}`} onClick={() => setActiveTab('refs')}>
-              References · {referenceLinks.length}
-            </button>
-            <button type="button" className={`cvd-tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
-              Timeline
-            </button>
+              {/* Timeline */}
+              <div className="cvd2-panel">
+                <div className="cvd2-panel-hdr">Timeline</div>
+                <div style={{ padding: '8px 16px' }}>
+                  {timelineItems.length === 0 ? (
+                    <p className="cvd-tab-empty">No timeline events available.</p>
+                  ) : (
+                    timelineItems.map(entry => (
+                      <div key={`${entry.label}-${entry.value}`} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span className={`cve-overview-timeline-dot ${entry.tone}`} aria-hidden="true" style={{ marginTop: 4, flexShrink: 0 }} />
+                        <div>
+                          <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{entry.label}</p>
+                          <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{entry.value}</p>
+                          {entry.sublabel && <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{entry.sublabel}</p>}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+            </div>{/* end cvd2-overview-sidebar */}
+
           </div>
+        );
+      })()}
 
-          {activeTab === 'assets' && (
-            <div style={{ padding: '14px 16px' }}>
-              {/* Investigation assessment banner */}
+
+
+      {/* ── AFFECTED ENTITIES TAB ── */}
+      {activeTab === 'assets' && (
+        <div className="cvd2-tab-content">
               {persistedRunbookState?.assetAssessmentRan && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginBottom: 12,
@@ -4243,11 +4119,7 @@ function CveOverviewExperience({
                 </div>
               )}
               {(() => {
-                // When investigation has run, show the assessed software with their entity counts.
-                // Otherwise fall back to the backend vendor-intelligence product list.
                 const invRan = persistedRunbookState?.assetAssessmentRan ?? false;
-                // Use persisted summary if available; otherwise build from assetCriteria (entity counts will be 0
-                // until the user re-runs the assessment with the latest code that persists counts).
                 const invSoftwareList: Array<{ software: string; vendor?: string; version?: string; assetCount: number }> =
                   persistedRunbookState?.investigationSoftwareSummary ??
                   (persistedRunbookState?.assetCriteria ?? [])
@@ -4259,7 +4131,7 @@ function CveOverviewExperience({
                       assetCount: 0,
                     }));
                 const useInvestigationList = invRan && invSoftwareList.length > 0;
-                const viewAllHandler = invRan ? () => onStepChange(3) : onOpenAffectedEntities;
+                const viewAllHandler = invRan ? () => navigate(`/vuln-repo/org-cves/${encodeURIComponent(item.externalId)}/assets`) : onOpenAffectedEntities;
                 const viewAllLabel = invRan ? 'View all impacted assets →' : 'View all affected entities →';
 
                 return (
@@ -4281,23 +4153,39 @@ function CveOverviewExperience({
                       <div style={{ flexShrink: 0, minWidth: 120, textAlign: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Support Group</span>
                       </div>
+                      <div style={{ flexShrink: 0, minWidth: 140, textAlign: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fixes</span>
+                      </div>
                       <div style={{ flexShrink: 0, width: 80, textAlign: 'right' }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Entities</span>
                       </div>
                     </div>
 
                     {useInvestigationList ? (
-                      // Investigation-derived rows: one row per assessed software criterion
                       invSoftwareList.map((sw, i) => {
                         const count = sw.assetCount;
-                        // Try to match EOL / VEX / support info from existing affectedProducts
                         const existing = affectedProducts.find(
                           (p) => normalizeAssetInventoryValue(p.product) === normalizeAssetInventoryValue(sw.software)
                         );
+                        const swFixIds = fixRecords
+                          .filter((f) => f.softwareEntities?.some((se) => se.name.toLowerCase() === sw.software.toLowerCase()))
+                          .map((f) => f.id.slice(0, 8).toUpperCase())
+                          .join(', ');
                         return (
                           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
                             <div style={{ flex: '1 1 0', minWidth: 0 }}>
-                              <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sw.software}</p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const identityId = softwareIdentityMap.get(sw.software.toLowerCase());
+                                  navigate(identityId
+                                    ? pathForSoftwareIdentityDetail(identityId)
+                                    : pathForInventoryViewWithSearch('software-identities', { search: sw.software }));
+                                }}
+                                style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%', textDecoration: 'underline' }}
+                              >
+                                {sw.software}
+                              </button>
                               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                                 {sw.version && sw.version !== '-' ? `Version · ${sw.version}` : 'All versions'}
                               </p>
@@ -4347,9 +4235,16 @@ function CveOverviewExperience({
                                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
                               )}
                             </div>
+                            <div style={{ flexShrink: 0, minWidth: 140, textAlign: 'center' }}>
+                              {swFixIds ? (
+                                <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{swFixIds}</span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
                             <button
                               type="button"
-                              onClick={() => onStepChange(3)}
+                              onClick={() => navigate(`/vuln-repo/org-cves/${encodeURIComponent(item.externalId)}/assets`)}
                               style={{
                                 flexShrink: 0, width: 80, fontSize: 11, fontWeight: 600,
                                 padding: '4px 0', borderRadius: 4, border: 'none', cursor: 'pointer', textAlign: 'center',
@@ -4363,74 +4258,97 @@ function CveOverviewExperience({
                         );
                       })
                     ) : (
-                      // Fallback: backend vendor-intelligence product list
-                      affectedProducts.slice(0, 5).map((p, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
-                          <div style={{ flex: '1 1 0', minWidth: 0 }}>
-                            <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</p>
-                            <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>Affected versions · {p.affectedVersions}</p>
+                      affectedProducts.slice(0, 5).map((p, i) => {
+                        const pFixIds = fixRecords
+                          .filter((f) => f.softwareEntities?.some((se) => se.name.toLowerCase() === p.product.toLowerCase()))
+                          .map((f) => f.id.slice(0, 8).toUpperCase())
+                          .join(', ');
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
+                            <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const identityId = softwareIdentityMap.get(p.product.toLowerCase());
+                                  navigate(identityId
+                                    ? pathForSoftwareIdentityDetail(identityId)
+                                    : pathForInventoryViewWithSearch('software-identities', { search: p.product }));
+                                }}
+                                style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%', textDecoration: 'underline' }}
+                              >
+                                {p.product}
+                              </button>
+                              <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>Affected versions · {p.affectedVersions}</p>
+                            </div>
+                            <div style={{ flexShrink: 0, minWidth: 100, textAlign: 'center' }}>
+                              {p.vendorName ? (
+                                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>{p.vendorName}</span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
+                            <div style={{ flexShrink: 0, minWidth: 110, textAlign: 'center' }}>
+                              {p.isEol ? (
+                                <span style={{ fontSize: 11, fontWeight: 600, color: '#e53e3e', background: '#fff5f5', border: '1px solid #feb2b2', borderRadius: 4, padding: '2px 6px' }}>
+                                  EOL{p.eolDate ? ` · ${p.eolDate.slice(0, 10)}` : ''}
+                                </span>
+                              ) : p.eolDate ? (
+                                <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 4, padding: '2px 6px' }}>
+                                  EOL {p.eolDate.slice(0, 10)}
+                                </span>
+                              ) : p.supportPhase ? (
+                                <span style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>
+                                  {p.supportPhase}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
+                            <div style={{ flexShrink: 0, minWidth: 120, textAlign: 'center' }}>
+                              {p.vendorAdvisory ? (
+                                <span style={{
+                                  fontSize: 11, fontWeight: 500, borderRadius: 4, padding: '2px 6px',
+                                  background: p.vendorAdvisory.toUpperCase().includes('NOT') ? '#f0fff4' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#ebf8ff' : '#fffff0',
+                                  color: p.vendorAdvisory.toUpperCase().includes('NOT') ? '#276749' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#2b6cb0' : '#744210',
+                                  border: `1px solid ${p.vendorAdvisory.toUpperCase().includes('NOT') ? '#9ae6b4' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#90cdf4' : '#f6e05e'}`,
+                                }}>
+                                  {p.vendorAdvisory.replace(/_/g, ' ')}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
+                            <div style={{ flexShrink: 0, minWidth: 120, textAlign: 'center' }}>
+                              {p.supportGroup ? (
+                                <span style={{ fontSize: 11, color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px', display: 'inline-block', maxWidth: 116, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.supportGroup}>
+                                  {p.supportGroup}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
+                            <div style={{ flexShrink: 0, minWidth: 140, textAlign: 'center' }}>
+                              {pFixIds ? (
+                                <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{pFixIds}</span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={onOpenAffectedEntities}
+                              style={{
+                                flexShrink: 0, width: 80, fontSize: 11, fontWeight: 600,
+                                padding: '4px 0', borderRadius: 4, border: 'none', cursor: 'pointer', textAlign: 'center',
+                                background: p.totalAssetsImpacted > 20 ? '#fff5f5' : p.totalAssetsImpacted > 5 ? '#fffbeb' : '#f0fff4',
+                                color: p.totalAssetsImpacted > 20 ? '#c53030' : p.totalAssetsImpacted > 5 ? '#b7791f' : p.totalAssetsImpacted > 0 ? '#276749' : 'var(--muted)',
+                              }}
+                            >
+                              {p.totalAssetsImpacted} {p.totalAssetsImpacted === 1 ? 'entity' : 'entities'}
+                            </button>
                           </div>
-                          <div style={{ flexShrink: 0, minWidth: 100, textAlign: 'center' }}>
-                            {p.vendorName ? (
-                              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>{p.vendorName}</span>
-                            ) : (
-                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
-                            )}
-                          </div>
-                          <div style={{ flexShrink: 0, minWidth: 110, textAlign: 'center' }}>
-                            {p.isEol ? (
-                              <span style={{ fontSize: 11, fontWeight: 600, color: '#e53e3e', background: '#fff5f5', border: '1px solid #feb2b2', borderRadius: 4, padding: '2px 6px' }}>
-                                EOL{p.eolDate ? ` · ${p.eolDate.slice(0, 10)}` : ''}
-                              </span>
-                            ) : p.eolDate ? (
-                              <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 4, padding: '2px 6px' }}>
-                                EOL {p.eolDate.slice(0, 10)}
-                              </span>
-                            ) : p.supportPhase ? (
-                              <span style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>
-                                {p.supportPhase}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
-                            )}
-                          </div>
-                          <div style={{ flexShrink: 0, minWidth: 120, textAlign: 'center' }}>
-                            {p.vendorAdvisory ? (
-                              <span style={{
-                                fontSize: 11, fontWeight: 500, borderRadius: 4, padding: '2px 6px',
-                                background: p.vendorAdvisory.toUpperCase().includes('NOT') ? '#f0fff4' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#ebf8ff' : '#fffff0',
-                                color: p.vendorAdvisory.toUpperCase().includes('NOT') ? '#276749' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#2b6cb0' : '#744210',
-                                border: `1px solid ${p.vendorAdvisory.toUpperCase().includes('NOT') ? '#9ae6b4' : p.vendorAdvisory.toUpperCase().includes('FIXED') ? '#90cdf4' : '#f6e05e'}`,
-                              }}>
-                                {p.vendorAdvisory.replace(/_/g, ' ')}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
-                            )}
-                          </div>
-                          <div style={{ flexShrink: 0, minWidth: 120, textAlign: 'center' }}>
-                            {p.supportGroup ? (
-                              <span style={{ fontSize: 11, color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px', display: 'inline-block', maxWidth: 116, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.supportGroup}>
-                                {p.supportGroup}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={onOpenAffectedEntities}
-                            style={{
-                              flexShrink: 0, width: 80, fontSize: 11, fontWeight: 600,
-                              padding: '4px 0', borderRadius: 4, border: 'none', cursor: 'pointer', textAlign: 'center',
-                              background: p.totalAssetsImpacted > 20 ? '#fff5f5' : p.totalAssetsImpacted > 5 ? '#fffbeb' : '#f0fff4',
-                              color: p.totalAssetsImpacted > 20 ? '#c53030' : p.totalAssetsImpacted > 5 ? '#b7791f' : p.totalAssetsImpacted > 0 ? '#276749' : 'var(--muted)',
-                            }}
-                          >
-                            {p.totalAssetsImpacted} {p.totalAssetsImpacted === 1 ? 'entity' : 'entities'}
-                          </button>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
 
                     <button type="button" className="cvd-link-btn" style={{ alignSelf: 'flex-start', marginTop: 6 }} onClick={viewAllHandler}>
@@ -4439,58 +4357,229 @@ function CveOverviewExperience({
                   </div>
                 );
               })()}
+        </div>
+      )}
+
+
+      {/* ── FIXES TAB ── */}
+      {activeTab === 'fixes' && (
+        <div className="cvd2-tab-content">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={fixesGenerating}
+                  onClick={async () => {
+                    setFixesGenerating(true);
+                    try {
+                      const invSoftware = (persistedRunbookState?.investigationSoftwareSummary ?? []).map((s) => ({
+                        name: s.software,
+                        vendor: s.vendor,
+                        version: s.version,
+                        assetCount: s.assetCount,
+                      }));
+                      const records = await cveWorkbenchApi.generateFixRecords(
+                        detail.summary.externalId,
+                        invSoftware.length > 0 ? invSoftware : undefined
+                      );
+                      setFixRecords(records);
+                    } catch {
+                      // silently fail — user can retry
+                    } finally {
+                      setFixesGenerating(false);
+                    }
+                  }}
+                >
+                  {fixesGenerating ? 'Generating…' : fixRecords.length > 0 ? 'Regenerate Fixes' : 'Generate Fixes'}
+                </button>
+              </div>
+              {scopedFixRecords.length === 0 ? (
+                <p className="cvd-tab-empty">
+                  No fix records yet.{' '}
+                  Click <strong>Generate Fixes</strong> to analyse CVE references and create remediation guidance.
+                </p>
+              ) : (
+                <FixRecordsTable fixes={scopedFixRecords} />
+              )}
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// --- Fix Records Table ---
+
+function FixRecordsTable({ fixes }: { fixes: FixRecord[] }) {
+  const [popupFixId, setPopupFixId] = React.useState<string | null>(null);
+
+  function fixTypeColor(ft: string): { bg: string; color: string; border: string } {
+    if (ft === 'UPGRADE' || ft === 'PATCH') return { bg: 'rgba(34,197,94,0.12)', color: '#16a34a', border: 'rgba(34,197,94,0.25)' };
+    if (ft === 'NO_FIX') return { bg: 'rgba(239,68,68,0.12)', color: '#dc2626', border: 'rgba(239,68,68,0.25)' };
+    return { bg: 'rgba(59,130,246,0.12)', color: '#2563eb', border: 'rgba(59,130,246,0.25)' };
+  }
+
+  function parseRich(fix: FixRecord): Record<string, unknown> | null {
+    if (!fix.description) return null;
+    try {
+      const parsed = JSON.parse(fix.description) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object' && ('primary_fix' in parsed || 'compensating_controls' in parsed)) return parsed;
+    } catch { /* plain text */ }
+    return null;
+  }
+
+  function buildPopupContent(fix: FixRecord): React.ReactNode {
+    const rich = parseRich(fix);
+
+    type PrimaryFix = { action?: string; target_version?: string; patch_id?: string; applies_to?: string; reboot_required?: boolean; verification?: string };
+    type Control = { control?: string; effort?: string; effectiveness?: string };
+    type LifecycleWarning = { product?: string; eol_date?: string; is_eol?: boolean; upgrade_recommendation?: string };
+
+    if (rich) {
+      const pf = rich.primary_fix as PrimaryFix | undefined;
+      const controls = rich.compensating_controls as Control[] | undefined;
+      const rollback = rich.rollback_plan as string[] | undefined;
+      const lifecycle = rich.lifecycle_warning as LifecycleWarning | null | undefined;
+      const isSupersedence = Boolean(rich.is_supersedence);
+      const supersedes = Array.isArray(rich.supersedes) ? (rich.supersedes as string[]) : [];
+      return (
+        <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
+          {isSupersedence && supersedes.length > 0 && (
+            <div style={{ marginBottom: 10, padding: '6px 8px', background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 4 }}>
+              <span style={{ color: '#7c3aed', fontWeight: 700, fontSize: 11 }}>⇑ Supersedence fix </span>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>— this patch also covers older versions: </span>
+              <span style={{ color: 'var(--text)', fontWeight: 600, fontSize: 11 }}>{supersedes.join(', ')}</span>
             </div>
           )}
-
-          {activeTab === 'refs' && (
-            <div className="cvd-refs-list">
-              {referenceLinks.length === 0 ? (
-                <p className="cvd-tab-empty">No references available.</p>
-              ) : (
-                referenceLinks.map(ref => (
-                  <div key={ref.href} className="cvd-ref-row">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <a href={ref.href} target="_blank" rel="noreferrer" className="cvd-ref-link"
-                        style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ref.href}
-                      </a>
-                      {ref.source && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.source) && (
-                        <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>{ref.source}</span>
-                      )}
-                    </div>
-                    {ref.tags && ref.tags.length > 0 && (
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flexShrink: 0 }}>
-                        {ref.tags.map(tag => (
-                          <span key={tag} className="cvd-src-tag">{tag}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
+          {pf && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: 1, marginBottom: 4 }}>Primary Fix</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{pf.action ?? fix.fixType}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                {pf.target_version && <span>Target: <strong style={{ color: 'var(--text)' }}>{pf.target_version}</strong></span>}
+                {pf.patch_id && <span>Patch: <strong style={{ color: 'var(--text)' }}>{pf.patch_id}</strong></span>}
+                {pf.applies_to && <span>{pf.applies_to}</span>}
+                <span>Reboot: <strong style={{ color: pf.reboot_required ? '#d97706' : '#16a34a' }}>{pf.reboot_required ? 'Required' : 'Not required'}</strong></span>
+              </div>
+              {pf.verification && (
+                <div style={{ marginTop: 6, fontSize: 11 }}>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>✓ Verify </span>
+                  <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>{pf.verification}</span>
+                </div>
               )}
             </div>
           )}
-
-          {activeTab === 'timeline' && (
-            <div style={{ padding: '14px 16px' }}>
-              {timelineItems.length === 0 ? (
-                <p className="cvd-tab-empty">No timeline events available.</p>
-              ) : (
-                timelineItems.map(entry => (
-                  <div key={`${entry.label}-${entry.value}`} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span className={`cve-overview-timeline-dot ${entry.tone}`} aria-hidden="true" style={{ marginTop: 4, flexShrink: 0 }} />
-                    <div>
-                      <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{entry.label}</p>
-                      <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{entry.value}</p>
-                      {entry.sublabel && <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{entry.sublabel}</p>}
-                    </div>
-                  </div>
-                ))
-              )}
+          {controls && controls.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: 1, marginBottom: 4 }}>Compensating Controls</div>
+              {controls.map((c, i) => (
+                <div key={i} style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>
+                  {c.control} — Effort: {c.effort}, Effectiveness: {c.effectiveness}
+                </div>
+              ))}
+            </div>
+          )}
+          {rollback && rollback.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: 1, marginBottom: 4 }}>Rollback Plan</div>
+              <ol style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: 'var(--text-secondary)' }}>
+                {rollback.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            </div>
+          )}
+          {lifecycle?.is_eol && (
+            <div style={{ padding: '6px 8px', background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 4, fontSize: 11 }}>
+              <span style={{ color: '#d97706' }}>⚠ EOL — {lifecycle.product}</span>
+              {lifecycle.upgrade_recommendation && <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>{lifecycle.upgrade_recommendation}</div>}
+            </div>
+          )}
+          {fix.sourceUrls && fix.sourceUrls.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {fix.sourceUrls.slice(0, 2).map(url => (
+                <a key={url} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                  {url.length > 50 ? url.slice(0, 47) + '…' : url}
+                </a>
+              ))}
             </div>
           )}
         </div>
-      </div>
+      );
+    }
+    return <p style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', margin: 0 }}>{fix.description ?? 'No description available.'}</p>;
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: 'var(--panel-muted)', borderBottom: '1px solid var(--border)' }}>
+            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, width: 90 }}>Fix ID</th>
+            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Software / Version</th>
+            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, width: 130 }}>Fix Type</th>
+            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Summary</th>
+            <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, width: 60 }}>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fixes.map((fix, idx) => {
+            const { bg, color, border } = fixTypeColor(fix.fixType);
+            const shortId = fix.id.slice(0, 8).toUpperCase();
+            const isOpen = popupFixId === fix.id;
+            const swLabel = fix.softwareEntities && fix.softwareEntities.length > 0
+              ? fix.softwareEntities.map(sw => `${sw.name}${sw.version ? ` ${sw.version}` : ''}`).join(', ')
+              : '—';
+            const rich = parseRich(fix);
+            const isSupersedence = Boolean(rich?.is_supersedence);
+            return (
+              <React.Fragment key={fix.id}>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: idx % 2 === 0 ? 'var(--bg)' : 'var(--panel-muted)' }}>
+                  <td style={{ padding: '10px 12px', color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{shortId}</td>
+                  <td style={{ padding: '10px 12px', color: 'var(--text)', maxWidth: 220 }}>
+                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={swLabel}>{swLabel}</span>
+                    {fix.osHint && <span style={{ fontSize: 10, color: 'var(--muted)' }}>{fix.osHint}</span>}
+                  </td>
+                  <td style={{ padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, background: bg, color, border: `1px solid ${border}` }}>
+                        {fix.fixType.replace(/_/g, ' ')}
+                      </span>
+                      {isSupersedence && (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: 'rgba(139,92,246,0.1)', color: '#7c3aed', border: '1px solid rgba(139,92,246,0.25)' }}>
+                          ⇑ supersedes
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', maxWidth: 300 }}>
+                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fix.summary}>{fix.summary}</span>
+                  </td>
+                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      title="View details"
+                      onClick={() => setPopupFixId(isOpen ? null : fix.id)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4,
+                        color: isOpen ? 'var(--accent)' : 'var(--muted)',
+                        fontSize: 16, lineHeight: 1,
+                      }}
+                    >
+                      ℹ
+                    </button>
+                  </td>
+                </tr>
+                {isOpen && (
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td colSpan={5} style={{ padding: '12px 16px', background: 'color-mix(in srgb, var(--accent) 4%, var(--bg))' }}>
+                      {buildPopupContent(fix)}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -5275,6 +5364,9 @@ type FindingConfigPanelProps = {
   tagsInput: string;
   findingNotes: string;
   findingBusy: boolean;
+  creationMode: FindingCreationMode;
+  hasGroupedFinding: boolean;
+  existingFindingBehavior: ExistingFindingBehavior;
   onClose: () => void;
   onFindingTitleChange: (v: string) => void;
   onFindingPriorityChange: (v: string) => void;
@@ -5284,6 +5376,8 @@ type FindingConfigPanelProps = {
   onDueDateChange: (v: string) => void;
   onTagsInputChange: (v: string) => void;
   onFindingNotesChange: (v: string) => void;
+  onCreationModeChange: (v: FindingCreationMode) => void;
+  onExistingFindingBehaviorChange: (v: ExistingFindingBehavior) => void;
   onConfirm: () => void;
 };
 
@@ -5300,6 +5394,9 @@ function FindingConfigPanel({
   tagsInput,
   findingNotes,
   findingBusy,
+  creationMode,
+  hasGroupedFinding,
+  existingFindingBehavior,
   onClose,
   onFindingTitleChange,
   onFindingPriorityChange,
@@ -5309,6 +5406,8 @@ function FindingConfigPanel({
   onDueDateChange,
   onTagsInputChange,
   onFindingNotesChange,
+  onCreationModeChange,
+  onExistingFindingBehaviorChange,
   onConfirm,
 }: FindingConfigPanelProps) {
   const selectedSoftware = filteredSoftware
@@ -5344,7 +5443,7 @@ function FindingConfigPanel({
 
           <div className="cve-findings-modal-row">
             <div className="cve-form-field">
-              <label htmlFor="finding-priority">Priority</label>
+              <label htmlFor="finding-priority">Severity</label>
               <select id="finding-priority" value={findingPriority} onChange={(e) => onFindingPriorityChange(e.target.value)}>
                 <option value="CRITICAL">Critical</option>
                 <option value="HIGH">High</option>
@@ -5414,6 +5513,90 @@ function FindingConfigPanel({
               onChange={(e) => onTicketTargetChange(e.target.checked ? 'SERVICENOW' : 'JIRA')}
             />
           </label>
+
+          <div className="cve-form-field">
+            <label>Finding Creation Mode</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              {(
+                [
+                  {
+                    value: 'ASSET_CVE' as FindingCreationMode,
+                    label: 'Asset + CVE',
+                    description: 'One finding per impacted asset and CVE combination',
+                  },
+                  {
+                    value: 'CVE_FIX' as FindingCreationMode,
+                    label: 'CVE + Fix',
+                    description: 'One finding per CVE grouped by available fix record',
+                  },
+                ] satisfies Array<{ value: FindingCreationMode; label: string; description: string }>
+              ).map((opt) => (
+                <label
+                  key={opt.value}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: `1.5px solid ${creationMode === opt.value ? 'var(--color-primary, #2563eb)' : 'var(--border-color, #d1d5db)'}`,
+                    background: creationMode === opt.value ? 'var(--primary-subtle, #eff6ff)' : 'var(--surface-bg, #fff)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="finding-creation-mode"
+                    value={opt.value}
+                    checked={creationMode === opt.value}
+                    onChange={() => onCreationModeChange(opt.value)}
+                    style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--color-primary, #2563eb)', outline: 'none' }}
+                  />
+                  <span>
+                    <span style={{ fontWeight: 600, display: 'block', fontSize: '0.875rem' }}>{opt.label}</span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--muted, #6b7280)' }}>{opt.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {creationMode === 'CVE_FIX' && hasGroupedFinding && (
+            <div className="cve-form-field">
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>When Finding Exists</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                {(
+                  [
+                    { value: 'ADD_TO_EXISTING' as ExistingFindingBehavior, label: 'Add to existing finding', description: 'Update the existing finding\'s evidence to include all currently selected assets.' },
+                    { value: 'CREATE_NEW' as ExistingFindingBehavior, label: 'Create new finding', description: 'Create a new separate finding for the selected assets.' },
+                  ] as const
+                ).map((opt) => (
+                  <label
+                    key={opt.value}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px',
+                      borderRadius: 6, cursor: 'pointer',
+                      border: `1.5px solid ${existingFindingBehavior === opt.value ? 'var(--color-primary, #2563eb)' : 'var(--border-color, #d1d5db)'}`,
+                      background: existingFindingBehavior === opt.value ? 'var(--primary-subtle, #eff6ff)' : 'var(--surface-bg, #fff)',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="existingFindingBehavior"
+                      value={opt.value}
+                      checked={existingFindingBehavior === opt.value}
+                      onChange={() => onExistingFindingBehaviorChange(opt.value)}
+                      style={{ marginTop: 2, flexShrink: 0 }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.label}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.4, marginTop: 2 }}>{opt.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="cve-form-field">
             <label htmlFor="finding-notes">Notes</label>
@@ -5827,6 +6010,29 @@ export function VulnRepoCveAssessmentWorkbench({
     d.setDate(d.getDate() + 7);
     return d.toISOString().slice(0, 10);
   });
+
+  const slaDaysForPriority = React.useCallback((priority: string): number => {
+    const policy = riskPolicyQuery.data;
+    const p = priority.toUpperCase();
+    if (p === 'CRITICAL') return policy?.criticalSlaDays ?? 7;
+    if (p === 'HIGH') return policy?.highSlaDays ?? 14;
+    if (p === 'MEDIUM') return policy?.mediumSlaDays ?? 30;
+    return policy?.lowSlaDays ?? 60;
+  }, [riskPolicyQuery.data]);
+
+  React.useEffect(() => {
+    if (!riskPolicyQuery.data) return;
+    const d = new Date();
+    d.setDate(d.getDate() + slaDaysForPriority(findingPriority));
+    setDueDate(d.toISOString().slice(0, 10));
+  }, [riskPolicyQuery.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFindingPriorityChange = React.useCallback((priority: string) => {
+    setFindingPriority(priority);
+    const d = new Date();
+    d.setDate(d.getDate() + slaDaysForPriority(priority));
+    setDueDate(d.toISOString().slice(0, 10));
+  }, [slaDaysForPriority]);
   const [findingTagsInput, setFindingTagsInput] = React.useState('');
   const [findingNotes, setFindingNotes] = React.useState('');
   const [selectedFindingIds, setSelectedFindingIds] = React.useState<Set<string>>(new Set());
@@ -5836,21 +6042,95 @@ export function VulnRepoCveAssessmentWorkbench({
   const [findingAssetTypeFilter] = React.useState('ALL');
   const [findingBusy, setFindingBusy] = React.useState(false);
   const [findingConfigOpen, setFindingConfigOpen] = React.useState(false);
+  const [cfgCreationMode, setCfgCreationMode] = React.useState<FindingCreationMode>('ASSET_CVE');
+  const [existingFindingBehavior, setExistingFindingBehavior] = React.useState<ExistingFindingBehavior>('ADD_TO_EXISTING');
   const [findingIdsByComponentId, setFindingIdsByComponentId] = React.useState<Map<string, string>>(new Map());
   const [findingsByDisplayId, setFindingsByDisplayId] = React.useState<Map<string, Finding>>(new Map());
+  const hasGroupedFinding = React.useMemo(() => {
+    if (cfgCreationMode !== 'CVE_FIX') return false;
+    return Array.from(findingsByDisplayId.values()).some((f) => {
+      try { return JSON.parse(f.evidence ?? '{}').groupedFinding === true; }
+      catch { return false; }
+    });
+  }, [cfgCreationMode, findingsByDisplayId]);
   const createdFindings = React.useMemo(() => Array.from(findingsByDisplayId.values()).map((finding) => ({
     displayId: finding.displayId || finding.id,
-    assetName: finding.assetName,
-    assetIdentifier: finding.assetIdentifier,
-    packageName: finding.packageName,
-    packageVersion: finding.packageVersion,
-    severity: finding.severity,
-    status: finding.status,
-    decisionState: finding.decisionState,
+    assetName: finding.assetName ?? '',
+    assetIdentifier: finding.assetIdentifier ?? '',
+    packageName: finding.packageName ?? '',
+    packageVersion: finding.packageVersion ?? '',
+    severity: finding.severity ?? '',
+    status: finding.status ?? '',
+    decisionState: finding.decisionState ?? '',
     assignedTo: finding.assignedTo,
     dueAt: finding.dueAt,
     incidentId: finding.incidentId,
   })), [findingsByDisplayId]);
+
+  const _investigationSummaryInput2 = React.useMemo<InvestigationSummaryInput>(() => {
+    if (!detail) return {} as InvestigationSummaryInput;
+    const summaryDetail = detail;
+    return {
+      summary: {
+        cveId: item.externalId,
+        title: summaryDetail.summary.title,
+        description: summaryDetail.summary.description,
+        severity: summaryDetail.summary.severity ?? item.severity,
+        cvssScore: summaryDetail.summary.cvssScore ?? item.cvssScore ?? undefined,
+        epssScore: summaryDetail.summary.epssScore ?? item.epssScore ?? undefined,
+        inKev: summaryDetail.summary.inKev ?? item.inKev ?? undefined,
+        exploitAvailable: summaryDetail.signals.exploitAvailable,
+        patchAvailable: summaryDetail.signals.patchAvailable,
+        patchVersions: summaryDetail.signals.patchVersions,
+      },
+      investigation: {
+        leadAnalyst: leadAnalyst || analystId,
+      },
+      runbookResults: runbookTasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        state: task.state,
+      })),
+      affectedAssets: summaryDetail.matchedSoftware.map((software) => ({
+        id: software.componentId,
+        hostname: software.assetName ?? software.assetIdentifier ?? software.packageName,
+        ipAddress: software.assetIdentifier,
+        os: software.assetType,
+        owner: software.assetName ? undefined : undefined,
+        environment: undefined,
+        externalFacing: false,
+        critical: false,
+        matchedSoftware: [{
+          software: software.packageName,
+          version: software.version ?? undefined,
+        }],
+      })),
+      falsePositiveRows: [],
+      eolRows: [],
+      solutionRows: summaryDetail.fixes?.flatMap((fix) => fix.softwareEntities.map((software) => ({
+        software: software.name,
+        version: software.version,
+        vendor: software.ecosystem,
+        impactedAssets: software.assetCount,
+        solutionType: fix.fixType,
+        solutionDetail: fix.summary,
+        targetVersion: software.version,
+      }))) ?? [],
+      createdFindings: createdFindings.map((finding) => ({
+        displayId: finding.displayId,
+        assetName: finding.assetName,
+        assetIdentifier: finding.assetIdentifier,
+        packageName: finding.packageName,
+        packageVersion: finding.packageVersion,
+        severity: finding.severity,
+        status: finding.status,
+        decisionState: finding.decisionState,
+        assignedTo: finding.assignedTo,
+        dueAt: finding.dueAt,
+        incidentId: finding.incidentId,
+      })),
+    };
+  }, [analystId, createdFindings, detail, item.cvssScore, item.epssScore, item.externalId, item.inKev, item.severity, leadAnalyst, runbookTasks]);
 
   React.useEffect(() => {
     if ((!findingConfigOpen && activeStep !== 4) || availableGroups.length > 0) return;
@@ -5919,7 +6199,7 @@ export function VulnRepoCveAssessmentWorkbench({
       {
         id: 'installed-patch-info',
         title: 'Summary Report',
-        description: 'Retrieve patch compliance data for all impacted org entities.',
+        description: 'Review the full investigation summary report for this CVE.',
         state: detail.signals.patchAvailable || persistedDoneTaskIds.has('installed-patch-info') ? 'DONE' : 'READY',
       },
     ]);
@@ -5974,9 +6254,41 @@ export function VulnRepoCveAssessmentWorkbench({
     }
     setImpactDecisions(initialImpact);
 
-    // Pre-select all eligible software for finding creation
-    const eligible = detail.matchedSoftware.filter((s) => s.eligibleForFinding && s.analystDisposition !== 'NOT_IMPACTED');
-    setSelectedFindingIds(new Set(eligible.map((s) => s.componentId)));
+    // Pre-select all eligible software for finding creation.
+    // Also include investigation-confirmed assets even if not yet eligible by default —
+    // the investigation explicitly confirmed their impact so they should be selected.
+    const preSelectedIds = new Set(
+      detail.matchedSoftware
+        .filter((s) => s.eligibleForFinding && s.analystDisposition !== 'NOT_IMPACTED')
+        .map((s) => s.componentId)
+    );
+    const persistedAssets = persistedRunbookState?.assetResults ?? [];
+    const resolvedInventory = persistedRunbookState?.resolvedInventory ?? [];
+    if (persistedAssets.length > 0 || resolvedInventory.length > 0) {
+      for (const sw of detail.matchedSoftware) {
+        if (preSelectedIds.has(sw.componentId) || sw.analystDisposition === 'NOT_IMPACTED') continue;
+        const assetKeys = [sw.assetId, sw.assetIdentifier, sw.assetName]
+          .filter(Boolean)
+          .map((v) => normalizeAssetInventoryValue(v));
+        const confirmedByInvestigation = persistedAssets.some((asset) => {
+          const identityKeys = [asset.id, asset.identifier, asset.entity]
+            .filter(Boolean)
+            .map((v) => normalizeAssetInventoryValue(v));
+          const swMatch = asset.matchedSoftware.some((entry) =>
+            normalizeAssetInventoryValue(entry.software) === normalizeAssetInventoryValue(sw.packageName)
+            && normalizeAssetInventoryValue(entry.version) === normalizeAssetInventoryValue(sw.version ?? '-')
+          );
+          return swMatch && assetKeys.some((k) => identityKeys.includes(k));
+        });
+        if (confirmedByInvestigation) preSelectedIds.add(sw.componentId);
+      }
+      for (const row of resolvedInventory) {
+        for (const asset of row.assets) {
+          if (asset.componentId) preSelectedIds.add(asset.componentId);
+        }
+      }
+    }
+    setSelectedFindingIds(preSelectedIds);
     setExpandedEvidenceComponentId(null);
     setVexEvidenceByComponent({});
     setVexEvidenceErrors({});
@@ -6062,21 +6374,6 @@ export function VulnRepoCveAssessmentWorkbench({
   }, [item.externalId, activeStep]);
 
   function handleRunbookTask(taskId: string): void {
-    if (taskId === 'generate-summary') {
-      const completed = runbookTasks.filter((task) => task.state === 'DONE').length;
-      setInvestigationLogEntries((current) => [
-        ...current,
-        {
-          id: `summary-${Date.now()}`,
-          type: 'ACTION',
-          message: `Generated investigation summary based on ${completed}/${runbookTasks.length} completed runbook actions.`,
-          actor: leadAnalyst || analystId || 'Alex Martinez',
-          at: new Date().toISOString(),
-        }
-      ]);
-      return;
-    }
-
     const task = runbookTasks.find((entry) => entry.id === taskId);
     if (!task) return;
     setRunbookTasks((current) => current.map((entry) => (
@@ -6093,20 +6390,6 @@ export function VulnRepoCveAssessmentWorkbench({
       }
     ]);
 
-    // When Solutions is marked Done and assets are matched, persist applicability as AFFECTED
-    if (taskId === 'solutions' && item.matchedAssetCount > 0 && item.applicability !== 'APPLICABLE') {
-      void (async () => {
-        try {
-          await cveWorkbenchApi.submitCveAssessment(item.externalId, {
-            finalResult: 'AFFECTED',
-            confidenceLevel: 'MEDIUM',
-            softwareDetected: true,
-            vulnerableVersionPresent: true,
-          });
-          await onRefreshDetail({ includeList: true });
-        } catch { /* best-effort */ }
-      })();
-    }
   }
 
   function handleAddInvestigationLogEntry(): void {
@@ -6428,6 +6711,10 @@ export function VulnRepoCveAssessmentWorkbench({
         componentIds: Array.from(selectedFindingIds),
         componentApplicabilityDecisions: selectedApplicabilityDecisions,
         componentAnalystDispositions: selectedImpactDecisions,
+        severity: findingPriority,
+        dueDate: dueDate || undefined,
+        findingCreationMode: cfgCreationMode,
+        existingFindingBehavior: cfgCreationMode === 'CVE_FIX' ? existingFindingBehavior : undefined,
       });
       await onRefreshDetail({ includeList: true });
       await loadPersistedFindingIds();
@@ -6437,8 +6724,8 @@ export function VulnRepoCveAssessmentWorkbench({
       if (result.reopenedCount > 0) parts.push(`Reopened ${result.reopenedCount}.`);
       if (result.alreadyOpenCount > 0) parts.push(`${result.alreadyOpenCount} already open.`);
 
-      // Create ServiceNow incidents if the checkbox is checked
-      if (ticketTarget === 'SERVICENOW') {
+      // Create ServiceNow incidents only when findings were actually created/reopened
+      if (ticketTarget === 'SERVICENOW' && (result.createdCount > 0 || result.reopenedCount > 0)) {
         try {
           // Build solution info from CVE signals — always populated
           const solutionInfo = (() => {
@@ -6798,13 +7085,18 @@ export function VulnRepoCveAssessmentWorkbench({
                   findingBusy={findingBusy}
                   onClose={() => setFindingConfigOpen(false)}
                   onFindingTitleChange={setFindingTitle}
-                  onFindingPriorityChange={setFindingPriority}
+                  onFindingPriorityChange={handleFindingPriorityChange}
                   onAssignmentGroupChange={setAssignmentGroup}
                   onOwnershipModeChange={setOwnershipMode}
                   onTicketTargetChange={setTicketTarget}
                   onDueDateChange={setDueDate}
                   onTagsInputChange={setFindingTagsInput}
                   onFindingNotesChange={setFindingNotes}
+                  creationMode={cfgCreationMode}
+                  onCreationModeChange={setCfgCreationMode}
+                  hasGroupedFinding={hasGroupedFinding}
+                  existingFindingBehavior={existingFindingBehavior}
+                  onExistingFindingBehaviorChange={setExistingFindingBehavior}
                   onConfirm={() => void createFindings()}
                 />
               )}
