@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -61,6 +63,25 @@ class RequestActorServiceTest {
         assertFalse(actor.creator());
         assertEquals(tenant.getId(), actor.tenantId());
         assertEquals("Primary Workspace", actor.tenantName());
+    }
+
+    @Test
+    void currentActorKeepsAnonymousRequestsTenantless() {
+        AnonymousAuthenticationToken authentication = new AnonymousAuthenticationToken(
+                "anonymous-key",
+                "anonymousUser",
+                List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))
+        );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        RequestActorService requestActorService = new RequestActorService(workspaceService, "local-analyst");
+        RequestActor actor = requestActorService.currentActor();
+
+        assertEquals("anonymousUser", actor.userId());
+        assertFalse(actor.creator());
+        assertNull(actor.tenantId());
+        assertNull(actor.tenantName());
+        org.mockito.Mockito.verifyNoInteractions(workspaceService);
     }
 
     private Tenant tenant(String name) {
