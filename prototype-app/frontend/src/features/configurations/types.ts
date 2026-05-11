@@ -1,19 +1,6 @@
 export type RiskPolicy = {
-  cvssWeight: number;
-  kevBoost: number;
-  epssWeight: number;
-  vexNotAffectedFreshnessDays: number;
-  vexFixedFreshnessDays: number;
-  vexKnownAffectedBoost: number;
-  vexUnderInvestigationPenalty: number;
-  vexNotAffectedReduction: number;
-  vexStalePenalty: number;
   criticalThreshold: number;
   highThreshold: number;
-  assetCriticalRiskBoost: number;
-  assetHighRiskBoost: number;
-  assetMediumRiskBoost: number;
-  assetLowRiskBoost: number;
   criticalSlaDays: number;
   highSlaDays: number;
   mediumSlaDays: number;
@@ -26,6 +13,7 @@ export type RiskPolicy = {
   autoCloseAssetIdentifier?: string;
   autoCloseAfterDays: number;
   findingGenerationMode: 'AUTO' | 'MANUAL';
+  findingsScoreConfig?: string;
   // Triage urgency signal weights — control how findings/CVEs are ranked
   // before investigation starts. All weights 0–2; 0 = disabled, 2 = highest influence.
   triageExploitabilityWeight: number;
@@ -39,4 +27,40 @@ export type RiskPolicy = {
 export type PrototypeDataResetResponse = {
   deletedRows: Record<string, number>;
   resetAt: string;
+};
+
+export type SuppressionRuleState = 'DRAFT' | 'APPROVED' | 'IN_REVIEW' | 'REJECTED' | 'EXPIRED';
+export type SuppressionRuleRecordType = 'CVE' | 'FINDING';
+
+export type SuppressionCondition = {
+  table: string;
+  column: string;
+  operator: string;
+  value: string;
+};
+
+export type SuppressionRule = {
+  id: string;
+  name: string;
+  state: SuppressionRuleState;
+  recordType: SuppressionRuleRecordType;
+  conditionsJson: string;
+  conditionLogic: 'AND' | 'OR';
+  reason?: string;
+  validFrom?: string;
+  validTo?: string;
+  createdAt: string;
+  updatedAt: string;
+  suppressedCount: number;
+};
+
+export type SuppressionRuleRequest = {
+  name: string;
+  state: SuppressionRuleState;
+  recordType: SuppressionRuleRecordType;
+  conditionsJson: string;
+  conditionLogic: 'AND' | 'OR';
+  reason?: string;
+  validFrom?: string;
+  validTo?: string;
 };

@@ -22,6 +22,10 @@ class FindingQueryServiceTest {
 
     @Mock
     private FindingRepository findingRepository;
+    @Mock
+    private FindingsScoreService findingsScoreService;
+    @Mock
+    private RiskPolicyService riskPolicyService;
 
     @Test
     void listAvailableFiltersNormalizesRepositoryValuesAndAppliesPreferredOrdering() {
@@ -39,7 +43,8 @@ class FindingQueryServiceTest {
         when(findingRepository.findDistinctVexFreshnessByTenant(tenant)).thenReturn(List.of("stale"));
         when(findingRepository.findDistinctVexProvidersByTenant(tenant)).thenReturn(List.of("microsoft"));
 
-        FindingQueryService service = new FindingQueryService(findingRepository, new ObjectMapper());
+        FindingQueryService service = new FindingQueryService(
+                findingRepository, new ObjectMapper(), findingsScoreService, riskPolicyService);
 
         FindingFilterValuesResponse filters = service.listAvailableFilters(tenant);
 

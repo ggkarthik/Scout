@@ -114,7 +114,6 @@ class ApplicabilityDecisionServiceTest {
                 + Instant.now().minus(Duration.ofDays(40)) + "\"}");
 
         RiskPolicy policy = new RiskPolicy();
-        policy.setVexNotAffectedFreshnessDays(14);
 
         ApplicabilityDecisionService.ApplicabilityDecision decision = service.evaluate(component, target, policy);
 

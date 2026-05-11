@@ -9,6 +9,8 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -147,15 +149,39 @@ public class CveWorkflowFacade {
                 .orElseThrow(() -> new IllegalArgumentException("CVE not found: " + cveId));
         Tenant tenant = tenantService.resolveTenantUuid(actor.tenantId());
 
-        ManualFindingCreationResult result = findingWorkflowFacade.createManualFindingsForVulnerability(
-                tenant,
-                vulnerability,
-                request.getJustification(),
-                actor.userId(),
-                parseComponentIds(request.getComponentIds()),
-                parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
-                parseAnalystDispositions(request.getComponentAnalystDispositions())
-        );
+        Instant dueDateOverride = null;
+        if (request.getDueDate() != null && !request.getDueDate().isBlank()) {
+            try {
+                dueDateOverride = LocalDate.parse(request.getDueDate()).atStartOfDay(ZoneOffset.UTC).toInstant();
+            } catch (Exception ignored) {
+                // invalid date format — fall back to SLA-computed value
+            }
+        }
+
+        boolean cveFix = "CVE_FIX".equalsIgnoreCase(request.getFindingCreationMode());
+        boolean forceNew = "CREATE_NEW".equalsIgnoreCase(request.getExistingFindingBehavior());
+        ManualFindingCreationResult result = cveFix
+                ? findingWorkflowFacade.createCveFixGroupedFinding(
+                        tenant,
+                        vulnerability,
+                        request.getJustification(),
+                        actor.userId(),
+                        parseComponentIds(request.getComponentIds()),
+                        parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
+                        parseAnalystDispositions(request.getComponentAnalystDispositions()),
+                        request.getSeverity(),
+                        dueDateOverride,
+                        forceNew)
+                : findingWorkflowFacade.createManualFindingsForVulnerability(
+                        tenant,
+                        vulnerability,
+                        request.getJustification(),
+                        actor.userId(),
+                        parseComponentIds(request.getComponentIds()),
+                        parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
+                        parseAnalystDispositions(request.getComponentAnalystDispositions()),
+                        request.getSeverity(),
+                        dueDateOverride);
 
         CveDetailController.ManualFindingResponse response = new CveDetailController.ManualFindingResponse();
         response.setCveId(cveId);

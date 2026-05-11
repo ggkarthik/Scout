@@ -32,10 +32,11 @@ const ALL_COLUMNS = [
   { key: 'priority',      label: 'S.AI Priority',  alwaysVisible: false },
   { key: 'assignedTo',     label: 'Assigned To',    alwaysVisible: false },
   { key: 'dueDate',        label: 'Due Date',       alwaysVisible: false },
-  { key: 'incidentId',     label: 'Incident ID',    alwaysVisible: false },
-  { key: 'incidentStatus', label: 'Inc. Status',    alwaysVisible: false },
-  { key: 'firstObserved',  label: 'First Observed', alwaysVisible: false },
-  { key: 'lastObserved',   label: 'Last Observed',  alwaysVisible: false },
+  { key: 'incidentId',       label: 'Incident ID',       alwaysVisible: false },
+  { key: 'incidentStatus',   label: 'Inc. Status',       alwaysVisible: false },
+  { key: 'suppressionRule',  label: 'Suppression Rule',  alwaysVisible: false },
+  { key: 'firstObserved',    label: 'First Observed',    alwaysVisible: false },
+  { key: 'lastObserved',     label: 'Last Observed',     alwaysVisible: false },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]['key'];
@@ -95,8 +96,8 @@ type ColFilters = {
 
 const DEFAULT_COL_FILTERS: ColFilters = {
   findingId: '', cveId: '', asset: '', owner: '', supportGroup: '', package: '',
-  severity: ['CRITICAL', 'HIGH'], // default: show Critical + High
-  status: ['OPEN'],               // default: show Open
+  severity: [],
+  status: [],
   risk: '', assignedTo: '', dueDate: '', incidentId: '',
 };
 
@@ -109,6 +110,7 @@ function severityClass(s: string) { return `severity-pill severity-${s.toLowerCa
 function statusClass(s: string)   { return `status-pill status-${s.toLowerCase()}`; }
 function statusLabel(row: Finding): string {
   if (row.status === 'SUPPRESSED') {
+    if (row.suppressedByRuleId) return 'Suppressed';
     const r = (row.suppressionReason ?? '').toUpperCase();
     if (r.includes('FALSE_POSITIVE')) return 'False Positive';
     if (r.includes('DUPLICATE')) return 'Duplicate';
@@ -409,7 +411,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const allSelected = rows.length>0 && selectedIds.size===rows.length;
 
   // ── actions ────────────────────────────────────────────────────────────────
-  type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate';
+  type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate'|'delete';
   function openAction(t: ActionType) { if (!hasSelection) return; setShowMoreActions(false); setActionError(''); setActionModal(t); }
   function closeModal() {
     setActionModal(null); setActionError('');
@@ -434,6 +436,13 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   async function handleDefer()       { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:deferReason||'DEFERRED',suppressedUntil:deferExpiry?new Date(deferExpiry).toISOString():undefined,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleFalsePos()    { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`FALSE_POSITIVE${fpJustification?': '+fpJustification:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleDuplicate()   { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`DUPLICATE${duplicateOf?': '+duplicateOf:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleDelete() {
+    setActionLoading(true);
+    try {
+      await api.bulkDeleteFindings(selectedFindings.map(f => f.id));
+      void findingsQuery.refetch(); void widgetQuery.refetch(); setSelectedIds(new Set()); closeModal();
+    } catch(e) { setActionError(String(e)); } finally { setActionLoading(false); }
+  }
   async function handleCreateIncident() {
     setActionLoading(true);
     try {
@@ -576,6 +585,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     }
     if (key==='incidentId') return row.incidentId ? <span className="mono fpl-incident-id">{row.incidentId}</span> : <span className="fpl-empty">—</span>;
     if (key==='incidentStatus') return row.incidentStatus ? <span className="fpl-inc-status">{row.incidentStatus}</span> : <span className="fpl-empty">—</span>;
+    if (key==='suppressionRule') return row.suppressedByRuleName
+      ? <span style={{ fontSize: '0.78rem', color: 'var(--medium)', fontWeight: 500 }}>{row.suppressedByRuleName}</span>
+      : <span className="fpl-empty">—</span>;
     if (key==='firstObserved') return row.firstObservedAt ? <span className="fpl-date">{new Date(row.firstObservedAt).toLocaleDateString()}</span> : <span className="fpl-empty">—</span>;
     if (key==='lastObserved') return row.lastObservedAt ? <span className="fpl-date">{new Date(row.lastObservedAt).toLocaleDateString()}</span> : <span className="fpl-empty">—</span>;
     return null;
@@ -592,6 +604,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       'resolve':`Resolve ${n} Finding${n!==1?'s':''}`,
       'false-positive':'Mark as False Positive',
       'duplicate':'Mark as Duplicate',
+      'delete':`Delete ${n} Finding${n!==1?'s':''}`,
     };
     return (
       <div className="fd3-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)closeModal();}}>
@@ -645,19 +658,33 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <div className="fpl-form-row"><label>Duplicate Of</label><input className="fpl-form-input mono" value={duplicateOf} onChange={e=>setDuplicateOf(e.target.value)} placeholder="Finding ID or Incident ID"/></div>
               </div>
             )}
+            {actionModal==='delete' && (
+              <div className="fpl-form">
+                <p className="fpl-form-desc" style={{color:'var(--danger,#ef4444)'}}>
+                  Permanently delete <strong>{n}</strong> finding{n!==1?'s':''} and all related data (comments, events)?
+                  <br/><strong>This cannot be undone.</strong>
+                </p>
+              </div>
+            )}
           </div>
           <div className="fd3-modal-footer">
             <button className="btn btn-secondary" onClick={closeModal} disabled={actionLoading}>Cancel</button>
-            <button className="btn btn-primary" disabled={actionLoading}
-              onClick={()=>{
-                if (actionModal==='create-incident') void handleCreateIncident();
-                else if (actionModal==='defer') void handleDefer();
-                else if (actionModal==='resolve') void handleResolve();
-                else if (actionModal==='false-positive') void handleFalsePos();
-                else if (actionModal==='duplicate') void handleDuplicate();
-              }}>
-              {actionLoading ? 'Working…' : actionModal==='create-incident' ? 'Create Incident' : actionModal==='defer' ? 'Defer' : actionModal==='resolve' ? 'Resolve' : actionModal==='false-positive' ? 'Mark False Positive' : 'Mark Duplicate'}
-            </button>
+            {actionModal==='delete'
+              ? <button className="btn btn-danger" disabled={actionLoading} onClick={()=>void handleDelete()}
+                  style={{background:'#ef4444',color:'#fff',borderColor:'#ef4444'}}>
+                  {actionLoading ? 'Deleting…' : `Delete ${n} Finding${n!==1?'s':''}`}
+                </button>
+              : <button className="btn btn-primary" disabled={actionLoading}
+                  onClick={()=>{
+                    if (actionModal==='create-incident') void handleCreateIncident();
+                    else if (actionModal==='defer') void handleDefer();
+                    else if (actionModal==='resolve') void handleResolve();
+                    else if (actionModal==='false-positive') void handleFalsePos();
+                    else if (actionModal==='duplicate') void handleDuplicate();
+                  }}>
+                  {actionLoading ? 'Working…' : actionModal==='create-incident' ? 'Create Incident' : actionModal==='defer' ? 'Defer' : actionModal==='resolve' ? 'Resolve' : actionModal==='false-positive' ? 'Mark False Positive' : 'Mark Duplicate'}
+                </button>
+            }
           </div>
         </div>
       </div>
@@ -725,7 +752,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           <HBarChart
             activeKey={colFilters.status.length===1?colFilters.status[0]:undefined}
             items={(['OPEN','RESOLVED','SUPPRESSED','AUTO_CLOSED'] as const).map(s=>({
-              key:s, label:s==='SUPPRESSED'?'Deferred':s==='AUTO_CLOSED'?'Closed':fmt(s), value:statusCounts.get(s)??0,
+              key:s, label:s==='SUPPRESSED'?'Deferred / Suppressed':s==='AUTO_CLOSED'?'Closed':fmt(s), value:statusCounts.get(s)??0,
               color:STATUS_COLORS[s], onClick:()=>filterByStatus(s),
             }))}
           />
@@ -833,6 +860,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <button className="fpl-more-item" onClick={()=>openAction('duplicate')} disabled={!hasSelection || !canMutateFindings}>Duplicate</button>
                 <div className="fpl-more-sep"/>
                 <button className="fpl-more-item" onClick={()=>void handleReopen()} disabled={!hasSelection || !canMutateFindings}>Re-open</button>
+                <div className="fpl-more-sep"/>
+                <button className="fpl-more-item fpl-more-item--danger" onClick={()=>openAction('delete')} disabled={!hasSelection || !canMutateFindings}
+                  style={{color:'#ef4444'}}>Delete</button>
               </div>
             )}
           </div>

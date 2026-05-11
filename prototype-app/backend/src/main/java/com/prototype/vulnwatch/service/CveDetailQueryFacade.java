@@ -17,6 +17,7 @@ import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.domain.VulnerabilityIntelObservation;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
+import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
@@ -55,6 +56,7 @@ public class CveDetailQueryFacade {
     private final TenantService tenantService;
     private final VulnerabilityIntelQueryService vulnerabilityIntelQueryService;
     private final EpssTrendService epssTrendService;
+    private final FixRecordRepository fixRecordRepository;
     private final ObjectMapper objectMapper;
 
     public CveDetailQueryFacade(
@@ -70,6 +72,7 @@ public class CveDetailQueryFacade {
             TenantService tenantService,
             VulnerabilityIntelQueryService vulnerabilityIntelQueryService,
             EpssTrendService epssTrendService,
+            FixRecordRepository fixRecordRepository,
             ObjectMapper objectMapper
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
@@ -84,6 +87,7 @@ public class CveDetailQueryFacade {
         this.tenantService = tenantService;
         this.vulnerabilityIntelQueryService = vulnerabilityIntelQueryService;
         this.epssTrendService = epssTrendService;
+        this.fixRecordRepository = fixRecordRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -117,6 +121,27 @@ public class CveDetailQueryFacade {
         response.setMatchedSoftware(matchedSoftware);
         response.setVendorIntelligence(buildVendorIntelligence(vulnerability, targets));
         response.setReferences(buildReferences(vulnerability));
+        response.setFixes(fixRecordRepository.findByTenantAndCveIdOrderByCreatedAtAsc(tenant, cveId)
+                .stream()
+                .map(r -> {
+                    com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>> strListType =
+                            new com.fasterxml.jackson.core.type.TypeReference<>() {};
+                    com.fasterxml.jackson.core.type.TypeReference<java.util.List<java.util.Map<String, Object>>> mapListType =
+                            new com.fasterxml.jackson.core.type.TypeReference<>() {};
+                    java.util.List<String> relatedCveIds = parseJsonList(r.getRelatedCveIdsJson(), strListType);
+                    java.util.List<String> sourceUrls = parseJsonList(r.getSourceUrlsJson(), strListType);
+                    java.util.List<com.prototype.vulnwatch.dto.FixRecordResponse.SoftwareEntity> entities =
+                            parseSoftwareEntities(r.getSoftwareEntitiesJson(), mapListType);
+                    return new com.prototype.vulnwatch.dto.FixRecordResponse(
+                            r.getId(), r.getCveId(), relatedCveIds, r.getSummary(), r.getDescription(),
+                            r.getFixType(), entities, r.getOsHint(), r.getRecommendationSource(),
+                            sourceUrls, r.getGeneratedAt(), r.getCreatedAt());
+                })
+                .toList());
+        if (orgCveRecord != null) {
+            response.setSuppressedByRuleId(orgCveRecord.getSuppressedByRuleId());
+            response.setSuppressedByRuleName(orgCveRecord.getSuppressedByRuleName());
+        }
         response.setInvestigations(investigationService.getInvestigationsByCve(tenantId, cveId).stream()
                 .map(this::toInvestigationDto)
                 .collect(Collectors.toList()));
@@ -165,6 +190,34 @@ public class CveDetailQueryFacade {
 
     private Tenant requestTenant() {
         return tenantService.resolveTenantUuid(requestActorService.currentActor().tenantId());
+    }
+
+    private <T> java.util.List<T> parseJsonList(String json,
+            com.fasterxml.jackson.core.type.TypeReference<java.util.List<T>> type) {
+        if (json == null || json.isBlank()) return java.util.List.of();
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (Exception e) {
+            return java.util.List.of();
+        }
+    }
+
+    private java.util.List<com.prototype.vulnwatch.dto.FixRecordResponse.SoftwareEntity> parseSoftwareEntities(
+            String json,
+            com.fasterxml.jackson.core.type.TypeReference<java.util.List<java.util.Map<String, Object>>> type
+    ) {
+        if (json == null || json.isBlank()) return java.util.List.of();
+        try {
+            java.util.List<java.util.Map<String, Object>> raw = objectMapper.readValue(json, type);
+            return raw.stream().map(m -> new com.prototype.vulnwatch.dto.FixRecordResponse.SoftwareEntity(
+                    m.get("name") != null ? String.valueOf(m.get("name")) : "",
+                    m.get("ecosystem") != null ? String.valueOf(m.get("ecosystem")) : "",
+                    m.get("version") != null ? String.valueOf(m.get("version")) : null,
+                    m.get("assetCount") instanceof Number n ? n.intValue() : 0
+            )).toList();
+        } catch (Exception e) {
+            return java.util.List.of();
+        }
     }
 
     private CveDetailController.CveSummary buildSummary(Vulnerability vulnerability) {
@@ -594,6 +647,7 @@ public class CveDetailQueryFacade {
         dto.setEolSupportEndDate(state.getComponent().getEolSupportEndDate());
         dto.setSupportPhase(state.getComponent().getSupportPhase());
         dto.setSupportGroup(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getSupportGroup());
+        dto.setSoftwareIdentityId(state.getComponent().getSoftwareIdentity() == null ? null : state.getComponent().getSoftwareIdentity().getId());
         return dto;
     }
 

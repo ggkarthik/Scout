@@ -39,10 +39,19 @@ public class FindingQueryService {
 
     private final FindingRepository findingRepository;
     private final ObjectMapper objectMapper;
+    private final FindingsScoreService findingsScoreService;
+    private final RiskPolicyService riskPolicyService;
 
-    public FindingQueryService(FindingRepository findingRepository, ObjectMapper objectMapper) {
+    public FindingQueryService(
+            FindingRepository findingRepository,
+            ObjectMapper objectMapper,
+            FindingsScoreService findingsScoreService,
+            RiskPolicyService riskPolicyService
+    ) {
         this.findingRepository = findingRepository;
         this.objectMapper = objectMapper;
+        this.findingsScoreService = findingsScoreService;
+        this.riskPolicyService = riskPolicyService;
     }
 
     @Transactional(readOnly = true)
@@ -232,6 +241,9 @@ public class FindingQueryService {
         InventoryComponent component = finding.getComponent();
         Map<String, Object> evidencePayload = readEvidencePayload(finding.getEvidence());
 
+        String scoreConfig = riskPolicyService.getFindingsScoreConfig(finding.getTenant());
+        double findingsScore = findingsScoreService.compute(scoreConfig, finding);
+
         return new FindingResponse(
                 finding.getId(),
                 finding.getDisplayId(),
@@ -243,7 +255,7 @@ public class FindingQueryService {
                 component.getVersion(),
                 vulnerability.getExternalId(),
                 vulnerability.getSource().name(),
-                vulnerability.getSeverity(),
+                finding.getSeverityOverride() != null ? finding.getSeverityOverride() : vulnerability.getSeverity(),
                 vulnerability.isInKev(),
                 vulnerability.getEpssScore(),
                 finding.getRiskScore(),
@@ -273,7 +285,10 @@ public class FindingQueryService {
                         ? (int) ChronoUnit.DAYS.between(LocalDate.now(), component.getEolDate())
                         : null,
                 finding.getIncidentId(),
-                finding.getIncidentStatus());
+                finding.getIncidentStatus(),
+                findingsScore,
+                finding.getSuppressedByRuleId(),
+                finding.getSuppressedByRuleName());
     }
 
     private Specification<Finding> byTenant(Tenant tenant) {
@@ -314,7 +329,14 @@ public class FindingQueryService {
             return null;
         }
         Set<String> upper = normalized.stream().map(String::toUpperCase).collect(Collectors.toSet());
-        return (root, query, cb) -> cb.upper(root.join("vulnerability").get("severity")).in(upper);
+        return (root, query, cb) -> {
+            jakarta.persistence.criteria.Expression<String> override =
+                    cb.upper(root.<String>get("severityOverride"));
+            jakarta.persistence.criteria.Expression<String> vulnSev =
+                    cb.upper(root.join("vulnerability").get("severity"));
+            jakarta.persistence.criteria.Expression<String> effective = cb.coalesce(override, vulnSev);
+            return effective.in(upper);
+        };
     }
 
     private Specification<Finding> byStatus(List<String> statuses) {

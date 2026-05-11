@@ -2,10 +2,15 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForVulnRepoView, pathForVulnRepoHostAsset } from '../app/routes';
 import { buildAssetRowsFromMatchedSoftware } from '../features/cve-workbench/asset-report';
+import {
+  loadPersistedInvestigationRunbookState,
+  buildPersistedInvestigationSoftwareRows,
+} from '../features/cve-workbench/investigation-context';
 import { useCveDetailQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { useFindingsQuery } from '../features/findings/queries';
 import type { Finding } from '../features/findings/types';
+import type { ExistingFindingBehavior, FindingCreationMode } from '../features/cve-workbench/types';
 
 const PRIORITY_COLORS: Record<string, { bg: string; color: string; border: string }> = {
   CRITICAL: { bg: '#9b233522', color: '#9b2335', border: '#9b233544' },
@@ -57,6 +62,7 @@ export function VulnRepoCveAssetsPage() {
 
   // Finding Configuration modal state
   const [showConfigModal, setShowConfigModal] = React.useState(false);
+  const [cfgCreationMode, setCfgCreationMode] = React.useState<FindingCreationMode>('ASSET_CVE');
   const [cfgTitle, setCfgTitle] = React.useState('');
   const [cfgPriority, setCfgPriority] = React.useState('Medium');
   const [cfgDueDate, setCfgDueDate] = React.useState('');
@@ -64,6 +70,7 @@ export function VulnRepoCveAssetsPage() {
   const [cfgAssignment, setCfgAssignment] = React.useState('Assign to lead analyst');
   const [cfgServiceNow, setCfgServiceNow] = React.useState(true);
   const [cfgNotes, setCfgNotes] = React.useState('');
+  const [existingFindingBehavior, setExistingFindingBehavior] = React.useState<ExistingFindingBehavior>('ADD_TO_EXISTING');
 
   const [filterAsset, setFilterAsset] = React.useState('');
   const [filterFinding, setFilterFinding] = React.useState('');
@@ -72,13 +79,28 @@ export function VulnRepoCveAssetsPage() {
   const [filterSupportGroup, setFilterSupportGroup] = React.useState('');
   const [filterPriority, setFilterPriority] = React.useState('All');
 
-  const allAssetRows = React.useMemo(
-    () => buildAssetRowsFromMatchedSoftware(
-      (detailQuery.data?.matchedSoftware ?? []).filter((sw) => sw.assetId != null),
-      detailQuery.data?.summary.severity ?? 'Unknown'
-    ),
-    [detailQuery.data?.matchedSoftware, detailQuery.data?.summary.severity]
+  // Load investigation assets from localStorage
+  const persistedRunbookState = React.useMemo(
+    () => (cveId ? loadPersistedInvestigationRunbookState(cveId) : null),
+    [cveId],
   );
+
+  const severity = detailQuery.data?.summary.severity ?? 'Unknown';
+
+  const allAssetRows = React.useMemo(() => {
+    const backendRows = buildAssetRowsFromMatchedSoftware(
+      (detailQuery.data?.matchedSoftware ?? []).filter((sw) => sw.assetId != null),
+      severity,
+    );
+    const backendIds = new Set(backendRows.map((r) => r.id));
+
+    // Build rows from investigation state and merge in any not already present
+    const invSoftwareRows = buildPersistedInvestigationSoftwareRows(persistedRunbookState);
+    const invAssetRows = buildAssetRowsFromMatchedSoftware(invSoftwareRows, severity);
+    const extraRows = invAssetRows.filter((r) => !backendIds.has(r.id));
+
+    return [...backendRows, ...extraRows].sort((a, b) => a.entity.localeCompare(b.entity));
+  }, [detailQuery.data?.matchedSoftware, severity, persistedRunbookState]);
 
   // Map assetIdentifier → first finding for this CVE
   const findingsByAsset = React.useMemo(() => {
@@ -89,19 +111,54 @@ export function VulnRepoCveAssetsPage() {
     return map;
   }, [findingsQuery.data?.items]);
 
+  // For grouped (CVE+Fix) findings: map each componentId, assetId, and assetIdentifier
+  // in evidence.affectedAssets → the finding so any asset in the group can resolve it.
+  const groupedFindingsByComponentId = React.useMemo(() => {
+    const map = new Map<string, Finding>();
+    for (const f of findingsQuery.data?.items ?? []) {
+      try {
+        const ev = JSON.parse(f.evidence ?? '{}') as {
+          groupedFinding?: boolean;
+          affectedAssets?: Array<{ componentId?: string; assetId?: string; assetIdentifier?: string }>;
+        };
+        if (ev.groupedFinding && Array.isArray(ev.affectedAssets)) {
+          for (const a of ev.affectedAssets) {
+            if (a.componentId) map.set(a.componentId, f);
+            if (a.assetId) map.set(a.assetId, f);
+            if (a.assetIdentifier) map.set(a.assetIdentifier, f);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    return map;
+  }, [findingsQuery.data?.items]);
+
   // Map assetIdentifier → componentIds (for Create Findings)
-  // componentsByAsset: all APPLICABLE components per asset (for Create Findings)
+  // Include all correlated components regardless of applicabilityState — the backend
+  // eligibility filter and override logic handle which ones are actually created.
   const componentsByAsset = React.useMemo(() => {
     const map = new Map<string, string[]>();
+    // Backend-correlated components
     for (const sw of (detailQuery.data?.matchedSoftware ?? []).filter(
-      (s) => s.assetId != null && s.applicabilityState === 'APPLICABLE'
+      (s) => s.assetId != null
     )) {
       const key = sw.assetIdentifier ?? sw.assetId ?? sw.componentId;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(sw.componentId);
     }
+    // Investigation-resolved inventory components (have real UUIDs)
+    for (const row of persistedRunbookState?.resolvedInventory ?? []) {
+      for (const asset of row.assets) {
+        if (!asset.componentId) continue;
+        const key = asset.assetIdentifier ?? asset.assetId ?? asset.componentId;
+        if (!map.has(key)) map.set(key, []);
+        if (!map.get(key)!.includes(asset.componentId)) {
+          map.get(key)!.push(asset.componentId);
+        }
+      }
+    }
     return map;
-  }, [detailQuery.data?.matchedSoftware]);
+  }, [detailQuery.data?.matchedSoftware, persistedRunbookState]);
 
   // Track which components are already eligible (vs need IMPACTED override)
   const componentEligibility = React.useMemo(() => {
@@ -114,7 +171,14 @@ export function VulnRepoCveAssetsPage() {
 
   const enrichedRows = React.useMemo(() => (
     allAssetRows.map((asset) => {
-      const finding = findingsByAsset.get(asset.identifier);
+      // Primary lookup: by assetIdentifier. Fallback: grouped finding evidence indexed by
+      // assetIdentifier, assetId, or componentId — covers all assets in a CVE+Fix group.
+      const componentIds = componentsByAsset.get(asset.id) ?? [];
+      const finding = findingsByAsset.get(asset.identifier)
+        ?? groupedFindingsByComponentId.get(asset.identifier)
+        ?? (asset.assetId ? groupedFindingsByComponentId.get(asset.assetId) : undefined)
+        ?? componentIds.map(cid => groupedFindingsByComponentId.get(cid)).find(Boolean)
+        ?? undefined;
       return {
         ...asset,
         finding,
@@ -126,7 +190,7 @@ export function VulnRepoCveAssetsPage() {
         incidentId: finding?.incidentId ?? '—',
       };
     })
-  ), [allAssetRows, findingsByAsset, detailQuery.data?.summary.severity]);
+  ), [allAssetRows, findingsByAsset, groupedFindingsByComponentId, componentsByAsset, detailQuery.data?.summary.severity]);
 
   const filteredRows = React.useMemo(() => (
     enrichedRows.filter((row) => {
@@ -141,6 +205,17 @@ export function VulnRepoCveAssetsPage() {
   ), [enrichedRows, filterAsset, filterFinding, filterSoftware, filterFalsePositive, filterSupportGroup, filterPriority]);
 
   const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.id));
+
+  // For CVE+Fix mode: check if a grouped finding already exists for this CVE at all.
+  // One CVE should have at most one grouped (CVE+Fix) finding.
+  const selectedRowsHaveGroupedFinding = React.useMemo(() => {
+    if (cfgCreationMode !== 'CVE_FIX') return false;
+    return (findingsQuery.data?.items ?? []).some((f) => {
+      try {
+        return JSON.parse(f.evidence ?? '{}').groupedFinding === true;
+      } catch { return false; }
+    });
+  }, [cfgCreationMode, findingsQuery.data?.items]);
 
   const toggleAll = () => {
     setSelectedIds((prev) => {
@@ -177,22 +252,49 @@ export function VulnRepoCveAssetsPage() {
 
   const handleCreateFindings = async () => {
     if (!cveId) return;
-    const componentIds = Array.from(selectedIds).flatMap((id) => componentsByAsset.get(id) ?? []);
+    // Build component IDs for all selected assets.
+    // Primary source: matchedSoftware from backend (real UUIDs, matches by assetIdentifier/assetId/componentId).
+    // Fallback: componentsByAsset for investigation-resolved assets.
+    const seenComponentIds = new Set<string>();
+    const componentIds: string[] = [];
+    const addComponentId = (id: string) => {
+      if (id && !seenComponentIds.has(id)) {
+        seenComponentIds.add(id);
+        componentIds.push(id);
+      }
+    };
+    // Direct lookup from matchedSoftware — avoids any key mismatch in the intermediate map.
+    for (const sw of detailQuery.data?.matchedSoftware ?? []) {
+      const rowKey = sw.assetIdentifier ?? sw.assetId ?? sw.componentId;
+      if (selectedIds.has(rowKey) && sw.componentId) {
+        addComponentId(sw.componentId);
+      }
+    }
+    // Fallback: investigation-resolved components not in matchedSoftware.
+    for (const id of Array.from(selectedIds)) {
+      for (const cid of componentsByAsset.get(id) ?? []) {
+        addComponentId(cid);
+      }
+    }
     if (componentIds.length === 0) {
       setCreateMsg('None of the selected assets have eligible components. Components need confirmed impact (IMPACTED disposition or no available patch) to create findings.');
       setShowConfigModal(false);
       return;
     }
-    // For components not yet eligible, pass IMPACTED disposition — the analyst explicitly
-    // requesting finding creation is an implicit confirmation of impact.
+    // For components not yet eligible, pass APPLICABLE + IMPACTED overrides — the analyst
+    // explicitly requesting finding creation is an implicit confirmation of impact.
     const componentAnalystDispositions: Record<string, 'IMPACTED' | 'NOT_IMPACTED' | 'UNKNOWN'> = {};
+    const componentApplicabilityDecisions: Record<string, 'APPLICABLE' | 'NOT_APPLICABLE' | 'NEEDS_REVIEW'> = {};
     componentIds.forEach((id) => {
       if (!componentEligibility.get(id)) {
         componentAnalystDispositions[id] = 'IMPACTED';
+        componentApplicabilityDecisions[id] = 'APPLICABLE';
       }
     });
     const dispositions = Object.keys(componentAnalystDispositions).length > 0
       ? componentAnalystDispositions : undefined;
+    const applicability = Object.keys(componentApplicabilityDecisions).length > 0
+      ? componentApplicabilityDecisions : undefined;
 
     setCreating(true);
     setCreateMsg(null);
@@ -201,7 +303,24 @@ export function VulnRepoCveAssetsPage() {
       const result = await cveWorkbenchApi.createManualFindings(cveId, {
         justification: cfgNotes.trim(),
         componentIds,
+        componentApplicabilityDecisions: applicability,
         componentAnalystDispositions: dispositions,
+        findingCreationMode: cfgCreationMode,
+        existingFindingBehavior: cfgCreationMode === 'CVE_FIX' ? existingFindingBehavior : 'ADD_TO_EXISTING',
+      }).catch(async () => {
+        // CVE_FIX may fail when the primary component already has a non-grouped finding.
+        // Fall back to ASSET_CVE so existing findings are reopened/counted correctly.
+        if (cfgCreationMode === 'CVE_FIX') {
+          return cveWorkbenchApi.createManualFindings(cveId, {
+            justification: cfgNotes.trim(),
+            componentIds,
+            componentApplicabilityDecisions: applicability,
+            componentAnalystDispositions: dispositions,
+            findingCreationMode: 'ASSET_CVE',
+            existingFindingBehavior: 'ADD_TO_EXISTING',
+          });
+        }
+        throw new Error('server-error');
       });
       await findingsQuery.refetch();
       const parts: string[] = [];
@@ -210,7 +329,11 @@ export function VulnRepoCveAssetsPage() {
       if (result.alreadyOpenCount > 0) parts.push(`${result.alreadyOpenCount} already open.`);
       setCreateMsg(parts.length > 0 ? parts.join(' ') : 'No eligible components found for the selected assets.');
     } catch {
-      setCreateMsg('Failed to create findings.');
+      await findingsQuery.refetch();
+      const existingCount = findingsQuery.data?.items.length ?? 0;
+      setCreateMsg(existingCount > 0
+        ? `Could not create new findings — ${existingCount} finding(s) already exist for this CVE.`
+        : 'Failed to create findings. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -220,22 +343,22 @@ export function VulnRepoCveAssetsPage() {
     <>
     <section className="panel vuln-repo-assets-shell">
       <div className="panel-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate(pathForVulnRepoView('org-cves', cveId))}
+              disabled={!cveId}
+            >
+              Back to CVE
+            </button>
+          </div>
           <div className="org-cve-back-link">Affected Entities</div>
           <h3>{cveId ?? 'CVE Assets'}</h3>
           <span className="panel-caption">
             {allAssetRows.length.toLocaleString()} entities matched to this CVE.
           </span>
-        </div>
-        <div className="button-row">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => navigate(pathForVulnRepoView('org-cves', cveId))}
-            disabled={!cveId}
-          >
-            Back to CVE
-          </button>
         </div>
       </div>
 
@@ -420,7 +543,7 @@ export function VulnRepoCveAssetsPage() {
             {/* Priority + Due Date */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em' }}>PRIORITY</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em' }}>SEVERITY</label>
                 <select
                   style={{ padding: '10px 12px', fontSize: 14, background: 'var(--input-bg, var(--panel-muted))', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)' }}
                   value={cfgPriority}
@@ -452,6 +575,13 @@ export function VulnRepoCveAssetsPage() {
                 value={cfgTags}
                 onChange={(e) => setCfgTags(e.target.value)}
               />
+              {cfgTags.split(',').map(t => t.trim()).filter(t => t.length > 0).length > 0 && (
+                <div className="cve-findings-tag-list">
+                  {cfgTags.split(',').map(t => t.trim()).filter(t => t.length > 0).map((tag) => (
+                    <span key={tag} className="cve-findings-tag-chip">{tag}</span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Assignment */}
@@ -480,6 +610,52 @@ export function VulnRepoCveAssetsPage() {
               Create tickets in ServiceNow
             </label>
 
+            {/* Finding Creation Mode */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em' }}>FINDING CREATION MODE</label>
+              {(
+                [
+                  {
+                    value: 'ASSET_CVE' as FindingCreationMode,
+                    label: 'Asset + CVE',
+                    description: 'Create one unique finding per selected asset, with the CVE linked as a dependency.',
+                  },
+                  {
+                    value: 'CVE_FIX' as FindingCreationMode,
+                    label: 'CVE + Fix',
+                    description: 'Create one finding per available fix for this CVE, with all selected assets and the CVE as dependent elements.',
+                  },
+                ] as const
+              ).map(({ value, label, description }) => {
+                const active = cfgCreationMode === value;
+                return (
+                  <label
+                    key={value}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px',
+                      borderRadius: 8, cursor: 'pointer',
+                      border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                      background: active ? 'color-mix(in srgb, var(--accent) 6%, var(--panel-muted))' : 'var(--panel-muted)',
+                      transition: 'border-color 0.15s, background 0.15s',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="findingCreationMode"
+                      value={value}
+                      checked={active}
+                      onChange={() => setCfgCreationMode(value)}
+                      style={{ marginTop: 2, accentColor: 'var(--accent)', flexShrink: 0 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{description}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
             {/* Notes */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em' }}>NOTES</label>
@@ -493,6 +669,45 @@ export function VulnRepoCveAssetsPage() {
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)' }} />
+
+            {selectedRowsHaveGroupedFinding && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em' }}>WHEN FINDING EXISTS</label>
+                {(
+                  [
+                    { value: 'ADD_TO_EXISTING' as ExistingFindingBehavior, label: 'Add to existing finding', description: 'Update the existing finding\'s evidence to include all currently selected assets.' },
+                    { value: 'CREATE_NEW' as ExistingFindingBehavior, label: 'Create new finding', description: 'Create a new separate finding for the selected assets.' },
+                  ] as const
+                ).map(({ value, label, description }) => {
+                  const active = existingFindingBehavior === value;
+                  return (
+                    <label
+                      key={value}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 14px',
+                        borderRadius: 8, cursor: 'pointer',
+                        border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active ? 'color-mix(in srgb, var(--accent) 6%, var(--panel-muted))' : 'var(--panel-muted)',
+                        transition: 'border-color 0.15s, background 0.15s',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="existingFindingBehavior"
+                        value={value}
+                        checked={active}
+                        onChange={() => setExistingFindingBehavior(value)}
+                        style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--accent)' }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{label}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{description}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Footer */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>

@@ -158,11 +158,12 @@ Sidebar-nav layout. Sections in order (leftmost first):
 
 | # | Tab | Content |
 |---|---|---|
-| 1 | **SLA & Remediation** | Remediation deadlines per severity + asset criticality SLA multipliers |
-| 2 | **Vulnerability Scoring** | CVSS/EPSS/KEV weights, VEX modifiers, critical/high score thresholds |
-| 3 | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
-| 4 | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
-| 5 | **Developer Tools** | Prototype data reset — wipes all inventory, findings, and vuln intel |
+| 1 | **SLA & Remediation** | Risk score thresholds (critical/high), remediation deadlines per severity, asset criticality SLA multipliers |
+| 2 | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
+| 3 | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
+| 4 | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; is the sole source of persisted `risk_score` on findings; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
+| 5 | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; condition builder reuses Findings Score table/column/operator structure (without weights); conditions combined with AND or OR logic; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
+| 6 | **Developer Tools** | Prototype data reset — wipes all inventory, findings, and vuln intel |
 
 All sections persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
 `applyTriageDefaults()` normalises API responses for backends that predate the V1062 migration
@@ -194,7 +195,7 @@ Key connector components:
 
 Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
 
-**Current watermark: V1077** (`org_cve_org_impact`). The next migration must be **V1078**.
+**Current watermark: V1087** (`fix_records_jsonb_to_text`). The next migration must be **V1088**.
 
 ### Scheduled Jobs
 

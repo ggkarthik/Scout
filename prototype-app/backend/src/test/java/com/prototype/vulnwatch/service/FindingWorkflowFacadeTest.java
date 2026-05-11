@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -31,6 +32,7 @@ import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
+import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.HashMap;
@@ -52,8 +54,9 @@ class FindingWorkflowFacadeTest {
 
     @Mock private FindingRepository findingRepository;
     @Mock private ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
+    @Mock private InventoryComponentRepository inventoryComponentRepository;
     @Mock private RiskPolicyService riskPolicyService;
-    @Mock private RiskScoringService riskScoringService;
+    @Mock private FindingsScoreService findingsScoreService;
     @Mock private FindingWorkflowService findingWorkflowService;
     @Mock private OrgCveRecordService orgCveRecordService;
     @Mock private FindingSlaService findingSlaService;
@@ -69,8 +72,9 @@ class FindingWorkflowFacadeTest {
         facade = new FindingWorkflowFacade(
                 findingRepository,
                 componentVulnerabilityStateRepository,
+                inventoryComponentRepository,
                 riskPolicyService,
-                riskScoringService,
+                findingsScoreService,
                 findingWorkflowService,
                 orgCveRecordService,
                 findingSlaService,
@@ -312,7 +316,6 @@ class FindingWorkflowFacadeTest {
         state.setMatchedBy("cpe-match");
         state.setConfidenceScore(0.85);
         wireForCreate(List.of(state), List.of());
-        when(riskScoringService.score(eq(vulnerability), any(), any())).thenReturn(7.5);
 
         ManualFindingCreationResult r = facade.createManualFindingsForVulnerability(
                 tenant, vulnerability, "  needed urgently  ", "alice", List.of(), Map.of(), Map.of());
@@ -527,6 +530,7 @@ class FindingWorkflowFacadeTest {
         when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId))
                 .thenReturn(existing);
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(new RiskPolicy());
+        when(findingsScoreService.computeFromParts(anyString(), any(), any(), any(), any())).thenReturn(7.5);
         when(findingSlaService.deriveDueAt(any(), anyDouble(), any(), any())).thenReturn(Instant.now().plusSeconds(86400));
     }
 

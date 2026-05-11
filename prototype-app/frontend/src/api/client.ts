@@ -1,6 +1,8 @@
 import type {
   PrototypeDataResetResponse,
-  RiskPolicy
+  RiskPolicy,
+  SuppressionRule,
+  SuppressionRuleRequest,
 } from '../features/configurations/types';
 import type {
   FindingBulkWorkflowRequest,
@@ -252,6 +254,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+  listAssignmentGroups: () => request<string[]>('/cve-detail/servicenow/assignment-groups'),
   validateDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}`),
   acceptDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}/accept`, {
     method: 'POST'
@@ -575,13 +578,34 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(policy)
   }),
+  recomputeFindingsScores: () => request<{ updated: number }>('/risk-policy/recompute-findings-scores', {
+    method: 'POST'
+  }),
   cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
     method: 'POST'
   }),
+  listSuppressionRules: () => request<SuppressionRule[]>('/suppression-rules'),
+  createSuppressionRule: (payload: SuppressionRuleRequest) => request<SuppressionRule>('/suppression-rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateSuppressionRule: (id: string, payload: SuppressionRuleRequest) => request<SuppressionRule>(`/suppression-rules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteSuppressionRule: (id: string) => request<void>(`/suppression-rules/${id}`, { method: 'DELETE' }),
+  executeSuppressionRule: (id: string) => request<{ suppressed: number; error?: string }>(`/suppression-rules/${id}/execute`, { method: 'POST' }),
+  reopenCveRecord: (recordId: string) => request<void>(`/suppression-rules/cve-reopen/${recordId}`, { method: 'POST' }),
+  reopenAllByRule: (ruleId: string) => request<{ reopened: number }>(`/suppression-rules/${ruleId}/reopen-all`, { method: 'POST' }),
   bulkUpdateFindingWorkflow: (payload: FindingBulkWorkflowRequest) =>
     request<FindingBulkWorkflowResponse>('/findings/bulk-workflow', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  bulkDeleteFindings: (findingIds: string[]) =>
+    request<{ deleted: number; message: string }>('/findings/bulk', {
+      method: 'DELETE',
+      body: JSON.stringify({ findingIds })
     }),
   getVulnIntelSourcesSummary: () => request<VulnIntelSourcesSummary>('/sync-runs/sources-summary'),
   syncNvd: (lookbackHours = 24) => request<SyncTriggerResponse>(`/ingestion/nvd-sync?lookbackHours=${lookbackHours}`, { method: 'POST' }),
