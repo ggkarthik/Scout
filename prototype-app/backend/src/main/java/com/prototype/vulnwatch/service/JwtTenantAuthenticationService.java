@@ -105,13 +105,14 @@ public class JwtTenantAuthenticationService {
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_slug is not registered"));
         }
 
+        if (roles.contains("PLATFORM_OWNER")) {
+            return null;
+        }
+
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(subject, "ACTIVE");
         if (!memberships.isEmpty()) {
             return memberships.get(0).getTenant();
-        }
-        if (roles.contains("PLATFORM_OWNER")) {
-            return null;
         }
         throw new ResponseStatusException(FORBIDDEN, "JWT user does not have an active tenant membership");
     }
