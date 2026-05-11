@@ -45,6 +45,9 @@ public record FindingResponse(
         Boolean isEol,
         Integer eolDaysRemaining,
         String incidentId,
-        String incidentStatus
+        String incidentStatus,
+        Double findingsScore,
+        UUID suppressedByRuleId,
+        String suppressedByRuleName
 ) {
 }

@@ -37,7 +37,7 @@ public class FindingAssetRecomputeService {
     private final InventoryComponentRepository inventoryComponentRepository;
     private final CorrelationCandidateService correlationCandidateService;
     private final RiskPolicyService riskPolicyService;
-    private final RiskScoringService riskScoringService;
+    private final FindingsScoreService findingsScoreService;
     private final FindingWorkflowService findingWorkflowService;
     private final ImpactEvaluationService impactEvaluationService;
     private final FindingEvidenceService findingEvidenceService;
@@ -52,7 +52,7 @@ public class FindingAssetRecomputeService {
             InventoryComponentRepository inventoryComponentRepository,
             CorrelationCandidateService correlationCandidateService,
             RiskPolicyService riskPolicyService,
-            RiskScoringService riskScoringService,
+            FindingsScoreService findingsScoreService,
             FindingWorkflowService findingWorkflowService,
             ImpactEvaluationService impactEvaluationService,
             FindingEvidenceService findingEvidenceService,
@@ -66,7 +66,7 @@ public class FindingAssetRecomputeService {
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.correlationCandidateService = correlationCandidateService;
         this.riskPolicyService = riskPolicyService;
-        this.riskScoringService = riskScoringService;
+        this.findingsScoreService = findingsScoreService;
         this.findingWorkflowService = findingWorkflowService;
         this.impactEvaluationService = impactEvaluationService;
         this.findingEvidenceService = findingEvidenceService;
@@ -234,16 +234,16 @@ public class FindingAssetRecomputeService {
                     continue;
                 }
 
-                RiskScoringService.RiskScoreOutcome riskScoreOutcome =
-                        riskScoringService.score(vulnerability, policy, asset, findingSelected, resolution);
-                double riskScore = riskScoreOutcome.score();
+                String existingSeverityOverride = finding != null ? finding.getSeverityOverride() : null;
+                double riskScore = findingsScoreService.computeFromParts(
+                        policy.getFindingsScoreConfig(), vulnerability, asset, component, existingSeverityOverride);
                 String evidence = findingEvidenceService.buildEvidence(
                         component,
                         vulnerability,
                         target,
                         findingSelected,
                         resolution,
-                        riskScoreOutcome
+                        null
                 );
                 evidence = findingCorrelationMutationService.withVexOverlayEvidence(evidence, vexOverlay);
 

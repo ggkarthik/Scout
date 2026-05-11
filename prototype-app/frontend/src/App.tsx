@@ -166,7 +166,6 @@ const OPERATIONS_NAV_ITEMS = [
 ] as const;
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
-  { key: 'org-cves', label: 'Unified Records' },
   { key: 'vulnerabilities', label: 'Intelligence' },
 ];
 
@@ -621,7 +620,7 @@ function AppShell() {
       ? 'org-cves'
       : 'dashboard';
   const visiblePrimaryNavTabs = React.useMemo(() => {
-    const tabs: AppTab[] = ['exposure', 'dashboard'];
+    const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
     }
@@ -963,7 +962,7 @@ function AppShell() {
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
-              <Route path="/" element={<DashboardRoute />} />
+              <Route path="/" element={<Navigate to="/exposure" replace />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />

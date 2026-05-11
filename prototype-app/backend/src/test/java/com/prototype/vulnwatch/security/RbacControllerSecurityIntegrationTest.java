@@ -64,6 +64,8 @@ class RbacControllerSecurityIntegrationTest {
     @MockBean
     private RiskPolicyService riskPolicyService;
     @MockBean
+    private com.prototype.vulnwatch.service.FindingsScoreRecomputeService findingsScoreRecomputeService;
+    @MockBean
     private ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     @MockBean
     private ServiceNowCmdbSyncService serviceNowCmdbSyncService;

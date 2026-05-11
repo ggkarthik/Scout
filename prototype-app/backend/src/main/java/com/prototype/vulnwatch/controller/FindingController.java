@@ -13,6 +13,8 @@ import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -110,5 +112,18 @@ public class FindingController {
         int updated = findingWorkflowService.updateWorkflowBulkByIds(request.findingIds(), workflowUpdate);
         int failed = targeted - updated;
         return new FindingBulkWorkflowResponse(targeted, updated, failed, "Bulk workflow update completed");
+    }
+
+    public record BulkDeleteRequest(List<UUID> findingIds) {}
+    public record BulkDeleteResponse(int deleted, String message) {}
+
+    @DeleteMapping("/bulk")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<BulkDeleteResponse> bulkDelete(@RequestBody BulkDeleteRequest request) {
+        if (request.findingIds() == null || request.findingIds().isEmpty()) {
+            return ResponseEntity.ok(new BulkDeleteResponse(0, "No finding IDs provided"));
+        }
+        int deleted = findingWorkflowService.bulkDelete(request.findingIds());
+        return ResponseEntity.ok(new BulkDeleteResponse(deleted, deleted + " finding(s) permanently deleted"));
     }
 }

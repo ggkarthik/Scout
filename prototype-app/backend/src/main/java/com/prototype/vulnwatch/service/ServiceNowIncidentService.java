@@ -233,9 +233,14 @@ public class ServiceNowIncidentService {
             throw new ResponseStatusException(BAD_GATEWAY, "ServiceNow returned an unexpected response — incident number missing");
         }
 
-        // Associate additional CIs via the task_ci M2M table
+        // Associate additional CIs via the task_ci M2M table (skip the primary already on cmdb_ci)
         if (sysId != null && !sysId.isBlank()) {
-            linkAdditionalCis(config, sysId, groupAssets);
+            String primaryCiSysId = groupAssets.stream()
+                    .map(a -> extractCiSysId(a.assetIdentifier()))
+                    .filter(id -> id != null)
+                    .findFirst()
+                    .orElse(null);
+            linkAdditionalCis(config, sysId, primaryCiSysId, groupAssets);
             // Create a Task SLA record for the remediation due date
             if (req.taskSlaDueDate() != null && !req.taskSlaDueDate().isBlank()) {
                 createTaskSla(config, sysId, req.taskSlaDueDate());
@@ -253,12 +258,14 @@ public class ServiceNowIncidentService {
     }
 
     /**
-     * Links all CIs in the group to the incident via the {@code task_ci} M2M table.
-     * The first CI is already set via {@code cmdb_ci}; this adds all of them for completeness.
+     * Links additional CIs in the group to the incident via the {@code task_ci} M2M table.
+     * The primary CI is already set via {@code cmdb_ci} on the incident; skip it here to
+     * avoid a duplicate-insert 403 from ServiceNow.
      */
     private void linkAdditionalCis(
             ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config,
             String incidentSysId,
+            String primaryCiSysId,
             List<CreateServiceNowIncidentRequest.AffectedAsset> groupAssets
     ) {
         String endpoint = config.baseUrl() + "/api/now/table/task_ci";
@@ -268,6 +275,8 @@ public class ServiceNowIncidentService {
         for (CreateServiceNowIncidentRequest.AffectedAsset asset : groupAssets) {
             String ciSysId = extractCiSysId(asset.assetIdentifier());
             if (ciSysId == null) continue;
+            // The primary CI is already linked via cmdb_ci on the incident — skip it.
+            if (ciSysId.equals(primaryCiSysId)) continue;
 
             Map<String, Object> taskCiPayload = new LinkedHashMap<>();
             taskCiPayload.put("task", incidentSysId);

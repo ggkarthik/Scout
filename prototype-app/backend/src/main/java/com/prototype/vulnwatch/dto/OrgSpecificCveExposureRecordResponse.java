@@ -37,6 +37,8 @@ public record OrgSpecificCveExposureRecordResponse(
         String investigationSummaryMode,
         boolean hasAiSolution,
         Instant aiSolutionGeneratedAt,
-        String orgImpact
+        String orgImpact,
+        UUID suppressedByRuleId,
+        String suppressedByRuleName
 ) {
 }

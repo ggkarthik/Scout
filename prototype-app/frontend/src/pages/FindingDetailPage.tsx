@@ -46,6 +46,7 @@ function statusLabel(f: Finding): string {
   if (f.status === 'RESOLVED') return 'Resolved';
   if (f.status === 'AUTO_CLOSED') return 'Closed';
   if (f.status === 'SUPPRESSED') {
+    if (f.suppressedByRuleId) return 'Suppressed';
     const r = (f.suppressionReason ?? '').toUpperCase();
     if (r.includes('FALSE_POSITIVE')) return 'False Positive';
     if (r.includes('DUPLICATE')) return 'Duplicate';
@@ -82,6 +83,95 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
     <div className="fd3-panel">
       <div className="fd3-panel-title">{title}</div>
       <div className="fd3-panel-body">{children}</div>
+    </div>
+  );
+}
+
+type FixDescriptionJson = {
+  summary?: string;
+  fix_type?: string;
+  os_hint?: string | null;
+  primary_fix?: {
+    action?: string;
+    target_version?: string | null;
+    applies_to?: string | null;
+    reboot_required?: boolean | null;
+    verification?: string | null;
+    patch_id?: string | null;
+  } | null;
+  compensating_controls?: Array<{ control?: string; effort?: string; effectiveness?: string }> | null;
+  rollback_plan?: string[] | null;
+  lifecycle_warning?: string | null;
+};
+
+function FixDescriptionDetail({ description }: { description: string }) {
+  let parsed: FixDescriptionJson | null = null;
+  try { parsed = JSON.parse(description) as FixDescriptionJson; } catch { /* fall through */ }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return <p style={{ marginTop: 6, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{description}</p>;
+  }
+
+  const WRAP: React.CSSProperties = { marginTop: 10, fontSize: 12, lineHeight: 1.6 };
+  const SECTION: React.CSSProperties = { fontWeight: 700, fontSize: 10, letterSpacing: '0.07em', color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 6 };
+  // Two-column grid: label 110px, value fills rest — no wrapping in narrow columns
+  const GRID: React.CSSProperties = { display: 'grid', gridTemplateColumns: '110px 1fr', gap: '3px 10px', marginBottom: 2 };
+  const KEY: React.CSSProperties = { fontWeight: 600, color: 'var(--muted)', fontSize: 11, alignSelf: 'start', paddingTop: 1 };
+  const VAL: React.CSSProperties = { color: 'var(--text)', fontSize: 12, wordBreak: 'break-word' };
+
+  return (
+    <div style={WRAP}>
+      {parsed.primary_fix && (
+        <>
+          <div style={SECTION}>Primary Fix</div>
+          {parsed.primary_fix.action && <div style={GRID}><span style={KEY}>Action</span><span style={VAL}>{parsed.primary_fix.action}</span></div>}
+          {parsed.primary_fix.applies_to && <div style={GRID}><span style={KEY}>Applies To</span><span style={VAL}>{parsed.primary_fix.applies_to}</span></div>}
+          {parsed.primary_fix.target_version && <div style={GRID}><span style={KEY}>Target Version</span><span style={{ ...VAL, fontFamily: 'monospace', fontSize: 11 }}>{parsed.primary_fix.target_version}</span></div>}
+          {parsed.primary_fix.reboot_required != null && <div style={GRID}><span style={KEY}>Reboot Required</span><span style={VAL}>{parsed.primary_fix.reboot_required ? 'Yes' : 'No'}</span></div>}
+          {parsed.primary_fix.verification && <div style={GRID}><span style={KEY}>Verification</span><span style={VAL}>{parsed.primary_fix.verification}</span></div>}
+        </>
+      )}
+
+      {parsed.compensating_controls && parsed.compensating_controls.length > 0 && (
+        <>
+          <div style={SECTION}>Compensating Controls</div>
+          {parsed.compensating_controls.map((c, i) => (
+            <div key={i} style={{ flexDirection: 'column', display: 'flex', marginBottom: 8, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
+              <span style={{ fontWeight: 600, fontSize: 12 }}>{c.control}</span>
+              {(c.effort || c.effectiveness) && (
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>
+                  {[c.effort && `Effort: ${c.effort}`, c.effectiveness && `Effectiveness: ${c.effectiveness}`].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+
+      {parsed.rollback_plan && parsed.rollback_plan.length > 0 && (
+        <>
+          <div style={SECTION}>Rollback Plan</div>
+          <ol style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {parsed.rollback_plan.map((step, i) => (
+              <li key={i} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 2 }}>{step}</li>
+            ))}
+          </ol>
+        </>
+      )}
+
+      {parsed.lifecycle_warning && (
+        <>
+          <div style={SECTION}>Lifecycle Warning</div>
+          <p style={{ margin: '4px 0 0', fontSize: 12, lineHeight: 1.5, color: '#b7791f' }}>{parsed.lifecycle_warning}</p>
+        </>
+      )}
+
+      {parsed.os_hint && (
+        <>
+          <div style={SECTION}>OS Hint</div>
+          <p style={{ margin: '4px 0 0', fontSize: 12 }}>{parsed.os_hint}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -124,6 +214,8 @@ export function FindingDetailPage() {
   const [incidentDueDate, setIncidentDueDate] = React.useState('');
   const [incidentNotes, setIncidentNotes] = React.useState('');
   const [incidentResult, setIncidentResult] = React.useState<ServiceNowIncidentResponse[] | null>(null);
+
+  const [activeTab, setActiveTab] = React.useState<'overview' | 'affected-assets'>('overview');
 
   // remote data
   const [cveDetail, setCveDetail] = React.useState<CveDetail | null>(null);
@@ -215,6 +307,12 @@ export function FindingDetailPage() {
         if (payload.decisionState) updates.decisionState = payload.decisionState as Finding['decisionState'];
         if (payload.suppressionReason) updates.suppressionReason = payload.suppressionReason as string;
         if (payload.suppressedUntil) updates.suppressedUntil = payload.suppressedUntil as string;
+        if (payload.status === 'OPEN') {
+          updates.suppressedByRuleId = undefined;
+          updates.suppressedByRuleName = undefined;
+          updates.suppressionReason = undefined;
+          updates.suppressedUntil = undefined;
+        }
         return { ...f, ...updates };
       });
       setActionDone(successMsg);
@@ -426,6 +524,23 @@ export function FindingDetailPage() {
   const ownership = currentFinding.ownership;
   const ownershipSource = ownership?.sourceSystem || ownership?.sourceType || '—';
 
+  // Parse grouped-finding evidence
+  const evidencePayload = (() => {
+    try { return JSON.parse(currentFinding.evidence ?? '{}') as Record<string, unknown>; }
+    catch { return {} as Record<string, unknown>; }
+  })();
+  const isGroupedFinding = Boolean(evidencePayload.groupedFinding);
+  const affectedAssetsFromEvidence = (Array.isArray(evidencePayload.affectedAssets)
+    ? evidencePayload.affectedAssets
+    : []) as Array<{ componentId?: string; assetId?: string; assetIdentifier?: string; assetName?: string; packageName?: string; version?: string; assetType?: string; businessCriticality?: string; environment?: string }>;
+  const affectedAssetCount = isGroupedFinding && affectedAssetsFromEvidence.length > 0
+    ? affectedAssetsFromEvidence.length : 1;
+
+  // Most relevant fix record for this finding
+  const relevantFix = (cveDetail?.fixes ?? []).find(f =>
+    f.softwareEntities?.some(e => e.name?.toLowerCase() === currentFinding.packageName?.toLowerCase())
+  ) ?? cveDetail?.fixes?.[0] ?? null;
+
   return (
     <div className="fd3-page">
 
@@ -436,7 +551,6 @@ export function FindingDetailPage() {
         <span className={statusCls(currentFinding)}>{statusLabel(currentFinding)}</span>
         {overdue && <span className="fd3-target-missed">⚠ Target Missed</span>}
         <div style={{ flex: 1 }} />
-        {/* Actions */}
         <div className="fd3-actions">
           <button className="fd3-action-btn fd3-action-btn--incident" onClick={() => openModal('create-incident')}>+ Create Incident</button>
           {currentFinding.status === 'OPEN' && (
@@ -453,87 +567,128 @@ export function FindingDetailPage() {
         </div>
       </div>
 
-      {/* ── 2-column body ───────────────────────────────────────────────── */}
-      <div className="fd3-body">
+      {/* ── tab bar ─────────────────────────────────────────────────────── */}
+      <div className="fd3-tab-bar">
+        <button
+          className={`fd3-tab${activeTab === 'overview' ? ' fd3-tab--active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+        >Overview</button>
+        <button
+          className={`fd3-tab${activeTab === 'affected-assets' ? ' fd3-tab--active' : ''}`}
+          onClick={() => setActiveTab('affected-assets')}
+        >
+          Affected Assets
+          <span className="fd3-tab-count">{affectedAssetCount}</span>
+        </button>
+      </div>
 
-        {/* ── LEFT: Asset + Workflow ──────────────────────────────────── */}
-        <div className="fd3-col fd3-col-left">
+      {/* ── OVERVIEW TAB ────────────────────────────────────────────────── */}
+      {activeTab === 'overview' && (
+        <div className="fd3-body">
 
-          <Panel title="Affected Configuration Item">
-            <div className="fd3-ci-root">
-              {/* CI identifier row */}
-              <div className="fd3-ci-id-row">
-                <span className="fd3-ci-id-label">Configuration item</span>
-                {hostAssetId ? (
-                  <button className="fd3-asset-link" onClick={() => navigate(pathForInventoryHostAsset(hostAssetId))}>
-                    {currentFinding.assetIdentifier}
-                  </button>
-                ) : (
-                  <span className="fd3-ci-id-val">{currentFinding.assetIdentifier || currentFinding.assetName}</span>
+          {/* ── LEFT ──────────────────────────────────────────────────── */}
+          <div className="fd3-col fd3-col-left">
+
+            {/* 1. Details (at top-left) */}
+            <Panel title="Details">
+              <div className="fd3-kv-table">
+                <KVRow label="Status">
+                  <span className={statusCls(currentFinding)}>{statusLabel(currentFinding)}</span>
+                </KVRow>
+                {(() => {
+                  const p = computeFindingPriorityScore(currentFinding, policyQuery.data);
+                  const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(p.score).toLowerCase()}`;
+                  return (
+                    <KVRow label="S.AI Priority">
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span className={cls}>{p.score.toFixed(1)}</span>
+                        {p.topReasons.length > 0 && (
+                          <span className="fd3-muted" style={{ fontSize: 11 }}>
+                            {p.topReasons.join(' · ')}
+                          </span>
+                        )}
+                      </span>
+                    </KVRow>
+                  );
+                })()}
+                <KVRow label="Due Date">
+                  {currentFinding.dueAt
+                    ? <span className={overdue ? 'fd3-overdue' : undefined}>{fmtDate(currentFinding.dueAt)}{overdue && ' ⚠'}</span>
+                    : <span className="fd3-muted">—</span>}
+                </KVRow>
+                {currentFinding.status === 'SUPPRESSED' && !currentFinding.suppressedByRuleId && !((currentFinding.suppressionReason ?? '').toUpperCase().includes('FALSE_POSITIVE')) && (
+                  <KVRow label="Deferral Date">{fmtDate(currentFinding.suppressedUntil)}</KVRow>
                 )}
+                {currentFinding.suppressedByRuleName && (
+                  <KVRow label="Suppression Rule">
+                    <span style={{ fontWeight: 600 }}>{currentFinding.suppressedByRuleName}</span>
+                  </KVRow>
+                )}
+                {currentFinding.suppressedByRuleName && currentFinding.suppressionReason && (
+                  <KVRow label="Suppression Reason">{currentFinding.suppressionReason}</KVRow>
+                )}
+                <KVRow label="Assigned To">
+                  {editingAssignee ? (
+                    <span className="fd3-assign-wrap">
+                      <input autoFocus className="fd3-assign-input"
+                        value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') void saveAssignee(); if (e.key === 'Escape') setEditingAssignee(false); }}
+                        placeholder="username or email" />
+                      <button className="fd3-assign-save" onClick={() => void saveAssignee()} disabled={assigneeSaving}>
+                        {assigneeSaving ? '…' : '✓'}
+                      </button>
+                      <button className="fd3-assign-cancel" onClick={() => { setAssignedTo(currentFinding.assignedTo ?? ''); setEditingAssignee(false); }}>✕</button>
+                    </span>
+                  ) : (
+                    <span className="fd3-assign-display" onClick={() => setEditingAssignee(true)}>
+                      {currentFinding.assignedTo || <span className="fd3-muted">Unassigned</span>}
+                      <span className="fd3-assign-edit-icon">✏</span>
+                    </span>
+                  )}
+                </KVRow>
+                <KVRow label="Assignment Group">
+                  {editingGroup ? (
+                    <span className="fd3-assign-wrap">
+                      <input autoFocus className="fd3-assign-input"
+                        value={assignmentGroup} onChange={e => setAssignmentGroup(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') void saveAssignmentGroup(); if (e.key === 'Escape') setEditingGroup(false); }}
+                        placeholder="e.g. Security Operations" />
+                      <button className="fd3-assign-save" onClick={() => void saveAssignmentGroup()} disabled={groupSaving}>
+                        {groupSaving ? '…' : '✓'}
+                      </button>
+                      <button className="fd3-assign-cancel" onClick={() => setEditingGroup(false)}>✕</button>
+                    </span>
+                  ) : (
+                    <span className="fd3-assign-display" onClick={() => setEditingGroup(true)}>
+                      {assignmentGroup || <span className="fd3-muted">—</span>}
+                      <span className="fd3-assign-edit-icon">✏</span>
+                    </span>
+                  )}
+                </KVRow>
+                {currentFinding.incidentId && (
+                  <KVRow label="Incident ID">
+                    <span className="mono fd3-incident-link">{currentFinding.incidentId}</span>
+                  </KVRow>
+                )}
+                <KVRow label="First Observed">{fmtDt(currentFinding.firstObservedAt)}</KVRow>
+                <KVRow label="Last Observed">{fmtDt(currentFinding.lastObservedAt)}</KVRow>
               </div>
 
-              {/* Grid row 1: Name · OS Version · Internet Facing */}
-              <div className="fd3-ci-grid">
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Name</div>
-                  <div className="fd3-ci-cell-value">{currentFinding.assetName}</div>
-                </div>
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">OS Version</div>
-                  <div className="fd3-ci-cell-value">{hostAsset?.managedBy || '—'}</div>
-                </div>
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Internet Facing</div>
-                  <div className="fd3-ci-cell-value">—</div>
-                </div>
-              </div>
-
-              {/* Grid row 2: Class · Category · Asset tag */}
-              <div className="fd3-ci-grid">
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Class</div>
-                  <div className="fd3-ci-cell-value">{fmt(currentFinding.assetType)}</div>
-                </div>
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Category</div>
-                  <div className="fd3-ci-cell-value">{hostAsset?.department || '—'}</div>
-                </div>
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Asset tag</div>
-                  <div className="fd3-ci-cell-value">{hostAsset?.sysId ? <span className="mono" style={{ fontSize: 11 }}>{hostAsset.sysId.slice(0, 10)}…</span> : '—'}</div>
-                </div>
-              </div>
-
-              {/* Grid row 3: Install Status · Environment */}
-              <div className="fd3-ci-grid">
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Install Status</div>
-                  <div className="fd3-ci-cell-value">{fmt(hostAsset?.state) || '—'}</div>
-                </div>
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Environment</div>
-                  <div className="fd3-ci-cell-value">{hostAsset?.environment || '—'}</div>
-                </div>
-              </div>
-
-              {/* Assigned to */}
-              <div className="fd3-ci-grid">
-                <div className="fd3-ci-cell">
-                  <div className="fd3-ci-cell-label">Assigned to</div>
-                  <div className="fd3-ci-cell-value fd3-ci-assignee">{hostAsset?.assignedTo || '—'}</div>
-                </div>
-              </div>
-
-              {/* Software row */}
+              {/* Impacted Software */}
               <div className="fd3-ci-sep" />
+              <div className="fd3-panel-sub-title">IMPACTED SOFTWARE</div>
               <div className="fd3-kv-table">
                 <KVRow label="Package">
-                  <span className="mono">{currentFinding.packageName}</span>
+                  <span className="mono">{currentFinding.packageName || '—'}</span>
                 </KVRow>
                 <KVRow label="Version">
                   <span className="mono">{currentFinding.packageVersion || '—'}</span>
                 </KVRow>
+                {relevantFix?.softwareEntities?.[0]?.ecosystem && (
+                  <KVRow label="Vendor / Ecosystem">
+                    <span>{relevantFix.softwareEntities[0].ecosystem}</span>
+                  </KVRow>
+                )}
                 {currentFinding.isEol && (
                   <KVRow label="EOL Status">
                     <span className="fd3-eol-badge">End of Life</span>
@@ -541,194 +696,266 @@ export function FindingDetailPage() {
                   </KVRow>
                 )}
               </div>
-            </div>
-          </Panel>
 
-          {ownership && (
-            <Panel title="Asset Ownership">
+              {/* Fix Information */}
+              {relevantFix && (
+                <>
+                  <div className="fd3-ci-sep" />
+                  <div className="fd3-panel-sub-title">FIX INFORMATION</div>
+                  <div className="fd3-kv-table">
+                    <KVRow label="Fix ID">
+                      <span className="mono" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                        {relevantFix.id.slice(0, 8).toUpperCase()}
+                      </span>
+                    </KVRow>
+                    <KVRow label="Fix Type">{fmt(relevantFix.fixType)}</KVRow>
+                    <KVRow label="Summary">
+                      <span style={{ fontSize: 12, lineHeight: 1.5 }}>{relevantFix.summary}</span>
+                    </KVRow>
+                    {relevantFix.softwareEntities?.length > 0 && (
+                      <KVRow label="Affected Software">
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {relevantFix.softwareEntities.map((e, i) => (
+                            <span key={i} className="mono" style={{ fontSize: 11 }}>
+                              {e.name}{e.version ? ` ${e.version}` : ''}{e.ecosystem ? ` (${e.ecosystem})` : ''}
+                            </span>
+                          ))}
+                        </span>
+                      </KVRow>
+                    )}
+                  </div>
+
+                  {/* Full description — full-width, outside KVRow to avoid narrow column wrapping */}
+                  {relevantFix.description && relevantFix.description !== relevantFix.summary && (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--accent, #3b82f6)', userSelect: 'none', fontSize: 12, fontWeight: 500, listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 10 }}>▶</span> Show full description
+                      </summary>
+                      <FixDescriptionDetail description={relevantFix.description} />
+                    </details>
+                  )}
+                </>
+              )}
+            </Panel>
+
+            {/* 2. Affected Assets summary — stat cards */}
+            {(() => {
+              const assets = isGroupedFinding && affectedAssetsFromEvidence.length > 0
+                ? affectedAssetsFromEvidence
+                : null;
+              const total = assets ? assets.length : 1;
+
+              // External facing: environment contains production/external/internet/public hints
+              const EXT_HINTS = ['prod', 'external', 'internet', 'public', 'dmz', 'edge', 'web'];
+              const externalCount = assets
+                ? assets.filter(a => EXT_HINTS.some(h => (a.environment ?? '').toLowerCase().includes(h))).length
+                : (EXT_HINTS.some(h => (hostAsset?.environment ?? '').toLowerCase().includes(h)) ? 1 : 0);
+
+              // Critical: businessCriticality === CRITICAL
+              const criticalCount = assets
+                ? assets.filter(a => a.businessCriticality === 'CRITICAL').length
+                : (hostAsset?.businessCriticality?.toUpperCase() === 'CRITICAL' ? 1 : 0);
+
+              const STAT: React.CSSProperties = {
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                flex: 1, padding: '12px 8px', borderRight: '1px solid var(--border)',
+              };
+              const NUM: React.CSSProperties = { fontSize: 28, fontWeight: 700, color: 'var(--text)', lineHeight: 1 };
+              const CAP: React.CSSProperties = { fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', color: 'var(--muted)', textTransform: 'uppercase', marginTop: 4, textAlign: 'center' };
+
+              return (
+                <Panel title="Affected Assets">
+                  <div style={{ margin: '-12px -16px' }}>
+                    <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+                      <div style={STAT}>
+                        <span style={NUM}>{total}</span>
+                        <span style={CAP}>Total Assets</span>
+                      </div>
+                      <div style={STAT}>
+                        <span style={{ ...NUM, color: externalCount > 0 ? '#c53030' : 'var(--text)' }}>{externalCount}</span>
+                        <span style={CAP}>External Facing</span>
+                      </div>
+                      <div style={{ ...STAT, borderRight: 'none' }}>
+                        <span style={{ ...NUM, color: criticalCount > 0 ? '#9b2335' : 'var(--text)' }}>{criticalCount}</span>
+                        <span style={CAP}>Critical Assets</span>
+                      </div>
+                    </div>
+                    <div style={{ padding: '8px 14px' }}>
+                      <button className="fd3-asset-link" style={{ fontSize: 12 }}
+                        onClick={() => setActiveTab('affected-assets')}>
+                        View full asset list →
+                      </button>
+                    </div>
+                  </div>
+                </Panel>
+              );
+            })()}
+
+            {/* 3. Asset Ownership */}
+            {ownership && (
+              <Panel title="Asset Ownership">
+                <div className="fd3-kv-table">
+                  <KVRow label="Owner">{ownership.displayName || 'Unassigned'}</KVRow>
+                  <KVRow label="Owner Team">{ownership.ownerTeam || '—'}</KVRow>
+                  <KVRow label="Owner Email">{ownership.ownerEmail || '—'}</KVRow>
+                  <KVRow label="Managed By">{ownership.managedBy || '—'}</KVRow>
+                  <KVRow label="Department">{ownership.department || '—'}</KVRow>
+                  <KVRow label="Support Group">{ownership.supportGroup || '—'}</KVRow>
+                  <KVRow label="Asset Assigned To">{ownership.assignedTo || '—'}</KVRow>
+                  <KVRow label="Source">{ownershipSource}</KVRow>
+                  <KVRow label="Authority">{ownership.authority || '—'}</KVRow>
+                  <KVRow label="Last Ownership Sync">{fmtDt(currentFinding.ownershipSyncedAt)}</KVRow>
+                </div>
+              </Panel>
+            )}
+
+          </div>
+
+          {/* ── RIGHT: CVE + Remediation ──────────────────────────────── */}
+          <div className="fd3-col fd3-col-right">
+
+            <Panel title="Vulnerability">
               <div className="fd3-kv-table">
-                <KVRow label="Owner">{ownership.displayName || 'Unassigned'}</KVRow>
-                <KVRow label="Owner Team">{ownership.ownerTeam || '—'}</KVRow>
-                <KVRow label="Owner Email">{ownership.ownerEmail || '—'}</KVRow>
-                <KVRow label="Managed By">{ownership.managedBy || '—'}</KVRow>
-                <KVRow label="Department">{ownership.department || '—'}</KVRow>
-                <KVRow label="Support Group">{ownership.supportGroup || '—'}</KVRow>
-                <KVRow label="Asset Assigned To">{ownership.assignedTo || '—'}</KVRow>
-                <KVRow label="Source">{ownershipSource}</KVRow>
-                <KVRow label="Authority">{ownership.authority || '—'}</KVRow>
-                <KVRow label="Last Ownership Sync">{fmtDt(currentFinding.ownershipSyncedAt)}</KVRow>
+                <KVRow label="CVE ID">
+                  <button className="fd3-cve-link" onClick={() => navigate(pathForVulnRepoView('org-cves' as VulnerabilityIntelRouteView, cve))}>
+                    {cve}
+                  </button>
+                </KVRow>
+                {cveDetail?.summary.description && (
+                  <KVRow label="Summary">
+                    <span style={{ fontSize: 12, lineHeight: 1.5 }}>{cveDetail.summary.description}</span>
+                  </KVRow>
+                )}
+                <KVRow label="Severity">
+                  <span className={`severity-pill severity-${currentFinding.severity.toLowerCase()}`}>{currentFinding.severity}</span>
+                </KVRow>
+                <KVRow label="Risk Score">{currentFinding.riskScore.toFixed(1)}</KVRow>
+                {currentFinding.findingsScore != null && (
+                  <KVRow label="Findings Score">{currentFinding.findingsScore.toFixed(1)}</KVRow>
+                )}
+                {cveDetail?.summary.cvssScore != null && (
+                  <KVRow label="Vulnerability Score (v3)">{cveDetail.summary.cvssScore.toFixed(1)}</KVRow>
+                )}
+                {cveDetail?.summary.publishedAt && (
+                  <KVRow label="Date Published">{fmtDate(cveDetail.summary.publishedAt)}</KVRow>
+                )}
+                {cveDetail?.signals && (
+                  <KVRow label="Exploit Exists">{cveDetail.signals.exploitAvailable ? 'Yes' : 'No'}</KVRow>
+                )}
+                {currentFinding.epss != null && (
+                  <KVRow label="EPSS">{(currentFinding.epss * 100).toFixed(2)}%</KVRow>
+                )}
+                {cveDetail?.summary.modifiedAt && (
+                  <KVRow label="Last Modified">{fmtDate(cveDetail.summary.modifiedAt)}</KVRow>
+                )}
               </div>
             </Panel>
-          )}
 
-          <Panel title="Details">
-            <div className="fd3-kv-table">
-              <KVRow label="Status">
-                <span className={statusCls(currentFinding)}>{statusLabel(currentFinding)}</span>
-              </KVRow>
-              {(() => {
-                const p = computeFindingPriorityScore(currentFinding, policyQuery.data);
-                const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(p.score).toLowerCase()}`;
-                return (
-                  <KVRow label="S.AI Priority">
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <span className={cls}>{p.score.toFixed(1)}</span>
-                      {p.topReasons.length > 0 && (
-                        <span className="fd3-muted" style={{ fontSize: 11 }}>
-                          {p.topReasons.join(' · ')}
-                        </span>
-                      )}
-                    </span>
-                  </KVRow>
-                );
-              })()}
-              <KVRow label="Due Date">
-                {currentFinding.dueAt
-                  ? <span className={overdue ? 'fd3-overdue' : undefined}>{fmtDate(currentFinding.dueAt)}{overdue && ' ⚠'}</span>
-                  : <span className="fd3-muted">—</span>}
-              </KVRow>
-              {currentFinding.status === 'SUPPRESSED' && !((currentFinding.suppressionReason ?? '').toUpperCase().includes('FALSE_POSITIVE')) && (
-                <KVRow label="Deferral Date">{fmtDate(currentFinding.suppressedUntil)}</KVRow>
-              )}
-              <KVRow label="Assigned To">
-                {editingAssignee ? (
-                  <span className="fd3-assign-wrap">
-                    <input autoFocus className="fd3-assign-input"
-                      value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') void saveAssignee(); if (e.key === 'Escape') setEditingAssignee(false); }}
-                      placeholder="username or email" />
-                    <button className="fd3-assign-save" onClick={() => void saveAssignee()} disabled={assigneeSaving}>
-                      {assigneeSaving ? '…' : '✓'}
-                    </button>
-                    <button className="fd3-assign-cancel" onClick={() => { setAssignedTo(currentFinding.assignedTo ?? ''); setEditingAssignee(false); }}>✕</button>
-                  </span>
-                ) : (
-                  <span className="fd3-assign-display" onClick={() => setEditingAssignee(true)}>
-                    {currentFinding.assignedTo || <span className="fd3-muted">Unassigned</span>}
-                    <span className="fd3-assign-edit-icon">✏</span>
-                  </span>
+            {aiSolution?.data && (
+              <Panel title="Remediation Guidance">
+                {aiSolution.data.bottom_line && (
+                  <div className="fd3-solution-summary">
+                    <p className="fd3-solution-text">{aiSolution.data.bottom_line.summary}</p>
+                  </div>
                 )}
-              </KVRow>
-              <KVRow label="Assignment Group">
-                {editingGroup ? (
-                  <span className="fd3-assign-wrap">
-                    <input autoFocus className="fd3-assign-input"
-                      value={assignmentGroup} onChange={e => setAssignmentGroup(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') void saveAssignmentGroup(); if (e.key === 'Escape') setEditingGroup(false); }}
-                      placeholder="e.g. Security Operations" />
-                    <button className="fd3-assign-save" onClick={() => void saveAssignmentGroup()} disabled={groupSaving}>
-                      {groupSaving ? '…' : '✓'}
-                    </button>
-                    <button className="fd3-assign-cancel" onClick={() => setEditingGroup(false)}>✕</button>
-                  </span>
-                ) : (
-                  <span className="fd3-assign-display" onClick={() => setEditingGroup(true)}>
-                    {assignmentGroup || <span className="fd3-muted">—</span>}
-                    <span className="fd3-assign-edit-icon">✏</span>
-                  </span>
+                {aiSolution.data.primary_fix && (
+                  <div className="fd3-kv-table" style={{ marginTop: 10 }}>
+                    <KVRow label="Action">{aiSolution.data.primary_fix.action}</KVRow>
+                    {aiSolution.data.primary_fix.target_version && (
+                      <KVRow label="Target Version"><span className="mono">{aiSolution.data.primary_fix.target_version}</span></KVRow>
+                    )}
+                    {aiSolution.data.primary_fix.verification && (
+                      <KVRow label="Verification">{aiSolution.data.primary_fix.verification}</KVRow>
+                    )}
+                    {aiSolution.data.primary_fix.reboot_required != null && (
+                      <KVRow label="Reboot Required">{aiSolution.data.primary_fix.reboot_required ? 'Yes' : 'No'}</KVRow>
+                    )}
+                  </div>
                 )}
-              </KVRow>
-              {currentFinding.incidentId && (
-                <KVRow label="Incident ID">
-                  <span className="mono fd3-incident-link">{currentFinding.incidentId}</span>
-                </KVRow>
-              )}
-              <KVRow label="First Observed">{fmtDt(currentFinding.firstObservedAt)}</KVRow>
-              <KVRow label="Last Observed">{fmtDt(currentFinding.lastObservedAt)}</KVRow>
-            </div>
-          </Panel>
-
-        </div>
-
-        {/* ── RIGHT: CVE + Vendor + Solution ─────────────────────────── */}
-        <div className="fd3-col fd3-col-right">
-
-          <Panel title="Vulnerability">
-            <div className="fd3-kv-table">
-              <KVRow label="CVE ID">
-                <button className="fd3-cve-link" onClick={() => navigate(pathForVulnRepoView('org-cves' as VulnerabilityIntelRouteView, cve))}>
-                  {cve}
-                </button>
-              </KVRow>
-              {cveDetail?.summary.description && (
-                <KVRow label="Summary">
-                  <span style={{ fontSize: 12, lineHeight: 1.5 }}>{cveDetail.summary.description}</span>
-                </KVRow>
-              )}
-              <KVRow label="Modified Severity">
-                <span className={`severity-pill severity-${currentFinding.severity.toLowerCase()}`}>{currentFinding.severity}</span>
-              </KVRow>
-              <KVRow label="Risk Score">{Math.round(currentFinding.riskScore * 100)}</KVRow>
-              {cveDetail?.summary.cvssScore != null && (
-                <KVRow label="Vulnerability Score (v3)">{cveDetail.summary.cvssScore.toFixed(1)}</KVRow>
-              )}
-              {cveDetail?.summary.publishedAt && (
-                <KVRow label="Date Published">{fmtDate(cveDetail.summary.publishedAt)}</KVRow>
-              )}
-              {cveDetail?.signals && (
-                <KVRow label="Exploit Exists">{cveDetail.signals.exploitAvailable ? 'Yes' : 'No'}</KVRow>
-              )}
-
-              {currentFinding.epss != null && (
-                <KVRow label="EPSS">{(currentFinding.epss * 100).toFixed(2)}%</KVRow>
-              )}
-              {cveDetail?.summary.modifiedAt && (
-                <KVRow label="Last Modified">{fmtDate(cveDetail.summary.modifiedAt)}</KVRow>
-              )}
-            </div>
-          </Panel>
-
-          {/* AI Solution / Remediation */}
-          {aiSolution?.data && (
-            <Panel title="Remediation Guidance">
-              {aiSolution.data.bottom_line && (
-                <div className="fd3-solution-summary">
-                  <p className="fd3-solution-text">{aiSolution.data.bottom_line.summary}</p>
-                </div>
-              )}
-              {aiSolution.data.primary_fix && (
-                <div className="fd3-kv-table" style={{ marginTop: 10 }}>
-                  <KVRow label="Action">{aiSolution.data.primary_fix.action}</KVRow>
-                  {aiSolution.data.primary_fix.target_version && (
-                    <KVRow label="Target Version"><span className="mono">{aiSolution.data.primary_fix.target_version}</span></KVRow>
-                  )}
-                  {aiSolution.data.primary_fix.verification && (
-                    <KVRow label="Verification">{aiSolution.data.primary_fix.verification}</KVRow>
-                  )}
-                  {aiSolution.data.primary_fix.reboot_required != null && (
-                    <KVRow label="Reboot Required">{aiSolution.data.primary_fix.reboot_required ? 'Yes' : 'No'}</KVRow>
-                  )}
-                </div>
-              )}
-              {aiSolution.data.timeline && aiSolution.data.timeline.length > 0 && (
-                <div className="fd3-timeline">
-                  {aiSolution.data.timeline.map((t, i) => (
-                    <div key={i} className="fd3-timeline-item" style={{ borderLeftColor: t.color }}>
-                      <div className="fd3-timeline-window">{t.window} · {t.label}</div>
-                      <ul className="fd3-timeline-actions">
-                        {t.actions.map((a, j) => <li key={j}>{a}</li>)}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {aiSolution.data.compensating_controls && aiSolution.data.compensating_controls.length > 0 && (
-                <details className="fd3-details">
-                  <summary className="fd3-details-summary">Compensating Controls ({aiSolution.data.compensating_controls.length})</summary>
-                  <div className="fd3-kv-table" style={{ marginTop: 8 }}>
-                    {aiSolution.data.compensating_controls.map((c, i) => (
-                      <KVRow key={i} label={c.control}>
-                        <span className="fd3-muted">{c.effort} effort · {c.effectiveness} effectiveness</span>
-                      </KVRow>
+                {aiSolution.data.timeline && aiSolution.data.timeline.length > 0 && (
+                  <div className="fd3-timeline">
+                    {aiSolution.data.timeline.map((t, i) => (
+                      <div key={i} className="fd3-timeline-item" style={{ borderLeftColor: t.color }}>
+                        <div className="fd3-timeline-window">{t.window} · {t.label}</div>
+                        <ul className="fd3-timeline-actions">
+                          {t.actions.map((a, j) => <li key={j}>{a}</li>)}
+                        </ul>
+                      </div>
                     ))}
                   </div>
-                </details>
-              )}
-            </Panel>
-          )}
+                )}
+                {aiSolution.data.compensating_controls && aiSolution.data.compensating_controls.length > 0 && (
+                  <details className="fd3-details">
+                    <summary className="fd3-details-summary">Compensating Controls ({aiSolution.data.compensating_controls.length})</summary>
+                    <div className="fd3-kv-table" style={{ marginTop: 8 }}>
+                      {aiSolution.data.compensating_controls.map((c, i) => (
+                        <KVRow key={i} label={c.control}>
+                          <span className="fd3-muted">{c.effort} effort · {c.effectiveness} effectiveness</span>
+                        </KVRow>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </Panel>
+            )}
 
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── AFFECTED ASSETS TAB ─────────────────────────────────────────── */}
+      {activeTab === 'affected-assets' && (
+        <div style={{ padding: '20px 0' }}>
+          <div className="fd3-panel">
+            <div className="fd3-panel-title">Affected Assets</div>
+            <div className="fd3-panel-body" style={{ padding: 0 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--panel-muted)', borderBottom: '2px solid var(--border)' }}>
+                    <th style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--muted)', letterSpacing: '0.06em' }}>ASSET ID</th>
+                    <th style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--muted)', letterSpacing: '0.06em' }}>HOST NAME</th>
+                    <th style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--muted)', letterSpacing: '0.06em' }}>SOFTWARE</th>
+                    <th style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--muted)', letterSpacing: '0.06em' }}>VERSION</th>
+                    <th style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--muted)', letterSpacing: '0.06em' }}>TYPE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isGroupedFinding && affectedAssetsFromEvidence.length > 0
+                    ? affectedAssetsFromEvidence.map((a, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', cursor: a.assetId ? 'pointer' : 'default' }}
+                          onClick={() => a.assetId && navigate(pathForInventoryHostAsset(a.assetId))}>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 11, color: 'var(--muted)' }}>
+                            {a.assetIdentifier || (a.componentId ? a.componentId.slice(0, 8).toUpperCase() : '—')}
+                          </td>
+                          <td style={{ padding: '10px 16px', fontWeight: 500, color: a.assetId ? 'var(--accent, #3b82f6)' : 'var(--text)' }}>
+                            {a.assetName || '—'}
+                          </td>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12 }}>{a.packageName || '—'}</td>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12 }}>{a.version || '—'}</td>
+                          <td style={{ padding: '10px 16px', color: 'var(--muted)', fontSize: 12 }}>{fmt(a.assetType)}</td>
+                        </tr>
+                      ))
+                    : (
+                        <tr style={{ borderBottom: '1px solid var(--border)', cursor: hostAssetId ? 'pointer' : 'default' }}
+                          onClick={() => hostAssetId && navigate(pathForInventoryHostAsset(hostAssetId))}>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 11, color: 'var(--muted)' }}>
+                            {currentFinding.assetIdentifier || '—'}
+                          </td>
+                          <td style={{ padding: '10px 16px', fontWeight: 500, color: hostAssetId ? 'var(--accent, #3b82f6)' : 'var(--text)' }}>
+                            {currentFinding.assetName || '—'}
+                          </td>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12 }}>{currentFinding.packageName || '—'}</td>
+                          <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12 }}>{currentFinding.packageVersion || '—'}</td>
+                          <td style={{ padding: '10px 16px', color: 'var(--muted)', fontSize: 12 }}>{fmt(currentFinding.assetType)}</td>
+                        </tr>
+                      )
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {renderModal()}
     </div>

@@ -137,6 +137,12 @@ public class OrgCveRecord {
     @Column(name = "suppressed_until")
     private Instant suppressedUntil;
 
+    @Column(name = "suppressed_by_rule_id")
+    private UUID suppressedByRuleId;
+
+    @Column(name = "suppressed_by_rule_name")
+    private String suppressedByRuleName;
+
     @Column(name = "last_evaluated_at", nullable = false)
     private Instant lastEvaluatedAt = Instant.now();
 
@@ -417,6 +423,12 @@ public class OrgCveRecord {
     public void setSuppressedUntil(Instant suppressedUntil) {
         this.suppressedUntil = suppressedUntil;
     }
+
+    public UUID getSuppressedByRuleId() { return suppressedByRuleId; }
+    public void setSuppressedByRuleId(UUID suppressedByRuleId) { this.suppressedByRuleId = suppressedByRuleId; }
+
+    public String getSuppressedByRuleName() { return suppressedByRuleName; }
+    public void setSuppressedByRuleName(String suppressedByRuleName) { this.suppressedByRuleName = suppressedByRuleName; }
 
     public boolean isActivelySuppressed(Instant at) {
         if (suppressedAt == null) {

@@ -18,9 +18,21 @@ public class FindingSlaService {
         if (baseSlaDays <= 0) {
             return null;
         }
-        double multiplier = slaMultiplierForAsset(asset, policy);
-        int effectiveDays = (int) Math.max(1, Math.round(baseSlaDays * multiplier));
+        double multiplier = assetMultiplier(asset, policy);
+        long effectiveDays = Math.max(1, Math.round(baseSlaDays * multiplier));
         return firstObservedAt.plus(Duration.ofDays(effectiveDays));
+    }
+
+    private double assetMultiplier(Asset asset, RiskPolicy policy) {
+        BusinessCriticality criticality = asset == null || asset.getBusinessCriticality() == null
+                ? BusinessCriticality.MEDIUM
+                : asset.getBusinessCriticality();
+        return switch (criticality) {
+            case CRITICAL -> policy.getAssetCriticalSlaMultiplier() > 0 ? policy.getAssetCriticalSlaMultiplier() : 1.0;
+            case HIGH -> policy.getAssetHighSlaMultiplier() > 0 ? policy.getAssetHighSlaMultiplier() : 1.0;
+            case MEDIUM -> policy.getAssetMediumSlaMultiplier() > 0 ? policy.getAssetMediumSlaMultiplier() : 1.0;
+            case LOW -> policy.getAssetLowSlaMultiplier() > 0 ? policy.getAssetLowSlaMultiplier() : 1.0;
+        };
     }
 
     private int baseSlaDaysForRisk(double riskScore, RiskPolicy policy) {
@@ -34,17 +46,5 @@ public class FindingSlaService {
             return policy.getMediumSlaDays();
         }
         return policy.getLowSlaDays();
-    }
-
-    private double slaMultiplierForAsset(Asset asset, RiskPolicy policy) {
-        BusinessCriticality criticality = asset == null || asset.getBusinessCriticality() == null
-                ? BusinessCriticality.MEDIUM
-                : asset.getBusinessCriticality();
-        return switch (criticality) {
-            case CRITICAL -> policy.getAssetCriticalSlaMultiplier();
-            case HIGH -> policy.getAssetHighSlaMultiplier();
-            case MEDIUM -> policy.getAssetMediumSlaMultiplier();
-            case LOW -> policy.getAssetLowSlaMultiplier();
-        };
     }
 }

@@ -83,9 +83,7 @@ public class VexPolicyService {
         if (normalizedStatus != null && normalizedStatus.contains("FIXED")) {
             return Integer.MAX_VALUE;
         }
-        return policy == null
-                ? DEFAULT_VEX_NOT_AFFECTED_FRESHNESS_DAYS
-                : Math.max(1, policy.getVexNotAffectedFreshnessDays());
+        return DEFAULT_VEX_NOT_AFFECTED_FRESHNESS_DAYS;
     }
 
     private boolean hasText(String value) {

@@ -4,8 +4,10 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.RiskPolicyRequest;
 import com.prototype.vulnwatch.dto.RiskPolicyResponse;
 import com.prototype.vulnwatch.service.AuditEventService;
+import com.prototype.vulnwatch.service.FindingsScoreRecomputeService;
 import com.prototype.vulnwatch.service.RiskPolicyService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import java.util.Map;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,15 +22,18 @@ public class RiskPolicyController {
     private final WorkspaceService workspaceService;
     private final RiskPolicyService riskPolicyService;
     private final AuditEventService auditEventService;
+    private final FindingsScoreRecomputeService findingsScoreRecomputeService;
 
     public RiskPolicyController(
             WorkspaceService workspaceService,
             RiskPolicyService riskPolicyService,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            FindingsScoreRecomputeService findingsScoreRecomputeService
     ) {
         this.workspaceService = workspaceService;
         this.riskPolicyService = riskPolicyService;
         this.auditEventService = auditEventService;
+        this.findingsScoreRecomputeService = findingsScoreRecomputeService;
     }
 
     @GetMapping
@@ -44,5 +49,14 @@ public class RiskPolicyController {
         RiskPolicyResponse response = riskPolicyService.update(tenant, request);
         auditEventService.record("risk_policy.updated", "risk_policy", tenant.getId().toString(), null);
         return response;
+    }
+
+    @PostMapping("/recompute-findings-scores")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    public Map<String, Object> recomputeFindingsScores() {
+        Tenant tenant = workspaceService.getWorkspace();
+        int updated = findingsScoreRecomputeService.recomputeAll(tenant);
+        auditEventService.record("risk_policy.findings_score_recomputed", "risk_policy", tenant.getId().toString(), null);
+        return Map.of("updated", updated);
     }
 }

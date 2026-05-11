@@ -1,0 +1,323 @@
+package com.prototype.vulnwatch.service;
+
+import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingStatus;
+import com.prototype.vulnwatch.domain.OrgCveRecord;
+import com.prototype.vulnwatch.domain.SuppressionRule;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.SuppressionRuleRequest;
+import com.prototype.vulnwatch.dto.SuppressionRuleResponse;
+import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
+import com.prototype.vulnwatch.repo.FindingRepository;
+import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
+import com.prototype.vulnwatch.repo.SuppressionRuleRepository;
+import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class SuppressionRuleService {
+
+    private final SuppressionRuleRepository repo;
+    private final FindingRepository findingRepository;
+    private final OrgCveRecordRepository orgCveRecordRepository;
+    private final ComponentVulnerabilityStateRepository cvsRepository;
+    private final VulnerabilityTargetRepository vulnTargetRepository;
+    private final TenantRepository tenantRepository;
+    private final FindingsScoreService findingsScoreService;
+
+    public SuppressionRuleService(
+            SuppressionRuleRepository repo,
+            FindingRepository findingRepository,
+            OrgCveRecordRepository orgCveRecordRepository,
+            ComponentVulnerabilityStateRepository cvsRepository,
+            VulnerabilityTargetRepository vulnTargetRepository,
+            TenantRepository tenantRepository,
+            FindingsScoreService findingsScoreService
+    ) {
+        this.repo = repo;
+        this.findingRepository = findingRepository;
+        this.orgCveRecordRepository = orgCveRecordRepository;
+        this.cvsRepository = cvsRepository;
+        this.vulnTargetRepository = vulnTargetRepository;
+        this.tenantRepository = tenantRepository;
+        this.findingsScoreService = findingsScoreService;
+    }
+
+    public List<SuppressionRuleResponse> list(Tenant tenant) {
+        return repo.findByTenantOrderByCreatedAtAsc(tenant)
+                .stream()
+                .map(r -> toResponse(r, tenant))
+                .toList();
+    }
+
+    public SuppressionRuleResponse create(Tenant tenant, SuppressionRuleRequest req) {
+        SuppressionRule rule = new SuppressionRule();
+        rule.setTenant(tenant);
+        applyRequest(rule, req);
+        return toResponse(repo.save(rule), tenant);
+    }
+
+    public SuppressionRuleResponse update(Tenant tenant, UUID id, SuppressionRuleRequest req) {
+        SuppressionRule rule = repo.findById(id)
+                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
+        applyRequest(rule, req);
+        rule.touch();
+        return toResponse(repo.save(rule), tenant);
+    }
+
+    public void delete(Tenant tenant, UUID id) {
+        SuppressionRule rule = repo.findById(id)
+                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
+        repo.delete(rule);
+    }
+
+    /**
+     * Evaluates an APPROVED rule against all matching records for the tenant.
+     * For FINDING rules: processes OPEN findings.
+     * For CVE rules: processes OrgCveRecords not yet suppressed by any rule.
+     *
+     * @return count of newly suppressed records
+     * @throws IllegalStateException if the rule is not APPROVED
+     */
+    @Transactional
+    public int execute(Tenant tenant, UUID ruleId) {
+        SuppressionRule rule = repo.findById(ruleId)
+                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
+
+        if (rule.getState() != SuppressionRule.State.APPROVED) {
+            throw new IllegalStateException(
+                    "Only APPROVED rules can be executed. Rule \"" + rule.getName() + "\" is " + rule.getState() + ".");
+        }
+
+        if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
+            return executeCveRule(rule, tenant);
+        }
+        return executeFindingRule(rule, tenant);
+    }
+
+    /**
+     * Reopens all CVE records and findings suppressed by the given rule, and returns
+     * the total number of records cleared.
+     */
+    @Transactional
+    public int reopenAllByRule(Tenant tenant, UUID ruleId) {
+        repo.findById(ruleId)
+                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
+
+        List<OrgCveRecord> cveRecords = orgCveRecordRepository.findByTenantAndSuppressedByRuleId(tenant, ruleId);
+        for (OrgCveRecord record : cveRecords) {
+            record.setSuppressedByRuleId(null);
+            record.setSuppressedByRuleName(null);
+            record.setSuppressedBy(null);
+            record.setSuppressedAt(null);
+            record.setSuppressedUntil(null);
+            record.setSuppressionReason(null);
+            record.touch();
+        }
+        if (!cveRecords.isEmpty()) {
+            orgCveRecordRepository.saveAll(cveRecords);
+        }
+
+        List<Finding> findings = findingRepository.findByTenantAndSuppressedByRuleId(tenant, ruleId);
+        for (Finding finding : findings) {
+            finding.setStatus(FindingStatus.OPEN);
+            finding.setSuppressedByRuleId(null);
+            finding.setSuppressedByRuleName(null);
+            finding.setSuppressionReason(null);
+            finding.touch();
+        }
+        if (!findings.isEmpty()) {
+            findingRepository.saveAll(findings);
+        }
+
+        return cveRecords.size() + findings.size();
+    }
+
+    /**
+     * Reopens an OrgCveRecord from rule-based suppression by clearing the rule reference.
+     */
+    @Transactional
+    public void reopenCveRecord(Tenant tenant, UUID recordId) {
+        OrgCveRecord record = orgCveRecordRepository.findById(recordId)
+                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                .orElseThrow(() -> new NoSuchElementException("CVE record not found: " + recordId));
+        record.setSuppressedByRuleId(null);
+        record.setSuppressedByRuleName(null);
+        record.setSuppressedBy(null);
+        record.setSuppressedAt(null);
+        record.setSuppressedUntil(null);
+        record.setSuppressionReason(null);
+        record.touch();
+        orgCveRecordRepository.save(record);
+    }
+
+    /** Nightly job — runs all APPROVED rules for every tenant at midnight. */
+    @Scheduled(cron = "0 0 0 * * *")
+    @Transactional
+    public void runAllApprovedRulesNightly() {
+        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+            for (SuppressionRule rule : repo.findByTenantOrderByCreatedAtAsc(tenant)) {
+                if (rule.getState() == SuppressionRule.State.APPROVED) {
+                    if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
+                        executeCveRule(rule, tenant);
+                    } else {
+                        executeFindingRule(rule, tenant);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── private helpers ──────────────────────────────────────────────────────
+
+    private int executeFindingRule(SuppressionRule rule, Tenant tenant) {
+        List<Finding> openFindings = findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(
+                tenant, FindingStatus.OPEN);
+
+        List<Finding> toSuppress = new ArrayList<>();
+        for (Finding finding : openFindings) {
+            if (finding.getVulnerability() == null
+                    || finding.getAsset() == null
+                    || finding.getComponent() == null) {
+                continue;
+            }
+            if (findingsScoreService.matchesSuppressionConditions(
+                    rule.getConditionsJson(), rule.getConditionLogic(), finding)) {
+                finding.setStatus(FindingStatus.SUPPRESSED);
+                finding.setSuppressionReason(rule.getReason());
+                finding.setSuppressedByRuleId(rule.getId());
+                finding.setSuppressedByRuleName(rule.getName());
+                finding.touch();
+                toSuppress.add(finding);
+            }
+        }
+
+        if (!toSuppress.isEmpty()) {
+            findingRepository.saveAll(toSuppress);
+        }
+        return toSuppress.size();
+    }
+
+    private int executeCveRule(SuppressionRule rule, Tenant tenant) {
+        // Only process records not yet suppressed by any rule
+        List<OrgCveRecord> candidates = orgCveRecordRepository
+                .findByTenantAndSuppressedByRuleIdIsNull(tenant);
+
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        // Batch-load all CVS and VulnerabilityTarget data for all candidate vulnerabilities
+        // to avoid N+1 queries (one per record in a loop).
+        List<UUID> vulnIds = candidates.stream()
+                .filter(r -> r.getVulnerability() != null)
+                .map(r -> r.getVulnerability().getId())
+                .distinct()
+                .toList();
+
+        // Map<vulnId, Set<softwareName>> — package names from matched inventory components
+        java.util.Map<UUID, java.util.Set<String>> namesByVuln = new java.util.HashMap<>();
+        cvsRepository.findByTenant_IdAndVulnerability_IdIn(tenant.getId(), vulnIds)
+                .forEach(cvs -> {
+                    if (cvs.getComponent() != null && cvs.getComponent().getPackageName() != null
+                            && !cvs.getComponent().getPackageName().isBlank()) {
+                        namesByVuln
+                                .computeIfAbsent(cvs.getVulnerability().getId(), k -> new java.util.LinkedHashSet<>())
+                                .add(cvs.getComponent().getPackageName());
+                    }
+                });
+
+        // CPE product + vendor names from VulnerabilityTarget — covers CVEs with no inventory match
+        vulnTargetRepository.findByVulnerability_IdIn(vulnIds)
+                .forEach(vt -> {
+                    if (vt.getCpeDim() != null) {
+                        java.util.Set<String> names = namesByVuln
+                                .computeIfAbsent(vt.getVulnerability().getId(), k -> new java.util.LinkedHashSet<>());
+                        if (vt.getCpeDim().getProduct() != null && !vt.getCpeDim().getProduct().isBlank()) {
+                            names.add(vt.getCpeDim().getProduct());
+                        }
+                        if (vt.getCpeDim().getVendor() != null && !vt.getCpeDim().getVendor().isBlank()) {
+                            names.add(vt.getCpeDim().getVendor());
+                        }
+                    }
+                });
+
+        List<OrgCveRecord> toSuppress = new ArrayList<>();
+        Instant now = Instant.now();
+        for (OrgCveRecord record : candidates) {
+            if (record.getVulnerability() == null) continue;
+
+            List<String> packageNames = new ArrayList<>(
+                    namesByVuln.getOrDefault(record.getVulnerability().getId(), java.util.Set.of()));
+
+            if (findingsScoreService.matchesCveSuppressionConditions(
+                    rule.getConditionsJson(), rule.getConditionLogic(), record, packageNames)) {
+                record.setSuppressedByRuleId(rule.getId());
+                record.setSuppressedByRuleName(rule.getName());
+                record.setSuppressedBy("RULE:" + rule.getName());
+                record.setSuppressionReason(rule.getReason());
+                record.setSuppressedAt(now);
+                record.setSuppressedUntil(null);
+                record.touch();
+                toSuppress.add(record);
+            }
+        }
+
+        if (!toSuppress.isEmpty()) {
+            orgCveRecordRepository.saveAll(toSuppress);
+        }
+        return toSuppress.size();
+    }
+
+    private void applyRequest(SuppressionRule rule, SuppressionRuleRequest req) {
+        if (req.name() != null) {
+            rule.setName(req.name());
+        }
+        if (req.state() != null) {
+            rule.setState(SuppressionRule.State.valueOf(req.state()));
+        }
+        if (req.recordType() != null) {
+            rule.setRecordType(SuppressionRule.RecordType.valueOf(req.recordType()));
+        }
+        if (req.conditionsJson() != null) {
+            rule.setConditionsJson(req.conditionsJson());
+        }
+        if (req.conditionLogic() != null) {
+            rule.setConditionLogic(req.conditionLogic());
+        }
+        rule.setReason(req.reason());
+        rule.setValidFrom(req.validFrom() != null ? Instant.parse(req.validFrom()) : null);
+        rule.setValidTo(req.validTo() != null ? Instant.parse(req.validTo()) : null);
+    }
+
+    private SuppressionRuleResponse toResponse(SuppressionRule r, Tenant tenant) {
+        long suppressedCount = findingRepository.countByTenantAndSuppressedByRuleId(tenant, r.getId())
+                + orgCveRecordRepository.countByTenantAndSuppressedByRuleId(tenant, r.getId());
+        return new SuppressionRuleResponse(
+                r.getId(),
+                r.getName(),
+                r.getState().name(),
+                r.getRecordType().name(),
+                r.getConditionsJson(),
+                r.getConditionLogic(),
+                r.getReason(),
+                r.getValidFrom(),
+                r.getValidTo(),
+                r.getCreatedAt(),
+                r.getUpdatedAt(),
+                suppressedCount
+        );
+    }
+}

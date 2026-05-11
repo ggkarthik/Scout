@@ -3,7 +3,9 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.client.http.AdvisoryFetchService;
 import com.prototype.vulnwatch.client.http.OpenAiClient;
 import com.prototype.vulnwatch.dto.CveInvestigationSummaryResponse;
+import com.prototype.vulnwatch.dto.FixRecordResponse;
 import com.prototype.vulnwatch.dto.SavedCveInvestigationSummaryResponse;
+import com.prototype.vulnwatch.service.FixRecordService;
 import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.ImpactState;
@@ -11,8 +13,8 @@ import com.prototype.vulnwatch.domain.Investigation;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.service.ApplicabilityAssessmentService;
 import com.prototype.vulnwatch.service.CveAiSolutionPersistenceService;
-import com.prototype.vulnwatch.service.CveInvestigationAiSummaryService;
 import com.prototype.vulnwatch.service.CveDetailQueryFacade;
+import com.prototype.vulnwatch.service.CveInvestigationAiSummaryService;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryService;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryPersistenceService;
 import com.prototype.vulnwatch.service.CveWorkflowFacade;
@@ -57,6 +59,7 @@ public class CveDetailController {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final WorkspaceService workspaceService;
     private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
+    private final FixRecordService fixRecordService;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -219,6 +222,71 @@ public class CveDetailController {
     public ResponseEntity<SavedCveInvestigationSummaryResponse> getSavedInvestigationSummary(
             @PathVariable String cveId) {
         return ResponseEntity.ok(summaryPersistenceService.getSavedSummary(cveId));
+    }
+
+    /**
+     * GET /api/cve-detail/{cveId}/fixes
+     * Return previously generated fix records for this CVE.
+     */
+    @GetMapping("/{cveId}/fixes")
+    public ResponseEntity<List<FixRecordResponse>> getFixRecords(@PathVariable String cveId) {
+        com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
+        return ResponseEntity.ok(fixRecordService.getFixRecords(tenant, cveId));
+    }
+
+    /**
+     * GET /api/cve-detail/software-fixes?software={name}
+     * Return all fix records for the tenant where softwareEntities contains the given software name.
+     */
+    @GetMapping("/software-fixes")
+    public ResponseEntity<List<FixRecordResponse>> getFixRecordsBySoftware(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String software) {
+        com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
+        return ResponseEntity.ok(fixRecordService.getFixRecordsBySoftware(tenant, software));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/generate-fixes
+     * Generate (or regenerate) fix records for this CVE using references + OpenAI.
+     */
+    public record GenerateFixesRequest(
+            java.util.List<GenerateFixesSoftwareEntry> additionalSoftware
+    ) {}
+    public record GenerateFixesSoftwareEntry(
+            String name, String vendor, String version, int assetCount
+    ) {}
+
+    @PostMapping("/{cveId}/generate-fixes")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<List<FixRecordResponse>> generateFixRecords(
+            @PathVariable String cveId,
+            @org.springframework.web.bind.annotation.RequestBody(required = false) GenerateFixesRequest body
+    ) {
+        assertDemoAllowsAiAction();
+        com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
+        java.util.List<GenerateFixesSoftwareEntry> extra = body != null && body.additionalSoftware() != null
+                ? body.additionalSoftware() : java.util.List.of();
+        return ResponseEntity.ok(fixRecordService.generateFixRecords(tenant, cveId, extra));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/analyst-fixes
+     * Save analyst-entered solution text as fix records (one per software row).
+     * Replaces any previous ANALYST-sourced fix records for this CVE.
+     */
+    public record AnalystFixesRequest(
+            java.util.List<FixRecordService.AnalystFixEntry> solutions
+    ) {}
+
+    @PostMapping("/{cveId}/analyst-fixes")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<List<FixRecordResponse>> saveAnalystFixes(
+            @PathVariable String cveId,
+            @RequestBody AnalystFixesRequest body) {
+        com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
+        java.util.List<FixRecordService.AnalystFixEntry> solutions =
+                body.solutions() != null ? body.solutions() : java.util.List.of();
+        return ResponseEntity.ok(fixRecordService.saveAnalystFixes(tenant, cveId, solutions));
     }
 
     /**
@@ -635,6 +703,9 @@ public class CveDetailController {
         private List<MatchedSoftwareDto> matchedSoftware;
         private List<VendorIntelligenceDto> vendorIntelligence;
         private List<CveReference> references;
+        private List<FixRecordResponse> fixes;
+        private java.util.UUID suppressedByRuleId;
+        private String suppressedByRuleName;
     }
 
     @Data
@@ -755,6 +826,7 @@ public class CveDetailController {
         private java.time.LocalDate eolSupportEndDate;
         private String supportPhase;
         private String supportGroup;
+        private UUID softwareIdentityId;
     }
 
     @Data
@@ -807,6 +879,12 @@ public class CveDetailController {
         private List<String> componentIds;
         private Map<String, String> componentApplicabilityDecisions;
         private Map<String, String> componentAnalystDispositions;
+        private String severity;
+        private String dueDate;
+        /** ASSET_CVE (default) or CVE_FIX */
+        private String findingCreationMode;
+        /** ADD_TO_EXISTING (default) or CREATE_NEW — only relevant for CVE_FIX mode */
+        private String existingFindingBehavior;
     }
 
     @Data
