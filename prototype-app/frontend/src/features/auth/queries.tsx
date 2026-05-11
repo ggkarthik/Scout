@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { getStoredAuthToken } from '../../api/client';
 import { authApi } from './api';
 
-const ACTOR_CONTEXT_QUERY_KEY = ['actor-context'] as const;
-
 export function useActorQuery() {
+  const authToken = getStoredAuthToken().trim() || 'anonymous';
   return useQuery({
-    queryKey: ACTOR_CONTEXT_QUERY_KEY,
+    queryKey: ['actor-context', authToken],
     queryFn: authApi.getActorContext
   });
 }

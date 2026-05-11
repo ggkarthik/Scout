@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
@@ -100,9 +101,6 @@ class ValidationAuthServiceTest {
         user.setEmail("owner@example.com");
         user.setPlatformOwner(true);
 
-        when(membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc("owner@example.com", "ACTIVE"))
-                .thenReturn(List.of());
-
         ValidationAuthService service = new ValidationAuthService(
                 appUserRepository,
                 membershipRepository,
@@ -118,5 +116,31 @@ class ValidationAuthServiceTest {
         var jwt = decoder.decode(response.token());
         assertEquals("owner@example.com", jwt.getSubject());
         assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+    }
+
+    @Test
+    void issueSessionKeepsPlatformOwnerTenantlessEvenWithActiveMembership() {
+        AppUser user = new AppUser();
+        user.setExternalSubject("owner@example.com");
+        user.setEmail("owner@example.com");
+        user.setPlatformOwner(true);
+
+        ValidationAuthService service = new ValidationAuthService(
+                appUserRepository,
+                membershipRepository,
+                new BCryptPasswordEncoder(),
+                SECRET,
+                12);
+
+        AuthSessionResponse response = service.issueSession(user);
+
+        var decoder = NimbusJwtDecoder
+                .withSecretKey(new SecretKeySpec(SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"))
+                .build();
+        var jwt = decoder.decode(response.token());
+        assertEquals("owner@example.com", jwt.getSubject());
+        assertEquals(List.of("PLATFORM_OWNER"), jwt.getClaimAsStringList("roles"));
+        assertNull(jwt.getClaimAsString("tenant_id"));
+        assertNull(jwt.getClaimAsString("tenant_slug"));
     }
 }
