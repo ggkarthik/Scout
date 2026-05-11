@@ -92,10 +92,9 @@ describe('FindingsPage', () => {
 
     renderWithProviders(<FindingsPage />);
 
-    // Default filters (severity CRITICAL+HIGH, status OPEN) produce active chips,
-    // so empty state shows the "no findings matched" branch.
+    // No findings and no active chips → "No findings yet" onboarding state.
     await waitFor(() => {
-      expect(screen.getByText(/No findings matched/i)).toBeInTheDocument();
+      expect(screen.getByText(/No findings yet/i)).toBeInTheDocument();
     });
   });
 
