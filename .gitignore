@@ -17,3 +17,4 @@ prototype-app/frontend/coverage/
 # Dependency caches
 node_modules/
 prototype-app/frontend/node_modules/
+.vercel

@@ -24,7 +24,20 @@
 4. Wait for the backend ECS service to become stable.
 5. Run `BASE_URL=https://<app-host> ./scripts/smoke-test.sh`.
 6. Upload frontend build assets to the Terraform-managed frontend bucket and invalidate CloudFront.
-7. Check CloudWatch logs for startup validation, Flyway migration, and readiness status.
+7. If the frontend is hosted on Vercel instead of CloudFront, use `prototype-app/frontend` as the authoritative Vercel project root.
+8. In Vercel, set preview or production environment variables:
+   - `VITE_API_BASE=https://<api-host>/api`
+   - `VITE_SENTRY_DSN=<optional>`
+   - `VITE_SHOW_TOKEN_LOGIN=false`
+9. Keep the SPA rewrite policy so `/login`, `/demo/*`, and `/invite/*` resolve to `index.html`.
+10. Do a preview-first Vercel rollout before promoting to production:
+    - deploy preview from the existing Vercel project
+    - verify `/`, `/login`, `/demo`, `/demo/request`, and `/demo/expired`
+    - submit a public demo request against the hosted backend
+    - verify platform-owner login and authenticated tenant navigation
+11. If the final Vercel hostname becomes the user-facing frontend URL, update Railway backend `APP_BASE_URL` and `APP_CORS_ALLOWED_ORIGINS` before validating invite and login emails.
+12. Treat repo-root `vercel.json` and `prototype-app/vercel.json` as compatibility wrappers only while the existing Vercel project is still bound above `prototype-app/frontend`; the target state is a Vercel project rooted directly at `prototype-app/frontend`.
+13. Check CloudWatch logs for startup validation, Flyway migration, and readiness status.
 
 ## Rollback
 
@@ -48,3 +61,6 @@
 - Public demo request submission succeeds with `DEMO_SMOKE=1 BASE_URL=https://<api-host> ./scripts/smoke-test.sh`.
 - Platform owner can approve a demo request, resend the invite, and see the demo tenant expiration date.
 - Demo tenants can use limited SBOM ingestion but receive stable demo errors for live connector setup.
+- Vercel deep links for `/login`, `/demo/request`, `/demo/expired`, and `/invite/<token>` return the SPA instead of a 404.
+- Preview frontend requests hit the hosted backend at `VITE_API_BASE` and do not rely on `VITE_API_KEY`, `VITE_CREATOR_KEY`, or `VITE_AUTH_TOKEN`.
+- If production moved to a new Vercel hostname or custom domain, invite and login emails resolve to the correct frontend origin after backend `APP_BASE_URL` is updated.

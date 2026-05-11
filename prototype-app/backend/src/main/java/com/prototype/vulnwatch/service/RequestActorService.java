@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.config.TenantAuthenticationDetails;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -34,13 +35,16 @@ public class RequestActorService {
                     details.roles());
         }
         String principal = resolvePrincipal(authentication);
+        Set<String> roles = authentication == null ? Set.of() : authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority().replaceFirst("^ROLE_", ""))
+                .collect(Collectors.toUnmodifiableSet());
+        if (authentication instanceof AnonymousAuthenticationToken) {
+            return new RequestActor(principal, false, null, null, roles);
+        }
         boolean creator = authentication != null
                 && authentication.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_CREATOR".equals(authority.getAuthority()));
         Tenant tenant = workspaceService.getWorkspace();
-        Set<String> roles = authentication == null ? Set.of() : authentication.getAuthorities().stream()
-                .map(authority -> authority.getAuthority().replaceFirst("^ROLE_", ""))
-                .collect(Collectors.toUnmodifiableSet());
         return new RequestActor(
                 principal,
                 creator,
