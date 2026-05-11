@@ -627,7 +627,7 @@ export function ConfigurationsPage() {
   };
 
   const addSecondBound = (ci: number, vi: number): void => {
-    const col = parsedFindingsColumns[ci];
+    const _col = parsedFindingsColumns[ci];
     saveFindingsColumns(parsedFindingsColumns.map((c, i) =>
       i === ci ? {
         ...c, values: c.values.map((v, j) => j === vi
@@ -642,7 +642,6 @@ export function ConfigurationsPage() {
       i === ci ? {
         ...c, values: c.values.map((v, j) => {
           if (j !== vi) return v;
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { operator2: _op2, value2: _val2, ...rest } = v;
           return rest;
         })
@@ -2785,7 +2784,7 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
           const componentAnalystDispositions: Record<string, 'IMPACTED'> =
             Object.fromEntries(componentIds.map(id => [id, 'IMPACTED']));
 
-          let result = await cveWorkbenchApi.createManualFindings(cve.externalId, {
+          const result = await cveWorkbenchApi.createManualFindings(cve.externalId, {
             justification: `Auto-created by rule: ${rule.name}`,
             findingCreationMode,
             componentIds,

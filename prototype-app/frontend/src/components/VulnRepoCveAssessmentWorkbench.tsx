@@ -7,7 +7,7 @@ import { computeCveRiskScore, computeOrgImpact } from '../lib/riskScoring';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SegmentedControl } from './SegmentedControl';
 import { pathForFindingDetail, pathForFindingsWithFilters, pathForInventoryViewWithSearch, pathForSoftwareIdentityDetail, pathForVulnRepoCveAssets, pathForVulnRepoCveSoftware, pathForVulnRepoHostAsset } from '../app/routes';
-import { cveWorkbenchApi, type AiSolutionData, type AiRequiredAction } from '../features/cve-workbench/api';
+import { cveWorkbenchApi, type AiRequiredAction } from '../features/cve-workbench/api';
 import { api } from '../api/client';
 import { buildAssetRowsFromMatchedSoftware, type DerivedAssetRow } from '../features/cve-workbench/asset-report';
 import {
@@ -3440,7 +3440,7 @@ function CveOverviewExperience({
   const [aiActionsError, setAiActionsError] = React.useState<string | null>(null);
   const [, setAiActionsGeneratedAt] = React.useState<string | null>(null);
 
-  const investigationSummaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
+  const _investigationSummaryInput = React.useMemo<InvestigationSummaryInput>(() => ({
     summary: {
       cveId: item.externalId,
       title: detail.summary.title,
@@ -6067,7 +6067,7 @@ export function VulnRepoCveAssessmentWorkbench({
     incidentId: finding.incidentId,
   })), [findingsByDisplayId]);
 
-  const investigationSummaryInput = React.useMemo<InvestigationSummaryInput>(() => {
+  const _investigationSummaryInput2 = React.useMemo<InvestigationSummaryInput>(() => {
     if (!detail) return {} as InvestigationSummaryInput;
     const summaryDetail = detail;
     return {

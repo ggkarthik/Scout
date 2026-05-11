@@ -324,7 +324,7 @@ function ExposureDashboardRoute() {
   return <ExposureDashboardPage />;
 }
 
-function DashboardRoute() {
+function _DashboardRoute() {
   const navigate = useNavigate();
   return <DashboardPage onViewEol={() => navigate('/end-of-life')} />;
 }
