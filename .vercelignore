@@ -1,0 +1,15 @@
+.git
+.DS_Store
+node_modules
+.sentry-local
+.vercel
+
+prototype-app/backend/target
+prototype-app/backend/data
+prototype-app/backend/secrets
+prototype-app/backend/.env
+prototype-app/backend/.env.*
+
+prototype-app/frontend/node_modules
+prototype-app/frontend/dist
+prototype-app/frontend/coverage
