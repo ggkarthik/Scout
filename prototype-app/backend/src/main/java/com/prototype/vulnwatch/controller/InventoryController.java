@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.dto.SoftwareIdentityDetailResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityFunnelResponse;
 import com.prototype.vulnwatch.dto.SoftwareIdentityMetadataRequest;
 import com.prototype.vulnwatch.dto.SoftwareIdentityMetadataResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.dto.SoftwareIdentityPageResponse;
 import com.prototype.vulnwatch.service.InventoryService;
 import com.prototype.vulnwatch.service.SoftwareIdentityMetadataService;
@@ -102,6 +103,7 @@ public class InventoryController {
     }
 
     @PutMapping("/software-identities/{softwareIdentityId}/metadata")
+    @SensitiveTenantAction("inventory.software_identity.metadata_saved")
     public SoftwareIdentityMetadataResponse saveSoftwareIdentityMetadata(
             @PathVariable UUID softwareIdentityId,
             @RequestBody SoftwareIdentityMetadataRequest request

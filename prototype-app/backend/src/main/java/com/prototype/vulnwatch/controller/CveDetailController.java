@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.client.http.OpenAiClient;
 import com.prototype.vulnwatch.dto.CveInvestigationSummaryResponse;
 import com.prototype.vulnwatch.dto.FixRecordResponse;
 import com.prototype.vulnwatch.dto.SavedCveInvestigationSummaryResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.FixRecordService;
 import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
@@ -84,6 +85,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/investigation")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.created")
     public ResponseEntity<InvestigationDto> createInvestigation(
             @PathVariable String cveId,
             @RequestBody CreateInvestigationRequest request) {
@@ -96,6 +98,7 @@ public class CveDetailController {
      */
     @PutMapping("/investigation/{investigationId}")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.updated")
     public ResponseEntity<InvestigationDto> updateInvestigation(
             @PathVariable Long investigationId,
             @RequestBody InvestigationService.InvestigationUpdateRequest request) {
@@ -108,6 +111,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/investigation/submit")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.submitted")
     public ResponseEntity<InvestigationDto> submitInvestigation(
             @PathVariable String cveId,
             @RequestBody InvestigationService.SubmitInvestigationRequest request) {
@@ -120,6 +124,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/assessment/submit")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.assessment.submitted")
     public ResponseEntity<AssessmentDto> submitAssessment(
             @PathVariable String cveId,
             @RequestBody ApplicabilityAssessmentService.SubmitAssessmentRequest request) {
@@ -132,6 +137,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/applicability-assessment")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.assessment.created")
     public ResponseEntity<AssessmentDto> createAssessment(
             @PathVariable String cveId) {
         return workflowFacade.createAssessment(cveId);
@@ -143,6 +149,7 @@ public class CveDetailController {
      */
     @PutMapping("/applicability-assessment/{assessmentId}")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.assessment.updated")
     public ResponseEntity<AssessmentDto> updateAssessment(
             @PathVariable Long assessmentId,
             @RequestBody ApplicabilityAssessmentService.AssessmentUpdateRequest request) {
@@ -155,6 +162,7 @@ public class CveDetailController {
      */
     @PostMapping("/applicability-assessment/{assessmentId}/complete")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.assessment.completed")
     public ResponseEntity<AssessmentDto> completeAssessment(
             @PathVariable Long assessmentId,
             @RequestBody CompleteAssessmentRequest request) {
@@ -167,6 +175,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/manual-finding")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.manual_finding.created")
     public ResponseEntity<ManualFindingResponse> createManualFinding(
             @PathVariable String cveId,
             @RequestBody CreateManualFindingRequest request) {
@@ -179,6 +188,7 @@ public class CveDetailController {
      */
     @PostMapping("/{cveId}/suppress")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.suppressed")
     public ResponseEntity<SuppressionResponse> suppressCve(
             @PathVariable String cveId,
             @RequestBody SuppressRequest request) {

@@ -56,11 +56,16 @@ app:
       issuer-uri: ${APP_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_JWT_JWK_SET_URI:}
       hmac-secret: ${APP_JWT_HMAC_SECRET:}
+      token-ttl-minutes: ${APP_JWT_TOKEN_TTL_MINUTES:480}
+      active-tenant-id-claim: ${APP_JWT_ACTIVE_TENANT_ID_CLAIM:active_tenant_id}
       tenant-id-claim: ${APP_JWT_TENANT_ID_CLAIM:tenant_id}
       tenant-slug-claim: ${APP_JWT_TENANT_SLUG_CLAIM:tenant_slug}
       email-claim: ${APP_JWT_EMAIL_CLAIM:email}
       name-claim: ${APP_JWT_NAME_CLAIM:name}
       roles-claim: ${APP_JWT_ROLES_CLAIM:roles}
+    local-auth:
+      platform-owner-email: ${APP_PLATFORM_OWNER_EMAIL:}
+      platform-owner-password-hash: ${APP_PLATFORM_OWNER_PASSWORD_HASH:}
     headers:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}
@@ -72,6 +77,11 @@ app:
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
+  email:
+    resend:
+      base-url: ${RESEND_BASE_URL:https://api.resend.com}
+      api-key: ${RESEND_API_KEY:}
+      from: ${RESEND_FROM_EMAIL:}
   sbom-fetch:
     max-payload-bytes: ${SBOM_FETCH_MAX_PAYLOAD_BYTES:5242880}
     allow-user-auth-header: ${SBOM_FETCH_ALLOW_USER_AUTH_HEADER:false}
