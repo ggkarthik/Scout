@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -85,6 +86,7 @@ public class FindingController {
 
     @PutMapping("/{findingId}/workflow")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.workflow.updated")
     public Finding updateWorkflow(
             @PathVariable UUID findingId,
             @RequestBody FindingWorkflowUpdateRequest request
@@ -94,6 +96,7 @@ public class FindingController {
 
     @PostMapping("/bulk-workflow")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.workflow.bulk_updated")
     public FindingBulkWorkflowResponse bulkUpdateWorkflow(
             @RequestBody FindingBulkWorkflowRequest request
     ) {
@@ -119,6 +122,7 @@ public class FindingController {
 
     @DeleteMapping("/bulk")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.bulk_deleted")
     public ResponseEntity<BulkDeleteResponse> bulkDelete(@RequestBody BulkDeleteRequest request) {
         if (request.findingIds() == null || request.findingIds().isEmpty()) {
             return ResponseEntity.ok(new BulkDeleteResponse(0, "No finding IDs provided"));

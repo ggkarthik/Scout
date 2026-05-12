@@ -17,4 +17,12 @@ public record RequestActor(
     public boolean hasRole(String role) {
         return roles != null && roles.contains(role);
     }
+
+    public boolean platformScope() {
+        return hasRole("PLATFORM_OWNER") && tenantId == null;
+    }
+
+    public boolean actingAsPlatformOwner() {
+        return hasRole("PLATFORM_OWNER") && tenantId != null;
+    }
 }

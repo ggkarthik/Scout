@@ -28,6 +28,7 @@ public class JwtTenantAuthenticationService {
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
     private final String tenantIdClaim;
+    private final String activeTenantIdClaim;
     private final String tenantSlugClaim;
     private final String emailClaim;
     private final String nameClaim;
@@ -38,6 +39,7 @@ public class JwtTenantAuthenticationService {
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository,
             @Value("${app.security.jwt.tenant-id-claim:tenant_id}") String tenantIdClaim,
+            @Value("${app.security.jwt.active-tenant-id-claim:active_tenant_id}") String activeTenantIdClaim,
             @Value("${app.security.jwt.tenant-slug-claim:tenant_slug}") String tenantSlugClaim,
             @Value("${app.security.jwt.email-claim:email}") String emailClaim,
             @Value("${app.security.jwt.name-claim:name}") String nameClaim,
@@ -47,6 +49,7 @@ public class JwtTenantAuthenticationService {
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.tenantIdClaim = tenantIdClaim;
+        this.activeTenantIdClaim = activeTenantIdClaim;
         this.tenantSlugClaim = tenantSlugClaim;
         this.emailClaim = emailClaim;
         this.nameClaim = nameClaim;
@@ -87,12 +90,20 @@ public class JwtTenantAuthenticationService {
         return new AuthenticatedTenantActor(
                 subject,
                 user.getId(),
+                user.getEmail(),
+                user.getDisplayName(),
                 tenant == null ? null : tenant.getId(),
                 tenant == null ? null : tenant.getName(),
                 Set.copyOf(roles));
     }
 
     private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles) {
+        String activeTenantId = claimAsString(jwt, activeTenantIdClaim);
+        if (activeTenantId != null) {
+            return tenantRepository.findById(parseUuid(activeTenantId))
+                    .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT active_tenant_id is not registered"));
+        }
+
         String tenantId = claimAsString(jwt, tenantIdClaim);
         if (tenantId != null) {
             return tenantRepository.findById(parseUuid(tenantId))
@@ -111,8 +122,11 @@ public class JwtTenantAuthenticationService {
 
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(subject, "ACTIVE");
-        if (!memberships.isEmpty()) {
+        if (memberships.size() == 1) {
             return memberships.get(0).getTenant();
+        }
+        if (memberships.size() > 1) {
+            throw new ResponseStatusException(FORBIDDEN, "JWT user has multiple active tenant memberships");
         }
         throw new ResponseStatusException(FORBIDDEN, "JWT user does not have an active tenant membership");
     }

@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigRequest;
 import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigResponse;
 import com.prototype.vulnwatch.dto.ServiceNowCmdbConnectionTestResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
@@ -52,6 +53,7 @@ public class ServiceNowCmdbConfigController {
 
     @PutMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.servicenow_cmdb.saved")
     public ServiceNowCmdbConfigResponse save(@Valid @RequestBody ServiceNowCmdbConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -62,6 +64,7 @@ public class ServiceNowCmdbConfigController {
 
     @PostMapping("/test")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.servicenow_cmdb.tested")
     public ServiceNowCmdbConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -73,6 +76,7 @@ public class ServiceNowCmdbConfigController {
 
     @PostMapping("/sync")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.servicenow_cmdb.sync_triggered")
     public SyncTriggerResponse sync() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);

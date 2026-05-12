@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.dto.TenantMemberRequest;
 import com.prototype.vulnwatch.dto.TenantMemberResponse;
 import com.prototype.vulnwatch.dto.TenantResponse;
 import com.prototype.vulnwatch.dto.TenantStatusRequest;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.IdentityAdministrationService;
 import com.prototype.vulnwatch.service.RequestActorService;
@@ -88,6 +89,7 @@ public class TenantAdministrationController {
 
     @PostMapping("/tenants/{tenantId}/members")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("tenant.member.added")
     public TenantMemberResponse addMember(@PathVariable UUID tenantId, @RequestBody TenantMemberRequest request) {
         assertSameTenantOrPlatformOwner(tenantId);
         TenantMembership membership = identityAdministrationService.addMember(
