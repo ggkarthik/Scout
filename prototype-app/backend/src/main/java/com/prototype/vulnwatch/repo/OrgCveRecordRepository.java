@@ -538,6 +538,67 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             Pageable pageable
     );
 
+    @EntityGraph(attributePaths = {"vulnerability"})
+    @Query(
+            value = """
+                    select o
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and o.vulnerability.id in :vulnIds
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (
+                        :includeAll = true
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
+                      )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    order by
+                      case when o.impacted = true then 1 else 0 end desc,
+                      case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
+                      case when o.inKev = true then 1 else 0 end desc,
+                      coalesce(o.epssScore, 0.0) desc,
+                      coalesce(o.cvssScore, 0.0) desc,
+                      o.externalId asc
+                    """,
+            countQuery = """
+                    select count(o.id)
+                    from OrgCveRecord o
+                    join o.vulnerability v
+                    where o.tenant = :tenant
+                      and o.vulnerability.id in :vulnIds
+                      and (:inKev is null or o.inKev = :inKev)
+                      and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
+                      and (
+                        :includeAll = true
+                        or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
+                      )
+                      and (:impactedOnly = false or o.matchedAssetCount > 0)
+                      and (
+                        :queryPattern is null
+                        or upper(o.externalId) like :queryPattern
+                        or upper(coalesce(v.title, '')) like :queryPattern
+                        or upper(coalesce(v.descriptionSnippet, '')) like :queryPattern
+                      )
+                    """
+    )
+    Page<OrgCveRecord> findExposurePageBySourceVulnIds(
+            @Param("tenant") Tenant tenant,
+            @Param("vulnIds") Collection<UUID> vulnIds,
+            @Param("inKev") Boolean inKev,
+            @Param("severity") String severity,
+            @Param("includeAll") boolean includeAll,
+            @Param("impactedOnly") boolean impactedOnly,
+            @Param("queryPattern") String queryPattern,
+            Pageable pageable
+    );
+
     @Query("""
             select
               count(o) as reviewQueueCount,

@@ -240,6 +240,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const [query, setQuery] = React.useState(initialQuery);
   const [severityFilters, setSeverityFilters] = React.useState<string[]>(parseCsvParam(initialSeverity));
   const [statusFilters, setStatusFilters] = React.useState<string[]>(initialStatuses);
+  const [sourceFilter, setSourceFilter] = React.useState<string>('');
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
   const [colFilters, setColFilters] = React.useState<IntelColFilters>(DEFAULT_INTEL_COL_FILTERS);
@@ -263,6 +264,7 @@ export function VulnRepoVulnerabilitiesPage() {
       ? undefined
       : (initialIncludeAll || undefined),
     impactedOnly: initialImpactedOnly || undefined,
+    source: sourceFilter || undefined,
   });
   const policyQuery = useRiskPolicyQuery();
   const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
@@ -566,6 +568,24 @@ export function VulnRepoVulnerabilitiesPage() {
               return <span className="inv-status-badge inv-status-applicable">Applicable</span>;
             })(),
           },
+          sources: {
+            content: item.sources && item.sources.length > 0 ? (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {item.sources.map((s) => {
+                  const label = { nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory' }[s.toLowerCase()] ?? s;
+                  const isEuvd = s.toLowerCase() === 'euvd';
+                  return (
+                    <span key={s} style={{
+                      display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                      background: isEuvd ? '#dbeafe' : '#f1f5f9',
+                      color: isEuvd ? '#1d4ed8' : '#475569',
+                      border: isEuvd ? '1px solid #93c5fd' : '1px solid #e2e8f0',
+                    }}>{label}</span>
+                  );
+                })}
+              </div>
+            ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>,
+          },
           impactedSoftware: {
             content: applicable ? (
               <button
@@ -687,8 +707,11 @@ export function VulnRepoVulnerabilitiesPage() {
     colFilters.investigationStatus.forEach((s) => {
       chips.push({ label: `Inv. Status: ${formatLabel(s)}`, onRemove: () => { setColFilters((f) => ({ ...f, investigationStatus: f.investigationStatus.filter((x) => x !== s) })); setPage(0); } });
     });
+    if (sourceFilter) {
+      chips.push({ label: `Source: ${{ nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory' }[sourceFilter] ?? sourceFilter}`, onRemove: () => { setSourceFilter(''); setPage(0); } });
+    }
     return chips;
-  }, [initialApplicable, initialImpactedOnly, initialHasFindings, severityFilters, statusFilters, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters]);
+  }, [initialApplicable, initialImpactedOnly, initialHasFindings, severityFilters, statusFilters, sourceFilter, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters]);
 
   const dashboardFilterChips = React.useMemo(() => {
     const keys = ['exploitOnly', 'inKev', 'createdSinceDays', 'software', 'softwareScope', 'includeAll', 'impactedOnly', 'hasFindings'];
@@ -745,6 +768,7 @@ export function VulnRepoVulnerabilitiesPage() {
       { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 110 },
       { id: 'applicable', label: 'Applicable', initialSize: 110, headerProps: { style: relStyle }, header: filterable('applicable', 'Applicable') },
       { id: 'investigationStatus', label: 'Investigation Status', initialSize: 170, headerProps: { style: relStyle }, header: filterable('investigationStatus', 'Investigation Status') },
+      { id: 'sources', label: 'Source', header: 'Source', initialSize: 160 },
       { id: 'impactedSoftware', label: 'Impacted Software', header: 'Impacted Software', initialSize: 180 },
       { id: 'investigationSummary', label: 'AI Summaries', header: 'AI Summaries', initialSize: 140 },
       { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
@@ -817,6 +841,24 @@ export function VulnRepoVulnerabilitiesPage() {
                   {formatLabel(option)}
                 </option>
               ))}
+            </select>
+          </label>
+
+          {/* Source filter */}
+          <label className="vuln-repo-filter-select">
+            <span>Source</span>
+            <select
+              value={sourceFilter}
+              onChange={(e) => { setSourceFilter(e.target.value); setPage(0); }}
+            >
+              <option value="">All sources</option>
+              <option value="nvd">NVD</option>
+              <option value="euvd">EUVD</option>
+              <option value="ghsa">GHSA</option>
+              <option value="kev">KEV</option>
+              <option value="csaf-redhat">Red Hat</option>
+              <option value="vex-microsoft">Microsoft</option>
+              <option value="advisory">Advisory</option>
             </select>
           </label>
 

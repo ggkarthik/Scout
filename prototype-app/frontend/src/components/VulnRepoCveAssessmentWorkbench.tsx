@@ -46,6 +46,8 @@ import {
   FindingCreationMode,
   FixRecord,
   OrgSpecificCveExposureRecord,
+  VulnerabilityIntelRelation,
+  VulnerabilityIntelSourceRecord,
 } from '../features/cve-workbench/types';
 import type { Finding } from '../features/findings/types';
 import type { SoftwareIdentityAsset, SoftwareIdentitySummary } from '../features/software-identities/types';
@@ -410,6 +412,17 @@ function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: 
     }
   }
 
+  for (const record of detail.sourceRecords ?? []) {
+    if (record.sourceUrl && !seen.has(record.sourceUrl)) {
+      seen.add(record.sourceUrl);
+      out.push({
+        href: record.sourceUrl,
+        source: record.sourceSystem,
+        tags: [record.sourceRecordId, record.sourceIdentifier, record.sourceOnly ? 'Source only' : null].filter(Boolean) as string[],
+      });
+    }
+  }
+
   if (detail.summary.sourceUrl && !seen.has(detail.summary.sourceUrl)) {
     out.push({ href: detail.summary.sourceUrl, source: detail.summary.source ?? undefined });
   }
@@ -420,6 +433,189 @@ function buildReferenceLinks(detail: CveDetail): Array<{ href: string; source?: 
   }
 
   return out;
+}
+
+type SourceRecordView = {
+  key: string;
+  observationId?: string;
+  sourceSystem: string;
+  sourceRecordId?: string;
+  sourceIdentifier?: string;
+  sourceUrl?: string;
+  title?: string;
+  description?: string;
+  severity?: string;
+  cvssScore?: number;
+  cvssVector?: string;
+  epssScore?: number;
+  inKev?: boolean;
+  vulnStatus?: string;
+  cweIds?: string;
+  publishedAt?: string;
+  lastModifiedAt?: string;
+  observedAt?: string;
+  lastSeenAt?: string;
+  sourceOnly?: boolean;
+};
+
+type SourceRelationView = {
+  key: string;
+  relationType: string;
+  fromLabel: string;
+  toLabel: string;
+  sourceSystem?: string;
+  confidence?: number;
+  provenanceNote?: string;
+  verified?: boolean;
+};
+
+function sourceRecordLabel(record: Pick<SourceRecordView, 'sourceSystem' | 'sourceIdentifier' | 'sourceRecordId'>): string {
+  const identifier = record.sourceIdentifier ?? record.sourceRecordId ?? 'unknown record';
+  return `${record.sourceSystem}${identifier ? ` · ${identifier}` : ''}`;
+}
+
+function buildSourceRecordViews(detail: CveDetail): SourceRecordView[] {
+  const records = (detail.sourceRecords ?? []).filter((record) => record.sourceSystem.trim().length > 0);
+  const seen = new Set<string>();
+  const out: SourceRecordView[] = [];
+
+  for (const record of records) {
+    const key = [
+      record.sourceSystem,
+      record.sourceRecordId ?? '',
+      record.sourceIdentifier ?? '',
+      record.observationId ?? '',
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      observationId: record.observationId,
+      sourceSystem: record.sourceSystem,
+      sourceRecordId: record.sourceRecordId,
+      sourceIdentifier: record.sourceIdentifier,
+      sourceUrl: record.sourceUrl,
+      title: record.title,
+      description: record.description,
+      severity: record.severity,
+      cvssScore: record.cvssScore,
+      cvssVector: record.cvssVector,
+      epssScore: record.epssScore,
+      inKev: record.inKev,
+      vulnStatus: record.vulnStatus,
+      cweIds: record.cweIds,
+      publishedAt: record.publishedAt,
+      lastModifiedAt: record.lastModifiedAt,
+      observedAt: record.observedAt,
+      lastSeenAt: record.lastSeenAt,
+      sourceOnly: record.sourceOnly,
+    });
+  }
+
+  if (out.length > 0) return out;
+
+  const fallback: SourceRecordView[] = [];
+  const summarySource = detail.summary.source?.trim();
+  if (summarySource) {
+    fallback.push({
+      key: `summary|${summarySource}|${detail.summary.externalId}`,
+      sourceSystem: summarySource,
+      sourceRecordId: detail.summary.externalId,
+      sourceIdentifier: detail.summary.externalId,
+      sourceUrl: detail.summary.sourceUrl,
+      title: detail.summary.title,
+      description: detail.summary.description,
+      severity: detail.summary.severity,
+      cvssScore: detail.summary.cvssScore,
+      cvssVector: detail.summary.cvssVector,
+      epssScore: detail.summary.epssScore,
+      inKev: detail.summary.inKev,
+      vulnStatus: undefined,
+      cweIds: detail.summary.cweIds,
+      publishedAt: detail.summary.publishedAt,
+      lastModifiedAt: detail.summary.modifiedAt,
+      sourceOnly: false,
+    });
+  }
+
+  return fallback;
+}
+
+function buildSourceRelationViews(
+  detail: CveDetail,
+  sourceRecords: SourceRecordView[]
+): SourceRelationView[] {
+  const byObservationId = new Map<string, SourceRecordView>();
+  for (const record of sourceRecords) {
+    if (record.observationId) byObservationId.set(record.observationId, record);
+  }
+
+  return (detail.relations ?? []).map((relation, index) => {
+    const fromRecord = relation.fromObservationId ? byObservationId.get(relation.fromObservationId) : null;
+    const toRecord = relation.toObservationId ? byObservationId.get(relation.toObservationId) : null;
+    const fromLabel = fromRecord
+      ? sourceRecordLabel(fromRecord)
+      : [relation.fromSourceSystem, relation.fromSourceRecordId].filter(Boolean).join(' · ') || relation.fromObservationId || 'Unknown source';
+    const toLabel = toRecord
+      ? sourceRecordLabel(toRecord)
+      : [relation.toSourceSystem, relation.toSourceRecordId].filter(Boolean).join(' · ') || relation.toObservationId || 'Unknown source';
+
+    return {
+      key: `${relation.id ?? relation.fromObservationId ?? 'relation'}-${index}`,
+      relationType: relation.relationType ?? 'RELATED_TO',
+      fromLabel,
+      toLabel,
+      sourceSystem: relation.sourceSystem,
+      confidence: relation.confidence,
+      provenanceNote: relation.provenanceNote,
+      verified: relation.verified,
+    };
+  });
+}
+
+function buildSourceScoreEntries(
+  detail: CveDetail,
+  sourceRecords: SourceRecordView[]
+): Array<{ source: string; score: number; sourceRecordId?: string; sourceIdentifier?: string; sourceUrl?: string }> {
+  const scores = new Map<string, { source: string; score: number; sourceRecordId?: string; sourceIdentifier?: string; sourceUrl?: string }>();
+  const add = (entry: { source: string; score: number; sourceRecordId?: string; sourceIdentifier?: string; sourceUrl?: string }) => {
+    const key = `${entry.source}|${entry.sourceIdentifier ?? entry.sourceRecordId ?? ''}|${entry.score}`;
+    if (!scores.has(key)) scores.set(key, entry);
+  };
+
+  if (typeof detail.summary.cvssScore === 'number' && detail.summary.source) {
+    add({
+      source: detail.summary.source,
+      score: detail.summary.cvssScore,
+      sourceRecordId: detail.summary.externalId,
+      sourceIdentifier: detail.summary.externalId,
+      sourceUrl: detail.summary.sourceUrl,
+    });
+  }
+
+  sourceRecords.forEach((record) => {
+    if (typeof record.cvssScore === 'number') {
+      add({
+        source: record.sourceSystem,
+        score: record.cvssScore,
+        sourceRecordId: record.sourceRecordId,
+        sourceIdentifier: record.sourceIdentifier,
+        sourceUrl: record.sourceUrl,
+      });
+    }
+  });
+
+  (detail.vendorIntelligence ?? []).forEach((intel) => {
+    if (typeof intel.cvssScore === 'number' && intel.source) {
+      add({
+        source: intel.source,
+        score: intel.cvssScore,
+        sourceRecordId: intel.packageName,
+      });
+    }
+  });
+
+  return Array.from(scores.values());
 }
 
 function buildSignalsFallback(
@@ -3547,6 +3743,12 @@ function CveOverviewExperience({
     [detail, softwareGroups],
   );
   const referenceLinks = React.useMemo(() => buildReferenceLinks(detail), [detail]);
+  const sourceRecords = React.useMemo(() => buildSourceRecordViews(detail), [detail]);
+  const sourceRelations = React.useMemo(() => buildSourceRelationViews(detail, sourceRecords), [detail, sourceRecords]);
+  const sourceScoreEntries = React.useMemo(
+    () => buildSourceScoreEntries(detail, sourceRecords),
+    [detail, sourceRecords]
+  );
 
   const timelineItems = [
     detail.summary.publishedAt ? { label: 'CVE Record Created', value: formatDate(detail.summary.publishedAt), tone: 'published', sublabel: 'NVD Published Date' } : null,
@@ -3696,15 +3898,11 @@ function CveOverviewExperience({
         // Technical details variables
         const allSources = Array.from(new Set([
           ...(detail.summary.source ? [detail.summary.source] : []),
+          ...sourceRecords.map((record) => record.sourceSystem).filter(Boolean),
           ...detail.vendorIntelligence.map(v => v.source).filter(Boolean),
         ]));
         const multiSource = allSources.length > 1;
-        const altScores = detail.vendorIntelligence.reduce<Array<{ source: string; score: number }>>((scores, intel) => {
-          if (intel.source && intel.source !== detail.summary.source && typeof intel.cvssScore === 'number') {
-            scores.push({ source: intel.source, score: intel.cvssScore });
-          }
-          return scores;
-        }, []);
+        const altScores = sourceScoreEntries.filter((entry) => entry.source !== detail.summary.source);
 
         return (
           <div className="cvd2-overview-body">
@@ -3940,6 +4138,169 @@ function CveOverviewExperience({
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {sourceRecords.length > 0 && (
+              <div className="cvd2-panel">
+                <div className="cvd-card-inset-hdr">
+                  <p className="cvd-section-label">Source intelligence</p>
+                  <span className="cvd-count-badge">
+                    {sourceRecords.length} record{sourceRecords.length === 1 ? '' : 's'}
+                    {sourceRelations.length > 0 ? ` · ${sourceRelations.length} relation${sourceRelations.length === 1 ? '' : 's'}` : ''}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: sourceRelations.length > 0 ? 'minmax(0, 1.1fr) minmax(280px, 0.9fr)' : '1fr',
+                    gap: 12,
+                    padding: '0 16px 16px',
+                    alignItems: 'start',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {sourceRecords.map((record) => (
+                      <div
+                        key={record.key}
+                        style={{
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          background: 'var(--surface)',
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                          <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+                              <span className="cvd-src-tag">{record.sourceSystem}</span>
+                              {record.sourceOnly && <span className="cvd-src-tag">Source only</span>}
+                              {record.sourceRecordId && <span className="cvd-src-tag">{record.sourceRecordId}</span>}
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: 1.4 }}>
+                              {record.title ?? record.sourceIdentifier ?? record.sourceRecordId ?? 'Source record'}
+                            </div>
+                            {record.description && (
+                              <div
+                                style={{
+                                  marginTop: 4,
+                                  fontSize: 12,
+                                  lineHeight: 1.5,
+                                  color: 'var(--muted)',
+                                  display: '-webkit-box',
+                                  WebkitBoxOrient: 'vertical',
+                                  WebkitLineClamp: 3,
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {record.description}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flexShrink: 0, minWidth: 140, textAlign: 'right' }}>
+                            {typeof record.cvssScore === 'number' ? (
+                              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>
+                                {record.cvssScore.toFixed(1)}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 13, color: 'var(--muted)' }}>No CVSS</div>
+                            )}
+                            {record.severity && (
+                              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                {record.severity}
+                              </div>
+                            )}
+                            {record.vulnStatus && (
+                              <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 2 }}>
+                                {formatLabel(record.vulnStatus)}
+                              </div>
+                            )}
+                            {record.inKev && (
+                              <div style={{ fontSize: 11, color: '#b91c1c', fontWeight: 600, marginTop: 2 }}>
+                                CISA KEV
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {record.sourceIdentifier && record.sourceIdentifier !== record.sourceRecordId && (
+                            <span className="cvd-kv-src-inline">ID {record.sourceIdentifier}</span>
+                          )}
+                          {record.cvssVector && <span className="cvd-kv-src-inline">{record.cvssVector}</span>}
+                          {typeof record.epssScore === 'number' && (
+                            <span className="cvd-kv-src-inline">EPSS {(record.epssScore * 100).toFixed(1)}%</span>
+                          )}
+                          {record.cweIds && <span className="cvd-kv-src-inline">{record.cweIds}</span>}
+                          {record.sourceOnly && <span className="cvd-kv-src-inline">Source record only</span>}
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--muted)' }}>
+                          {record.publishedAt && <span>Published {formatDate(record.publishedAt)}</span>}
+                          {record.lastModifiedAt && <span>Modified {formatDate(record.lastModifiedAt)}</span>}
+                          {record.observedAt && <span>Observed {formatDate(record.observedAt)}</span>}
+                          {record.lastSeenAt && <span>Seen {formatDate(record.lastSeenAt)}</span>}
+                        </div>
+
+                        {record.sourceUrl && (
+                          <a
+                            href={record.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="cvd-ref-link"
+                            style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {record.sourceUrl}
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {sourceRelations.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Correlations
+                        </span>
+                        <span className="cvd-count-badge">{sourceRelations.length}</span>
+                      </div>
+                      {sourceRelations.map((relation) => (
+                        <div
+                          key={relation.key}
+                          style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            background: 'var(--surface)',
+                            padding: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                            <span className="cvd-src-tag">{relation.relationType}</span>
+                            {relation.sourceSystem && <span className="cvd-src-tag">{relation.sourceSystem}</span>}
+                            {relation.verified && <span className="cvd-src-tag">Verified</span>}
+                            {typeof relation.confidence === 'number' && (
+                              <span className="cvd-kv-src-inline">Confidence {(relation.confidence * 100).toFixed(0)}%</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 2 }}>{relation.fromLabel}</div>
+                            <div style={{ color: 'var(--muted)', marginBottom: 2 }}>→ {relation.toLabel}</div>
+                            {relation.provenanceNote && (
+                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{relation.provenanceNote}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

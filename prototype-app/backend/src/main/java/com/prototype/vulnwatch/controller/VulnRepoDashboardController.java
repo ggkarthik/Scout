@@ -75,7 +75,8 @@ public class VulnRepoDashboardController {
             @RequestParam(required = false) String softwareScope,
             @RequestParam(required = false) String softwareIdentityId,
             @RequestParam(required = false) Boolean includeAll,
-            @RequestParam(required = false) Boolean impactedOnly
+            @RequestParam(required = false) Boolean impactedOnly,
+            @RequestParam(required = false) String source
     ) {
         return vulnRepoVulnerabilityQueryService.listVulnerabilities(
                 workspaceService.getWorkspace(),
@@ -90,7 +91,8 @@ public class VulnRepoDashboardController {
                 softwareScope,
                 softwareIdentityId,
                 includeAll,
-                impactedOnly
+                impactedOnly,
+                source
         );
     }
 
@@ -122,7 +124,8 @@ public class VulnRepoDashboardController {
                 softwareScope,
                 softwareIdentityId,
                 Boolean.TRUE.equals(includeAll),
-                false
+                false,
+                null
         );
     }
 

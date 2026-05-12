@@ -605,7 +605,7 @@ public class ServiceNowIncidentService {
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 return List.of();
             }
-            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode root = ServiceNowApiResponseParser.parseJson(objectMapper, response, "ServiceNow sys_user_group");
             JsonNode results = root.path("result");
             if (!results.isArray()) return List.of();
             List<String> groups = new ArrayList<>();
@@ -615,6 +615,17 @@ public class ServiceNowIncidentService {
             }
             groups.sort(String.CASE_INSENSITIVE_ORDER);
             return groups;
+        } catch (IllegalStateException e) {
+            if (e.getMessage() != null && (
+                    e.getMessage().contains("returned HTML instead of JSON")
+                            || e.getMessage().contains("returned invalid JSON")
+                            || e.getMessage().contains("returned an empty response")
+            )) {
+                log.debug("Skipping assignment group fetch from ServiceNow: {}", e.getMessage());
+                return List.of();
+            }
+            log.warn("Failed to fetch assignment groups from ServiceNow: {}", e.getMessage());
+            return List.of();
         } catch (Exception e) {
             log.warn("Failed to fetch assignment groups from ServiceNow: {}", e.getMessage());
             return List.of();

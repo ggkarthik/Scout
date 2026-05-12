@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import { useActor } from '../features/auth/context';
 import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
 import type { RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
@@ -8,7 +9,7 @@ import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings';
+type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'euvd' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings';
 
 interface ConfigNavItem {
   key: ConfigNavKey;
@@ -53,6 +54,11 @@ const CONFIG_NAV: ConfigNavItem[] = [
     key: 'auto-findings',
     label: 'Auto-Finding Rules',
     description: 'Automatically create findings based on CVE, software, and asset criteria',
+  },
+  {
+    key: 'euvd',
+    label: 'EUVD Integration',
+    description: 'ENISA EUVD feed sync and status',
   },
   {
     key: 'dev-tools',
@@ -517,6 +523,11 @@ export function ConfigurationsPage() {
   const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
   const canEditRiskPolicy = canManageRiskPolicy(actor);
   const canUseDevTools = hasRole(actor, 'PLATFORM_OWNER');
+  const canExecuteVulnFeeds = hasRole(actor, 'PLATFORM_OWNER');
+  const [vulnIntelSourcesSummary, setVulnIntelSourcesSummary] = React.useState<VulnIntelSourcesSummary | null>(null);
+  const [euvdLoading, setEuvdLoading] = React.useState(true);
+  const [euvdBusy, setEuvdBusy] = React.useState(false);
+  const [euvdMessage, setEuvdMessage] = React.useState('');
   const [ownershipRules, setOwnershipRules] = React.useState<OwnershipRule[]>([]);
   const [ownershipGroups, setOwnershipGroups] = React.useState<string[]>([]);
   const [ownershipLoading, setOwnershipLoading] = React.useState(true);
@@ -724,6 +735,22 @@ export function ConfigurationsPage() {
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [ownershipGroupOpen]);
+
+  const refreshEuvdStatus = React.useCallback(async () => {
+    setEuvdLoading(true);
+    try {
+      const summary = await api.getVulnIntelSourcesSummary();
+      setVulnIntelSourcesSummary(summary);
+    } catch {
+      setVulnIntelSourcesSummary(null);
+    } finally {
+      setEuvdLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void refreshEuvdStatus();
+  }, [refreshEuvdStatus]);
 
   React.useEffect(() => {
     if (!policy && riskPolicyQuery.error) {
@@ -1408,6 +1435,26 @@ export function ConfigurationsPage() {
     }
   };
 
+  const executeEuvdNow = async () => {
+    if (!canExecuteVulnFeeds) {
+      setEuvdMessage('Platform owner access is required to execute EUVD sync.');
+      return;
+    }
+    setEuvdBusy(true);
+    setEuvdMessage('');
+    try {
+      const response = await api.syncEuvd();
+      setEuvdMessage(response.message || 'EUVD sync queued.');
+      await refreshEuvdStatus();
+    } catch (error) {
+      setEuvdMessage(error instanceof Error ? error.message : 'EUVD sync failed.');
+    } finally {
+      setEuvdBusy(false);
+    }
+  };
+
+  const euvdStatus: VulnIntelSourceStatus | null = vulnIntelSourcesSummary?.sources?.EUVD ?? vulnIntelSourcesSummary?.sources?.euvd ?? null;
+
   const renderOwnership = () => (
     <div className="config-section-body">
       <div className="config-section-intro">
@@ -1690,6 +1737,69 @@ export function ConfigurationsPage() {
           </button>
         </div>
         {resetMessage && <div className="notice" style={{ marginTop: 10 }}>{resetMessage}</div>}
+      </div>
+    </div>
+  );
+
+  const renderEuvdIntegration = () => (
+    <div className="config-section-body">
+      <div className="config-section-intro">
+        <p>
+          ENISA EUVD is a public vulnerability feed. Execute an on-demand sync to ingest the latest
+          EUVD records into vuln intelligence and refresh EUVD-to-CVE correlations.
+        </p>
+      </div>
+
+      {euvdMessage && (
+        <div className="notice" style={{ marginBottom: 16 }}>
+          {euvdMessage}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel-muted)', padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>EUVD Vulnerability Feed</div>
+              <div className="field-hint" style={{ marginTop: 4 }}>
+                Source records are stored separately and linked back to CVEs when cross-references exist.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={executeEuvdNow}
+              disabled={!canExecuteVulnFeeds || euvdBusy}
+            >
+              {euvdBusy ? 'Executing…' : 'Execute now'}
+            </button>
+          </div>
+
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Status</div>
+              <div style={{ fontWeight: 700, marginTop: 4, textTransform: 'capitalize' }}>
+                {euvdLoading ? 'Loading…' : (euvdStatus?.status ?? 'never')}
+              </div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Last completed</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>
+                {euvdStatus?.completedAt ? formatInstant(euvdStatus.completedAt) : 'Never'}
+              </div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Fetched / Inserted / Updated</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>
+                {(euvdStatus?.recordsFetched ?? 0).toLocaleString()} / {(euvdStatus?.recordsInserted ?? 0).toLocaleString()} / {(euvdStatus?.recordsUpdated ?? 0).toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          <div className="field-hint" style={{ marginTop: 12 }}>
+            The execute action runs the backend EUVD sync endpoint immediately.
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2048,6 +2158,10 @@ export function ConfigurationsPage() {
       title: 'Auto-Finding Rules',
       description: 'Define rules that automatically create findings when CVEs match specific software, asset, and severity criteria.',
     },
+    euvd: {
+      title: 'EUVD Integration',
+      description: 'Execute and monitor the ENISA EUVD vulnerability feed ingestion.',
+    },
     'dev-tools': {
       title: 'Developer Tools',
       description: 'Prototype controls — use only in development environments.',
@@ -2107,6 +2221,7 @@ export function ConfigurationsPage() {
           {activeSection === 'findings-score' && renderFindingsScore()}
           {activeSection === 'suppress' && renderSuppress()}
           {activeSection === 'auto-findings' && renderAutoFindings()}
+          {activeSection === 'euvd' && renderEuvdIntegration()}
           {activeSection === 'dev-tools' && renderDevTools()}
         </div>
       </div>

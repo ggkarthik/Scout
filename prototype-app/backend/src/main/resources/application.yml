@@ -119,6 +119,13 @@ app:
     default-lookback-days: ${GHSA_DEFAULT_LOOKBACK_DAYS:7}
     per-page: ${GHSA_PER_PAGE:100}
     max-pages-per-sync: ${GHSA_MAX_PAGES_PER_SYNC:40}
+  euvd:
+    api-url: ${EUVD_API_URL:https://euvdservices.enisa.europa.eu/api/search}
+    per-page: ${EUVD_PER_PAGE:100}
+    max-pages-per-sync: ${EUVD_MAX_PAGES_PER_SYNC:200}
+    min-request-interval-ms: ${EUVD_MIN_REQUEST_INTERVAL_MS:${HTTP_OUTBOUND_MIN_REQUEST_INTERVAL_MS:0}}
+    max-retries: ${EUVD_MAX_RETRIES:${HTTP_OUTBOUND_MAX_RETRIES:3}}
+    retry-base-backoff-ms: ${EUVD_RETRY_BASE_BACKOFF_MS:${HTTP_OUTBOUND_RETRY_BASE_BACKOFF_MS:500}}
   correlation:
     delta-queue-capacity: ${APP_CORRELATION_DELTA_QUEUE_CAPACITY:500}
     delta-queue-enqueue-timeout-ms: ${APP_CORRELATION_DELTA_QUEUE_ENQUEUE_TIMEOUT_MS:2000}

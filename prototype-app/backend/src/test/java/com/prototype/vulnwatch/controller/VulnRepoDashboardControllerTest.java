@@ -95,7 +95,7 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null
-        )).thenReturn(new OrgSpecificCveExposurePageResponse(
+        , null)).thenReturn(new OrgSpecificCveExposurePageResponse(
                 new OrgSpecificCveExposureSummaryResponse(7L, 5L, 3L, 1L, 2L),
                 List.of(new OrgSpecificCveExposureRecordResponse(
                         UUID.fromString("10000000-0000-0000-0000-000000000001"),
@@ -133,7 +133,8 @@ class VulnRepoDashboardControllerTest {
                         null,
                         null,
                         null,
-                        null
+                        null,
+                        java.util.List.of()
                 )),
                 1,
                 25,
@@ -167,7 +168,7 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null
-        );
+        , null);
     }
 
     @Test
@@ -187,7 +188,7 @@ class VulnRepoDashboardControllerTest {
                 "00000000-0000-0000-0000-000000000099",
                 true,
                 false
-        )).thenReturn(new OrgSpecificCveExposurePageResponse(
+        , null)).thenReturn(new OrgSpecificCveExposurePageResponse(
                 new OrgSpecificCveExposureSummaryResponse(1L, 1L, 1L, 0L, 0L),
                 List.of(),
                 0,
@@ -223,7 +224,7 @@ class VulnRepoDashboardControllerTest {
                 "00000000-0000-0000-0000-000000000099",
                 true,
                 false
-        );
+        , null);
     }
 
     @Test
