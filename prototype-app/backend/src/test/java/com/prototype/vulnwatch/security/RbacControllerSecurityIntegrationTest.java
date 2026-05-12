@@ -134,6 +134,8 @@ class RbacControllerSecurityIntegrationTest {
         when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
                 subject,
                 UUID.randomUUID(),
+                null,
+                null,
                 tenantId,
                 "Customer A",
                 Set.of(role)));

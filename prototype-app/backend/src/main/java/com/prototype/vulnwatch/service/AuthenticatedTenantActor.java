@@ -6,6 +6,8 @@ import java.util.UUID;
 public record AuthenticatedTenantActor(
         String subject,
         UUID userId,
+        String email,
+        String displayName,
         UUID tenantId,
         String tenantName,
         Set<String> roles

@@ -73,6 +73,13 @@ export type AuditEvent = {
   detailsJson: string | null;
 };
 
+export type AllowedTenant = {
+  id: string;
+  name: string;
+  slug: string | null;
+  role: string;
+};
+
 export type AuthContext = {
   creator: boolean;
   principal: string;
@@ -80,6 +87,10 @@ export type AuthContext = {
   tenantId: string | null;
   tenantName: string | null;
   roles: string[];
+  allowedTenants?: AllowedTenant[];
+  platformScope?: boolean;
+  actingAsPlatformOwner?: boolean;
+  sensitiveActionConfirmationRequired?: boolean;
   planCode?: string | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;
@@ -139,6 +150,13 @@ export type DemoInviteValidationResponse = {
   inviteExpiresAt: string;
   loginUrl: string;
   message: string;
+  setupToken?: string | null;
+};
+
+export type AuthTokenResponse = {
+  token: string;
+  tokenType: 'Bearer';
+  expiresAt: string;
 };
 
 export type DemoStatus = {

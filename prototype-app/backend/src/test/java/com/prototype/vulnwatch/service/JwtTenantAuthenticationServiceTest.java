@@ -44,6 +44,7 @@ class JwtTenantAuthenticationServiceTest {
                 tenantRepository,
                 membershipRepository,
                 "tenant_id",
+                "active_tenant_id",
                 "tenant_slug",
                 "email",
                 "name",

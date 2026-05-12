@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { InventoryViewKey } from './features/inventory/types';
 import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
@@ -474,13 +474,23 @@ function routeLoadingFallback() {
 }
 
 function actorFromPersona(persona: TestPersona): ActorContext {
+  const platformOwner = persona.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER');
   return {
-    creator: persona.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER'),
+    creator: platformOwner,
     principal: persona.subject,
     userId: persona.subject,
     tenantId: persona.tenantSlug ? `preview:${persona.tenantSlug}` : null,
     tenantName: persona.tenantName,
     roles: persona.roles,
+    allowedTenants: persona.tenantSlug && persona.tenantName ? [{
+      id: `preview:${persona.tenantSlug}`,
+      name: persona.tenantName,
+      slug: persona.tenantSlug,
+      role: persona.roles[0] ?? 'SECURITY_ANALYST'
+    }] : [],
+    platformScope: platformOwner && !persona.tenantSlug,
+    actingAsPlatformOwner: platformOwner && !!persona.tenantSlug,
+    sensitiveActionConfirmationRequired: platformOwner && !!persona.tenantSlug,
     planCode: null,
     demoExpiresAt: null,
     demoDaysRemaining: null,
@@ -591,6 +601,7 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
 function AppShell() {
   const actor = useActor();
   const testPersonas = React.useContext(TestPersonaControlsState);
+  const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
@@ -705,9 +716,28 @@ function AppShell() {
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
   const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
+  const isPlatformScope = actor?.platformScope ?? false;
+  const actingAsPlatformOwner = actor?.actingAsPlatformOwner ?? false;
+  const availableTenantContexts = actor?.allowedTenants ?? [];
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
+  const switchTenantContext = useMutation({
+    mutationFn: api.selectTenantContext,
+    onSuccess: (response) => {
+      setStoredAuthToken(response.token);
+      void queryClient.invalidateQueries({ queryKey: ['actor-context'] });
+      navigate('/exposure');
+    }
+  });
+  const clearTenantContext = useMutation({
+    mutationFn: api.clearTenantContext,
+    onSuccess: (response) => {
+      setStoredAuthToken(response.token);
+      void queryClient.invalidateQueries({ queryKey: ['actor-context'] });
+      navigate(pathForPlatformView('tenants'));
+    }
+  });
 
   const openPersonaDialog = (): void => {
     setSettingsMenuOpen(false);
@@ -737,6 +767,11 @@ function AppShell() {
     if (activeTab === 'platform') return 'Platform Console';
     return titleForTab(activeTab);
   }, [activeTab]);
+
+  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'vuln-repo', 'inventory', 'end-of-life', 'connect', 'admin', 'configurations']);
+  if (actor && isPlatformScope && tenantScopedTabs.has(activeTab)) {
+    return <Navigate to={pathForPlatformView('tenants')} replace state={{ platformMessage: 'Select a tenant to continue.' }} />;
+  }
 
   const renderNavButton = (tab: AppTab): React.ReactNode => (
     <button
@@ -837,6 +872,29 @@ function AppShell() {
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
               </div>
+              {canAccessPlatformConsole(actor) && availableTenantContexts.length > 0 && (
+                <label className="tenant-context-pill" style={{ gap: '0.4rem' }}>
+                  <span>Tenant Context</span>
+                  <select
+                    aria-label="Tenant context switcher"
+                    value={actor?.tenantId ?? ''}
+                    onChange={(event) => {
+                      const nextTenantId = event.target.value;
+                      if (!nextTenantId) {
+                        clearTenantContext.mutate();
+                        return;
+                      }
+                      switchTenantContext.mutate(nextTenantId);
+                    }}
+                    disabled={switchTenantContext.isPending || clearTenantContext.isPending}
+                  >
+                    <option value="">Platform scope</option>
+                    {availableTenantContexts.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {isDemoTenant && (
                 <div className="tenant-context-pill demo-status-pill" title={actor.demoExpiresAt ? `Expires ${actor.demoExpiresAt}` : 'Demo workspace'}>
                   <span>Demo</span>
@@ -853,6 +911,16 @@ function AppShell() {
                 <div className="test-persona-inline-warning" role="status">
                   UI preview only - backend authorization still uses the current real session.
                 </div>
+              )}
+              {actingAsPlatformOwner && (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={() => clearTenantContext.mutate()}
+                  disabled={clearTenantContext.isPending}
+                >
+                  {clearTenantContext.isPending ? 'Returning...' : 'Return to Platform'}
+                </button>
               )}
               <button
                 className="btn btn-secondary nav-toggle"
@@ -921,6 +989,20 @@ function AppShell() {
               </button>
             </div>
           </header>
+
+          {actingAsPlatformOwner && (
+            <div className="section-tab-row" role="status" aria-live="polite">
+              <span style={{ fontWeight: 600 }}>Viewing {actor?.tenantName} as Platform Owner</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => clearTenantContext.mutate()}
+                disabled={clearTenantContext.isPending}
+              >
+                Return to Platform
+              </button>
+            </div>
+          )}
 
           {activeTab === 'vuln-repo' && (
             <div className="section-tab-row">
