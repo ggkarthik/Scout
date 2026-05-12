@@ -195,7 +195,7 @@ Key connector components:
 
 Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
 
-**Current watermark: V1087** (`fix_records_jsonb_to_text`). The next migration must be **V1088**.
+**Current watermark: V1091** (`demo_invite_delivery_metadata`). The next migration must be **V1092**.
 
 ### Scheduled Jobs
 
