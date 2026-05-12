@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.domain.ServiceAccount;
 import com.prototype.vulnwatch.dto.ServiceAccountRequest;
 import com.prototype.vulnwatch.dto.ServiceAccountResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.IdentityAdministrationService;
 import com.prototype.vulnwatch.service.RequestActorService;
@@ -46,6 +47,7 @@ public class ServiceAccountController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("service_account.created")
     public ServiceAccountResponse create(@RequestBody ServiceAccountRequest request) {
         var actor = requestActorService.currentActor();
         UUID tenantId = request.tenantId() == null ? actor.tenantId() : request.tenantId();

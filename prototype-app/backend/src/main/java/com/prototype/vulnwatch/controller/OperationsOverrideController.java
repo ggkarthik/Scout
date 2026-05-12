@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService.IssueSourceIds;
 import com.prototype.vulnwatch.service.QualityIssueProjectionCoordinator;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import java.util.List;
 import java.util.UUID;
 import lombok.Data;
@@ -84,6 +85,7 @@ public class OperationsOverrideController {
      * Falls back to per-instance override for legacy SOFTWARE_INSTANCE issues.
      */
     @PostMapping("/quality/issues/{issueId}/normalize")
+    @SensitiveTenantAction("operations.override.normalize")
     public ResponseEntity<OverrideResponse> applyNormalizationOverride(
             @PathVariable String issueId,
             @RequestBody NormalizationOverrideRequest request,
@@ -122,6 +124,7 @@ public class OperationsOverrideController {
      * Revoke a manual normalization override.
      */
     @DeleteMapping("/quality/issues/{issueId}/normalize")
+    @SensitiveTenantAction("operations.override.normalize.revoke")
     public ResponseEntity<OverrideResponse> revokeNormalizationOverride(
             @PathVariable String issueId,
             @RequestHeader(value = "X-User-ID", defaultValue = "system") String actor
@@ -161,6 +164,7 @@ public class OperationsOverrideController {
      * Apply a manual correlation override: set analyst disposition on all states for the component.
      */
     @PostMapping("/quality/issues/{issueId}/correlate")
+    @SensitiveTenantAction("operations.override.correlate")
     public ResponseEntity<OverrideResponse> applyCorrelationOverride(
             @PathVariable String issueId,
             @RequestBody CorrelationOverrideRequest request,
@@ -188,6 +192,7 @@ public class OperationsOverrideController {
      * Revoke a manual correlation override.
      */
     @DeleteMapping("/quality/issues/{issueId}/correlate")
+    @SensitiveTenantAction("operations.override.correlate.revoke")
     public ResponseEntity<OverrideResponse> revokeCorrelationOverride(
             @PathVariable String issueId,
             @RequestHeader(value = "X-User-ID", defaultValue = "system") String actor

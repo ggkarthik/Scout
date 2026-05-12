@@ -1,7 +1,7 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, setStoredAuthToken } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
@@ -21,6 +21,10 @@ type PlatformConsolePageProps = {
 
 export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
+    ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
+    : '';
 
   return (
     <div className="page-grid platform-console-page">
@@ -46,6 +50,11 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
             </button>
           ))}
         </div>
+        {platformMessage && (
+          <div className="notice" role="status">
+            {platformMessage}
+          </div>
+        )}
 
         {selectedView === 'tenants' && <TenantLifecyclePanel />}
         {selectedView === 'demo-requests' && <DemoRequestsPanel />}
@@ -59,6 +68,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
 
 function TenantLifecyclePanel() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
@@ -67,6 +77,14 @@ function TenantLifecyclePanel() {
     mutationFn: api.createTenant,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+    }
+  });
+  const openTenantContext = useMutation({
+    mutationFn: api.selectTenantContext,
+    onSuccess: async (response) => {
+      setStoredAuthToken(response.token);
+      await queryClient.invalidateQueries({ queryKey: ['actor-context'] });
+      navigate('/exposure');
     }
   });
 
@@ -126,6 +144,7 @@ function TenantLifecyclePanel() {
                 <th>Daily Exposure Refreshes</th>
                 <th>Demo Expires</th>
                 <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -138,10 +157,25 @@ function TenantLifecyclePanel() {
                   <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
                   <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => openTenantContext.mutate(tenant.id)}
+                      disabled={openTenantContext.isPending}
+                    >
+                      Enter Tenant
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {openTenantContext.isError && (
+        <div className="notice error" role="alert">
+          {openTenantContext.error instanceof Error ? openTenantContext.error.message : 'Failed to enter tenant context'}
         </div>
       )}
     </div>

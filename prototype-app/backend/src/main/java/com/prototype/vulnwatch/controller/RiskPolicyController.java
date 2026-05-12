@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.controller;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.RiskPolicyRequest;
 import com.prototype.vulnwatch.dto.RiskPolicyResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.FindingsScoreRecomputeService;
 import com.prototype.vulnwatch.service.RiskPolicyService;
@@ -44,6 +45,7 @@ public class RiskPolicyController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("risk_policy.updated")
     public RiskPolicyResponse update(@RequestBody RiskPolicyRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
         RiskPolicyResponse response = riskPolicyService.update(tenant, request);
@@ -53,6 +55,7 @@ public class RiskPolicyController {
 
     @PostMapping("/recompute-findings-scores")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("risk_policy.findings_score_recomputed")
     public Map<String, Object> recomputeFindingsScores() {
         Tenant tenant = workspaceService.getWorkspace();
         int updated = findingsScoreRecomputeService.recomputeAll(tenant);

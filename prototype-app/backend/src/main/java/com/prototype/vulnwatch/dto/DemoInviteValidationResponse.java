@@ -12,6 +12,7 @@ public record DemoInviteValidationResponse(
         Instant demoExpiresAt,
         Instant inviteExpiresAt,
         String loginUrl,
-        String message
+        String message,
+        String setupToken
 ) {
 }
