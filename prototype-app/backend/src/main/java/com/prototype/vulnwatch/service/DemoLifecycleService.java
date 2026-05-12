@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.DemoInvite;
 import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
@@ -36,6 +37,8 @@ public class DemoLifecycleService {
     private final TenantRepository tenantRepository;
     private final TenantService tenantService;
     private final IdentityAdministrationService identityAdministrationService;
+    private final LocalCredentialAuthService localCredentialAuthService;
+    private final DemoInviteEmailService demoInviteEmailService;
     private final AuditEventService auditEventService;
     private final SbomUploadRepository sbomUploadRepository;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -47,6 +50,8 @@ public class DemoLifecycleService {
             TenantRepository tenantRepository,
             TenantService tenantService,
             IdentityAdministrationService identityAdministrationService,
+            LocalCredentialAuthService localCredentialAuthService,
+            DemoInviteEmailService demoInviteEmailService,
             AuditEventService auditEventService,
             SbomUploadRepository sbomUploadRepository,
             @Value("${app.demo.app-base-url:http://localhost:5173}") String appBaseUrl
@@ -56,6 +61,8 @@ public class DemoLifecycleService {
         this.tenantRepository = tenantRepository;
         this.tenantService = tenantService;
         this.identityAdministrationService = identityAdministrationService;
+        this.localCredentialAuthService = localCredentialAuthService;
+        this.demoInviteEmailService = demoInviteEmailService;
         this.auditEventService = auditEventService;
         this.sbomUploadRepository = sbomUploadRepository;
         this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
@@ -95,7 +102,7 @@ public class DemoLifecycleService {
             return toRequestResponse(request);
         }
         Tenant tenant = provisionTenant(request, actor);
-        DemoInvite invite = createInvite(request, tenant);
+        DemoInvite invite = deliverInvite(createInvite(request, tenant), request);
         request.setStatus("PROVISIONED");
         request.setDecidedAt(Instant.now());
         request.setDecidedBy(trimToNull(actor));
@@ -129,31 +136,31 @@ public class DemoLifecycleService {
                     .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
             invite = createInvite(request, tenant);
         }
-        invite.setStatus("SENT");
-        invite.setLastSentAt(Instant.now());
+        invite = deliverInvite(invite, request);
         auditEventService.record("demo.invite.resent", "demo_invite", invite.getId().toString(), null);
-        return toInviteResponse(demoInviteRepository.save(invite));
+        return toInviteResponse(invite);
     }
 
     @Transactional(readOnly = true)
     public DemoInviteValidationResponse validateInvite(String token) {
         DemoInvite invite = findInvite(token);
-        return inviteValidationResponse(invite, null);
+        return inviteValidationResponse(invite, null, null);
     }
 
     @Transactional
     public DemoInviteValidationResponse acceptInvite(String token) {
         DemoInvite invite = findInvite(token);
-        DemoInviteValidationResponse validation = inviteValidationResponse(invite, null);
+        DemoInviteValidationResponse validation = inviteValidationResponse(invite, null, null);
         if (!validation.valid()) {
             throw new DemoAccessException("DEMO_INVITE_INVALID", validation.message(), HttpStatus.BAD_REQUEST);
         }
         invite.setStatus("ACCEPTED");
         invite.setAcceptedAt(Instant.now());
         demoInviteRepository.save(invite);
+        String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
         auditEventService.record("demo.invite.accepted", "demo_invite", invite.getId().toString(),
                 "{\"tenantId\":\"" + invite.getTenant().getId() + "\"}");
-        return inviteValidationResponse(invite, "Invite accepted");
+        return inviteValidationResponse(invite, "Invite accepted", setupToken);
     }
 
     @Transactional(readOnly = true)
@@ -249,8 +256,24 @@ public class DemoLifecycleService {
         invite.setTenant(tenant);
         invite.setEmail(request.getEmail());
         invite.setToken(newToken());
+        invite.setStatus("READY");
         invite.setExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
-        invite.setLastSentAt(Instant.now());
+        return demoInviteRepository.save(invite);
+    }
+
+    private DemoInvite deliverInvite(DemoInvite invite, DemoRequest request) {
+        ResendEmailClient.DeliveryResult deliveryResult = demoInviteEmailService.sendInvite(request, invite);
+        if (deliveryResult.state() == ResendEmailClient.DeliveryState.SENT) {
+            invite.setStatus("SENT");
+            invite.setLastSentAt(Instant.now());
+            auditEventService.record("demo.invite.email.sent", "demo_invite", invite.getId().toString(), null);
+        } else if (deliveryResult.state() == ResendEmailClient.DeliveryState.SKIPPED) {
+            invite.setStatus("READY");
+            auditEventService.record("demo.invite.email.skipped", "demo_invite", invite.getId().toString(), null);
+        } else {
+            invite.setStatus("DELIVERY_FAILED");
+            auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), null);
+        }
         return demoInviteRepository.save(invite);
     }
 
@@ -264,7 +287,7 @@ public class DemoLifecycleService {
                 .orElseThrow(() -> new DemoAccessException("DEMO_INVITE_INVALID", "Demo invite not found", HttpStatus.NOT_FOUND));
     }
 
-    private DemoInviteValidationResponse inviteValidationResponse(DemoInvite invite, String overrideMessage) {
+    private DemoInviteValidationResponse inviteValidationResponse(DemoInvite invite, String overrideMessage, String setupToken) {
         Instant now = Instant.now();
         Tenant tenant = invite.getTenant();
         boolean tenantExpired = tenant.getDemoExpiresAt() != null && !tenant.getDemoExpiresAt().isAfter(now);
@@ -288,7 +311,8 @@ public class DemoLifecycleService {
                 tenant.getDemoExpiresAt(),
                 invite.getExpiresAt(),
                 appBaseUrl + "/login?invite=" + invite.getToken(),
-                message);
+                message,
+                setupToken);
     }
 
     private DemoRequestResponse toRequestResponse(DemoRequest request) {

@@ -54,6 +54,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         return !path.startsWith("/api/")
+                || "/api/auth/login".equals(path)
+                || "/api/auth/setup-password".equals(path)
                 || ("/api/demo-requests".equals(path) && "POST".equalsIgnoreCase(request.getMethod()))
                 || path.startsWith("/api/demo-invites/");
     }
@@ -150,6 +152,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                     actor.tenantId(),
                     actor.tenantName(),
                     actor.subject(),
+                    actor.email(),
+                    actor.displayName(),
                     Set.copyOf(actor.roles())));
             SecurityContextHolder.getContext().setAuthentication(authentication);
             TenantContext.setCurrentTenantId(actor.tenantId());

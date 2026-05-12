@@ -25,6 +25,21 @@ public class AppUser {
     @Column(nullable = false, length = 32)
     private String status = "ACTIVE";
 
+    @Column(name = "password_hash", length = 255)
+    private String passwordHash;
+
+    @Column(name = "password_set_at")
+    private Instant passwordSetAt;
+
+    @Column(name = "platform_owner", nullable = false)
+    private boolean platformOwner;
+
+    @Column(name = "password_setup_token_hash", length = 64)
+    private String passwordSetupTokenHash;
+
+    @Column(name = "password_setup_token_expires_at")
+    private Instant passwordSetupTokenExpiresAt;
+
     private Instant lastSeenAt;
 
     @Column(nullable = false)
@@ -79,6 +94,46 @@ public class AppUser {
 
     public void setLastSeenAt(Instant lastSeenAt) {
         this.lastSeenAt = lastSeenAt;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public Instant getPasswordSetAt() {
+        return passwordSetAt;
+    }
+
+    public void setPasswordSetAt(Instant passwordSetAt) {
+        this.passwordSetAt = passwordSetAt;
+    }
+
+    public boolean isPlatformOwner() {
+        return platformOwner;
+    }
+
+    public void setPlatformOwner(boolean platformOwner) {
+        this.platformOwner = platformOwner;
+    }
+
+    public String getPasswordSetupTokenHash() {
+        return passwordSetupTokenHash;
+    }
+
+    public void setPasswordSetupTokenHash(String passwordSetupTokenHash) {
+        this.passwordSetupTokenHash = passwordSetupTokenHash;
+    }
+
+    public Instant getPasswordSetupTokenExpiresAt() {
+        return passwordSetupTokenExpiresAt;
+    }
+
+    public void setPasswordSetupTokenExpiresAt(Instant passwordSetupTokenExpiresAt) {
+        this.passwordSetupTokenExpiresAt = passwordSetupTokenExpiresAt;
     }
 
     public Instant getCreatedAt() {

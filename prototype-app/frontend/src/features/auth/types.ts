@@ -1,3 +1,10 @@
+export type AllowedTenant = {
+  id: string;
+  name: string;
+  slug: string | null;
+  role: string;
+};
+
 export type ActorContext = {
   creator: boolean;
   principal: string;
@@ -5,6 +12,10 @@ export type ActorContext = {
   tenantId: string | null;
   tenantName: string | null;
   roles: string[];
+  allowedTenants?: AllowedTenant[];
+  platformScope?: boolean;
+  actingAsPlatformOwner?: boolean;
+  sensitiveActionConfirmationRequired?: boolean;
   planCode?: string | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;

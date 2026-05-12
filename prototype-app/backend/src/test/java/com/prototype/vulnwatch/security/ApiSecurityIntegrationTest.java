@@ -177,6 +177,8 @@ class ApiSecurityIntegrationTest {
         when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
                 "user-123",
                 UUID.randomUUID(),
+                "analyst@example.com",
+                "Analyst User",
                 tenantId,
                 "Acme Security",
                 Set.of("SECURITY_ANALYST", "TENANT_ADMIN")));

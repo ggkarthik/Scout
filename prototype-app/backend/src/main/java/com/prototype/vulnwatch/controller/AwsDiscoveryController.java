@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.dto.AwsDiscoveryConfigResponse;
 import com.prototype.vulnwatch.dto.AwsDiscoveryTargetRequest;
 import com.prototype.vulnwatch.dto.AwsDiscoveryTargetResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.AwsDiscoveryConfigService;
 import com.prototype.vulnwatch.service.AwsDiscoverySyncService;
@@ -63,6 +64,7 @@ public class AwsDiscoveryController {
     /** PUT /api/connectors/aws-discovery — create or update the connector config. */
     @PutMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.saved")
     public AwsDiscoveryConfigResponse save(@RequestBody AwsDiscoveryConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -74,6 +76,7 @@ public class AwsDiscoveryController {
     /** POST /api/connectors/aws-discovery/test — test the current connector config. */
     @PostMapping("/test")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.tested")
     public AwsConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -86,6 +89,7 @@ public class AwsDiscoveryController {
     /** POST /api/connectors/aws-discovery/sync — manually trigger a sync run. */
     @PostMapping("/sync")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.sync_triggered")
     public SyncTriggerResponse sync() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -103,6 +107,7 @@ public class AwsDiscoveryController {
 
     @PostMapping("/targets")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.target_created")
     public AwsDiscoveryTargetResponse createTarget(@RequestBody AwsDiscoveryTargetRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -113,6 +118,7 @@ public class AwsDiscoveryController {
 
     @PutMapping("/targets/{targetId}")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.target_updated")
     public AwsDiscoveryTargetResponse updateTarget(
             @PathVariable UUID targetId,
             @RequestBody AwsDiscoveryTargetRequest request
@@ -126,6 +132,7 @@ public class AwsDiscoveryController {
 
     @DeleteMapping("/targets/{targetId}")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.target_deleted")
     public void deleteTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -135,6 +142,7 @@ public class AwsDiscoveryController {
 
     @PostMapping("/targets/{targetId}/test")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.target_tested")
     public AwsConnectionTestResponse testTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -146,6 +154,7 @@ public class AwsDiscoveryController {
 
     @PostMapping("/targets/{targetId}/sync")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.aws_discovery.target_sync_triggered")
     public SyncTriggerResponse syncTarget(@PathVariable UUID targetId) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);

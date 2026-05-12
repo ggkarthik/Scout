@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.config;
 
+import com.prototype.vulnwatch.security.SensitiveTenantActionInterceptor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -12,9 +13,14 @@ public class WebConfig implements WebMvcConfigurer {
     @Value("${app.cors.allowed-origins:http://localhost:5173}")
     private String allowedOrigins;
     private final OperationalMetricsInterceptor operationalMetricsInterceptor;
+    private final SensitiveTenantActionInterceptor sensitiveTenantActionInterceptor;
 
-    public WebConfig(OperationalMetricsInterceptor operationalMetricsInterceptor) {
+    public WebConfig(
+            OperationalMetricsInterceptor operationalMetricsInterceptor,
+            SensitiveTenantActionInterceptor sensitiveTenantActionInterceptor
+    ) {
         this.operationalMetricsInterceptor = operationalMetricsInterceptor;
+        this.sensitiveTenantActionInterceptor = sensitiveTenantActionInterceptor;
     }
 
     @Override
@@ -28,6 +34,8 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(operationalMetricsInterceptor)
+                .addPathPatterns("/api/**");
+        registry.addInterceptor(sensitiveTenantActionInterceptor)
                 .addPathPatterns("/api/**");
     }
 

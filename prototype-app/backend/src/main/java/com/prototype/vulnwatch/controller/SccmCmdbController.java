@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.dto.SccmCmdbConfigRequest;
 import com.prototype.vulnwatch.dto.SccmCmdbConfigResponse;
 import com.prototype.vulnwatch.dto.SccmConnectionTestResponse;
 import com.prototype.vulnwatch.dto.SyncTriggerResponse;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.SccmCmdbConfigService;
@@ -53,6 +54,7 @@ public class SccmCmdbController {
     /** PUT /api/connectors/sccm-cmdb — create or update the connector config. */
     @PutMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.sccm_cmdb.saved")
     public SccmCmdbConfigResponse save(@RequestBody SccmCmdbConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -64,6 +66,7 @@ public class SccmCmdbController {
     /** POST /api/connectors/sccm-cmdb/test — test the current connector config. */
     @PostMapping("/test")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.sccm_cmdb.tested")
     public SccmConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
@@ -76,6 +79,7 @@ public class SccmCmdbController {
     /** POST /api/connectors/sccm-cmdb/sync — manually trigger a sync run. */
     @PostMapping("/sync")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @SensitiveTenantAction("connector.sccm_cmdb.sync_triggered")
     public SyncTriggerResponse sync() {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
