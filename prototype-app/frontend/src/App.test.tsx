@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ActorContext } from './features/auth/types';
 import { renderWithProviders } from './test/test-utils';
@@ -68,5 +69,45 @@ describe('App test persona switcher', () => {
     fireEvent.click(await screen.findByLabelText('Open settings menu'));
 
     expect(screen.queryByText('Impersonate User')).not.toBeInTheDocument();
+  });
+
+  it('refetches actor context when the auth token changes between sessions', async () => {
+    const auth = await import('./features/auth/api');
+    const client = await import('./api/client');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER']
+    };
+    const actorSpy = vi.spyOn(auth.authApi, 'getActorContext')
+      .mockResolvedValueOnce(TENANT_ADMIN)
+      .mockResolvedValueOnce(platformOwner);
+
+    client.setStoredAuthToken('tenant-token');
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: 10_000
+        }
+      }
+    });
+
+    const { default: App } = await import('./App');
+    const view = renderWithProviders(<App />, { route: '/platform/demo-requests', queryClient });
+
+    expect(await screen.findByText(/Platform console access requires the Platform Owner role/i)).toBeInTheDocument();
+
+    client.setStoredAuthToken('platform-token');
+    view.unmount();
+    renderWithProviders(<App />, { route: '/platform/demo-requests', queryClient });
+
+    await waitFor(() => {
+      expect(actorSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
   });
 });
