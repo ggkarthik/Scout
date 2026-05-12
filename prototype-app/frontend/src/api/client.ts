@@ -68,6 +68,7 @@ import type {
   DemoRequest,
   DemoRequestCreateRequest,
   DemoStatus,
+  AuthTokenResponse,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -198,6 +199,65 @@ function applyAuthHeaders(headers: Headers): void {
   }
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function currentPlatformTenantContext():
+  | { tenantId: string; roles: string[] }
+  | null {
+  const token = getStoredAuthToken().trim() || STATIC_AUTH_TOKEN.trim();
+  if (!token) {
+    return null;
+  }
+  const payload = decodeJwtPayload(token);
+  if (!payload) {
+    return null;
+  }
+  const rawRoles = Array.isArray(payload.roles) ? payload.roles.map(String) : [];
+  const roles = rawRoles.map((role) => role.replace(/^ROLE_/, '').toUpperCase());
+  if (!roles.includes('PLATFORM_OWNER')) {
+    return null;
+  }
+  const tenantId = String(payload.active_tenant_id ?? payload.tenant_id ?? '').trim();
+  return tenantId ? { tenantId, roles } : null;
+}
+
+function shouldConfirmPlatformAction(path: string, method: string): boolean {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) {
+    return false;
+  }
+  if (path.startsWith('/auth/')) {
+    return false;
+  }
+  const sensitivePrefixes = [
+    '/tenants/',
+    '/service-accounts',
+    '/connectors/aws-discovery',
+    '/connectors/servicenow-cmdb',
+    '/connectors/sccm-cmdb',
+    '/connectors/vulnerability-sources',
+    '/github-sbom-sources',
+    '/suppression-rules',
+    '/risk-policy',
+    '/findings',
+    '/cve-detail',
+    '/operations/quality/issues/',
+    '/inventory/software-identities/',
+  ];
+  return sensitivePrefixes.some((prefix) => path.startsWith(prefix));
+}
+
 function buildApiHeaders(base?: HeadersInit, includeJsonContentType = true): Headers {
   const headers = new Headers(base ?? {});
   if (includeJsonContentType) {
@@ -209,6 +269,17 @@ function buildApiHeaders(base?: HeadersInit, includeJsonContentType = true): Hea
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = buildApiHeaders(options?.headers);
+  const method = options?.method?.toUpperCase() ?? 'GET';
+  const platformTenantContext = typeof window === 'undefined' ? null : currentPlatformTenantContext();
+  if (platformTenantContext && shouldConfirmPlatformAction(path, method)) {
+    const confirmed = window.confirm(`Confirm action for tenant ${platformTenantContext.tenantId} as Platform Owner.`);
+    if (!confirmed) {
+      throw new Error('Action cancelled');
+    }
+    headers.set('X-Platform-Action-Confirm', 'true');
+    headers.set('X-Platform-Action-Tenant', platformTenantContext.tenantId);
+    headers.set('X-Platform-Action-Time', new Date().toISOString());
+  }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers
@@ -718,6 +789,21 @@ export const api = {
     }
   ),
   getAuthContext: () => request<AuthContext>('/me'),
+  login: (email: string, password: string) => publicRequest<AuthTokenResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  }),
+  setupPassword: (setupToken: string, password: string) => publicRequest<AuthTokenResponse>('/auth/setup-password', {
+    method: 'POST',
+    body: JSON.stringify({ setupToken, password })
+  }),
+  selectTenantContext: (tenantId: string) => request<AuthTokenResponse>('/auth/context/tenant', {
+    method: 'POST',
+    body: JSON.stringify({ tenantId })
+  }),
+  clearTenantContext: () => request<AuthTokenResponse>('/auth/context/clear', {
+    method: 'POST'
+  }),
   listTestPersonas: () => request<TestPersona[]>('/dev/test-personas'),
   issueTestPersonaToken: (personaKey: string) =>
     request<TestPersonaToken>(`/dev/test-personas/${encodeURIComponent(personaKey)}/token`, {

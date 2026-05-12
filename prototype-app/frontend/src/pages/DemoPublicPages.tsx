@@ -2,8 +2,10 @@ import React from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, setStoredAuthToken } from '../api/client';
+import type { ActorContext } from '../features/auth/types';
 
 const IDP_LOGIN_URL = import.meta.env.VITE_IDP_LOGIN_URL ?? '';
+const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
 
 export function DemoLandingPage() {
   return (
@@ -137,13 +139,19 @@ export function DemoRequestSuccessPage() {
 
 export function DemoInvitePage() {
   const { token = '' } = useParams();
+  const navigate = useNavigate();
   const inviteQuery = useQuery({
     queryKey: ['demo-invite', token],
     queryFn: () => api.validateDemoInvite(token),
     enabled: token.length > 0
   });
   const acceptInvite = useMutation({
-    mutationFn: () => api.acceptDemoInvite(token)
+    mutationFn: () => api.acceptDemoInvite(token),
+    onSuccess: (response) => {
+      if (response.setupToken) {
+        navigate(`/login?setup=${encodeURIComponent(response.setupToken)}`);
+      }
+    }
   });
 
   const invite = inviteQuery.data;
@@ -186,8 +194,24 @@ export function DemoInvitePage() {
 export function LoginPage() {
   const [searchParams] = useSearchParams();
   const invite = searchParams.get('invite');
-  const [token, setToken] = React.useState('');
+  const setupToken = searchParams.get('setup');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
   const navigate = useNavigate();
+  const personasQuery = useQuery({
+    queryKey: ['login-test-personas'],
+    queryFn: api.listTestPersonas,
+    enabled: TEST_PERSONAS_ENABLED
+  });
+
+  const navigateAfterAuth = React.useCallback((actor: ActorContext) => {
+    if (actor.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER') && actor.platformScope) {
+      navigate('/platform/tenants', { replace: true });
+      return;
+    }
+    navigate('/exposure', { replace: true });
+  }, [navigate]);
 
   const startHostedLogin = () => {
     const returnTo = `${window.location.origin}/`;
@@ -197,25 +221,118 @@ export function LoginPage() {
       : '/demo';
   };
 
-  const submitDevToken = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const applyToken = async (token: string) => {
     setStoredAuthToken(token);
-    navigate('/');
+    const actor = await api.getAuthContext();
+    navigateAfterAuth(actor);
+  };
+
+  const loginMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.login(email, password);
+      await applyToken(response.token);
+      return response;
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : 'Login failed');
+    }
+  });
+
+  const setupPasswordMutation = useMutation({
+    mutationFn: async () => {
+      if (!setupToken) {
+        throw new Error('Password setup token is missing');
+      }
+      const response = await api.setupPassword(setupToken, password);
+      await applyToken(response.token);
+      return response;
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : 'Password setup failed');
+    }
+  });
+
+  const issuePersonaToken = useMutation({
+    mutationFn: async (personaKey: string) => {
+      const response = await api.issueTestPersonaToken(personaKey);
+      await applyToken(response.token);
+      return response;
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : 'Test persona login failed');
+    }
+  });
+
+  const submitLogin = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    if (setupToken) {
+      setupPasswordMutation.mutate();
+      return;
+    }
+    loginMutation.mutate();
   };
 
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Log in to Scout.ai</h1>
-        <p>Customer demo access uses the hosted identity provider configured for this environment.</p>
-        <button className="btn btn-primary" type="button" onClick={startHostedLogin}>
-          Continue with hosted login
-        </button>
-        {import.meta.env.VITE_SHOW_TOKEN_LOGIN === 'true' && (
-          <form className="auth-token-form dev-token-form" onSubmit={submitDevToken}>
-            <label>Development bearer token<input type="password" value={token} onChange={(event) => setToken(event.target.value)} /></label>
-            <button className="btn btn-secondary" type="submit" disabled={!token.trim()}>Use token</button>
+        <p>
+          {setupToken
+            ? 'Set a password for your tenant workspace. You will be signed in as soon as the password is saved.'
+            : 'Use your email and password to access your tenant workspace or the platform console.'}
+        </p>
+        {!setupToken && (
+          <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
+            <label>Work email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <button className="btn btn-primary" type="submit" disabled={loginMutation.isPending || !email.trim() || !password.trim()}>
+              {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
+            </button>
           </form>
+        )}
+        {setupToken && (
+          <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
+            <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <button className="btn btn-primary" type="submit" disabled={setupPasswordMutation.isPending || password.trim().length < 8}>
+              {setupPasswordMutation.isPending ? 'Saving...' : 'Set password'}
+            </button>
+          </form>
+        )}
+        {error && <div className="notice error" role="alert">{error}</div>}
+        {!setupToken && IDP_LOGIN_URL && (
+          <button className="btn btn-secondary" type="button" onClick={startHostedLogin}>
+            Continue with hosted login
+          </button>
+        )}
+        {TEST_PERSONAS_ENABLED && (
+          <div className="section-block">
+            <h2 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Non-production test personas</h2>
+            {personasQuery.isLoading ? (
+              <p>Loading personas...</p>
+            ) : personasQuery.isError ? (
+              <div className="notice error" role="alert">
+                {personasQuery.error instanceof Error ? personasQuery.error.message : 'Failed to load personas'}
+              </div>
+            ) : (
+              <div className="button-row">
+                {(personasQuery.data ?? []).map((persona) => (
+                  <button
+                    key={persona.key}
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      issuePersonaToken.mutate(persona.key);
+                    }}
+                    disabled={issuePersonaToken.isPending}
+                  >
+                    {persona.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </section>
     </PublicDemoShell>

@@ -1,0 +1,155 @@
+package com.prototype.vulnwatch.client;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ResendEmailClient {
+
+    public enum DeliveryState {
+        SENT,
+        SKIPPED,
+        FAILED
+    }
+
+    public record EmailMessage(
+            String to,
+            String subject,
+            String html,
+            String text,
+            Map<String, String> tags,
+            String idempotencyKey
+    ) {
+    }
+
+    public record DeliveryResult(
+            DeliveryState state,
+            String providerMessageId,
+            String detail
+    ) {
+        public static DeliveryResult sent(String providerMessageId) {
+            return new DeliveryResult(DeliveryState.SENT, providerMessageId, null);
+        }
+
+        public static DeliveryResult skipped(String detail) {
+            return new DeliveryResult(DeliveryState.SKIPPED, null, detail);
+        }
+
+        public static DeliveryResult failed(String detail) {
+            return new DeliveryResult(DeliveryState.FAILED, null, detail);
+        }
+    }
+
+    private static final Logger LOG = LoggerFactory.getLogger(ResendEmailClient.class);
+    private static final String DEFAULT_BASE_URL = "https://api.resend.com";
+    private static final String DEFAULT_USER_AGENT = "vulnwatch-backend/resend";
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
+
+    private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
+    private final String baseUrl;
+    private final String apiKey;
+    private final String fromAddress;
+
+    public ResendEmailClient(
+            ObjectMapper objectMapper,
+            @Value("${app.email.resend.base-url:https://api.resend.com}") String baseUrl,
+            @Value("${app.email.resend.api-key:${RESEND_API_KEY:}}") String apiKey,
+            @Value("${app.email.resend.from:${RESEND_FROM_EMAIL:}}") String fromAddress
+    ) {
+        this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+        this.baseUrl = normalize(baseUrl, DEFAULT_BASE_URL);
+        this.apiKey = normalize(apiKey, "");
+        this.fromAddress = normalize(fromAddress, "");
+    }
+
+    public DeliveryResult send(EmailMessage message) {
+        if (!isConfigured()) {
+            return DeliveryResult.skipped("Resend delivery is not configured");
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/emails"))
+                    .timeout(REQUEST_TIMEOUT)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .header("User-Agent", DEFAULT_USER_AGENT)
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payloadFor(message))))
+                    .build();
+            if (message.idempotencyKey() != null && !message.idempotencyKey().isBlank()) {
+                request = HttpRequest.newBuilder(request.uri())
+                        .timeout(REQUEST_TIMEOUT)
+                        .header("Authorization", "Bearer " + apiKey)
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "application/json")
+                        .header("User-Agent", DEFAULT_USER_AGENT)
+                        .header("Idempotency-Key", message.idempotencyKey().trim())
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payloadFor(message))))
+                        .build();
+            }
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return DeliveryResult.sent(parseMessageId(response.body()));
+            }
+            LOG.warn("Resend email delivery failed status={} body={}", response.statusCode(), response.body());
+            return DeliveryResult.failed("Resend rejected the email request with status " + response.statusCode());
+        } catch (Exception ex) {
+            LOG.warn("Resend email delivery failed", ex);
+            return DeliveryResult.failed("Resend email delivery failed");
+        }
+    }
+
+    private boolean isConfigured() {
+        return !apiKey.isBlank() && !fromAddress.isBlank();
+    }
+
+    private Map<String, Object> payloadFor(EmailMessage message) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("from", fromAddress);
+        payload.put("to", List.of(message.to()));
+        payload.put("subject", message.subject());
+        payload.put("html", message.html());
+        payload.put("text", message.text());
+        if (message.tags() != null && !message.tags().isEmpty()) {
+            payload.put("tags", message.tags().entrySet().stream()
+                    .map(entry -> Map.of("name", entry.getKey(), "value", entry.getValue()))
+                    .toList());
+        }
+        return payload;
+    }
+
+    private String parseMessageId(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode payload = objectMapper.readTree(body);
+            return payload.path("id").asText(null);
+        } catch (Exception ex) {
+            LOG.debug("Unable to parse Resend response body", ex);
+            return null;
+        }
+    }
+
+    private String normalize(String value, String fallback) {
+        return value == null || value.isBlank()
+                ? fallback
+                : value.trim().replaceAll("/+$", "");
+    }
+}
