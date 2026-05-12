@@ -114,6 +114,14 @@ public class IngestionController {
         return response;
     }
 
+    @PostMapping("/ingestion/euvd-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public SyncTriggerResponse syncEuvd() {
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerEuvdSync();
+        auditEventService.record("platform.vulnerability_feed.euvd_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
+    }
+
     @PostMapping("/ingestion/csaf/microsoft-sync")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncMicrosoftCsaf() {

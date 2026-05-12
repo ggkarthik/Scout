@@ -18,17 +18,20 @@ public class ObservationIngestionService {
     private final VulnerabilityRepository vulnerabilityRepository;
     private final VulnerabilityIntelObservationRepository vulnerabilityIntelObservationRepository;
     private final VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService;
+    private final VulnerabilityIntelCorrelationService vulnerabilityIntelCorrelationService;
     private final VulnerabilitySourceNormalizationService sourceNormalizationService;
 
     public ObservationIngestionService(
             VulnerabilityRepository vulnerabilityRepository,
             VulnerabilityIntelObservationRepository vulnerabilityIntelObservationRepository,
             VulnerabilityIntelSummaryService vulnerabilityIntelSummaryService,
+            VulnerabilityIntelCorrelationService vulnerabilityIntelCorrelationService,
             VulnerabilitySourceNormalizationService sourceNormalizationService
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.vulnerabilityIntelObservationRepository = vulnerabilityIntelObservationRepository;
         this.vulnerabilityIntelSummaryService = vulnerabilityIntelSummaryService;
+        this.vulnerabilityIntelCorrelationService = vulnerabilityIntelCorrelationService;
         this.sourceNormalizationService = sourceNormalizationService;
     }
 
@@ -40,20 +43,13 @@ public class ObservationIngestionService {
         String sourceSystem = sourceNormalizationService.normalizeSourceSystem(request.sourceSystem());
         String sourceRecordId = hasText(request.sourceRecordId()) ? request.sourceRecordId().trim() : externalId;
 
-        Optional<Vulnerability> existingVulnerability = vulnerabilityRepository.findByExternalId(externalId);
-        Vulnerability vulnerability = existingVulnerability.orElseGet(Vulnerability::new);
-        boolean vulnerabilityCreated = existingVulnerability.isEmpty();
-        if (vulnerabilityCreated) {
-            vulnerability.setExternalId(externalId);
-            vulnerability.setSource(sourceNormalizationService.mapSourceSystem(sourceSystem));
-            vulnerability.setTitle(externalId);
-            vulnerability.setSeverity("UNKNOWN");
-            vulnerability = vulnerabilityRepository.save(vulnerability);
-        }
+        boolean vulnerabilityAlreadyExisted = vulnerabilityRepository.findByExternalId(externalId).isPresent();
+        Vulnerability vulnerability = resolveVulnerability(externalId, sourceSystem);
+        boolean vulnerabilityCreated = vulnerability != null && !vulnerabilityAlreadyExisted;
 
         Optional<VulnerabilityIntelObservation> existingObservation = vulnerabilityIntelObservationRepository
-                .findByVulnerabilityAndSourceSystemAndSourceRecordId(vulnerability, sourceSystem, sourceRecordId);
-        if (existingObservation.isEmpty()) {
+                .findBySourceSystemAndSourceRecordId(sourceSystem, sourceRecordId);
+        if (existingObservation.isEmpty() && vulnerability != null) {
             existingObservation = vulnerabilityIntelObservationRepository.findByVulnerabilityOrderByLastSeenAtDesc(vulnerability)
                     .stream()
                     .filter(candidate -> Objects.equals(sourceRecordId, candidate.getSourceRecordId()))
@@ -68,11 +64,13 @@ public class ObservationIngestionService {
 
         Instant now = Instant.now();
         if (observationCreated) {
-            observation.setVulnerability(vulnerability);
             observation.setSourceRecordId(sourceRecordId);
             observation.setObservedAt(now);
         }
         observation.setSourceSystem(sourceSystem);
+        if (vulnerability != null) {
+            observation.setVulnerability(vulnerability);
+        }
 
         String payloadHash = sha256Hex(request.rawPayload());
         boolean payloadChanged = !Objects.equals(observation.getPayloadHash(), payloadHash);
@@ -96,10 +94,33 @@ public class ObservationIngestionService {
         }
         observation.setLastSeenAt(now);
         observation.touch();
-        vulnerabilityIntelObservationRepository.save(observation);
+        observation = vulnerabilityIntelObservationRepository.save(observation);
 
-        vulnerabilityIntelSummaryService.mergeCanonicalAndRefresh(vulnerability);
+        if (vulnerability != null) {
+            vulnerabilityIntelSummaryService.mergeCanonicalAndRefresh(vulnerability);
+        }
+        vulnerabilityIntelCorrelationService.correlateObservation(observation);
         return new VulnerabilityIntelligenceService.ObservationUpsertResult(vulnerability, vulnerabilityCreated, observationCreated);
+    }
+
+    private Vulnerability resolveVulnerability(String externalId, String sourceSystem) {
+        boolean sourceOnly = sourceNormalizationService.isSourceOnlySourceSystem(sourceSystem);
+        boolean cveRecord = sourceNormalizationService.isExactCveQuery(externalId);
+        if (sourceOnly) {
+            return vulnerabilityRepository.findByExternalId(externalId).orElse(null);
+        }
+
+        Optional<Vulnerability> existingVulnerability = vulnerabilityRepository.findByExternalId(externalId);
+        if (existingVulnerability.isPresent()) {
+            return existingVulnerability.get();
+        }
+
+        Vulnerability vulnerability = new Vulnerability();
+        vulnerability.setExternalId(externalId);
+        vulnerability.setSource(sourceNormalizationService.mapSourceSystem(sourceSystem));
+        vulnerability.setTitle(externalId);
+        vulnerability.setSeverity("UNKNOWN");
+        return vulnerabilityRepository.save(vulnerability);
     }
 
     private boolean hasText(String value) {

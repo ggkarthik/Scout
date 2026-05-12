@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record OrgSpecificCveExposureRecordResponse(
@@ -39,6 +40,7 @@ public record OrgSpecificCveExposureRecordResponse(
         Instant aiSolutionGeneratedAt,
         String orgImpact,
         UUID suppressedByRuleId,
-        String suppressedByRuleName
+        String suppressedByRuleName,
+        List<String> sources
 ) {
 }
