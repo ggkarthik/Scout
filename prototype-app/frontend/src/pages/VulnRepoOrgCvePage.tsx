@@ -344,6 +344,11 @@ export function VulnRepoOrgCvePage({
             <>
               <button type="button" className="org-cve-link-btn" onClick={() => openRecord(item)}>
                 <span className="mono">{item.externalId}</span>
+                {item.euvdId && (
+                  <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
+                    {item.euvdId}
+                  </span>
+                )}
               </button>
               {item.inKev && (
                 <span className="cve-source-badge kev org-cve-kev-badge" title="CISA Known Exploited Vulnerabilities catalog">

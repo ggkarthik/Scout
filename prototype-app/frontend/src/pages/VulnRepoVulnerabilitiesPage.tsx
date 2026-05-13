@@ -509,6 +509,11 @@ export function VulnRepoVulnerabilitiesPage() {
                 }}
               >
                 <span className="mono">{item.externalId}</span>
+                {item.euvdId && (
+                  <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
+                    {item.euvdId}
+                  </span>
+                )}
               </button>
             ),
           },
