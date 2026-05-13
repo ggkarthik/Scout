@@ -736,6 +736,21 @@
 
 .vuln-repo-cve-link {
   font-size: 0.95rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.euvd-id-badge {
+  font-size: 0.72rem;
+  color: var(--text-muted, #8b9cb6);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
 }
 
 .vuln-repo-summary-link {

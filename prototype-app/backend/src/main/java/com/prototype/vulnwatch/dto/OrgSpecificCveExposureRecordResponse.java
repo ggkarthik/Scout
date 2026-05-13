@@ -41,6 +41,7 @@ public record OrgSpecificCveExposureRecordResponse(
         String orgImpact,
         UUID suppressedByRuleId,
         String suppressedByRuleName,
-        List<String> sources
+        List<String> sources,
+        String euvdId
 ) {
 }
