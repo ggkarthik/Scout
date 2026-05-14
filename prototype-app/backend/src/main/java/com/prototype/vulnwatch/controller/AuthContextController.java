@@ -1,15 +1,12 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.AuthContextResponse;
-import com.prototype.vulnwatch.dto.AllowedTenantResponse;
 import com.prototype.vulnwatch.dto.DemoStatusResponse;
-import com.prototype.vulnwatch.repo.TenantMembershipRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.service.AllowedTenantContextService;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,50 +17,28 @@ public class AuthContextController {
 
     private final RequestActorService requestActorService;
     private final WorkspaceService workspaceService;
-    private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
-    private final ObjectProvider<TenantMembershipRepository> tenantMembershipRepositoryProvider;
-    private final ObjectProvider<TenantRepository> tenantRepositoryProvider;
+    private final DemoLifecycleService demoLifecycleService;
+    private final AllowedTenantContextService allowedTenantContextService;
 
     public AuthContextController(
             RequestActorService requestActorService,
             WorkspaceService workspaceService,
-            ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider,
-            ObjectProvider<TenantMembershipRepository> tenantMembershipRepositoryProvider,
-            ObjectProvider<TenantRepository> tenantRepositoryProvider
+            DemoLifecycleService demoLifecycleService,
+            AllowedTenantContextService allowedTenantContextService
     ) {
         this.requestActorService = requestActorService;
         this.workspaceService = workspaceService;
-        this.demoLifecycleServiceProvider = demoLifecycleServiceProvider;
-        this.tenantMembershipRepositoryProvider = tenantMembershipRepositoryProvider;
-        this.tenantRepositoryProvider = tenantRepositoryProvider;
+        this.demoLifecycleService = demoLifecycleService;
+        this.allowedTenantContextService = allowedTenantContextService;
     }
 
     @GetMapping({"/auth/context", "/me"})
     public AuthContextResponse get() {
         RequestActor actor = requestActorService.currentActor();
-        DemoLifecycleService demoLifecycleService = demoLifecycleServiceProvider.getIfAvailable();
-        DemoStatusResponse demoStatus = actor.tenantId() == null || demoLifecycleService == null
+        DemoStatusResponse demoStatus = actor.tenantId() == null
                 ? null
                 : demoLifecycleService.statusForTenant(workspaceService.getWorkspace());
-        TenantRepository tenantRepository = tenantRepositoryProvider.getIfAvailable();
-        TenantMembershipRepository tenantMembershipRepository = tenantMembershipRepositoryProvider.getIfAvailable();
-        var allowedTenants = actor.hasRole("PLATFORM_OWNER") && tenantRepository != null
-                ? tenantRepository.findAllByOrderByCreatedAtAsc().stream()
-                        .map(tenant -> new AllowedTenantResponse(
-                                tenant.getId().toString(),
-                                tenant.getName(),
-                                tenant.getSlug(),
-                                "PLATFORM_OWNER"))
-                        .toList()
-                : tenantMembershipRepository == null
-                        ? java.util.List.<AllowedTenantResponse>of()
-                        : tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
-                        .map(membership -> new AllowedTenantResponse(
-                                membership.getTenant().getId().toString(),
-                                membership.getTenant().getName(),
-                                membership.getTenant().getSlug(),
-                                membership.getRole()))
-                        .toList();
+        var allowedTenants = allowedTenantContextService.listAllowedTenants(actor);
         return new AuthContextResponse(
                 actor.creator(),
                 actor.userId(),

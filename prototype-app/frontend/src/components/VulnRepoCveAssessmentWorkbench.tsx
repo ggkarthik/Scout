@@ -46,8 +46,6 @@ import {
   FindingCreationMode,
   FixRecord,
   OrgSpecificCveExposureRecord,
-  VulnerabilityIntelRelation,
-  VulnerabilityIntelSourceRecord,
 } from '../features/cve-workbench/types';
 import type { Finding } from '../features/findings/types';
 import type { SoftwareIdentityAsset, SoftwareIdentitySummary } from '../features/software-identities/types';
