@@ -1,1 +1,1 @@
-ALTER TABLE findings ADD COLUMN IF NOT EXISTS severity_override VARCHAR(16);
+ALTER TABLE findings ADD COLUMN severity_override VARCHAR(16);
