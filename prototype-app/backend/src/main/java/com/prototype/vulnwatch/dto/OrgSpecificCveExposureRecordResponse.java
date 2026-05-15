@@ -42,6 +42,7 @@ public record OrgSpecificCveExposureRecordResponse(
         UUID suppressedByRuleId,
         String suppressedByRuleName,
         List<String> sources,
-        String euvdId
+        String euvdId,
+        String jvndbId
 ) {
 }

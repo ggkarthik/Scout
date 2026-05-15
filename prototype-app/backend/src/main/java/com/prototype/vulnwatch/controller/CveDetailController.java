@@ -716,6 +716,8 @@ public class CveDetailController {
         private List<FixRecordResponse> fixes;
         private java.util.UUID suppressedByRuleId;
         private String suppressedByRuleName;
+        private List<com.prototype.vulnwatch.dto.VulnerabilityIntelSourceRecordResponse> sourceRecords;
+        private List<com.prototype.vulnwatch.dto.VulnerabilityIntelRelationResponse> relations;
     }
 
     @Data

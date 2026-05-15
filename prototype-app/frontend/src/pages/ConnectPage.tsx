@@ -9,8 +9,10 @@ import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
 import { api } from '../api/client';
+import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
 import { useActor } from '../features/auth/context';
+import { hasRole } from '../features/auth/roles';
 
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
@@ -36,7 +38,9 @@ type ConnectorId =
   | 'microsoft-csaf-vex'
   | 'redhat-csaf-vex'
   | 'advisory-feed'
-  | 'endoflife-date';
+  | 'endoflife-date'
+  | 'euvd-feed'
+  | 'jvn-feed';
 
 type ConnectView = 'sources' | 'integration-run-queue' | 'processing-jobs';
 
@@ -139,6 +143,25 @@ const IconCalendar = (
   </svg>
 );
 
+const IconEu = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="10" r="8" />
+    <path d="M6 8h5" />
+    <path d="M6 10h4" />
+    <path d="M6 12h5" />
+    <path d="M13 8v4" />
+  </svg>
+);
+
+const IconJvn = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="10" r="8" />
+    <path d="M10 6v5" />
+    <path d="M7 8.5l3-2.5 3 2.5" />
+    <path d="M7.5 13.5c0 1 1.1 1.5 2.5 1.5s2.5-.5 2.5-1.5v-4" />
+  </svg>
+);
+
 const CONNECT_SOURCE_QUERY_KEY = 'connectSource';
 const CONNECTORS: ConnectorDefinition[] = [
   {
@@ -212,6 +235,18 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'endoflife.date EOL Feed',
     summary: 'Run endoflife.date catalog, release, mapping, and denormalization jobs.',
     icon: IconCalendar
+  },
+  {
+    id: 'euvd-feed',
+    name: 'ENISA EUVD Feed',
+    summary: 'Ingest ENISA European Vulnerability Database records and sync EUVD-to-CVE correlations.',
+    icon: IconEu
+  },
+  {
+    id: 'jvn-feed',
+    name: 'JVN Vulnerability Database',
+    summary: 'Ingest Japan Vulnerability Notes (JVNdb) records via the MyJVN API and sync JVNDB-to-CVE correlations.',
+    icon: IconJvn
   }
 ];
 
@@ -225,7 +260,9 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
 ];
 
 const LIFECYCLE_CONNECTOR_IDS: ConnectorId[] = [
-  'endoflife-date'
+  'endoflife-date',
+  'euvd-feed',
+  'jvn-feed'
 ];
 
 const CMDB_CONNECTOR_IDS: ConnectorId[] = [
@@ -238,6 +275,186 @@ const CMDB_CONNECTOR_IDS: ConnectorId[] = [
 const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
   'aws-discovery'
 ];
+
+function formatInstantConnect(iso?: string): string {
+  if (!iso) return 'Never';
+  return new Date(iso).toLocaleString();
+}
+
+function EuvdConnectorPanel() {
+  const actor = useActor();
+  const canSync = hasRole(actor, 'PLATFORM_OWNER');
+  const [status, setStatus] = React.useState<VulnIntelSourceStatus | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState('');
+
+  const loadStatus = React.useCallback(async () => {
+    try {
+      const summary: VulnIntelSourcesSummary = await api.getVulnIntelSourcesSummary();
+      setStatus(summary?.sources?.EUVD ?? summary?.sources?.euvd ?? null);
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { void loadStatus(); }, [loadStatus]);
+
+  const executeSync = async () => {
+    if (!canSync) { setMessage('Platform owner access is required to execute EUVD sync.'); return; }
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await api.syncEuvd();
+      setMessage((response as { message?: string }).message || 'EUVD sync queued.');
+      await loadStatus();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'EUVD sync failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h3>ENISA EUVD Feed</h3>
+        <span className="panel-caption">
+          Ingest the latest EUVD records from ENISA and refresh EUVD-to-CVE cross-source correlations.
+        </span>
+      </div>
+      <div style={{ padding: '16px 24px', display: 'grid', gap: 16 }}>
+        {message && (
+          <div className="notice">{message}</div>
+        )}
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel-muted)', padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>EUVD Vulnerability Feed</div>
+              <div className="field-hint" style={{ marginTop: 4 }}>
+                Source records are stored separately and linked back to CVEs when cross-references exist.
+              </div>
+            </div>
+            <button type="button" className="btn btn-primary" onClick={() => void executeSync()} disabled={!canSync || busy}>
+              {busy ? 'Executing…' : 'Execute now'}
+            </button>
+          </div>
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Status</div>
+              <div style={{ fontWeight: 700, marginTop: 4, textTransform: 'capitalize' }}>
+                {loading ? 'Loading…' : (status?.status ?? 'never')}
+              </div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Last completed</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>{formatInstantConnect(status?.completedAt)}</div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Fetched / Inserted / Updated</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>
+                {(status?.recordsFetched ?? 0).toLocaleString()} / {(status?.recordsInserted ?? 0).toLocaleString()} / {(status?.recordsUpdated ?? 0).toLocaleString()}
+              </div>
+            </div>
+          </div>
+          <div className="field-hint" style={{ marginTop: 12 }}>
+            The execute action runs the backend EUVD sync endpoint immediately.
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function JvnConnectorPanel() {
+  const actor = useActor();
+  const canSync = hasRole(actor, 'PLATFORM_OWNER');
+  const [status, setStatus] = React.useState<VulnIntelSourceStatus | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState('');
+
+  const loadStatus = React.useCallback(async () => {
+    try {
+      const summary: VulnIntelSourcesSummary = await api.getVulnIntelSourcesSummary();
+      setStatus(summary?.sources?.['japan-vulndb'] ?? summary?.sources?.JVN ?? null);
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { void loadStatus(); }, [loadStatus]);
+
+  const executeSync = async () => {
+    if (!canSync) { setMessage('Platform owner access is required to execute JVN sync.'); return; }
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await api.syncJvn();
+      setMessage((response as { message?: string }).message || 'JVN sync queued.');
+      await loadStatus();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'JVN sync failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h3>JVN Vulnerability Database</h3>
+        <span className="panel-caption">
+          Ingest Japan Vulnerability Notes (JVNdb) records via the MyJVN API and sync JVNDB-to-CVE cross-source correlations.
+        </span>
+      </div>
+      <div style={{ padding: '16px 24px', display: 'grid', gap: 16 }}>
+        {message && (
+          <div className="notice">{message}</div>
+        )}
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel-muted)', padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>JVN Vulnerability Feed</div>
+              <div className="field-hint" style={{ marginTop: 4 }}>
+                Source records are stored separately and linked back to CVEs when cross-references exist.
+              </div>
+            </div>
+            <button type="button" className="btn btn-primary" onClick={() => void executeSync()} disabled={!canSync || busy}>
+              {busy ? 'Executing…' : 'Execute now'}
+            </button>
+          </div>
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Status</div>
+              <div style={{ fontWeight: 700, marginTop: 4, textTransform: 'capitalize' }}>
+                {loading ? 'Loading…' : (status?.status ?? 'never')}
+              </div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Last completed</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>{formatInstantConnect(status?.completedAt)}</div>
+            </div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', padding: 12 }}>
+              <div className="field-hint">Fetched / Inserted / Updated</div>
+              <div style={{ fontWeight: 700, marginTop: 4 }}>
+                {(status?.recordsFetched ?? 0).toLocaleString()} / {(status?.recordsInserted ?? 0).toLocaleString()} / {(status?.recordsUpdated ?? 0).toLocaleString()}
+              </div>
+            </div>
+          </div>
+          <div className="field-hint" style={{ marginTop: 12 }}>
+            The execute action runs the backend JVN sync endpoint immediately. Records are fetched from the
+            MyJVN API at jvndb.jvn.jp and correlated with CVEs where cross-references are present.
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function isConnectorId(value: string | null): value is ConnectorId {
   return CONNECTORS.some((connector) => connector.id === value);
@@ -341,6 +558,12 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
         caption=""
       />
     );
+  }
+  if (connectorId === 'euvd-feed') {
+    return <EuvdConnectorPanel />;
+  }
+  if (connectorId === 'jvn-feed') {
+    return <JvnConnectorPanel />;
   }
   if (connectorId === 'servicenow-cmdb') {
     return <AssetsPage />;
