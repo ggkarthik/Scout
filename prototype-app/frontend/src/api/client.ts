@@ -689,6 +689,7 @@ export const api = {
   syncKev: () => request<SyncTriggerResponse>('/ingestion/kev-sync', { method: 'POST' }),
   syncGhsa: () => request<SyncTriggerResponse>('/ingestion/ghsa-sync', { method: 'POST' }),
   syncEuvd: () => request<SyncTriggerResponse>('/ingestion/euvd-sync', { method: 'POST' }),
+  syncJvn: () => request<SyncTriggerResponse>('/ingestion/jvn-sync', { method: 'POST' }),
   syncMicrosoftCsaf: () => request<SyncTriggerResponse>('/ingestion/csaf/microsoft-sync', { method: 'POST' }),
   syncRedhatCsaf: () => request<SyncTriggerResponse>('/ingestion/csaf/redhat-sync', { method: 'POST' }),
   triggerVexAssertionRepair: () => request<SyncTriggerResponse>('/ingestion/vex-assertion-repair', { method: 'POST' }),

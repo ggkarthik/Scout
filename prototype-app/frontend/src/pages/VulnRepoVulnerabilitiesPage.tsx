@@ -505,14 +505,33 @@ export function VulnRepoVulnerabilitiesPage() {
                 type="button"
                 className="btn-link vuln-repo-cve-link"
                 onClick={() => {
-                  navigate(pathForVulnRepoView('org-cves', item.externalId));
+                  const base = pathForVulnRepoView('org-cves', item.externalId);
+                  const dest = sourceFilter === 'euvd' && item.euvdId
+                    ? `${base}?euvdId=${encodeURIComponent(item.euvdId)}`
+                    : sourceFilter === 'japan-vulndb' && item.jvndbId
+                    ? `${base}?jvndbId=${encodeURIComponent(item.jvndbId)}`
+                    : base;
+                  navigate(dest);
                 }}
               >
-                <span className="mono">{item.externalId}</span>
-                {item.euvdId && (
-                  <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
-                    {item.euvdId}
-                  </span>
+                {sourceFilter === 'euvd' && item.euvdId ? (
+                  <span className="mono">{item.euvdId}</span>
+                ) : sourceFilter === 'japan-vulndb' && item.jvndbId ? (
+                  <span className="mono">{item.jvndbId}</span>
+                ) : (
+                  <>
+                    <span className="mono">{item.externalId}</span>
+                    {item.euvdId && (
+                      <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
+                        {item.euvdId}
+                      </span>
+                    )}
+                    {item.jvndbId && (
+                      <span className="mono euvd-id-badge" title={`JVNDB ID: ${item.jvndbId}`}>
+                        {item.jvndbId}
+                      </span>
+                    )}
+                  </>
                 )}
               </button>
             ),
@@ -574,22 +593,30 @@ export function VulnRepoVulnerabilitiesPage() {
             })(),
           },
           sources: {
-            content: item.sources && item.sources.length > 0 ? (
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {item.sources.map((s) => {
-                  const label = { nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory' }[s.toLowerCase()] ?? s;
-                  const isEuvd = s.toLowerCase() === 'euvd';
-                  return (
-                    <span key={s} style={{
-                      display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
-                      background: isEuvd ? '#dbeafe' : '#f1f5f9',
-                      color: isEuvd ? '#1d4ed8' : '#475569',
-                      border: isEuvd ? '1px solid #93c5fd' : '1px solid #e2e8f0',
-                    }}>{label}</span>
-                  );
-                })}
-              </div>
-            ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>,
+            content: (() => {
+              const baseSources = item.sources ?? [];
+              const allSources = baseSources.some(s => s.toLowerCase() === 'nvd')
+                ? baseSources
+                : ['nvd', ...baseSources];
+              return (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {allSources.map((s) => {
+                    const label = { nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory', 'japan-vulndb': 'JVNDB' }[s.toLowerCase()] ?? s;
+                    const src = s.toLowerCase();
+                    const isEuvd = src === 'euvd';
+                    const isJvn = src === 'japan-vulndb';
+                    return (
+                      <span key={s} style={{
+                        display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                        background: isEuvd ? '#dbeafe' : isJvn ? '#fef3c7' : '#f1f5f9',
+                        color: isEuvd ? '#1d4ed8' : isJvn ? '#92400e' : '#475569',
+                        border: isEuvd ? '1px solid #93c5fd' : isJvn ? '1px solid #fcd34d' : '1px solid #e2e8f0',
+                      }}>{label}</span>
+                    );
+                  })}
+                </div>
+              );
+            })(),
           },
           impactedSoftware: {
             content: applicable ? (
@@ -713,7 +740,7 @@ export function VulnRepoVulnerabilitiesPage() {
       chips.push({ label: `Inv. Status: ${formatLabel(s)}`, onRemove: () => { setColFilters((f) => ({ ...f, investigationStatus: f.investigationStatus.filter((x) => x !== s) })); setPage(0); } });
     });
     if (sourceFilter) {
-      chips.push({ label: `Source: ${{ nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory' }[sourceFilter] ?? sourceFilter}`, onRemove: () => { setSourceFilter(''); setPage(0); } });
+      chips.push({ label: `Source: ${{ nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory', 'japan-vulndb': 'JVNDB' }[sourceFilter] ?? sourceFilter}`, onRemove: () => { setSourceFilter(''); setPage(0); } });
     }
     return chips;
   }, [initialApplicable, initialImpactedOnly, initialHasFindings, severityFilters, statusFilters, sourceFilter, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters]);
@@ -859,6 +886,7 @@ export function VulnRepoVulnerabilitiesPage() {
               <option value="">All sources</option>
               <option value="nvd">NVD</option>
               <option value="euvd">EUVD</option>
+              <option value="japan-vulndb">JVNDB</option>
               <option value="ghsa">GHSA</option>
               <option value="kev">KEV</option>
               <option value="csaf-redhat">Red Hat</option>

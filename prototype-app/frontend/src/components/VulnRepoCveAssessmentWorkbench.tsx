@@ -142,6 +142,8 @@ type Props = {
   analystId?: string;
   onBack: () => void;
   onRefreshDetail: (options?: { includeList?: boolean }) => Promise<void>;
+  euvdId?: string;
+  jvndbId?: string;
 };
 
 const _AV_LABELS: Record<string, string> = { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' };
@@ -456,6 +458,7 @@ type SourceRecordView = {
   observedAt?: string;
   lastSeenAt?: string;
   sourceOnly?: boolean;
+  metadata?: Record<string, string>;
 };
 
 type SourceRelationView = {
@@ -509,6 +512,7 @@ function buildSourceRecordViews(detail: CveDetail): SourceRecordView[] {
       observedAt: record.observedAt,
       lastSeenAt: record.lastSeenAt,
       sourceOnly: record.sourceOnly,
+      metadata: record.metadata,
     });
   }
 
@@ -3572,6 +3576,8 @@ function CveOverviewExperience({
   leadAnalyst: _leadAnalyst,
   onLeadAnalystChange: _onLeadAnalystChange,
   persistedRunbookState,
+  euvdId,
+  jvndbId,
 }: {
   item: OrgSpecificCveExposureRecord;
   detail: CveDetail;
@@ -3587,6 +3593,8 @@ function CveOverviewExperience({
   leadAnalyst: string;
   onLeadAnalystChange: (value: string) => void;
   persistedRunbookState?: PersistedInvestigationRunbookState | null;
+  euvdId?: string;
+  jvndbId?: string;
 }) {
   const navigate = useNavigate();
   const riskPolicyQuery = useRiskPolicyQuery();
@@ -3750,9 +3758,159 @@ function CveOverviewExperience({
     [detail, sourceRecords]
   );
 
+  // EUVD context helpers (used in overview header + description)
+  const euvdRecord = euvdId ? sourceRecords.find(r => r.sourceSystem.toLowerCase() === 'euvd') : undefined;
+  const hasCve = item.externalId.toUpperCase().startsWith('CVE-');
+  const effectivePublishedAt = (euvdId && euvdRecord?.publishedAt) ? euvdRecord.publishedAt : detail.summary.publishedAt;
+  const effectiveModifiedAt = (euvdId && euvdRecord?.lastModifiedAt) ? euvdRecord.lastModifiedAt : detail.summary.modifiedAt;
+  const effectiveDescription = (euvdId && euvdRecord?.description) ? euvdRecord.description : detail.summary.description;
+
+  // Multi-source tech details selector
+  type TechSourceEntry = {
+    id: string;
+    label: string;
+    cvssVector?: string;
+    cvssScore?: number;
+    epssScore?: number;
+    severity?: string;
+    publishedAt?: string;
+    lastModifiedAt?: string;
+    inKev?: boolean;
+    description?: string;
+    cweIds?: string;
+    vulnStatus?: string;
+    sourceUrl?: string;
+    sourceRecordId?: string;
+    hasRelation: boolean;
+    metadata?: Record<string, string>;
+  };
+  const techSources = React.useMemo<TechSourceEntry[]>(() => {
+    const rawPrimaryLabel = (detail.summary.source ?? 'NVD').toUpperCase();
+    const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(detail.summary.externalId)}`;
+    // When in EUVD context and the fetched entity is EUVD-sourced, relabel the primary
+    // entry as NVD so that NVD appears as a separate pill and EUVD is injected explicitly below.
+    const primaryLabel = (euvdId && rawPrimaryLabel === 'EUVD') ? 'NVD' : rawPrimaryLabel;
+    const result: TechSourceEntry[] = [{
+      id: 'primary',
+      label: primaryLabel,
+      cvssVector: detail.summary.cvssVector,
+      cvssScore: detail.summary.cvssScore,
+      epssScore: detail.summary.epssScore,
+      severity: detail.summary.severity,
+      publishedAt: detail.summary.publishedAt,
+      lastModifiedAt: detail.summary.modifiedAt,
+      inKev: detail.summary.inKev ?? false,
+      description: detail.summary.description,
+      cweIds: detail.summary.cweIds,
+      vulnStatus: undefined,
+      sourceUrl: detail.summary.sourceUrl ?? nvdUrl,
+      sourceRecordId: detail.summary.externalId,
+      hasRelation: false,
+    }];
+    const seenSystems = new Set<string>([primaryLabel.toLowerCase()]);
+
+    // Helper: derive a user-friendly label from sourceSystem + recordId
+    function sourceLabel(sys: string, recordId?: string): string {
+      const upper = sys.toUpperCase();
+      // GHSA identifiers show as "GHSA" regardless of stored sourceSystem name
+      if (recordId && /^GHSA-/i.test(recordId)) return 'GHSA';
+      if (upper === 'ADVISORY') return 'ADVISORY';
+      return upper;
+    }
+
+    // Add all unique source observations (no cvss filter — show all related sources)
+    for (const record of sourceRecords) {
+      const sysKey = record.sourceSystem.toLowerCase();
+      if (seenSystems.has(sysKey)) continue;
+      seenSystems.add(sysKey);
+      const hasRelation = sourceRelations.some(rel =>
+        rel.fromLabel.toLowerCase().includes(sysKey) ||
+        rel.toLabel.toLowerCase().includes(sysKey)
+      );
+      // Derive a source URL for this record
+      let recordUrl = record.sourceUrl;
+      if (!recordUrl && record.sourceRecordId) {
+        if (/^GHSA-/i.test(record.sourceRecordId)) {
+          recordUrl = `https://github.com/advisories/${record.sourceRecordId}`;
+        }
+      }
+      result.push({
+        id: sysKey,
+        label: sourceLabel(record.sourceSystem, record.sourceRecordId),
+        cvssVector: record.cvssVector,
+        cvssScore: record.cvssScore,
+        epssScore: record.epssScore,
+        severity: record.severity,
+        publishedAt: record.publishedAt,
+        lastModifiedAt: record.lastModifiedAt,
+        inKev: record.inKev ?? false,
+        description: record.description,
+        cweIds: record.cweIds,
+        vulnStatus: record.vulnStatus,
+        sourceUrl: recordUrl,
+        sourceRecordId: record.sourceRecordId,
+        hasRelation,
+        metadata: record.metadata,
+      });
+    }
+
+    // If in EUVD context and EUVD isn't already in the list, add it explicitly
+    // (EUVD observations are stored on the EUVD vulnerability entity, not the CVE entity)
+    if (euvdId && !seenSystems.has('euvd')) {
+      result.push({
+        id: 'euvd',
+        label: 'EUVD',
+        cvssVector: detail.summary.cvssVector,
+        cvssScore: detail.summary.cvssScore,
+        epssScore: undefined,
+        severity: detail.summary.severity,
+        publishedAt: detail.summary.publishedAt,
+        lastModifiedAt: undefined,
+        inKev: detail.summary.inKev ?? false,
+        description: detail.summary.description,
+        cweIds: undefined,
+        vulnStatus: undefined,
+        sourceUrl: undefined, // EUVD portal URL not known statically
+        sourceRecordId: euvdId,
+        hasRelation: true,
+      });
+    }
+
+    // If in JVNDB context and JAPAN-VULNDB isn't already in the list, add it explicitly
+    if (jvndbId && !seenSystems.has('japan-vulndb')) {
+      result.push({
+        id: 'japan-vulndb',
+        label: 'JAPAN-VULNDB',
+        cvssVector: detail.summary.cvssVector,
+        cvssScore: detail.summary.cvssScore,
+        epssScore: undefined,
+        severity: detail.summary.severity,
+        publishedAt: detail.summary.publishedAt,
+        lastModifiedAt: undefined,
+        inKev: detail.summary.inKev ?? false,
+        description: detail.summary.description,
+        cweIds: undefined,
+        vulnStatus: undefined,
+        sourceUrl: undefined,
+        sourceRecordId: jvndbId,
+        hasRelation: true,
+      });
+    }
+
+    return result;
+  }, [detail, euvdId, jvndbId, sourceRecords, sourceRelations]);
+  const [selectedTechSource, setSelectedTechSource] = React.useState<string>(() => jvndbId ? 'japan-vulndb' : euvdId ? 'euvd' : 'primary');
+  const activeTechSource = techSources.find(s => s.id === selectedTechSource) ?? techSources[0];
+  const activeTechCvssFields = React.useMemo(
+    () => parseCvssVector(activeTechSource?.cvssVector),
+    [activeTechSource?.cvssVector]
+  );
+
   const timelineItems = [
-    detail.summary.publishedAt ? { label: 'CVE Record Created', value: formatDate(detail.summary.publishedAt), tone: 'published', sublabel: 'NVD Published Date' } : null,
-    detail.summary.modifiedAt ? { label: 'CVE Record Updated', value: formatDate(detail.summary.modifiedAt), tone: 'updated', sublabel: 'NVD Last Modified' } : null,
+    effectivePublishedAt
+      ? { label: jvndbId ? 'JVNDB Record Created' : euvdId ? 'EUVD Record Created' : 'CVE Record Created', value: formatDate(effectivePublishedAt), tone: 'published', sublabel: jvndbId ? 'JVNDB Published Date' : euvdId ? 'EUVD Published Date' : 'NVD Published Date' }
+      : null,
+    effectiveModifiedAt && !euvdId && !jvndbId ? { label: 'CVE Record Updated', value: formatDate(effectiveModifiedAt), tone: 'updated', sublabel: 'NVD Last Modified' } : null,
     detail.summary.inKev && detail.summary.kevDateAdded ? { label: 'Added to CISA KEV', value: formatDate(detail.summary.kevDateAdded), tone: 'exploit', sublabel: 'Known Exploited Vulnerability' } : null,
     detail.summary.inKev && detail.summary.kevDueDate ? { label: 'CISA Remediation Due', value: formatDate(detail.summary.kevDueDate), tone: 'danger', sublabel: detail.summary.kevRequiredAction ?? 'Patch or mitigate per vendor guidance' } : null,
     detail.signals.exploitAvailable && !detail.summary.inKev ? { label: 'Public Exploit Observed', value: detail.signals.exploitReason || 'Active exploit known', tone: 'exploit', sublabel: undefined } : null,
@@ -3801,7 +3959,7 @@ function CveOverviewExperience({
       {activeTab === 'overview' && (() => {
         const epss = detail.summary.epssScore ?? item.epssScore;
         const nowMs = Date.now();
-        const publishedMs = detail.summary.publishedAt ? new Date(detail.summary.publishedAt).getTime() : null;
+        const publishedMs = effectivePublishedAt ? new Date(effectivePublishedAt).getTime() : null;
         const kevMs = detail.summary.kevDueDate ? new Date(detail.summary.kevDueDate).getTime() : null;
         const daysAgo = publishedMs != null ? Math.floor((nowMs - publishedMs) / 86400000) : null;
         const kevOverdue = kevMs != null && kevMs < nowMs;
@@ -3924,7 +4082,7 @@ function CveOverviewExperience({
               </div>
               {publishedMs != null && daysAgo != null && (
                 <div className="cvd-ov-first-seen">
-                  First seen {formatDate(detail.summary.publishedAt!)}
+                  {(euvdId || jvndbId) ? 'Published' : 'First seen'} {formatDate(effectivePublishedAt!)}
                   {kevMs != null && (
                     <span className={kevOverdue ? ' cvd-ov-kev-overdue' : ''}>
                       {' '}· CISA KEV {kevOverdue
@@ -3935,8 +4093,15 @@ function CveOverviewExperience({
                 </div>
               )}
 
-              {/* Large CVE ID */}
-              <h1 className="cvd-ov-cve-id">{item.externalId}</h1>
+              {/* Primary vulnerability ID */}
+              <h1 className="cvd-ov-cve-id">
+                {jvndbId ?? euvdId ?? item.externalId}
+              </h1>
+              {(euvdId || jvndbId) && hasCve && (
+                <div className="cvd-ov-cve-secondary-id" title={`CVE ID: ${item.externalId}`}>
+                  {item.externalId}
+                </div>
+              )}
 
               {/* Badge pills */}
               <div className="cvd-ov-badges">
@@ -4016,7 +4181,7 @@ function CveOverviewExperience({
               </div>
 
               {/* Description */}
-              <p className="cvd-ov-description">{detail.summary.description || 'No description available.'}</p>
+              <p className="cvd-ov-description">{effectiveDescription || 'No description available.'}</p>
 
               <div className="cvd-ov-divider" />
 
@@ -4049,77 +4214,192 @@ function CveOverviewExperience({
             </div>{/* end cvd2-panel (summary) */}
 
             {/* Technical details */}
-            {(detail.summary.cvssVector || cweList.length > 0) && (
+            {(activeTechSource != null || cweList.length > 0) && (
               <div className="cvd-tech-weakness-row">
-                {detail.summary.cvssVector && (
+                {activeTechSource != null && (
                   <div className="cvd2-panel cvd-tech-col">
-                    <div className="cvd-technical-hdr">
-                      <p className="cvd-section-label">Technical details · CVSS v3.1 vector</p>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {allSources.map(src => (
-                          <span key={src} className="cvd-src-tag">{src}</span>
+                    {/* Source selector chips */}
+                    {techSources.length > 1 && (
+                      <div className="cvd-tech-source-selector">
+                        {techSources.map(src => (
+                          <label
+                            key={src.id}
+                            className={`cvd-tech-src-chip${selectedTechSource === src.id ? ' active' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name="tech-source-selector"
+                              value={src.id}
+                              checked={selectedTechSource === src.id}
+                              onChange={() => setSelectedTechSource(src.id)}
+                            />
+                            {src.label}
+                          </label>
                         ))}
                       </div>
-                    </div>
-                    <div className="cvd-vector-bar">
-                      <code className="cvd-vector-code">{detail.summary.cvssVector}</code>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ padding: '4px 10px', fontSize: '11px' }}
-                        onClick={() => void navigator.clipboard.writeText(detail.summary.cvssVector ?? '')}
-                      >Copy</button>
-                    </div>
-                    <div className="cvd-kv-table">
-                      {CVSS_DIMS_LOCAL.map(({ key, label, values }) => {
-                        const raw = cvssFields[key];
-                        if (!raw) return null;
-                        return (
-                          <div key={key} className="cvd-kv-row">
-                            <span className="cvd-kv-label">{label}</span>
-                            <span className="cvd-kv-value">{(values as Record<string, string>)[raw] ?? raw}</span>
-                          </div>
-                        );
-                      })}
-                      {detail.summary.cvssScore != null && (
-                        <div className="cvd-kv-row">
-                          <span className="cvd-kv-label">CVSS score</span>
-                          <span className="cvd-kv-value">
-                            {detail.summary.cvssScore.toFixed(1)}
-                            {multiSource && detail.summary.source && (
-                              <span className="cvd-kv-src-inline">{detail.summary.source}</span>
-                            )}
-                            {altScores.map(alt => (
-                              <React.Fragment key={alt.source}>
-                                {' '}
-                                <span className="cvd-kv-alt-val">
-                                  {alt.score.toFixed(1)}
-                                  <span className="cvd-kv-src-inline">{alt.source}</span>
-                                </span>
-                              </React.Fragment>
-                            ))}
-                          </span>
+                    )}
+                    {(() => {
+                      const isPrimary = activeTechSource.id === 'primary';
+                      const isKev = activeTechSource.id === 'kev';
+                      const primaryScore = detail.summary.cvssScore;
+                      const primarySeverity = detail.summary.severity?.toUpperCase();
+                      const scoreDiffers = !isPrimary && activeTechSource.cvssScore != null
+                        && activeTechSource.cvssScore !== primaryScore;
+                      const severityDiffers = !isPrimary
+                        && activeTechSource.severity?.toUpperCase() != null
+                        && activeTechSource.severity?.toUpperCase() !== primarySeverity;
+                      // EPSS: show if this source has it; for primary also show it
+                      const epssToShow = activeTechSource.epssScore != null
+                        ? activeTechSource.epssScore : null;
+
+                      const recordId = activeTechSource.sourceRecordId;
+                      // KEV uses CVE IDs as its record ID — don't display as a separate ID row
+                      const showIdRow = !!recordId && !isKev;
+                      const isEuvdId = recordId && /^EUVD-/i.test(recordId);
+                      const isJvndbId = recordId && /^JVNDB-/i.test(recordId);
+                      const isCveId = recordId && /^CVE-/i.test(recordId);
+                      const idNode = showIdRow ? (
+                        isEuvdId ? (
+                          <button
+                            type="button"
+                            className="cvd-tech-id-link"
+                            onClick={() => navigate(`/vuln-repo/org-cves/${encodeURIComponent(item.externalId)}?euvdId=${encodeURIComponent(recordId!)}`)}
+                          >
+                            {recordId} →
+                          </button>
+                        ) : isJvndbId ? (
+                          <button
+                            type="button"
+                            className="cvd-tech-id-link"
+                            onClick={() => navigate(`/vuln-repo/org-cves/${encodeURIComponent(item.externalId)}?jvndbId=${encodeURIComponent(recordId!)}`)}
+                          >
+                            {recordId} →
+                          </button>
+                        ) : isCveId ? (
+                          <button
+                            type="button"
+                            className="cvd-tech-id-link"
+                            onClick={() => navigate(`/vuln-repo/org-cves/${encodeURIComponent(recordId!)}`)}
+                          >
+                            {recordId} →
+                          </button>
+                        ) : activeTechSource.sourceUrl ? (
+                          <a
+                            href={activeTechSource.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="cvd-tech-id-link cvd-tech-id-ext"
+                          >
+                            {recordId} ↗
+                          </a>
+                        ) : (
+                          <span>{recordId}</span>
+                        )
+                      ) : null;
+
+                      const kev = activeTechSource.metadata;
+
+                      return (
+                        <div className="cvd-tech-attrs">
+                          {/* Row 1: ID (hidden for KEV) */}
+                          {showIdRow && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">ID</span>
+                              <span className="cvd-tech-attr-value">{idNode}</span>
+                            </div>
+                          )}
+                          {/* Row 2: CVSS vector — only if available */}
+                          {activeTechSource.cvssVector && (
+                            <div className="cvd-tech-attr cvd-tech-attr--vector">
+                              <span className="cvd-tech-attr-label">CVSS Vector</span>
+                              <span className="cvd-tech-attr-value cvd-tech-vector-val">
+                                <code className="cvd-vector-inline">{activeTechSource.cvssVector}</code>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '2px 8px', fontSize: '10px', flexShrink: 0 }}
+                                  onClick={() => void navigator.clipboard.writeText(activeTechSource.cvssVector ?? '')}
+                                >Copy</button>
+                              </span>
+                            </div>
+                          )}
+                          {/* CVSS score — only if differs from primary */}
+                          {scoreDiffers && (
+                            <div className="cvd-tech-attr cvd-tech-attr--diff">
+                              <span className="cvd-tech-attr-label">CVSS Score</span>
+                              <span className="cvd-tech-attr-value">
+                                {activeTechSource.cvssScore!.toFixed(1)}
+                                <span className="cvd-tech-attr-delta"> (primary: {primaryScore?.toFixed(1) ?? '—'})</span>
+                              </span>
+                            </div>
+                          )}
+                          {severityDiffers && (
+                            <div className="cvd-tech-attr cvd-tech-attr--diff">
+                              <span className="cvd-tech-attr-label">Severity</span>
+                              <span className="cvd-tech-attr-value">
+                                {activeTechSource.severity}
+                                <span className="cvd-tech-attr-delta"> (primary: {detail.summary.severity ?? '—'})</span>
+                              </span>
+                            </div>
+                          )}
+                          {epssToShow != null && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">EPSS</span>
+                              <span className="cvd-tech-attr-value">{(epssToShow * 100).toFixed(2)}%</span>
+                            </div>
+                          )}
+                          {activeTechSource.publishedAt && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Published</span>
+                              <span className="cvd-tech-attr-value">{formatDate(activeTechSource.publishedAt)}</span>
+                            </div>
+                          )}
+                          {activeTechSource.vulnStatus && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Status</span>
+                              <span className="cvd-tech-attr-value">{activeTechSource.vulnStatus}</span>
+                            </div>
+                          )}
+                          {activeTechSource.cweIds && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">CWE</span>
+                              <span className="cvd-tech-attr-value">{activeTechSource.cweIds}</span>
+                            </div>
+                          )}
+                          {/* KEV-specific metadata */}
+                          {kev?.vendorProject && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Vendor</span>
+                              <span className="cvd-tech-attr-value">{kev.vendorProject}</span>
+                            </div>
+                          )}
+                          {kev?.product && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Product</span>
+                              <span className="cvd-tech-attr-value">{kev.product}</span>
+                            </div>
+                          )}
+                          {kev?.dueDate && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Due Date</span>
+                              <span className="cvd-tech-attr-value">{kev.dueDate}</span>
+                            </div>
+                          )}
+                          {kev?.knownRansomwareCampaignUse && (
+                            <div className="cvd-tech-attr">
+                              <span className="cvd-tech-attr-label">Ransomware</span>
+                              <span className="cvd-tech-attr-value">{kev.knownRansomwareCampaignUse}</span>
+                            </div>
+                          )}
+                          {kev?.requiredAction && (
+                            <div className="cvd-tech-attr cvd-tech-attr--wrap">
+                              <span className="cvd-tech-attr-label">Required Action</span>
+                              <span className="cvd-tech-attr-value">{kev.requiredAction}</span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {detail.summary.epssScore != null && (
-                        <div className="cvd-kv-row">
-                          <span className="cvd-kv-label">EPSS score</span>
-                          <span className="cvd-kv-value">{(detail.summary.epssScore * 100).toFixed(2)}%</span>
-                        </div>
-                      )}
-                      {detail.summary.publishedAt && (
-                        <div className="cvd-kv-row">
-                          <span className="cvd-kv-label">Published</span>
-                          <span className="cvd-kv-value">{formatDate(detail.summary.publishedAt)}</span>
-                        </div>
-                      )}
-                      {detail.summary.modifiedAt && (
-                        <div className="cvd-kv-row">
-                          <span className="cvd-kv-label">Last modified</span>
-                          <span className="cvd-kv-value">{formatDate(detail.summary.modifiedAt)}</span>
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </div>
                 )}
                 {cweList.length > 0 && (
@@ -4141,7 +4421,7 @@ function CveOverviewExperience({
               </div>
             )}
 
-            {sourceRecords.length > 0 && (
+            {false && sourceRecords.length > 0 && (
               <div className="cvd2-panel">
                 <div className="cvd-card-inset-hdr">
                   <p className="cvd-section-label">Source intelligence</p>
@@ -6322,7 +6602,9 @@ export function VulnRepoCveAssessmentWorkbench({
   error,
   analystId,
   onBack: _onBack,
-  onRefreshDetail
+  onRefreshDetail,
+  euvdId,
+  jvndbId
 }: Props) {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = React.useState<WorkflowStep>(1);
@@ -7334,6 +7616,8 @@ export function VulnRepoCveAssessmentWorkbench({
               leadAnalyst={leadAnalyst || analystId || 'Alex Martinez'}
               onLeadAnalystChange={setLeadAnalyst}
               persistedRunbookState={persistedRunbookState}
+              euvdId={euvdId}
+              jvndbId={jvndbId}
               onStepChange={(step) => {
                 if (step === 1) {
                   setInvestigationCanvasOpen(true);
