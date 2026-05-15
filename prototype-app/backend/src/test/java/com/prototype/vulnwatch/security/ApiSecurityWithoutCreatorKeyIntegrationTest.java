@@ -15,6 +15,8 @@ import com.prototype.vulnwatch.controller.OperationalDashboardController;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.OperationalDashboardResponse;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.service.AllowedTenantContextService;
+import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
@@ -66,6 +68,12 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     private WorkspaceService workspaceService;
 
     @MockBean
+    private DemoLifecycleService demoLifecycleService;
+
+    @MockBean
+    private AllowedTenantContextService allowedTenantContextService;
+
+    @MockBean
     private OperationalMetricsService operationalMetricsService;
 
     @BeforeEach
@@ -75,6 +83,7 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
         defaultTenant.setName("Default Workspace");
         when(tenantService.getDefaultTenant()).thenReturn(defaultTenant);
         when(workspaceService.getWorkspace()).thenReturn(defaultTenant);
+        when(allowedTenantContextService.listAllowedTenants(any())).thenReturn(List.of());
         when(operationalDashboardService.get()).thenReturn(new OperationalDashboardResponse(
                 Instant.EPOCH,
                 null,

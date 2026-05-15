@@ -18,6 +18,8 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
+import com.prototype.vulnwatch.service.AllowedTenantContextService;
+import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
@@ -27,6 +29,7 @@ import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.UUID;
 import java.util.Set;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +70,12 @@ class ApiSecurityIntegrationTest {
     private WorkspaceService workspaceService;
 
     @MockBean
+    private DemoLifecycleService demoLifecycleService;
+
+    @MockBean
+    private AllowedTenantContextService allowedTenantContextService;
+
+    @MockBean
     private DashboardService dashboardService;
 
     @MockBean
@@ -91,6 +100,7 @@ class ApiSecurityIntegrationTest {
         defaultTenant.setName("Default Workspace");
         when(tenantService.getDefaultTenant()).thenReturn(defaultTenant);
         when(workspaceService.getWorkspace()).thenReturn(defaultTenant);
+        when(allowedTenantContextService.listAllowedTenants(any())).thenReturn(List.of());
         when(dashboardService.get(any(Tenant.class))).thenReturn(null);
         when(operationalDashboardService.get()).thenReturn(null);
     }
