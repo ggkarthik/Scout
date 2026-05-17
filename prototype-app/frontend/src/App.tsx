@@ -20,7 +20,7 @@ import {
 } from './app/routes';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
 import { ActorContextState, useActor } from './features/auth/context';
-import { useActorQuery } from './features/auth/queries';
+import { AUTH_CONTEXT_QUERY_ROOT, useActorQuery } from './features/auth/queries';
 import type { ActorContext } from './features/auth/types';
 import {
   canAccessPlatformConsole,
@@ -623,7 +623,12 @@ function AppShell() {
     : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
       : 'dashboard';
+  const isPlatformScope = actor?.platformScope ?? false;
+  const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
   const visiblePrimaryNavTabs = React.useMemo(() => {
+    if (platformScopeOwner) {
+      return ['operations'] satisfies AppTab[];
+    }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'inventory', 'end-of-life');
@@ -638,7 +643,7 @@ function AppShell() {
       tabs.push('configurations');
     }
     return tabs;
-  }, [actor]);
+  }, [actor, platformScopeOwner]);
   const inventoryAssetsQuery = useQuery({
     queryKey: ['inventory-nav-assets'],
     queryFn: api.listAssets,
@@ -716,25 +721,15 @@ function AppShell() {
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
   const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
-  const isPlatformScope = actor?.platformScope ?? false;
   const actingAsPlatformOwner = actor?.actingAsPlatformOwner ?? false;
-  const availableTenantContexts = actor?.allowedTenants ?? [];
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
-  const switchTenantContext = useMutation({
-    mutationFn: api.selectTenantContext,
-    onSuccess: (response) => {
-      setStoredAuthToken(response.token);
-      void queryClient.invalidateQueries({ queryKey: ['actor-context'] });
-      navigate('/exposure');
-    }
-  });
   const clearTenantContext = useMutation({
     mutationFn: api.clearTenantContext,
     onSuccess: (response) => {
       setStoredAuthToken(response.token);
-      void queryClient.invalidateQueries({ queryKey: ['actor-context'] });
+      void queryClient.invalidateQueries({ queryKey: AUTH_CONTEXT_QUERY_ROOT });
       navigate(pathForPlatformView('tenants'));
     }
   });
@@ -872,29 +867,6 @@ function AppShell() {
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
               </div>
-              {canAccessPlatformConsole(actor) && availableTenantContexts.length > 0 && (
-                <label className="tenant-context-pill" style={{ gap: '0.4rem' }}>
-                  <span>Tenant Context</span>
-                  <select
-                    aria-label="Tenant context switcher"
-                    value={actor?.tenantId ?? ''}
-                    onChange={(event) => {
-                      const nextTenantId = event.target.value;
-                      if (!nextTenantId) {
-                        clearTenantContext.mutate();
-                        return;
-                      }
-                      switchTenantContext.mutate(nextTenantId);
-                    }}
-                    disabled={switchTenantContext.isPending || clearTenantContext.isPending}
-                  >
-                    <option value="">Platform scope</option>
-                    {availableTenantContexts.map((tenant) => (
-                      <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
               {isDemoTenant && (
                 <div className="tenant-context-pill demo-status-pill" title={actor.demoExpiresAt ? `Expires ${actor.demoExpiresAt}` : 'Demo workspace'}>
                   <span>Demo</span>
@@ -944,16 +916,17 @@ function AppShell() {
                       <div className="brand-mark settings-menu-mark">SA</div>
                       <strong>Settings</strong>
                     </div>
-                    <button
-                      type="button"
-                      className="settings-menu-item"
-                      role="menuitem"
-                      onClick={() => navigate('/admin/users')}
-                      disabled={!canManageTenant(actor)}
-                    >
-                      <span>Tenant Administration</span>
-                      <small>Users, roles, service accounts and audit</small>
-                    </button>
+                    {canManageTenant(actor) && (
+                      <button
+                        type="button"
+                        className="settings-menu-item"
+                        role="menuitem"
+                        onClick={() => navigate('/admin/users')}
+                      >
+                        <span>Tenant Administration</span>
+                        <small>Users, roles, service accounts and audit</small>
+                      </button>
+                    )}
                     {canAccessPlatformConsole(actor) && (
                       <button
                         type="button"

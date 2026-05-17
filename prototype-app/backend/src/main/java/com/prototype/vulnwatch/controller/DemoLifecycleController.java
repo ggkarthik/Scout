@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
+import com.prototype.vulnwatch.dto.DemoSetupLinkResponse;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoRequestDecisionRequest;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -71,6 +73,18 @@ public class DemoLifecycleController {
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public DemoInviteResponse resendInvite(@PathVariable UUID requestId) {
         return demoLifecycleService.resendInvite(requestId);
+    }
+
+    @PostMapping("/platform/demo-requests/{requestId}/issue-setup-link")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public DemoSetupLinkResponse issueSetupLink(@PathVariable UUID requestId) {
+        return demoLifecycleService.issueSetupLink(requestId, requestActorService.currentActor().userId());
+    }
+
+    @DeleteMapping("/platform/demo-requests/{requestId}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public void deleteRequest(@PathVariable UUID requestId) {
+        demoLifecycleService.deleteRequest(requestId, requestActorService.currentActor().userId());
     }
 
     @GetMapping("/demo-invites/{token}")

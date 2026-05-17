@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, setStoredAuthToken } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { AUTH_CONTEXT_QUERY_ROOT } from '../features/auth/queries';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 
@@ -83,7 +85,7 @@ function TenantLifecyclePanel() {
     mutationFn: api.selectTenantContext,
     onSuccess: async (response) => {
       setStoredAuthToken(response.token);
-      await queryClient.invalidateQueries({ queryKey: ['actor-context'] });
+      await queryClient.invalidateQueries({ queryKey: AUTH_CONTEXT_QUERY_ROOT });
       navigate('/exposure');
     }
   });
@@ -184,6 +186,12 @@ function TenantLifecyclePanel() {
 
 function DemoRequestsPanel() {
   const queryClient = useQueryClient();
+  const [requestPendingDelete, setRequestPendingDelete] = React.useState<{
+    id: string;
+    company: string;
+    fullName: string;
+    tenantId: string | null;
+  } | null>(null);
   const requestsQuery = useQuery({
     queryKey: ['platform-demo-requests'],
     queryFn: api.listDemoRequests
@@ -195,7 +203,36 @@ function DemoRequestsPanel() {
   const approve = useMutation({ mutationFn: api.approveDemoRequest, onSuccess: refresh });
   const reject = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.rejectDemoRequest(id, reason), onSuccess: refresh });
   const resend = useMutation({ mutationFn: api.resendDemoInvite, onSuccess: refresh });
+  const issueSetup = useMutation({
+    mutationFn: api.issueDemoSetupLink,
+    onSuccess: (response) => {
+      window.location.href = response.setupUrl;
+    }
+  });
+  const deleteRequest = useMutation({
+    mutationFn: api.deleteDemoRequest,
+    onSuccess: async () => {
+      setRequestPendingDelete(null);
+      await refresh();
+    },
+    onError: async (error) => {
+      if (error instanceof Error && error.message.includes('[NOT_FOUND]')) {
+        setRequestPendingDelete(null);
+        await refresh();
+      }
+    }
+  });
   const requests = requestsQuery.data ?? [];
+  const isApprovalComplete = (status: string, tenantId: string | null) =>
+    tenantId != null || ['SENT', 'ERROR', 'REJECTED'].includes(status.toUpperCase());
+  const deleteNotFound =
+    deleteRequest.error instanceof Error && deleteRequest.error.message.includes('[NOT_FOUND]');
+
+  React.useEffect(() => {
+    if (requestPendingDelete == null && deleteRequest.isError && deleteNotFound) {
+      deleteRequest.reset();
+    }
+  }, [deleteNotFound, deleteRequest, requestPendingDelete]);
 
   return (
     <div className="section-block">
@@ -243,14 +280,39 @@ function DemoRequestsPanel() {
                   <td>{new Date(request.requestedAt).toLocaleDateString()}</td>
                   <td>
                     <div className="button-row compact">
-                      <button className="btn btn-secondary btn-sm" disabled={approve.isPending || request.status === 'PROVISIONED'} onClick={() => approve.mutate(request.id)}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={approve.isPending || isApprovalComplete(request.status, request.tenantId)}
+                        onClick={() => approve.mutate(request.id)}
+                      >
                         Approve
                       </button>
                       <button className="btn btn-secondary btn-sm" disabled={resend.isPending || !request.tenantId} onClick={() => resend.mutate(request.id)}>
                         Resend
                       </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={issueSetup.isPending || !request.tenantId}
+                        onClick={() => issueSetup.mutate(request.id)}
+                        title={request.tenantId ? 'Open password setup for the tenant owner' : 'Provision the request first'}
+                      >
+                        Set Password
+                      </button>
                       <button className="btn btn-secondary btn-sm" disabled={reject.isPending || request.status === 'REJECTED'} onClick={() => reject.mutate({ id: request.id, reason: 'Not a fit for current validation wave' })}>
                         Reject
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={deleteRequest.isPending}
+                        onClick={() => setRequestPendingDelete({
+                          id: request.id,
+                          company: request.company,
+                          fullName: request.fullName,
+                          tenantId: request.tenantId
+                        })}
+                        title="Delete this request from the queue"
+                      >
+                        Delete
                       </button>
                     </div>
                   </td>
@@ -260,13 +322,36 @@ function DemoRequestsPanel() {
           </table>
         </div>
       )}
-      {(approve.isError || reject.isError || resend.isError) && (
+      {(approve.isError || reject.isError || resend.isError || issueSetup.isError || (deleteRequest.isError && !deleteNotFound)) && (
         <div className="notice error" role="alert">
-          {[approve.error, reject.error, resend.error].find(Boolean) instanceof Error
-            ? ([approve.error, reject.error, resend.error].find(Boolean) as Error).message
+          {[approve.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) instanceof Error
+            ? ([approve.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) as Error).message
             : 'Demo request action failed'}
         </div>
       )}
+      <ConfirmDialog
+        isOpen={requestPendingDelete != null}
+        title="Delete demo request?"
+        message={
+          requestPendingDelete == null
+            ? ''
+            : requestPendingDelete.tenantId
+              ? `Delete the demo request for ${requestPendingDelete.fullName} at ${requestPendingDelete.company} from the queue? The tenant workspace will remain provisioned.`
+              : `Delete the demo request for ${requestPendingDelete.fullName} at ${requestPendingDelete.company} from the queue?`
+        }
+        confirmLabel={deleteRequest.isPending ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        onCancel={() => {
+          if (!deleteRequest.isPending) {
+            setRequestPendingDelete(null);
+          }
+        }}
+        onConfirm={() => {
+          if (requestPendingDelete != null && !deleteRequest.isPending) {
+            deleteRequest.mutate(requestPendingDelete.id);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -110,4 +110,28 @@ describe('App test persona switcher', () => {
     });
     expect(await screen.findByText('Platform Console')).toBeInTheDocument();
   });
+
+  it('keeps platform-scope owners on operations and hides tenant administration controls', async () => {
+    const auth = await import('./features/auth/api');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      platformScope: true
+    };
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(platformOwner);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/platform/tenants' });
+
+    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Tenant context switcher')).not.toBeInTheDocument();
+    expect(screen.getByText('Operations')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Open settings menu'));
+    expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
+  });
 });

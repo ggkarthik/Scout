@@ -111,6 +111,18 @@ export type DemoInvite = {
   inviteUrl: string;
 };
 
+export type DemoSetupLink = {
+  requestId: string;
+  inviteId: string;
+  tenantId: string;
+  tenantName: string;
+  email: string;
+  inviteStatus: string;
+  inviteExpiresAt: string;
+  inviteUrl: string;
+  setupUrl: string;
+};
+
 export type DemoRequest = {
   id: string;
   email: string;

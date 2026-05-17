@@ -1,9 +1,16 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
-import { api, clearStoredAuthToken } from '../api/client';
-import { renderWithProviders } from '../test/test-utils';
+import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
+import { authApi } from '../features/auth/api';
+import { useActorQuery } from '../features/auth/queries';
+import { createTestQueryClient, renderWithProviders } from '../test/test-utils';
 import { DemoInvitePage, DemoRequestPage, LoginPage } from './DemoPublicPages';
+
+function ExposureActorProbe() {
+  const actorQuery = useActorQuery();
+  return <div>{actorQuery.data?.principal ?? 'missing actor'}</div>;
+}
 
 describe('Demo public pages', () => {
   afterEach(() => {
@@ -73,7 +80,33 @@ describe('Demo public pages', () => {
 
     expect(await screen.findByText('Example Co')).toBeInTheDocument();
     expect(screen.getByText('alex@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Accept invite/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Activate your workspace/i })).toBeEnabled();
+    expect(screen.queryByRole('link', { name: /Continue to login/i })).not.toBeInTheDocument();
+  });
+
+  it('renders delivery failure invites as manual setup fallback', async () => {
+    vi.spyOn(api, 'validateDemoInvite').mockResolvedValue({
+      valid: true,
+      status: 'DELIVERY_ERROR',
+      email: 'alex@example.com',
+      tenantId: 'tenant-1',
+      tenantName: 'Example Co',
+      demoExpiresAt: '2026-05-09T00:00:00Z',
+      inviteExpiresAt: '2026-05-09T00:00:00Z',
+      loginUrl: '/login',
+      message: 'Email delivery failed, but this invite link is still valid. Continue here to set the tenant password manually.'
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/invite/:token" element={<DemoInvitePage />} />
+      </Routes>,
+      { route: '/invite/demo-token' }
+    );
+
+    expect(await screen.findByText(/Email delivery failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not deliver the email automatically/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Activate your workspace/i })).toBeEnabled();
   });
 
   it('routes tenant owners to exposure after credential login', async () => {
@@ -82,7 +115,7 @@ describe('Demo public pages', () => {
       tokenType: 'Bearer',
       expiresAt: '2026-05-09T00:00:00Z'
     });
-    vi.spyOn(api, 'getAuthContext').mockResolvedValue({
+    const actor = {
       creator: false,
       principal: 'alex@example.com',
       userId: 'alex@example.com',
@@ -90,23 +123,28 @@ describe('Demo public pages', () => {
       tenantName: 'Example Co',
       roles: ['TENANT_ADMIN'],
       platformScope: false
-    });
+    };
+    const getAuthContextSpy = vi.spyOn(api, 'getAuthContext').mockResolvedValue(actor);
+    const getActorContextSpy = vi.spyOn(authApi, 'getActorContext').mockResolvedValue(actor);
+    const queryClient = createTestQueryClient();
 
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/exposure" element={<div>Exposure Home</div>} />
+        <Route path="/exposure" element={<ExposureActorProbe />} />
         <Route path="/platform/tenants" element={<div>Platform Tenants</div>} />
       </Routes>,
-      { route: '/login' }
+      { queryClient, route: '/login' }
     );
 
     fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
-    await screen.findByText('Exposure Home');
+    await screen.findByText('alex@example.com');
     expect(api.login).toHaveBeenCalledWith('alex@example.com', 'password-123');
+    expect(getAuthContextSpy).toHaveBeenCalledTimes(1);
+    expect(getActorContextSpy).not.toHaveBeenCalled();
   });
 
   it('routes platform owners to platform tenants after credential login', async () => {
@@ -142,7 +180,7 @@ describe('Demo public pages', () => {
     expect(api.login).toHaveBeenCalledWith('owner@example.com', 'password-123');
   });
 
-  it('sends invite accept flows to password setup login', async () => {
+  it('sends invite activation flows to password setup login', async () => {
     vi.spyOn(api, 'validateDemoInvite').mockResolvedValue({
       valid: true,
       status: 'VALID',
@@ -175,7 +213,7 @@ describe('Demo public pages', () => {
       { route: '/invite/demo-token' }
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /Accept invite/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Activate your workspace/i }));
 
     expect(await screen.findByText(/Set a password for your tenant workspace/i)).toBeInTheDocument();
   });
@@ -209,5 +247,75 @@ describe('Demo public pages', () => {
 
     await screen.findByText('Exposure Home');
     expect(api.setupPassword).toHaveBeenCalledWith('setup-token-123', 'password-123');
+  });
+
+  it('allows tenant login with the request email and new password after activation reset', async () => {
+    vi.spyOn(api, 'setupPassword').mockResolvedValue({
+      token: 'tenant-token',
+      tokenType: 'Bearer',
+      expiresAt: '2026-05-09T00:00:00Z'
+    });
+    vi.spyOn(api, 'getAuthContext').mockResolvedValue({
+      creator: false,
+      principal: 'alex@example.com',
+      userId: 'alex@example.com',
+      tenantId: 'tenant-1',
+      tenantName: 'Example Co',
+      roles: ['TENANT_ADMIN'],
+      platformScope: false
+    });
+    const loginSpy = vi.spyOn(api, 'login').mockResolvedValue({
+      token: 'tenant-token-2',
+      tokenType: 'Bearer',
+      expiresAt: '2026-05-09T00:00:00Z'
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/exposure" element={<div>Exposure Home</div>} />
+      </Routes>,
+      { route: '/login?setup=setup-token-123' }
+    );
+
+    fireEvent.change(screen.getByLabelText(/New password/i), { target: { value: 'password-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /Set password/i }));
+    await screen.findByText('Exposure Home');
+
+    clearStoredAuthToken();
+    cleanup();
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/exposure" element={<div>Exposure Home</div>} />
+      </Routes>,
+      { route: '/login' }
+    );
+
+    fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
+
+    await screen.findByText('Exposure Home');
+    expect(loginSpy).toHaveBeenCalledWith('alex@example.com', 'password-123');
+  });
+
+  it('lets users clear a saved session from the login shell', async () => {
+    setStoredAuthToken('saved-token');
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+      </Routes>,
+      { route: '/login' }
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Log out/i }));
+
+    await waitFor(() => {
+      expect(getStoredAuthToken()).toBe('');
+    });
+    expect(screen.getByRole('heading', { name: /Log in to Scout.ai/i })).toBeInTheDocument();
   });
 });
