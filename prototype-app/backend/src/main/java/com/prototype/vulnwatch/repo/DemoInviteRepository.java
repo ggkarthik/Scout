@@ -9,4 +9,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface DemoInviteRepository extends JpaRepository<DemoInvite, UUID> {
     Optional<DemoInvite> findByToken(String token);
     List<DemoInvite> findByRequest_IdOrderByCreatedAtDesc(UUID requestId);
+    void deleteByRequest_Id(UUID requestId);
 }

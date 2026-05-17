@@ -31,9 +31,10 @@ describe('role helpers', () => {
   });
 
   it('maps tenant-owned configuration permissions by role', () => {
-    expect(canManageUsers(actor(['PLATFORM_OWNER']))).toBe(true);
+    expect(canManageUsers(actor(['PLATFORM_OWNER']))).toBe(false);
     expect(canManageUsers(actor(['TENANT_ADMIN']))).toBe(true);
     expect(canManageServiceAccounts(actor(['TENANT_ADMIN']))).toBe(true);
+    expect(canManageServiceAccounts(actor(['PLATFORM_OWNER']))).toBe(false);
     expect(canManageRiskPolicy(actor(['INVENTORY_ADMIN']))).toBe(false);
     expect(canManageInventorySources(actor(['INVENTORY_ADMIN']))).toBe(true);
     expect(canManageUsers(actor(['INVENTORY_ADMIN']))).toBe(false);

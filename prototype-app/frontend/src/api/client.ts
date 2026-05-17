@@ -65,6 +65,7 @@ import type {
   AuthContext,
   DemoInvite,
   DemoInviteValidationResponse,
+  DemoSetupLink,
   DemoRequest,
   DemoRequestCreateRequest,
   DemoStatus,
@@ -338,6 +339,8 @@ export const api = {
     body: JSON.stringify({ reason: reason ?? '' })
   }),
   resendDemoInvite: (requestId: string) => request<DemoInvite>(`/platform/demo-requests/${requestId}/resend-invite`, { method: 'POST' }),
+  issueDemoSetupLink: (requestId: string) => request<DemoSetupLink>(`/platform/demo-requests/${requestId}/issue-setup-link`, { method: 'POST' }),
+  deleteDemoRequest: (requestId: string) => request<void>(`/platform/demo-requests/${requestId}`, { method: 'DELETE' }),
   getDashboard: () => request<Dashboard>('/dashboard'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {

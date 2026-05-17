@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
   type AdminRouteView,
   normalizeAdminRouteView,
@@ -15,7 +15,7 @@ import {
 } from '../features/admin/queries';
 import { api } from '../api/client';
 import type { AuditEvent, ServiceAccount, TenantMember } from '../features/admin/types';
-import { canExportAudit, canManageServiceAccounts, canManageUsers } from '../features/auth/roles';
+import { canExportAudit, canManageServiceAccounts, canManageTenant, canManageUsers } from '../features/auth/roles';
 
 type RoleKey = 'Owner' | 'Admin' | 'Security Lead' | 'Analyst' | 'Viewer';
 
@@ -215,9 +215,14 @@ export function UserManagementPage() {
   const authQuery = useAuthContextQuery();
   const actor = authQuery.data ?? null;
   const tenantId = authQuery.data?.tenantId ?? null;
+  const mayAccessTenantAdministration = canManageTenant(actor);
   const mayManageUsers = canManageUsers(actor);
   const mayManageServiceAccounts = canManageServiceAccounts(actor);
   const mayExportAudit = canExportAudit(actor);
+
+  if (!authQuery.isLoading && !mayAccessTenantAdministration) {
+    return <Navigate to="/exposure" replace />;
+  }
 
   const membersQuery = useTenantMembersQuery(tenantId);
   const serviceAccountsQuery = useServiceAccountsQuery();

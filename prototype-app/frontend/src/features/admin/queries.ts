@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api/client';
+import { api, getStoredAuthToken } from '../../api/client';
+import { getAuthContextQueryKey } from '../auth/queries';
 import type { ServiceAccountRequest, TenantMemberRequest } from './types';
 
-const AUTH_CONTEXT_KEY = ['auth-context'] as const;
 const SERVICE_ACCOUNTS_KEY = ['service-accounts'] as const;
 const AUDIT_EVENTS_KEY = ['audit-events'] as const;
 
@@ -11,8 +11,9 @@ function membersKey(tenantId: string | null | undefined) {
 }
 
 export function useAuthContextQuery() {
+  const authToken = getStoredAuthToken().trim() || 'anonymous';
   return useQuery({
-    queryKey: AUTH_CONTEXT_KEY,
+    queryKey: getAuthContextQueryKey(authToken),
     queryFn: api.getAuthContext,
     staleTime: 5 * 60 * 1000
   });

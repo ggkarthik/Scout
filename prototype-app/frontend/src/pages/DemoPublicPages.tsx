@@ -1,7 +1,8 @@
 import React from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { api, setStoredAuthToken } from '../api/client';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
+import { getAuthContextQueryKey } from '../features/auth/queries';
 import type { ActorContext } from '../features/auth/types';
 
 const IDP_LOGIN_URL = import.meta.env.VITE_IDP_LOGIN_URL ?? '';
@@ -155,6 +156,7 @@ export function DemoInvitePage() {
   });
 
   const invite = inviteQuery.data;
+  const deliveryFailed = invite?.status === 'DELIVERY_ERROR';
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
@@ -165,7 +167,15 @@ export function DemoInvitePage() {
           <div className="notice error">{inviteQuery.error instanceof Error ? inviteQuery.error.message : 'Invite is invalid'}</div>
         ) : invite ? (
           <>
-            <p>{invite.message}</p>
+            <div className={`notice ${deliveryFailed ? 'error' : 'success'}`}>
+              {invite.message}
+            </div>
+            {deliveryFailed && (
+              <p>
+                The workspace was provisioned, but Scout.ai could not deliver the email automatically.
+                You can still accept this invite and continue with manual password setup.
+              </p>
+            )}
             <dl className="demo-invite-details">
               <div><dt>Workspace</dt><dd>{invite.tenantName}</dd></div>
               <div><dt>Email</dt><dd>{invite.email}</dd></div>
@@ -178,11 +188,9 @@ export function DemoInvitePage() {
                 disabled={!invite.valid || acceptInvite.isPending}
                 onClick={() => acceptInvite.mutate()}
               >
-                {acceptInvite.isPending ? 'Accepting...' : 'Accept invite'}
+                {acceptInvite.isPending ? 'Activating...' : 'Activate your workspace'}
               </button>
-              <Link className="btn btn-secondary" to={`/login?invite=${encodeURIComponent(token)}`}>Continue to login</Link>
             </div>
-            {acceptInvite.isSuccess && <div className="notice success">Invite accepted. Continue to login.</div>}
             {acceptInvite.isError && <div className="notice error">{acceptInvite.error instanceof Error ? acceptInvite.error.message : 'Accept failed'}</div>}
           </>
         ) : null}
@@ -199,6 +207,7 @@ export function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const personasQuery = useQuery({
     queryKey: ['login-test-personas'],
     queryFn: api.listTestPersonas,
@@ -224,6 +233,7 @@ export function LoginPage() {
   const applyToken = async (token: string) => {
     setStoredAuthToken(token);
     const actor = await api.getAuthContext();
+    queryClient.setQueryData(getAuthContextQueryKey(token), actor);
     navigateAfterAuth(actor);
   };
 
@@ -352,6 +362,20 @@ export function DemoExpiredPage() {
 }
 
 function PublicDemoShell({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [hasStoredToken, setHasStoredToken] = React.useState(() => getStoredAuthToken().trim().length > 0);
+
+  React.useEffect(() => {
+    setHasStoredToken(getStoredAuthToken().trim().length > 0);
+  }, [location.pathname, location.search]);
+
+  const logout = React.useCallback(() => {
+    clearStoredAuthToken();
+    setHasStoredToken(false);
+    navigate('/login', { replace: true });
+  }, [navigate]);
+
   return (
     <main className={compact ? 'public-demo-shell compact' : 'public-demo-shell'}>
       <nav className="public-demo-nav">
@@ -359,6 +383,11 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
         <div className="public-demo-links">
           <Link to="/demo/request">Request demo</Link>
           <Link to="/login">Log in</Link>
+          {hasStoredToken && (
+            <button className="btn btn-secondary" type="button" onClick={logout}>
+              Log out
+            </button>
+          )}
         </div>
       </nav>
       {children}

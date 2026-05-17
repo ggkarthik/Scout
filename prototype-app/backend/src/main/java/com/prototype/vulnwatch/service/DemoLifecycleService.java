@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
+import com.prototype.vulnwatch.dto.DemoSetupLinkResponse;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
@@ -30,7 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DemoLifecycleService {
     public static final String DEMO_PLAN_CODE = "DEMO";
-    private static final List<String> ACTIVE_REQUEST_STATUSES = List.of("PENDING", "APPROVED", "PROVISIONED");
+    private static final List<String> ACTIVE_REQUEST_STATUSES = List.of("PENDING", "SENT", "ERROR");
 
     private final DemoRequestRepository demoRequestRepository;
     private final DemoInviteRepository demoInviteRepository;
@@ -98,12 +99,24 @@ public class DemoLifecycleService {
     @Transactional
     public DemoRequestResponse approve(UUID requestId, String actor) {
         DemoRequest request = getRequest(requestId);
-        if ("PROVISIONED".equalsIgnoreCase(request.getStatus())) {
-            return toRequestResponse(request);
+        Tenant tenant;
+        if (request.getTenantId() != null) {
+            tenant = tenantRepository.findById(request.getTenantId())
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
+        } else {
+            tenant = provisionTenant(request, actor);
         }
-        Tenant tenant = provisionTenant(request, actor);
-        DemoInvite invite = deliverInvite(createInvite(request, tenant), request);
-        request.setStatus("PROVISIONED");
+
+        DemoInvite invite = latestInvite(requestId);
+        if (invite == null) {
+            invite = createInvite(request, tenant);
+        }
+        if (invite.getAcceptedAt() == null && !"ACCEPTED".equalsIgnoreCase(invite.getStatus())) {
+            invite = deliverInvite(invite, request);
+            request.setStatus(requestStatusForInvite(invite));
+        } else if (request.getStatus() == null || request.getStatus().isBlank() || "PENDING".equalsIgnoreCase(request.getStatus())) {
+            request.setStatus("SENT");
+        }
         request.setDecidedAt(Instant.now());
         request.setDecidedBy(trimToNull(actor));
         request.setTenantId(tenant.getId());
@@ -137,8 +150,59 @@ public class DemoLifecycleService {
             invite = createInvite(request, tenant);
         }
         invite = deliverInvite(invite, request);
+        request.setStatus(requestStatusForInvite(invite));
+        demoRequestRepository.save(request);
         auditEventService.record("demo.invite.resent", "demo_invite", invite.getId().toString(), null);
         return toInviteResponse(invite);
+    }
+
+    @Transactional
+    public DemoSetupLinkResponse issueSetupLink(UUID requestId, String actor) {
+        DemoRequest request = getRequest(requestId);
+        if (request.getTenantId() == null) {
+            throw new DemoAccessException("DEMO_SETUP_NOT_READY", "Demo request must be provisioned before password setup can be issued", HttpStatus.CONFLICT);
+        }
+        Tenant tenant = tenantRepository.findById(request.getTenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
+        DemoInvite invite = latestInvite(requestId);
+        if (invite == null) {
+            invite = createInvite(request, tenant);
+        }
+        if (invite.getAcceptedAt() == null) {
+            invite.setAcceptedAt(Instant.now());
+        }
+        invite.setStatus("ACCEPTED");
+        invite = demoInviteRepository.save(invite);
+
+        String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
+        auditEventService.record(
+                "demo.invite.setup_issued_by_platform",
+                "demo_invite",
+                invite.getId().toString(),
+                "{\"requestId\":\"" + requestId + "\",\"actor\":\"" + escapeJson(trimToNull(actor)) + "\"}");
+        return new DemoSetupLinkResponse(
+                request.getId(),
+                invite.getId(),
+                tenant.getId(),
+                tenant.getName(),
+                invite.getEmail(),
+                invite.getStatus(),
+                invite.getExpiresAt(),
+                appBaseUrl + "/invite/" + invite.getToken(),
+                appBaseUrl + "/login?setup=" + setupToken
+        );
+    }
+
+    @Transactional
+    public void deleteRequest(UUID requestId, String actor) {
+        DemoRequest request = getRequest(requestId);
+        demoInviteRepository.deleteByRequest_Id(requestId);
+        demoRequestRepository.delete(request);
+        auditEventService.record(
+                "demo.request.deleted",
+                "demo_request",
+                requestId.toString(),
+                "{\"actor\":\"" + escapeJson(trimToNull(actor)) + "\"}");
     }
 
     @Transactional(readOnly = true)
@@ -230,13 +294,20 @@ public class DemoLifecycleService {
     }
 
     private Tenant provisionTenant(DemoRequest request, String actor) {
-        String slug = normalizeSlug(request.getCompany());
+        String baseName = requireText(request.getCompany(), "company");
+        String nameCandidate = baseName;
+        int nameSuffix = 2;
+        while (tenantRepository.existsByNameIgnoreCase(nameCandidate)) {
+            nameCandidate = baseName + " (" + nameSuffix++ + ")";
+        }
+
+        String slug = normalizeSlug(baseName);
         String candidate = slug;
         int suffix = 2;
-        while (tenantRepository.findBySlugIgnoreCase(candidate).isPresent()) {
+        while (tenantRepository.existsBySlugIgnoreCase(candidate)) {
             candidate = slug + "-" + suffix++;
         }
-        Tenant tenant = tenantService.createTenant(request.getCompany(), candidate, DEMO_PLAN_CODE, "demo-request:" + request.getId());
+        Tenant tenant = tenantService.createTenant(nameCandidate, candidate, DEMO_PLAN_CODE, "demo-request:" + request.getId());
         tenant.setDemoExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
         tenant.setDemoCreatedBy(trimToNull(actor));
         tenant.setDemoSource("REQUEST_REVIEW");
@@ -267,14 +338,19 @@ public class DemoLifecycleService {
             invite.setStatus("SENT");
             invite.setLastSentAt(Instant.now());
             auditEventService.record("demo.invite.email.sent", "demo_invite", invite.getId().toString(), null);
-        } else if (deliveryResult.state() == ResendEmailClient.DeliveryState.SKIPPED) {
-            invite.setStatus("READY");
-            auditEventService.record("demo.invite.email.skipped", "demo_invite", invite.getId().toString(), null);
         } else {
-            invite.setStatus("DELIVERY_FAILED");
-            auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), null);
+            invite.setStatus("ERROR");
+            if (deliveryResult.state() == ResendEmailClient.DeliveryState.SKIPPED) {
+                auditEventService.record("demo.invite.email.skipped", "demo_invite", invite.getId().toString(), null);
+            } else {
+                auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), null);
+            }
         }
         return demoInviteRepository.save(invite);
+    }
+
+    private String requestStatusForInvite(DemoInvite invite) {
+        return "SENT".equalsIgnoreCase(invite.getStatus()) ? "SENT" : "ERROR";
     }
 
     private DemoRequest getRequest(UUID requestId) {
@@ -290,13 +366,24 @@ public class DemoLifecycleService {
     private DemoInviteValidationResponse inviteValidationResponse(DemoInvite invite, String overrideMessage, String setupToken) {
         Instant now = Instant.now();
         Tenant tenant = invite.getTenant();
+        boolean deliveryError = "ERROR".equalsIgnoreCase(invite.getStatus());
         boolean tenantExpired = tenant.getDemoExpiresAt() != null && !tenant.getDemoExpiresAt().isAfter(now);
         boolean inviteExpired = !invite.getExpiresAt().isAfter(now);
         boolean accepted = invite.getAcceptedAt() != null || "ACCEPTED".equalsIgnoreCase(invite.getStatus());
         boolean valid = !tenantExpired && !inviteExpired && !accepted && "ACTIVE".equalsIgnoreCase(tenant.getStatus());
-        String status = tenantExpired ? "TENANT_EXPIRED" : inviteExpired ? "INVITE_EXPIRED" : accepted ? "ACCEPTED" : valid ? "VALID" : "INVALID";
+        String status = tenantExpired
+                ? "TENANT_EXPIRED"
+                : inviteExpired
+                        ? "INVITE_EXPIRED"
+                        : accepted
+                                ? "ACCEPTED"
+                                : deliveryError && valid
+                                        ? "DELIVERY_ERROR"
+                                        : valid ? "VALID" : "INVALID";
         String message = overrideMessage != null ? overrideMessage : switch (status) {
             case "VALID" -> "Invite is ready";
+            case "DELIVERY_ERROR" ->
+                    "Email delivery failed, but this invite link is still valid. Continue here to set the tenant password manually.";
             case "ACCEPTED" -> "Invite has already been accepted";
             case "TENANT_EXPIRED" -> "Demo tenant has expired";
             case "INVITE_EXPIRED" -> "Demo invite has expired";
@@ -396,5 +483,9 @@ public class DemoLifecycleService {
 
     private String trimToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String escapeJson(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

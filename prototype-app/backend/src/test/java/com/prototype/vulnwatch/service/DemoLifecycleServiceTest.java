@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,8 @@ import com.prototype.vulnwatch.domain.DemoInvite;
 import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
+import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
+import com.prototype.vulnwatch.dto.DemoSetupLinkResponse;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.repo.DemoInviteRepository;
 import com.prototype.vulnwatch.repo.DemoRequestRepository;
@@ -51,13 +54,14 @@ class DemoLifecycleServiceTest {
     private SbomUploadRepository sbomUploadRepository;
 
     @Test
-    void approveMarksInviteSentWhenEmailDeliverySucceeds() {
+    void approveMarksRequestAndInviteSentWhenEmailDeliverySucceeds() {
         DemoRequest request = pendingRequest();
         Tenant tenant = provisionedTenant();
         AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
 
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
-        when(tenantRepository.findBySlugIgnoreCase("example-co")).thenReturn(Optional.empty());
+        when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
         when(tenantService.createTenant("Example Co", "example-co", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -78,7 +82,7 @@ class DemoLifecycleServiceTest {
         DemoLifecycleService service = service();
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
-        assertEquals("PROVISIONED", response.status());
+        assertEquals("SENT", response.status());
         assertNotNull(response.tenantId());
         assertEquals("SENT", response.latestInvite().status());
         assertNotNull(response.latestInvite().lastSentAt());
@@ -86,13 +90,51 @@ class DemoLifecycleServiceTest {
     }
 
     @Test
-    void approveLeavesInviteReadyWhenEmailDeliveryIsNotConfigured() {
+    void approveUsesUniqueTenantNameWhenCompanyAlreadyExists() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        tenant.setName("Example Co (2)");
+        tenant.setSlug("example-co-2");
+        AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(true);
+        when(tenantRepository.existsByNameIgnoreCase("Example Co (2)")).thenReturn(false);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(true);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co-2")).thenReturn(false);
+        when(tenantService.createTenant("Example Co (2)", "example-co-2", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
+                .thenReturn(tenant);
+        when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
+            DemoInvite invite = invocation.getArgument(0);
+            if (invite.getId() == null) {
+                ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+            }
+            latestInvite.set(invite);
+            return invite;
+        });
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId()))
+                .thenAnswer(invocation -> latestInvite.get() == null ? List.of() : List.of(latestInvite.get()));
+        when(demoInviteEmailService.sendInvite(eq(request), any(DemoInvite.class)))
+                .thenReturn(ResendEmailClient.DeliveryResult.sent("email-123"));
+
+        DemoLifecycleService service = service();
+        DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
+
+        assertEquals("SENT", response.status());
+        assertEquals("Example Co (2)", response.latestInvite().tenantName());
+    }
+
+    @Test
+    void approveMarksRequestAndInviteErrorWhenEmailDeliveryIsNotConfigured() {
         DemoRequest request = pendingRequest();
         Tenant tenant = provisionedTenant();
         AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
 
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
-        when(tenantRepository.findBySlugIgnoreCase("example-co")).thenReturn(Optional.empty());
+        when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
         when(tenantService.createTenant("Example Co", "example-co", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -113,8 +155,67 @@ class DemoLifecycleServiceTest {
         DemoLifecycleService service = service();
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
-        assertEquals("READY", response.latestInvite().status());
+        assertEquals("ERROR", response.status());
+        assertEquals("ERROR", response.latestInvite().status());
         assertNull(response.latestInvite().lastSentAt());
+        verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
+    }
+
+    @Test
+    void validateInviteReturnsDeliveryErrorWhenInviteExistsButEmailWasNotSent() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        tenant.setStatus("ACTIVE");
+        tenant.setDemoExpiresAt(java.time.Instant.now().plusSeconds(86400));
+
+        DemoInvite invite = new DemoInvite();
+        ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+        invite.setRequest(request);
+        invite.setTenant(tenant);
+        invite.setEmail(request.getEmail());
+        invite.setToken("invite-token-123");
+        invite.setStatus("ERROR");
+        invite.setExpiresAt(java.time.Instant.now().plusSeconds(86400));
+
+        when(demoInviteRepository.findByToken("invite-token-123")).thenReturn(Optional.of(invite));
+
+        DemoLifecycleService service = service();
+        DemoInviteValidationResponse response = service.validateInvite("invite-token-123");
+
+        assertTrue(response.valid());
+        assertEquals("DELIVERY_ERROR", response.status());
+        assertTrue(response.message().contains("Email delivery failed"));
+    }
+
+    @Test
+    void approveRecoversPartiallyProvisionedRequestByCreatingInvite() {
+        DemoRequest request = pendingRequest();
+        request.setTenantId(UUID.randomUUID());
+        Tenant tenant = provisionedTenant();
+        tenant.setId(request.getTenantId());
+        AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.findById(request.getTenantId())).thenReturn(Optional.of(tenant));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId()))
+                .thenAnswer(invocation -> latestInvite.get() == null ? List.of() : List.of(latestInvite.get()));
+        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
+            DemoInvite invite = invocation.getArgument(0);
+            if (invite.getId() == null) {
+                ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+            }
+            latestInvite.set(invite);
+            return invite;
+        });
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteEmailService.sendInvite(eq(request), any(DemoInvite.class)))
+                .thenReturn(ResendEmailClient.DeliveryResult.sent("email-789"));
+
+        DemoLifecycleService service = service();
+        DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
+
+        assertEquals("SENT", response.status());
+        assertEquals("SENT", response.latestInvite().status());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
     }
 
@@ -146,6 +247,66 @@ class DemoLifecycleServiceTest {
         assertEquals("SENT", response.status());
         assertNotNull(response.lastSentAt());
         verify(demoInviteEmailService).sendInvite(request, existingInvite);
+        verify(demoRequestRepository).save(request);
+    }
+
+    @Test
+    void issueSetupLinkMarksInviteAcceptedAndReturnsSetupUrl() {
+        DemoRequest request = pendingRequest();
+        request.setStatus("PROVISIONED");
+        Tenant tenant = provisionedTenant();
+        request.setTenantId(tenant.getId());
+
+        DemoInvite existingInvite = new DemoInvite();
+        ReflectionTestUtils.setField(existingInvite, "id", UUID.randomUUID());
+        existingInvite.setRequest(request);
+        existingInvite.setTenant(tenant);
+        existingInvite.setEmail(request.getEmail());
+        existingInvite.setToken("invite-token-123");
+        existingInvite.setStatus("SENT");
+        existingInvite.setExpiresAt(java.time.Instant.now().plusSeconds(86400));
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId())).thenReturn(List.of(existingInvite));
+        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(localCredentialAuthService.issuePasswordSetupToken(request.getEmail())).thenReturn("setup-token-123");
+
+        DemoLifecycleService service = service();
+        DemoSetupLinkResponse response = service.issueSetupLink(request.getId(), "platform-owner@example.com");
+
+        assertEquals("ACCEPTED", response.inviteStatus());
+        assertNotNull(existingInvite.getAcceptedAt());
+        assertEquals("https://app.example.com/login?setup=setup-token-123", response.setupUrl());
+        verify(localCredentialAuthService).issuePasswordSetupToken(request.getEmail());
+    }
+
+    @Test
+    void deleteRequestRemovesNonProvisionedQueueItem() {
+        DemoRequest request = pendingRequest();
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+
+        DemoLifecycleService service = service();
+        service.deleteRequest(request.getId(), "platform-owner@example.com");
+
+        verify(demoInviteRepository).deleteByRequest_Id(request.getId());
+        verify(demoRequestRepository).delete(request);
+    }
+
+    @Test
+    void deleteRequestRemovesProvisionedQueueItemButKeepsTenantUntouched() {
+        DemoRequest request = pendingRequest();
+        request.setStatus("PROVISIONED");
+        request.setTenantId(UUID.randomUUID());
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+
+        DemoLifecycleService service = service();
+        service.deleteRequest(request.getId(), "platform-owner@example.com");
+
+        verify(demoInviteRepository).deleteByRequest_Id(request.getId());
+        verify(demoRequestRepository).delete(request);
     }
 
     private DemoLifecycleService service() {

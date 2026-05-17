@@ -10,7 +10,7 @@ export function hasAnyRole(actor: ActorContext | null, roles: string[]): boolean
 }
 
 export function canManageTenant(actor: ActorContext | null): boolean {
-  return hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN']);
+  return hasRole(actor, 'TENANT_ADMIN');
 }
 
 export function canAccessPlatformConsole(actor: ActorContext | null): boolean {
@@ -18,15 +18,15 @@ export function canAccessPlatformConsole(actor: ActorContext | null): boolean {
 }
 
 export function canManageUsers(actor: ActorContext | null): boolean {
-  return hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN']);
+  return hasRole(actor, 'TENANT_ADMIN');
 }
 
 export function canManageServiceAccounts(actor: ActorContext | null): boolean {
-  return hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN']);
+  return hasRole(actor, 'TENANT_ADMIN');
 }
 
 export function canExportAudit(actor: ActorContext | null): boolean {
-  return hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN', 'READ_ONLY_AUDITOR']);
+  return hasAnyRole(actor, ['TENANT_ADMIN', 'READ_ONLY_AUDITOR']);
 }
 
 export function canManageInventorySources(actor: ActorContext | null): boolean {
