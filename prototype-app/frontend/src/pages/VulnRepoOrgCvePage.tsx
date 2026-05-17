@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DataTable,
@@ -159,6 +159,9 @@ export function VulnRepoOrgCvePage({
 }: VulnRepoOrgCvePageProps = {}) {
   const actor = useActor();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const euvdContextId = searchParams.get('euvdId') ?? undefined;
+  const jvndbContextId = searchParams.get('jvndbId') ?? undefined;
   const queryClient = useQueryClient();
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState('');
@@ -462,6 +465,8 @@ export function VulnRepoOrgCvePage({
         analystId={actor?.userId ?? undefined}
         onBack={closeDrawer}
         onRefreshDetail={refreshDetail}
+        euvdId={euvdContextId}
+        jvndbId={jvndbContextId}
       />
     );
   }
