@@ -20,7 +20,9 @@ import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
+import com.prototype.vulnwatch.domain.VulnerabilityIntelRelation;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityIntelRelationRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
@@ -58,6 +60,8 @@ public class CveDetailQueryFacade {
     private final EpssTrendService epssTrendService;
     private final FixRecordRepository fixRecordRepository;
     private final ObjectMapper objectMapper;
+    private final VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler;
+    private final VulnerabilityIntelRelationRepository relationRepository;
 
     public CveDetailQueryFacade(
             VulnerabilityRepository vulnerabilityRepository,
@@ -73,7 +77,9 @@ public class CveDetailQueryFacade {
             VulnerabilityIntelQueryService vulnerabilityIntelQueryService,
             EpssTrendService epssTrendService,
             FixRecordRepository fixRecordRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler,
+            VulnerabilityIntelRelationRepository relationRepository
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.orgCveRecordRepository = orgCveRecordRepository;
@@ -89,6 +95,8 @@ public class CveDetailQueryFacade {
         this.epssTrendService = epssTrendService;
         this.fixRecordRepository = fixRecordRepository;
         this.objectMapper = objectMapper;
+        this.vulnerabilityIntelDetailAssembler = vulnerabilityIntelDetailAssembler;
+        this.relationRepository = relationRepository;
     }
 
     public ResponseEntity<CveDetailController.CveDetailResponse> getCveDetail(String cveId) {
@@ -142,6 +150,29 @@ public class CveDetailQueryFacade {
             response.setSuppressedByRuleId(orgCveRecord.getSuppressedByRuleId());
             response.setSuppressedByRuleName(orgCveRecord.getSuppressedByRuleName());
         }
+        List<VulnerabilityIntelObservation> observations =
+                observationRepository.findByVulnerabilityOrderByLastSeenAtDesc(vulnerability);
+
+        // Fetch cross-source relations where this vulnerability's observations are the target
+        List<VulnerabilityIntelRelation> relations =
+                relationRepository.findByToObservationVulnerabilityIdIn(List.of(vulnerability.getId()));
+
+        // Include source-only observations (e.g. EUVD) from the from-side of relations
+        // so they appear as sourceRecords on the CVE detail even though they carry no vulnerability FK
+        Set<UUID> knownObsIds = observations.stream()
+                .map(VulnerabilityIntelObservation::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        List<VulnerabilityIntelObservation> allObservations = new ArrayList<>(observations);
+        for (VulnerabilityIntelRelation relation : relations) {
+            VulnerabilityIntelObservation fromObs = relation.getFromObservation();
+            if (fromObs != null && !knownObsIds.contains(fromObs.getId())) {
+                knownObsIds.add(fromObs.getId());
+                allObservations.add(fromObs);
+            }
+        }
+
+        response.setSourceRecords(vulnerabilityIntelDetailAssembler.toSourceRecordResponses(allObservations));
+        response.setRelations(vulnerabilityIntelDetailAssembler.toRelationResponses(relations));
         response.setInvestigations(investigationService.getInvestigationsByCve(tenantId, cveId).stream()
                 .map(this::toInvestigationDto)
                 .collect(Collectors.toList()));

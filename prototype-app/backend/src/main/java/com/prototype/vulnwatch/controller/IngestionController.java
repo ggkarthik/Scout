@@ -122,6 +122,14 @@ public class IngestionController {
         return response;
     }
 
+    @PostMapping("/ingestion/jvn-sync")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public SyncTriggerResponse syncJvn() {
+        SyncTriggerResponse response = vulnerabilityIngestionService.triggerJvnSync();
+        auditEventService.record("platform.vulnerability_feed.jvn_sync", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        return response;
+    }
+
     @PostMapping("/ingestion/csaf/microsoft-sync")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse syncMicrosoftCsaf() {

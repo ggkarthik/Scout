@@ -753,6 +753,12 @@
   line-height: 1.4;
 }
 
+.euvd-id-badge.cve-secondary {
+  background: rgba(100, 116, 139, 0.08);
+  border-color: rgba(100, 116, 139, 0.2);
+  color: var(--text-muted, #8b9cb6);
+}
+
 .vuln-repo-summary-link {
   display: inline-flex;
   align-items: center;
