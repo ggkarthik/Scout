@@ -3564,7 +3564,7 @@ function CveOverviewExperience({
   detail,
   latestAssessment,
   latestInvestigation,
-  cvssFields,
+  cvssFields: _cvssFields,
   softwareGroups,
   analystId: _analystId,
   onStepChange,
@@ -3899,7 +3899,7 @@ function CveOverviewExperience({
   }, [detail, euvdId, jvndbId, sourceRecords, sourceRelations]);
   const [selectedTechSource, setSelectedTechSource] = React.useState<string>(() => jvndbId ? 'japan-vulndb' : euvdId ? 'euvd' : 'primary');
   const activeTechSource = techSources.find(s => s.id === selectedTechSource) ?? techSources[0];
-  const activeTechCvssFields = React.useMemo(
+  const _activeTechCvssFields = React.useMemo(
     () => parseCvssVector(activeTechSource?.cvssVector),
     [activeTechSource?.cvssVector]
   );
@@ -3925,7 +3925,7 @@ function CveOverviewExperience({
     [detail.summary.cweIds]
   );
 
-  const CVSS_DIMS_LOCAL = [
+  const _CVSS_DIMS_LOCAL = [
     { key: 'AV', label: 'Attack vector',       values: { N: 'Network', A: 'Adjacent', L: 'Local', P: 'Physical' } },
     { key: 'AC', label: 'Attack complexity',   values: { L: 'Low', H: 'High' } },
     { key: 'PR', label: 'Privileges required', values: { N: 'None', L: 'Low', H: 'High' } },
@@ -4057,8 +4057,9 @@ function CveOverviewExperience({
           ...sourceRecords.map((record) => record.sourceSystem).filter(Boolean),
           ...detail.vendorIntelligence.map(v => v.source).filter(Boolean),
         ]));
-        const multiSource = allSources.length > 1;
-        const altScores = sourceScoreEntries.filter((entry) => entry.source !== detail.summary.source);
+        const _multiSource = allSources.length > 1;
+        const _altScores = sourceScoreEntries.filter((entry) => entry.source !== detail.summary.source);
+        const sourceIntelligenceEnabled = false;
 
         return (
           <div className="cvd2-overview-body">
@@ -4419,7 +4420,7 @@ function CveOverviewExperience({
               </div>
             )}
 
-            {false && sourceRecords.length > 0 && (
+            {sourceIntelligenceEnabled && sourceRecords.length > 0 && (
               <div className="cvd2-panel">
                 <div className="cvd-card-inset-hdr">
                   <p className="cvd-section-label">Source intelligence</p>

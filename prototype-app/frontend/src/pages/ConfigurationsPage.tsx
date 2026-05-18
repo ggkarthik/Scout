@@ -1,9 +1,8 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import { useActor } from '../features/auth/context';
-import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
+import { canManageRiskPolicy } from '../features/auth/roles';
 import type { OwnershipRuleResponse, RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
 import type { VulnerabilitySourceFilterConfig, VulnerabilitySourceFilterConfigRequest, VulnerabilitySourceSystem } from '../features/connect/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';

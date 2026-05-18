@@ -169,8 +169,9 @@ class ApiSecurityIntegrationTest {
                 .andExpect(jsonPath("$.creator").value(true))
                 .andExpect(jsonPath("$.principal").value("local-analyst"))
                 .andExpect(jsonPath("$.userId").value("local-analyst"))
-                .andExpect(jsonPath("$.tenantId").value("00000000-0000-0000-0000-000000000001"))
-                .andExpect(jsonPath("$.tenantName").value("Default Workspace"));
+                .andExpect(jsonPath("$.platformScope").value(true))
+                .andExpect(jsonPath("$.tenantId").doesNotExist())
+                .andExpect(jsonPath("$.tenantName").doesNotExist());
 
         mockMvc.perform(get("/api/me")
                         .header("X-API-Key", "test-api-key"))

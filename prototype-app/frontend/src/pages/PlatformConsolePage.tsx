@@ -7,8 +7,6 @@ import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AUTH_CONTEXT_QUERY_ROOT } from '../features/auth/queries';
 import { useAcceptPlatformSupportGrantMutation, useAuthContextQuery, usePlatformInventoryConnectorHealthQuery, usePlatformSupportGrantsQuery } from '../features/admin/queries';
-import { VulnIntelConfigPage } from './VulnIntelConfigPage';
-import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
