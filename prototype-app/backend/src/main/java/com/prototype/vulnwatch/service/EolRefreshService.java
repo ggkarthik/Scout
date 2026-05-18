@@ -203,6 +203,7 @@ public class EolRefreshService {
     private SyncRun startRun(String type) {
         SyncRun run = new SyncRun();
         run.setSyncType(type);
+        run.setRunScope("PLATFORM_VULNERABILITY");
         run.setStatus("queued");
         return syncRunRepository.save(run);
     }

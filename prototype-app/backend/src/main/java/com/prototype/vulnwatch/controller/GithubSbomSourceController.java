@@ -51,7 +51,7 @@ public class GithubSbomSourceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.created")
     public GithubSbomSourceResponse create(@Valid @RequestBody GithubSbomSourceRequest request) {
         assertDemoAllowsLiveConnector();
@@ -61,7 +61,7 @@ public class GithubSbomSourceController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.updated")
     public GithubSbomSourceResponse update(@PathVariable UUID id, @Valid @RequestBody GithubSbomSourceRequest request) {
         assertDemoAllowsLiveConnector();
@@ -71,7 +71,7 @@ public class GithubSbomSourceController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.deleted")
     public void delete(@PathVariable UUID id) {
         assertDemoAllowsLiveConnector();
@@ -80,7 +80,7 @@ public class GithubSbomSourceController {
     }
 
     @PostMapping("/ghcr/run")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.ghcr_run_triggered")
     public SyncTriggerResponse runGhcrOnce(@Valid @RequestBody GithubGhcrSbomIngestionRequest request) {
         assertDemoAllowsLiveConnector();
@@ -91,7 +91,7 @@ public class GithubSbomSourceController {
     }
 
     @PostMapping("/repository/run")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.repository_run_triggered")
     public SyncTriggerResponse runRepositoryOnce(@Valid @RequestBody GithubSbomIngestionRequest request) {
         assertDemoAllowsLiveConnector();
@@ -102,7 +102,7 @@ public class GithubSbomSourceController {
     }
 
     @PostMapping("/{id}/run")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.github_sbom_source.run_triggered")
     public SyncTriggerResponse run(@PathVariable UUID id) {
         assertDemoAllowsLiveConnector();

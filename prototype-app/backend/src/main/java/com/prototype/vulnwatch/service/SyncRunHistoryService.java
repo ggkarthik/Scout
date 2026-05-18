@@ -44,17 +44,20 @@ public class SyncRunHistoryService {
     );
 
     private final SyncRunRepository syncRunRepository;
+    private final RequestActorService requestActorService;
 
-    public SyncRunHistoryService(SyncRunRepository syncRunRepository) {
+    public SyncRunHistoryService(SyncRunRepository syncRunRepository, RequestActorService requestActorService) {
         this.syncRunRepository = syncRunRepository;
+        this.requestActorService = requestActorService;
     }
 
     public List<SyncRunResponse> list(String category, int limit) {
         String normalizedCategory = normalizeCategory(category);
         int normalizedLimit = Math.max(1, Math.min(200, limit));
+        RequestActor actor = requestActorService.currentActor();
 
-        Map<UUID, Integer> queuePositions = activeQueuePositions(normalizedCategory);
-        return syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt")).stream()
+        Map<UUID, Integer> queuePositions = activeQueuePositions(actor, normalizedCategory);
+        return runsForActor(actor).stream()
                 .filter(run -> matchesCategory(run.getSyncType(), normalizedCategory))
                 .map(run -> toResponse(run, queuePositions.get(run.getId())))
                 .sorted(Comparator
@@ -66,9 +69,10 @@ public class SyncRunHistoryService {
     }
 
     public VulnIntelSourceSummary sourcesSummary() {
+        RequestActor actor = requestActorService.currentActor();
         Map<String, SourceStatus> sources = new LinkedHashMap<>();
         for (String type : VULN_INTEL_TYPES) {
-            syncRunRepository.findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(type)
+            findLatestByActor(actor, type)
                     .ifPresentOrElse(
                             run -> sources.put(type, toSourceStatus(run)),
                             () -> sources.put(type, new SourceStatus("never", null, 0, 0, 0, null))
@@ -77,8 +81,8 @@ public class SyncRunHistoryService {
         return new VulnIntelSourceSummary(sources);
     }
 
-    private Map<UUID, Integer> activeQueuePositions(String category) {
-        List<SyncRun> queue = syncRunRepository.findQueueByStatuses(List.of("queued", "running")).stream()
+    private Map<UUID, Integer> activeQueuePositions(RequestActor actor, String category) {
+        List<SyncRun> queue = queueForActor(actor).stream()
                 .filter(run -> matchesCategory(run.getSyncType(), category))
                 .sorted(Comparator
                         .comparingInt((SyncRun run) -> "running".equalsIgnoreCase(run.getStatus()) ? 0 : 1)
@@ -89,6 +93,40 @@ public class SyncRunHistoryService {
             queuePositions.put(queue.get(i).getId(), i + 1);
         }
         return queuePositions;
+    }
+
+    private List<SyncRun> runsForActor(RequestActor actor) {
+        if (actor.platformScope()) {
+            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt"));
+        }
+        if (actor.tenantId() == null) {
+            return List.of();
+        }
+        return syncRunRepository.findByTenant_IdOrderByStartedAtDesc(actor.tenantId());
+    }
+
+    private List<SyncRun> queueForActor(RequestActor actor) {
+        if (actor.platformScope()) {
+            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")).stream()
+                    .filter(run -> "queued".equalsIgnoreCase(run.getStatus()) || "running".equalsIgnoreCase(run.getStatus()))
+                    .toList();
+        }
+        if (actor.tenantId() == null) {
+            return List.of();
+        }
+        return syncRunRepository.findQueueByTenantAndStatuses(actor.tenantId(), List.of("queued", "running"));
+    }
+
+    private java.util.Optional<SyncRun> findLatestByActor(RequestActor actor, String syncType) {
+        if (actor.platformScope()) {
+            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")).stream()
+                    .filter(run -> syncType.equalsIgnoreCase(run.getSyncType()))
+                    .findFirst();
+        }
+        if (actor.tenantId() == null) {
+            return java.util.Optional.empty();
+        }
+        return syncRunRepository.findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(syncType, actor.tenantId());
     }
 
     private SyncRunResponse toResponse(SyncRun run, Integer queuePosition) {

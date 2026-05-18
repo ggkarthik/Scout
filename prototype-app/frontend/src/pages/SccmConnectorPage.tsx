@@ -13,7 +13,7 @@ import type {
 } from '../features/connect/types';
 import { useSccmCmdbConfigQuery } from '../features/connect/queries';
 
-function connectHref(view: 'integration-run-queue'): string {
+function connectHref(view: 'run-history'): string {
   return pathForConnectView(view);
 }
 
@@ -395,7 +395,7 @@ export function SccmConnectorPage() {
       {syncResult && (
         <div className="notice">
           <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
-          <a href={connectHref('integration-run-queue')}>Integration Run Queue</a>.
+          <a href={connectHref('run-history')}>Integration Run Queue</a>.
         </div>
       )}
 

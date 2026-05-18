@@ -17,9 +17,9 @@ export type AppTab =
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
-export type ConnectRouteView = 'sources' | 'integration-run-queue' | 'processing-jobs';
-export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'demo-requests' | 'feeds' | 'runs' | 'support';
+export type ConnectRouteView = 'sources' | 'connectors' | 'run-history' | 'processing-jobs';
+export type AdminRouteView = 'users' | 'invites' | 'support' | 'roles' | 'service-accounts' | 'audit';
+export type PlatformRouteView = 'tenants' | 'demo-requests' | 'support';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -61,25 +61,21 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
   'sources',
-  'integration-run-queue',
+  'connectors',
+  'run-history',
   'processing-jobs'
 ]);
 
 const ADMIN_VIEWS = new Set<AdminRouteView>([
   'users',
   'invites',
+  'support',
   'roles',
   'service-accounts',
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>([
-  'tenants',
-  'demo-requests',
-  'feeds',
-  'runs',
-  'support'
-]);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'demo-requests', 'support']);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {
@@ -120,8 +116,11 @@ export function normalizeConnectRouteView(value: string | null | undefined): Con
   if (value === 'github-pipelines') {
     return 'sources';
   }
-  if (value === 'integration-queue' || value === 'inventory-run-queue' || value === 'vuln-intel-queue') {
-    return 'integration-run-queue';
+  if (value === 'feeds' || value === 'central-repository') {
+    return 'connectors';
+  }
+  if (value === 'integration-queue' || value === 'inventory-run-queue' || value === 'vuln-intel-queue' || value === 'integration-run-queue') {
+    return 'run-history';
   }
   return CONNECT_VIEWS.has(value as ConnectRouteView) ? value as ConnectRouteView : CONNECT_DEFAULT_VIEW;
 }

@@ -50,7 +50,7 @@ function inventoryHref(view: 'hosts', reviewCategories?: string[]): string {
   return query ? `${pathForInventoryView(view)}?${query}` : pathForInventoryView(view);
 }
 
-function connectHref(view: 'integration-run-queue'): string {
+function connectHref(view: 'run-history'): string {
   return pathForConnectView(view);
 }
 
@@ -422,7 +422,7 @@ export function AssetsPage() {
       {liveSyncResult && (
         <div className="notice">
           <strong>Integration queued.</strong> {liveSyncResult.message}. Track progress in{' '}
-          <a href={connectHref('integration-run-queue')}>Integration Run Queue</a>.
+          <a href={connectHref('run-history')}>Integration Run Queue</a>.
         </div>
       )}
 

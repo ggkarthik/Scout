@@ -84,7 +84,7 @@ public class CveDetailController {
      * Create a new investigation for this CVE
      */
     @PostMapping("/{cveId}/investigation")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.investigation.created")
     public ResponseEntity<InvestigationDto> createInvestigation(
             @PathVariable String cveId,
@@ -97,7 +97,7 @@ public class CveDetailController {
      * Update an existing investigation
      */
     @PutMapping("/investigation/{investigationId}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.investigation.updated")
     public ResponseEntity<InvestigationDto> updateInvestigation(
             @PathVariable Long investigationId,
@@ -110,7 +110,7 @@ public class CveDetailController {
      * Create-or-update investigation in a single call (upsert semantics)
      */
     @PostMapping("/{cveId}/investigation/submit")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.investigation.submitted")
     public ResponseEntity<InvestigationDto> submitInvestigation(
             @PathVariable String cveId,
@@ -123,7 +123,7 @@ public class CveDetailController {
      * Create-or-update-and-complete assessment in a single call (upsert + complete)
      */
     @PostMapping("/{cveId}/assessment/submit")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.assessment.submitted")
     public ResponseEntity<AssessmentDto> submitAssessment(
             @PathVariable String cveId,
@@ -136,7 +136,7 @@ public class CveDetailController {
      * Start applicability assessment wizard
      */
     @PostMapping("/{cveId}/applicability-assessment")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.assessment.created")
     public ResponseEntity<AssessmentDto> createAssessment(
             @PathVariable String cveId) {
@@ -148,7 +148,7 @@ public class CveDetailController {
      * Update assessment (step by step)
      */
     @PutMapping("/applicability-assessment/{assessmentId}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.assessment.updated")
     public ResponseEntity<AssessmentDto> updateAssessment(
             @PathVariable Long assessmentId,
@@ -161,7 +161,7 @@ public class CveDetailController {
      * Complete the assessment with final result
      */
     @PostMapping("/applicability-assessment/{assessmentId}/complete")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.assessment.completed")
     public ResponseEntity<AssessmentDto> completeAssessment(
             @PathVariable Long assessmentId,
@@ -174,7 +174,7 @@ public class CveDetailController {
      * Create manual finding (add to backlog)
      */
     @PostMapping("/{cveId}/manual-finding")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.manual_finding.created")
     public ResponseEntity<ManualFindingResponse> createManualFinding(
             @PathVariable String cveId,
@@ -187,7 +187,7 @@ public class CveDetailController {
      * Suppress this CVE for the organization
      */
     @PostMapping("/{cveId}/suppress")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("cve_detail.suppressed")
     public ResponseEntity<SuppressionResponse> suppressCve(
             @PathVariable String cveId,
@@ -200,7 +200,7 @@ public class CveDetailController {
      * Export CVE report in various formats
      */
     @PostMapping("/{cveId}/export")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST','READ_ONLY_AUDITOR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST','READ_ONLY_AUDITOR')")
     public ResponseEntity<ExportResponse> exportCveReport(
             @PathVariable String cveId,
             @RequestBody ExportRequest request) {
@@ -208,7 +208,7 @@ public class CveDetailController {
     }
 
     @PostMapping("/{cveId}/investigation-summary")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<CveInvestigationSummaryResponse> generateInvestigationSummary(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> request) {
@@ -218,7 +218,7 @@ public class CveDetailController {
     }
 
     @PostMapping("/{cveId}/investigation-ai-summary")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<CveInvestigationSummaryResponse> generateInvestigationAiSummary(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> request) {
@@ -267,7 +267,7 @@ public class CveDetailController {
     ) {}
 
     @PostMapping("/{cveId}/generate-fixes")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<List<FixRecordResponse>> generateFixRecords(
             @PathVariable String cveId,
             @org.springframework.web.bind.annotation.RequestBody(required = false) GenerateFixesRequest body
@@ -289,7 +289,7 @@ public class CveDetailController {
     ) {}
 
     @PostMapping("/{cveId}/analyst-fixes")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<List<FixRecordResponse>> saveAnalystFixes(
             @PathVariable String cveId,
             @RequestBody AnalystFixesRequest body) {
@@ -326,7 +326,7 @@ public class CveDetailController {
      * Generate and persist a comprehensive structured remediation recommendation using OpenAI.
      */
     @PostMapping("/{cveId}/ai-solution")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<AiSolutionResponse> generateAiSolution(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> recommendationContext) {
@@ -596,7 +596,7 @@ public class CveDetailController {
      * Generate top 3 prioritised analyst actions using OpenAI based on full CVE context.
      */
     @PostMapping("/{cveId}/ai-actions")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public ResponseEntity<AiActionsResponse> generateAiActions(
             @PathVariable String cveId,
             @RequestBody Map<String, Object> context) {

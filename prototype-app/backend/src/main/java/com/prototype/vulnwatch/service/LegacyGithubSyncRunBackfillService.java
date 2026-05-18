@@ -64,29 +64,25 @@ public class LegacyGithubSyncRunBackfillService {
 
     @Transactional
     public int backfillMissingRuns() {
-        Tenant tenant = tenantService.getDefaultTenant();
-        List<SbomUpload> uploads = sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(
-                tenant,
-                "github"
-        );
-        if (uploads.isEmpty()) {
-            return 0;
-        }
-        List<SyncRun> persistedRuns = new ArrayList<>(
-                syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))
-        );
-        List<LegacyGithubRunGroup> groups = groupLegacyGithubUploads(uploads);
-        if (groups.isEmpty()) {
-            return 0;
-        }
         List<SyncRun> backfilledRuns = new ArrayList<>();
-        for (LegacyGithubRunGroup group : groups) {
-            if (hasPersistedSyncRunOverlap(group, persistedRuns)) {
+        List<SyncRun> persistedRuns = new ArrayList<>(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt")));
+        for (Tenant tenant : tenantService.listTenants()) {
+            List<SbomUpload> uploads = sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(
+                    tenant,
+                    "github"
+            );
+            if (uploads.isEmpty()) {
                 continue;
             }
-            SyncRun run = toSyncRun(group);
-            backfilledRuns.add(run);
-            persistedRuns.add(run);
+            List<LegacyGithubRunGroup> groups = groupLegacyGithubUploads(uploads);
+            for (LegacyGithubRunGroup group : groups) {
+                if (hasPersistedSyncRunOverlap(group, persistedRuns)) {
+                    continue;
+                }
+                SyncRun run = toSyncRun(tenant, group);
+                backfilledRuns.add(run);
+                persistedRuns.add(run);
+            }
         }
         if (backfilledRuns.isEmpty()) {
             return 0;
@@ -192,7 +188,7 @@ public class LegacyGithubSyncRunBackfillService {
         return scope.isBlank() || scope.toLowerCase(Locale.ROOT).contains(ownerGroup.toLowerCase(Locale.ROOT));
     }
 
-    private SyncRun toSyncRun(LegacyGithubRunGroup group) {
+    private SyncRun toSyncRun(Tenant tenant, LegacyGithubRunGroup group) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSystem", "github");
         metadata.put("legacyReconstructed", true);
@@ -208,7 +204,9 @@ public class LegacyGithubSyncRunBackfillService {
         metadata.put("message", "Backfilled from legacy GitHub ingestion evidence recorded before sync-run history existed.");
 
         SyncRun run = new SyncRun();
+        run.setTenant(tenant);
         run.setSyncType(group.syncType());
+        run.setRunScope("TENANT_INVENTORY");
         run.setStatus(group.status());
         run.setRecordsFetched(group.totalAssets());
         run.setRecordsInserted(group.componentsIngested());

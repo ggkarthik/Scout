@@ -654,7 +654,7 @@ export function AwsDiscoveryConnectorPage() {
       {syncResult && (
         <div className="notice">
           <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
-          <a href={pathForConnectView('integration-run-queue')}>Integration Run Queue</a>.
+          <a href={pathForConnectView('run-history')}>Integration Run Queue</a>.
         </div>
       )}
 

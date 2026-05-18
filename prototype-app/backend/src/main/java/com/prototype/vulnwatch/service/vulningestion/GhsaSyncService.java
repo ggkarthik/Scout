@@ -150,7 +150,7 @@ public class GhsaSyncService {
         int updated = 0;
         Set<UUID> changedVulnerabilityIds = new LinkedHashSet<>();
         VulnerabilitySourceFilterConfigService.GhsaFilters filters =
-                vulnerabilitySourceFilterConfigService.resolveGhsaFilters(defaultTenant());
+                vulnerabilitySourceFilterConfigService.resolvePlatformGhsaFilters();
         syncRunService.applyRunMetadata(run, "ghsa", syncRunService.ghsaFiltersMetadata(filters));
         try {
             int safePerPage = Math.max(1, Math.min(100, ghsaPerPage));
@@ -466,10 +466,6 @@ public class GhsaSyncService {
             return null;
         }
         return matcher.group(1);
-    }
-
-    private Tenant defaultTenant() {
-        return tenantService.getDefaultTenant();
     }
 
     private OutboundPolicy outboundPolicy() {
