@@ -43,6 +43,7 @@ export type Finding = {
   incidentId?: string;
   incidentStatus?: string;
   findingsScore?: number;
+  ownerGroup?: string;
   ownershipSyncedAt?: string;
   ownership?: OwnershipSummary;
 };

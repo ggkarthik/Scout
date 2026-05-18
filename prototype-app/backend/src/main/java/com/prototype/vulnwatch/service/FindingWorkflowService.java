@@ -115,6 +115,10 @@ public class FindingWorkflowService {
         String actor = actor(request.actor());
         Instant now = Instant.now();
 
+        if (request.ownerGroup() != null) {
+            finding.setOwnerGroup(trimToNull(request.ownerGroup()));
+        }
+
         if (request.assignedTo() != null) {
             String previousAssignee = finding.getAssignedTo();
             finding.setAssignedTo(trimToNull(request.assignedTo()));

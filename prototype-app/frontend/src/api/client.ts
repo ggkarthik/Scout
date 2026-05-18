@@ -1,5 +1,6 @@
 import type {
-  PrototypeDataResetResponse,
+  OwnershipRuleRequest,
+  OwnershipRuleResponse,
   RiskPolicy,
   SuppressionRule,
   SuppressionRuleRequest,
@@ -249,6 +250,7 @@ function shouldConfirmPlatformAction(path: string, method: string): boolean {
     '/connectors/vulnerability-sources',
     '/github-sbom-sources',
     '/suppression-rules',
+    '/ownership-rules',
     '/risk-policy',
     '/findings',
     '/cve-detail',
@@ -652,9 +654,18 @@ export const api = {
   recomputeFindingsScores: () => request<{ updated: number }>('/risk-policy/recompute-findings-scores', {
     method: 'POST'
   }),
-  cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
-    method: 'POST'
+  listOwnershipRules: () => request<OwnershipRuleResponse[]>('/ownership-rules'),
+  createOwnershipRule: (payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>('/ownership-rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
   }),
+  updateOwnershipRule: (id: string, payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>(`/ownership-rules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteOwnershipRule: (id: string) => request<void>(`/ownership-rules/${id}`, { method: 'DELETE' }),
+  applyOwnershipRules: () => request<{ updated: number }>('/ownership-rules/apply', { method: 'POST' }),
+  applyOwnershipRule: (id: string) => request<{ updated: number }>(`/ownership-rules/${id}/apply`, { method: 'POST' }),
   listSuppressionRules: () => request<SuppressionRule[]>('/suppression-rules'),
   createSuppressionRule: (payload: SuppressionRuleRequest) => request<SuppressionRule>('/suppression-rules', {
     method: 'POST',

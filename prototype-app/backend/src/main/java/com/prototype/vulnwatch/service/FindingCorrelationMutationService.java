@@ -27,6 +27,7 @@ public class FindingCorrelationMutationService {
     private final ImpactEvaluationService impactEvaluationService;
     private final VexAssertionMatchService vexAssertionMatchService;
     private final FindingSlaService findingSlaService;
+    private final OwnershipRuleService ownershipRuleService;
     private final ObjectMapper objectMapper;
 
     public FindingCorrelationMutationService(
@@ -34,12 +35,14 @@ public class FindingCorrelationMutationService {
             ImpactEvaluationService impactEvaluationService,
             VexAssertionMatchService vexAssertionMatchService,
             FindingSlaService findingSlaService,
+            OwnershipRuleService ownershipRuleService,
             ObjectMapper objectMapper
     ) {
         this.correlationCandidateService = correlationCandidateService;
         this.impactEvaluationService = impactEvaluationService;
         this.vexAssertionMatchService = vexAssertionMatchService;
         this.findingSlaService = findingSlaService;
+        this.ownershipRuleService = ownershipRuleService;
         this.objectMapper = objectMapper;
     }
 
@@ -199,6 +202,7 @@ public class FindingCorrelationMutationService {
         finding.setSuppressedUntil(null);
         setEvidenceWithVex(finding, evidence);
         finding.setPrecedenceTrace(toJson(resolution.precedenceTrace()));
+        ownershipRuleService.applyOwnerGroupToFinding(finding);
         finding.touch();
         return finding;
     }

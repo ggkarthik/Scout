@@ -288,7 +288,8 @@ public class FindingQueryService {
                 finding.getIncidentStatus(),
                 findingsScore,
                 finding.getSuppressedByRuleId(),
-                finding.getSuppressedByRuleName());
+                finding.getSuppressedByRuleName(),
+                finding.getOwnerGroup());
     }
 
     private Specification<Finding> byTenant(Tenant tenant) {
