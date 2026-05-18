@@ -13,8 +13,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -53,24 +51,6 @@ public class TenantIsolationConfig {
             @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
     ) {
         return new TenantAwareDataSource(hikariDataSource, requireTenantContext);
-    }
-
-    /**
-     * Unscoped JdbcTemplate for admin-only flows that must clear data across
-     * all tenants and global tables.
-     */
-    @Bean(name = "prototypeResetJdbcTemplate")
-    public JdbcTemplate prototypeResetJdbcTemplate(HikariDataSource hikariDataSource) {
-        return new JdbcTemplate(hikariDataSource);
-    }
-
-    /**
-     * Dedicated transaction manager for prototype reset operations that should
-     * bypass the tenant-aware datasource wrapper.
-     */
-    @Bean(name = "prototypeResetTransactionManager")
-    public PlatformTransactionManager prototypeResetTransactionManager(HikariDataSource hikariDataSource) {
-        return new DataSourceTransactionManager(hikariDataSource);
     }
 
     /**

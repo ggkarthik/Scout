@@ -4,12 +4,12 @@ import { api } from '../api/client';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import { useActor } from '../features/auth/context';
 import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
-import type { RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
+import type { OwnershipRuleResponse, RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings';
+type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings';
 
 interface ConfigNavItem {
   key: ConfigNavKey;
@@ -54,11 +54,6 @@ const CONFIG_NAV: ConfigNavItem[] = [
     key: 'auto-findings',
     label: 'Auto-Finding Rules',
     description: 'Automatically create findings based on CVE, software, and asset criteria',
-  },
-  {
-    key: 'dev-tools',
-    label: 'Developer Tools',
-    description: 'Prototype data controls',
   },
 ];
 
@@ -387,14 +382,7 @@ const DEFAULT_RISK_POLICY: RiskPolicy = applyTriageDefaults({
   triagePatchGapBoost: 0.3,
 });
 
-type OwnershipRule = {
-  id: string;
-  name: string;
-  condition: string;
-  userGroup: string;
-  createdAt: string;
-  updatedAt: string;
-};
+type OwnershipRule = OwnershipRuleResponse;
 
 type OwnershipConditionRow = {
   table: string;
@@ -409,8 +397,6 @@ type OwnershipRuleForm = {
   conditions: OwnershipConditionRow[];
   userGroup: string;
 };
-
-const OWNERSHIP_RULES_STORAGE_KEY = 'ownership-rules-config';
 
 function blankOwnershipRuleForm(): OwnershipRuleForm {
   return {
@@ -473,27 +459,6 @@ function parseOwnershipRuleCondition(condition: string): OwnershipRuleForm {
   };
 }
 
-function makeOwnershipRule(form: OwnershipRuleForm, existing?: OwnershipRule): OwnershipRule {
-  const now = new Date().toISOString();
-  return {
-    id: existing?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: form.name.trim(),
-    condition: JSON.stringify({
-      logic: form.conditionLogic,
-      conditions: form.conditions
-        .map((row) => ({
-          table: row.table,
-          column: row.column,
-          operator: row.operator,
-          value: row.value,
-        }))
-        .filter((row) => row.value.trim().length > 0),
-    }),
-    userGroup: form.userGroup.trim(),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
-}
 
 function scoreSeverityLabel(score: number): { label: string; color: string } {
   if (score >= 9) return { label: 'Critical', color: 'var(--critical)' };
@@ -513,14 +478,12 @@ export function ConfigurationsPage() {
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
-  const [resetBusy, setResetBusy] = React.useState(false);
-  const [resetMessage, setResetMessage] = React.useState('');
   const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
   const canEditRiskPolicy = canManageRiskPolicy(actor);
-  const canUseDevTools = hasRole(actor, 'PLATFORM_OWNER');
   const [ownershipRules, setOwnershipRules] = React.useState<OwnershipRule[]>([]);
   const [ownershipGroups, setOwnershipGroups] = React.useState<string[]>([]);
   const [ownershipLoading, setOwnershipLoading] = React.useState(true);
+  const [ownershipExecutingId, setOwnershipExecutingId] = React.useState<string | null>(null);
   const [ownershipShowForm, setOwnershipShowForm] = React.useState(false);
   const [ownershipEditingId, setOwnershipEditingId] = React.useState<string | null>(null);
   const [ownershipForm, setOwnershipForm] = React.useState<OwnershipRuleForm>(blankOwnershipRuleForm());
@@ -685,30 +648,10 @@ export function ConfigurationsPage() {
   }, [riskPolicyQuery.data]);
 
   React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(OWNERSHIP_RULES_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as OwnershipRule[];
-        if (Array.isArray(parsed)) {
-          setOwnershipRules(
-            parsed
-              .filter((rule) => rule && typeof rule.name === 'string' && typeof rule.condition === 'string' && typeof rule.userGroup === 'string')
-              .map((rule) => ({
-                id: String(rule.id ?? `${Date.now()}`),
-                name: String(rule.name ?? ''),
-                condition: String(rule.condition ?? ''),
-                userGroup: String(rule.userGroup ?? ''),
-                createdAt: String(rule.createdAt ?? new Date().toISOString()),
-                updatedAt: String(rule.updatedAt ?? new Date().toISOString()),
-              }))
-          );
-        }
-      }
-    } catch {
-      setOwnershipRules([]);
-    } finally {
-      setOwnershipLoading(false);
-    }
+    api.listOwnershipRules()
+      .then((rules) => setOwnershipRules(rules))
+      .catch(() => setOwnershipRules([]))
+      .finally(() => setOwnershipLoading(false));
 
     api.listAssignmentGroups()
       .then((groups) => setOwnershipGroups(Array.from(new Set(groups)).sort((a, b) => a.localeCompare(b))))
@@ -779,28 +722,6 @@ export function ConfigurationsPage() {
       setRecomputeMessage(e instanceof Error ? e.message : String(e));
     } finally {
       setRecomputeInProgress(false);
-    }
-  };
-
-  const cleanAllPrototypeData = async (): Promise<void> => {
-    const confirmed = window.confirm(
-      'This will permanently delete findings, inventory, vulnerability intelligence, and sync run history. Continue?'
-    );
-    if (!confirmed) return;
-    setResetBusy(true);
-    setResetMessage('');
-    try {
-      const result = await api.cleanAllPrototypeData();
-      const total = Object.values(result.deletedRows ?? {}).reduce(
-        (sum, value) => sum + Number(value || 0),
-        0
-      );
-      setResetMessage(`Prototype data reset complete. Deleted ${total} rows.`);
-      await riskPolicyQuery.refetch();
-    } catch (e) {
-      setResetMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setResetBusy(false);
     }
   };
 
@@ -1341,20 +1262,31 @@ export function ConfigurationsPage() {
       return;
     }
 
-    const current = ownershipEditingId
-      ? ownershipRules.find((rule) => rule.id === ownershipEditingId)
-      : undefined;
-    const nextRule = makeOwnershipRule(ownershipForm, current);
-    const nextRules = ownershipEditingId
-      ? ownershipRules.map((rule) => (rule.id === ownershipEditingId ? nextRule : rule))
-      : [...ownershipRules, nextRule];
+    const condition = JSON.stringify({
+      logic: ownershipForm.conditionLogic,
+      conditions: ownershipForm.conditions
+        .map((row) => ({ table: row.table, column: row.column, operator: row.operator, value: row.value }))
+        .filter((row) => row.value.trim().length > 0),
+    });
+    const payload = { name: ownershipForm.name.trim(), condition, userGroup: ownershipForm.userGroup.trim() };
 
-    setOwnershipRules(nextRules);
-    window.localStorage.setItem(OWNERSHIP_RULES_STORAGE_KEY, JSON.stringify(nextRules));
-    setOwnershipMessage(ownershipEditingId ? 'Ownership rule saved.' : 'Ownership rule created.');
-    setOwnershipShowForm(false);
-    setOwnershipEditingId(null);
-    setOwnershipGroupOpen(false);
+    const apiCall = ownershipEditingId
+      ? api.updateOwnershipRule(ownershipEditingId, payload)
+      : api.createOwnershipRule(payload);
+
+    apiCall
+      .then((saved) => {
+        setOwnershipRules((prev) =>
+          ownershipEditingId
+            ? prev.map((r) => (r.id === ownershipEditingId ? saved : r))
+            : [...prev, saved]
+        );
+        setOwnershipMessage(ownershipEditingId ? 'Ownership rule saved.' : 'Ownership rule created.');
+        setOwnershipShowForm(false);
+        setOwnershipEditingId(null);
+        setOwnershipGroupOpen(false);
+      })
+      .catch(() => setOwnershipMessage('Failed to save ownership rule.'));
   };
 
   const addOwnershipCondition = () => {
@@ -1401,12 +1333,23 @@ export function ConfigurationsPage() {
 
   const deleteOwnershipRule = (id: string) => {
     if (!window.confirm('Delete this ownership rule?')) return;
-    const nextRules = ownershipRules.filter((rule) => rule.id !== id);
-    setOwnershipRules(nextRules);
-    window.localStorage.setItem(OWNERSHIP_RULES_STORAGE_KEY, JSON.stringify(nextRules));
-    if (ownershipEditingId === id) {
-      cancelOwnershipForm();
-    }
+    api.deleteOwnershipRule(id)
+      .then(() => {
+        setOwnershipRules((prev) => prev.filter((r) => r.id !== id));
+        if (ownershipEditingId === id) {
+          cancelOwnershipForm();
+        }
+      })
+      .catch(() => setOwnershipMessage('Failed to delete ownership rule.'));
+  };
+
+  const executeOwnershipRule = (id: string) => {
+    setOwnershipExecutingId(id);
+    setOwnershipMessage('');
+    api.applyOwnershipRule(id)
+      .then(({ updated }) => setOwnershipMessage(`Executed: ${updated} finding${updated !== 1 ? 's' : ''} updated.`))
+      .catch(() => setOwnershipMessage('Execution failed. Please try again.'))
+      .finally(() => setOwnershipExecutingId(null));
   };
 
   const renderOwnership = () => (
@@ -1436,6 +1379,7 @@ export function ConfigurationsPage() {
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px 0' }}>Name</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>Condition</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>User Group</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px 6px' }}>Findings</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>Updated</th>
                 <th style={{ padding: '4px 0 6px' }} />
               </tr>
@@ -1446,10 +1390,20 @@ export function ConfigurationsPage() {
                   <td style={{ padding: '10px 8px 10px 0', fontWeight: 600 }}>{rule.name}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{formatOwnershipRuleCondition(rule)}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)' }}>{rule.userGroup}</td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{rule.matchedCount}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)' }}>{formatInstant(rule.updatedAt)}</td>
                   <td style={{ padding: '10px 0', whiteSpace: 'nowrap', textAlign: 'right' }}>
                     <button type="button" className="btn-link" style={{ fontSize: '0.78rem', marginRight: 8 }} onClick={() => openOwnershipEdit(rule)}>Edit</button>
-                    <button type="button" className="btn-link" style={{ fontSize: '0.78rem', color: 'var(--critical)' }} onClick={() => deleteOwnershipRule(rule.id)}>Delete</button>
+                    <button type="button" className="btn-link" style={{ fontSize: '0.78rem', color: 'var(--critical)', marginRight: 8 }} onClick={() => deleteOwnershipRule(rule.id)}>Delete</button>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      style={{ fontSize: '0.78rem', color: 'var(--accent)' }}
+                      disabled={ownershipExecutingId === rule.id}
+                      onClick={() => executeOwnershipRule(rule.id)}
+                    >
+                      {ownershipExecutingId === rule.id ? 'Running…' : 'Execute Now'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1672,29 +1626,6 @@ export function ConfigurationsPage() {
   );
 
   // ── Dev tools section ──────────────────────────────────────────────────────
-  const renderDevTools = () => (
-    <div className="config-section-body">
-      <div className="config-section-body danger-zone-section" style={{ marginTop: 0 }}>
-        <div className="inline-note" style={{ marginBottom: 16 }}>
-          Use this only in prototype mode. This action permanently clears findings, software
-          inventory, assets, vulnerability intelligence records, org exposure rows, and sync
-          run history.
-        </div>
-        <div className="button-row form-submit-row">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={cleanAllPrototypeData}
-            disabled={!canUseDevTools || resetBusy}
-          >
-            {resetBusy ? 'Cleaning…' : 'Clean All Prototype Data'}
-          </button>
-        </div>
-        {resetMessage && <div className="notice" style={{ marginTop: 10 }}>{resetMessage}</div>}
-      </div>
-    </div>
-  );
-
   // ── Findings Score section ─────────────────────────────────────────────────
   const renderFindingsScore = () => {
     const weightOk = parsedFindingsColumns.length === 0 || Math.abs(totalFindingsWeight - 1) < 0.001;
@@ -2049,10 +1980,6 @@ export function ConfigurationsPage() {
       title: 'Auto-Finding Rules',
       description: 'Define rules that automatically create findings when CVEs match specific software, asset, and severity criteria.',
     },
-    'dev-tools': {
-      title: 'Developer Tools',
-      description: 'Prototype controls — use only in development environments.',
-    },
   };
 
   const { title, description } = SECTION_TITLES[activeSection];
@@ -2062,7 +1989,7 @@ export function ConfigurationsPage() {
       <div className="panel-header">
         <h3>Configurations</h3>
         <span className="panel-caption">
-          Findings Score, S.AI prioritization, SLA, workflow automation, and prototype controls
+          Findings Score, S.AI prioritization, SLA, and workflow automation
         </span>
       </div>
 
@@ -2108,7 +2035,6 @@ export function ConfigurationsPage() {
           {activeSection === 'findings-score' && renderFindingsScore()}
           {activeSection === 'suppress' && renderSuppress()}
           {activeSection === 'auto-findings' && renderAutoFindings()}
-          {activeSection === 'dev-tools' && renderDevTools()}
         </div>
       </div>
     </div>

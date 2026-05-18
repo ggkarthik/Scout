@@ -24,10 +24,6 @@ export type RiskPolicy = {
   triagePatchGapBoost: number;
 };
 
-export type PrototypeDataResetResponse = {
-  deletedRows: Record<string, number>;
-  resetAt: string;
-};
 
 export type SuppressionRuleState = 'DRAFT' | 'APPROVED' | 'IN_REVIEW' | 'REJECTED' | 'EXPIRED';
 export type SuppressionRuleRecordType = 'CVE' | 'FINDING';
@@ -63,4 +59,22 @@ export type SuppressionRuleRequest = {
   reason?: string;
   validFrom?: string;
   validTo?: string;
+};
+
+export type OwnershipRuleResponse = {
+  id: string;
+  name: string;
+  condition: string;
+  userGroup: string;
+  executionOrder: number;
+  matchedCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OwnershipRuleRequest = {
+  name: string;
+  condition: string;
+  userGroup: string;
+  executionOrder?: number;
 };
