@@ -45,6 +45,7 @@ public class FindingWorkflowFacade {
     private final FindingWorkflowService findingWorkflowService;
     private final OrgCveRecordService orgCveRecordService;
     private final FindingSlaService findingSlaService;
+    private final OwnershipRuleService ownershipRuleService;
     private final ObjectMapper objectMapper;
 
     public FindingWorkflowFacade(
@@ -56,6 +57,7 @@ public class FindingWorkflowFacade {
             FindingWorkflowService findingWorkflowService,
             OrgCveRecordService orgCveRecordService,
             FindingSlaService findingSlaService,
+            OwnershipRuleService ownershipRuleService,
             ObjectMapper objectMapper
     ) {
         this.findingRepository = findingRepository;
@@ -66,6 +68,7 @@ public class FindingWorkflowFacade {
         this.findingWorkflowService = findingWorkflowService;
         this.orgCveRecordService = orgCveRecordService;
         this.findingSlaService = findingSlaService;
+        this.ownershipRuleService = ownershipRuleService;
         this.objectMapper = objectMapper;
     }
 
@@ -272,6 +275,7 @@ public class FindingWorkflowFacade {
                         created.setSuppressionReason(null);
                         created.setSuppressedUntil(null);
                         applyManualEvidence(created, evidence);
+                        ownershipRuleService.applyOwnerGroupToFinding(created);
                         created.touch();
                         toPersist.add(created);
                         createdFindings.add(created);
@@ -494,6 +498,7 @@ public class FindingWorkflowFacade {
         if (primaryState != null) {
             grouped.setPrecedenceTrace(primaryState.getTraceJson());
         }
+        ownershipRuleService.applyOwnerGroupToFinding(grouped);
         grouped.touch();
 
         findingRepository.save(grouped);
@@ -525,6 +530,7 @@ public class FindingWorkflowFacade {
                 findings,
                 new FindingWorkflowUpdateRequest(
                         FindingStatus.SUPPRESSED.name(),
+                        null,
                         null,
                         null,
                         buildSuppressionReason(reason, justification),
@@ -567,6 +573,7 @@ public class FindingWorkflowFacade {
         finding.setSuppressedUntil(null);
         applyManualEvidence(finding, evidence);
         finding.setPrecedenceTrace(state.getTraceJson());
+        ownershipRuleService.applyOwnerGroupToFinding(finding);
         finding.touch();
         return finding;
     }
