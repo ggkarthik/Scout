@@ -170,8 +170,24 @@ public class FindingsScoreService {
         attrs.put("SOFTWARE.packageType", comp.getEcosystem());
         attrs.put("SOFTWARE.isEol", comp.getIsEol());
         attrs.put("SOFTWARE.purl", comp.getPurl());
+        // vendor = namespace segment of purl (e.g. "oracle" from pkg:generic/oracle/database_server)
+        // falls back to ecosystem when purl has no namespace
+        String purlVendor = extractVendorFromPurl(comp.getPurl());
+        attrs.put("SOFTWARE.vendor", purlVendor != null ? purlVendor : comp.getEcosystem());
 
         return attrs;
+    }
+
+    private String extractVendorFromPurl(String purl) {
+        if (purl == null || purl.isBlank()) return null;
+        // purl format: pkg:type/namespace/name@version
+        String withoutScheme = purl.startsWith("pkg:") ? purl.substring(4) : purl;
+        int firstSlash = withoutScheme.indexOf('/');
+        if (firstSlash < 0) return null;
+        String afterType = withoutScheme.substring(firstSlash + 1);
+        int secondSlash = afterType.indexOf('/');
+        if (secondSlash < 0) return null; // no namespace segment
+        return afterType.substring(0, secondSlash);
     }
 
     private boolean evaluateCondition(String operator, String ruleValue, Object attrValue) {

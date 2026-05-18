@@ -52,7 +52,7 @@ public class ServiceNowCmdbConfigController {
     }
 
     @PutMapping
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.servicenow_cmdb.saved")
     public ServiceNowCmdbConfigResponse save(@Valid @RequestBody ServiceNowCmdbConfigRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -63,7 +63,7 @@ public class ServiceNowCmdbConfigController {
     }
 
     @PostMapping("/test")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.servicenow_cmdb.tested")
     public ServiceNowCmdbConnectionTestResponse test() {
         Tenant tenant = workspaceService.getWorkspace();
@@ -75,7 +75,7 @@ public class ServiceNowCmdbConfigController {
     }
 
     @PostMapping("/sync")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN')")
     @SensitiveTenantAction("connector.servicenow_cmdb.sync_triggered")
     public SyncTriggerResponse sync() {
         Tenant tenant = workspaceService.getWorkspace();

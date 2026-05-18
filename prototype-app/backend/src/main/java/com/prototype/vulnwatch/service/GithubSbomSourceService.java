@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,49 +44,55 @@ public class GithubSbomSourceService {
     private final GithubSbomSourceRepository githubSbomSourceRepository;
     private final SyncRunRepository syncRunRepository;
     private final SbomIngestionService sbomIngestionService;
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final GithubTokenProvider githubTokenProvider;
     private final TaskExecutor ingestionExecutor;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate platformJdbcTemplate;
 
     public GithubSbomSourceService(
             GithubSbomSourceRepository githubSbomSourceRepository,
             SyncRunRepository syncRunRepository,
             SbomIngestionService sbomIngestionService,
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             GithubTokenProvider githubTokenProvider,
             TaskExecutor ingestionExecutor,
             TransactionTemplate transactionTemplate,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
     ) {
         this.githubSbomSourceRepository = githubSbomSourceRepository;
         this.syncRunRepository = syncRunRepository;
         this.sbomIngestionService = sbomIngestionService;
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.githubTokenProvider = githubTokenProvider;
         this.ingestionExecutor = ingestionExecutor;
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
+        this.platformJdbcTemplate = platformJdbcTemplate;
     }
 
     @Transactional(readOnly = true)
     public List<GithubSbomSourceResponse> list() {
-        return githubSbomSourceRepository.findAll().stream()
+        UUID tenantId = currentTenantId();
+        return githubSbomSourceRepository.findByTenant_IdOrderByCreatedAtAsc(tenantId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional
     public GithubSbomSourceResponse create(GithubSbomSourceRequest request) {
+        Tenant tenant = currentTenant();
         GithubSbomSource source = new GithubSbomSource();
+        source.setTenant(tenant);
         apply(source, request);
         return toResponse(githubSbomSourceRepository.save(source));
     }
 
     @Transactional
     public GithubSbomSourceResponse update(UUID id, GithubSbomSourceRequest request) {
-        GithubSbomSource source = githubSbomSourceRepository.findById(id)
+        GithubSbomSource source = githubSbomSourceRepository.findByIdAndTenant_Id(id, currentTenantId())
                 .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + id));
         apply(source, request);
         source.touch();
@@ -93,7 +101,7 @@ public class GithubSbomSourceService {
 
     @Transactional
     public void delete(UUID id) {
-        GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(id)
+        GithubSbomSource source = githubSbomSourceRepository.findByIdAndTenantIdForUpdate(id, currentTenantId())
                 .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + id));
         if (isSourceInFlight(source)) {
             throw new IllegalStateException("GitHub SBOM source is already queued or running and cannot be deleted");
@@ -103,53 +111,71 @@ public class GithubSbomSourceService {
 
     public SyncTriggerResponse trigger(UUID id) {
         ensureGhcrTokenConfiguredIfNeeded(id);
-        ClaimedGithubSourceRun claimed = claimSourceRun(id, false, true);
-        ingestionExecutor.execute(() -> executeSource(claimed.sourceId(), claimed.runId()));
+        Tenant tenant = currentTenant();
+        ClaimedGithubSourceRun claimed = claimSourceRun(tenant, id, false, true);
+        ingestionExecutor.execute(() -> executeSource(claimed.tenantId(), claimed.sourceId(), claimed.runId()));
         return new SyncTriggerResponse(claimed.runId(), "queued", "GitHub ingestion queued");
     }
 
     public SyncTriggerResponse triggerGhcrRunOnce(String owner) {
         ensureGhcrTokenConfigured();
+        Tenant tenant = currentTenant();
         String normalizedOwner = owner == null ? "" : owner.trim();
         if (normalizedOwner.isBlank()) {
             throw new IllegalArgumentException("GitHub owner is required");
         }
-        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_GHCR_SBOM));
-        ingestionExecutor.execute(() -> executeGhcrRunOnce(run.getId(), normalizedOwner));
+        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_GHCR_SBOM, tenant));
+        ingestionExecutor.execute(() -> executeGhcrRunOnce(tenant.getId(), run.getId(), normalizedOwner));
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub GHCR ingestion queued");
     }
 
     public SyncTriggerResponse triggerRepositoryRunOnce(GithubSbomIngestionRequest request) {
+        Tenant tenant = currentTenant();
         GithubSbomIngestionRequest normalizedRequest = normalizeRepositoryRequest(request);
         String normalizedOwner = normalizedRequest.owner() == null ? "" : normalizedRequest.owner().trim();
         if (normalizedOwner.isBlank()) {
             throw new IllegalArgumentException("GitHub owner is required");
         }
-        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM));
-        ingestionExecutor.execute(() -> executeRepositoryRunOnce(run.getId(), normalizedRequest));
+        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM, tenant));
+        ingestionExecutor.execute(() -> executeRepositoryRunOnce(tenant.getId(), run.getId(), normalizedRequest));
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub repository ingestion queued");
     }
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSources() {
-        List<GithubSbomSource> sources = githubSbomSourceRepository.findByEnabledTrueOrderByCreatedAtAsc();
-        for (GithubSbomSource source : sources) {
-            ClaimedGithubSourceRun claimed = claimSourceRun(source.getId(), true, false);
+        List<ClaimedGithubSourceRun> scheduledSources = platformJdbcTemplate.query(
+                """
+                select id, tenant_id
+                from github_sbom_sources
+                where enabled = true
+                  and tenant_id is not null
+                order by created_at asc
+                """,
+                (rs, rowNum) -> new ClaimedGithubSourceRun(
+                        UUID.fromString(rs.getString("tenant_id")),
+                        UUID.fromString(rs.getString("id")),
+                        null
+                )
+        );
+        for (ClaimedGithubSourceRun source : scheduledSources) {
+            TenantContext.setCurrentTenantId(source.tenantId());
+            ClaimedGithubSourceRun claimed = claimSourceRun(currentTenant(), source.sourceId(), true, false);
+            TenantContext.clear();
             if (claimed == null) {
                 continue;
             }
-            ingestionExecutor.execute(() -> executeSource(claimed.sourceId(), claimed.runId()));
+            ingestionExecutor.execute(() -> executeSource(claimed.tenantId(), claimed.sourceId(), claimed.runId()));
         }
     }
 
-    public void executeSource(UUID sourceId, UUID runId) {
-        GithubSbomSourceExecution snapshot = markSourceRunRunning(sourceId, runId);
-        if (snapshot == null) {
-            return;
-        }
-
-        Tenant tenant = tenantService.getDefaultTenant();
+    public void executeSource(UUID tenantId, UUID sourceId, UUID runId) {
+        TenantContext.setCurrentTenantId(tenantId);
         try {
+            GithubSbomSourceExecution snapshot = markSourceRunRunning(tenantId, sourceId, runId);
+            if (snapshot == null) {
+                return;
+            }
+            Tenant tenant = workspaceService.getWorkspace();
             if (isGhcrSourcePath(snapshot.path())) {
                 SbomIngestionService.GithubGhcrIngestionSummary summary =
                         sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, snapshot.owner());
@@ -167,29 +193,37 @@ public class GithubSbomSourceService {
             }
         } catch (Exception e) {
             failSourceRun(sourceId, runId, e.getMessage());
+        } finally {
+            TenantContext.clear();
         }
     }
 
-    public void executeGhcrRunOnce(UUID runId, String owner) {
+    public void executeGhcrRunOnce(UUID tenantId, UUID runId, String owner) {
+        TenantContext.setCurrentTenantId(tenantId);
         markStandaloneRunRunning(runId);
-        Tenant tenant = tenantService.getDefaultTenant();
         try {
+            Tenant tenant = workspaceService.getWorkspace();
             SbomIngestionService.GithubGhcrIngestionSummary summary =
                     sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, owner);
             completeStandaloneGhcrRun(runId, owner, summary);
         } catch (Exception e) {
             failStandaloneRun(runId, e.getMessage());
+        } finally {
+            TenantContext.clear();
         }
     }
 
-    public void executeRepositoryRunOnce(UUID runId, GithubSbomIngestionRequest request) {
+    public void executeRepositoryRunOnce(UUID tenantId, UUID runId, GithubSbomIngestionRequest request) {
+        TenantContext.setCurrentTenantId(tenantId);
         markStandaloneRunRunning(runId);
-        Tenant tenant = tenantService.getDefaultTenant();
         try {
+            Tenant tenant = workspaceService.getWorkspace();
             var summary = sbomIngestionService.ingestFromGithub(tenant, request);
             completeStandaloneRepositoryRun(runId, request, summary);
         } catch (Exception e) {
             failStandaloneRun(runId, e.getMessage());
+        } finally {
+            TenantContext.clear();
         }
     }
 
@@ -286,9 +320,9 @@ public class GithubSbomSourceService {
         return isGhcrSourcePath(path) ? SYNC_TYPE_GITHUB_GHCR_SBOM : SYNC_TYPE_GITHUB_REPOSITORY_SBOM;
     }
 
-    private ClaimedGithubSourceRun claimSourceRun(UUID sourceId, boolean requireDue, boolean failWhenUnavailable) {
+    private ClaimedGithubSourceRun claimSourceRun(Tenant tenant, UUID sourceId, boolean requireDue, boolean failWhenUnavailable) {
         return transactionTemplate.execute(status -> {
-            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+            GithubSbomSource source = githubSbomSourceRepository.findByIdAndTenantIdForUpdate(sourceId, tenant.getId())
                     .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
             if (!source.isEnabled()) {
                 if (failWhenUnavailable) {
@@ -314,14 +348,14 @@ public class GithubSbomSourceService {
             source.touch();
             githubSbomSourceRepository.save(source);
 
-            SyncRun run = createQueuedRun(syncTypeForPath(source.getPath()));
-            return new ClaimedGithubSourceRun(source.getId(), run.getId());
+            SyncRun run = createQueuedRun(syncTypeForPath(source.getPath()), tenant);
+            return new ClaimedGithubSourceRun(tenant.getId(), source.getId(), run.getId());
         });
     }
 
-    private GithubSbomSourceExecution markSourceRunRunning(UUID sourceId, UUID runId) {
+    private GithubSbomSourceExecution markSourceRunRunning(UUID tenantId, UUID sourceId, UUID runId) {
         return transactionTemplate.execute(status -> {
-            GithubSbomSource source = githubSbomSourceRepository.findByIdForUpdate(sourceId)
+            GithubSbomSource source = githubSbomSourceRepository.findByIdAndTenantIdForUpdate(sourceId, tenantId)
                     .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
             SyncRun run = requireRun(runId);
 
@@ -509,9 +543,11 @@ public class GithubSbomSourceService {
         )));
     }
 
-    private SyncRun createQueuedRun(String syncType) {
+    private SyncRun createQueuedRun(String syncType, Tenant tenant) {
         SyncRun run = new SyncRun();
+        run.setTenant(tenant);
         run.setSyncType(syncType);
+        run.setRunScope("TENANT_INVENTORY");
         run.setStatus("queued");
         run.setMetadataJson(toJson(Map.of(
                 "sourceSystem", "github",
@@ -577,11 +613,19 @@ public class GithubSbomSourceService {
     }
 
     private void ensureGhcrTokenConfiguredIfNeeded(UUID sourceId) {
-        GithubSbomSource source = githubSbomSourceRepository.findById(sourceId)
+        GithubSbomSource source = githubSbomSourceRepository.findByIdAndTenant_Id(sourceId, currentTenantId())
                 .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
         if (isGhcrSourcePath(source.getPath())) {
             ensureGhcrTokenConfigured();
         }
+    }
+
+    private Tenant currentTenant() {
+        return workspaceService.getWorkspace();
+    }
+
+    private UUID currentTenantId() {
+        return currentTenant().getId();
     }
 
     private void ensureGhcrTokenConfigured() {
@@ -623,6 +667,7 @@ public class GithubSbomSourceService {
     }
 
     private record ClaimedGithubSourceRun(
+            UUID tenantId,
             UUID sourceId,
             UUID runId
     ) {

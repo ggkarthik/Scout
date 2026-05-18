@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { IngestionPage } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
@@ -12,7 +13,9 @@ import { api } from '../api/client';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
 import { useActor } from '../features/auth/context';
-import { hasRole } from '../features/auth/roles';
+import { canAccessPlatformConsole, hasRole } from '../features/auth/roles';
+import { VulnIntelConfigPage } from './VulnIntelConfigPage';
+import { PlatformConnectorsPage } from './PlatformConnectorsPage';
 
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
@@ -42,7 +45,7 @@ type ConnectorId =
   | 'euvd-feed'
   | 'jvn-feed';
 
-type ConnectView = 'sources' | 'integration-run-queue' | 'processing-jobs';
+type ConnectView = 'sources' | 'connectors' | 'run-history' | 'processing-jobs';
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -257,12 +260,6 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
   'microsoft-csaf-vex',
   'redhat-csaf-vex',
   'advisory-feed'
-];
-
-const LIFECYCLE_CONNECTOR_IDS: ConnectorId[] = [
-  'endoflife-date',
-  'euvd-feed',
-  'jvn-feed'
 ];
 
 const CMDB_CONNECTOR_IDS: ConnectorId[] = [
@@ -595,6 +592,7 @@ type ConnectPageProps = {
 
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
   const actor = useActor();
+  const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
@@ -628,6 +626,31 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     }
   }, [activeConnector, searchParams, setSearchParams]);
 
+  const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
+  const canAccessPlatformConnectors = canAccessPlatformConsole(actor);
+  const platformConnectorSummaryQuery = useQuery({
+    queryKey: ['vuln-intel-sources-summary'],
+    queryFn: api.getVulnIntelSourcesSummary,
+    enabled: canAccessPlatformConnectors
+  });
+  const selectedConnectorAllowed = selectedConnector != null
+    && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
+
+  const availableViews = React.useMemo(
+    () => (canAccessPlatformConnectors
+      ? (['sources', 'connectors', 'run-history'] as const)
+      : (['sources', 'run-history'] as const)),
+    [canAccessPlatformConnectors]
+  );
+
+  React.useEffect(() => {
+    if (!(availableViews as readonly ConnectView[]).includes(activeView)) {
+      const fallbackView = availableViews[0];
+      setActiveView(fallbackView);
+      onViewChange?.(fallbackView);
+    }
+  }, [activeView, availableViews, onViewChange]);
+
   React.useEffect(() => {
     if (!activeConnector) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -637,14 +660,15 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
 
+  if (platformScope) {
+    return <PlatformConnectorsPage initialView={initialView} onViewChange={onViewChange} />;
+  }
+
   const cmdbConnectors = CONNECTORS
     .filter((connector) => CMDB_CONNECTOR_IDS.includes(connector.id));
 
   const cloudConnectors = CONNECTORS
     .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
-
-  const lifecycleConnectors = CONNECTORS
-    .filter((connector) => LIFECYCLE_CONNECTOR_IDS.includes(connector.id));
 
   const visibleSections = [
     {
@@ -658,25 +682,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
       caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
-    },
-    {
-      key: 'lifecycle' as const,
-      title: 'Lifecycle Intelligence',
-      connectors: lifecycleConnectors,
-      caption: 'End-of-life catalog sync and component lifecycle status tracking.',
     }
   ];
-
-  const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
-  const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
-  const selectedConnectorAllowed = selectedConnector != null
-    && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id)
-    && (!isDemoTenant || selectedConnector.id === 'sbom-endpoint');
 
   return (
     <div className="page-grid">
       <div className="connect-filter-bar connect-filter-bar--standalone">
-        {(['sources', 'integration-run-queue'] as const).map((view) => (
+        {availableViews.map((view) => (
           <button
             key={view}
             type="button"
@@ -690,7 +702,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
             }}
           >
             {view === 'sources' && 'Sources'}
-            {view === 'integration-run-queue' && 'Integration Run Queue'}
+            {view === 'connectors' && 'Connectors'}
+            {view === 'run-history' && 'Run History'}
           </button>
         ))}
       </div>
@@ -729,7 +742,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                         const dotClass = isFailed ? 'connect-source-dot--fail' :
                                          hasSynced ? 'connect-source-dot--ok' :
                                          'connect-source-dot--warn';
-                        const demoDisabled = isDemoTenant && connector.id !== 'sbom-endpoint';
+                        const demoDisabled = false;
 
                         return (
                           <button
@@ -770,7 +783,13 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
         </section>
       )}
 
-      {activeView === 'integration-run-queue' && <IntegrationRunQueuePage />}
+      {activeView === 'connectors' && canAccessPlatformConnectors && (
+        <section className="panel">
+          <VulnIntelConfigPage vulnSummary={platformConnectorSummaryQuery.data ?? null} />
+        </section>
+      )}
+
+      {activeView === 'run-history' && <IntegrationRunQueuePage />}
 
       {activeView === 'processing-jobs' && (
         <section className="panel">
@@ -783,9 +802,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       {activeConnector && selectedConnector && !selectedConnectorAllowed && (
         <section className="panel">
           <div className="notice" role="note">
-            {isDemoTenant
-              ? 'Free demo workspaces allow limited SBOM ingestion only. Live external connectors are disabled for customer validation.'
-              : 'Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.'}
+            {'Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.'}
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setActiveConnector(null)}>
             Back to customer sources

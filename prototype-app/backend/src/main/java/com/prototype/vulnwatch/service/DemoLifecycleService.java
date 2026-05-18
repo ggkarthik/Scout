@@ -42,6 +42,8 @@ public class DemoLifecycleService {
     private final DemoInviteEmailService demoInviteEmailService;
     private final AuditEventService auditEventService;
     private final SbomUploadRepository sbomUploadRepository;
+    private final DemoTenantPurgeService demoTenantPurgeService;
+    private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final String appBaseUrl;
 
@@ -55,6 +57,8 @@ public class DemoLifecycleService {
             DemoInviteEmailService demoInviteEmailService,
             AuditEventService auditEventService,
             SbomUploadRepository sbomUploadRepository,
+            DemoTenantPurgeService demoTenantPurgeService,
+            TenantLifecycleGuardService tenantLifecycleGuardService,
             @Value("${app.demo.app-base-url:http://localhost:5173}") String appBaseUrl
     ) {
         this.demoRequestRepository = demoRequestRepository;
@@ -66,6 +70,8 @@ public class DemoLifecycleService {
         this.demoInviteEmailService = demoInviteEmailService;
         this.auditEventService = auditEventService;
         this.sbomUploadRepository = sbomUploadRepository;
+        this.demoTenantPurgeService = demoTenantPurgeService;
+        this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
     }
 
@@ -164,6 +170,9 @@ public class DemoLifecycleService {
         }
         Tenant tenant = tenantRepository.findById(request.getTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
+        if (!tenantLifecycleGuardService.isTenantAccessible(tenant)) {
+            throw new DemoAccessException("DEMO_TENANT_EXPIRED", "Demo tenant has expired", HttpStatus.GONE);
+        }
         DemoInvite invite = latestInvite(requestId);
         if (invite == null) {
             invite = createInvite(request, tenant);
@@ -239,7 +248,7 @@ public class DemoLifecycleService {
                 daysRemaining(tenant.getDemoExpiresAt()),
                 Map.of(
                         "sbomUpload", demo,
-                        "liveConnectors", !demo,
+                        "liveConnectors", true,
                         "aiActions", !demo,
                         "exports", true
                 ),
@@ -253,9 +262,7 @@ public class DemoLifecycleService {
     }
 
     public void assertDemoAllowsLiveConnector(Tenant tenant) {
-        if (isDemoTenant(tenant)) {
-            throw new DemoAccessException("DEMO_CONNECTOR_DISABLED", "Live connectors are disabled for free demo tenants", HttpStatus.FORBIDDEN);
-        }
+        // Inventory connectors are temporarily enabled for demo tenants.
     }
 
     public void assertDemoAllowsAiAction(Tenant tenant) {
@@ -281,15 +288,10 @@ public class DemoLifecycleService {
     }
 
     @Scheduled(cron = "${app.demo.expiration-cron:0 10 * * * *}")
-    @Transactional
     public void expireDemoTenants() {
         Instant now = Instant.now();
-        for (Tenant tenant : tenantRepository.findByPlanCodeIgnoreCaseAndStatusIgnoreCaseAndDemoExpiresAtBefore(DEMO_PLAN_CODE, "ACTIVE", now)) {
-            tenant.setStatus("SUSPENDED");
-            tenant.setSuspendedAt(now);
-            tenant.setUpdatedAt(now);
-            tenantRepository.save(tenant);
-            auditEventService.record("demo.tenant.expired", "tenant", tenant.getId().toString(), null);
+        for (Tenant tenant : tenantRepository.findByPlanCodeIgnoreCaseAndDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(DEMO_PLAN_CODE, now)) {
+            demoTenantPurgeService.processExpiredTenant(tenant.getId(), now);
         }
     }
 
@@ -308,7 +310,8 @@ public class DemoLifecycleService {
             candidate = slug + "-" + suffix++;
         }
         Tenant tenant = tenantService.createTenant(nameCandidate, candidate, DEMO_PLAN_CODE, "demo-request:" + request.getId());
-        tenant.setDemoExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        Instant expiresAt = Instant.now().plus(7, ChronoUnit.DAYS);
+        tenant.setDemoExpiresAt(expiresAt);
         tenant.setDemoCreatedBy(trimToNull(actor));
         tenant.setDemoSource("REQUEST_REVIEW");
         tenant.setMaxConnectorCount(0);
@@ -328,7 +331,9 @@ public class DemoLifecycleService {
         invite.setEmail(request.getEmail());
         invite.setToken(newToken());
         invite.setStatus("READY");
-        invite.setExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        Instant defaultExpiry = Instant.now().plus(7, ChronoUnit.DAYS);
+        Instant tenantExpiry = tenant.getDemoExpiresAt();
+        invite.setExpiresAt(tenantExpiry != null && tenantExpiry.isBefore(defaultExpiry) ? tenantExpiry : defaultExpiry);
         return demoInviteRepository.save(invite);
     }
 
@@ -368,10 +373,13 @@ public class DemoLifecycleService {
         Tenant tenant = invite.getTenant();
         boolean deliveryError = "ERROR".equalsIgnoreCase(invite.getStatus());
         boolean tenantExpired = tenant.getDemoExpiresAt() != null && !tenant.getDemoExpiresAt().isAfter(now);
+        boolean tenantRemoved = "DELETED".equalsIgnoreCase(tenant.getStatus()) || tenant.getPurgedAt() != null;
         boolean inviteExpired = !invite.getExpiresAt().isAfter(now);
         boolean accepted = invite.getAcceptedAt() != null || "ACCEPTED".equalsIgnoreCase(invite.getStatus());
-        boolean valid = !tenantExpired && !inviteExpired && !accepted && "ACTIVE".equalsIgnoreCase(tenant.getStatus());
-        String status = tenantExpired
+        boolean valid = !tenantRemoved && !tenantExpired && !inviteExpired && !accepted && "ACTIVE".equalsIgnoreCase(tenant.getStatus());
+        String status = tenantRemoved
+                ? "TENANT_REMOVED"
+                : tenantExpired
                 ? "TENANT_EXPIRED"
                 : inviteExpired
                         ? "INVITE_EXPIRED"
@@ -385,6 +393,7 @@ public class DemoLifecycleService {
             case "DELIVERY_ERROR" ->
                     "Email delivery failed, but this invite link is still valid. Continue here to set the tenant password manually.";
             case "ACCEPTED" -> "Invite has already been accepted";
+            case "TENANT_REMOVED" -> "Demo tenant has already been removed";
             case "TENANT_EXPIRED" -> "Demo tenant has expired";
             case "INVITE_EXPIRED" -> "Demo invite has expired";
             default -> "Demo invite is not active";

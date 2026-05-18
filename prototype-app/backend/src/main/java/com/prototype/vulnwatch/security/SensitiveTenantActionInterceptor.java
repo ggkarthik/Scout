@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.security;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
@@ -21,25 +22,33 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
     private static final Duration MAX_CONFIRM_AGE = Duration.ofMinutes(2);
 
     private final RequestActorService requestActorService;
+    private final TenantSupportGrantService tenantSupportGrantService;
     private final ObjectProvider<AuditEventService> auditEventServiceProvider;
 
     public SensitiveTenantActionInterceptor(
             RequestActorService requestActorService,
+            TenantSupportGrantService tenantSupportGrantService,
             ObjectProvider<AuditEventService> auditEventServiceProvider
     ) {
         this.requestActorService = requestActorService;
+        this.tenantSupportGrantService = tenantSupportGrantService;
         this.auditEventServiceProvider = auditEventServiceProvider;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!(handler instanceof HandlerMethod handlerMethod) || !requiresConfirmation(handlerMethod)) {
+        if (!(handler instanceof HandlerMethod handlerMethod) || !requiresConfirmation(handlerMethod, request.getMethod())) {
             return true;
         }
         RequestActor actor = requestActorService.currentActor();
         if (!actor.actingAsPlatformOwner()) {
             return true;
         }
+        if (isSafeMethod(request.getMethod())) {
+            tenantSupportGrantService.requireActiveGrant(actor.userId(), actor.tenantId());
+            return true;
+        }
+        tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());
         String confirmed = request.getHeader("X-Platform-Action-Confirm");
         String tenantId = request.getHeader("X-Platform-Action-Tenant");
         String confirmedAt = request.getHeader("X-Platform-Action-Time");
@@ -64,9 +73,18 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    private boolean requiresConfirmation(HandlerMethod handlerMethod) {
+    private boolean requiresConfirmation(HandlerMethod handlerMethod, String method) {
+        if (!isSafeMethod(method)) {
+            return true;
+        }
         return handlerMethod.hasMethodAnnotation(SensitiveTenantAction.class)
                 || handlerMethod.getBeanType().isAnnotationPresent(SensitiveTenantAction.class);
+    }
+
+    private boolean isSafeMethod(String method) {
+        return "GET".equalsIgnoreCase(method)
+                || "HEAD".equalsIgnoreCase(method)
+                || "OPTIONS".equalsIgnoreCase(method);
     }
 
     private Instant parseConfirmationTime(String confirmedAt) {

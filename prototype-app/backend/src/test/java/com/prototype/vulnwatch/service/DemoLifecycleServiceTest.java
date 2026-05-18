@@ -52,6 +52,10 @@ class DemoLifecycleServiceTest {
     private AuditEventService auditEventService;
     @Mock
     private SbomUploadRepository sbomUploadRepository;
+    @Mock
+    private DemoTenantPurgeService demoTenantPurgeService;
+    @Mock
+    private TenantLifecycleGuardService tenantLifecycleGuardService;
 
     @Test
     void approveMarksRequestAndInviteSentWhenEmailDeliverySucceeds() {
@@ -271,6 +275,7 @@ class DemoLifecycleServiceTest {
         when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId())).thenReturn(List.of(existingInvite));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(localCredentialAuthService.issuePasswordSetupToken(request.getEmail())).thenReturn("setup-token-123");
+        when(tenantLifecycleGuardService.isTenantAccessible(tenant)).thenReturn(true);
 
         DemoLifecycleService service = service();
         DemoSetupLinkResponse response = service.issueSetupLink(request.getId(), "platform-owner@example.com");
@@ -320,6 +325,8 @@ class DemoLifecycleServiceTest {
                 demoInviteEmailService,
                 auditEventService,
                 sbomUploadRepository,
+                demoTenantPurgeService,
+                tenantLifecycleGuardService,
                 "https://app.example.com"
         );
     }

@@ -16,6 +16,7 @@ import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
+import com.prototype.vulnwatch.repo.VulnerabilityIntelSummarySourceRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.FlushModeType;
 import java.time.Instant;
@@ -51,6 +52,8 @@ public class FindingComponentRecomputeService {
     private final FindingCorrelationAnalysisService findingCorrelationAnalysisService;
     private final FindingCorrelationMutationService findingCorrelationMutationService;
     private final FindingSlaService findingSlaService;
+    private final VulnerabilitySourceFilterConfigService vulnerabilitySourceFilterConfigService;
+    private final VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository;
 
     public FindingComponentRecomputeService(
             FindingRepository findingRepository,
@@ -67,7 +70,9 @@ public class FindingComponentRecomputeService {
             EntityManager entityManager,
             FindingCorrelationAnalysisService findingCorrelationAnalysisService,
             FindingCorrelationMutationService findingCorrelationMutationService,
-            FindingSlaService findingSlaService
+            FindingSlaService findingSlaService,
+            VulnerabilitySourceFilterConfigService vulnerabilitySourceFilterConfigService,
+            VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository
     ) {
         this.findingRepository = findingRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
@@ -84,6 +89,8 @@ public class FindingComponentRecomputeService {
         this.findingCorrelationAnalysisService = findingCorrelationAnalysisService;
         this.findingCorrelationMutationService = findingCorrelationMutationService;
         this.findingSlaService = findingSlaService;
+        this.vulnerabilitySourceFilterConfigService = vulnerabilitySourceFilterConfigService;
+        this.vulnerabilityIntelSummarySourceRepository = vulnerabilityIntelSummarySourceRepository;
     }
 
     @Transactional
@@ -196,6 +203,7 @@ public class FindingComponentRecomputeService {
         List<CorrelationCandidateService.CandidateMatch> candidates = correlationCandidateService.candidatesForComponent(component, bundle);
         Map<UUID, List<PrecedenceResolverService.CandidateDecision>> decisionsByVulnerability =
                 findingCorrelationAnalysisService.buildCandidateDecisionsByVulnerability(component, candidates, policy);
+        decisionsByVulnerability = filterByEnabledSources(tenant, decisionsByVulnerability);
 
         Map<UUID, Finding> existingByVulnerability = new HashMap<>();
         for (Finding finding : existing) {
@@ -503,6 +511,38 @@ public class FindingComponentRecomputeService {
             }
         }
         return vulnerabilityIds;
+    }
+
+    private Map<UUID, List<PrecedenceResolverService.CandidateDecision>> filterByEnabledSources(
+            Tenant tenant,
+            Map<UUID, List<PrecedenceResolverService.CandidateDecision>> decisionsByVulnerability
+    ) {
+        if (tenant == null || decisionsByVulnerability.isEmpty()) {
+            return decisionsByVulnerability;
+        }
+        Set<String> enabledSources = vulnerabilitySourceFilterConfigService.enabledSourcesForCorrelation(tenant).stream()
+                .map(source -> source.toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (enabledSources.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, List<String>> sourcesByVulnerability = new HashMap<>();
+        vulnerabilityIntelSummarySourceRepository.findByVulnerabilityIdIn(decisionsByVulnerability.keySet())
+                .forEach(row -> sourcesByVulnerability
+                        .computeIfAbsent(row.getVulnerabilityId(), ignored -> new ArrayList<>())
+                        .add(row.getSourceSystem()));
+
+        Map<UUID, List<PrecedenceResolverService.CandidateDecision>> filtered = new HashMap<>();
+        for (Map.Entry<UUID, List<PrecedenceResolverService.CandidateDecision>> entry : decisionsByVulnerability.entrySet()) {
+            List<String> sources = sourcesByVulnerability.getOrDefault(entry.getKey(), List.of());
+            boolean include = sources.isEmpty()
+                    || sources.stream().anyMatch(source -> enabledSources.contains(source.toLowerCase(java.util.Locale.ROOT)));
+            if (include) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return filtered;
     }
 
     private record ComponentRecomputeResult(

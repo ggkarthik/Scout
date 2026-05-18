@@ -60,6 +60,7 @@ class FindingWorkflowFacadeTest {
     @Mock private FindingWorkflowService findingWorkflowService;
     @Mock private OrgCveRecordService orgCveRecordService;
     @Mock private FindingSlaService findingSlaService;
+    @Mock private OwnershipRuleService ownershipRuleService;
 
     private FindingWorkflowFacade facade;
     private Tenant tenant;
@@ -78,6 +79,7 @@ class FindingWorkflowFacadeTest {
                 findingWorkflowService,
                 orgCveRecordService,
                 findingSlaService,
+                ownershipRuleService,
                 new ObjectMapper().registerModule(new JavaTimeModule())
         );
         tenantId = UUID.randomUUID();

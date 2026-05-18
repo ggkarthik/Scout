@@ -31,6 +31,11 @@ class JwtTenantAuthenticationServiceTest {
     @Mock
     TenantMembershipRepository membershipRepository;
 
+    @Mock
+    TenantSupportGrantService tenantSupportGrantService;
+    @Mock
+    TenantLifecycleGuardService tenantLifecycleGuardService;
+
     @Test
     void platformOwnerJwtWithoutExplicitTenantStaysTenantless() {
         AppUser user = new AppUser();
@@ -43,6 +48,8 @@ class JwtTenantAuthenticationServiceTest {
                 userRepository,
                 tenantRepository,
                 membershipRepository,
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
                 "tenant_id",
                 "active_tenant_id",
                 "tenant_slug",

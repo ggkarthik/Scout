@@ -124,7 +124,7 @@ public class CsafSyncService {
         Set<UUID> vexChangedVulnerabilityIds = new LinkedHashSet<>();
         CsafRunDiagnostics diagnostics = new CsafRunDiagnostics(provider.providerKey());
         VulnerabilitySourceFilterConfigService.RedhatFilters redhatFilters = provider == CsafProvider.REDHAT
-                ? vulnerabilitySourceFilterConfigService.resolveRedhatFilters(defaultTenant())
+                ? vulnerabilitySourceFilterConfigService.resolvePlatformRedhatFilters()
                 : new VulnerabilitySourceFilterConfigService.RedhatFilters(null, null, null);
         if (provider == CsafProvider.REDHAT) {
             syncRunService.applyRunMetadata(run, "redhat", syncRunService.redhatFiltersMetadata(redhatFilters));
@@ -293,7 +293,4 @@ public class CsafSyncService {
         return root + "/" + year + "/msrc_" + lower + ".json";
     }
 
-    private Tenant defaultTenant() {
-        return tenantService.getDefaultTenant();
-    }
 }

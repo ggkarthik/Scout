@@ -1,15 +1,15 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import { useActor } from '../features/auth/context';
-import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
-import type { RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
+import { canManageRiskPolicy } from '../features/auth/roles';
+import type { OwnershipRuleResponse, RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
+import type { VulnerabilitySourceFilterConfig, VulnerabilitySourceFilterConfigRequest, VulnerabilitySourceSystem } from '../features/connect/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings';
+type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings' | 'vulnerability-sources';
 
 interface ConfigNavItem {
   key: ConfigNavKey;
@@ -41,6 +41,11 @@ const CONFIG_NAV: ConfigNavItem[] = [
     description: 'Rule-based user group assignment',
   },
   {
+    key: 'vulnerability-sources',
+    label: 'Vulnerability Sources',
+    description: 'Choose which sources participate in tenant correlation',
+  },
+  {
     key: 'findings-score',
     label: 'Findings Score',
     description: 'Custom scoring rules by attribute value and weight',
@@ -54,11 +59,6 @@ const CONFIG_NAV: ConfigNavItem[] = [
     key: 'auto-findings',
     label: 'Auto-Finding Rules',
     description: 'Automatically create findings based on CVE, software, and asset criteria',
-  },
-  {
-    key: 'dev-tools',
-    label: 'Developer Tools',
-    description: 'Prototype data controls',
   },
 ];
 
@@ -387,14 +387,7 @@ const DEFAULT_RISK_POLICY: RiskPolicy = applyTriageDefaults({
   triagePatchGapBoost: 0.3,
 });
 
-type OwnershipRule = {
-  id: string;
-  name: string;
-  condition: string;
-  userGroup: string;
-  createdAt: string;
-  updatedAt: string;
-};
+type OwnershipRule = OwnershipRuleResponse;
 
 type OwnershipConditionRow = {
   table: string;
@@ -409,8 +402,6 @@ type OwnershipRuleForm = {
   conditions: OwnershipConditionRow[];
   userGroup: string;
 };
-
-const OWNERSHIP_RULES_STORAGE_KEY = 'ownership-rules-config';
 
 function blankOwnershipRuleForm(): OwnershipRuleForm {
   return {
@@ -473,27 +464,6 @@ function parseOwnershipRuleCondition(condition: string): OwnershipRuleForm {
   };
 }
 
-function makeOwnershipRule(form: OwnershipRuleForm, existing?: OwnershipRule): OwnershipRule {
-  const now = new Date().toISOString();
-  return {
-    id: existing?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: form.name.trim(),
-    condition: JSON.stringify({
-      logic: form.conditionLogic,
-      conditions: form.conditions
-        .map((row) => ({
-          table: row.table,
-          column: row.column,
-          operator: row.operator,
-          value: row.value,
-        }))
-        .filter((row) => row.value.trim().length > 0),
-    }),
-    userGroup: form.userGroup.trim(),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
-}
 
 function scoreSeverityLabel(score: number): { label: string; color: string } {
   if (score >= 9) return { label: 'Critical', color: 'var(--critical)' };
@@ -513,14 +483,12 @@ export function ConfigurationsPage() {
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
-  const [resetBusy, setResetBusy] = React.useState(false);
-  const [resetMessage, setResetMessage] = React.useState('');
   const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
   const canEditRiskPolicy = canManageRiskPolicy(actor);
-  const canUseDevTools = hasRole(actor, 'PLATFORM_OWNER');
   const [ownershipRules, setOwnershipRules] = React.useState<OwnershipRule[]>([]);
   const [ownershipGroups, setOwnershipGroups] = React.useState<string[]>([]);
   const [ownershipLoading, setOwnershipLoading] = React.useState(true);
+  const [ownershipExecutingId, setOwnershipExecutingId] = React.useState<string | null>(null);
   const [ownershipShowForm, setOwnershipShowForm] = React.useState(false);
   const [ownershipEditingId, setOwnershipEditingId] = React.useState<string | null>(null);
   const [ownershipForm, setOwnershipForm] = React.useState<OwnershipRuleForm>(blankOwnershipRuleForm());
@@ -685,30 +653,10 @@ export function ConfigurationsPage() {
   }, [riskPolicyQuery.data]);
 
   React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(OWNERSHIP_RULES_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as OwnershipRule[];
-        if (Array.isArray(parsed)) {
-          setOwnershipRules(
-            parsed
-              .filter((rule) => rule && typeof rule.name === 'string' && typeof rule.condition === 'string' && typeof rule.userGroup === 'string')
-              .map((rule) => ({
-                id: String(rule.id ?? `${Date.now()}`),
-                name: String(rule.name ?? ''),
-                condition: String(rule.condition ?? ''),
-                userGroup: String(rule.userGroup ?? ''),
-                createdAt: String(rule.createdAt ?? new Date().toISOString()),
-                updatedAt: String(rule.updatedAt ?? new Date().toISOString()),
-              }))
-          );
-        }
-      }
-    } catch {
-      setOwnershipRules([]);
-    } finally {
-      setOwnershipLoading(false);
-    }
+    api.listOwnershipRules()
+      .then((rules) => setOwnershipRules(rules))
+      .catch(() => setOwnershipRules([]))
+      .finally(() => setOwnershipLoading(false));
 
     api.listAssignmentGroups()
       .then((groups) => setOwnershipGroups(Array.from(new Set(groups)).sort((a, b) => a.localeCompare(b))))
@@ -779,28 +727,6 @@ export function ConfigurationsPage() {
       setRecomputeMessage(e instanceof Error ? e.message : String(e));
     } finally {
       setRecomputeInProgress(false);
-    }
-  };
-
-  const cleanAllPrototypeData = async (): Promise<void> => {
-    const confirmed = window.confirm(
-      'This will permanently delete findings, inventory, vulnerability intelligence, and sync run history. Continue?'
-    );
-    if (!confirmed) return;
-    setResetBusy(true);
-    setResetMessage('');
-    try {
-      const result = await api.cleanAllPrototypeData();
-      const total = Object.values(result.deletedRows ?? {}).reduce(
-        (sum, value) => sum + Number(value || 0),
-        0
-      );
-      setResetMessage(`Prototype data reset complete. Deleted ${total} rows.`);
-      await riskPolicyQuery.refetch();
-    } catch (e) {
-      setResetMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setResetBusy(false);
     }
   };
 
@@ -1341,20 +1267,31 @@ export function ConfigurationsPage() {
       return;
     }
 
-    const current = ownershipEditingId
-      ? ownershipRules.find((rule) => rule.id === ownershipEditingId)
-      : undefined;
-    const nextRule = makeOwnershipRule(ownershipForm, current);
-    const nextRules = ownershipEditingId
-      ? ownershipRules.map((rule) => (rule.id === ownershipEditingId ? nextRule : rule))
-      : [...ownershipRules, nextRule];
+    const condition = JSON.stringify({
+      logic: ownershipForm.conditionLogic,
+      conditions: ownershipForm.conditions
+        .map((row) => ({ table: row.table, column: row.column, operator: row.operator, value: row.value }))
+        .filter((row) => row.value.trim().length > 0),
+    });
+    const payload = { name: ownershipForm.name.trim(), condition, userGroup: ownershipForm.userGroup.trim() };
 
-    setOwnershipRules(nextRules);
-    window.localStorage.setItem(OWNERSHIP_RULES_STORAGE_KEY, JSON.stringify(nextRules));
-    setOwnershipMessage(ownershipEditingId ? 'Ownership rule saved.' : 'Ownership rule created.');
-    setOwnershipShowForm(false);
-    setOwnershipEditingId(null);
-    setOwnershipGroupOpen(false);
+    const apiCall = ownershipEditingId
+      ? api.updateOwnershipRule(ownershipEditingId, payload)
+      : api.createOwnershipRule(payload);
+
+    apiCall
+      .then((saved) => {
+        setOwnershipRules((prev) =>
+          ownershipEditingId
+            ? prev.map((r) => (r.id === ownershipEditingId ? saved : r))
+            : [...prev, saved]
+        );
+        setOwnershipMessage(ownershipEditingId ? 'Ownership rule saved.' : 'Ownership rule created.');
+        setOwnershipShowForm(false);
+        setOwnershipEditingId(null);
+        setOwnershipGroupOpen(false);
+      })
+      .catch(() => setOwnershipMessage('Failed to save ownership rule.'));
   };
 
   const addOwnershipCondition = () => {
@@ -1401,12 +1338,23 @@ export function ConfigurationsPage() {
 
   const deleteOwnershipRule = (id: string) => {
     if (!window.confirm('Delete this ownership rule?')) return;
-    const nextRules = ownershipRules.filter((rule) => rule.id !== id);
-    setOwnershipRules(nextRules);
-    window.localStorage.setItem(OWNERSHIP_RULES_STORAGE_KEY, JSON.stringify(nextRules));
-    if (ownershipEditingId === id) {
-      cancelOwnershipForm();
-    }
+    api.deleteOwnershipRule(id)
+      .then(() => {
+        setOwnershipRules((prev) => prev.filter((r) => r.id !== id));
+        if (ownershipEditingId === id) {
+          cancelOwnershipForm();
+        }
+      })
+      .catch(() => setOwnershipMessage('Failed to delete ownership rule.'));
+  };
+
+  const executeOwnershipRule = (id: string) => {
+    setOwnershipExecutingId(id);
+    setOwnershipMessage('');
+    api.applyOwnershipRule(id)
+      .then(({ updated }) => setOwnershipMessage(`Executed: ${updated} finding${updated !== 1 ? 's' : ''} updated.`))
+      .catch(() => setOwnershipMessage('Execution failed. Please try again.'))
+      .finally(() => setOwnershipExecutingId(null));
   };
 
   const renderOwnership = () => (
@@ -1436,6 +1384,7 @@ export function ConfigurationsPage() {
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px 0' }}>Name</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>Condition</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>User Group</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px 6px' }}>Findings</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px 6px' }}>Updated</th>
                 <th style={{ padding: '4px 0 6px' }} />
               </tr>
@@ -1446,10 +1395,20 @@ export function ConfigurationsPage() {
                   <td style={{ padding: '10px 8px 10px 0', fontWeight: 600 }}>{rule.name}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{formatOwnershipRuleCondition(rule)}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)' }}>{rule.userGroup}</td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{rule.matchedCount}</td>
                   <td style={{ padding: '10px 8px', color: 'var(--text-2)' }}>{formatInstant(rule.updatedAt)}</td>
                   <td style={{ padding: '10px 0', whiteSpace: 'nowrap', textAlign: 'right' }}>
                     <button type="button" className="btn-link" style={{ fontSize: '0.78rem', marginRight: 8 }} onClick={() => openOwnershipEdit(rule)}>Edit</button>
-                    <button type="button" className="btn-link" style={{ fontSize: '0.78rem', color: 'var(--critical)' }} onClick={() => deleteOwnershipRule(rule.id)}>Delete</button>
+                    <button type="button" className="btn-link" style={{ fontSize: '0.78rem', color: 'var(--critical)', marginRight: 8 }} onClick={() => deleteOwnershipRule(rule.id)}>Delete</button>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      style={{ fontSize: '0.78rem', color: 'var(--accent)' }}
+                      disabled={ownershipExecutingId === rule.id}
+                      onClick={() => executeOwnershipRule(rule.id)}
+                    >
+                      {ownershipExecutingId === rule.id ? 'Running…' : 'Execute Now'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1672,29 +1631,6 @@ export function ConfigurationsPage() {
   );
 
   // ── Dev tools section ──────────────────────────────────────────────────────
-  const renderDevTools = () => (
-    <div className="config-section-body">
-      <div className="config-section-body danger-zone-section" style={{ marginTop: 0 }}>
-        <div className="inline-note" style={{ marginBottom: 16 }}>
-          Use this only in prototype mode. This action permanently clears findings, software
-          inventory, assets, vulnerability intelligence records, org exposure rows, and sync
-          run history.
-        </div>
-        <div className="button-row form-submit-row">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={cleanAllPrototypeData}
-            disabled={!canUseDevTools || resetBusy}
-          >
-            {resetBusy ? 'Cleaning…' : 'Clean All Prototype Data'}
-          </button>
-        </div>
-        {resetMessage && <div className="notice" style={{ marginTop: 10 }}>{resetMessage}</div>}
-      </div>
-    </div>
-  );
-
   // ── Findings Score section ─────────────────────────────────────────────────
   const renderFindingsScore = () => {
     const weightOk = parsedFindingsColumns.length === 0 || Math.abs(totalFindingsWeight - 1) < 0.001;
@@ -2011,6 +1947,10 @@ export function ConfigurationsPage() {
     <SuppressionSection canEdit={canEditRiskPolicy} />
   );
 
+  const renderVulnerabilitySources = () => (
+    <VulnerabilitySourcesSection canEdit={canEditRiskPolicy} />
+  );
+
   const renderAutoFindings = () => (
     <AutoFindingRulesSection canEdit={canEditRiskPolicy} />
   );
@@ -2036,6 +1976,11 @@ export function ConfigurationsPage() {
       description:
         'Route records to the right user group using rule-based ownership conditions.',
     },
+    'vulnerability-sources': {
+      title: 'Vulnerability Sources',
+      description:
+        'Select which ingested sources should drive tenant correlation while keeping the broader repository visible for research.',
+    },
     'findings-score': {
       title: 'Findings Score',
       description:
@@ -2049,10 +1994,6 @@ export function ConfigurationsPage() {
       title: 'Auto-Finding Rules',
       description: 'Define rules that automatically create findings when CVEs match specific software, asset, and severity criteria.',
     },
-    'dev-tools': {
-      title: 'Developer Tools',
-      description: 'Prototype controls — use only in development environments.',
-    },
   };
 
   const { title, description } = SECTION_TITLES[activeSection];
@@ -2062,7 +2003,7 @@ export function ConfigurationsPage() {
       <div className="panel-header">
         <h3>Configurations</h3>
         <span className="panel-caption">
-          Findings Score, S.AI prioritization, SLA, workflow automation, and prototype controls
+          Findings Score, S.AI prioritization, SLA, and workflow automation
         </span>
       </div>
 
@@ -2105,10 +2046,10 @@ export function ConfigurationsPage() {
           {activeSection === 'sla' && renderSla()}
           {activeSection === 'automation' && renderAutomation()}
           {activeSection === 'ownership' && renderOwnership()}
+          {activeSection === 'vulnerability-sources' && renderVulnerabilitySources()}
           {activeSection === 'findings-score' && renderFindingsScore()}
           {activeSection === 'suppress' && renderSuppress()}
           {activeSection === 'auto-findings' && renderAutoFindings()}
-          {activeSection === 'dev-tools' && renderDevTools()}
         </div>
       </div>
     </div>
@@ -2116,6 +2057,137 @@ export function ConfigurationsPage() {
 }
 
 // ── SuppressionSection — standalone component (hoisted) ─────────────────────
+
+const VULNERABILITY_SOURCE_COPY: Record<VulnerabilitySourceSystem, { label: string; description: string }> = {
+  nvd: {
+    label: 'NVD',
+    description: 'Baseline national vulnerability feed for broad CVE coverage.',
+  },
+  kev: {
+    label: 'KEV',
+    description: 'CISA Known Exploited Vulnerabilities for active exploitation context.',
+  },
+  ghsa: {
+    label: 'GHSA',
+    description: 'GitHub Security Advisories for ecosystem and package-centric coverage.',
+  },
+  redhat: {
+    label: 'Red Hat',
+    description: 'Vendor advisory data for Red Hat ecosystems and packages.',
+  },
+};
+
+function toSourceFilterRequest(config: VulnerabilitySourceFilterConfig): VulnerabilitySourceFilterConfigRequest {
+  return {
+    enabledForCorrelation: config.enabledForCorrelation ?? true,
+    cpeName: config.cpeName,
+    isVulnerable: config.isVulnerable,
+    hasKev: config.hasKev,
+    cvssV3Severity: config.cvssV3Severity,
+    cvssV4Severity: config.cvssV4Severity,
+    vendorProject: config.vendorProject,
+    product: config.product,
+    dateAddedFrom: config.dateAddedFrom,
+    dateAddedTo: config.dateAddedTo,
+    dueDateFrom: config.dueDateFrom,
+    dueDateTo: config.dueDateTo,
+    knownRansomwareCampaignUse: config.knownRansomwareCampaignUse,
+    severity: config.severity,
+    cvssScore: config.cvssScore,
+    cvss3Score: config.cvss3Score,
+  };
+}
+
+function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
+  const [configs, setConfigs] = React.useState<VulnerabilitySourceFilterConfig[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [savingSource, setSavingSource] = React.useState<VulnerabilitySourceSystem | null>(null);
+
+  const loadConfigs = React.useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.listVulnerabilitySourceFilterConfigs();
+      setConfigs(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load vulnerability sources');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadConfigs();
+  }, [loadConfigs]);
+
+  const toggleSource = async (config: VulnerabilitySourceFilterConfig) => {
+    setSavingSource(config.sourceSystem);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await api.saveVulnerabilitySourceFilterConfig(config.sourceSystem, {
+        ...toSourceFilterRequest(config),
+        enabledForCorrelation: !config.enabledForCorrelation,
+      });
+      setConfigs((current) => current.map((item) => item.sourceSystem === saved.sourceSystem ? saved : item));
+      setMessage(`${VULNERABILITY_SOURCE_COPY[config.sourceSystem].label} correlation setting saved.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save vulnerability source');
+    } finally {
+      setSavingSource(null);
+    }
+  };
+
+  return (
+    <div className="config-section-body">
+      <div className="notice" role="note">
+        Disabled sources remain visible in Vulnerability Repository screens, but they are excluded from tenant matching,
+        org-CVE generation, and downstream exposure workflows.
+      </div>
+      {message ? <div className="notice" role="status">{message}</div> : null}
+      {error ? <div className="notice error" role="alert">{error}</div> : null}
+      {loading ? (
+        <p>Loading vulnerability sources…</p>
+      ) : (
+        <div className="um-card-grid" style={{ marginTop: 16 }}>
+          {configs.map((config) => (
+            <article key={config.sourceSystem} className="um-card">
+              <div className="um-card-header">
+                <div>
+                      <h4>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].label}</h4>
+                      <p>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].description}</p>
+                    </div>
+                <span className={(config.enabledForCorrelation ?? true) ? 'status-pill status-open' : 'status-pill status-warning'}>
+                  {(config.enabledForCorrelation ?? true) ? 'Included in correlation' : 'Excluded from correlation'}
+                </span>
+              </div>
+              <div className="um-card-meta" style={{ marginTop: 12 }}>
+                <span>Saved filters: {config.configured ? 'Configured' : 'Default feed settings'}</span>
+                <span>Last updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : 'Never'}</span>
+              </div>
+              <div className="button-row" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className={(config.enabledForCorrelation ?? true) ? 'btn btn-secondary' : 'btn btn-primary'}
+                  disabled={!canEdit || savingSource === config.sourceSystem}
+                  onClick={() => void toggleSource(config)}
+                >
+                  {savingSource === config.sourceSystem
+                    ? 'Saving...'
+                    : (config.enabledForCorrelation ?? true)
+                      ? 'Exclude from Correlation'
+                      : 'Include in Correlation'}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const BLANK_CONDITION: SuppressionCondition = { table: 'VULNERABILITY', column: 'severity', operator: '=', value: '' };
 

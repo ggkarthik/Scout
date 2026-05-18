@@ -627,7 +627,7 @@ function AppShell() {
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['operations'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'operations', 'platform'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
@@ -763,9 +763,18 @@ function AppShell() {
     return titleForTab(activeTab);
   }, [activeTab]);
 
-  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'vuln-repo', 'inventory', 'end-of-life', 'connect', 'admin', 'configurations']);
+  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'inventory', 'end-of-life', 'admin', 'configurations']);
   if (actor && isPlatformScope && tenantScopedTabs.has(activeTab)) {
     return <Navigate to={pathForPlatformView('tenants')} replace state={{ platformMessage: 'Select a tenant to continue.' }} />;
+  }
+  if (
+    actor
+    && platformScopeOwner
+    && (location.pathname.startsWith('/vuln-repo/org-cves')
+      || location.pathname.startsWith('/vuln-repo/software-assets')
+      || location.pathname.startsWith('/vuln-repo/host-assets'))
+  ) {
+    return <Navigate to={pathForVulnRepoView('dashboard')} replace />;
   }
 
   const renderNavButton = (tab: AppTab): React.ReactNode => (
@@ -935,7 +944,7 @@ function AppShell() {
                         onClick={() => navigate(pathForPlatformView('tenants'))}
                       >
                         <span>Platform Console</span>
-                        <small>Tenants, central feeds and support access</small>
+                        <small>Tenants, connectors, support access and global repository views</small>
                       </button>
                     )}
                     {testPersonas.enabled && (
@@ -965,7 +974,11 @@ function AppShell() {
 
           {actingAsPlatformOwner && (
             <div className="section-tab-row" role="status" aria-live="polite">
-              <span style={{ fontWeight: 600 }}>Viewing {actor?.tenantName} as Platform Owner</span>
+              <span style={{ fontWeight: 600 }}>
+                Viewing {actor?.tenantName} as Platform Owner
+                {actor?.supportAccessMode ? ` · ${actor.supportAccessMode.replace(/_/g, ' ')}` : ''}
+                {actor?.supportGrantExpiresAt ? ` · expires ${new Date(actor.supportGrantExpiresAt).toLocaleString()}` : ''}
+              </span>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"

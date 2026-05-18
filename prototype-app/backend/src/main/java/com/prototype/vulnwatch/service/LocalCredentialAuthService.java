@@ -29,6 +29,8 @@ public class LocalCredentialAuthService {
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
     private final AuthTokenService authTokenService;
+    private final TenantSupportGrantService tenantSupportGrantService;
+    private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final String platformOwnerEmail;
     private final String platformOwnerPasswordHash;
 
@@ -37,6 +39,8 @@ public class LocalCredentialAuthService {
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository,
             AuthTokenService authTokenService,
+            TenantSupportGrantService tenantSupportGrantService,
+            TenantLifecycleGuardService tenantLifecycleGuardService,
             @Value("${app.security.local-auth.platform-owner-email:${APP_PLATFORM_OWNER_EMAIL:}}") String platformOwnerEmail,
             @Value("${app.security.local-auth.platform-owner-password-hash:${APP_PLATFORM_OWNER_PASSWORD_HASH:}}") String platformOwnerPasswordHash
     ) {
@@ -44,6 +48,8 @@ public class LocalCredentialAuthService {
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.authTokenService = authTokenService;
+        this.tenantSupportGrantService = tenantSupportGrantService;
+        this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.platformOwnerEmail = platformOwnerEmail;
         this.platformOwnerPasswordHash = platformOwnerPasswordHash;
     }
@@ -79,6 +85,7 @@ public class LocalCredentialAuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant owner must have exactly one active tenant");
         }
         TenantMembership membership = memberships.get(0);
+        tenantLifecycleGuardService.assertTenantAccessible(membership.getTenant());
         user.setLastSeenAt(Instant.now());
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
@@ -106,6 +113,7 @@ public class LocalCredentialAuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant owner must have exactly one active tenant");
         }
         TenantMembership membership = memberships.get(0);
+        tenantLifecycleGuardService.assertTenantAccessible(membership.getTenant());
         return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant());
     }
 
@@ -115,6 +123,8 @@ public class LocalCredentialAuthService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found"));
+        tenantLifecycleGuardService.assertTenantAccessible(tenant);
+        tenantSupportGrantService.requireActiveGrant(user.getExternalSubject(), tenantId);
         return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), tenant);
     }
 

@@ -3,12 +3,12 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.dto.SloStatusResponse;
 import com.prototype.vulnwatch.dto.SloStatusResponse.SloEntry;
-import com.prototype.vulnwatch.repo.FindingDeltaQueueEntryRepository;
-import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,8 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SloMetricsService {
 
-    private final SbomUploadRepository sbomUploadRepository;
-    private final FindingDeltaQueueEntryRepository deltaQueueRepository;
+    private final JdbcTemplate platformJdbcTemplate;
 
     @Value("${app.slo.sbom-success-rate-min-pct:95.0}")
     private double sbomSuccessRateMinPct;
@@ -39,11 +38,9 @@ public class SloMetricsService {
     private long queueStaleMaxCount;
 
     public SloMetricsService(
-            SbomUploadRepository sbomUploadRepository,
-            FindingDeltaQueueEntryRepository deltaQueueRepository
+            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
     ) {
-        this.sbomUploadRepository = sbomUploadRepository;
-        this.deltaQueueRepository = deltaQueueRepository;
+        this.platformJdbcTemplate = platformJdbcTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -68,21 +65,8 @@ public class SloMetricsService {
 
     private SloEntry evaluateSbomSuccessRate(Instant now) {
         Instant since = now.minus(24, ChronoUnit.HOURS);
-        var uploads = sbomUploadRepository
-                .findByTenantAndUploadedAtGreaterThanEqualOrderByUploadedAtDesc(null, since);
-
-        // findByTenantAndUploadedAt with null tenant returns all tenants via the
-        // default tenant path; fall back to all uploads if that returns empty.
-        var allUploads = uploads.isEmpty()
-                ? sbomUploadRepository.findAll().stream()
-                        .filter(u -> u.getUploadedAt() != null && !u.getUploadedAt().isBefore(since))
-                        .toList()
-                : uploads;
-
-        long total = allUploads.size();
-        long successes = allUploads.stream()
-                .filter(u -> SbomIngestionStatus.SUCCESS == u.getStatus())
-                .count();
+        long total = countUploadsSince(since, null);
+        long successes = countUploadsSince(since, SbomIngestionStatus.SUCCESS.name());
 
         double rate = total == 0 ? 100.0 : (successes * 100.0 / total);
         return new SloEntry(
@@ -97,7 +81,9 @@ public class SloMetricsService {
     }
 
     private SloEntry evaluateQueueDepth() {
-        long pending = deltaQueueRepository.countPending();
+        long pending = queryCount(
+                "select count(*) from finding_delta_queue where upper(status) = 'PENDING'"
+        );
         return new SloEntry(
                 "delta_queue_depth",
                 "Number of PENDING finding delta events in the durable queue",
@@ -113,7 +99,15 @@ public class SloMetricsService {
         // A visible item that has not been claimed after the threshold window
         // indicates the poller is falling behind or has stalled.
         Instant staleThreshold = now.minus(queueStaleThresholdMinutes, ChronoUnit.MINUTES);
-        long staleCount = deltaQueueRepository.countStaleVisible(staleThreshold);
+        long staleCount = queryCount(
+                """
+                select count(*)
+                from finding_delta_queue
+                where upper(status) = 'PENDING'
+                  and visible_at <= ?
+                """,
+                java.sql.Timestamp.from(staleThreshold)
+        );
         return new SloEntry(
                 "delta_queue_stale_visible",
                 "PENDING delta events that became visible more than " + queueStaleThresholdMinutes + " minutes ago",
@@ -127,5 +121,24 @@ public class SloMetricsService {
 
     private static double round2(double value) {
         return Math.round(value * 100.0) / 100.0;
+    }
+
+    private long countUploadsSince(Instant since, String status) {
+        if (status == null) {
+            return queryCount(
+                    "select count(*) from sbom_uploads where uploaded_at >= ?",
+                    java.sql.Timestamp.from(since)
+            );
+        }
+        return queryCount(
+                "select count(*) from sbom_uploads where uploaded_at >= ? and upper(status) = ?",
+                java.sql.Timestamp.from(since),
+                status.toUpperCase()
+        );
+    }
+
+    private long queryCount(String sql, Object... args) {
+        Long value = platformJdbcTemplate.queryForObject(sql, Long.class, args);
+        return value == null ? 0L : value;
     }
 }
