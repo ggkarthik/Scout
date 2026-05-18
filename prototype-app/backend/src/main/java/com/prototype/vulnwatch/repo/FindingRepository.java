@@ -58,6 +58,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     void deleteByAsset(Asset asset);
     long countByTenantAndStatus(Tenant tenant, FindingStatus status);
     long countByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+    long countByTenantAndOwnerGroup(Tenant tenant, String ownerGroup);
 
     List<Finding> findByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
     long countByTenantAndStatusAndRiskScoreGreaterThanEqual(Tenant tenant, FindingStatus status, double minRiskScore);
@@ -72,6 +73,18 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     long countByTenantAndStatusAndSeverity(
             @Param("tenant") Tenant tenant,
             @Param("status") FindingStatus status,
+            @Param("severity") String severity
+    );
+
+    @Query("""
+            select count(f)
+            from Finding f
+            join f.vulnerability v
+            where f.tenant = :tenant
+              and upper(coalesce(f.severityOverride, v.severity)) = upper(:severity)
+            """)
+    long countByTenantAndSeverity(
+            @Param("tenant") Tenant tenant,
             @Param("severity") String severity
     );
 

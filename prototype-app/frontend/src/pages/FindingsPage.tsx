@@ -30,6 +30,7 @@ const ALL_COLUMNS = [
   { key: 'status',         label: 'Status',         alwaysVisible: false },
   { key: 'risk',           label: 'Risk',           alwaysVisible: false },
   { key: 'priority',      label: 'S.AI Priority',  alwaysVisible: false },
+  { key: 'ownerGroup',     label: 'Owner Group',    alwaysVisible: false },
   { key: 'assignedTo',     label: 'Assigned To',    alwaysVisible: false },
   { key: 'dueDate',        label: 'Due Date',       alwaysVisible: false },
   { key: 'incidentId',       label: 'Incident ID',       alwaysVisible: false },
@@ -43,7 +44,7 @@ type ColKey = typeof ALL_COLUMNS[number]['key'];
 
 const DEFAULT_VISIBLE: ColKey[] = [
   'findingId', 'cveId', 'asset', 'owner', 'supportGroup', 'package',
-  'severity', 'status', 'risk', 'priority', 'assignedTo', 'dueDate', 'incidentId',
+  'severity', 'status', 'risk', 'priority', 'ownerGroup', 'assignedTo', 'dueDate', 'incidentId',
 ];
 
 const SEV_COLORS: Record<string, string> = {
@@ -577,6 +578,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         </span>
       );
     }
+    if (key==='ownerGroup') return row.ownerGroup ? <span className="fpl-assigned">{row.ownerGroup}</span> : <span className="fpl-empty">—</span>;
     if (key==='assignedTo') return row.assignedTo ? <span className="fpl-assigned">{row.assignedTo}</span> : <span className="fpl-empty">—</span>;
     if (key==='dueDate') {
       if (!row.dueAt) return <span className="fpl-empty">—</span>;

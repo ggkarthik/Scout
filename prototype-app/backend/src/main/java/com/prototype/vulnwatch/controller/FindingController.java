@@ -107,6 +107,7 @@ public class FindingController {
         FindingWorkflowUpdateRequest workflowUpdate = new FindingWorkflowUpdateRequest(
                 request.workflowStatus(),
                 request.assignedTo(),
+                null,
                 request.dueAt(),
                 request.suppressionReason(),
                 request.suppressedUntil(),
