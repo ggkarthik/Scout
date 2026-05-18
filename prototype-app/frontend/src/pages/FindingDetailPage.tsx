@@ -195,7 +195,7 @@ export function FindingDetailPage() {
   const [editingAssignee, setEditingAssignee] = React.useState(false);
   const [assigneeSaving, setAssigneeSaving] = React.useState(false);
 
-  const [assignmentGroup, setAssignmentGroup] = React.useState('');
+  const [assignmentGroup, setAssignmentGroup] = React.useState(finding?.ownerGroup ?? '');
   const [editingGroup, setEditingGroup] = React.useState(false);
   const [groupSaving, setGroupSaving] = React.useState(false);
 
@@ -280,7 +280,8 @@ export function FindingDetailPage() {
   async function saveAssignmentGroup() {
     setGroupSaving(true);
     try {
-      await updateWorkflow(currentFinding!.id, { assignmentGroup: assignmentGroup.trim() || null, actor: 'local-analyst' });
+      await updateWorkflow(currentFinding!.id, { ownerGroup: assignmentGroup.trim() || null, actor: 'local-analyst' });
+      setCurrentFinding(f => f ? { ...f, ownerGroup: assignmentGroup.trim() || undefined } : f);
       setEditingGroup(false);
     } catch { /**/ }
     finally { setGroupSaving(false); }

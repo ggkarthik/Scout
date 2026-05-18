@@ -26,8 +26,8 @@ public class TenantResolutionFilter implements Filter {
     public TenantResolutionFilter(
             WorkspaceService workspaceService,
             TenantService tenantService,
-            @Value("${app.tenancy.allow-header-tenant-selection:true}") boolean allowHeaderTenantSelection,
-            @Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
+            @Value("${app.tenancy.allow-header-tenant-selection:false}") boolean allowHeaderTenantSelection,
+            @Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext
     ) {
         this.workspaceService = workspaceService;
         this.tenantService = tenantService;

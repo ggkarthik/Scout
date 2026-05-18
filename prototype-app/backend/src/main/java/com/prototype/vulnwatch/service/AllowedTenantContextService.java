@@ -2,7 +2,6 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.dto.AllowedTenantResponse;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,15 +9,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AllowedTenantContextService {
 
-    private final TenantRepository tenantRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
+    private final TenantSupportGrantService tenantSupportGrantService;
+    private final TenantLifecycleGuardService tenantLifecycleGuardService;
 
     public AllowedTenantContextService(
-            TenantRepository tenantRepository,
-            TenantMembershipRepository tenantMembershipRepository
+            TenantMembershipRepository tenantMembershipRepository,
+            TenantSupportGrantService tenantSupportGrantService,
+            TenantLifecycleGuardService tenantLifecycleGuardService
     ) {
-        this.tenantRepository = tenantRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
+        this.tenantSupportGrantService = tenantSupportGrantService;
+        this.tenantLifecycleGuardService = tenantLifecycleGuardService;
     }
 
     @Transactional(readOnly = true)
@@ -27,20 +29,26 @@ public class AllowedTenantContextService {
             return List.of();
         }
         if (actor.hasRole("PLATFORM_OWNER")) {
-            return tenantRepository.findAllByOrderByCreatedAtAsc().stream()
-                    .map(tenant -> new AllowedTenantResponse(
-                            tenant.getId().toString(),
-                            tenant.getName(),
-                            tenant.getSlug(),
-                            "PLATFORM_OWNER"))
+            return tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()).stream()
+                    .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
+                    .map(grant -> new AllowedTenantResponse(
+                            grant.getTenant().getId().toString(),
+                            grant.getTenant().getName(),
+                            grant.getTenant().getSlug(),
+                            "PLATFORM_SUPPORT",
+                            grant.getAccessMode(),
+                            grant.getExpiresAt()))
                     .toList();
         }
         return tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
+                .filter(membership -> tenantLifecycleGuardService.isTenantAccessible(membership.getTenant()))
                 .map(membership -> new AllowedTenantResponse(
                         membership.getTenant().getId().toString(),
                         membership.getTenant().getName(),
                         membership.getTenant().getSlug(),
-                        membership.getRole()))
+                        membership.getRole(),
+                        null,
+                        null))
                 .toList();
     }
 }

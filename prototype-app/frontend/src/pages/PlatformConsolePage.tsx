@@ -6,14 +6,11 @@ import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AUTH_CONTEXT_QUERY_ROOT } from '../features/auth/queries';
-import { VulnIntelConfigPage } from './VulnIntelConfigPage';
-import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
+import { useAcceptPlatformSupportGrantMutation, useAuthContextQuery, usePlatformInventoryConnectorHealthQuery, usePlatformSupportGrantsQuery } from '../features/admin/queries';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
-  { key: 'feeds', label: 'Central Repository', helper: 'Global CVE and advisory feed sync' },
-  { key: 'runs', label: 'Run History', helper: 'Feed, inventory, and processing runs' },
   { key: 'support', label: 'Support', helper: 'Audited support access workspace' }
 ];
 
@@ -35,7 +32,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
           <div>
             <h3>Platform Console</h3>
             <div className="panel-caption">
-              Platform-owner controls for tenant lifecycle and the central vulnerability repository.
+              Platform-owner controls for tenant lifecycle, demo provisioning, and support access.
             </div>
           </div>
         </div>
@@ -60,8 +57,6 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
 
         {selectedView === 'tenants' && <TenantLifecyclePanel />}
         {selectedView === 'demo-requests' && <DemoRequestsPanel />}
-        {selectedView === 'feeds' && <PlatformFeedsPanel />}
-        {selectedView === 'runs' && <PlatformRunsPanel />}
         {selectedView === 'support' && <PlatformSupportPanel />}
       </section>
     </div>
@@ -71,6 +66,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
 function TenantLifecyclePanel() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const authQuery = useAuthContextQuery();
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
@@ -91,6 +87,7 @@ function TenantLifecyclePanel() {
   });
 
   const tenants = tenantsQuery.data ?? [];
+  const allowedTenantIds = new Set((authQuery.data?.allowedTenants ?? []).map((tenant) => tenant.id));
 
   const handleCreateTenant = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -164,7 +161,8 @@ function TenantLifecyclePanel() {
                       type="button"
                       className="btn btn-secondary btn-sm"
                       onClick={() => openTenantContext.mutate(tenant.id)}
-                      disabled={openTenantContext.isPending}
+                      disabled={openTenantContext.isPending || !allowedTenantIds.has(tenant.id)}
+                      title={allowedTenantIds.has(tenant.id) ? 'Enter tenant support session' : 'Tenant support grant must be accepted first'}
                     >
                       Enter Tenant
                     </button>
@@ -356,34 +354,132 @@ function DemoRequestsPanel() {
   );
 }
 
-function PlatformFeedsPanel() {
-  const summaryQuery = useQuery({
-    queryKey: ['vuln-intel-sources-summary'],
-    queryFn: api.getVulnIntelSourcesSummary
-  });
-  return (
-    <div className="section-block">
-      <VulnIntelConfigPage vulnSummary={summaryQuery.data ?? null} />
-    </div>
-  );
-}
-
-function PlatformRunsPanel() {
-  return (
-    <div className="section-block">
-      <IntegrationRunQueuePage />
-    </div>
-  );
-}
-
 function PlatformSupportPanel() {
+  const supportGrantsQuery = usePlatformSupportGrantsQuery();
+  const connectorHealthQuery = usePlatformInventoryConnectorHealthQuery();
+  const acceptGrant = useAcceptPlatformSupportGrantMutation();
+  const queryClient = useQueryClient();
+
+  const grants = supportGrantsQuery.data ?? [];
+  const connectorHealth = connectorHealthQuery.data ?? [];
+
   return (
     <div className="section-block">
-      <h4 className="section-title">Support Access</h4>
-      <div className="notice" role="note">
-        Support access must remain audited and approval-backed. Use tenant audit exports and support bundles from
-        tenant administration until impersonation approval APIs are available.
+      <div className="section-title-row">
+        <h4 className="section-title">Support Access</h4>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => {
+            void supportGrantsQuery.refetch();
+            void connectorHealthQuery.refetch();
+          }}
+        >
+          Refresh
+        </button>
       </div>
+
+      <div className="notice" role="note">
+        Tenant support sessions are approval-backed and time-bound. Accept a pending invite before entering a tenant,
+        and use explicit confirmation headers for any write action while you are in tenant context.
+      </div>
+
+      <div className="um-section-head" style={{ marginTop: 16 }}>
+        <div>
+          <h3>Support Grants</h3>
+          <p>Only active grants become eligible tenant contexts.</p>
+        </div>
+      </div>
+      {supportGrantsQuery.isLoading ? (
+        <div className="um-empty-block">Loading support grants…</div>
+      ) : supportGrantsQuery.isError ? (
+        <div className="notice error" role="alert">
+          {supportGrantsQuery.error instanceof Error ? supportGrantsQuery.error.message : 'Failed to load support grants'}
+        </div>
+      ) : grants.length === 0 ? (
+        <div className="um-empty-block">No tenant support grants have been issued to this platform owner.</div>
+      ) : (
+        <div className="um-card-grid">
+          {grants.map((grant) => (
+            <article key={grant.id} className="um-card">
+              <div className="um-card-title">
+                <div style={{ minWidth: 0 }}>
+                  <h4>{grant.tenantName}</h4>
+                  <p><code>{grant.invitedPlatformSubject}</code></p>
+                </div>
+                <span className={grant.status === 'ACTIVE' ? 'status-pill status-open' : grant.status === 'PENDING' ? 'status-pill status-investigating' : 'status-pill'}>
+                  {grant.status}
+                </span>
+              </div>
+              <div className="um-card-row"><span>Mode</span><strong>{grant.accessMode.replace(/_/g, ' ')}</strong></div>
+              <div className="um-card-row"><span>Reason</span><strong>{grant.reason}</strong></div>
+              <div className="um-card-row"><span>Expires</span><strong>{new Date(grant.expiresAt).toLocaleString()}</strong></div>
+              <div className="um-card-row"><span>Accepted</span><strong>{grant.acceptedAt ? new Date(grant.acceptedAt).toLocaleString() : 'Not yet'}</strong></div>
+              <div className="um-card-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={grant.status !== 'PENDING' || acceptGrant.isPending}
+                  onClick={() => acceptGrant.mutate(grant.id, {
+                    onSuccess: async () => {
+                      await queryClient.invalidateQueries({ queryKey: AUTH_CONTEXT_QUERY_ROOT });
+                    }
+                  })}
+                >
+                  {grant.status === 'ACTIVE' ? 'Accepted' : acceptGrant.isPending ? 'Accepting...' : 'Accept'}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <div className="um-section-head" style={{ marginTop: 28 }}>
+        <div>
+          <h3>Inventory Connector Health</h3>
+          <p>Platform-visible sanitized health across tenant-operated inventory integrations.</p>
+        </div>
+      </div>
+      {connectorHealthQuery.isLoading ? (
+        <div className="um-empty-block">Loading connector health…</div>
+      ) : connectorHealthQuery.isError ? (
+        <div className="notice error" role="alert">
+          {connectorHealthQuery.error instanceof Error ? connectorHealthQuery.error.message : 'Failed to load connector health'}
+        </div>
+      ) : connectorHealth.length === 0 ? (
+        <div className="um-empty-block">No tenant inventory connector configurations have been recorded yet.</div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Connector</th>
+                <th>Health</th>
+                <th>Enabled</th>
+                <th>Auto Sync</th>
+                <th>Last Test</th>
+                <th>Last Sync</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {connectorHealth.map((item) => (
+                <tr key={`${item.tenantId}:${item.connectorKey}`}>
+                  <td>{item.tenantName}</td>
+                  <td>{item.connectorKey}</td>
+                  <td>{item.healthState}</td>
+                  <td>{item.enabled ? 'Yes' : 'No'}</td>
+                  <td>{item.autoSyncEnabled ? 'Yes' : 'No'}</td>
+                  <td>{item.lastTestedAt ? new Date(item.lastTestedAt).toLocaleString() : 'Never'}</td>
+                  <td>{item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : 'Never'}</td>
+                  <td>{item.lastTestMessage ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

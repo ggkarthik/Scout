@@ -173,7 +173,7 @@ public class NvdSyncService {
         int recomputeInterval = Math.max(1, cveDeltaRecomputePageInterval);
         Set<UUID> changedVulnerabilityIds = new LinkedHashSet<>();
         VulnerabilitySourceFilterConfigService.NvdFilters filters =
-                vulnerabilitySourceFilterConfigService.resolveNvdFilters(defaultTenant());
+                vulnerabilitySourceFilterConfigService.resolvePlatformNvdFilters();
         syncRunService.applyRunMetadata(
                 run,
                 "nvd",
@@ -458,7 +458,4 @@ public class NvdSyncService {
         return upsertResult.vulnerabilityCreated();
     }
 
-    private Tenant defaultTenant() {
-        return tenantService.getDefaultTenant();
-    }
 }

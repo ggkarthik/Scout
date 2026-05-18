@@ -48,6 +48,7 @@ public record FindingResponse(
         String incidentStatus,
         Double findingsScore,
         UUID suppressedByRuleId,
-        String suppressedByRuleName
+        String suppressedByRuleName,
+        String ownerGroup
 ) {
 }

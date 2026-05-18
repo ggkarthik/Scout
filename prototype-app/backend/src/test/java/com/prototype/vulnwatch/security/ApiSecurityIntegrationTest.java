@@ -26,6 +26,7 @@ import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.UUID;
 import java.util.Set;
@@ -92,6 +93,9 @@ class ApiSecurityIntegrationTest {
 
     @MockBean
     private JwtTenantAuthenticationService jwtTenantAuthenticationService;
+
+    @MockBean
+    private TenantSupportGrantService tenantSupportGrantService;
 
     @BeforeEach
     void setUp() {
@@ -165,8 +169,9 @@ class ApiSecurityIntegrationTest {
                 .andExpect(jsonPath("$.creator").value(true))
                 .andExpect(jsonPath("$.principal").value("local-analyst"))
                 .andExpect(jsonPath("$.userId").value("local-analyst"))
-                .andExpect(jsonPath("$.tenantId").value("00000000-0000-0000-0000-000000000001"))
-                .andExpect(jsonPath("$.tenantName").value("Default Workspace"));
+                .andExpect(jsonPath("$.platformScope").value(true))
+                .andExpect(jsonPath("$.tenantId").doesNotExist())
+                .andExpect(jsonPath("$.tenantName").doesNotExist());
 
         mockMvc.perform(get("/api/me")
                         .header("X-API-Key", "test-api-key"))

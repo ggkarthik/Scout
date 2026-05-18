@@ -1,6 +1,8 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { pathForInventoryView, pathForVulnRepoHostAsset, pathForVulnRepoSoftwareAssets, pathForVulnRepoView } from '../app/routes';
+import { useActor } from '../features/auth/context';
+import { canAccessPlatformConsole } from '../features/auth/roles';
 import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import type {
   VulnRepoDashboardCriticalUnresolvedItem,
@@ -152,7 +154,9 @@ function vulnRepoTrackedVulnerabilityPath(filters?: Record<string, string | numb
 export function VulnRepoDashboardPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const dashboardQuery = useVulnRepoDashboardQuery();
+  const actor = useActor();
+  const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
+  const dashboardQuery = useVulnRepoDashboardQuery(platformScope);
 
   const dashboard = dashboardQuery.data;
   const loading = dashboardQuery.isPending && !dashboard;
@@ -237,7 +241,7 @@ export function VulnRepoDashboardPage() {
             <button
               type="button"
               className="vuln-repo-dashboard-stat-button"
-              onClick={() => navigate(vulnRepoVulnerabilityPath({ applicable: true, createdSinceDays: 7 }))}
+              onClick={() => navigate(vulnRepoVulnerabilityPath(platformScope ? { createdSinceDays: 7 } : { applicable: true, createdSinceDays: 7 }))}
             >
               <div className="stat-card stat-neutral">
                 <div className="stat-title-row">
@@ -245,17 +249,23 @@ export function VulnRepoDashboardPage() {
                 </div>
                 <div className="stat-value">{formatNumber(dashboard.summaryCards.trackedAddedLastWeek)}</div>
                 <div className="stat-caption">
-                  <div>{formatNumber(dashboard.summaryCards.applicableAddedLastWeek)} applicable</div>
-                  <button
-                    type="button"
-                    className="btn-link stat-caption-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(vulnRepoVulnerabilityPath({ impactedOnly: true, createdSinceDays: 7 }));
-                    }}
-                  >
-                    {formatNumber(dashboard.summaryCards.impactedAddedLastWeek)} impacted after investigation
-                  </button>
+                  {platformScope ? (
+                    <div>{formatNumber(dashboard.summaryCards.trackedAddedLastWeek)} ingested into the global repository</div>
+                  ) : (
+                    <>
+                      <div>{formatNumber(dashboard.summaryCards.applicableAddedLastWeek)} applicable</div>
+                      <button
+                        type="button"
+                        className="btn-link stat-caption-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(vulnRepoVulnerabilityPath({ impactedOnly: true, createdSinceDays: 7 }));
+                        }}
+                      >
+                        {formatNumber(dashboard.summaryCards.impactedAddedLastWeek)} impacted after investigation
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className="btn-link stat-caption-link stat-caption-link--kev"
@@ -361,7 +371,9 @@ export function VulnRepoDashboardPage() {
                   <h3>Critical unresolved</h3>
                   <div className="panel-caption">Requires immediate attention</div>
                 </div>
-                <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
+                {!platformScope ? (
+                  <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
+                ) : null}
               </div>
               <div className="vuln-repo-dashboard-unresolved-list">
                 {dashboard.criticalUnresolved.length === 0 ? (

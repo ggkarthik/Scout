@@ -14,6 +14,7 @@ import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,8 @@ class JwtOnlySecurityIntegrationTest {
     private JwtDecoder jwtDecoder;
     @MockBean
     private JwtTenantAuthenticationService jwtTenantAuthenticationService;
+    @MockBean
+    private TenantSupportGrantService tenantSupportGrantService;
 
     @Test
     void rejectsApiKeyWhenJwtOnlyModeIsEnabled() throws Exception {

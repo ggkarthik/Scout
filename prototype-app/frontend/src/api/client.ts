@@ -1,5 +1,6 @@
 import type {
-  PrototypeDataResetResponse,
+  OwnershipRuleRequest,
+  OwnershipRuleResponse,
   RiskPolicy,
   SuppressionRule,
   SuppressionRuleRequest,
@@ -70,10 +71,13 @@ import type {
   DemoRequestCreateRequest,
   DemoStatus,
   AuthTokenResponse,
+  InventoryConnectorHealth,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
   TenantCreateRequest,
+  TenantSupportGrant,
+  TenantSupportGrantRequest,
   TenantMember,
   TenantMemberRequest
 } from '../features/admin/types';
@@ -250,6 +254,7 @@ function shouldConfirmPlatformAction(path: string, method: string): boolean {
     '/connectors/vulnerability-sources',
     '/github-sbom-sources',
     '/suppression-rules',
+    '/ownership-rules',
     '/risk-policy',
     '/findings',
     '/cve-detail',
@@ -343,6 +348,7 @@ export const api = {
   deleteDemoRequest: (requestId: string) => request<void>(`/platform/demo-requests/${requestId}`, { method: 'DELETE' }),
   getDashboard: () => request<Dashboard>('/dashboard'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
+  getPlatformVulnRepoDashboard: () => request<VulnRepoDashboard>('/platform/vuln-repo/dashboard'),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.page != null) searchParams.set('page', String(params.page));
@@ -555,6 +561,8 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload)
   }),
+  listVulnerabilitySourceFilterConfigs: () =>
+    request<VulnerabilitySourceFilterConfig[]>('/connectors/vulnerability-sources'),
   getVulnerabilitySourceFilterConfig: (sourceSystem: VulnerabilitySourceSystem) =>
     request<VulnerabilitySourceFilterConfig>(`/connectors/vulnerability-sources/${encodeURIComponent(sourceSystem)}`),
   saveVulnerabilitySourceFilterConfig: (
@@ -655,9 +663,18 @@ export const api = {
   recomputeFindingsScores: () => request<{ updated: number }>('/risk-policy/recompute-findings-scores', {
     method: 'POST'
   }),
-  cleanAllPrototypeData: () => request<PrototypeDataResetResponse>('/configurations/clean-all', {
-    method: 'POST'
+  listOwnershipRules: () => request<OwnershipRuleResponse[]>('/ownership-rules'),
+  createOwnershipRule: (payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>('/ownership-rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
   }),
+  updateOwnershipRule: (id: string, payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>(`/ownership-rules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteOwnershipRule: (id: string) => request<void>(`/ownership-rules/${id}`, { method: 'DELETE' }),
+  applyOwnershipRules: () => request<{ updated: number }>('/ownership-rules/apply', { method: 'POST' }),
+  applyOwnershipRule: (id: string) => request<{ updated: number }>(`/ownership-rules/${id}/apply`, { method: 'POST' }),
   listSuppressionRules: () => request<SuppressionRule[]>('/suppression-rules'),
   createSuppressionRule: (payload: SuppressionRuleRequest) => request<SuppressionRule>('/suppression-rules', {
     method: 'POST',
@@ -820,12 +837,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  listPlatformSupportGrants: () => request<TenantSupportGrant[]>('/platform/support-grants'),
+  acceptPlatformSupportGrant: (grantId: string) =>
+    request<TenantSupportGrant>(`/platform/support-grants/${encodeURIComponent(grantId)}/accept`, {
+      method: 'POST'
+    }),
+  listPlatformInventoryConnectorHealth: () =>
+    request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   listTenantMembers: (tenantId: string) =>
     request<TenantMember[]>(`/tenants/${encodeURIComponent(tenantId)}/members`),
   addTenantMember: (tenantId: string, payload: TenantMemberRequest) =>
     request<TenantMember>(`/tenants/${encodeURIComponent(tenantId)}/members`, {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  listTenantSupportGrants: (tenantId: string) =>
+    request<TenantSupportGrant[]>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`),
+  createTenantSupportGrant: (tenantId: string, payload: TenantSupportGrantRequest) =>
+    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  revokeTenantSupportGrant: (tenantId: string, grantId: string) =>
+    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants/${encodeURIComponent(grantId)}`, {
+      method: 'DELETE'
     }),
   listServiceAccounts: () => request<ServiceAccount[]>('/service-accounts'),
   createServiceAccount: (payload: ServiceAccountRequest) =>

@@ -235,6 +235,7 @@ export type VulnerabilitySourceSystem = 'nvd' | 'kev' | 'ghsa' | 'redhat';
 export type VulnerabilitySourceFilterConfig = {
   sourceSystem: VulnerabilitySourceSystem;
   configured: boolean;
+  enabledForCorrelation?: boolean;
   cpeName?: string;
   isVulnerable: boolean;
   hasKev: boolean;
@@ -254,6 +255,7 @@ export type VulnerabilitySourceFilterConfig = {
 };
 
 export type VulnerabilitySourceFilterConfigRequest = {
+  enabledForCorrelation?: boolean;
   cpeName?: string;
   isVulnerable?: boolean;
   hasKev?: boolean;

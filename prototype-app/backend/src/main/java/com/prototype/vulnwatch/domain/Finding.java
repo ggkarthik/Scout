@@ -123,6 +123,9 @@ public class Finding {
     @Column(name = "suppressed_by_rule_name")
     private String suppressedByRuleName;
 
+    @Column(name = "owner_group", length = 255)
+    private String ownerGroup;
+
     /** ServiceNow incident number linked to this finding (e.g. INC0010005) */
     @Column(name = "incident_id", length = 64)
     private String incidentId;
@@ -348,6 +351,9 @@ public class Finding {
 
     public String getSuppressedByRuleName() { return suppressedByRuleName; }
     public void setSuppressedByRuleName(String suppressedByRuleName) { this.suppressedByRuleName = suppressedByRuleName; }
+
+    public String getOwnerGroup() { return ownerGroup; }
+    public void setOwnerGroup(String ownerGroup) { this.ownerGroup = ownerGroup; }
 
     public String getIncidentId() {
         return incidentId;
