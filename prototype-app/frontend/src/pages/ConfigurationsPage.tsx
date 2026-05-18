@@ -10,7 +10,6 @@ import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings';
 type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings' | 'vulnerability-sources';
 
 interface ConfigNavItem {
