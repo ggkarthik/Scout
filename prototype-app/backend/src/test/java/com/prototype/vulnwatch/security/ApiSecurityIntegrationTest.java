@@ -26,6 +26,7 @@ import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.UUID;
 import java.util.Set;
@@ -92,6 +93,9 @@ class ApiSecurityIntegrationTest {
 
     @MockBean
     private JwtTenantAuthenticationService jwtTenantAuthenticationService;
+
+    @MockBean
+    private TenantSupportGrantService tenantSupportGrantService;
 
     @BeforeEach
     void setUp() {

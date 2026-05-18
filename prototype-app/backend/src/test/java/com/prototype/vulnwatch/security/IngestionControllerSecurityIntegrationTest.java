@@ -22,6 +22,7 @@ import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.VulnerabilityIngestionService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
@@ -72,11 +73,17 @@ class IngestionControllerSecurityIntegrationTest {
     @MockBean
     private AuditEventService auditEventService;
 
+    @MockBean
+    private TenantSupportGrantService tenantSupportGrantService;
+
+    private UUID defaultTenantId;
+
     @BeforeEach
     void setUp() {
         Tenant defaultTenant = new Tenant();
-        defaultTenant.setId(1L);
         defaultTenant.setName("Default Workspace");
+        defaultTenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        defaultTenant.setId(defaultTenantId);
         when(tenantService.getDefaultTenant()).thenReturn(defaultTenant);
         when(workspaceService.getWorkspace()).thenReturn(defaultTenant);
     }
@@ -93,10 +100,13 @@ class IngestionControllerSecurityIntegrationTest {
         when(vulnerabilityIngestionService.triggerNvdSync(12))
                 .thenReturn(new SyncTriggerResponse(runId, "queued", "NVD incremental sync queued"));
 
-        mockMvc.perform(post("/api/ingestion/nvd-sync")
+                mockMvc.perform(post("/api/ingestion/nvd-sync")
                         .queryParam("lookbackHours", "12")
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key"))
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Platform-Action-Confirm", "true")
+                        .header("X-Platform-Action-Tenant", defaultTenantId.toString())
+                        .header("X-Platform-Action-Time", Instant.now().toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
                 .andExpect(jsonPath("$.status").value("queued"))
@@ -137,6 +147,9 @@ class IngestionControllerSecurityIntegrationTest {
         mockMvc.perform(post("/api/ingestion/advisories")
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Platform-Action-Confirm", "true")
+                        .header("X-Platform-Action-Tenant", defaultTenantId.toString())
+                        .header("X-Platform-Action-Time", Instant.now().toString())
                         .contentType("application/json")
                         .content("{\"advisories\":[{\"externalId\":\"ADV-1\",\"title\":\"Test advisory\",\"rules\":[]}]}"))
                 .andExpect(status().isOk())

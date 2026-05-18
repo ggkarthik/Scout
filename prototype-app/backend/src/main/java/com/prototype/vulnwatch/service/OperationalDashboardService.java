@@ -55,7 +55,7 @@ public class OperationalDashboardService {
     private static final Set<FindingDecisionState> UNKNOWN_STATES =
             EnumSet.of(FindingDecisionState.UNDER_INVESTIGATION, FindingDecisionState.NEEDS_REVIEW);
 
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
     private final DashboardService dashboardService;
     private final VulnerabilityRepository vulnerabilityRepository;
     private final VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository;
@@ -69,7 +69,7 @@ public class OperationalDashboardService {
     private final SyncRunRepository syncRunRepository;
 
     public OperationalDashboardService(
-            TenantService tenantService,
+            WorkspaceService workspaceService,
             DashboardService dashboardService,
             VulnerabilityRepository vulnerabilityRepository,
             VulnerabilityIntelSummaryRepository vulnerabilityIntelSummaryRepository,
@@ -82,7 +82,7 @@ public class OperationalDashboardService {
             SbomUploadRepository sbomUploadRepository,
             SyncRunRepository syncRunRepository
     ) {
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
         this.dashboardService = dashboardService;
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.vulnerabilityIntelSummaryRepository = vulnerabilityIntelSummaryRepository;
@@ -98,7 +98,7 @@ public class OperationalDashboardService {
 
     public OperationalDashboardResponse get() {
         Instant now = Instant.now();
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         DashboardResponse dashboard = dashboardService.get(tenant);
         DashboardNoiseReductionResponse noise = dashboard.noiseReduction();
 
@@ -108,7 +108,9 @@ public class OperationalDashboardService {
         List<Finding> findings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant);
         List<SbomUpload> uploads = sbomUploadRepository
                 .findByTenantAndUploadedAtGreaterThanEqualOrderByUploadedAtDesc(tenant, thirtyDaysAgo);
-        List<SyncRun> syncRuns = syncRunRepository.findByStartedAtGreaterThanEqual(sevenDaysAgo);
+        List<SyncRun> syncRuns = syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId()).stream()
+                .filter(run -> run.getStartedAt() != null && !run.getStartedAt().isBefore(sevenDaysAgo))
+                .toList();
         List<SyncRun> syncRuns24h = syncRuns.stream()
                 .filter(run -> run.getStartedAt() != null && run.getStartedAt().isAfter(now.minus(Duration.ofHours(HOURS_24))))
                 .toList();

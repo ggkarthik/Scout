@@ -94,7 +94,7 @@ public class KevSyncService {
         int updated = 0;
         Set<UUID> changedVulnerabilityIds = new LinkedHashSet<>();
         VulnerabilitySourceFilterConfigService.KevFilters filters =
-                vulnerabilitySourceFilterConfigService.resolveKevFilters(defaultTenant());
+                vulnerabilitySourceFilterConfigService.resolvePlatformKevFilters();
         syncRunService.applyRunMetadata(run, "kev", syncRunService.kevFiltersMetadata(filters));
         try {
             String body = fetchKevFeed();
@@ -200,10 +200,6 @@ public class KevSyncService {
             return false;
         }
         return true;
-    }
-
-    private Tenant defaultTenant() {
-        return tenantService.getDefaultTenant();
     }
 
     private String fetchKevFeed() {

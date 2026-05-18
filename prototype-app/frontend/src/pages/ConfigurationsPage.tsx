@@ -4,12 +4,13 @@ import { api } from '../api/client';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import { useActor } from '../features/auth/context';
 import { canManageRiskPolicy, hasRole } from '../features/auth/roles';
+import type { VulnerabilitySourceFilterConfig, VulnerabilitySourceFilterConfigRequest, VulnerabilitySourceSystem } from '../features/connect/types';
 import type { RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings';
+type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'dev-tools' | 'findings-score' | 'suppress' | 'auto-findings' | 'vulnerability-sources';
 
 interface ConfigNavItem {
   key: ConfigNavKey;
@@ -39,6 +40,11 @@ const CONFIG_NAV: ConfigNavItem[] = [
     key: 'ownership',
     label: 'Ownership',
     description: 'Rule-based user group assignment',
+  },
+  {
+    key: 'vulnerability-sources',
+    label: 'Vulnerability Sources',
+    description: 'Choose which sources participate in tenant correlation',
   },
   {
     key: 'findings-score',
@@ -2011,6 +2017,10 @@ export function ConfigurationsPage() {
     <SuppressionSection canEdit={canEditRiskPolicy} />
   );
 
+  const renderVulnerabilitySources = () => (
+    <VulnerabilitySourcesSection canEdit={canEditRiskPolicy} />
+  );
+
   const renderAutoFindings = () => (
     <AutoFindingRulesSection canEdit={canEditRiskPolicy} />
   );
@@ -2035,6 +2045,11 @@ export function ConfigurationsPage() {
       title: 'Ownership',
       description:
         'Route records to the right user group using rule-based ownership conditions.',
+    },
+    'vulnerability-sources': {
+      title: 'Vulnerability Sources',
+      description:
+        'Select which ingested sources should drive tenant correlation while keeping the broader repository visible for research.',
     },
     'findings-score': {
       title: 'Findings Score',
@@ -2105,6 +2120,7 @@ export function ConfigurationsPage() {
           {activeSection === 'sla' && renderSla()}
           {activeSection === 'automation' && renderAutomation()}
           {activeSection === 'ownership' && renderOwnership()}
+          {activeSection === 'vulnerability-sources' && renderVulnerabilitySources()}
           {activeSection === 'findings-score' && renderFindingsScore()}
           {activeSection === 'suppress' && renderSuppress()}
           {activeSection === 'auto-findings' && renderAutoFindings()}
@@ -2116,6 +2132,137 @@ export function ConfigurationsPage() {
 }
 
 // ── SuppressionSection — standalone component (hoisted) ─────────────────────
+
+const VULNERABILITY_SOURCE_COPY: Record<VulnerabilitySourceSystem, { label: string; description: string }> = {
+  nvd: {
+    label: 'NVD',
+    description: 'Baseline national vulnerability feed for broad CVE coverage.',
+  },
+  kev: {
+    label: 'KEV',
+    description: 'CISA Known Exploited Vulnerabilities for active exploitation context.',
+  },
+  ghsa: {
+    label: 'GHSA',
+    description: 'GitHub Security Advisories for ecosystem and package-centric coverage.',
+  },
+  redhat: {
+    label: 'Red Hat',
+    description: 'Vendor advisory data for Red Hat ecosystems and packages.',
+  },
+};
+
+function toSourceFilterRequest(config: VulnerabilitySourceFilterConfig): VulnerabilitySourceFilterConfigRequest {
+  return {
+    enabledForCorrelation: config.enabledForCorrelation ?? true,
+    cpeName: config.cpeName,
+    isVulnerable: config.isVulnerable,
+    hasKev: config.hasKev,
+    cvssV3Severity: config.cvssV3Severity,
+    cvssV4Severity: config.cvssV4Severity,
+    vendorProject: config.vendorProject,
+    product: config.product,
+    dateAddedFrom: config.dateAddedFrom,
+    dateAddedTo: config.dateAddedTo,
+    dueDateFrom: config.dueDateFrom,
+    dueDateTo: config.dueDateTo,
+    knownRansomwareCampaignUse: config.knownRansomwareCampaignUse,
+    severity: config.severity,
+    cvssScore: config.cvssScore,
+    cvss3Score: config.cvss3Score,
+  };
+}
+
+function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
+  const [configs, setConfigs] = React.useState<VulnerabilitySourceFilterConfig[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [savingSource, setSavingSource] = React.useState<VulnerabilitySourceSystem | null>(null);
+
+  const loadConfigs = React.useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.listVulnerabilitySourceFilterConfigs();
+      setConfigs(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load vulnerability sources');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadConfigs();
+  }, [loadConfigs]);
+
+  const toggleSource = async (config: VulnerabilitySourceFilterConfig) => {
+    setSavingSource(config.sourceSystem);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await api.saveVulnerabilitySourceFilterConfig(config.sourceSystem, {
+        ...toSourceFilterRequest(config),
+        enabledForCorrelation: !config.enabledForCorrelation,
+      });
+      setConfigs((current) => current.map((item) => item.sourceSystem === saved.sourceSystem ? saved : item));
+      setMessage(`${VULNERABILITY_SOURCE_COPY[config.sourceSystem].label} correlation setting saved.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save vulnerability source');
+    } finally {
+      setSavingSource(null);
+    }
+  };
+
+  return (
+    <div className="config-section-body">
+      <div className="notice" role="note">
+        Disabled sources remain visible in Vulnerability Repository screens, but they are excluded from tenant matching,
+        org-CVE generation, and downstream exposure workflows.
+      </div>
+      {message ? <div className="notice" role="status">{message}</div> : null}
+      {error ? <div className="notice error" role="alert">{error}</div> : null}
+      {loading ? (
+        <p>Loading vulnerability sources…</p>
+      ) : (
+        <div className="um-card-grid" style={{ marginTop: 16 }}>
+          {configs.map((config) => (
+            <article key={config.sourceSystem} className="um-card">
+              <div className="um-card-header">
+                <div>
+                      <h4>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].label}</h4>
+                      <p>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].description}</p>
+                    </div>
+                <span className={(config.enabledForCorrelation ?? true) ? 'status-pill status-open' : 'status-pill status-warning'}>
+                  {(config.enabledForCorrelation ?? true) ? 'Included in correlation' : 'Excluded from correlation'}
+                </span>
+              </div>
+              <div className="um-card-meta" style={{ marginTop: 12 }}>
+                <span>Saved filters: {config.configured ? 'Configured' : 'Default feed settings'}</span>
+                <span>Last updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : 'Never'}</span>
+              </div>
+              <div className="button-row" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className={(config.enabledForCorrelation ?? true) ? 'btn btn-secondary' : 'btn btn-primary'}
+                  disabled={!canEdit || savingSource === config.sourceSystem}
+                  onClick={() => void toggleSource(config)}
+                >
+                  {savingSource === config.sourceSystem
+                    ? 'Saving...'
+                    : (config.enabledForCorrelation ?? true)
+                      ? 'Exclude from Correlation'
+                      : 'Include in Correlation'}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const BLANK_CONDITION: SuppressionCondition = { table: 'VULNERABILITY', column: 'severity', operator: '=', value: '' };
 

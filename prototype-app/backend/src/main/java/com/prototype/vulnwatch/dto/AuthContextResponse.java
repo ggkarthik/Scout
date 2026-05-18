@@ -16,6 +16,8 @@ public record AuthContextResponse(
         boolean platformScope,
         boolean actingAsPlatformOwner,
         boolean sensitiveActionConfirmationRequired,
+        String supportAccessMode,
+        Instant supportGrantExpiresAt,
         String planCode,
         Instant demoExpiresAt,
         Long demoDaysRemaining,

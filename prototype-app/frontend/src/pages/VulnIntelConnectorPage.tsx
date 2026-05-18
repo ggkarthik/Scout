@@ -7,7 +7,7 @@ import { pathForConnectView } from '../app/routes';
 import type { SyncTriggerResponse } from '../features/connect/types';
 import type { VulnIntelSourceStatus } from '../api/client';
 
-function connectHref(view: 'integration-run-queue'): string {
+function connectHref(view: 'run-history'): string {
   return pathForConnectView(view);
 }
 
@@ -148,7 +148,7 @@ export function VulnIntelConnectorPage({ config, lastRun }: Props) {
       {result && (
         <div className="notice">
           <strong>Integration queued.</strong> {result.message}. Track progress in{' '}
-          <a href={connectHref('integration-run-queue')}>Integration Run Queue</a>.
+          <a href={connectHref('run-history')}>Integration Run Queue</a>.
         </div>
       )}
     </section>

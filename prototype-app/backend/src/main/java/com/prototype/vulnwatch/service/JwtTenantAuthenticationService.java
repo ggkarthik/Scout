@@ -27,6 +27,8 @@ public class JwtTenantAuthenticationService {
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final TenantSupportGrantService tenantSupportGrantService;
+    private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final String tenantIdClaim;
     private final String activeTenantIdClaim;
     private final String tenantSlugClaim;
@@ -38,6 +40,8 @@ public class JwtTenantAuthenticationService {
             AppUserRepository userRepository,
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository,
+            TenantSupportGrantService tenantSupportGrantService,
+            TenantLifecycleGuardService tenantLifecycleGuardService,
             @Value("${app.security.jwt.tenant-id-claim:tenant_id}") String tenantIdClaim,
             @Value("${app.security.jwt.active-tenant-id-claim:active_tenant_id}") String activeTenantIdClaim,
             @Value("${app.security.jwt.tenant-slug-claim:tenant_slug}") String tenantSlugClaim,
@@ -48,6 +52,8 @@ public class JwtTenantAuthenticationService {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
+        this.tenantSupportGrantService = tenantSupportGrantService;
+        this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.tenantIdClaim = tenantIdClaim;
         this.activeTenantIdClaim = activeTenantIdClaim;
         this.tenantSlugClaim = tenantSlugClaim;
@@ -100,20 +106,30 @@ public class JwtTenantAuthenticationService {
     private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles) {
         String activeTenantId = claimAsString(jwt, activeTenantIdClaim);
         if (activeTenantId != null) {
-            return tenantRepository.findById(parseUuid(activeTenantId))
+            UUID tenantId = parseUuid(activeTenantId);
+            if (roles.contains("PLATFORM_OWNER")) {
+                tenantSupportGrantService.requireActiveGrant(subject, tenantId);
+            }
+            Tenant tenant = tenantRepository.findById(tenantId)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT active_tenant_id is not registered"));
+            tenantLifecycleGuardService.assertTenantAccessible(tenant);
+            return tenant;
         }
 
         String tenantId = claimAsString(jwt, tenantIdClaim);
         if (tenantId != null) {
-            return tenantRepository.findById(parseUuid(tenantId))
+            Tenant tenant = tenantRepository.findById(parseUuid(tenantId))
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_id is not registered"));
+            tenantLifecycleGuardService.assertTenantAccessible(tenant);
+            return tenant;
         }
 
         String tenantSlug = claimAsString(jwt, tenantSlugClaim);
         if (tenantSlug != null) {
-            return tenantRepository.findBySlugIgnoreCase(tenantSlug)
+            Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_slug is not registered"));
+            tenantLifecycleGuardService.assertTenantAccessible(tenant);
+            return tenant;
         }
 
         if (roles.contains("PLATFORM_OWNER")) {
@@ -123,7 +139,9 @@ public class JwtTenantAuthenticationService {
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(subject, "ACTIVE");
         if (memberships.size() == 1) {
-            return memberships.get(0).getTenant();
+            Tenant tenant = memberships.get(0).getTenant();
+            tenantLifecycleGuardService.assertTenantAccessible(tenant);
+            return tenant;
         }
         if (memberships.size() > 1) {
             throw new ResponseStatusException(FORBIDDEN, "JWT user has multiple active tenant memberships");

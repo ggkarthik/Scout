@@ -9,12 +9,15 @@ import {
   useAddTenantMemberMutation,
   useAuditEventsQuery,
   useAuthContextQuery,
+  useCreateTenantSupportGrantMutation,
   useCreateServiceAccountMutation,
+  useRevokeTenantSupportGrantMutation,
   useServiceAccountsQuery,
+  useTenantSupportGrantsQuery,
   useTenantMembersQuery,
 } from '../features/admin/queries';
 import { api } from '../api/client';
-import type { AuditEvent, ServiceAccount, TenantMember } from '../features/admin/types';
+import type { AuditEvent, ServiceAccount, TenantMember, TenantSupportGrant } from '../features/admin/types';
 import { canExportAudit, canManageServiceAccounts, canManageTenant, canManageUsers } from '../features/auth/roles';
 
 type RoleKey = 'Owner' | 'Admin' | 'Security Lead' | 'Analyst' | 'Viewer';
@@ -45,6 +48,7 @@ const ROLE_MATRIX = [
 const ADMIN_TABS: Array<{ key: AdminRouteView; label: string; helper: string }> = [
   { key: 'users', label: 'Users', helper: 'Members and access scope' },
   { key: 'invites', label: 'Invites', helper: 'Pending access requests' },
+  { key: 'support', label: 'Support Access', helper: 'Tenant-approved platform access' },
   { key: 'roles', label: 'Roles & Permissions', helper: 'Role model and grants' },
   { key: 'service-accounts', label: 'Service Accounts', helper: 'Machine identities' },
   { key: 'audit', label: 'Audit', helper: 'Identity event trail' },
@@ -73,6 +77,14 @@ function formatRole(role: string | null | undefined): string {
     .split('_')
     .map((part) => (part.length === 0 ? '' : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()))
     .filter((part) => part.length > 0)
+    .join(' ');
+}
+
+function formatAccessMode(mode: string | null | undefined): string {
+  if (!mode) return 'Read only';
+  return mode
+    .split('_')
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
     .join(' ');
 }
 
@@ -226,12 +238,16 @@ export function UserManagementPage() {
 
   const membersQuery = useTenantMembersQuery(tenantId);
   const serviceAccountsQuery = useServiceAccountsQuery();
+  const supportGrantsQuery = useTenantSupportGrantsQuery(tenantId);
   const auditEventsQuery = useAuditEventsQuery();
   const addMember = useAddTenantMemberMutation(tenantId);
   const createServiceAccount = useCreateServiceAccountMutation();
+  const createSupportGrant = useCreateTenantSupportGrantMutation(tenantId);
+  const revokeSupportGrant = useRevokeTenantSupportGrantMutation(tenantId);
 
   const members = React.useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
   const serviceAccounts = React.useMemo(() => serviceAccountsQuery.data ?? [], [serviceAccountsQuery.data]);
+  const supportGrants = React.useMemo(() => supportGrantsQuery.data ?? [], [supportGrantsQuery.data]);
   const auditEvents = React.useMemo(() => auditEventsQuery.data ?? [], [auditEventsQuery.data]);
 
   const [selectedRole, setSelectedRole] = React.useState<RoleKey>('Security Lead');
@@ -240,6 +256,7 @@ export function UserManagementPage() {
   const [memberQuery, setMemberQuery] = React.useState('');
   const [inviteQuery, setInviteQuery] = React.useState('');
   const [serviceQuery, setServiceQuery] = React.useState('');
+  const [supportQuery, setSupportQuery] = React.useState('');
   const [auditQuery, setAuditQuery] = React.useState('');
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [isExporting, setIsExporting] = React.useState(false);
@@ -272,6 +289,8 @@ export function UserManagementPage() {
   const visibleMembers = activeMembers.filter((m) => matchesQuery(memberSearchHaystack(m), memberQuery));
   const visibleInvites = invitedMembers.filter((m) => matchesQuery(memberSearchHaystack(m), inviteQuery));
   const visibleServiceAccounts = serviceAccounts.filter((a) => matchesQuery(serviceSearchHaystack(a), serviceQuery));
+  const visibleSupportGrants = supportGrants.filter((grant) =>
+    matchesQuery([grant.tenantName, grant.invitedPlatformSubject, grant.reason, grant.status, grant.accessMode].join(' '), supportQuery));
   const visibleAuditEvents = auditEvents.filter((e) => matchesQuery(auditSearchHaystack(e), auditQuery));
 
   const memberCountByRole = React.useMemo(() => {
@@ -288,6 +307,7 @@ export function UserManagementPage() {
   captionParts.push(`${members.length} member${members.length === 1 ? '' : 's'}`);
   captionParts.push(`${privilegedCount} privileged`);
   captionParts.push(`${serviceAccounts.length} service account${serviceAccounts.length === 1 ? '' : 's'}`);
+  captionParts.push(`${supportGrants.length} support grant${supportGrants.length === 1 ? '' : 's'}`);
   captionParts.push(`${auditEvents.length} event${auditEvents.length === 1 ? '' : 's'}`);
 
   const openInvite = React.useCallback(() => {
@@ -371,6 +391,35 @@ export function UserManagementPage() {
       {
         onSuccess: () => {
           closeService();
+        },
+      }
+    );
+  };
+
+  const handleSupportGrantSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!mayManageUsers || !tenantId) return;
+    const formData = new FormData(event.currentTarget);
+    const invitedPlatformSubject = String(formData.get('invitedPlatformSubject') ?? '').trim();
+    const reason = String(formData.get('reason') ?? '').trim();
+    const expiresInHours = Number(String(formData.get('expiresInHours') ?? '24').trim());
+  const scope = String(formData.get('scope') ?? '').trim();
+  const accessMode = String(formData.get('accessMode') ?? 'READ_ONLY').trim() || 'READ_ONLY';
+  if (!invitedPlatformSubject || !reason || !Number.isFinite(expiresInHours) || expiresInHours <= 0) {
+    return;
+  }
+    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString();
+    createSupportGrant.mutate(
+      {
+        invitedPlatformSubject,
+        reason,
+        scope,
+        accessMode,
+        expiresAt,
+      },
+      {
+        onSuccess: () => {
+          event.currentTarget.reset();
         },
       }
     );
@@ -684,6 +733,88 @@ export function UserManagementPage() {
                     </tbody>
                   </table>
                 </div>
+              </>
+            )}
+
+            {activeView === 'support' && (
+              <>
+                <div className="um-section-head">
+                  <div>
+                    <h3>Support Access</h3>
+                    <p>Issue audited, time-bound platform support access to this tenant. Access stays read-only by default.</p>
+                  </div>
+                  <div className="um-section-head-actions">
+                    <label className="um-search">
+                      <Icon name="search" />
+                      <input
+                        value={supportQuery}
+                        onChange={(event) => setSupportQuery(event.target.value)}
+                        placeholder="Search support grants"
+                        aria-label="Search support grants"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <form className="platform-create-tenant-form" onSubmit={handleSupportGrantSubmit}>
+                  <input name="invitedPlatformSubject" placeholder="platform-owner@example.com" aria-label="Platform owner subject" />
+                  <input name="reason" placeholder="Why platform access is needed" aria-label="Support reason" />
+                  <input name="scope" placeholder="Scope (optional)" aria-label="Support scope" />
+                  <select name="accessMode" defaultValue="READ_ONLY" aria-label="Support access mode">
+                    <option value="READ_ONLY">Read only</option>
+                    <option value="WRITE_ENABLED">Write enabled</option>
+                  </select>
+                  <input name="expiresInHours" type="number" min="1" defaultValue="24" placeholder="Expires in hours" aria-label="Expires in hours" />
+                  <button type="submit" className="btn btn-primary" disabled={!tenantId || !mayManageUsers || createSupportGrant.isPending}>
+                    {createSupportGrant.isPending ? 'Issuing...' : 'Issue support grant'}
+                  </button>
+                </form>
+                {createSupportGrant.isError && (
+                  <div className="notice error" role="alert">
+                    {createSupportGrant.error instanceof Error ? createSupportGrant.error.message : 'Failed to issue support grant'}
+                  </div>
+                )}
+
+                {supportGrantsQuery.isError ? (
+                  <div className="notice error" role="alert">
+                    <strong>Failed to load support grants.</strong> {supportGrantsQuery.error instanceof Error ? supportGrantsQuery.error.message : 'Unknown error'}
+                  </div>
+                ) : supportGrantsQuery.isLoading ? (
+                  <div className="um-empty-block">Loading support grants…</div>
+                ) : visibleSupportGrants.length === 0 ? (
+                  <div className="um-empty-block">
+                    {supportQuery ? <>No support grants match &ldquo;{supportQuery}&rdquo;.</> : 'No support grants have been issued for this tenant.'}
+                  </div>
+                ) : (
+                  <div className="um-card-grid">
+                    {visibleSupportGrants.map((grant: TenantSupportGrant) => (
+                      <article key={grant.id} className="um-card">
+                        <div className="um-card-title">
+                          <span className="um-card-icon"><Icon name="key" /></span>
+                          <div style={{ minWidth: 0 }}>
+                            <h4>{grant.invitedPlatformSubject}</h4>
+                            <p>{grant.reason}</p>
+                          </div>
+                        </div>
+                        <div className="um-card-row"><span>Status</span><strong><span className={statusPillClass(grant.status)}>{formatStatus(grant.status)}</span></strong></div>
+                        <div className="um-card-row"><span>Mode</span><strong>{formatAccessMode(grant.accessMode)}</strong></div>
+                        <div className="um-card-row"><span>Requested</span><strong>{formatRelative(grant.requestedAt)}</strong></div>
+                        <div className="um-card-row"><span>Expires</span><strong>{formatTimestamp(grant.expiresAt)}</strong></div>
+                        <div className="um-card-row"><span>Accepted</span><strong>{grant.acceptedAt ? formatTimestamp(grant.acceptedAt) : 'Pending acceptance'}</strong></div>
+                        <div className="um-card-actions">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={!mayManageUsers || revokeSupportGrant.isPending || ['REVOKED', 'EXPIRED'].includes(grant.status.toUpperCase())}
+                            onClick={() => revokeSupportGrant.mutate(grant.id)}
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </>
             )}
 

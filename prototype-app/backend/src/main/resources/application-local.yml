@@ -1,0 +1,6 @@
+app:
+  security:
+    allow-api-key-auth: true
+  tenancy:
+    allow-header-tenant-selection: true
+    require-tenant-context: false

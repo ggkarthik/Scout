@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -17,8 +19,15 @@ public class SyncRun {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @ManyToOne(optional = true)
+    @JoinColumn(name = "tenant_id")
+    private Tenant tenant;
+
     @Column(nullable = false)
     private String syncType;
+
+    @Column(nullable = false, length = 64)
+    private String runScope = "PLATFORM_VULNERABILITY";
 
     @Column(nullable = false)
     private String status = "running";
@@ -50,12 +59,28 @@ public class SyncRun {
         return id;
     }
 
+    public Tenant getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
+    }
+
     public String getSyncType() {
         return syncType;
     }
 
     public void setSyncType(String syncType) {
         this.syncType = syncType;
+    }
+
+    public String getRunScope() {
+        return runScope;
+    }
+
+    public void setRunScope(String runScope) {
+        this.runScope = runScope;
     }
 
     public String getStatus() {

@@ -42,11 +42,15 @@ class SyncRunHistoryServiceTest {
     @Mock
     private TenantService tenantService;
 
+    @Mock
+    private RequestActorService requestActorService;
+
     @Test
     void backfillsLegacyGithubRepositoryRunsAndHistoryReadsPersistedRecords() {
         Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         tenant.setName("Default Workspace");
-        when(tenantService.getDefaultTenant()).thenReturn(tenant);
+        when(tenantService.listTenants()).thenReturn(List.of(tenant));
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of());
         List<SbomUpload> uploads = List.of(
                 githubGeneratedUpload(
@@ -83,10 +87,11 @@ class SyncRunHistoryServiceTest {
         );
 
         assertEquals(1, backfillService.backfillMissingRuns());
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
-        when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(savedRuns.get());
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(savedRuns.get());
 
-        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository);
+        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -106,6 +111,7 @@ class SyncRunHistoryServiceTest {
     @Test
     void skipsLegacyGithubBackfillWhenPersistedSyncRunAlreadyExists() {
         Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         tenant.setName("Default Workspace");
         SyncRun persistedRun = new SyncRun();
         persistedRun.setSyncType("GITHUB_REPOSITORY_SBOM");
@@ -114,7 +120,7 @@ class SyncRunHistoryServiceTest {
         persistedRun.setStartedAt(Instant.parse("2026-03-08T12:15:40Z"));
         persistedRun.setCompletedAt(Instant.parse("2026-03-08T12:16:30Z"));
 
-        when(tenantService.getDefaultTenant()).thenReturn(tenant);
+        when(tenantService.listTenants()).thenReturn(List.of(tenant));
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(persistedRun));
         when(sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(tenant, "github"))
                 .thenReturn(List.of(
@@ -137,8 +143,10 @@ class SyncRunHistoryServiceTest {
         assertEquals(0, backfillService.backfillMissingRuns());
         verify(syncRunRepository, never()).saveAll(any());
 
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
-        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository);
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(persistedRun));
+        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -153,10 +161,11 @@ class SyncRunHistoryServiceTest {
         SyncRun feedRun = syncRun("CSAF_MICROSOFT", "completed", Instant.parse("2026-03-15T12:15:00Z"));
         SyncRun processingRun = syncRun("VEX_ROLLOUT_BACKFILL", "running", Instant.parse("2026-03-15T12:16:00Z"));
 
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of(processingRun));
-        when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(processingRun, feedRun));
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("platform-owner", false, null, null, java.util.Set.of("PLATFORM_OWNER")));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt"))).thenReturn(List.of(processingRun));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(processingRun, feedRun));
 
-        SyncRunHistoryService service = new SyncRunHistoryService(syncRunRepository);
+        SyncRunHistoryService service = new SyncRunHistoryService(syncRunRepository, requestActorService);
 
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
         List<SyncRunResponse> feedRuns = service.list("vuln-intel", 20);
