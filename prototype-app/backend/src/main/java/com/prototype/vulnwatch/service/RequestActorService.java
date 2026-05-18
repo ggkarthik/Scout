@@ -28,12 +28,11 @@ public class RequestActorService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getDetails() instanceof TenantAuthenticationDetails details) {
             if (details.tenantId() != null) {
-                Tenant tenant = workspaceService.getWorkspace();
                 return new RequestActor(
                         details.userId(),
                         details.roles().contains("PLATFORM_OWNER") || details.roles().contains("CREATOR"),
-                        tenant.getId(),
-                        tenant.getName(),
+                        details.tenantId(),
+                        details.tenantName(),
                         details.roles());
             }
             return new RequestActor(

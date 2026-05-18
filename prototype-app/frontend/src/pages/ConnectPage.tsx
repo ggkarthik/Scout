@@ -626,6 +626,31 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     }
   }, [activeConnector, searchParams, setSearchParams]);
 
+  const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
+  const canAccessPlatformConnectors = canAccessPlatformConsole(actor);
+  const platformConnectorSummaryQuery = useQuery({
+    queryKey: ['vuln-intel-sources-summary'],
+    queryFn: api.getVulnIntelSourcesSummary,
+    enabled: canAccessPlatformConnectors
+  });
+  const selectedConnectorAllowed = selectedConnector != null
+    && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
+
+  const availableViews = React.useMemo(
+    () => (canAccessPlatformConnectors
+      ? (['sources', 'connectors', 'run-history'] as const)
+      : (['sources', 'run-history'] as const)),
+    [canAccessPlatformConnectors]
+  );
+
+  React.useEffect(() => {
+    if (!(availableViews as readonly ConnectView[]).includes(activeView)) {
+      const fallbackView = availableViews[0];
+      setActiveView(fallbackView);
+      onViewChange?.(fallbackView);
+    }
+  }, [activeView, availableViews, onViewChange]);
+
   React.useEffect(() => {
     if (!activeConnector) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -659,31 +684,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
     }
   ];
-
-  const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
-  const canAccessPlatformConnectors = canAccessPlatformConsole(actor);
-  const platformConnectorSummaryQuery = useQuery({
-    queryKey: ['vuln-intel-sources-summary'],
-    queryFn: api.getVulnIntelSourcesSummary,
-    enabled: canAccessPlatformConnectors
-  });
-  const selectedConnectorAllowed = selectedConnector != null
-    && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
-
-  const availableViews = React.useMemo(
-    () => (canAccessPlatformConnectors
-      ? (['sources', 'connectors', 'run-history'] as const)
-      : (['sources', 'run-history'] as const)),
-    [canAccessPlatformConnectors]
-  );
-
-  React.useEffect(() => {
-    if (!(availableViews as readonly ConnectView[]).includes(activeView)) {
-      const fallbackView = availableViews[0];
-      setActiveView(fallbackView);
-      onViewChange?.(fallbackView);
-    }
-  }, [activeView, availableViews, onViewChange]);
 
   return (
     <div className="page-grid">

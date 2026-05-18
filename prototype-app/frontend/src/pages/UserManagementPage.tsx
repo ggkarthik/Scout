@@ -232,10 +232,6 @@ export function UserManagementPage() {
   const mayManageServiceAccounts = canManageServiceAccounts(actor);
   const mayExportAudit = canExportAudit(actor);
 
-  if (!authQuery.isLoading && !mayAccessTenantAdministration) {
-    return <Navigate to="/exposure" replace />;
-  }
-
   const membersQuery = useTenantMembersQuery(tenantId);
   const serviceAccountsQuery = useServiceAccountsQuery();
   const supportGrantsQuery = useTenantSupportGrantsQuery(tenantId);
@@ -358,6 +354,10 @@ export function UserManagementPage() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [serviceOpen, closeService]);
+
+  if (!authQuery.isLoading && !mayAccessTenantAdministration) {
+    return <Navigate to="/exposure" replace />;
+  }
 
   const handleInviteSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
