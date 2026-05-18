@@ -44,7 +44,7 @@ public class RiskPolicyController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("risk_policy.updated")
     public RiskPolicyResponse update(@RequestBody RiskPolicyRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -54,7 +54,7 @@ public class RiskPolicyController {
     }
 
     @PostMapping("/recompute-findings-scores")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("risk_policy.findings_score_recomputed")
     public Map<String, Object> recomputeFindingsScores() {
         Tenant tenant = workspaceService.getWorkspace();

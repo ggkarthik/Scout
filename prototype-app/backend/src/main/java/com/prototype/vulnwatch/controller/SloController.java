@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.SloStatusResponse;
 import com.prototype.vulnwatch.service.SloMetricsService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +26,7 @@ public class SloController {
     }
 
     @GetMapping("/status")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SloStatusResponse status() {
         return sloMetricsService.evaluate();
     }

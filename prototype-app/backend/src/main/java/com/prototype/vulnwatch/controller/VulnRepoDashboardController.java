@@ -135,7 +135,7 @@ public class VulnRepoDashboardController {
     }
 
     @PostMapping("/org-cves/recompute")
-    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public OrgSpecificCveExposureRecomputeResponse recomputeOrgSpecificCves(
             @RequestParam(defaultValue = "targeted") String mode
     ) {
@@ -152,7 +152,7 @@ public class VulnRepoDashboardController {
     }
 
     @PostMapping("/org-cves/refresh")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     public TenantExposureRefreshResponse refreshTenantExposure() {
         Tenant tenant = workspaceService.getWorkspace();
         tenantQuotaService.assertCanRefreshTenantExposure(tenant);

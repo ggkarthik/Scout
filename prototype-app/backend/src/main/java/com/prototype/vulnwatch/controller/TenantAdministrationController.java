@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.IdentityAdministrationService;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
 import java.util.List;
 import java.util.UUID;
@@ -33,17 +34,20 @@ public class TenantAdministrationController {
     private final IdentityAdministrationService identityAdministrationService;
     private final AuditEventService auditEventService;
     private final RequestActorService requestActorService;
+    private final TenantAccessControlService tenantAccessControlService;
 
     public TenantAdministrationController(
             TenantAdministrationService tenantAdministrationService,
             IdentityAdministrationService identityAdministrationService,
             AuditEventService auditEventService,
-            RequestActorService requestActorService
+            RequestActorService requestActorService,
+            TenantAccessControlService tenantAccessControlService
     ) {
         this.tenantAdministrationService = tenantAdministrationService;
         this.identityAdministrationService = identityAdministrationService;
         this.auditEventService = auditEventService;
         this.requestActorService = requestActorService;
+        this.tenantAccessControlService = tenantAccessControlService;
     }
 
     @GetMapping("/tenants")
@@ -88,7 +92,7 @@ public class TenantAdministrationController {
     }
 
     @PostMapping("/tenants/{tenantId}/members")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("tenant.member.added")
     public TenantMemberResponse addMember(@PathVariable UUID tenantId, @RequestBody TenantMemberRequest request) {
         assertSameTenantOrPlatformOwner(tenantId);
@@ -104,10 +108,7 @@ public class TenantAdministrationController {
     }
 
     private void assertSameTenantOrPlatformOwner(UUID tenantId) {
-        var actor = requestActorService.currentActor();
-        if (!actor.hasRole("PLATFORM_OWNER") && (actor.tenantId() == null || !actor.tenantId().equals(tenantId))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Cannot manage another tenant");
-        }
+        tenantAccessControlService.assertTenantAccess(requestActorService.currentActor(), tenantId);
     }
 
     private TenantResponse toTenantResponse(Tenant tenant) {
@@ -124,6 +125,11 @@ public class TenantAdministrationController {
                 tenant.getMaxExportRows(),
                 tenant.getMaxDailyExposureRefreshes(),
                 tenant.getDemoExpiresAt(),
+                tenant.getExpiredAt(),
+                tenant.getPurgeStartedAt(),
+                tenant.getPurgedAt(),
+                tenant.getPurgeStatus(),
+                tenant.getPurgeError(),
                 tenant.getDemoCreatedBy(),
                 tenant.getDemoSource(),
                 tenant.getCreatedAt(),

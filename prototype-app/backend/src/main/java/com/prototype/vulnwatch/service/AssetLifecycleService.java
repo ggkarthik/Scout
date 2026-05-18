@@ -29,7 +29,7 @@ public class AssetLifecycleService {
     private final AssetRepository assetRepository;
     private final FindingRepository findingRepository;
     private final FindingWorkflowService findingWorkflowService;
-    private final TenantService tenantService;
+    private final WorkspaceService workspaceService;
 
     @Value("${app.assets.stale-days-to-inactive:30}")
     private int staleDaysToInactive;
@@ -38,17 +38,17 @@ public class AssetLifecycleService {
             AssetRepository assetRepository,
             FindingRepository findingRepository,
             FindingWorkflowService findingWorkflowService,
-            TenantService tenantService
+            WorkspaceService workspaceService
     ) {
         this.assetRepository = assetRepository;
         this.findingRepository = findingRepository;
         this.findingWorkflowService = findingWorkflowService;
-        this.tenantService = tenantService;
+        this.workspaceService = workspaceService;
     }
 
     @Transactional
     public CmdbAssetSyncResponse syncFromCmdb(CmdbAssetSyncRequest request) {
-        Tenant tenant = tenantService.getDefaultTenant();
+        Tenant tenant = workspaceService.getWorkspace();
         int inserted = 0;
         int updated = 0;
         for (CmdbAssetRecordRequest record : request.assets()) {

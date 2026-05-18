@@ -27,6 +27,15 @@ public class RequestActorService {
     public RequestActor currentActor() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getDetails() instanceof TenantAuthenticationDetails details) {
+            if (details.tenantId() != null) {
+                Tenant tenant = workspaceService.getWorkspace();
+                return new RequestActor(
+                        details.userId(),
+                        details.roles().contains("PLATFORM_OWNER") || details.roles().contains("CREATOR"),
+                        tenant.getId(),
+                        tenant.getName(),
+                        details.roles());
+            }
             return new RequestActor(
                     details.userId(),
                     details.roles().contains("PLATFORM_OWNER") || details.roles().contains("CREATOR"),
@@ -44,6 +53,10 @@ public class RequestActorService {
         boolean creator = authentication != null
                 && authentication.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_CREATOR".equals(authority.getAuthority()));
+        boolean platformOwner = roles.contains("PLATFORM_OWNER");
+        if (platformOwner && TenantContext.getCurrentTenantId() == null) {
+            return new RequestActor(principal, creator, null, null, roles);
+        }
         Tenant tenant = workspaceService.getWorkspace();
         return new RequestActor(
                 principal,

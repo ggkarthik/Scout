@@ -18,7 +18,7 @@ describe('routes', () => {
     expect(pathForTab('end-of-life')).toBe('/end-of-life');
     expect(pathForTab('admin')).toBe('/admin/users');
     expect(pathForTab('platform')).toBe('/platform/tenants');
-    expect(pathForConnectView('integration-run-queue')).toBe('/connect/integration-run-queue');
+    expect(pathForConnectView('run-history')).toBe('/connect/run-history');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
     expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
   });
@@ -77,7 +77,7 @@ describe('routes', () => {
       '/inventory/container-images?ecosystem=oci'
     );
     expect(buildLegacyCompatiblePath('?tab=connect&connectView=integration-queue&source=ghsa')).toBe(
-      '/connect/integration-run-queue?source=ghsa'
+      '/connect/run-history?source=ghsa'
     );
   });
 

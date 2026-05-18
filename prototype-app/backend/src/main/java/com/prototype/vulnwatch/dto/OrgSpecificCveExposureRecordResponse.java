@@ -43,6 +43,9 @@ public record OrgSpecificCveExposureRecordResponse(
         String suppressedByRuleName,
         List<String> sources,
         String euvdId,
-        String jvndbId
+        String jvndbId,
+        boolean includedInCorrelation,
+        List<String> includedCorrelationSources,
+        List<String> excludedCorrelationSources
 ) {
 }

@@ -589,6 +589,20 @@ export function VulnIntelConfigPage({ vulnSummary }: Props) {
       lastRun: s?.['ADVISORY'],
       note: 'Curated vendor advisories imported via API (POST /api/ingestion/advisories). No scheduled sync — imports are triggered on demand.',
     },
+    {
+      icon: '🇪🇺',
+      name: 'EUVD Feed',
+      lastRun: s?.['EUVD'],
+      note: 'European Union Vulnerability Database ingestion for supplemental regional vulnerability intelligence.',
+      triggerSync: () => api.syncEuvd(),
+    },
+    {
+      icon: '🇯🇵',
+      name: 'JVN Feed',
+      lastRun: s?.['JVN'],
+      note: 'Japan Vulnerability Notes Database ingestion for regional advisories and JVNDB mappings.',
+      triggerSync: () => api.syncJvn(),
+    },
   ];
 
   return (

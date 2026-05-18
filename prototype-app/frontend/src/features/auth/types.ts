@@ -3,6 +3,8 @@ export type AllowedTenant = {
   name: string;
   slug: string | null;
   role: string;
+  accessMode?: string | null;
+  expiresAt?: string | null;
 };
 
 export type ActorContext = {
@@ -16,6 +18,8 @@ export type ActorContext = {
   platformScope?: boolean;
   actingAsPlatformOwner?: boolean;
   sensitiveActionConfirmationRequired?: boolean;
+  supportAccessMode?: string | null;
+  supportGrantExpiresAt?: string | null;
   planCode?: string | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;
