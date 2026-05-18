@@ -78,6 +78,8 @@ export type AllowedTenant = {
   name: string;
   slug: string | null;
   role: string;
+  accessMode?: string | null;
+  expiresAt?: string | null;
 };
 
 export type AuthContext = {
@@ -91,6 +93,8 @@ export type AuthContext = {
   platformScope?: boolean;
   actingAsPlatformOwner?: boolean;
   sensitiveActionConfirmationRequired?: boolean;
+  supportAccessMode?: string | null;
+  supportGrantExpiresAt?: string | null;
   planCode?: string | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;
@@ -178,4 +182,43 @@ export type DemoStatus = {
   demoDaysRemaining: number | null;
   demoCapabilities: Record<string, boolean>;
   demoUsage: Record<string, number>;
+};
+
+export type TenantSupportGrant = {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  invitedPlatformSubject: string;
+  reason: string;
+  scope: string | null;
+  accessMode: string;
+  status: string;
+  grantedBySubject: string | null;
+  acceptedBySubject: string | null;
+  revokedBySubject: string | null;
+  requestedAt: string;
+  acceptedAt: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+export type TenantSupportGrantRequest = {
+  invitedPlatformSubject: string;
+  reason: string;
+  scope?: string;
+  accessMode?: string;
+  expiresAt: string;
+};
+
+export type InventoryConnectorHealth = {
+  tenantId: string;
+  tenantName: string;
+  connectorKey: string;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  lastTestStatus: string | null;
+  lastTestMessage: string | null;
+  lastTestedAt: string | null;
+  lastSyncAt: string | null;
+  healthState: string;
 };

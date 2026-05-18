@@ -163,8 +163,20 @@ function buildRows(runs: SyncRun[]): DataTableRow[] {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export function IntegrationRunQueuePage() {
-  const query = useSyncRunsQuery({ category: 'all', limit: 200 });
+type IntegrationRunQueuePageProps = {
+  title?: string;
+  caption?: string;
+  queryParams?: { category?: 'all' | 'inventory' | 'vulnerability' | 'vuln-intel' | 'processing'; limit?: number };
+  storageKey?: string;
+};
+
+export function IntegrationRunQueuePage({
+  title = 'Integration Run Queue',
+  caption = 'All integration runs — inventory ingestion, vulnerability intel feeds, and processing jobs.',
+  queryParams = { category: 'all', limit: 200 },
+  storageKey = 'integration-run-queue-table-widths',
+}: IntegrationRunQueuePageProps = {}) {
+  const query = useSyncRunsQuery(queryParams);
   const runs = query.data ?? [];
   const rows = React.useMemo(() => buildRows(runs), [runs]);
   const loading = query.isPending && !query.data;
@@ -175,9 +187,9 @@ export function IntegrationRunQueuePage() {
     <section className="panel">
       <div className="panel-header">
         <div>
-          <h3>Integration Run Queue</h3>
+          <h3>{title}</h3>
           <span className="panel-caption">
-            All integration runs — inventory ingestion, vulnerability intel feeds, and processing jobs.
+            {caption}
           </span>
         </div>
         <div className="button-row">
@@ -203,7 +215,7 @@ export function IntegrationRunQueuePage() {
       ) : (
         <div className="table-scroll">
           <DataTable
-            storageKey="integration-run-queue-table-widths"
+            storageKey={storageKey}
             columns={COLUMNS}
             rows={rows}
           />

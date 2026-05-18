@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.AuditEvent;
 import com.prototype.vulnwatch.dto.AuditEventResponse;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantQuotaService;
 import java.util.Map;
 import java.util.List;
@@ -22,21 +23,26 @@ public class AuditEventController {
     private final AuditEventService auditEventService;
     private final RequestActorService requestActorService;
     private final TenantQuotaService tenantQuotaService;
+    private final TenantAccessControlService tenantAccessControlService;
 
     public AuditEventController(
             AuditEventService auditEventService,
             RequestActorService requestActorService,
-            TenantQuotaService tenantQuotaService
+            TenantQuotaService tenantQuotaService,
+            TenantAccessControlService tenantAccessControlService
     ) {
         this.auditEventService = auditEventService;
         this.requestActorService = requestActorService;
         this.tenantQuotaService = tenantQuotaService;
+        this.tenantAccessControlService = tenantAccessControlService;
     }
 
     @GetMapping
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     public List<AuditEventResponse> list() {
-        return auditEventService.listForTenant(requestActorService.currentActor().tenantId()).stream()
+        var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
+        return auditEventService.listForTenant(actor.tenantId()).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -45,6 +51,7 @@ public class AuditEventController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     public ResponseEntity<String> exportCsv() {
         var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
         List<AuditEvent> events = auditEventService.listAllForTenant(actor.tenantId());
         tenantQuotaService.assertCanExportRows(actor.tenantId(), events.size());
         auditEventService.record("audit_events.exported", "tenant", actor.tenantId().toString(),
@@ -59,6 +66,7 @@ public class AuditEventController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     public Map<String, Object> supportBundle() {
         var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
         auditEventService.record("support.bundle.exported", "tenant", actor.tenantId().toString(), null);
         return auditEventService.supportBundle(actor.tenantId());
     }

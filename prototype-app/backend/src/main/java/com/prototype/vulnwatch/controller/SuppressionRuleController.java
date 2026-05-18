@@ -44,7 +44,7 @@ public class SuppressionRuleController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("suppression_rule.created")
     public SuppressionRuleResponse create(@RequestBody SuppressionRuleRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -52,7 +52,7 @@ public class SuppressionRuleController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("suppression_rule.updated")
     public SuppressionRuleResponse update(
             @PathVariable UUID id,
@@ -64,7 +64,7 @@ public class SuppressionRuleController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("suppression_rule.deleted")
     public void delete(@PathVariable UUID id) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -72,7 +72,7 @@ public class SuppressionRuleController {
     }
 
     @PostMapping("/{id}/execute")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("suppression_rule.executed")
     public Map<String, Object> execute(@PathVariable UUID id) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -85,7 +85,7 @@ public class SuppressionRuleController {
     }
 
     @PostMapping("/{id}/reopen-all")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @SensitiveTenantAction("suppression_rule.reopen_all")
     public Map<String, Object> reopenAll(@PathVariable UUID id) {
         Tenant tenant = workspaceService.getWorkspace();
@@ -94,7 +94,7 @@ public class SuppressionRuleController {
     }
 
     @PostMapping("/cve-reopen/{recordId}")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @SensitiveTenantAction("suppression_rule.cve_reopen")
     public void reopenCveRecord(@PathVariable UUID recordId) {

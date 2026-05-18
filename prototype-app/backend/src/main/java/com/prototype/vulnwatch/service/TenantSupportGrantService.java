@@ -1,0 +1,244 @@
+package com.prototype.vulnwatch.service;
+
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
+
+import com.prototype.vulnwatch.domain.AppUser;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.TenantSupportGrant;
+import com.prototype.vulnwatch.dto.TenantSupportGrantRequest;
+import com.prototype.vulnwatch.dto.TenantSupportGrantResponse;
+import com.prototype.vulnwatch.repo.AppUserRepository;
+import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.repo.TenantSupportGrantRepository;
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+@Service
+public class TenantSupportGrantService {
+
+    public static final String ACCESS_MODE_READ_ONLY = "READ_ONLY";
+    public static final String ACCESS_MODE_WRITE_ENABLED = "WRITE_ENABLED";
+
+    private final TenantSupportGrantRepository tenantSupportGrantRepository;
+    private final TenantRepository tenantRepository;
+    private final AppUserRepository appUserRepository;
+    private final TenantLifecycleGuardService tenantLifecycleGuardService;
+
+    public TenantSupportGrantService(
+            TenantSupportGrantRepository tenantSupportGrantRepository,
+            TenantRepository tenantRepository,
+            AppUserRepository appUserRepository,
+            TenantLifecycleGuardService tenantLifecycleGuardService
+    ) {
+        this.tenantSupportGrantRepository = tenantSupportGrantRepository;
+        this.tenantRepository = tenantRepository;
+        this.appUserRepository = appUserRepository;
+        this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantSupportGrantResponse> listForTenant(UUID tenantId) {
+        return tenantSupportGrantRepository.findByTenant_IdOrderByRequestedAtDesc(tenantId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantSupportGrantResponse> listForPlatformOwner(String subject) {
+        return tenantSupportGrantRepository.findByInvitedPlatformSubjectIgnoreCaseOrderByRequestedAtDesc(normalizeSubject(subject)).stream()
+                .map(this::refreshExpiredStatus)
+                .sorted(Comparator.comparing(TenantSupportGrant::getRequestedAt).reversed())
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    public TenantSupportGrantResponse create(UUID tenantId, String grantedBySubject, TenantSupportGrantRequest request) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Tenant not found"));
+        AppUser grantedBy = appUserRepository.findByExternalSubject(requireText(grantedBySubject, "grantedBySubject"))
+                .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authenticated user is not registered"));
+
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setTenant(tenant);
+        grant.setGrantedBy(grantedBy);
+        grant.setInvitedPlatformSubject(normalizeSubject(request.invitedPlatformSubject()));
+        grant.setReason(requireText(request.reason(), "reason"));
+        grant.setScope(blankToNull(request.scope()));
+        grant.setAccessMode(normalizeAccessMode(request.accessMode()));
+        grant.setStatus("PENDING");
+        grant.setRequestedAt(Instant.now());
+        grant.setExpiresAt(request.expiresAt());
+        grant.setUpdatedAt(Instant.now());
+        return toResponse(tenantSupportGrantRepository.save(grant));
+    }
+
+    @Transactional
+    public TenantSupportGrantResponse accept(UUID grantId, String platformSubject) {
+        TenantSupportGrant grant = tenantSupportGrantRepository.findById(grantId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Support grant not found"));
+        refreshExpiredStatus(grant);
+        String normalizedSubject = normalizeSubject(platformSubject);
+        if (!normalizedSubject.equalsIgnoreCase(grant.getInvitedPlatformSubject())) {
+            throw new ResponseStatusException(FORBIDDEN, "Support grant is not assigned to the current platform owner");
+        }
+        if (!"PENDING".equalsIgnoreCase(grant.getStatus()) && !"ACTIVE".equalsIgnoreCase(grant.getStatus())) {
+            throw new ResponseStatusException(FORBIDDEN, "Support grant is not available for acceptance");
+        }
+        if (grant.getExpiresAt() == null || !grant.getExpiresAt().isAfter(Instant.now())) {
+            markExpired(grant);
+            throw new ResponseStatusException(FORBIDDEN, "Support grant has expired");
+        }
+        AppUser acceptedBy = appUserRepository.findByExternalSubject(normalizedSubject)
+                .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authenticated platform owner is not registered"));
+        grant.setAcceptedBy(acceptedBy);
+        if (grant.getAcceptedAt() == null) {
+            grant.setAcceptedAt(Instant.now());
+        }
+        grant.setStatus("ACTIVE");
+        grant.setUpdatedAt(Instant.now());
+        return toResponse(tenantSupportGrantRepository.save(grant));
+    }
+
+    @Transactional
+    public TenantSupportGrantResponse revoke(UUID tenantId, UUID grantId, String revokedBySubject) {
+        TenantSupportGrant grant = tenantSupportGrantRepository.findById(grantId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Support grant not found"));
+        if (!grant.getTenant().getId().equals(tenantId)) {
+            throw new ResponseStatusException(FORBIDDEN, "Support grant does not belong to the selected tenant");
+        }
+        AppUser revokedBy = appUserRepository.findByExternalSubject(requireText(revokedBySubject, "revokedBySubject"))
+                .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authenticated user is not registered"));
+        grant.setRevokedBy(revokedBy);
+        grant.setRevokedAt(Instant.now());
+        grant.setStatus("REVOKED");
+        grant.setUpdatedAt(Instant.now());
+        return toResponse(tenantSupportGrantRepository.save(grant));
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantSupportGrant> listActiveGrantsForPlatformOwner(String subject) {
+        return tenantSupportGrantRepository.findActiveByInvitedPlatformSubject(normalizeSubject(subject), Instant.now()).stream()
+                .map(this::refreshExpiredStatus)
+                .filter(grant -> "ACTIVE".equalsIgnoreCase(grant.getStatus()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<TenantSupportGrant> findActiveGrant(String subject, UUID tenantId) {
+        return tenantSupportGrantRepository.findActiveByInvitedPlatformSubjectAndTenantId(
+                        normalizeSubject(subject),
+                        tenantId,
+                        Instant.now())
+                .stream()
+                .map(this::refreshExpiredStatus)
+                .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
+                .filter(grant -> "ACTIVE".equalsIgnoreCase(grant.getStatus()))
+                .findFirst();
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasActiveGrant(String subject, UUID tenantId) {
+        return findActiveGrant(subject, tenantId).isPresent();
+    }
+
+    @Transactional
+    public void requireActiveGrant(String subject, UUID tenantId) {
+        if (tenantId == null || !hasActiveGrant(subject, tenantId)) {
+            throw new ResponseStatusException(FORBIDDEN, "Platform owner does not have active support access for this tenant");
+        }
+    }
+
+    @Transactional
+    public TenantSupportGrant requireActiveGrantForWrite(String subject, UUID tenantId) {
+        TenantSupportGrant grant = findActiveGrant(subject, tenantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        FORBIDDEN,
+                        "Platform owner does not have active support access for this tenant"));
+        if (!isWriteEnabled(grant.getAccessMode())) {
+            throw new ResponseStatusException(
+                    FORBIDDEN,
+                    "This support session is read-only. Request a write-enabled support grant to modify tenant data.");
+        }
+        return grant;
+    }
+
+    public boolean isWriteEnabled(String accessMode) {
+        return ACCESS_MODE_WRITE_ENABLED.equals(normalizeAccessMode(accessMode));
+    }
+
+    private TenantSupportGrant refreshExpiredStatus(TenantSupportGrant grant) {
+        if (grant.getRevokedAt() == null
+                && grant.getExpiresAt() != null
+                && !grant.getExpiresAt().isAfter(Instant.now())
+                && !"EXPIRED".equalsIgnoreCase(grant.getStatus())) {
+            markExpired(grant);
+        }
+        return grant;
+    }
+
+    private void markExpired(TenantSupportGrant grant) {
+        grant.setStatus("EXPIRED");
+        grant.setUpdatedAt(Instant.now());
+        tenantSupportGrantRepository.save(grant);
+    }
+
+    private TenantSupportGrantResponse toResponse(TenantSupportGrant grant) {
+        return new TenantSupportGrantResponse(
+                grant.getId(),
+                grant.getTenant().getId(),
+                grant.getTenant().getName(),
+                grant.getInvitedPlatformSubject(),
+                grant.getReason(),
+                grant.getScope(),
+                grant.getAccessMode(),
+                grant.getStatus(),
+                grant.getGrantedBy() == null ? null : grant.getGrantedBy().getExternalSubject(),
+                grant.getAcceptedBy() == null ? null : grant.getAcceptedBy().getExternalSubject(),
+                grant.getRevokedBy() == null ? null : grant.getRevokedBy().getExternalSubject(),
+                grant.getRequestedAt(),
+                grant.getAcceptedAt(),
+                grant.getExpiresAt(),
+                grant.getRevokedAt()
+        );
+    }
+
+    private String normalizeSubject(String subject) {
+        return requireText(subject, "invitedPlatformSubject").toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeAccessMode(String accessMode) {
+        String normalized = blankToNull(accessMode);
+        if (normalized == null) {
+            return ACCESS_MODE_READ_ONLY;
+        }
+        String canonical = normalized.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        if (ACCESS_MODE_READ_ONLY.equals(canonical) || ACCESS_MODE_WRITE_ENABLED.equals(canonical)) {
+            return canonical;
+        }
+        throw new ResponseStatusException(FORBIDDEN, "accessMode must be READ_ONLY or WRITE_ENABLED");
+    }
+
+    private String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new ResponseStatusException(FORBIDDEN, field + " is required");
+        }
+        return value.trim();
+    }
+}

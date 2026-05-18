@@ -44,6 +44,18 @@ public class Tenant {
 
     private Instant demoExpiresAt;
 
+    private Instant expiredAt;
+
+    private Instant purgeStartedAt;
+
+    private Instant purgedAt;
+
+    @Column(length = 32)
+    private String purgeStatus;
+
+    @Column(length = 2000)
+    private String purgeError;
+
     @Column(length = 255)
     private String demoCreatedBy;
 
@@ -175,6 +187,46 @@ public class Tenant {
 
     public void setDemoSource(String demoSource) {
         this.demoSource = demoSource;
+    }
+
+    public Instant getExpiredAt() {
+        return expiredAt;
+    }
+
+    public void setExpiredAt(Instant expiredAt) {
+        this.expiredAt = expiredAt;
+    }
+
+    public Instant getPurgeStartedAt() {
+        return purgeStartedAt;
+    }
+
+    public void setPurgeStartedAt(Instant purgeStartedAt) {
+        this.purgeStartedAt = purgeStartedAt;
+    }
+
+    public Instant getPurgedAt() {
+        return purgedAt;
+    }
+
+    public void setPurgedAt(Instant purgedAt) {
+        this.purgedAt = purgedAt;
+    }
+
+    public String getPurgeStatus() {
+        return purgeStatus;
+    }
+
+    public void setPurgeStatus(String purgeStatus) {
+        this.purgeStatus = purgeStatus;
+    }
+
+    public String getPurgeError() {
+        return purgeError;
+    }
+
+    public void setPurgeError(String purgeError) {
+        this.purgeError = purgeError;
     }
 
     public Integer getMaxConnectorCount() {

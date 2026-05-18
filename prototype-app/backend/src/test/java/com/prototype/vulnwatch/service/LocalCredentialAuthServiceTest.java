@@ -46,6 +46,11 @@ class LocalCredentialAuthServiceTest {
     @Mock
     private TenantMembershipRepository membershipRepository;
 
+    @Mock
+    private TenantSupportGrantService tenantSupportGrantService;
+    @Mock
+    private TenantLifecycleGuardService tenantLifecycleGuardService;
+
     @Test
     void platformOwnerLoginReturnsPlatformScopeToken() {
         AppUser existingUser = new AppUser();
@@ -60,6 +65,8 @@ class LocalCredentialAuthServiceTest {
                 tenantRepository,
                 membershipRepository,
                 authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
                 "owner@example.com",
                 BCrypt.hashpw("password-123", BCrypt.gensalt(10))
         );
@@ -94,6 +101,8 @@ class LocalCredentialAuthServiceTest {
                 tenantRepository,
                 membershipRepository,
                 authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
                 "owner@example.com",
                 BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
         );
@@ -127,6 +136,8 @@ class LocalCredentialAuthServiceTest {
                 tenantRepository,
                 membershipRepository,
                 authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
                 "owner@example.com",
                 BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
         );

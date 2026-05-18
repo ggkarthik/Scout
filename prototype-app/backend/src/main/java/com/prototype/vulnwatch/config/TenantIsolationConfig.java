@@ -13,6 +13,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -48,9 +50,37 @@ public class TenantIsolationConfig {
     @Primary
     public DataSource dataSource(
             HikariDataSource hikariDataSource,
-            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext
     ) {
         return new TenantAwareDataSource(hikariDataSource, requireTenantContext);
+    }
+
+    /**
+     * Unscoped JdbcTemplate for platform-plane flows that must operate outside
+     * tenant RLS, including global ingestion jobs and irreversible purge/reset operations.
+     */
+    @Bean(name = "prototypeResetJdbcTemplate")
+    public JdbcTemplate prototypeResetJdbcTemplate(HikariDataSource hikariDataSource) {
+        return new JdbcTemplate(hikariDataSource);
+    }
+
+    @Bean(name = "platformJdbcTemplate")
+    public JdbcTemplate platformJdbcTemplate(HikariDataSource hikariDataSource) {
+        return new JdbcTemplate(hikariDataSource);
+    }
+
+    /**
+     * Dedicated transaction manager for platform-plane operations that should
+     * bypass the tenant-aware datasource wrapper.
+     */
+    @Bean(name = "prototypeResetTransactionManager")
+    public PlatformTransactionManager prototypeResetTransactionManager(HikariDataSource hikariDataSource) {
+        return new DataSourceTransactionManager(hikariDataSource);
+    }
+
+    @Bean(name = "platformTransactionManager")
+    public PlatformTransactionManager platformTransactionManager(HikariDataSource hikariDataSource) {
+        return new DataSourceTransactionManager(hikariDataSource);
     }
 
     /**
@@ -71,8 +101,8 @@ public class TenantIsolationConfig {
     public FilterRegistrationBean<Filter> tenantResolutionFilter(
             WorkspaceService workspaceService,
             TenantService tenantService,
-            @org.springframework.beans.factory.annotation.Value("${app.tenancy.allow-header-tenant-selection:true}") boolean allowHeaderTenantSelection,
-            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:false}") boolean requireTenantContext
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.allow-header-tenant-selection:false}") boolean allowHeaderTenantSelection,
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext
     ) {
         FilterRegistrationBean<Filter> reg = new FilterRegistrationBean<>(
                 new TenantResolutionFilter(workspaceService, tenantService, allowHeaderTenantSelection, requireTenantContext));

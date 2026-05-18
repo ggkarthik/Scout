@@ -70,8 +70,8 @@ app:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}
   tenancy:
-    allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:true}
-    require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:false}
+    allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:false}
+    require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}

@@ -8,6 +8,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -16,7 +18,8 @@ import java.util.UUID;
 @Table(
         name = "github_sbom_sources",
         indexes = {
-                @Index(name = "idx_github_sbom_sources_enabled", columnList = "enabled,last_run_at")
+                @Index(name = "idx_github_sbom_sources_enabled", columnList = "enabled,last_run_at"),
+                @Index(name = "idx_github_sbom_sources_tenant", columnList = "tenant_id,enabled,created_at")
         }
 )
 public class GithubSbomSource {
@@ -24,6 +27,10 @@ public class GithubSbomSource {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    @ManyToOne(optional = true)
+    @JoinColumn(name = "tenant_id")
+    private Tenant tenant;
 
     @Column(nullable = false, length = 255)
     private String name;
@@ -74,6 +81,14 @@ public class GithubSbomSource {
 
     public UUID getId() {
         return id;
+    }
+
+    public Tenant getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
     }
 
     public String getName() {

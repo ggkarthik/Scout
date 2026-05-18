@@ -18,13 +18,15 @@ class WorkspaceServiceTest {
 
     @Mock
     private TenantService tenantService;
+    @Mock
+    private TenantLifecycleGuardService tenantLifecycleGuardService;
 
     @Test
     void cachesWorkspaceAfterFirstResolution() {
         Tenant tenant = tenant("Primary Workspace");
         when(tenantService.getDefaultTenant()).thenReturn(tenant);
 
-        WorkspaceService workspaceService = new WorkspaceService(tenantService, false);
+        WorkspaceService workspaceService = new WorkspaceService(tenantService, tenantLifecycleGuardService, false);
 
         Tenant first = workspaceService.getWorkspace();
         Tenant second = workspaceService.getWorkspace();
@@ -41,7 +43,7 @@ class WorkspaceServiceTest {
         Tenant refreshed = tenant("Workspace B");
         when(tenantService.getDefaultTenant()).thenReturn(initial, refreshed);
 
-        WorkspaceService workspaceService = new WorkspaceService(tenantService, false);
+        WorkspaceService workspaceService = new WorkspaceService(tenantService, tenantLifecycleGuardService, false);
 
         assertSame(initial, workspaceService.getWorkspace());
         assertSame(refreshed, workspaceService.refreshWorkspace());

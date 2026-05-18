@@ -23,6 +23,7 @@ import com.prototype.vulnwatch.service.RiskPolicyService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbSyncService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.Optional;
 import java.util.Set;
@@ -77,6 +78,8 @@ class RbacControllerSecurityIntegrationTest {
     private JwtDecoder jwtDecoder;
     @MockBean
     private JwtTenantAuthenticationService jwtTenantAuthenticationService;
+    @MockBean
+    private TenantSupportGrantService tenantSupportGrantService;
 
     private UUID tenantId;
 

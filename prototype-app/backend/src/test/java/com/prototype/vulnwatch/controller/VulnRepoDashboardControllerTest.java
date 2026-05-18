@@ -136,7 +136,10 @@ class VulnRepoDashboardControllerTest {
                         null,
                         java.util.List.of(),
                         null,
-                        null
+                        null,
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of()
                 )),
                 1,
                 25,

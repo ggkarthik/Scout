@@ -85,7 +85,7 @@ public class FindingController {
     }
 
     @PutMapping("/{findingId}/workflow")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("finding.workflow.updated")
     public Finding updateWorkflow(
             @PathVariable UUID findingId,
@@ -95,7 +95,7 @@ public class FindingController {
     }
 
     @PostMapping("/bulk-workflow")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("finding.workflow.bulk_updated")
     public FindingBulkWorkflowResponse bulkUpdateWorkflow(
             @RequestBody FindingBulkWorkflowRequest request
@@ -122,7 +122,7 @@ public class FindingController {
     public record BulkDeleteResponse(int deleted, String message) {}
 
     @DeleteMapping("/bulk")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
     @SensitiveTenantAction("finding.bulk_deleted")
     public ResponseEntity<BulkDeleteResponse> bulkDelete(@RequestBody BulkDeleteRequest request) {
         if (request.findingIds() == null || request.findingIds().isEmpty()) {
