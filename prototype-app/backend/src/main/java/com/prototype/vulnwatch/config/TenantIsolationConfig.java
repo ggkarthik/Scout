@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -56,6 +57,16 @@ public class TenantIsolationConfig {
     }
 
     /**
+     * Default tenant-aware JdbcTemplate for the application's ordinary read/write
+     * flows. Platform-plane jobs use the explicitly qualified templates below.
+     */
+    @Bean
+    @Primary
+    public JdbcTemplate jdbcTemplate(DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    /**
      * Unscoped JdbcTemplate for platform-plane flows that must operate outside
      * tenant RLS, including global ingestion jobs and irreversible purge/reset operations.
      */
@@ -67,6 +78,15 @@ public class TenantIsolationConfig {
     @Bean(name = "platformJdbcTemplate")
     public JdbcTemplate platformJdbcTemplate(HikariDataSource hikariDataSource) {
         return new JdbcTemplate(hikariDataSource);
+    }
+
+    /**
+     * Spring Boot normally auto-configures this, but that backs off once we
+     * provide our own DataSource/JdbcTemplate stack for tenant isolation.
+     */
+    @Bean
+    public NamedParameterJdbcTemplate namedParameterJdbcTemplate(DataSource dataSource) {
+        return new NamedParameterJdbcTemplate(dataSource);
     }
 
     /**
