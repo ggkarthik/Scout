@@ -45,6 +45,9 @@ public class TenantQuotaService {
 
     @Transactional(readOnly = true)
     public void assertCanCreateConnector(Tenant tenant, String connectorType) {
+        if (isUnlimitedDemoConnectorMode(tenant)) {
+            return;
+        }
         int max = safeLimit(tenant.getMaxConnectorCount());
         long current = countConnectors(tenant.getId());
         if (current >= max) {
@@ -109,5 +112,11 @@ public class TenantQuotaService {
 
     private int safeLimit(Integer value) {
         return value == null ? 0 : Math.max(0, value);
+    }
+
+    private boolean isUnlimitedDemoConnectorMode(Tenant tenant) {
+        return tenant != null
+                && "DEMO".equalsIgnoreCase(tenant.getPlanCode())
+                && safeLimit(tenant.getMaxConnectorCount()) == 0;
     }
 }
