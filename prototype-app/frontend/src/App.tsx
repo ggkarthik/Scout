@@ -647,12 +647,12 @@ function AppShell() {
   const inventoryAssetsQuery = useQuery({
     queryKey: ['inventory-nav-assets'],
     queryFn: api.listAssets,
-    enabled: activeTab === 'inventory'
+    enabled: activeTab === 'inventory' && !platformScopeOwner
   });
   const inventorySoftwareQuery = useQuery({
     queryKey: ['inventory-nav-software-identities'],
     queryFn: () => api.listSoftwareIdentities({ page: 0, size: 1 }),
-    enabled: activeTab === 'inventory'
+    enabled: activeTab === 'inventory' && !platformScopeOwner
   });
   const inventoryPillCounts = React.useMemo(() => {
     const assets = inventoryAssetsQuery.data ?? [];
