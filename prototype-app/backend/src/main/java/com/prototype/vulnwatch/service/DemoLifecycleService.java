@@ -314,7 +314,7 @@ public class DemoLifecycleService {
         tenant.setDemoExpiresAt(expiresAt);
         tenant.setDemoCreatedBy(trimToNull(actor));
         tenant.setDemoSource("REQUEST_REVIEW");
-        tenant.setMaxConnectorCount(0);
+        tenant.setMaxConnectorCount(25);
         tenant.setMaxServiceAccountCount(0);
         tenant.setMaxDailySbomUploads(5);
         tenant.setMaxDailyExposureRefreshes(3);
