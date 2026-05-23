@@ -223,21 +223,25 @@ export function FindingDetailPage() {
   const [hostAssetId, setHostAssetId] = React.useState<string | null>(null);
   const [hostAsset, setHostAsset] = React.useState<HostAssetSummary | null>(null);
 
-  React.useEffect(() => {
-    if (!currentFinding) return;
-    cveWorkbenchApi.getCveDetail(currentFinding.vulnerabilityId)
-      .then(d => setCveDetail(d))
-      .catch(() => setCveDetail(null));
-    cveWorkbenchApi.getSavedAiSolution(currentFinding.vulnerabilityId)
-      .then(r => setAiSolution(r))
-      .catch(() => setAiSolution(null));
-  }, [currentFinding?.vulnerabilityId]);
+  const findingVulnId = currentFinding?.vulnerabilityId;
+  const findingAssetIdentifier = currentFinding?.assetIdentifier;
+  const findingAssetName = currentFinding?.assetName;
 
   React.useEffect(() => {
-    if (!currentFinding) return;
+    if (!findingVulnId) return;
+    cveWorkbenchApi.getCveDetail(findingVulnId)
+      .then(d => setCveDetail(d))
+      .catch(() => setCveDetail(null));
+    cveWorkbenchApi.getSavedAiSolution(findingVulnId)
+      .then(r => setAiSolution(r))
+      .catch(() => setAiSolution(null));
+  }, [findingVulnId]);
+
+  React.useEffect(() => {
+    if (!findingAssetIdentifier) return;
     api.listAssets().then(assets => {
       const match = assets.find(
-        a => a.identifier === currentFinding.assetIdentifier || a.name === currentFinding.assetName
+        a => a.identifier === findingAssetIdentifier || a.name === findingAssetName
       );
       if (match) {
         setHostAssetId(match.id);
@@ -246,7 +250,7 @@ export function FindingDetailPage() {
           .catch(() => {});
       }
     }).catch(() => {});
-  }, [currentFinding?.assetIdentifier]);
+  }, [findingAssetIdentifier, findingAssetName]);
 
   if (!currentFinding) {
     return (

@@ -529,7 +529,7 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
       openFindings: { content: item.openFindings.toLocaleString() },
       lastEvaluated: { content: formatDateTime(item.lastEvaluatedAt) }
     }
-  })), [navigate, selectedCves, toggleCve, vulnerabilities]);
+  })), [navigate, vulnerabilities]);
 
   const findingRows = React.useMemo<DataTableRow[]>(() => findings.map((f) => ({
     id: f.id,

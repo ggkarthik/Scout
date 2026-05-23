@@ -2179,6 +2179,7 @@ function InvestigationCanvas({
     logEntries,
     runbookTasks,
     solutionEntries,
+    resolvedInventory,
   ]);
 
   React.useEffect(() => {
@@ -2410,7 +2411,7 @@ function InvestigationCanvas({
     }
   }
 
-  async function runFalsePositiveAssessment(): Promise<void> {
+  const runFalsePositiveAssessment = React.useCallback(async (): Promise<void> => {
     const resolved = await resolveInventorySoftware(assetCriteria);
     setResolvedInventory(resolved);
     const allFpResults = buildFalsePositiveResults(detail, resolved);
@@ -2425,7 +2426,7 @@ function InvestigationCanvas({
     setFalsePositiveResultsExpanded(true);
     setFalsePositiveRan(true);
     onRunTask('find-false-positive');
-  }
+  }, [assetCriteria, assetResults, detail, onRunTask]);
 
   async function generateSolutionsForRows(): Promise<void> {
     const rowsToGenerate = solutionRows.filter((row) => {
@@ -2558,7 +2559,7 @@ function InvestigationCanvas({
       void runFalsePositiveAssessment();
     }
     setSelectedTaskId(taskId);
-  }, [assessmentDirty, assetAssessmentRan, falsePositiveRan, selectedTaskId]);
+  }, [assessmentDirty, assetAssessmentRan, falsePositiveRan, selectedTaskId, runFalsePositiveAssessment]);
 
   const moveTask = React.useCallback((direction: -1 | 1): void => {
     if (selectedTaskIndex < 0) return;
@@ -5961,6 +5962,8 @@ function NotifyGroupsPanel({ item, detail, availableGroups, dueDate, onNotified 
   );
 }
 
+const EXT_FACING_TOKENS = ['public', 'internet', 'edge', 'gateway', 'vpn', 'dmz', 'web', 'api', 'proxy'];
+
 // --- Main Component ---
 
 export function VulnRepoCveAssessmentWorkbench({
@@ -6146,7 +6149,7 @@ export function VulnRepoCveAssessmentWorkbench({
     cveWorkbenchApi.listAssignmentGroups()
       .then((groups) => setAvailableGroups(groups))
       .catch(() => { /* best-effort */ });
-  }, [findingConfigOpen, activeStep]);
+  }, [findingConfigOpen, activeStep, availableGroups.length]);
 
   // Unsaved-changes guard
   const seedNotesRef = React.useRef('');
@@ -6302,7 +6305,7 @@ export function VulnRepoCveAssessmentWorkbench({
     setVexEvidenceByComponent({});
     setVexEvidenceErrors({});
     setVexEvidenceLoadingComponentId(null);
-  }, [detail, item.externalId, latestAssessment, latestInvestigation]);
+  }, [detail, item.externalId, latestAssessment, latestInvestigation, analystId]);
 
   const loadPersistedFindingIds = React.useCallback(async (): Promise<void> => {
     try {
@@ -6585,7 +6588,6 @@ export function VulnRepoCveAssessmentWorkbench({
     return [...scopedRows, ...baseRows.filter((row) => !scopedIds.has(row.software.componentId))];
   }, [currentApplicableSoftware, applicabilityDecisions, impactDecisions, findingShowFilter, detail, persistedRunbookState]);
 
-  const extFacingTokens = ['public','internet','edge','gateway','vpn','dmz','web','api','proxy'];
   const filteredFindingSoftware = React.useMemo<FindingDisplayRow[]>(() => {
     const normalizedQuery = normalizedAssetInventorySearch(findingSearchQuery);
     return findingRows.filter((row) => {
@@ -6594,7 +6596,7 @@ export function VulnRepoCveAssessmentWorkbench({
       if (findingExternalFacingOnly) {
         const haystack = [row.software.assetName, row.software.assetIdentifier, row.software.packageName]
           .filter(Boolean).join(' ').toLowerCase();
-        if (!extFacingTokens.some(t => haystack.includes(t))) return false;
+        if (!EXT_FACING_TOKENS.some(t => haystack.includes(t))) return false;
       }
       if (!normalizedQuery) return true;
       const searchBlob = [
