@@ -63,23 +63,9 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
             @Param("before") Instant before
     );
     List<InventoryComponent> findByTenant(Tenant tenant);
-    List<InventoryComponent> findByTenantOrderByLastObservedAtDesc(Tenant tenant);
     List<InventoryComponent> findByComponentStatus(InventoryComponentStatus status);
-    List<InventoryComponent> findByTenantAndComponentStatusOrderByLastObservedAtDesc(
-            Tenant tenant,
-            InventoryComponentStatus status
-    );
-    List<InventoryComponent> findByTenantAndAsset_TypeOrderByLastObservedAtDesc(
-            Tenant tenant,
-            AssetType assetType
-    );
-    List<InventoryComponent> findByTenantAndAsset_TypeAndComponentStatusOrderByLastObservedAtDesc(
-            Tenant tenant,
-            AssetType assetType,
-            InventoryComponentStatus status
-    );
-    long countByTenant(Tenant tenant);
-    long countByTenantAndComponentStatus(Tenant tenant, InventoryComponentStatus status);
+    List<InventoryComponent> findByComponentStatusOrderByLastObservedAtDesc(InventoryComponentStatus status);
+    long countByComponentStatus(InventoryComponentStatus status);
     List<InventoryComponent> findByAsset(Asset asset);
     List<InventoryComponent> findByAsset_IdIn(Collection<UUID> assetIds);
     List<InventoryComponent> findByAssetAndComponentStatus(Asset asset, InventoryComponentStatus status);

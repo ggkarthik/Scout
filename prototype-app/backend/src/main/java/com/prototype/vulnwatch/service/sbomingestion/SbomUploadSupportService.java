@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
+import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,23 +25,25 @@ public class SbomUploadSupportService {
     private final AssetRepository assetRepository;
     private final SbomUploadRepository sbomUploadRepository;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SbomUploadSupportService(
             AssetRepository assetRepository,
             SbomUploadRepository sbomUploadRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.assetRepository = assetRepository;
         this.sbomUploadRepository = sbomUploadRepository;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public List<SbomUploadEvidenceResponse> listUploads(Tenant tenant, String sourceSystem) {
-        List<SbomUpload> uploads = sourceSystem == null || sourceSystem.isBlank()
-                ? sbomUploadRepository.findByTenantOrderByUploadedAtDesc(tenant)
-                : sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(
-                        tenant,
-                        sourceSystem.trim());
+        List<SbomUpload> uploads = tenantSchemaExecutionService.run(tenant, () ->
+                sourceSystem == null || sourceSystem.isBlank()
+                        ? sbomUploadRepository.findAllByOrderByUploadedAtDesc()
+                        : sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(sourceSystem.trim()));
         return uploads.stream()
                 .map(upload -> new SbomUploadEvidenceResponse(
                         upload.getId(),
@@ -67,7 +70,7 @@ public class SbomUploadSupportService {
     }
 
     public Asset resolveAsset(Tenant tenant, AssetType assetType, String assetName, String assetIdentifier) {
-        return assetRepository.findByTenantAndIdentifier(tenant, assetIdentifier)
+        return tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByIdentifier(assetIdentifier)
                 .orElseGet(() -> {
                     Asset created = new Asset();
                     created.setTenant(tenant);
@@ -77,10 +80,10 @@ public class SbomUploadSupportService {
                     try {
                         return assetRepository.save(created);
                     } catch (DataIntegrityViolationException e) {
-                        return assetRepository.findByTenantAndIdentifier(tenant, assetIdentifier)
+                        return assetRepository.findByIdentifier(assetIdentifier)
                                 .orElseThrow(() -> e);
                     }
-                });
+                }));
     }
 
     public Asset saveAsset(Asset asset) {

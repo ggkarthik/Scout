@@ -73,6 +73,7 @@ function buildFinding(overrides: Partial<Finding> = {}): Finding {
     packageVersion: '1.0',
     vulnerabilityId: 'v-1',
     source: 'NVD',
+    creationSource: 'AUTOMATIC',
     severity: 'MEDIUM',
     inKev: false,
     riskScore: 0,

@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -13,6 +15,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.FindingDeltaQueueEntry;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingDeltaQueueEntryRepository;
 import java.lang.reflect.Field;
@@ -47,6 +50,9 @@ class FindingDeltaQueueServiceTest {
     @Mock
     private DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
 
+    @Mock
+    private TenantService tenantService;
+
     private FindingDeltaQueueService service;
 
     @BeforeEach
@@ -55,8 +61,15 @@ class FindingDeltaQueueServiceTest {
                 repository,
                 componentVulnerabilityStateRepository,
                 findingRecomputeService,
-                dashboardNoiseReductionProjectionService
+                dashboardNoiseReductionProjectionService,
+                tenantService
         );
+        lenient().when(tenantService.resolveTenantUuid(any())).thenAnswer(invocation -> {
+            Tenant tenant = new Tenant();
+            tenant.setId((UUID) invocation.getArgument(0));
+            tenant.setSchemaName("tenant_test");
+            return tenant;
+        });
     }
 
     // ----------------------------------------------------------------

@@ -28,10 +28,16 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     private static final String NO_TENANT_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
     private final boolean requireTenantContext;
+    private final String defaultTenantSchema;
 
-    public TenantAwareDataSource(javax.sql.DataSource targetDataSource, boolean requireTenantContext) {
+    public TenantAwareDataSource(
+            javax.sql.DataSource targetDataSource,
+            boolean requireTenantContext,
+            String defaultTenantSchema
+    ) {
         super(targetDataSource);
         this.requireTenantContext = requireTenantContext;
+        this.defaultTenantSchema = defaultTenantSchema;
     }
 
     @Override
@@ -50,10 +56,16 @@ public class TenantAwareDataSource extends DelegatingDataSource {
 
     private void applyTenantContext(Connection conn) throws SQLException {
         UUID tenantId = TenantContext.getCurrentTenantId();
+        String schemaName = normalizeSchemaName(TenantContext.getCurrentSchemaName());
         String value = tenantId != null ? tenantId.toString() : requireTenantContext ? NO_TENANT_SENTINEL : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
             ps.setString(1, value);
+            ps.execute();
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT set_config('search_path', ?, FALSE)")) {
+            ps.setString(1, schemaName + ",platform");
             ps.execute();
         }
     }
@@ -71,11 +83,19 @@ public class TenantAwareDataSource extends DelegatingDataSource {
                     if ("close".equals(method.getName())) {
                         try (Statement stmt = target.createStatement()) {
                             stmt.execute("RESET app.current_tenant_id");
+                            stmt.execute("RESET search_path");
                         } catch (SQLException ignored) {
                             // Best-effort: connection still returned to pool.
                         }
                     }
                     return method.invoke(target, args);
                 });
+    }
+
+    private String normalizeSchemaName(String schemaName) {
+        if (schemaName == null || schemaName.isBlank()) {
+            return defaultTenantSchema;
+        }
+        return schemaName.trim();
     }
 }

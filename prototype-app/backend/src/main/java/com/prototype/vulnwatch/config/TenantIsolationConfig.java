@@ -51,9 +51,10 @@ public class TenantIsolationConfig {
     @Primary
     public DataSource dataSource(
             HikariDataSource hikariDataSource,
-            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.default-schema:tenant_default}") String defaultSchemaName
     ) {
-        return new TenantAwareDataSource(hikariDataSource, requireTenantContext);
+        return new TenantAwareDataSource(hikariDataSource, requireTenantContext, defaultSchemaName);
     }
 
     /**

@@ -1,7 +1,6 @@
 package com.prototype.vulnwatch.repo;
 
 import com.prototype.vulnwatch.domain.FixRecord;
-import com.prototype.vulnwatch.domain.Tenant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,12 +10,23 @@ import org.springframework.data.repository.query.Param;
 
 public interface FixRecordRepository extends JpaRepository<FixRecord, UUID> {
 
-    List<FixRecord> findByTenantAndCveIdOrderByCreatedAtAsc(Tenant tenant, String cveId);
+    List<FixRecord> findByCveIdOrderByCreatedAtAsc(String cveId);
 
-    @Query("SELECT f FROM FixRecord f WHERE f.tenant = :tenant AND f.softwareEntitiesJson LIKE :nameLike ORDER BY f.createdAt ASC")
-    List<FixRecord> findByTenantAndSoftwareNameContaining(@Param("tenant") Tenant tenant, @Param("nameLike") String nameLike);
+    @Query(
+            value = """
+                    SELECT *
+                    FROM fix_records f
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(coalesce(f.software_entities, '[]'::jsonb)) AS elem
+                        WHERE upper(coalesce(elem->>'name', '')) LIKE upper(concat('%', :software, '%'))
+                      )
+                    ORDER BY f.created_at ASC
+                    """,
+            nativeQuery = true
+    )
+    List<FixRecord> findBySoftwareNameContaining(@Param("software") String software);
 
     @Modifying
-    @Query("delete from FixRecord f where f.tenant = :tenant and f.cveId = :cveId")
-    void deleteByTenantAndCveId(@Param("tenant") Tenant tenant, @Param("cveId") String cveId);
+    void deleteByCveId(String cveId);
 }

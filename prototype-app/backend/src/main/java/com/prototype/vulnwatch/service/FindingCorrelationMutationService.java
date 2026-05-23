@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.ImpactState;
@@ -192,6 +193,7 @@ public class FindingCorrelationMutationService {
         finding.setVulnerability(vulnerability);
         finding.setStatus(FindingStatus.OPEN);
         finding.setDecisionState(FindingDecisionState.AFFECTED);
+        finding.setCreationSource(FindingCreationSource.AUTOMATIC);
         finding.setMatchedBy(selected.matchedBy());
         finding.setRiskScore(riskScore);
         finding.setConfidenceScore(selected.confidence());

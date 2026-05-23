@@ -33,8 +33,7 @@ public class LifecycleQualityIssueBuilder {
                     FROM inventory_components ic
                     LEFT JOIN findings f ON f.component_id = ic.id
                     LEFT JOIN component_vulnerability_states state ON state.component_id = ic.id
-                    WHERE ic.tenant_id = :tenantId
-                      AND ic.component_status = 'ACTIVE'
+                    WHERE ic.component_status = 'ACTIVE'
                       AND ic.software_identity_id IS NOT NULL
                     GROUP BY ic.software_identity_id
                 )
@@ -65,8 +64,7 @@ public class LifecycleQualityIssueBuilder {
                     coalesce(exposure.open_vulnerability_count, 0) AS open_vulnerability_count
                 FROM software_identity_summary sis
                 LEFT JOIN exposure ON exposure.software_identity_id = sis.software_identity_id
-                WHERE sis.tenant_id = :tenantId
-                  AND sis.needs_eol_mapping = true
+                WHERE sis.needs_eol_mapping = true
                 ORDER BY sis.last_observed_at DESC NULLS LAST, sis.display_name ASC
                 """;
         List<QualityIssueRecord> issues = new ArrayList<>();
@@ -120,8 +118,7 @@ public class LifecycleQualityIssueBuilder {
                     FROM inventory_components ic
                     LEFT JOIN findings f ON f.component_id = ic.id
                     LEFT JOIN component_vulnerability_states state ON state.component_id = ic.id
-                    WHERE ic.tenant_id = :tenantId
-                      AND ic.component_status = 'ACTIVE'
+                    WHERE ic.component_status = 'ACTIVE'
                       AND ic.software_identity_id IS NOT NULL
                     GROUP BY ic.software_identity_id
                 )
@@ -147,8 +144,7 @@ public class LifecycleQualityIssueBuilder {
                     coalesce(exposure.open_vulnerability_count, 0) AS open_vulnerability_count
                 FROM software_identity_summary sis
                 LEFT JOIN exposure ON exposure.software_identity_id = sis.software_identity_id
-                WHERE sis.tenant_id = :tenantId
-                  AND sis.needs_eol_mapping = false
+                WHERE sis.needs_eol_mapping = false
                   AND sis.eol_slug IS NOT NULL
                   AND sis.unknown_eol_component_count = sis.component_count
                   AND sis.component_count > 0
@@ -210,8 +206,7 @@ public class LifecycleQualityIssueBuilder {
                     FROM inventory_components ic
                     LEFT JOIN findings f ON f.component_id = ic.id
                     LEFT JOIN component_vulnerability_states state ON state.component_id = ic.id
-                    WHERE ic.tenant_id = :tenantId
-                      AND ic.component_status = 'ACTIVE'
+                    WHERE ic.component_status = 'ACTIVE'
                       AND ic.software_identity_id IS NOT NULL
                     GROUP BY ic.software_identity_id
                 )
@@ -237,8 +232,7 @@ public class LifecycleQualityIssueBuilder {
                     coalesce(exposure.open_vulnerability_count, 0) AS open_vulnerability_count
                 FROM software_identity_summary sis
                 LEFT JOIN exposure ON exposure.software_identity_id = sis.software_identity_id
-                WHERE sis.tenant_id = :tenantId
-                  AND sis.needs_eol_mapping = false
+                WHERE sis.needs_eol_mapping = false
                   AND sis.eol_slug IS NOT NULL
                   AND sis.unknown_eol_component_count > 0
                   AND sis.unknown_eol_component_count < sis.component_count

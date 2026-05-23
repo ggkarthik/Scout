@@ -54,6 +54,8 @@ public class FindingComponentRecomputeService {
     private final FindingSlaService findingSlaService;
     private final VulnerabilitySourceFilterConfigService vulnerabilitySourceFilterConfigService;
     private final VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final FindingUpsertService findingUpsertService;
 
     public FindingComponentRecomputeService(
             FindingRepository findingRepository,
@@ -72,7 +74,9 @@ public class FindingComponentRecomputeService {
             FindingCorrelationMutationService findingCorrelationMutationService,
             FindingSlaService findingSlaService,
             VulnerabilitySourceFilterConfigService vulnerabilitySourceFilterConfigService,
-            VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository
+            VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            FindingUpsertService findingUpsertService
     ) {
         this.findingRepository = findingRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
@@ -91,6 +95,8 @@ public class FindingComponentRecomputeService {
         this.findingSlaService = findingSlaService;
         this.vulnerabilitySourceFilterConfigService = vulnerabilitySourceFilterConfigService;
         this.vulnerabilityIntelSummarySourceRepository = vulnerabilityIntelSummarySourceRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.findingUpsertService = findingUpsertService;
     }
 
     @Transactional
@@ -186,7 +192,7 @@ public class FindingComponentRecomputeService {
     ) {
         List<Finding> existing = prefetchedFindings == null ? findingRepository.findByComponent(component) : prefetchedFindings;
         List<ComponentVulnerabilityState> existingStates = prefetchedStates == null
-                ? componentVulnerabilityStateRepository.findByTenantAndComponent(tenant, component)
+                ? tenantSchemaExecutionService.run(tenant, () -> componentVulnerabilityStateRepository.findByComponent(component))
                 : prefetchedStates;
         Set<UUID> touchedVulnerabilityIds = collectTouchedVulnerabilityIds(existing, existingStates);
         if (component.getAsset() == null
@@ -288,73 +294,79 @@ public class FindingComponentRecomputeService {
                     null
             );
             evidence = findingCorrelationMutationService.withVexOverlayEvidence(evidence, vexOverlay);
+            final PrecedenceResolverService.CandidateDecision selectedForUpsert = findingSelected;
+            final String evidenceForUpsert = evidence;
+            final double riskScoreForUpsert = riskScore;
 
-            boolean findingCreated = false;
-            if (finding == null) {
-                if (!isAutomaticFindingGenerationEnabled(policy)) {
-                    continue;
-                }
-                finding = findingCorrelationMutationService.createFinding(
-                        tenant,
-                        component.getAsset(),
-                        component,
-                        vulnerability,
-                        findingSelected,
-                        resolution,
-                        riskScore,
-                        evidence,
-                        now,
-                        policy
-                );
-                existingByVulnerability.put(vulnerability.getId(), finding);
-                createdFindings.add(finding);
-                findingCreated = true;
-            }
-            activeVulnerabilityIds.add(vulnerability.getId());
-
-            boolean findingChanged = findingCreated;
-            if (!findingCreated && finding.getStatus() == FindingStatus.RESOLVED) {
-                finding.setStatus(FindingStatus.OPEN);
-                findingChanged = true;
+            if (finding == null && !isAutomaticFindingGenerationEnabled(policy)) {
+                continue;
             }
 
-            FindingDecisionState nextDecisionState = impactAssessment.findingDecisionState();
-            if (!findingCreated && finding.getDecisionState() != nextDecisionState) {
-                findingChanged = true;
-            }
-            String nextMatchedBy = findingSelected.matchedBy();
-            if (!findingCreated && !Objects.equals(finding.getMatchedBy(), nextMatchedBy)) {
-                findingChanged = true;
-            }
-            if (!findingCreated && Double.compare(finding.getRiskScore(), riskScore) != 0) {
-                findingChanged = true;
-            }
-            Instant nextDueAt = findingSlaService.deriveDueAt(finding.getFirstObservedAt(), riskScore, component.getAsset(), policy);
-            if (!findingCreated && !Objects.equals(finding.getDueAt(), nextDueAt)) {
-                findingChanged = true;
-            }
-            if (!findingCreated && Double.compare(finding.getConfidenceScore(), findingSelected.confidence()) != 0) {
-                findingChanged = true;
-            }
+            Finding candidate = findingCorrelationMutationService.createFinding(
+                    tenant,
+                    component.getAsset(),
+                    component,
+                    vulnerability,
+                    selectedForUpsert,
+                    resolution,
+                    riskScoreForUpsert,
+                    evidenceForUpsert,
+                    now,
+                    policy
+            );
             String nextPrecedenceTrace = toJson(resolution.precedenceTrace());
-            if (!findingCreated && !Objects.equals(finding.getEvidence(), evidence)) {
-                findingChanged = true;
-            }
-            if (!findingCreated && !Objects.equals(finding.getPrecedenceTrace(), nextPrecedenceTrace)) {
-                findingChanged = true;
-            }
+            FindingUpsertService.UpsertResult upsertResult = findingUpsertService.upsert(candidate, existingFinding -> {
+                boolean reopened = existingFinding.getStatus() == FindingStatus.RESOLVED
+                        || existingFinding.getStatus() == FindingStatus.AUTO_CLOSED;
+                boolean changed = reopened;
+                if (reopened) {
+                    existingFinding.setStatus(FindingStatus.OPEN);
+                }
 
-            if (findingChanged) {
-                finding.setDecisionState(nextDecisionState);
-                finding.setMatchedBy(nextMatchedBy);
-                finding.setRiskScore(riskScore);
-                finding.setDueAt(nextDueAt);
-                finding.setConfidenceScore(findingSelected.confidence());
-                findingCorrelationMutationService.setEvidenceWithVex(finding, evidence);
-                finding.setPrecedenceTrace(nextPrecedenceTrace);
-                finding.setLastObservedAt(now);
-                finding.touch();
-                toPersist.add(finding);
+                FindingDecisionState nextDecisionState = impactAssessment.findingDecisionState();
+                if (existingFinding.getDecisionState() != nextDecisionState) {
+                    changed = true;
+                }
+                String nextMatchedBy = selectedForUpsert.matchedBy();
+                if (!Objects.equals(existingFinding.getMatchedBy(), nextMatchedBy)) {
+                    changed = true;
+                }
+                if (Double.compare(existingFinding.getRiskScore(), riskScoreForUpsert) != 0) {
+                    changed = true;
+                }
+                Instant nextDueAt = findingSlaService.deriveDueAt(existingFinding.getFirstObservedAt(), riskScoreForUpsert, component.getAsset(), policy);
+                if (!Objects.equals(existingFinding.getDueAt(), nextDueAt)) {
+                    changed = true;
+                }
+                if (Double.compare(existingFinding.getConfidenceScore(), selectedForUpsert.confidence()) != 0) {
+                    changed = true;
+                }
+                if (!Objects.equals(existingFinding.getEvidence(), evidenceForUpsert)) {
+                    changed = true;
+                }
+                if (!Objects.equals(existingFinding.getPrecedenceTrace(), nextPrecedenceTrace)) {
+                    changed = true;
+                }
+
+                if (!changed) {
+                    return FindingUpsertService.UpsertAction.UNCHANGED;
+                }
+                existingFinding.setDecisionState(nextDecisionState);
+                existingFinding.setMatchedBy(nextMatchedBy);
+                existingFinding.setRiskScore(riskScoreForUpsert);
+                existingFinding.setDueAt(nextDueAt);
+                existingFinding.setConfidenceScore(selectedForUpsert.confidence());
+                findingCorrelationMutationService.setEvidenceWithVex(existingFinding, evidenceForUpsert);
+                existingFinding.setPrecedenceTrace(nextPrecedenceTrace);
+                existingFinding.setLastObservedAt(now);
+                existingFinding.touch();
+                return reopened ? FindingUpsertService.UpsertAction.REOPENED : FindingUpsertService.UpsertAction.UPDATED;
+            });
+            finding = upsertResult.finding();
+            existingByVulnerability.put(vulnerability.getId(), finding);
+            activeVulnerabilityIds.add(vulnerability.getId());
+            if (upsertResult.action() == FindingUpsertService.UpsertAction.CREATED) {
+                createdFindings.add(finding);
             }
         }
 
@@ -413,19 +425,19 @@ public class FindingComponentRecomputeService {
 
         if (!toPersist.isEmpty()) {
             findingRepository.saveAll(toPersist);
-            for (Finding finding : createdFindings) {
-                findingWorkflowService.appendEvent(
-                        finding,
-                        "CREATED_BY_CORRELATION",
-                        "system",
-                        "Finding created from deterministic inventory-to-vulnerability correlation",
-                        Map.of(
-                                "matchedBy", finding.getMatchedBy(),
-                                "riskScore", finding.getRiskScore(),
-                                "confidenceScore", finding.getConfidenceScore()
-                        )
-                );
-            }
+        }
+        for (Finding finding : createdFindings) {
+            findingWorkflowService.appendEvent(
+                    finding,
+                    "CREATED_BY_CORRELATION",
+                    "system",
+                    "Finding created from deterministic inventory-to-vulnerability correlation",
+                    Map.of(
+                            "matchedBy", finding.getMatchedBy(),
+                            "riskScore", finding.getRiskScore(),
+                            "confidenceScore", finding.getConfidenceScore()
+                    )
+            );
         }
         return new ComponentRecomputeResult(activeVulnerabilityIds.size(), touchedVulnerabilityIds);
     }

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.repo.TenantRepository;
 import java.util.Locale;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -12,16 +13,27 @@ public class SoftwareIdentitySummaryProjectionService {
 
     private static final int NEAR_EOL_THRESHOLD_DAYS = EolConstants.NEAR_EOL_THRESHOLD_DAYS;
 
+    private final TenantRepository tenantRepository;
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
-    public SoftwareIdentitySummaryProjectionService(NamedParameterJdbcTemplate jdbcTemplate) {
+    public SoftwareIdentitySummaryProjectionService(
+            TenantRepository tenantRepository,
+            NamedParameterJdbcTemplate jdbcTemplate,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
+        this.tenantRepository = tenantRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
     public int refreshAll() {
-        jdbcTemplate.getJdbcTemplate().update("DELETE FROM software_identity_summary");
-        return insertSummaryRows(new MapSqlParameterSource().addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS), "");
+        int total = 0;
+        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+            total += refreshTenant(tenant);
+        }
+        return total;
     }
 
     @Transactional
@@ -29,11 +41,13 @@ public class SoftwareIdentitySummaryProjectionService {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
-                .addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS);
-        jdbcTemplate.update("DELETE FROM software_identity_summary WHERE tenant_id = :tenantId", params);
-        return insertSummaryRows(params, " AND ic.tenant_id = :tenantId");
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS);
+            jdbcTemplate.update("DELETE FROM software_identity_summary", params);
+            return insertSummaryRows(params, "");
+        });
     }
 
     @Transactional
@@ -42,38 +56,56 @@ public class SoftwareIdentitySummaryProjectionService {
         if (normalized == null) {
             return 0;
         }
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("normalizedKey", normalized)
-                .addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS);
-        jdbcTemplate.update("DELETE FROM software_identity_summary WHERE normalized_key = :normalizedKey", params);
-        return insertSummaryRows(params, """
-                 AND lower(coalesce(sid.vendor, '')) || '::' || lower(coalesce(sid.product, '')) = :normalizedKey
-                """);
+        int total = 0;
+        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+            total += refreshByNormalizedKeyForTenant(tenant, normalized);
+        }
+        return total;
     }
 
     public void ensureTenantProjection(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return;
         }
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
-        Long summaryCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM software_identity_summary WHERE tenant_id = :tenantId",
-                params,
-                Long.class
-        );
-        if (summaryCount != null && summaryCount > 0L) {
-            return;
+        tenantSchemaExecutionService.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
+            Long summaryCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM software_identity_summary",
+                    params,
+                    Long.class
+            );
+            if (summaryCount != null && summaryCount > 0L) {
+                return;
+            }
+            Long activeInventoryCount = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM inventory_components
+                    WHERE component_status = 'ACTIVE'
+                      AND software_identity_id IS NOT NULL
+                    """, params, Long.class);
+            if (activeInventoryCount != null && activeInventoryCount > 0L) {
+                refreshTenant(tenant);
+            }
+        });
+    }
+
+    private int refreshByNormalizedKeyForTenant(Tenant tenant, String normalized) {
+        if (tenant == null || tenant.getId() == null || normalized == null) {
+            return 0;
         }
-        Long activeInventoryCount = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM inventory_components
-                WHERE tenant_id = :tenantId
-                  AND component_status = 'ACTIVE'
-                  AND software_identity_id IS NOT NULL
-                """, params, Long.class);
-        if (activeInventoryCount != null && activeInventoryCount > 0L) {
-            refreshTenant(tenant);
-        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("normalizedKey", normalized)
+                    .addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS);
+            jdbcTemplate.update("""
+                    DELETE FROM software_identity_summary
+                    WHERE normalized_key = :normalizedKey
+                    """, params);
+            return insertSummaryRows(params, """
+                     AND lower(coalesce(sid.vendor, '')) || '::' || lower(coalesce(sid.product, '')) = :normalizedKey
+                    """);
+        });
     }
 
     private int insertSummaryRows(MapSqlParameterSource params, String filterClause) {

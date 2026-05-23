@@ -14,11 +14,11 @@ spring:
       max-lifetime: 1800000
   flyway:
     enabled: true
-    locations: classpath:db/migration/postgres
-    baseline-on-migrate: true
-    baseline-version: 1000
+    locations: classpath:db/migration/postgres_reset
+    baseline-on-migrate: false
+    baseline-version: 1
     validate-on-migrate: true
-    out-of-order: true
+    out-of-order: false
   jpa:
     hibernate:
       ddl-auto: none
@@ -56,7 +56,9 @@ app:
       issuer-uri: ${APP_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_JWT_JWK_SET_URI:}
       hmac-secret: ${APP_JWT_HMAC_SECRET:}
+      audience: ${APP_SECURITY_JWT_AUDIENCE:}
       token-ttl-minutes: ${APP_JWT_TOKEN_TTL_MINUTES:480}
+      subject-claim: ${APP_SECURITY_JWT_SUBJECT_CLAIM:sub}
       active-tenant-id-claim: ${APP_JWT_ACTIVE_TENANT_ID_CLAIM:active_tenant_id}
       tenant-id-claim: ${APP_JWT_TENANT_ID_CLAIM:tenant_id}
       tenant-slug-claim: ${APP_JWT_TENANT_SLUG_CLAIM:tenant_slug}
@@ -72,6 +74,7 @@ app:
   tenancy:
     allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:false}
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
+    default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}
@@ -166,13 +169,6 @@ app:
   assets:
     stale-days-to-inactive: ${ASSET_STALE_DAYS_TO_INACTIVE:30}
   archive:
-    # Storage backend: 'filesystem' or 's3'
-    storage-backend: ${ARCHIVE_STORAGE_BACKEND:filesystem}
-    # S3 bucket name (only used when storage-backend=s3)
-    s3-bucket: ${ARCHIVE_S3_BUCKET:}
-    # Optional; defaults to the AWS SDK region provider chain when blank.
-    s3-region: ${ARCHIVE_S3_REGION:${AWS_REGION:}}
-    # Local filesystem path (only used when storage-backend=filesystem)
     local-path: ${ARCHIVE_LOCAL_PATH:./data/vulnerability-archives}
   eol:
     # endoflife.date API integration

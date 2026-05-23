@@ -17,6 +17,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "identity_links",
         uniqueConstraints = {
                 @UniqueConstraint(

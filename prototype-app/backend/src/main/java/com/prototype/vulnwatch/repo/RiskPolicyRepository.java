@@ -8,4 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RiskPolicyRepository extends JpaRepository<RiskPolicy, UUID> {
     Optional<RiskPolicy> findByTenant(Tenant tenant);
+
+    Optional<RiskPolicy> findTopByOrderByUpdatedAtDesc();
 }

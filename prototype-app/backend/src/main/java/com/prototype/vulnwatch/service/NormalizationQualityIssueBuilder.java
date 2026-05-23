@@ -51,8 +51,7 @@ public class NormalizationQualityIssueBuilder {
                 FROM inventory_components ic
                 JOIN assets a ON a.id = ic.asset_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE ic.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND nullif(trim(ic.normalized_version), '') IS NULL
                 ORDER BY ic.last_observed_at DESC
                 """;
@@ -122,8 +121,7 @@ public class NormalizationQualityIssueBuilder {
                 FROM inventory_components ic
                 JOIN assets a ON a.id = ic.asset_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE ic.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND nullif(trim(ic.normalized_name), '') IS NULL
                 ORDER BY ic.last_observed_at DESC
                 """;
@@ -191,13 +189,11 @@ public class NormalizationQualityIssueBuilder {
                     FROM findings
                     WHERE component_id = ic.id AND status = 'OPEN'
                 ) f_agg ON true
-                WHERE ic.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND ic.software_identity_id IS NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM software_identity_cluster_link cl
-                      WHERE cl.tenant_id   = :tenantId
-                        AND cl.source_type = 'PACKAGE_PATTERN'
+                      WHERE cl.source_type = 'PACKAGE_PATTERN'
                         AND cl.source_key  = ic.ecosystem || ':' || ic.package_name
                         AND cl.revoked_at IS NULL
                   )
@@ -267,14 +263,12 @@ public class NormalizationQualityIssueBuilder {
                     FROM findings
                     WHERE asset_id = ci.asset_id AND status = 'OPEN'
                 ) f_agg ON true
-                WHERE si.tenant_id = :tenantId
-                  AND si.active_install = true
+                WHERE si.active_install = true
                   AND si.software_identity_id IS NULL
                   AND si.inventory_component_id IS NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM software_identity_cluster_link cl
-                      WHERE cl.tenant_id   = :tenantId
-                        AND cl.source_type = 'DISCOVERY_MODEL'
+                      WHERE cl.source_type = 'DISCOVERY_MODEL'
                         AND cl.source_key  = dm.primary_key
                         AND cl.revoked_at IS NULL
                   )
@@ -350,8 +344,7 @@ public class NormalizationQualityIssueBuilder {
                 FROM ci_aliases alias
                 JOIN cis ci ON ci.id = alias.ci_id
                 JOIN assets a ON a.id = ci.asset_id
-                WHERE alias.tenant_id = :tenantId
-                  AND alias.confidence IS NOT NULL
+                WHERE alias.confidence IS NOT NULL
                   AND alias.confidence < :lowConfidence
                 ORDER BY alias.last_seen_at DESC
                 """;
@@ -423,8 +416,7 @@ public class NormalizationQualityIssueBuilder {
                     FROM findings
                     WHERE asset_id = ci.asset_id AND status = 'OPEN'
                 ) f_agg ON true
-                WHERE si.tenant_id = :tenantId
-                  AND si.active_install = true
+                WHERE si.active_install = true
                   AND (
                     dm.low_confidence = true
                     OR (
@@ -434,8 +426,7 @@ public class NormalizationQualityIssueBuilder {
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM software_identity_cluster_link cl
-                      WHERE cl.tenant_id   = :tenantId
-                        AND cl.source_type = 'DISCOVERY_MODEL'
+                      WHERE cl.source_type = 'DISCOVERY_MODEL'
                         AND cl.source_key  = dm.primary_key
                         AND cl.revoked_at IS NULL
                   )

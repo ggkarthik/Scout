@@ -17,8 +17,6 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
-                "s3",
-                "vulnwatch-prod-archive",
                 "https://app.example.com");
 
         assertDoesNotThrow(validator::validate);
@@ -34,26 +32,7 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
-                "s3",
-                "vulnwatch-prod-archive",
                 "*");
-
-        assertThrows(IllegalStateException.class, validator::validate);
-    }
-
-    @Test
-    void validateRejectsNonS3ArchiveBackend() {
-        ProductionSafetyValidator validator = validator(
-                "",
-                false,
-                "https://issuer.example.com",
-                "",
-                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                false,
-                true,
-                "filesystem",
-                "vulnwatch-prod-archive",
-                "https://app.example.com");
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -68,8 +47,6 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
-                "s3",
-                "vulnwatch-prod-archive",
                 "https://app.example.com");
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -85,8 +62,6 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
-                "s3",
-                "vulnwatch-prod-archive",
                 "https://app.example.com");
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -102,8 +77,6 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 false,
-                "s3",
-                "vulnwatch-prod-archive",
                 "https://app.example.com");
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -119,8 +92,6 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
                 false,
                 true,
-                "s3",
-                "vulnwatch-prod-archive",
                 "https://app.example.com",
                 true);
 
@@ -135,8 +106,6 @@ class ProductionSafetyValidatorTest {
             String credentialEncryptionKey,
             boolean allowHeaderTenantSelection,
             boolean requireTenantContext,
-            String archiveStorageBackend,
-            String archiveS3Bucket,
             String corsAllowedOrigins
     ) {
         return validator(
@@ -147,8 +116,6 @@ class ProductionSafetyValidatorTest {
                 credentialEncryptionKey,
                 allowHeaderTenantSelection,
                 requireTenantContext,
-                archiveStorageBackend,
-                archiveS3Bucket,
                 corsAllowedOrigins,
                 false);
     }
@@ -161,8 +128,6 @@ class ProductionSafetyValidatorTest {
             String credentialEncryptionKey,
             boolean allowHeaderTenantSelection,
             boolean requireTenantContext,
-            String archiveStorageBackend,
-            String archiveS3Bucket,
             String corsAllowedOrigins,
             boolean testPersonasEnabled
     ) {
@@ -176,8 +141,6 @@ class ProductionSafetyValidatorTest {
                 credentialEncryptionKey,
                 allowHeaderTenantSelection,
                 requireTenantContext,
-                archiveStorageBackend,
-                archiveS3Bucket,
                 corsAllowedOrigins,
                 testPersonasEnabled);
     }

@@ -15,6 +15,7 @@ import java.util.UUID;
 public final class TenantContext {
 
     private static final ThreadLocal<UUID> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<String> CURRENT_SCHEMA = new ThreadLocal<>();
 
     private TenantContext() {
     }
@@ -27,7 +28,16 @@ public final class TenantContext {
         CURRENT.set(tenantId);
     }
 
+    public static String getCurrentSchemaName() {
+        return CURRENT_SCHEMA.get();
+    }
+
+    public static void setCurrentSchemaName(String schemaName) {
+        CURRENT_SCHEMA.set(schemaName);
+    }
+
     public static void clear() {
         CURRENT.remove();
+        CURRENT_SCHEMA.remove();
     }
 }

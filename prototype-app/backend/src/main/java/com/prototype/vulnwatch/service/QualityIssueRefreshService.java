@@ -27,6 +27,7 @@ public class QualityIssueRefreshService {
     private final LifecycleQualityIssueBuilder lifecycleQualityIssueBuilder;
     private final ProjectionFreshnessIssueBuilder projectionFreshnessIssueBuilder;
     private final QualityIssuePersistenceService qualityIssuePersistenceService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public QualityIssueRefreshService(
             TenantRepository tenantRepository,
@@ -37,7 +38,8 @@ public class QualityIssueRefreshService {
             VexQualityIssueBuilder vexQualityIssueBuilder,
             LifecycleQualityIssueBuilder lifecycleQualityIssueBuilder,
             ProjectionFreshnessIssueBuilder projectionFreshnessIssueBuilder,
-            QualityIssuePersistenceService qualityIssuePersistenceService
+            QualityIssuePersistenceService qualityIssuePersistenceService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.tenantRepository = tenantRepository;
         this.jdbcTemplate = jdbcTemplate;
@@ -48,6 +50,7 @@ public class QualityIssueRefreshService {
         this.lifecycleQualityIssueBuilder = lifecycleQualityIssueBuilder;
         this.projectionFreshnessIssueBuilder = projectionFreshnessIssueBuilder;
         this.qualityIssuePersistenceService = qualityIssuePersistenceService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -64,35 +67,39 @@ public class QualityIssueRefreshService {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
-        UUID tenantId = tenant.getId();
-        List<QualityIssueRecord> issues = buildIssuesForTenant(tenantId);
-        qualityIssuePersistenceService.upsertRows(issues);
-        qualityIssuePersistenceService.deleteStaleRows(tenantId, issues);
-        return issues.size();
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            UUID tenantId = tenant.getId();
+            List<QualityIssueRecord> issues = buildIssuesForTenant(tenantId);
+            qualityIssuePersistenceService.upsertRows(issues);
+            qualityIssuePersistenceService.deleteStaleRows(tenantId, issues);
+            return issues.size();
+        });
     }
 
     public void ensureTenantProjection(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return;
         }
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
-        Long projectedCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM quality_issue_projection WHERE tenant_id = :tenantId",
-                params,
-                Long.class
-        );
-        if (projectedCount != null && projectedCount > 0L) {
-            return;
-        }
-        Long sourceCount = jdbcTemplate.queryForObject("""
-                SELECT
-                  COALESCE((SELECT COUNT(*) FROM inventory_components WHERE tenant_id = :tenantId), 0)
-                  + COALESCE((SELECT COUNT(*) FROM vulnerabilities), 0)
-                  + COALESCE((SELECT COUNT(*) FROM sync_runs), 0)
-                """, params, Long.class);
-        if (sourceCount != null && sourceCount > 0L) {
-            refreshTenant(tenant);
-        }
+        tenantSchemaExecutionService.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
+            Long projectedCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM quality_issue_projection",
+                    params,
+                    Long.class
+            );
+            if (projectedCount != null && projectedCount > 0L) {
+                return;
+            }
+            Long sourceCount = jdbcTemplate.queryForObject("""
+                    SELECT
+                      COALESCE((SELECT COUNT(*) FROM inventory_components), 0)
+                      + COALESCE((SELECT COUNT(*) FROM vulnerabilities), 0)
+                      + COALESCE((SELECT COUNT(*) FROM sync_runs), 0)
+                    """, params, Long.class);
+            if (sourceCount != null && sourceCount > 0L) {
+                refreshTenant(tenant);
+            }
+        });
     }
 
     private List<QualityIssueRecord> buildIssuesForTenant(UUID tenantId) {

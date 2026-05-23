@@ -37,6 +37,7 @@ public class LegacyGithubSyncRunBackfillService {
     private final SyncRunRepository syncRunRepository;
     private final SbomUploadRepository sbomUploadRepository;
     private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final ObjectMapper objectMapper;
     private final boolean backfillOnStartup;
 
@@ -44,12 +45,14 @@ public class LegacyGithubSyncRunBackfillService {
             SyncRunRepository syncRunRepository,
             SbomUploadRepository sbomUploadRepository,
             TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
             ObjectMapper objectMapper,
             @Value("${app.sync-runs.legacy-github-backfill-on-startup:true}") boolean backfillOnStartup
     ) {
         this.syncRunRepository = syncRunRepository;
         this.sbomUploadRepository = sbomUploadRepository;
         this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.objectMapper = objectMapper;
         this.backfillOnStartup = backfillOnStartup;
     }
@@ -67,9 +70,9 @@ public class LegacyGithubSyncRunBackfillService {
         List<SyncRun> backfilledRuns = new ArrayList<>();
         List<SyncRun> persistedRuns = new ArrayList<>(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt")));
         for (Tenant tenant : tenantService.listTenants()) {
-            List<SbomUpload> uploads = sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(
+            List<SbomUpload> uploads = tenantSchemaExecutionService.run(
                     tenant,
-                    "github"
+                    () -> sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github")
             );
             if (uploads.isEmpty()) {
                 continue;

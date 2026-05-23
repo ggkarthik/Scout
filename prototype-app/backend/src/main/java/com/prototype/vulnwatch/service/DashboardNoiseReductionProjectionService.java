@@ -23,15 +23,18 @@ public class DashboardNoiseReductionProjectionService {
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final OperationalMetricsService operationalMetricsService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public DashboardNoiseReductionProjectionService(
             NamedParameterJdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
-            OperationalMetricsService operationalMetricsService
+            OperationalMetricsService operationalMetricsService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.operationalMetricsService = operationalMetricsService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -43,70 +46,68 @@ public class DashboardNoiseReductionProjectionService {
         long startedAtNs = System.nanoTime();
         int statusCode = 200;
         try {
-            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
-            long neverOpenedNotApplicable = queryForLong("""
-                    SELECT COUNT(*)
-                    FROM component_vulnerability_states state
-                    WHERE state.tenant_id = :tenantId
-                      AND state.applicability_state = 'NOT_APPLICABLE'
-                      AND state.impact_state = 'NOT_IMPACTED'
-                      AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM findings finding
-                          WHERE finding.tenant_id = state.tenant_id
-                            AND finding.component_id = state.component_id
-                            AND finding.vulnerability_id = state.vulnerability_id
-                      )
-                    """, params);
+            return tenantSchemaExecutionService.run(tenantId, () -> {
+                MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+                long neverOpenedNotApplicable = queryForLong("""
+                        SELECT COUNT(*)
+                        FROM component_vulnerability_states state
+                        WHERE state.applicability_state = 'NOT_APPLICABLE'
+                          AND state.impact_state = 'NOT_IMPACTED'
+                          AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM findings finding
+                              WHERE finding.component_id = state.component_id
+                                AND finding.vulnerability_id = state.vulnerability_id
+                          )
+                        """, params);
 
-            long deferredUnderInvestigation = queryForLong("""
-                    SELECT COUNT(*)
-                    FROM component_vulnerability_states state
-                    WHERE state.tenant_id = :tenantId
-                      AND state.applicability_state = 'UNKNOWN'
-                      AND lower(coalesce(state.applicability_reason, '')) LIKE '%under_investigation%'
-                      AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM findings finding
-                          WHERE finding.tenant_id = state.tenant_id
-                            AND finding.component_id = state.component_id
-                            AND finding.vulnerability_id = state.vulnerability_id
-                      )
-                    """, params);
+                long deferredUnderInvestigation = queryForLong("""
+                        SELECT COUNT(*)
+                        FROM component_vulnerability_states state
+                        WHERE state.applicability_state = 'UNKNOWN'
+                          AND lower(coalesce(state.applicability_reason, '')) LIKE '%under_investigation%'
+                          AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM findings finding
+                              WHERE finding.component_id = state.component_id
+                                AND finding.vulnerability_id = state.vulnerability_id
+                          )
+                        """, params);
 
-            Map<String, Long> categoryCounts = loadCategoryCounts(params);
-            Instant computedAt = Instant.now();
-            String categoryCountsJson = toJson(categoryCounts);
+                Map<String, Long> categoryCounts = loadCategoryCounts(params);
+                Instant computedAt = Instant.now();
+                String categoryCountsJson = toJson(categoryCounts);
 
-            params.addValue("neverOpenedNotApplicable", neverOpenedNotApplicable)
-                    .addValue("deferredUnderInvestigation", deferredUnderInvestigation)
-                    .addValue("categoryCountsJson", categoryCountsJson)
-                    .addValue("lastComputedAt", toSqlTimestamp(computedAt));
+                params.addValue("neverOpenedNotApplicable", neverOpenedNotApplicable)
+                        .addValue("deferredUnderInvestigation", deferredUnderInvestigation)
+                        .addValue("categoryCountsJson", categoryCountsJson)
+                        .addValue("lastComputedAt", toSqlTimestamp(computedAt));
 
-            jdbcTemplate.update("""
-                    INSERT INTO dashboard_noise_reduction_projection (
-                        tenant_id,
-                        never_opened_not_applicable,
-                        deferred_under_investigation,
-                        category_counts_json,
-                        last_computed_at
-                    )
-                    VALUES (
-                        :tenantId,
-                        :neverOpenedNotApplicable,
-                        :deferredUnderInvestigation,
-                        CAST(:categoryCountsJson AS jsonb),
-                        :lastComputedAt
-                    )
-                    ON CONFLICT (tenant_id) DO UPDATE SET
-                        never_opened_not_applicable = EXCLUDED.never_opened_not_applicable,
-                        deferred_under_investigation = EXCLUDED.deferred_under_investigation,
-                        category_counts_json = EXCLUDED.category_counts_json,
-                        last_computed_at = EXCLUDED.last_computed_at
-                    """, params);
-            return 1;
+                jdbcTemplate.update("""
+                        INSERT INTO dashboard_noise_reduction_projection (
+                            tenant_id,
+                            never_opened_not_applicable,
+                            deferred_under_investigation,
+                            category_counts_json,
+                            last_computed_at
+                        )
+                        VALUES (
+                            :tenantId,
+                            :neverOpenedNotApplicable,
+                            :deferredUnderInvestigation,
+                            CAST(:categoryCountsJson AS jsonb),
+                            :lastComputedAt
+                        )
+                        ON CONFLICT (tenant_id) DO UPDATE SET
+                            never_opened_not_applicable = EXCLUDED.never_opened_not_applicable,
+                            deferred_under_investigation = EXCLUDED.deferred_under_investigation,
+                            category_counts_json = EXCLUDED.category_counts_json,
+                            last_computed_at = EXCLUDED.last_computed_at
+                        """, params);
+                return 1;
+            });
         } catch (RuntimeException ex) {
             statusCode = 500;
             throw ex;
@@ -172,15 +173,13 @@ public class DashboardNoiseReductionProjectionService {
                         ELSE 'Correlation Not Affected'
                     END AS category
                     FROM component_vulnerability_states state
-                    WHERE state.tenant_id = :tenantId
-                      AND state.applicability_state = 'NOT_APPLICABLE'
+                    WHERE state.applicability_state = 'NOT_APPLICABLE'
                       AND state.impact_state = 'NOT_IMPACTED'
                       AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
                       AND NOT EXISTS (
                           SELECT 1
                           FROM findings finding
-                          WHERE finding.tenant_id = state.tenant_id
-                            AND finding.component_id = state.component_id
+                          WHERE finding.component_id = state.component_id
                             AND finding.vulnerability_id = state.vulnerability_id
                       )
                 ) categorized
@@ -196,40 +195,43 @@ public class DashboardNoiseReductionProjectionService {
     }
 
     private ProjectionSnapshot loadProjection(UUID tenantId) {
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
-        return jdbcTemplate.query("""
-                        SELECT never_opened_not_applicable,
-                               deferred_under_investigation,
-                               category_counts_json::text AS category_counts_json,
-                               last_computed_at
-                        FROM dashboard_noise_reduction_projection
-                        WHERE tenant_id = :tenantId
-                        """,
-                params,
-                rs -> {
-                    if (!rs.next()) {
-                        return ProjectionSnapshot.empty();
-                    }
-                    Instant lastComputedAt = rs.getTimestamp("last_computed_at") == null
-                            ? null
-                            : rs.getTimestamp("last_computed_at").toInstant();
-                    return new ProjectionSnapshot(
-                            rs.getLong("never_opened_not_applicable"),
-                            rs.getLong("deferred_under_investigation"),
-                            parseCategoryCounts(rs.getString("category_counts_json")),
-                            lastComputedAt
-                    );
-                });
+        return tenantSchemaExecutionService.run(tenantId, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+            return jdbcTemplate.query("""
+                            SELECT never_opened_not_applicable,
+                                   deferred_under_investigation,
+                                   category_counts_json::text AS category_counts_json,
+                                   last_computed_at
+                            FROM dashboard_noise_reduction_projection
+                            LIMIT 1
+                            """,
+                    params,
+                    rs -> {
+                        if (!rs.next()) {
+                            return ProjectionSnapshot.empty();
+                        }
+                        Instant lastComputedAt = rs.getTimestamp("last_computed_at") == null
+                                ? null
+                                : rs.getTimestamp("last_computed_at").toInstant();
+                        return new ProjectionSnapshot(
+                                rs.getLong("never_opened_not_applicable"),
+                                rs.getLong("deferred_under_investigation"),
+                                parseCategoryCounts(rs.getString("category_counts_json")),
+                                lastComputedAt
+                        );
+                    });
+        });
     }
 
     private boolean projectionExists(UUID tenantId) {
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
-        Long count = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM dashboard_noise_reduction_projection
-                WHERE tenant_id = :tenantId
-                """, params, Long.class);
-        return count != null && count > 0L;
+        return tenantSchemaExecutionService.run(tenantId, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+            Long count = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM dashboard_noise_reduction_projection
+                    """, params, Long.class);
+            return count != null && count > 0L;
+        });
     }
 
     private long queryForLong(String sql, MapSqlParameterSource params) {

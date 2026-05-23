@@ -26,15 +26,17 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
         long getFindingCount();
     }
 
-    List<Finding> findByTenantOrderByUpdatedAtDesc(Tenant tenant);
-    Page<Finding> findByTenantOrderByUpdatedAtDesc(Tenant tenant, Pageable pageable);
-    List<Finding> findByTenantAndStatusOrderByUpdatedAtDesc(Tenant tenant, FindingStatus status);
+    List<Finding> findAllByOrderByUpdatedAtDesc();
+    Page<Finding> findAllByOrderByUpdatedAtDesc(Pageable pageable);
+    List<Finding> findByStatusOrderByUpdatedAtDesc(FindingStatus status);
     List<Finding> findByStatusAndSuppressedUntilBefore(FindingStatus status, Instant before);
     List<Finding> findByAsset(Asset asset);
     List<Finding> findByAssetAndStatus(Asset asset, FindingStatus status);
     List<Finding> findByAsset_IdIn(Collection<UUID> assetIds);
     List<Finding> findByComponent(InventoryComponent component);
     List<Finding> findByComponent_IdIn(Collection<UUID> componentIds);
+    java.util.Optional<Finding> findFirstByComponent_IdAndVulnerability_Id(UUID componentId, UUID vulnerabilityId);
+    List<Finding> findByVulnerability_Id(UUID vulnerabilityId);
     List<Finding> findByTenant_IdAndVulnerability_Id(UUID tenantId, UUID vulnerabilityId);
     @Query("""
             select distinct f.tenant.id
@@ -56,22 +58,21 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     );
     long countByVulnerabilityAndStatus(Vulnerability vulnerability, FindingStatus status);
     void deleteByAsset(Asset asset);
-    long countByTenantAndStatus(Tenant tenant, FindingStatus status);
-    long countByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
-    long countByTenantAndOwnerGroup(Tenant tenant, String ownerGroup);
+    long countByStatus(FindingStatus status);
+    long countByStatusAndConfidenceScoreGreaterThanEqual(FindingStatus status, double minConfidence);
+    long countBySuppressedByRuleId(UUID suppressedByRuleId);
+    long countByOwnerGroup(String ownerGroup);
 
-    List<Finding> findByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
-    long countByTenantAndStatusAndRiskScoreGreaterThanEqual(Tenant tenant, FindingStatus status, double minRiskScore);
-    long countByTenantAndStatusAndConfidenceScoreGreaterThanEqual(Tenant tenant, FindingStatus status, double minConfidence);
+    List<Finding> findBySuppressedByRuleId(UUID suppressedByRuleId);
+    long countByStatusAndRiskScoreGreaterThanEqual(FindingStatus status, double minRiskScore);
 
     @Query("""
             select count(f)
             from Finding f
             join f.vulnerability v
-            where f.tenant = :tenant and f.status = :status and upper(v.severity) = upper(:severity)
+            where f.status = :status and upper(v.severity) = upper(:severity)
             """)
-    long countByTenantAndStatusAndSeverity(
-            @Param("tenant") Tenant tenant,
+    long countByStatusAndSeverity(
             @Param("status") FindingStatus status,
             @Param("severity") String severity
     );
@@ -80,13 +81,9 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             select count(f)
             from Finding f
             join f.vulnerability v
-            where f.tenant = :tenant
-              and upper(coalesce(f.severityOverride, v.severity)) = upper(:severity)
+            where upper(coalesce(f.severityOverride, v.severity)) = upper(:severity)
             """)
-    long countByTenantAndSeverity(
-            @Param("tenant") Tenant tenant,
-            @Param("severity") String severity
-    );
+    long countBySeverity(@Param("severity") String severity);
 
     @Query("""
             select coalesce(avg(f.riskScore), 0)
@@ -191,13 +188,11 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
               f.vulnerability.id as vulnerabilityId,
               count(f) as findingCount
             from Finding f
-            where f.tenant = :tenant
-              and f.status = :status
+            where f.status = :status
               and f.vulnerability.id in :vulnerabilityIds
             group by f.vulnerability.id
             """)
-    List<VulnerabilityFindingCountRow> countByTenantAndVulnerabilityIdsAndStatus(
-            @Param("tenant") Tenant tenant,
+    List<VulnerabilityFindingCountRow> countByVulnerabilityIdsAndStatusGrouped(
             @Param("vulnerabilityIds") Collection<UUID> vulnerabilityIds,
             @Param("status") FindingStatus status
     );
@@ -205,8 +200,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select count(distinct f.id)
             from Finding f
-            where f.tenant = :tenant
-              and f.status = :status
+            where f.status = :status
               and f.decisionState = :decisionState
               and exists (
                 select 1
@@ -215,8 +209,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
                   and fe.eventType = :eventType
               )
             """)
-    long countByTenantAndStatusAndDecisionStateWithEvent(
-            @Param("tenant") Tenant tenant,
+    long countByStatusAndDecisionStateWithEvent(
             @Param("status") FindingStatus status,
             @Param("decisionState") FindingDecisionState decisionState,
             @Param("eventType") String eventType

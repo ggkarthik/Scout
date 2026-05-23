@@ -757,7 +757,12 @@ export function UserManagementPage() {
                 </div>
 
                 <form className="platform-create-tenant-form" onSubmit={handleSupportGrantSubmit}>
-                  <input name="invitedPlatformSubject" placeholder="platform-owner@example.com" aria-label="Platform owner subject" />
+                  <div>
+                    <input name="invitedPlatformSubject" placeholder="auth0|abc123…" aria-label="Platform owner Auth0 subject" style={{ width: '100%' }} />
+                    <p className="panel-caption" style={{ marginTop: 4 }}>
+                      Auth0 subject ID (<code>sub</code> claim) of the platform owner — find it in Platform Console → Users.
+                    </p>
+                  </div>
                   <input name="reason" placeholder="Why platform access is needed" aria-label="Support reason" />
                   <input name="scope" placeholder="Scope (optional)" aria-label="Support scope" />
                   <select name="accessMode" defaultValue="READ_ONLY" aria-label="Support access mode">

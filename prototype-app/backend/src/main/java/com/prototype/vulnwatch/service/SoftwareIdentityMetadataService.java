@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -20,33 +21,37 @@ public class SoftwareIdentityMetadataService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final SoftwareIdentitySummaryProjectionService projectionService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SoftwareIdentityMetadataService(
             NamedParameterJdbcTemplate jdbcTemplate,
-            SoftwareIdentitySummaryProjectionService projectionService
+            SoftwareIdentitySummaryProjectionService projectionService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.projectionService = projectionService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public SoftwareIdentityMetadataResponse getMetadata(Tenant tenant, UUID softwareIdentityId) {
         requireTenant(tenant);
-        requireActiveSoftwareIdentity(tenant, softwareIdentityId);
-        MapSqlParameterSource params = params(tenant, softwareIdentityId);
-        SoftwareIdentityMetadataResponse existing = jdbcTemplate.query("""
-                SELECT software_identity_id,
-                       owner,
-                       licensed,
-                       license_type,
-                       support_group,
-                       recommendation,
-                       recommendation_updated_at,
-                       updated_at
-                FROM software_identity_metadata
-                WHERE tenant_id = :tenantId
-                  AND software_identity_id = :softwareIdentityId
-                """, params, rs -> rs.next() ? mapResponse(rs) : null);
-        return existing == null ? defaultMetadata(softwareIdentityId) : existing;
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            requireActiveSoftwareIdentity(tenant, softwareIdentityId);
+            MapSqlParameterSource params = params(tenant, softwareIdentityId);
+            SoftwareIdentityMetadataResponse existing = jdbcTemplate.query("""
+                    SELECT software_identity_id,
+                           owner,
+                           licensed,
+                           license_type,
+                           support_group,
+                           recommendation,
+                           recommendation_updated_at,
+                           updated_at
+                    FROM software_identity_metadata
+                    WHERE software_identity_id = :softwareIdentityId
+                    """, params, rs -> rs.next() ? mapResponse(rs) : null);
+            return existing == null ? defaultMetadata(softwareIdentityId) : existing;
+        });
     }
 
     public SoftwareIdentityMetadataResponse saveMetadata(
@@ -55,64 +60,65 @@ public class SoftwareIdentityMetadataService {
             SoftwareIdentityMetadataRequest request
     ) {
         requireTenant(tenant);
-        requireActiveSoftwareIdentity(tenant, softwareIdentityId);
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Software metadata request is required");
         }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            requireActiveSoftwareIdentity(tenant, softwareIdentityId);
+            boolean hasRecommendation = normalize(request.recommendation()) != null;
+            MapSqlParameterSource params = params(tenant, softwareIdentityId)
+                    .addValue("owner", normalize(request.owner()))
+                    .addValue("licensed", normalizeLicensed(request.licensed()))
+                    .addValue("licenseType", normalize(request.licenseType()))
+                    .addValue("supportGroup", normalize(request.supportGroup()))
+                    .addValue("recommendation", normalize(request.recommendation()))
+                    .addValue("recommendationUpdatedAt", hasRecommendation ? Timestamp.from(Instant.now()) : null);
 
-        boolean hasRecommendation = normalize(request.recommendation()) != null;
-        MapSqlParameterSource params = params(tenant, softwareIdentityId)
-                .addValue("owner", normalize(request.owner()))
-                .addValue("licensed", normalizeLicensed(request.licensed()))
-                .addValue("licenseType", normalize(request.licenseType()))
-                .addValue("supportGroup", normalize(request.supportGroup()))
-                .addValue("recommendation", normalize(request.recommendation()))
-                .addValue("recommendationUpdatedAt", hasRecommendation ? Timestamp.from(Instant.now()) : null);
-
-        return jdbcTemplate.queryForObject("""
-                INSERT INTO software_identity_metadata (
-                    tenant_id,
-                    software_identity_id,
-                    owner,
-                    licensed,
-                    license_type,
-                    support_group,
-                    recommendation,
-                    recommendation_updated_at,
-                    updated_at
-                )
-                VALUES (
-                    :tenantId,
-                    :softwareIdentityId,
-                    :owner,
-                    :licensed,
-                    :licenseType,
-                    :supportGroup,
-                    :recommendation,
-                    :recommendationUpdatedAt,
-                    now()
-                )
-                ON CONFLICT (tenant_id, software_identity_id) DO UPDATE SET
-                    owner = EXCLUDED.owner,
-                    licensed = EXCLUDED.licensed,
-                    license_type = EXCLUDED.license_type,
-                    support_group = EXCLUDED.support_group,
-                    recommendation = EXCLUDED.recommendation,
-                    recommendation_updated_at = CASE
-                        WHEN software_identity_metadata.recommendation IS DISTINCT FROM EXCLUDED.recommendation
-                            THEN EXCLUDED.recommendation_updated_at
-                        ELSE software_identity_metadata.recommendation_updated_at
-                    END,
-                    updated_at = now()
-                RETURNING software_identity_id,
-                          owner,
-                          licensed,
-                          license_type,
-                          support_group,
-                          recommendation,
-                          recommendation_updated_at,
-                          updated_at
-                """, params, (rs, rowNum) -> mapResponse(rs));
+            return jdbcTemplate.queryForObject("""
+                    INSERT INTO software_identity_metadata (
+                        tenant_id,
+                        software_identity_id,
+                        owner,
+                        licensed,
+                        license_type,
+                        support_group,
+                        recommendation,
+                        recommendation_updated_at,
+                        updated_at
+                    )
+                    VALUES (
+                        :tenantId,
+                        :softwareIdentityId,
+                        :owner,
+                        :licensed,
+                        :licenseType,
+                        :supportGroup,
+                        :recommendation,
+                        :recommendationUpdatedAt,
+                        now()
+                    )
+                    ON CONFLICT (tenant_id, software_identity_id) DO UPDATE SET
+                        owner = EXCLUDED.owner,
+                        licensed = EXCLUDED.licensed,
+                        license_type = EXCLUDED.license_type,
+                        support_group = EXCLUDED.support_group,
+                        recommendation = EXCLUDED.recommendation,
+                        recommendation_updated_at = CASE
+                            WHEN software_identity_metadata.recommendation IS DISTINCT FROM EXCLUDED.recommendation
+                                THEN EXCLUDED.recommendation_updated_at
+                            ELSE software_identity_metadata.recommendation_updated_at
+                        END,
+                        updated_at = now()
+                    RETURNING software_identity_id,
+                              owner,
+                              licensed,
+                              license_type,
+                              support_group,
+                              recommendation,
+                              recommendation_updated_at,
+                              updated_at
+                    """, params, (rs, rowNum) -> mapResponse(rs));
+        });
     }
 
     private void requireTenant(Tenant tenant) {
@@ -131,8 +137,7 @@ public class SoftwareIdentityMetadataService {
                 SELECT EXISTS (
                     SELECT 1
                     FROM software_identity_summary
-                    WHERE tenant_id = :tenantId
-                      AND software_identity_id = :softwareIdentityId
+                    WHERE software_identity_id = :softwareIdentityId
                 )
                 """, params, Boolean.class);
         if (!Boolean.TRUE.equals(exists)) {
@@ -141,8 +146,7 @@ public class SoftwareIdentityMetadataService {
                     SELECT EXISTS (
                         SELECT 1
                         FROM software_identity_summary
-                        WHERE tenant_id = :tenantId
-                          AND software_identity_id = :softwareIdentityId
+                        WHERE software_identity_id = :softwareIdentityId
                     )
                     """, params, Boolean.class);
         }
@@ -153,7 +157,7 @@ public class SoftwareIdentityMetadataService {
 
     private MapSqlParameterSource params(Tenant tenant, UUID softwareIdentityId) {
         return new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
+                .addValue("tenantId", Objects.requireNonNull(tenant).getId())
                 .addValue("softwareIdentityId", softwareIdentityId);
     }
 

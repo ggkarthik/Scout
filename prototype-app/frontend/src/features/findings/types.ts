@@ -11,6 +11,7 @@ export type Finding = {
   packageVersion: string;
   vulnerabilityId: string;
   source: string;
+  creationSource: 'MANUAL' | 'AUTOMATIC';
   severity: string;
   inKev: boolean;
   epss?: number;

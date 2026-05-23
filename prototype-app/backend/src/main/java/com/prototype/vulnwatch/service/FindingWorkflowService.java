@@ -41,6 +41,7 @@ public class FindingWorkflowService {
     private final AssetRepository assetRepository;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<AuditEventService> auditEventServiceProvider;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FindingWorkflowService(
             FindingRepository findingRepository,
@@ -49,7 +50,8 @@ public class FindingWorkflowService {
             RiskPolicyRepository riskPolicyRepository,
             AssetRepository assetRepository,
             ObjectMapper objectMapper,
-            ObjectProvider<AuditEventService> auditEventServiceProvider
+            ObjectProvider<AuditEventService> auditEventServiceProvider,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.findingRepository = findingRepository;
         this.findingCommentRepository = findingCommentRepository;
@@ -58,6 +60,7 @@ public class FindingWorkflowService {
         this.assetRepository = assetRepository;
         this.objectMapper = objectMapper;
         this.auditEventServiceProvider = auditEventServiceProvider;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -288,7 +291,10 @@ public class FindingWorkflowService {
                 continue;
             }
 
-            Asset asset = assetRepository.findByTenantAndIdentifier(policy.getTenant(), identifier).orElse(null);
+            Asset asset = tenantSchemaExecutionService.run(
+                    policy.getTenant(),
+                    () -> assetRepository.findByIdentifier(identifier)
+            ).orElse(null);
             if (asset == null) {
                 continue;
             }

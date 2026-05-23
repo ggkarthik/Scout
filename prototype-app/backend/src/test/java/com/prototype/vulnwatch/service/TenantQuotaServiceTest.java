@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
@@ -17,6 +18,7 @@ import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +42,8 @@ class TenantQuotaServiceTest {
     AuditEventRepository auditEventRepository;
     @Mock
     TenantRepository tenantRepository;
+    @Mock
+    TenantSchemaExecutionService tenantSchemaExecutionService;
 
     TenantQuotaService service;
 
@@ -52,16 +56,19 @@ class TenantQuotaServiceTest {
                 serviceNowCmdbConfigRepository,
                 serviceAccountRepository,
                 auditEventRepository,
-                tenantRepository);
+                tenantRepository,
+                tenantSchemaExecutionService);
+        lenient().when(tenantSchemaExecutionService.run(any(Tenant.class), any(Supplier.class)))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
     }
 
     @Test
     void assertCanCreateConnectorAllowsWhenBelowLimit() {
         Tenant tenant = tenant(3);
-        when(awsDiscoveryConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
-        when(awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
-        when(sccmCmdbConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(0L);
-        when(serviceNowCmdbConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(0L);
+        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
+        when(awsDiscoveryTargetRepository.count()).thenReturn(1L);
+        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")).thenReturn(java.util.Optional.empty());
+        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")).thenReturn(java.util.Optional.empty());
 
         assertDoesNotThrow(() -> service.assertCanCreateConnector(tenant, "aws-target"));
     }
@@ -69,10 +76,10 @@ class TenantQuotaServiceTest {
     @Test
     void assertCanCreateConnectorRejectsWhenAtLimit() {
         Tenant tenant = tenant(2);
-        when(awsDiscoveryConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
-        when(awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
-        when(sccmCmdbConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(0L);
-        when(serviceNowCmdbConfigRepository.countByTenant_Id(tenant.getId())).thenReturn(0L);
+        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
+        when(awsDiscoveryTargetRepository.count()).thenReturn(1L);
+        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")).thenReturn(java.util.Optional.empty());
+        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")).thenReturn(java.util.Optional.empty());
 
         QuotaExceededException ex = assertThrows(
                 QuotaExceededException.class,
@@ -82,10 +89,17 @@ class TenantQuotaServiceTest {
     }
 
     @Test
+    void assertCanCreateConnectorAllowsWhenLimitIsZero() {
+        Tenant tenant = tenant(0);
+        tenant.setPlanCode("pilot");
+        assertDoesNotThrow(() -> service.assertCanCreateConnector(tenant, "servicenow"));
+    }
+
+    @Test
     void assertCanCreateServiceAccountRejectsWhenAtLimit() {
         Tenant tenant = tenant(10);
         tenant.setMaxServiceAccountCount(1);
-        when(serviceAccountRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
+        when(serviceAccountRepository.count()).thenReturn(1L);
 
         QuotaExceededException ex = assertThrows(
                 QuotaExceededException.class,

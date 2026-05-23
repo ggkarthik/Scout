@@ -20,7 +20,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +40,8 @@ public class SccmCmdbSyncService {
     private final TaskExecutor integrationQueueExecutor;
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceService workspaceService;
-    private final JdbcTemplate platformJdbcTemplate;
+    private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SccmCmdbSyncService(
             SccmCmdbConfigRepository sccmCmdbConfigRepository,
@@ -53,7 +53,8 @@ public class SccmCmdbSyncService {
             @Qualifier("integrationQueueExecutor") TaskExecutor integrationQueueExecutor,
             TransactionTemplate transactionTemplate,
             WorkspaceService workspaceService,
-            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
         this.sccmCmdbConfigService = sccmCmdbConfigService;
@@ -64,7 +65,8 @@ public class SccmCmdbSyncService {
         this.integrationQueueExecutor = integrationQueueExecutor;
         this.transactionTemplate = transactionTemplate;
         this.workspaceService = workspaceService;
-        this.platformJdbcTemplate = platformJdbcTemplate;
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public SyncTriggerResponse trigger() {
@@ -78,24 +80,20 @@ public class SccmCmdbSyncService {
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
-        List<ConfigRef> configs = platformJdbcTemplate.query(
-                """
-                select id, tenant_id
-                from sccm_cmdb_configs
-                where enabled = true
-                  and auto_sync_enabled = true
-                order by updated_at asc
-                """,
-                (rs, rowNum) -> new ConfigRef(
-                        UUID.fromString(rs.getString("id")),
-                        UUID.fromString(rs.getString("tenant_id"))
-                )
-        );
+        List<ConfigRef> configs = new java.util.ArrayList<>();
+        for (var tenant : tenantService.listTenants()) {
+            tenantSchemaExecutionService.run(tenant, () -> {
+                sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
+                        .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
+                        .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
+                return null;
+            });
+        }
         for (ConfigRef configRef : configs) {
-            TenantContext.setCurrentTenantId(configRef.tenantId());
-            SccmCmdbConfig config = sccmCmdbConfigRepository.findById(configRef.configId()).orElse(null);
-            ClaimedRun claimed = transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
-            TenantContext.clear();
+            ClaimedRun claimed = tenantSchemaExecutionService.run(configRef.tenantId(), () -> {
+                SccmCmdbConfig config = sccmCmdbConfigRepository.findById(configRef.configId()).orElse(null);
+                return transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
+            });
             if (claimed == null) {
                 continue;
             }
@@ -105,17 +103,14 @@ public class SccmCmdbSyncService {
 
     @Transactional(readOnly = true)
     public boolean hasActiveRun() {
-        return !syncRunRepository.findActiveRunsByTenantAndSyncType(currentTenantId(), SYNC_TYPE_SCCM_CMDB, List.of("queued", "running")).isEmpty();
+        return !syncRunRepository.findActiveRunsBySyncType(SYNC_TYPE_SCCM_CMDB, List.of("queued", "running")).isEmpty();
     }
 
     // ── Run claiming ───────────────────────────────────────────────────────────────────────────
 
     private ClaimedRun claimManualRun() {
-        UUID tenantId = currentTenantId();
-        SccmCmdbConfig config = sccmCmdbConfigRepository.findAll().stream()
-                .filter(existing -> existing.getTenant() != null && tenantId.equals(existing.getTenant().getId()))
+        SccmCmdbConfig config = sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
                 .filter(this::isConfigured)
-                .findFirst()
                 .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
         if (!config.isEnabled()) {
             throw new IllegalStateException("SCCM CMDB connector is disabled");
@@ -132,8 +127,7 @@ public class SccmCmdbSyncService {
 
     private ClaimedRun claimRunForConfig(SccmCmdbConfig config, String triggerMode, boolean allowReuseActiveRun) {
         UUID tenantId = config.getTenant().getId();
-        Optional<SyncRun> active = syncRunRepository.findActiveRunsByTenantAndSyncType(
-                tenantId,
+        Optional<SyncRun> active = syncRunRepository.findActiveRunsBySyncType(
                 SYNC_TYPE_SCCM_CMDB,
                 List.of("queued", "running")
         ).stream().findFirst();
@@ -161,7 +155,7 @@ public class SccmCmdbSyncService {
 
     private boolean isDue(SccmCmdbConfig config) {
         SyncRun latest = syncRunRepository
-                .findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(SYNC_TYPE_SCCM_CMDB, config.getTenant().getId())
+                .findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(SYNC_TYPE_SCCM_CMDB)
                 .orElse(null);
         if (latest == null) {
             return true;
@@ -177,44 +171,44 @@ public class SccmCmdbSyncService {
     // ── Execution ──────────────────────────────────────────────────────────────────────────────
 
     private void executeRun(UUID tenantId, UUID configId, UUID runId, String triggerMode) {
-        TenantContext.setCurrentTenantId(tenantId);
-        markRunRunning(runId, triggerMode);
-        try {
-            SccmCmdbConfig config = sccmCmdbConfigRepository.findById(configId)
-                    .orElseThrow(() -> new EntityNotFoundException("SCCM CMDB config not found: " + configId));
-            sccmCmdbConfigService.resolveRuntimeConfig(config.getTenant())
-                    .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
+        tenantSchemaExecutionService.run(tenantId, () -> {
+            markRunRunning(runId, triggerMode);
+            try {
+                SccmCmdbConfig config = sccmCmdbConfigRepository.findById(configId)
+                        .orElseThrow(() -> new EntityNotFoundException("SCCM CMDB config not found: " + configId));
+                sccmCmdbConfigService.resolveRuntimeConfig(config.getTenant())
+                        .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
 
-            LOG.info("SCCM sync run {} starting (trigger={})", runId, triggerMode);
-            List<Map<String, String>> installRows = sccmQueryService.fetchInstallRows(config);
-            updateRunProgress(runId, installRows.size(), "building-discovery");
+                LOG.info("SCCM sync run {} starting (trigger={})", runId, triggerMode);
+                List<Map<String, String>> installRows = sccmQueryService.fetchInstallRows(config);
+                updateRunProgress(runId, installRows.size(), "building-discovery");
 
-            List<Map<String, String>> discoveryRows = sccmQueryService.buildDiscoveryRows(installRows);
-            updateRunProgress(runId, installRows.size() + discoveryRows.size(), "ingesting");
+                List<Map<String, String>> discoveryRows = sccmQueryService.buildDiscoveryRows(installRows);
+                updateRunProgress(runId, installRows.size() + discoveryRows.size(), "ingesting");
 
-            CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
-                    config.getTenant(),
-                    defaultIfBlank(config.getSourceSystem(), "sccm"),
-                    installRows,
-                    discoveryRows,
-                    new CmdbIngestionService.HostInventorySourceDescriptor(
-                            "sccm-live-sync",
-                            "sccm-jdbc",
-                            defaultIfBlank(config.getSourceSystem(), "sccm"),
-                            "v_GS_INSTALLED_SOFTWARE",
-                            defaultIfBlank(config.getJdbcUrl(), ""),
-                            MediaType.APPLICATION_JSON_VALUE,
-                            null
-                    )
-            );
+                CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
+                        config.getTenant(),
+                        defaultIfBlank(config.getSourceSystem(), "sccm"),
+                        installRows,
+                        discoveryRows,
+                        new CmdbIngestionService.HostInventorySourceDescriptor(
+                                "sccm-live-sync",
+                                "sccm-jdbc",
+                                defaultIfBlank(config.getSourceSystem(), "sccm"),
+                                "v_GS_INSTALLED_SOFTWARE",
+                                defaultIfBlank(config.getJdbcUrl(), ""),
+                                MediaType.APPLICATION_JSON_VALUE,
+                                null
+                        )
+                );
 
-            completeRun(configId, runId, response, installRows.size() + discoveryRows.size(), triggerMode);
-        } catch (Exception e) {
-            LOG.error("SCCM sync run {} failed: {}", runId, e.getMessage(), e);
-            failRun(runId, e.getMessage(), triggerMode);
-        } finally {
-            TenantContext.clear();
-        }
+                completeRun(configId, runId, response, installRows.size() + discoveryRows.size(), triggerMode);
+            } catch (Exception e) {
+                LOG.error("SCCM sync run {} failed: {}", runId, e.getMessage(), e);
+                failRun(runId, e.getMessage(), triggerMode);
+            }
+            return null;
+        });
     }
 
     private UUID currentTenantId() {

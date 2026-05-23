@@ -23,9 +23,6 @@ app:
     require-tenant-context: true
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
-  archive:
-    storage-backend: s3
-    s3-bucket: ${ARCHIVE_S3_BUCKET}
 
 management:
   endpoint:

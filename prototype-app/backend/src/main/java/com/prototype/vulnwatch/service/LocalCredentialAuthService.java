@@ -31,6 +31,7 @@ public class LocalCredentialAuthService {
     private final AuthTokenService authTokenService;
     private final TenantSupportGrantService tenantSupportGrantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
+    private final AppUserGlobalRoleService appUserGlobalRoleService;
     private final String platformOwnerEmail;
     private final String platformOwnerPasswordHash;
 
@@ -41,6 +42,7 @@ public class LocalCredentialAuthService {
             AuthTokenService authTokenService,
             TenantSupportGrantService tenantSupportGrantService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
+            AppUserGlobalRoleService appUserGlobalRoleService,
             @Value("${app.security.local-auth.platform-owner-email:${APP_PLATFORM_OWNER_EMAIL:}}") String platformOwnerEmail,
             @Value("${app.security.local-auth.platform-owner-password-hash:${APP_PLATFORM_OWNER_PASSWORD_HASH:}}") String platformOwnerPasswordHash
     ) {
@@ -50,6 +52,7 @@ public class LocalCredentialAuthService {
         this.authTokenService = authTokenService;
         this.tenantSupportGrantService = tenantSupportGrantService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+        this.appUserGlobalRoleService = appUserGlobalRoleService;
         this.platformOwnerEmail = platformOwnerEmail;
         this.platformOwnerPasswordHash = platformOwnerPasswordHash;
     }
@@ -70,6 +73,7 @@ public class LocalCredentialAuthService {
             user.setLastSeenAt(Instant.now());
             user.setUpdatedAt(Instant.now());
             userRepository.save(user);
+            appUserGlobalRoleService.ensureRole(user, "PLATFORM_OWNER");
             return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
         }
 

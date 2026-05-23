@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ServiceNowCmdbConfigRepository extends JpaRepository<ServiceNowCmdbConfig, UUID> {
     Optional<ServiceNowCmdbConfig> findByTenant_IdAndSourceSystemIgnoreCase(UUID tenantId, String sourceSystem);
+    Optional<ServiceNowCmdbConfig> findBySourceSystemIgnoreCase(String sourceSystem);
     List<ServiceNowCmdbConfig> findByEnabledTrueAndAutoSyncEnabledTrueOrderByUpdatedAtAsc();
     long countByTenant_Id(UUID tenantId);
 }

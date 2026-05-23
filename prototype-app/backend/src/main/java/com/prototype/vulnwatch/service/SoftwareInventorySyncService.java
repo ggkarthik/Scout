@@ -22,9 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class SoftwareInventorySyncService {
 
     private final SoftwareInventoryItemRepository softwareInventoryItemRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
-    public SoftwareInventorySyncService(SoftwareInventoryItemRepository softwareInventoryItemRepository) {
+    public SoftwareInventorySyncService(
+            SoftwareInventoryItemRepository softwareInventoryItemRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
         this.softwareInventoryItemRepository = softwareInventoryItemRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -48,7 +53,7 @@ public class SoftwareInventorySyncService {
                 .map(InventoryComponent::getId)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         Map<UUID, SoftwareInventoryItem> existingByComponentId = new HashMap<>();
-        softwareInventoryItemRepository.findByTenantAndComponent_IdIn(tenant, componentIds).forEach(item -> {
+        tenantSchemaExecutionService.run(tenant, () -> softwareInventoryItemRepository.findByComponent_IdIn(componentIds)).forEach(item -> {
             if (item.getComponent() != null && item.getComponent().getId() != null) {
                 existingByComponentId.put(item.getComponent().getId(), item);
             }

@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-04-29
+Last updated: 2026-05-20
 
 ## Why This Fourth Document Exists
 
@@ -123,7 +123,7 @@ What exists in code but is not fully surfaced or is still transitional:
 
 ### Managed SaaS, Modular Monolith First
 
-The production direction is an AWS-hosted managed SaaS. The first customer-ready version should keep the Spring Boot backend as one deployable modular monolith while enforcing internal boundaries for identity/tenant management, inventory, vulnerability intelligence, correlation/projection, findings/workflow, connectors, and operations. Vulnerability-feed ingestion and inventory ingestion are the most likely future service extractions once scale or blast-radius demands it.
+The production direction is a managed SaaS deployment. The first customer-ready version should keep the Spring Boot backend as one deployable modular monolith while enforcing internal boundaries for identity/tenant management, inventory, vulnerability intelligence, correlation/projection, findings/workflow, connectors, and operations. Vulnerability-feed ingestion and inventory ingestion are the most likely future service extractions once scale or blast-radius demands it.
 
 ### Platform-Owned Vulnerability Repository
 
@@ -133,9 +133,9 @@ Canonical vulnerability intelligence is platform-owned and global. The platform 
 
 The backend deliberately centers on deterministic evidence rather than fuzzy package matching. The current production path is CPE-based with version checks and source precedence.
 
-### Tenant-Aware Schema, Single-Workspace Runtime
+### Tenant-Aware Schema, Multi-Tenant Hardening In Progress
 
-Most tables still carry tenant boundaries for schema compatibility, but the live runtime now resolves one cached workspace at startup and uses that same workspace across requests. The system is still tenant-aware in schema design, but it no longer treats tenant selection as a per-request concern.
+Most tables carry tenant boundaries for schema compatibility. The live runtime has been resolving one cached workspace at startup while the broader multi-tenant rollout continues. The system is tenant-aware in schema design, uses schema-per-tenant routing at runtime, and still retains some compatibility-oriented table shapes during the transition.
 
 ### Projection Tables Matter
 

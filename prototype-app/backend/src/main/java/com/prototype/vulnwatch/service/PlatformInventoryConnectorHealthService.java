@@ -1,95 +1,86 @@
 package com.prototype.vulnwatch.service;
 
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.InventoryConnectorHealthResponse;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
+import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
+import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 
 @Service
 public class PlatformInventoryConnectorHealthService {
 
-    private final JdbcTemplate platformJdbcTemplate;
+    private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
+    private final SccmCmdbConfigRepository sccmCmdbConfigRepository;
+    private final AwsDiscoveryConfigRepository awsDiscoveryConfigRepository;
 
-    public PlatformInventoryConnectorHealthService(@Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate) {
-        this.platformJdbcTemplate = platformJdbcTemplate;
+    public PlatformInventoryConnectorHealthService(
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
+            SccmCmdbConfigRepository sccmCmdbConfigRepository,
+            AwsDiscoveryConfigRepository awsDiscoveryConfigRepository
+    ) {
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
+        this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
+        this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
     }
 
     public List<InventoryConnectorHealthResponse> listInventoryConnectorHealth() {
         List<InventoryConnectorHealthResponse> responses = new ArrayList<>();
-        responses.addAll(platformJdbcTemplate.query("""
-                select c.tenant_id,
-                       t.name as tenant_name,
-                       'servicenow' as connector_key,
-                       c.enabled,
-                       c.auto_sync_enabled,
-                       c.last_test_status,
-                       c.last_test_message,
-                       c.last_tested_at,
-                       c.last_sync_at
-                from servicenow_cmdb_configs c
-                join tenants t on t.id = c.tenant_id
-                """, rowMapper()));
-        responses.addAll(platformJdbcTemplate.query("""
-                select c.tenant_id,
-                       t.name as tenant_name,
-                       'sccm' as connector_key,
-                       c.enabled,
-                       c.auto_sync_enabled,
-                       c.last_test_status,
-                       c.last_test_message,
-                       c.last_tested_at,
-                       c.last_sync_at
-                from sccm_cmdb_configs c
-                join tenants t on t.id = c.tenant_id
-                """, rowMapper()));
-        responses.addAll(platformJdbcTemplate.query("""
-                select c.tenant_id,
-                       t.name as tenant_name,
-                       'aws' as connector_key,
-                       c.enabled,
-                       c.auto_sync_enabled,
-                       c.last_test_status,
-                       c.last_test_message,
-                       c.last_tested_at,
-                       c.last_sync_at
-                from aws_discovery_configs c
-                join tenants t on t.id = c.tenant_id
-                """, rowMapper()));
+        for (Tenant tenant : tenantService.listTenants()) {
+            tenantSchemaExecutionService.run(tenant, () -> {
+                serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
+                        .ifPresent(config -> responses.add(toResponse(tenant, "servicenow", config.isEnabled(),
+                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                config.getLastTestedAt(), config.getLastSyncAt())));
+                sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
+                        .ifPresent(config -> responses.add(toResponse(tenant, "sccm", config.isEnabled(),
+                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                config.getLastTestedAt(), config.getLastSyncAt())));
+                awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
+                        .ifPresent(config -> responses.add(toResponse(tenant, "aws", config.isEnabled(),
+                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                config.getLastTestedAt(), config.getLastSyncAt())));
+                return null;
+            });
+        }
         responses.sort(Comparator
                 .comparing(InventoryConnectorHealthResponse::tenantName, Comparator.nullsLast(String::compareToIgnoreCase))
                 .thenComparing(InventoryConnectorHealthResponse::connectorKey, Comparator.nullsLast(String::compareToIgnoreCase)));
         return responses;
     }
 
-    private RowMapper<InventoryConnectorHealthResponse> rowMapper() {
-        return (rs, rowNum) -> new InventoryConnectorHealthResponse(
-                UUID.fromString(rs.getString("tenant_id")),
-                rs.getString("tenant_name"),
-                rs.getString("connector_key"),
-                rs.getBoolean("enabled"),
-                rs.getBoolean("auto_sync_enabled"),
-                rs.getString("last_test_status"),
-                sanitize(rs.getString("last_test_message")),
-                timestamp(rs, "last_tested_at"),
-                timestamp(rs, "last_sync_at"),
-                deriveHealthState(
-                        rs.getBoolean("enabled"),
-                        rs.getString("last_test_status"),
-                        timestamp(rs, "last_sync_at")
-                )
+    private InventoryConnectorHealthResponse toResponse(
+            Tenant tenant,
+            String connectorKey,
+            boolean enabled,
+            boolean autoSyncEnabled,
+            String lastTestStatus,
+            String lastTestMessage,
+            Instant lastTestedAt,
+            Instant lastSyncAt
+    ) {
+        return new InventoryConnectorHealthResponse(
+                tenant.getId(),
+                tenant.getName(),
+                connectorKey,
+                enabled,
+                autoSyncEnabled,
+                lastTestStatus,
+                sanitize(lastTestMessage),
+                lastTestedAt,
+                lastSyncAt,
+                deriveHealthState(enabled, lastTestStatus, lastSyncAt)
         );
-    }
-
-    private Instant timestamp(ResultSet rs, String column) throws SQLException {
-        return rs.getTimestamp(column) == null ? null : rs.getTimestamp(column).toInstant();
     }
 
     private String deriveHealthState(boolean enabled, String lastTestStatus, Instant lastSyncAt) {

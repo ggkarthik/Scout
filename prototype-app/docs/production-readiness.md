@@ -1,10 +1,10 @@
 # VulnWatch Production Readiness
 
-Last updated: 2026-04-29
+Last updated: 2026-05-20
 
 ## Direction
 
-VulnWatch is moving toward an AWS-hosted managed SaaS delivered first as a production-grade modular monolith. The backend remains one deployable Spring Boot service for v1, with explicit module boundaries and job semantics that can later move to workers or services.
+VulnWatch is moving toward a managed SaaS deployment delivered first as a production-grade modular monolith. The backend remains one deployable Spring Boot service for v1, with explicit module boundaries and job semantics that can later move to workers or services.
 
 ## Tenant And Identity Baseline
 
@@ -98,15 +98,15 @@ The API now reflects that split:
 
 ## AWS Deployment Baseline
 
-Initial AWS shape:
+Initial deployment shape:
 
-- backend container on ECS Fargate
-- frontend static container or S3/CloudFront distribution
-- RDS PostgreSQL with encryption, backups, PITR, and private networking
-- S3 for archives and exports
-- Secrets Manager/KMS for connector secrets, API keys, and signing secrets
-- CloudWatch logs, metrics, and alarms
-- SQS/EventBridge later for externalized ingestion/projection workers
+- backend container
+- frontend static build
+- PostgreSQL with backups and point-in-time recovery
+- filesystem-backed vulnerability archives
+- managed secret storage for connector secrets, API keys, and signing secrets
+- centralized logs, metrics, and alarms
+- queue/scheduler infrastructure later for externalized ingestion and projection workers
 
 Container entrypoints were added in:
 
@@ -114,11 +114,11 @@ Container entrypoints were added in:
 - `frontend/Dockerfile`
 - `frontend/nginx.conf`
 
-The first AWS deployment contract now lives in `infra/aws/terraform`. It provisions ECS Fargate services, an ALB, RDS PostgreSQL, an encrypted S3 archive bucket, KMS, Secrets Manager, CloudWatch log groups, and task IAM roles. The backend production profile is `application-prod.yml`; it enables readiness/liveness probes, disables header-based tenant selection, requires production secrets, and uses S3 archive storage.
+The backend production profile is `application-prod.yml`; it enables readiness/liveness probes, disables header-based tenant selection, and requires production secrets.
 
-The vulnerability archive backend now supports S3 through AWS SDK v2. Production startup requires `ARCHIVE_STORAGE_BACKEND=s3` and `ARCHIVE_S3_BUCKET`; credentials should come from the ECS task role. The service stores canonical archive keys such as `descriptions/CVE-2024-1234.txt` and `raw-payloads/CVE-2024-1234.json`, with local path traversal checks retained for filesystem development mode.
+The vulnerability archive backend stores canonical archive keys such as `descriptions/CVE-2024-1234.txt` and `raw-payloads/CVE-2024-1234.json` on the local filesystem, with path traversal checks enforced for reads and writes.
 
-Deployment operators should use `docs/runbooks/aws-deployment.md` and `scripts/smoke-test.sh` for the first smoke gate after ECS service stabilization.
+Deployment operators should use environment-specific rollout runbooks and `scripts/smoke-test.sh` for the first smoke gate after backend stabilization.
 
 ## Operations Observability Baseline
 
@@ -140,8 +140,8 @@ Audit events also persist `requestId`, allowing support and incident review to c
 - Replace API-key mode in production with verified OIDC/JWT validation and membership-derived tenant context.
 - Replace remaining default-workspace-only connector paths with request-derived tenant context.
 - Extend audit coverage to investigations, suppressions, and remaining connector edits.
-- Move production credential encryption keys into KMS/Secrets Manager envelope encryption and add rotation workflow.
+- Move production credential encryption keys into a managed secret-encryption and rotation workflow.
 - Extend quota enforcement to daily SBOM uploads, queued jobs, storage, and API rate limits.
-- Add OpenTelemetry trace/span export, CloudWatch dashboards, and alert routing for the request correlation fields.
-- Add Terraform remote state, ECR repositories, image scanning, SBOM generation, image signing, and production promotion workflow.
+- Add OpenTelemetry trace/span export, deployment-platform dashboards, and alert routing for the request correlation fields.
+- Add deployment automation, image scanning, SBOM generation, image signing, and production promotion workflow.
 - Add migration validation against an ephemeral PostgreSQL service and smoke tests against deployed preview environments.

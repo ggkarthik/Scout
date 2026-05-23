@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,13 +36,19 @@ class InventoryComponentCpeMappingServiceTest {
 
     @Mock
     private CpeDimensionService cpeDimensionService;
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Test
     void syncComponentMappings_batchesResolutionAcrossComponents() {
         InventoryComponentCpeMappingService service = new InventoryComponentCpeMappingService(
                 inventoryComponentCpeMapRepository,
-                cpeDimensionService
+                cpeDimensionService,
+                tenantSchemaExecutionService
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
         Tenant tenant = tenant(UUID.randomUUID());
         InventoryComponent first = component(tenant, UUID.randomUUID(), "2.14.1", InventoryComponentStatus.ACTIVE);
         InventoryComponent second = component(tenant, UUID.randomUUID(), "1.25.3", InventoryComponentStatus.ACTIVE);
@@ -51,9 +58,7 @@ class InventoryComponentCpeMappingServiceTest {
 
         when(cpeDimensionService.resolveOrCreateAllByNormalizedCpe(eq(Set.of(CPE_ONE, CPE_TWO))))
                 .thenReturn(Map.of(CPE_ONE, firstDim, CPE_TWO, secondDim));
-        when(inventoryComponentCpeMapRepository.findByTenant_IdAndComponent_IdIn(
-                eq(tenant.getId()),
-                eq(Set.of(first.getId(), second.getId()))))
+        when(inventoryComponentCpeMapRepository.findByComponent_IdIn(eq(Set.of(first.getId(), second.getId()))))
                 .thenReturn(List.of());
 
         service.syncComponentMappings(
@@ -65,10 +70,7 @@ class InventoryComponentCpeMappingServiceTest {
         );
 
         verify(cpeDimensionService).resolveOrCreateAllByNormalizedCpe(Set.of(CPE_ONE, CPE_TWO));
-        verify(inventoryComponentCpeMapRepository).findByTenant_IdAndComponent_IdIn(
-                tenant.getId(),
-                Set.of(first.getId(), second.getId())
-        );
+        verify(inventoryComponentCpeMapRepository).findByComponent_IdIn(Set.of(first.getId(), second.getId()));
 
         ArgumentCaptor<List<InventoryComponentCpeMap>> savedCaptor = ArgumentCaptor.forClass(List.class);
         verify(inventoryComponentCpeMapRepository).saveAll(savedCaptor.capture());
@@ -80,8 +82,12 @@ class InventoryComponentCpeMappingServiceTest {
     void syncComponentMappings_clearsMappingsForRetiredComponents() {
         InventoryComponentCpeMappingService service = new InventoryComponentCpeMappingService(
                 inventoryComponentCpeMapRepository,
-                cpeDimensionService
+                cpeDimensionService,
+                tenantSchemaExecutionService
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
         Tenant tenant = tenant(UUID.randomUUID());
         InventoryComponent retired = component(tenant, UUID.randomUUID(), "2.14.1", InventoryComponentStatus.RETIRED);
         InventoryComponentCpeMap existingRow = new InventoryComponentCpeMap();
@@ -90,9 +96,7 @@ class InventoryComponentCpeMappingServiceTest {
         existingRow.setCpeDim(cpeDim(UUID.randomUUID(), CPE_ONE));
 
         when(cpeDimensionService.resolveOrCreateAllByNormalizedCpe(Set.of())).thenReturn(Map.of());
-        when(inventoryComponentCpeMapRepository.findByTenant_IdAndComponent_IdIn(
-                tenant.getId(),
-                Set.of(retired.getId())))
+        when(inventoryComponentCpeMapRepository.findByComponent_IdIn(Set.of(retired.getId())))
                 .thenReturn(List.of(existingRow));
 
         service.syncComponentMappings(

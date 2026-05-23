@@ -1,7 +1,6 @@
 package com.prototype.vulnwatch.repo;
 
 import com.prototype.vulnwatch.domain.SoftwareInventoryItem;
-import com.prototype.vulnwatch.domain.Tenant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -11,7 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SoftwareInventoryItemRepository extends JpaRepository<SoftwareInventoryItem, UUID> {
-    List<SoftwareInventoryItem> findByTenantAndComponent_IdIn(Tenant tenant, Collection<UUID> componentIds);
+    List<SoftwareInventoryItem> findByComponent_IdIn(Collection<UUID> componentIds);
 
     long countByTenant_IdAndComponent_IdIn(UUID tenantId, Collection<UUID> componentIds);
 

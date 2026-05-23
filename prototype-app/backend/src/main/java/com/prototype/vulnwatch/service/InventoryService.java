@@ -232,7 +232,7 @@ public class InventoryService {
                 .toList();
         Map<UUID, UUID> ciIdByAssetId = new LinkedHashMap<>();
         List<UUID> ciIds = new ArrayList<>();
-        for (Ci ci : ciRepository.findByTenant_IdAndAsset_IdIn(tenant.getId(), assetIds)) {
+        for (Ci ci : ciRepository.findByAsset_IdIn(assetIds)) {
             if (ci.getAsset() == null || ci.getAsset().getId() == null || ci.getId() == null) {
                 continue;
             }
@@ -242,7 +242,7 @@ public class InventoryService {
 
         Map<UUID, List<CiAlias>> aliasesByCiId = new LinkedHashMap<>();
         if (!ciIds.isEmpty()) {
-            for (CiAlias alias : ciAliasRepository.findByTenant_IdAndCi_IdIn(tenant.getId(), ciIds)) {
+            for (CiAlias alias : ciAliasRepository.findByCi_IdIn(ciIds)) {
                 if (alias.getCi() == null || alias.getCi().getId() == null) {
                     continue;
                 }

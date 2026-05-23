@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
+import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
@@ -41,17 +43,20 @@ public class FindingQueryService {
     private final ObjectMapper objectMapper;
     private final FindingsScoreService findingsScoreService;
     private final RiskPolicyService riskPolicyService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FindingQueryService(
             FindingRepository findingRepository,
             ObjectMapper objectMapper,
             FindingsScoreService findingsScoreService,
-            RiskPolicyService riskPolicyService
+            RiskPolicyService riskPolicyService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.findingRepository = findingRepository;
         this.objectMapper = objectMapper;
         this.findingsScoreService = findingsScoreService;
         this.riskPolicyService = riskPolicyService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(readOnly = true)
@@ -62,6 +67,7 @@ public class FindingQueryService {
             List<String> severity,
             List<String> status,
             List<String> decisionState,
+            List<String> creationSource,
             List<String> matchMethod,
             List<String> vexStatus,
             List<String> vexFreshness,
@@ -80,6 +86,7 @@ public class FindingQueryService {
                 severity,
                 status,
                 decisionState,
+                creationSource,
                 matchMethod,
                 vexStatus,
                 vexFreshness,
@@ -89,7 +96,7 @@ public class FindingQueryService {
                 packageName,
                 ecosystem
         );
-        Page<Finding> findings = findingRepository.findAll(specification, pageable);
+        Page<Finding> findings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAll(specification, pageable));
         return new FindingPageResponse(
                 findings.getContent().stream().map(this::toResponse).toList(),
                 findings.getNumber(),
@@ -105,6 +112,7 @@ public class FindingQueryService {
             List<String> severity,
             List<String> status,
             List<String> decisionState,
+            List<String> creationSource,
             List<String> matchMethod,
             List<String> vexStatus,
             List<String> vexFreshness,
@@ -119,6 +127,7 @@ public class FindingQueryService {
                 severity,
                 status,
                 decisionState,
+                creationSource,
                 matchMethod,
                 vexStatus,
                 vexFreshness,
@@ -128,7 +137,10 @@ public class FindingQueryService {
                 packageName,
                 ecosystem
         );
-        return findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"));
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"))
+        );
     }
 
     @Transactional(readOnly = true)
@@ -145,7 +157,7 @@ public class FindingQueryService {
 
     @Transactional(readOnly = true)
     public List<FindingResponse> listByTenant(Tenant tenant) {
-        return findingRepository.findByTenantOrderByUpdatedAtDesc(tenant).stream()
+        return tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc()).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -153,14 +165,14 @@ public class FindingQueryService {
     @Transactional(readOnly = true)
     public FindingFilterValuesResponse listAvailableFilters(Tenant tenant) {
         LinkedHashSet<String> severities = new LinkedHashSet<>();
-        findingRepository.findDistinctSeveritiesByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctSeveritiesByTenant(tenant)).stream()
                 .filter(this::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(severities::add);
         severities.addAll(List.of("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE", "UNKNOWN"));
 
         LinkedHashSet<String> statuses = new LinkedHashSet<>();
-        findingRepository.findDistinctStatusesByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctStatusesByTenant(tenant)).stream()
                 .filter(Objects::nonNull)
                 .map(Enum::name)
                 .forEach(statuses::add);
@@ -169,7 +181,7 @@ public class FindingQueryService {
         }
 
         LinkedHashSet<String> decisionStates = new LinkedHashSet<>();
-        findingRepository.findDistinctDecisionStatesByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctDecisionStatesByTenant(tenant)).stream()
                 .filter(Objects::nonNull)
                 .map(Enum::name)
                 .forEach(decisionStates::add);
@@ -178,27 +190,27 @@ public class FindingQueryService {
         }
 
         LinkedHashSet<String> matchMethods = new LinkedHashSet<>();
-        findingRepository.findDistinctMatchMethodsByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctMatchMethodsByTenant(tenant)).stream()
                 .filter(this::hasText)
                 .map(value -> value.trim().toLowerCase(Locale.ROOT))
                 .forEach(matchMethods::add);
 
         LinkedHashSet<String> vexStatuses = new LinkedHashSet<>();
-        findingRepository.findDistinctVexStatusesByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexStatusesByTenant(tenant)).stream()
                 .filter(this::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(vexStatuses::add);
         vexStatuses.addAll(List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "NO_PATCH", "UNDER_INVESTIGATION", "UNKNOWN"));
 
         LinkedHashSet<String> vexFreshness = new LinkedHashSet<>();
-        findingRepository.findDistinctVexFreshnessByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexFreshnessByTenant(tenant)).stream()
                 .filter(this::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(vexFreshness::add);
         vexFreshness.addAll(List.of("FRESH", "STALE", "UNKNOWN"));
 
         LinkedHashSet<String> vexProviders = new LinkedHashSet<>();
-        findingRepository.findDistinctVexProvidersByTenant(tenant).stream()
+        tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexProvidersByTenant(tenant)).stream()
                 .filter(this::hasText)
                 .map(value -> value.trim().toLowerCase(Locale.ROOT))
                 .forEach(vexProviders::add);
@@ -221,43 +233,53 @@ public class FindingQueryService {
     @Transactional(readOnly = true)
     public List<FindingResponse> listLatestByTenant(Tenant tenant, int limit) {
         Pageable pageable = PageRequest.of(0, Math.max(1, Math.min(200, limit)), Sort.by(Sort.Direction.DESC, "updatedAt"));
-        return findingRepository.findByTenantOrderByUpdatedAtDesc(tenant, pageable).getContent().stream()
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findAllByOrderByUpdatedAtDesc(pageable)
+        ).getContent().stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public long countOpen(Tenant tenant) {
-        return findingRepository.countByTenantAndStatus(tenant, FindingStatus.OPEN);
+        return tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatus(FindingStatus.OPEN));
     }
 
     @Transactional(readOnly = true)
     public long countCritical(Tenant tenant) {
-        return findingRepository.countByTenantAndStatusAndRiskScoreGreaterThanEqual(tenant, FindingStatus.OPEN, 9.0);
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.countByStatusAndRiskScoreGreaterThanEqual(FindingStatus.OPEN, 9.0)
+        );
     }
 
     public FindingResponse toResponse(Finding finding) {
         Vulnerability vulnerability = finding.getVulnerability();
         InventoryComponent component = finding.getComponent();
+        Asset asset = finding.getAsset() != null ? finding.getAsset() : component != null ? component.getAsset() : null;
         Map<String, Object> evidencePayload = readEvidencePayload(finding.getEvidence());
 
         String scoreConfig = riskPolicyService.getFindingsScoreConfig(finding.getTenant());
-        double findingsScore = findingsScoreService.compute(scoreConfig, finding);
+        Double findingsScore = safeFindingsScore(scoreConfig, finding);
 
         return new FindingResponse(
                 finding.getId(),
                 finding.getDisplayId(),
-                component.getId(),
-                finding.getAsset().getName(),
-                finding.getAsset().getIdentifier(),
-                finding.getAsset().getType().name(),
-                component.getPackageName(),
-                component.getVersion(),
-                vulnerability.getExternalId(),
-                vulnerability.getSource().name(),
-                finding.getSeverityOverride() != null ? finding.getSeverityOverride() : vulnerability.getSeverity(),
-                vulnerability.isInKev(),
-                vulnerability.getEpssScore(),
+                component != null ? component.getId() : null,
+                asset != null ? asset.getName() : null,
+                asset != null ? asset.getIdentifier() : null,
+                asset != null && asset.getType() != null ? asset.getType().name() : null,
+                component != null ? component.getPackageName() : null,
+                component != null ? component.getVersion() : null,
+                vulnerability != null ? vulnerability.getExternalId() : null,
+                vulnerability != null && vulnerability.getSource() != null ? vulnerability.getSource().name() : null,
+                finding.getCreationSource(),
+                finding.getSeverityOverride() != null
+                        ? finding.getSeverityOverride()
+                        : vulnerability != null ? vulnerability.getSeverity() : null,
+                vulnerability != null && vulnerability.isInKev(),
+                vulnerability != null ? vulnerability.getEpssScore() : null,
                 finding.getRiskScore(),
                 finding.getConfidenceScore(),
                 finding.getMatchedBy(),
@@ -277,11 +299,11 @@ public class FindingQueryService {
                 finding.getDecisionState(),
                 finding.getStatus(),
                 finding.getUpdatedAt(),
-                component.getEolSlug(),
-                component.getEolCycle(),
-                component.getEolDate(),
-                component.getIsEol(),
-                component.getEolDate() != null
+                component != null ? component.getEolSlug() : null,
+                component != null ? component.getEolCycle() : null,
+                component != null ? component.getEolDate() : null,
+                component != null ? component.getIsEol() : null,
+                component != null && component.getEolDate() != null
                         ? (int) ChronoUnit.DAYS.between(LocalDate.now(), component.getEolDate())
                         : null,
                 finding.getIncidentId(),
@@ -290,6 +312,14 @@ public class FindingQueryService {
                 finding.getSuppressedByRuleId(),
                 finding.getSuppressedByRuleName(),
                 finding.getOwnerGroup());
+    }
+
+    private Double safeFindingsScore(String scoreConfig, Finding finding) {
+        try {
+            return findingsScoreService.compute(scoreConfig, finding);
+        } catch (RuntimeException ignored) {
+            return finding.getRiskScore();
+        }
     }
 
     private Specification<Finding> byTenant(Tenant tenant) {
@@ -301,6 +331,7 @@ public class FindingQueryService {
             List<String> severity,
             List<String> status,
             List<String> decisionState,
+            List<String> creationSource,
             List<String> matchMethod,
             List<String> vexStatus,
             List<String> vexFreshness,
@@ -314,6 +345,7 @@ public class FindingQueryService {
                 .and(bySeverity(severity))
                 .and(byStatus(status))
                 .and(byDecisionState(decisionState))
+                .and(byCreationSource(creationSource))
                 .and(byMatchMethod(matchMethod))
                 .and(byVexStatus(vexStatus))
                 .and(byVexFreshness(vexFreshness))
@@ -376,6 +408,25 @@ public class FindingQueryService {
             return null;
         }
         return (root, query, cb) -> root.get("decisionState").in(states);
+    }
+
+    private Specification<Finding> byCreationSource(List<String> creationSources) {
+        Set<String> normalized = normalizeFilterValues(creationSources);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        Set<FindingCreationSource> sources = new HashSet<>();
+        for (String value : normalized) {
+            try {
+                sources.add(FindingCreationSource.valueOf(value.toUpperCase(Locale.ROOT)));
+            } catch (IllegalArgumentException ignored) {
+                // Ignore unknown values and continue with valid tokens.
+            }
+        }
+        if (sources.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> root.get("creationSource").in(sources);
     }
 
     private Specification<Finding> byMatchMethod(List<String> matchMethods) {

@@ -16,6 +16,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -67,6 +69,10 @@ public class Finding {
     @Column(name = "decision_state", length = 40)
     private FindingDecisionState decisionState = FindingDecisionState.NEEDS_REVIEW;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "creation_source", nullable = false, length = 32)
+    private FindingCreationSource creationSource = FindingCreationSource.AUTOMATIC;
+
     @Column(nullable = false)
     private double riskScore;
 
@@ -98,7 +104,8 @@ public class Finding {
     private Instant suppressedUntil;
 
     @Basic(fetch = FetchType.LAZY)
-    @Column(columnDefinition = "text")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
     private String evidence;
 
     @Column(name = "vex_status", length = 64)
@@ -200,6 +207,14 @@ public class Finding {
 
     public void setDecisionState(FindingDecisionState decisionState) {
         this.decisionState = decisionState;
+    }
+
+    public FindingCreationSource getCreationSource() {
+        return creationSource;
+    }
+
+    public void setCreationSource(FindingCreationSource creationSource) {
+        this.creationSource = creationSource == null ? FindingCreationSource.AUTOMATIC : creationSource;
     }
 
     public double getRiskScore() {

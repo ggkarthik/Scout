@@ -6,10 +6,12 @@ import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AUTH_CONTEXT_QUERY_ROOT } from '../features/auth/queries';
-import { useAcceptPlatformSupportGrantMutation, useAuthContextQuery, usePlatformInventoryConnectorHealthQuery, usePlatformSupportGrantsQuery } from '../features/admin/queries';
+import { useAcceptPlatformSupportGrantMutation, usePlatformInventoryConnectorHealthQuery, usePlatformSupportGrantsQuery } from '../features/admin/queries';
+import type { TenantSupportGrant } from '../features/admin/types';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
+  { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'support', label: 'Support', helper: 'Audited support access workspace' }
 ];
@@ -24,6 +26,10 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
+
+  const supportGrantsQuery = usePlatformSupportGrantsQuery();
+  const grants = supportGrantsQuery.data ?? [];
+  const pendingGrantCount = grants.filter((g) => g.status === 'PENDING').length;
 
   return (
     <div className="page-grid platform-console-page">
@@ -45,7 +51,9 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
               onClick={() => navigate(pathForPlatformView(tab.key))}
               title={tab.helper}
             >
-              {tab.label}
+              {tab.key === 'support' && pendingGrantCount > 0
+                ? `${tab.label} (${pendingGrantCount})`
+                : tab.label}
             </button>
           ))}
         </div>
@@ -55,18 +63,153 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
           </div>
         )}
 
-        {selectedView === 'tenants' && <TenantLifecyclePanel />}
+        {selectedView === 'tenants' && <TenantLifecyclePanel grants={grants} />}
+        {selectedView === 'users' && <PlatformUsersPanel />}
         {selectedView === 'demo-requests' && <DemoRequestsPanel />}
-        {selectedView === 'support' && <PlatformSupportPanel />}
+        {selectedView === 'support' && (
+          <PlatformSupportPanel
+            grants={grants}
+            grantsLoading={supportGrantsQuery.isLoading}
+            grantsError={supportGrantsQuery.isError ? supportGrantsQuery.error : null}
+            onRefetch={() => { void supportGrantsQuery.refetch(); }}
+          />
+        )}
       </section>
     </div>
   );
 }
 
-function TenantLifecyclePanel() {
+function PlatformUsersPanel() {
+  const queryClient = useQueryClient();
+  const usersQuery = useQuery({
+    queryKey: ['platform-users'],
+    queryFn: api.listPlatformUsers
+  });
+  const upsertPlatformUser = useMutation({
+    mutationFn: api.upsertPlatformUser,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['platform-users'] });
+    }
+  });
+  const revokeRole = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) => api.revokePlatformUserRole(userId, role),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['platform-users'] });
+    }
+  });
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const externalSubject = String(formData.get('externalSubject') ?? '').trim();
+    const email = String(formData.get('email') ?? '').trim();
+    const displayName = String(formData.get('displayName') ?? '').trim();
+    const role = String(formData.get('role') ?? 'PLATFORM_OWNER').trim();
+    if (!externalSubject || !role) {
+      return;
+    }
+    upsertPlatformUser.mutate(
+      {
+        externalSubject,
+        email: email || undefined,
+        displayName: displayName || undefined,
+        role
+      },
+      {
+        onSuccess: () => event.currentTarget.reset()
+      }
+    );
+  };
+
+  const users = usersQuery.data ?? [];
+
+  return (
+    <div className="section-block">
+      <div className="section-title-row">
+        <h4 className="section-title">Platform Users</h4>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void usersQuery.refetch()}>
+          Refresh
+        </button>
+      </div>
+      <p className="panel-caption">
+        Provision platform access with the external subject emitted by Auth0 for the configured JWT subject claim.
+      </p>
+      <form className="platform-create-tenant-form" onSubmit={handleSubmit}>
+        <input name="externalSubject" placeholder="Auth0 subject" aria-label="Auth0 subject" />
+        <input name="email" placeholder="Email" aria-label="Email" />
+        <input name="displayName" placeholder="Display name" aria-label="Display name" />
+        <input name="role" placeholder="PLATFORM_OWNER" aria-label="Role" defaultValue="PLATFORM_OWNER" />
+        <button type="submit" className="btn btn-primary" disabled={upsertPlatformUser.isPending}>
+          {upsertPlatformUser.isPending ? 'Saving...' : 'Grant Role'}
+        </button>
+      </form>
+      {upsertPlatformUser.isError && (
+        <div className="notice error" role="alert">
+          {upsertPlatformUser.error instanceof Error ? upsertPlatformUser.error.message : 'Failed to save platform user'}
+        </div>
+      )}
+      {usersQuery.isError ? (
+        <div className="notice error" role="alert">
+          {usersQuery.error instanceof Error ? usersQuery.error.message : 'Failed to load platform users'}
+        </div>
+      ) : usersQuery.isLoading ? (
+        <div className="empty-state"><p>Loading platform users...</p></div>
+      ) : users.length === 0 ? (
+        <div className="empty-state"><p>No platform users provisioned yet.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Display Name</th>
+                <th>Subject</th>
+                <th>Email</th>
+                <th>Roles</th>
+                <th>Status</th>
+                <th>Last Seen</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.userId}>
+                  <td>{user.displayName ?? 'Unassigned'}</td>
+                  <td><code>{user.externalSubject}</code></td>
+                  <td>{user.email ?? '-'}</td>
+                  <td>{user.globalRoles.join(', ') || '-'}</td>
+                  <td>{user.status}</td>
+                  <td>{user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleString() : '-'}</td>
+                  <td>
+                    {user.globalRoles.length === 0 ? '-' : user.globalRoles.map((role) => (
+                      <button
+                        key={`${user.userId}-${role}`}
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => revokeRole.mutate({ userId: user.userId, role })}
+                        disabled={revokeRole.isPending}
+                      >
+                        Revoke {role}
+                      </button>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {revokeRole.isError && (
+        <div className="notice error" role="alert">
+          {revokeRole.error instanceof Error ? revokeRole.error.message : 'Failed to revoke role'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TenantLifecyclePanel({ grants }: { grants: TenantSupportGrant[] }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const authQuery = useAuthContextQuery();
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
@@ -87,7 +230,8 @@ function TenantLifecyclePanel() {
   });
 
   const tenants = tenantsQuery.data ?? [];
-  const allowedTenantIds = new Set((authQuery.data?.allowedTenants ?? []).map((tenant) => tenant.id));
+  const activeGrantTenantIds = new Set(grants.filter((g) => g.status === 'ACTIVE').map((g) => g.tenantId));
+  const pendingGrantTenantIds = new Set(grants.filter((g) => g.status === 'PENDING').map((g) => g.tenantId));
 
   const handleCreateTenant = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -137,6 +281,7 @@ function TenantLifecyclePanel() {
             <thead>
               <tr>
                 <th>Tenant</th>
+                <th>Owner Email</th>
                 <th>Slug</th>
                 <th>Status</th>
                 <th>Plan</th>
@@ -150,6 +295,7 @@ function TenantLifecyclePanel() {
               {tenants.map((tenant) => (
                 <tr key={tenant.id}>
                   <td>{tenant.name}</td>
+                  <td>{tenant.demoOwnerEmail ?? '-'}</td>
                   <td><code>{tenant.slug}</code></td>
                   <td>{tenant.status}</td>
                   <td>{tenant.planCode ?? 'manual'}</td>
@@ -157,15 +303,39 @@ function TenantLifecyclePanel() {
                   <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => openTenantContext.mutate(tenant.id)}
-                      disabled={openTenantContext.isPending || !allowedTenantIds.has(tenant.id)}
-                      title={allowedTenantIds.has(tenant.id) ? 'Enter tenant support session' : 'Tenant support grant must be accepted first'}
-                    >
-                      Enter Tenant
-                    </button>
+                    {activeGrantTenantIds.has(tenant.id) ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => openTenantContext.mutate(tenant.id)}
+                        disabled={openTenantContext.isPending}
+                        title="Enter tenant support session"
+                      >
+                        Enter Tenant
+                      </button>
+                    ) : pendingGrantTenantIds.has(tenant.id) ? (
+                      <div className="button-row compact">
+                        <button type="button" className="btn btn-secondary btn-sm" disabled title="Accept the pending grant first">
+                          Enter Tenant
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => navigate(pathForPlatformView('support'))}
+                        >
+                          Accept Grant →
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled
+                        title="Ask the tenant admin to issue a support grant via Admin → Support Access"
+                      >
+                        No grant
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -354,13 +524,31 @@ function DemoRequestsPanel() {
   );
 }
 
-function PlatformSupportPanel() {
-  const supportGrantsQuery = usePlatformSupportGrantsQuery();
+function PlatformSupportPanel({
+  grants,
+  grantsLoading,
+  grantsError,
+  onRefetch
+}: {
+  grants: TenantSupportGrant[];
+  grantsLoading: boolean;
+  grantsError: Error | unknown | null;
+  onRefetch: () => void;
+}) {
   const connectorHealthQuery = usePlatformInventoryConnectorHealthQuery();
   const acceptGrant = useAcceptPlatformSupportGrantMutation();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
-  const grants = supportGrantsQuery.data ?? [];
+  const openTenantContext = useMutation({
+    mutationFn: api.selectTenantContext,
+    onSuccess: async (response) => {
+      setStoredAuthToken(response.token);
+      await queryClient.invalidateQueries({ queryKey: AUTH_CONTEXT_QUERY_ROOT });
+      navigate('/exposure');
+    }
+  });
+
   const connectorHealth = connectorHealthQuery.data ?? [];
 
   return (
@@ -371,7 +559,7 @@ function PlatformSupportPanel() {
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={() => {
-            void supportGrantsQuery.refetch();
+            onRefetch();
             void connectorHealthQuery.refetch();
           }}
         >
@@ -390,11 +578,11 @@ function PlatformSupportPanel() {
           <p>Only active grants become eligible tenant contexts.</p>
         </div>
       </div>
-      {supportGrantsQuery.isLoading ? (
+      {grantsLoading ? (
         <div className="um-empty-block">Loading support grants…</div>
-      ) : supportGrantsQuery.isError ? (
+      ) : grantsError ? (
         <div className="notice error" role="alert">
-          {supportGrantsQuery.error instanceof Error ? supportGrantsQuery.error.message : 'Failed to load support grants'}
+          {grantsError instanceof Error ? grantsError.message : 'Failed to load support grants'}
         </div>
       ) : grants.length === 0 ? (
         <div className="um-empty-block">No tenant support grants have been issued to this platform owner.</div>
@@ -427,6 +615,15 @@ function PlatformSupportPanel() {
                   })}
                 >
                   {grant.status === 'ACTIVE' ? 'Accepted' : acceptGrant.isPending ? 'Accepting...' : 'Accept'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={grant.status !== 'ACTIVE' || openTenantContext.isPending}
+                  onClick={() => openTenantContext.mutate(grant.tenantId)}
+                  title={grant.status === 'ACTIVE' ? 'Enter tenant support session' : 'Accept the grant first'}
+                >
+                  Enter Tenant
                 </button>
               </div>
             </article>

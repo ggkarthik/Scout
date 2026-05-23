@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +25,7 @@ public class TenantQuotaService {
     private final ServiceAccountRepository serviceAccountRepository;
     private final AuditEventRepository auditEventRepository;
     private final TenantRepository tenantRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public TenantQuotaService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
@@ -32,7 +34,8 @@ public class TenantQuotaService {
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
             ServiceAccountRepository serviceAccountRepository,
             AuditEventRepository auditEventRepository,
-            TenantRepository tenantRepository
+            TenantRepository tenantRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
@@ -41,15 +44,16 @@ public class TenantQuotaService {
         this.serviceAccountRepository = serviceAccountRepository;
         this.auditEventRepository = auditEventRepository;
         this.tenantRepository = tenantRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(readOnly = true)
     public void assertCanCreateConnector(Tenant tenant, String connectorType) {
-        if (isUnlimitedDemoConnectorMode(tenant)) {
+        if (isUnlimitedConnectorMode(tenant)) {
             return;
         }
         int max = safeLimit(tenant.getMaxConnectorCount());
-        long current = countConnectors(tenant.getId());
+        long current = countConnectors(tenant);
         if (current >= max) {
             throw new QuotaExceededException(
                     "TENANT_CONNECTOR_LIMIT_EXCEEDED",
@@ -61,7 +65,7 @@ public class TenantQuotaService {
     @Transactional(readOnly = true)
     public void assertCanCreateServiceAccount(Tenant tenant) {
         int max = safeLimit(tenant.getMaxServiceAccountCount());
-        long current = serviceAccountRepository.countByTenant_Id(tenant.getId());
+        long current = tenantSchemaExecutionService.run(tenant, (Supplier<Long>) serviceAccountRepository::count);
         if (current >= max) {
             throw new QuotaExceededException(
                     "TENANT_SERVICE_ACCOUNT_LIMIT_EXCEEDED",
@@ -103,20 +107,25 @@ public class TenantQuotaService {
         assertCanExportRows(tenant, requestedRows);
     }
 
-    private long countConnectors(UUID tenantId) {
-        return awsDiscoveryConfigRepository.countByTenant_Id(tenantId)
-                + awsDiscoveryTargetRepository.countByTenant_Id(tenantId)
-                + sccmCmdbConfigRepository.countByTenant_Id(tenantId)
-                + serviceNowCmdbConfigRepository.countByTenant_Id(tenantId);
+    private long countConnectors(Tenant tenant) {
+        return tenantSchemaExecutionService.run(tenant, () ->
+                (awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws").isPresent() ? 1L : 0L)
+                        + awsDiscoveryTargetRepository.count()
+                        + (sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm").isPresent() ? 1L : 0L)
+                        + (serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow").isPresent() ? 1L : 0L)
+        );
     }
 
     private int safeLimit(Integer value) {
         return value == null ? 0 : Math.max(0, value);
     }
 
-    private boolean isUnlimitedDemoConnectorMode(Tenant tenant) {
-        return tenant != null
-                && "DEMO".equalsIgnoreCase(tenant.getPlanCode())
-                && safeLimit(tenant.getMaxConnectorCount()) == 0;
+    /**
+     * Temporary policy: a connector limit of zero means "unlimited" rather than
+     * "none allowed", so older demo tenants and any manually provisioned tenant
+     * with a zero quota do not get blocked from configuring integrations.
+     */
+    private boolean isUnlimitedConnectorMode(Tenant tenant) {
+        return tenant != null && safeLimit(tenant.getMaxConnectorCount()) == 0;
     }
 }

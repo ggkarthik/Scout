@@ -23,6 +23,7 @@ public record TenantResponse(
         String purgeError,
         String demoCreatedBy,
         String demoSource,
+        String demoOwnerEmail,
         Instant createdAt,
         Instant updatedAt
 ) {

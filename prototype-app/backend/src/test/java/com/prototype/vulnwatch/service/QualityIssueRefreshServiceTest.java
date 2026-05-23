@@ -1,6 +1,8 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -47,10 +50,18 @@ class QualityIssueRefreshServiceTest {
     @Mock
     private QualityIssuePersistenceService qualityIssuePersistenceService;
 
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
+
     @Test
     void refreshTenantBuildsAndPersistsUnionOfIssues() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
+        when(tenantSchemaExecutionService.run(eq(tenant), any(Supplier.class))).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Supplier<Integer> supplier = invocation.getArgument(1);
+            return supplier.get();
+        });
 
         QualityIssueRecord ingestionIssue = issue(tenant.getId(), "ingestion:a");
         QualityIssueRecord normalizationIssue = issue(tenant.getId(), "normalization:b");
@@ -98,7 +109,8 @@ class QualityIssueRefreshServiceTest {
                 vexQualityIssueBuilder,
                 lifecycleQualityIssueBuilder,
                 projectionFreshnessIssueBuilder,
-                qualityIssuePersistenceService
+                qualityIssuePersistenceService,
+                tenantSchemaExecutionService
         );
     }
 

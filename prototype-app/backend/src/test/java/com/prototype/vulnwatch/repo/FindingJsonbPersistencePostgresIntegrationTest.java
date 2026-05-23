@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.repo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Finding;
@@ -49,6 +51,9 @@ class FindingJsonbPersistencePostgresIntegrationTest {
     }
 
     @Autowired
+    private TenantRepository tenantRepository;
+
+    @Autowired
     private TenantService tenantService;
 
     @Autowired
@@ -72,8 +77,12 @@ class FindingJsonbPersistencePostgresIntegrationTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Test
     void persistsAndUpdatesJsonbEvidenceFields() {
+        ensureDefaultTenant();
         Tenant tenant = tenantService.getDefaultTenant();
         Asset asset = createAsset(tenant);
         SbomUpload upload = createUpload(tenant, asset);
@@ -113,8 +122,14 @@ class FindingJsonbPersistencePostgresIntegrationTest {
         Finding reloadedFinding = findingRepository.findById(finding.getId()).orElseThrow();
         FindingEvent reloadedEvent = findingEventRepository.findById(event.getId()).orElseThrow();
 
-        assertEquals("{\"source\":\"updated\",\"vexOverlay\":{\"status\":\"AFFECTED\"}}", reloadedFinding.getEvidence());
-        assertEquals("{\"matchedBy\":\"purl-indexed-exact+version\",\"confidenceScore\":0.82}", reloadedEvent.getDetailsJson());
+        assertJsonEquals(
+                "{\"source\":\"updated\",\"vexOverlay\":{\"status\":\"AFFECTED\"}}",
+                reloadedFinding.getEvidence()
+        );
+        assertJsonEquals(
+                "{\"matchedBy\":\"purl-indexed-exact+version\",\"confidenceScore\":0.82}",
+                reloadedEvent.getDetailsJson()
+        );
         assertNotNull(reloadedFinding.getUpdatedAt());
     }
 
@@ -158,5 +173,23 @@ class FindingJsonbPersistencePostgresIntegrationTest {
         vulnerability.setCvssScore(7.5);
         vulnerability.setLastModifiedAt(Instant.now());
         return vulnerabilityRepository.save(vulnerability);
+    }
+
+    private void ensureDefaultTenant() {
+        tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME).orElseGet(() -> {
+            Tenant tenant = new Tenant();
+            tenant.setName(TenantService.DEFAULT_TENANT_NAME);
+            return tenantRepository.save(tenant);
+        });
+    }
+
+    private void assertJsonEquals(String expected, String actual) {
+        try {
+            JsonNode expectedNode = objectMapper.readTree(expected);
+            JsonNode actualNode = objectMapper.readTree(actual);
+            assertEquals(expectedNode, actualNode);
+        } catch (Exception exception) {
+            throw new AssertionError("Unable to compare JSON", exception);
+        }
     }
 }

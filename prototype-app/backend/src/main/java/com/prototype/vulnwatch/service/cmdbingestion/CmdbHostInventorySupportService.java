@@ -93,7 +93,7 @@ public class CmdbHostInventorySupportService {
             return indexed;
         }
 
-        for (SoftwareInstance instance : softwareInstanceRepository.findByTenant_IdAndCi_IdIn(tenant.getId(), ciIds)) {
+        for (SoftwareInstance instance : softwareInstanceRepository.findByCi_IdIn(ciIds)) {
             if (instance.getCi() == null || instance.getCi().getId() == null) {
                 continue;
             }
@@ -145,7 +145,7 @@ public class CmdbHostInventorySupportService {
         }
         Map<String, DiscoveryModel> existingByKey = new LinkedHashMap<>();
         if (!keys.isEmpty() && tenant != null && tenant.getId() != null) {
-            for (DiscoveryModel existing : discoveryModelRepository.findByTenant_IdAndPrimaryKeyIn(tenant.getId(), keys)) {
+            for (DiscoveryModel existing : discoveryModelRepository.findByPrimaryKeyIn(keys)) {
                 existingByKey.put(normalizeKey(existing.getPrimaryKey()), existing);
             }
         }

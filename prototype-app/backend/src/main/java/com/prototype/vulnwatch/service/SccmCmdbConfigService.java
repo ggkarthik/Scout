@@ -51,7 +51,7 @@ public class SccmCmdbConfigService {
     @Transactional(readOnly = true)
     public SccmCmdbConfigResponse get(Tenant tenant) {
         SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
+                .findBySourceSystemIgnoreCase("sccm")
                 .orElse(null);
         return toResponse(config);
     }
@@ -59,7 +59,7 @@ public class SccmCmdbConfigService {
     @Transactional
     public SccmCmdbConfigResponse save(Tenant tenant, SccmCmdbConfigRequest request) {
         SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
+                .findBySourceSystemIgnoreCase("sccm")
                 .orElseGet(() -> {
                     tenantQuotaService.assertCanCreateConnector(tenant, "sccm");
                     SccmCmdbConfig created = new SccmCmdbConfig();
@@ -75,7 +75,7 @@ public class SccmCmdbConfigService {
     @Transactional
     public SccmConnectionTestResponse test(Tenant tenant) {
         SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
+                .findBySourceSystemIgnoreCase("sccm")
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "SCCM connector is not configured yet"));
 
         Instant testedAt = Instant.now();
@@ -113,7 +113,7 @@ public class SccmCmdbConfigService {
     @Transactional(readOnly = true)
     public Optional<SccmRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
         Optional<SccmCmdbConfig> saved = sccmCmdbConfigRepository
-                .findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm");
+                .findBySourceSystemIgnoreCase("sccm");
         if (saved.isPresent()) {
             SccmCmdbConfig config = saved.get();
             return Optional.of(new SccmRuntimeConfig(

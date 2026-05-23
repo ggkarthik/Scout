@@ -2,9 +2,14 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.RiskPolicy;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.dto.RiskPolicyRequest;
 import com.prototype.vulnwatch.dto.RiskPolicyResponse;
+import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.RiskPolicyRepository;
+import java.util.UUID;
+import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,14 +17,25 @@ import org.springframework.transaction.annotation.Transactional;
 public class RiskPolicyService {
 
     private final RiskPolicyRepository riskPolicyRepository;
+    private final InventoryComponentRepository inventoryComponentRepository;
+    private final ObjectProvider<FindingDeltaQueueService> findingDeltaQueueServiceProvider;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
-    public RiskPolicyService(RiskPolicyRepository riskPolicyRepository) {
+    public RiskPolicyService(
+            RiskPolicyRepository riskPolicyRepository,
+            InventoryComponentRepository inventoryComponentRepository,
+            ObjectProvider<FindingDeltaQueueService> findingDeltaQueueServiceProvider,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
         this.riskPolicyRepository = riskPolicyRepository;
+        this.inventoryComponentRepository = inventoryComponentRepository;
+        this.findingDeltaQueueServiceProvider = findingDeltaQueueServiceProvider;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
     public RiskPolicy getOrCreate(Tenant tenant) {
-        return riskPolicyRepository.findByTenant(tenant)
+        return tenantSchemaExecutionService.run(tenant, riskPolicyRepository::findTopByOrderByUpdatedAtDesc)
                 .orElseGet(() -> {
                     RiskPolicy policy = new RiskPolicy();
                     policy.setTenant(tenant);
@@ -30,6 +46,7 @@ public class RiskPolicyService {
     @Transactional
     public RiskPolicyResponse update(Tenant tenant, RiskPolicyRequest req) {
         RiskPolicy policy = getOrCreate(tenant);
+        RiskPolicy.FindingGenerationMode previousMode = policy.getFindingGenerationMode();
 
         if (req.criticalThreshold() != null) {
             policy.setCriticalThreshold(req.criticalThreshold());
@@ -79,7 +96,9 @@ public class RiskPolicyService {
         }
 
         policy.touch();
-        return toResponse(riskPolicyRepository.save(policy));
+        RiskPolicy saved = riskPolicyRepository.save(policy);
+        enqueueAutomaticFindingRecomputeIfEnabled(tenant, previousMode, saved.getFindingGenerationMode());
+        return toResponse(saved);
     }
 
     public RiskPolicyResponse get(Tenant tenant) {
@@ -88,7 +107,7 @@ public class RiskPolicyService {
 
     @Transactional(readOnly = true)
     public String getFindingsScoreConfig(Tenant tenant) {
-        return riskPolicyRepository.findByTenant(tenant)
+        return tenantSchemaExecutionService.run(tenant, riskPolicyRepository::findTopByOrderByUpdatedAtDesc)
                 .map(RiskPolicy::getFindingsScoreConfig)
                 .orElse("[]");
     }
@@ -121,5 +140,37 @@ public class RiskPolicyService {
         } catch (IllegalArgumentException ignored) {
             return RiskPolicy.FindingGenerationMode.MANUAL;
         }
+    }
+
+    private void enqueueAutomaticFindingRecomputeIfEnabled(
+            Tenant tenant,
+            RiskPolicy.FindingGenerationMode previousMode,
+            RiskPolicy.FindingGenerationMode nextMode
+    ) {
+        if (tenant == null || tenant.getId() == null) {
+            return;
+        }
+        if (previousMode == RiskPolicy.FindingGenerationMode.AUTO || nextMode != RiskPolicy.FindingGenerationMode.AUTO) {
+            return;
+        }
+        List<UUID> componentIds = tenantSchemaExecutionService.run(
+                tenant,
+                () -> inventoryComponentRepository.findByComponentStatusOrderByLastObservedAtDesc(
+                        InventoryComponentStatus.ACTIVE
+                )
+        )
+                .stream()
+                .map(component -> component.getId())
+                .filter(id -> id != null)
+                .toList();
+        if (componentIds.isEmpty()) {
+            return;
+        }
+        FindingDeltaQueueService findingDeltaQueueService = findingDeltaQueueServiceProvider.getIfAvailable();
+        if (findingDeltaQueueService == null) {
+            return;
+        }
+        findingDeltaQueueService.enqueueSoftwareDeltas(tenant.getId(), componentIds, "risk-policy-auto-enable");
+        findingDeltaQueueService.enqueueNoiseReductionRefresh(tenant.getId(), "risk-policy-auto-enable");
     }
 }

@@ -1,3 +1,0 @@
-ALTER TABLE org_cve_records
-    ADD COLUMN IF NOT EXISTS eol_component_count  BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS eos_component_count  BIGINT NOT NULL DEFAULT 0;

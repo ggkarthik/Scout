@@ -50,71 +50,71 @@ public class OperationalQualityReadService {
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final QualityIssueProjectionService projectionService;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public OperationalQualityReadService(
             NamedParameterJdbcTemplate jdbcTemplate,
             QualityIssueProjectionService projectionService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.projectionService = projectionService;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public OperationalQualitySummaryResponse getSummary(Tenant tenant) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
-                .addValue("newIssueThreshold", Timestamp.from(Instant.now().minus(24, ChronoUnit.HOURS)));
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("newIssueThreshold", Timestamp.from(Instant.now().minus(24, ChronoUnit.HOURS)));
 
-        long totalIssues = queryLong("""
-                SELECT COUNT(*)
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                """, params);
-        long criticalIssues = queryLong("""
-                SELECT COUNT(*)
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND severity = 'CRITICAL'
-                """, params);
-        long affectsActiveFindingsCount = queryLong("""
-                SELECT COUNT(*)
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND affects_active_findings = true
-                """, params);
-        long newIssuesLast24h = queryLong("""
-                SELECT COUNT(*)
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND first_seen_at >= :newIssueThreshold
-                """, params);
+            long totalIssues = queryLong("""
+                    SELECT COUNT(*)
+                    FROM quality_issue_projection
+                    """, params);
+            long criticalIssues = queryLong("""
+                    SELECT COUNT(*)
+                    FROM quality_issue_projection
+                    WHERE severity = 'CRITICAL'
+                    """, params);
+            long affectsActiveFindingsCount = queryLong("""
+                    SELECT COUNT(*)
+                    FROM quality_issue_projection
+                    WHERE affects_active_findings = true
+                    """, params);
+            long newIssuesLast24h = queryLong("""
+                    SELECT COUNT(*)
+                    FROM quality_issue_projection
+                    WHERE first_seen_at >= :newIssueThreshold
+                    """, params);
 
-        Map<String, Long> countsByDomain = new LinkedHashMap<>();
-        for (Map<String, Object> row : jdbcTemplate.queryForList("""
-                SELECT domain, COUNT(*) AS issue_count
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                GROUP BY domain
-                """, params)) {
-            countsByDomain.put(String.valueOf(row.get("domain")), ((Number) row.get("issue_count")).longValue());
-        }
+            Map<String, Long> countsByDomain = new LinkedHashMap<>();
+            for (Map<String, Object> row : jdbcTemplate.queryForList("""
+                    SELECT domain, COUNT(*) AS issue_count
+                    FROM quality_issue_projection
+                    GROUP BY domain
+                    """, params)) {
+                countsByDomain.put(String.valueOf(row.get("domain")), ((Number) row.get("issue_count")).longValue());
+            }
 
-        List<OperationalQualityDomainCountResponse> domainCounts = DOMAIN_ORDER.stream()
-                .map(domain -> new OperationalQualityDomainCountResponse(domain, countsByDomain.getOrDefault(domain, 0L)))
-                .toList();
+            List<OperationalQualityDomainCountResponse> domainCounts = DOMAIN_ORDER.stream()
+                    .map(domain -> new OperationalQualityDomainCountResponse(domain, countsByDomain.getOrDefault(domain, 0L)))
+                    .toList();
 
-        return new OperationalQualitySummaryResponse(
-                Instant.now(),
-                totalIssues,
-                criticalIssues,
-                affectsActiveFindingsCount,
-                newIssuesLast24h,
-                domainCounts
-        );
+            return new OperationalQualitySummaryResponse(
+                    Instant.now(),
+                    totalIssues,
+                    criticalIssues,
+                    affectsActiveFindingsCount,
+                    newIssuesLast24h,
+                    domainCounts
+            );
+        });
     }
 
     public OperationalQualityIssuePageResponse listIssues(
@@ -131,155 +131,157 @@ public class OperationalQualityReadService {
             int size
     ) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        int safePage = Math.max(0, page);
-        int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
-        SqlFilters filters = buildFilters(
-                tenant,
-                domain,
-                issueType,
-                severity,
-                affectsActiveFindings,
-                assetTypes,
-                sourceSystems,
-                ecosystems,
-                query
-        );
-        MapSqlParameterSource params = filters.params()
-                .addValue("limit", safeSize)
-                .addValue("offset", (long) safePage * safeSize);
+            int safePage = Math.max(0, page);
+            int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
+            SqlFilters filters = buildFilters(
+                    tenant,
+                    domain,
+                    issueType,
+                    severity,
+                    affectsActiveFindings,
+                    assetTypes,
+                    sourceSystems,
+                    ecosystems,
+                    query
+            );
+            MapSqlParameterSource params = filters.params()
+                    .addValue("limit", safeSize)
+                    .addValue("offset", (long) safePage * safeSize);
 
-        long totalItems = queryLong(countSql(filters.whereClause()), params);
-        List<OperationalQualityIssueResponse> items = jdbcTemplate.query(
-                listSql(filters.whereClause()),
-                params,
-                (rs, rowNum) -> new OperationalQualityIssueResponse(
-                        rs.getString("id"),
-                        rs.getString("issue_key"),
-                        rs.getString("domain"),
-                        rs.getString("issue_type"),
-                        rs.getString("severity"),
-                        rs.getString("reason_code"),
-                        rs.getString("title"),
-                        rs.getString("source_object_type"),
-                        rs.getString("source_object_id"),
-                        rs.getString("primary_label"),
-                        rs.getString("secondary_label"),
-                        rs.getString("asset_type"),
-                        rs.getString("source_system"),
-                        rs.getString("ecosystem"),
-                        rs.getBoolean("affects_active_findings"),
-                        rs.getLong("affected_asset_count"),
-                        rs.getLong("affected_component_count"),
-                        rs.getLong("open_finding_count"),
-                        rs.getLong("open_vulnerability_count"),
-                        getInstant(rs, "first_seen_at"),
-                        getInstant(rs, "last_seen_at")
-                )
-        );
+            long totalItems = queryLong(countSql(filters.whereClause()), params);
+            List<OperationalQualityIssueResponse> items = jdbcTemplate.query(
+                    listSql(filters.whereClause()),
+                    params,
+                    (rs, rowNum) -> new OperationalQualityIssueResponse(
+                            rs.getString("id"),
+                            rs.getString("issue_key"),
+                            rs.getString("domain"),
+                            rs.getString("issue_type"),
+                            rs.getString("severity"),
+                            rs.getString("reason_code"),
+                            rs.getString("title"),
+                            rs.getString("source_object_type"),
+                            rs.getString("source_object_id"),
+                            rs.getString("primary_label"),
+                            rs.getString("secondary_label"),
+                            rs.getString("asset_type"),
+                            rs.getString("source_system"),
+                            rs.getString("ecosystem"),
+                            rs.getBoolean("affects_active_findings"),
+                            rs.getLong("affected_asset_count"),
+                            rs.getLong("affected_component_count"),
+                            rs.getLong("open_finding_count"),
+                            rs.getLong("open_vulnerability_count"),
+                            getInstant(rs, "first_seen_at"),
+                            getInstant(rs, "last_seen_at")
+                    )
+            );
 
-        return new OperationalQualityIssuePageResponse(
-                items,
-                safePage,
-                safeSize,
-                totalItems,
-                totalItems == 0L ? 0 : (int) Math.ceil((double) totalItems / (double) safeSize)
-        );
+            return new OperationalQualityIssuePageResponse(
+                    items,
+                    safePage,
+                    safeSize,
+                    totalItems,
+                    totalItems == 0L ? 0 : (int) Math.ceil((double) totalItems / (double) safeSize)
+            );
+        });
     }
 
     public OperationalQualityIssueDetailResponse getIssueDetail(Tenant tenant, String issueId) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
-        if (issueId == null || issueId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Issue id is required");
-        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
+            if (issueId == null || issueId.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Issue id is required");
+            }
 
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
-                .addValue("issueId", issueId.trim());
-        QualityIssueRow row = jdbcTemplate.query(detailSql(), params, rs -> rs.next() ? toRow(rs) : null);
-        if (row == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quality issue not found");
-        }
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("issueId", issueId.trim());
+            QualityIssueRow row = jdbcTemplate.query(detailSql(), params, rs -> rs.next() ? toRow(rs) : null);
+            if (row == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quality issue not found");
+            }
 
-        String evidenceJson = prettyJson(row.evidenceJson());
-        OverrideInfo overrideInfo = resolveOverrideInfo(tenant, row);
-        return new OperationalQualityIssueDetailResponse(
-                row.id(),
-                row.issueKey(),
-                row.domain(),
-                row.issueType(),
-                row.severity(),
-                row.reasonCode(),
-                row.title(),
-                row.sourceObjectType(),
-                row.sourceObjectId(),
-                row.primaryLabel(),
-                row.secondaryLabel(),
-                row.assetType(),
-                row.sourceSystem(),
-                row.ecosystem(),
-                row.affectsActiveFindings(),
-                row.affectedAssetCount(),
-                row.affectedComponentCount(),
-                row.openFindingCount(),
-                row.openVulnerabilityCount(),
-                row.firstSeenAt(),
-                row.lastSeenAt(),
-                whyThisMatters(row),
-                evidenceJson,
-                recommendedAction(row),
-                buildDrilldownTargets(row),
-                buildSampleRecords(row),
-                overrideInfo.active(),
-                overrideInfo.actor(),
-                overrideInfo.at()
-        );
+            String evidenceJson = prettyJson(row.evidenceJson());
+            OverrideInfo overrideInfo = resolveOverrideInfo(tenant, row);
+            return new OperationalQualityIssueDetailResponse(
+                    row.id(),
+                    row.issueKey(),
+                    row.domain(),
+                    row.issueType(),
+                    row.severity(),
+                    row.reasonCode(),
+                    row.title(),
+                    row.sourceObjectType(),
+                    row.sourceObjectId(),
+                    row.primaryLabel(),
+                    row.secondaryLabel(),
+                    row.assetType(),
+                    row.sourceSystem(),
+                    row.ecosystem(),
+                    row.affectsActiveFindings(),
+                    row.affectedAssetCount(),
+                    row.affectedComponentCount(),
+                    row.openFindingCount(),
+                    row.openVulnerabilityCount(),
+                    row.firstSeenAt(),
+                    row.lastSeenAt(),
+                    whyThisMatters(row),
+                    evidenceJson,
+                    recommendedAction(row),
+                    buildDrilldownTargets(row),
+                    buildSampleRecords(row),
+                    overrideInfo.active(),
+                    overrideInfo.actor(),
+                    overrideInfo.at()
+            );
+        });
     }
 
     public OperationalQualityFilterValuesResponse listFilterValues(Tenant tenant) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
-        List<String> issueTypes = queryDistinctValues("""
-                SELECT DISTINCT issue_type
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND issue_type IS NOT NULL
-                ORDER BY issue_type
-                """, params);
-        List<String> assetTypes = queryDistinctValues("""
-                SELECT DISTINCT asset_type
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND asset_type IS NOT NULL
-                ORDER BY asset_type
-                """, params);
-        List<String> sourceSystems = queryDistinctValues("""
-                SELECT DISTINCT source_system
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND source_system IS NOT NULL
-                ORDER BY source_system
-                """, params);
-        List<String> ecosystems = queryDistinctValues("""
-                SELECT DISTINCT ecosystem
-                FROM quality_issue_projection
-                WHERE tenant_id = :tenantId
-                  AND ecosystem IS NOT NULL
-                ORDER BY ecosystem
-                """, params);
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
+            List<String> issueTypes = queryDistinctValues("""
+                    SELECT DISTINCT issue_type
+                    FROM quality_issue_projection
+                    WHERE issue_type IS NOT NULL
+                    ORDER BY issue_type
+                    """, params);
+            List<String> assetTypes = queryDistinctValues("""
+                    SELECT DISTINCT asset_type
+                    FROM quality_issue_projection
+                    WHERE asset_type IS NOT NULL
+                    ORDER BY asset_type
+                    """, params);
+            List<String> sourceSystems = queryDistinctValues("""
+                    SELECT DISTINCT source_system
+                    FROM quality_issue_projection
+                    WHERE source_system IS NOT NULL
+                    ORDER BY source_system
+                    """, params);
+            List<String> ecosystems = queryDistinctValues("""
+                    SELECT DISTINCT ecosystem
+                    FROM quality_issue_projection
+                    WHERE ecosystem IS NOT NULL
+                    ORDER BY ecosystem
+                    """, params);
 
-        return new OperationalQualityFilterValuesResponse(
-                DOMAIN_ORDER,
-                issueTypes,
-                SEVERITY_ORDER,
-                assetTypes,
-                sourceSystems,
-                ecosystems
-        );
+            return new OperationalQualityFilterValuesResponse(
+                    DOMAIN_ORDER,
+                    issueTypes,
+                    SEVERITY_ORDER,
+                    assetTypes,
+                    sourceSystems,
+                    ecosystems
+            );
+        });
     }
 
     private SqlFilters buildFilters(
@@ -295,7 +297,7 @@ public class OperationalQualityReadService {
     ) {
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
         StringBuilder where = new StringBuilder("""
-                WHERE q.tenant_id = :tenantId
+                WHERE 1 = 1
                 """);
 
         String normalizedDomain = normalizeToken(domain);
@@ -437,8 +439,7 @@ public class OperationalQualityReadService {
                     q.last_seen_at,
                     cast(q.evidence_json as text) AS evidence_json
                 FROM quality_issue_projection q
-                WHERE q.tenant_id = :tenantId
-                  AND q.id = :issueId
+                WHERE q.id = :issueId
                 """;
     }
 
@@ -626,8 +627,7 @@ public class OperationalQualityReadService {
         return jdbcTemplate.query("""
                 SELECT confirmed_by, confirmed_at
                 FROM software_identity_cluster_link
-                WHERE tenant_id = :tenantId
-                  AND source_type = :sourceType
+                WHERE source_type = :sourceType
                   AND source_key = :sourceKey
                   AND revoked_at IS NULL
                 ORDER BY confirmed_at DESC
@@ -649,8 +649,7 @@ public class OperationalQualityReadService {
         return jdbcTemplate.query("""
                 SELECT manual_identity_confirmed_by, manual_identity_confirmed_at
                 FROM inventory_components
-                WHERE tenant_id = :tenantId
-                  AND id = :componentId
+                WHERE id = :componentId
                   AND manual_identity_confirmed_at IS NOT NULL
                 """, params, rs -> rs.next()
                 ? new OverrideInfo(
@@ -681,8 +680,7 @@ public class OperationalQualityReadService {
         return jdbcTemplate.query("""
                 SELECT manual_identity_confirmed_by, manual_identity_confirmed_at
                 FROM software_instances
-                WHERE tenant_id = :tenantId
-                  AND id = :softwareInstanceId
+                WHERE id = :softwareInstanceId
                   AND manual_identity_confirmed_at IS NOT NULL
                 """, params, rs -> rs.next()
                 ? new OverrideInfo(
@@ -704,8 +702,7 @@ public class OperationalQualityReadService {
         return jdbcTemplate.query("""
                 SELECT analyst_updated_by, analyst_updated_at
                 FROM component_vulnerability_states
-                WHERE tenant_id = :tenantId
-                  AND component_id = :componentId
+                WHERE component_id = :componentId
                   AND analyst_updated_at IS NOT NULL
                 ORDER BY analyst_updated_at DESC
                 LIMIT 1
@@ -913,19 +910,22 @@ public class OperationalQualityReadService {
 
     public IssueSourceIds getIssueSourceIds(Tenant tenant, String issueId) {
         requireTenant(tenant);
-        if (issueId == null || issueId.isBlank()) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.BAD_REQUEST, "Issue id is required");
-        }
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
-                .addValue("issueId", issueId.trim());
-        QualityIssueRow row = jdbcTemplate.query(detailSql(), params, rs -> rs.next() ? toRow(rs) : null);
-        if (row == null) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.NOT_FOUND, "Quality issue not found");
-        }
-        return new IssueSourceIds(row.sourceObjectType(), row.sourceObjectId(), row.componentId());
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            if (issueId == null || issueId.isBlank()) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.BAD_REQUEST, "Issue id is required");
+            }
+            projectionService.ensureTenantProjection(tenant);
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("issueId", issueId.trim());
+            QualityIssueRow row = jdbcTemplate.query(detailSql(), params, rs -> rs.next() ? toRow(rs) : null);
+            if (row == null) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Quality issue not found");
+            }
+            return new IssueSourceIds(row.sourceObjectType(), row.sourceObjectId(), row.componentId());
+        });
     }
 
     private record QualityIssueRow(

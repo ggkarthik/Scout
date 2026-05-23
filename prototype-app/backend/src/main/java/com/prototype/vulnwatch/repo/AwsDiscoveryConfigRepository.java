@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AwsDiscoveryConfigRepository extends JpaRepository<AwsDiscoveryConfig, UUID> {
 
     Optional<AwsDiscoveryConfig> findByTenant_IdAndSourceSystemIgnoreCase(UUID tenantId, String sourceSystem);
+    Optional<AwsDiscoveryConfig> findBySourceSystemIgnoreCase(String sourceSystem);
 
     List<AwsDiscoveryConfig> findByEnabledTrueAndAutoSyncEnabledTrueOrderByUpdatedAtAsc();
 

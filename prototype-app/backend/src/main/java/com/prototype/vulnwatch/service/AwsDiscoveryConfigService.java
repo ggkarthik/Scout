@@ -50,14 +50,14 @@ public class AwsDiscoveryConfigService {
 
     @Transactional(readOnly = true)
     public AwsDiscoveryConfigResponse get(Tenant tenant) {
-        AwsDiscoveryConfig config = repo.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
                 .orElse(null);
         return toResponse(config);
     }
 
     @Transactional
     public AwsDiscoveryConfigResponse save(Tenant tenant, AwsDiscoveryConfigRequest request) {
-        AwsDiscoveryConfig config = repo.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
                 .orElseGet(() -> {
                     tenantQuotaService.assertCanCreateConnector(tenant, "aws");
                     AwsDiscoveryConfig c = new AwsDiscoveryConfig();
@@ -72,7 +72,7 @@ public class AwsDiscoveryConfigService {
 
     @Transactional
     public AwsConnectionTestResponse test(Tenant tenant) {
-        AwsDiscoveryConfig config = repo.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
                         "AWS Cloud Discovery connector is not configured yet"));
 

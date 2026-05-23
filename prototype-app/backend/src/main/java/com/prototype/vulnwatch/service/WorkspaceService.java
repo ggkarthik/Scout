@@ -71,6 +71,16 @@ public class WorkspaceService {
         return workspace == null ? null : workspace.getId();
     }
 
+    /**
+     * Returns the default tenant without requiring the caller to have an active tenant session.
+     * Use this for platform-owner-only endpoints that are not tenant-scoped (e.g. Operations dashboard).
+     */
+    public Tenant getDefaultWorkspace() {
+        Tenant workspace = tenantService.getDefaultTenant();
+        tenantLifecycleGuardService.assertTenantAccessible(workspace);
+        return workspace;
+    }
+
     public Tenant refreshWorkspace() {
         if (requireTenantContext) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant context is required");

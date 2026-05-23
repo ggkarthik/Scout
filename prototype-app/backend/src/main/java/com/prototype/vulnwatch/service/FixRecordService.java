@@ -46,6 +46,7 @@ public class FixRecordService {
     private final AdvisoryFetchService advisoryFetchService;
     private final OpenAiClient openAiClient;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FixRecordService(
             FixRecordRepository fixRecordRepository,
@@ -55,7 +56,8 @@ public class FixRecordService {
             VulnerabilityTargetRepository vulnTargetRepository,
             AdvisoryFetchService advisoryFetchService,
             OpenAiClient openAiClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.fixRecordRepository = fixRecordRepository;
         this.vulnerabilityRepository = vulnerabilityRepository;
@@ -65,21 +67,22 @@ public class FixRecordService {
         this.advisoryFetchService = advisoryFetchService;
         this.openAiClient = openAiClient;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public List<FixRecordResponse> getFixRecords(Tenant tenant, String cveId) {
-        return fixRecordRepository.findByTenantAndCveIdOrderByCreatedAtAsc(tenant, cveId)
+        return tenantSchemaExecutionService.run(tenant, () -> fixRecordRepository.findByCveIdOrderByCreatedAtAsc(cveId)
                 .stream()
                 .map(this::toResponse)
-                .toList();
+                .toList());
     }
 
     public List<FixRecordResponse> getFixRecordsBySoftware(Tenant tenant, String software) {
         if (software == null || software.isBlank()) return List.of();
-        return fixRecordRepository.findByTenantAndSoftwareNameContaining(tenant, "%" + software + "%")
+        return tenantSchemaExecutionService.run(tenant, () -> fixRecordRepository.findBySoftwareNameContaining(software)
                 .stream()
                 .map(this::toResponse)
-                .toList();
+                .toList());
     }
 
     public record AnalystFixEntry(
@@ -93,38 +96,39 @@ public class FixRecordService {
 
     @Transactional
     public List<FixRecordResponse> saveAnalystFixes(Tenant tenant, String cveId, List<AnalystFixEntry> entries) {
-        // Replace all previous ANALYST-sourced records for this CVE
-        List<FixRecord> existing = fixRecordRepository.findByTenantAndCveIdOrderByCreatedAtAsc(tenant, cveId)
-                .stream()
-                .filter(r -> FixRecord.RecommendationSource.ANALYST.name().equals(r.getRecommendationSource()))
-                .toList();
-        fixRecordRepository.deleteAll(existing);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            List<FixRecord> existing = fixRecordRepository.findByCveIdOrderByCreatedAtAsc(cveId)
+                    .stream()
+                    .filter(r -> FixRecord.RecommendationSource.ANALYST.name().equals(r.getRecommendationSource()))
+                    .toList();
+            fixRecordRepository.deleteAll(existing);
 
-        List<FixRecord> saved = new ArrayList<>();
-        for (AnalystFixEntry entry : entries) {
-            if (entry.solutionText() == null || entry.solutionText().isBlank()) continue;
-            FixRecord r = new FixRecord();
-            r.setTenant(tenant);
-            r.setCveId(cveId);
-            r.setRelatedCveIdsJson("[]");
-            String summary = entry.solutionText().length() > 200
-                    ? entry.solutionText().substring(0, 197) + "..."
-                    : entry.solutionText();
-            r.setSummary(summary);
-            r.setDescription(entry.solutionText());
-            r.setFixType(normalizeFixType(entry.fixType()));
-            r.setRecommendationSource(FixRecord.RecommendationSource.ANALYST.name());
-            Map<String, Object> entity = new LinkedHashMap<>();
-            entity.put("name", entry.software());
-            entity.put("ecosystem", entry.vendor() != null ? entry.vendor() : "");
-            entity.put("version", entry.version());
-            entity.put("assetCount", entry.assetCount());
-            r.setSoftwareEntitiesJson(toJson(List.of(entity)));
-            r.setSourceUrlsJson("[]");
-            r.setGeneratedAt(Instant.now());
-            saved.add(fixRecordRepository.save(r));
-        }
-        return saved.stream().map(this::toResponse).toList();
+            List<FixRecord> saved = new ArrayList<>();
+            for (AnalystFixEntry entry : entries) {
+                if (entry.solutionText() == null || entry.solutionText().isBlank()) continue;
+                FixRecord r = new FixRecord();
+                r.setTenant(tenant);
+                r.setCveId(cveId);
+                r.setRelatedCveIdsJson("[]");
+                String summary = entry.solutionText().length() > 200
+                        ? entry.solutionText().substring(0, 197) + "..."
+                        : entry.solutionText();
+                r.setSummary(summary);
+                r.setDescription(entry.solutionText());
+                r.setFixType(normalizeFixType(entry.fixType()));
+                r.setRecommendationSource(FixRecord.RecommendationSource.ANALYST.name());
+                Map<String, Object> entity = new LinkedHashMap<>();
+                entity.put("name", entry.software());
+                entity.put("ecosystem", entry.vendor() != null ? entry.vendor() : "");
+                entity.put("version", entry.version());
+                entity.put("assetCount", entry.assetCount());
+                r.setSoftwareEntitiesJson(toJson(List.of(entity)));
+                r.setSourceUrlsJson("[]");
+                r.setGeneratedAt(Instant.now());
+                saved.add(fixRecordRepository.save(r));
+            }
+            return saved.stream().map(this::toResponse).toList();
+        });
     }
 
     @Transactional
@@ -137,12 +141,19 @@ public class FixRecordService {
             Tenant tenant, String cveId,
             List<com.prototype.vulnwatch.controller.CveDetailController.GenerateFixesSoftwareEntry> extraSoftware
     ) {
+        return tenantSchemaExecutionService.run(tenant, () -> generateFixRecordsInTenantSchema(tenant, cveId, extraSoftware));
+    }
+
+    private List<FixRecordResponse> generateFixRecordsInTenantSchema(
+            Tenant tenant, String cveId,
+            List<com.prototype.vulnwatch.controller.CveDetailController.GenerateFixesSoftwareEntry> extraSoftware
+    ) {
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new NoSuchElementException("CVE not found: " + cveId));
 
         // ── 1. Collect matched software from CVS records (same filter as Affected Entities tab) ──
         List<ComponentVulnerabilityState> applicableStates = cvsRepository
-                .findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId())
+                .findByVulnerability_Id(vulnerability.getId())
                 .stream()
                 .filter(s -> s.getComponent() != null)
                 .filter(s -> s.getComponent().getComponentStatus() == InventoryComponentStatus.ACTIVE)
@@ -210,7 +221,7 @@ public class FixRecordService {
         List<String> relatedCveIds = findRelatedCveIds(tenant, cveId, softwareMap, fixedVersionsFromIntel);
 
         // ── 6. Delete previous records; generate fresh ───────────────────────
-        fixRecordRepository.deleteByTenantAndCveId(tenant, cveId);
+        fixRecordRepository.deleteByCveId(cveId);
 
         // One fix record per distinct software product (versions of same product share one record)
         Map<String, Map<String, SoftwareContext>> byProduct = new LinkedHashMap<>();
@@ -276,7 +287,7 @@ public class FixRecordService {
         if (softwareMap.isEmpty() || fixedVersions.isEmpty()) return List.of();
         try {
             Set<String> packageKeys = softwareMap.keySet();
-            return orgCveRecordRepository.findByTenantAndSuppressedByRuleIdIsNull(tenant)
+            return orgCveRecordRepository.findBySuppressedByRuleIdIsNull()
                     .stream()
                     .filter(r -> !cveId.equals(r.getExternalId()))
                     .filter(r -> r.getApplicabilityState() == ApplicabilityState.APPLICABLE)
@@ -284,7 +295,7 @@ public class FixRecordService {
                     .filter(r -> {
                         // Check if this other CVE has overlapping applicable software
                         List<ComponentVulnerabilityState> otherStates = cvsRepository
-                                .findByTenant_IdAndVulnerability_Id(tenant.getId(), r.getVulnerability().getId())
+                                .findByVulnerability_Id(r.getVulnerability().getId())
                                 .stream()
                                 .filter(s -> s.getComponent() != null
                                         && s.getApplicabilityState() == ApplicabilityState.APPLICABLE)

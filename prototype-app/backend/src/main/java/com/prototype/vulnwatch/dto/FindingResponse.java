@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import com.prototype.vulnwatch.domain.FindingDecisionState;
+import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -17,6 +18,7 @@ public record FindingResponse(
         String packageVersion,
         String vulnerabilityId,
         String source,
+        FindingCreationSource creationSource,
         String severity,
         boolean inKev,
         Double epss,

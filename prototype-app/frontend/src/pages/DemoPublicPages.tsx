@@ -4,8 +4,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
 import { getAuthContextQueryKey } from '../features/auth/queries';
 import type { ActorContext } from '../features/auth/types';
+import {
+  getAuth0AccessToken,
+  getAuth0User,
+  handleAuth0RedirectCallbackIfNeeded,
+  isAuthenticatedWithAuth0,
+  isAuth0Configured,
+  loginWithAuth0,
+  logoutWithAuth0
+} from '../lib/auth0';
 
-const IDP_LOGIN_URL = import.meta.env.VITE_IDP_LOGIN_URL ?? '';
+const HOSTED_LOGIN_ENABLED = isAuth0Configured();
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
 
 export function DemoLandingPage() {
@@ -206,6 +215,8 @@ export function LoginPage() {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [hostedLoginPending, setHostedLoginPending] = React.useState(false);
+  const [auth0CallbackPending, setAuth0CallbackPending] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const personasQuery = useQuery({
@@ -223,19 +234,28 @@ export function LoginPage() {
   }, [navigate]);
 
   const startHostedLogin = () => {
-    const returnTo = `${window.location.origin}/`;
-    const invitePart = invite ? `&invite=${encodeURIComponent(invite)}` : '';
-    window.location.href = IDP_LOGIN_URL
-      ? `${IDP_LOGIN_URL}${IDP_LOGIN_URL.includes('?') ? '&' : '?'}returnTo=${encodeURIComponent(returnTo)}${invitePart}`
-      : '/demo';
+    void (async () => {
+      try {
+        setError(null);
+        setHostedLoginPending(true);
+        await loginWithAuth0(
+          invite
+            ? { appState: { invite } }
+            : undefined
+        );
+      } catch (hostedLoginError) {
+        setHostedLoginPending(false);
+        setError(hostedLoginError instanceof Error ? hostedLoginError.message : 'Auth0 login failed to initialize');
+      }
+    })();
   };
 
-  const applyToken = async (token: string) => {
+  const applyToken = React.useCallback(async (token: string) => {
     setStoredAuthToken(token);
     const actor = await api.getAuthContext();
     queryClient.setQueryData(getAuthContextQueryKey(token), actor);
     navigateAfterAuth(actor);
-  };
+  }, [navigateAfterAuth, queryClient]);
 
   const loginMutation = useMutation({
     mutationFn: async () => {
@@ -283,6 +303,66 @@ export function LoginPage() {
     loginMutation.mutate();
   };
 
+  React.useEffect(() => {
+    if (!HOSTED_LOGIN_ENABLED || setupToken) {
+      return;
+    }
+    let cancelled = false;
+    // Only block the button when we're actively processing a redirect callback from Auth0.
+    // The background "already authenticated?" check must never disable the button.
+    const isRedirectCallback = searchParams.has('code') && searchParams.has('state');
+    const isErrorCallback = !!searchParams.get('error');
+    if (isRedirectCallback || isErrorCallback) {
+      setHostedLoginPending(true);
+    } else {
+      setAuth0CallbackPending(true);
+    }
+    setError(null);
+
+    void (async () => {
+      try {
+        if (isErrorCallback) {
+          throw new Error(
+            `Auth0 error: ${searchParams.get('error')} - ${searchParams.get('error_description') ?? 'Unknown error'}`
+          );
+        }
+
+        await handleAuth0RedirectCallbackIfNeeded();
+
+        if (!(await isAuthenticatedWithAuth0())) {
+          if (!cancelled) {
+            setHostedLoginPending(false);
+            setAuth0CallbackPending(false);
+          }
+          return;
+        }
+
+        const accessToken = await getAuth0AccessToken();
+        if (!accessToken) {
+          const user = await getAuth0User();
+          throw new Error(
+            user?.email
+              ? `Auth0 login succeeded for ${user.email}, but no API access token is available yet. Configure an Auth0 API audience before using hosted login with the backend.`
+              : 'Auth0 login succeeded, but no API access token is available yet. Configure an Auth0 API audience before using hosted login with the backend.'
+          );
+        }
+        if (!cancelled) {
+          await applyToken(accessToken);
+        }
+      } catch (hostedLoginError) {
+        if (!cancelled) {
+          setError(hostedLoginError instanceof Error ? hostedLoginError.message : 'Auth0 login failed');
+          setHostedLoginPending(false);
+          setAuth0CallbackPending(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyToken, searchParams, setupToken]);
+
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
@@ -310,9 +390,9 @@ export function LoginPage() {
           </form>
         )}
         {error && <div className="notice error" role="alert">{error}</div>}
-        {!setupToken && IDP_LOGIN_URL && (
-          <button className="btn btn-secondary" type="button" onClick={startHostedLogin}>
-            Continue with hosted login
+        {!setupToken && HOSTED_LOGIN_ENABLED && (
+          <button className="btn btn-secondary" type="button" onClick={startHostedLogin} disabled={hostedLoginPending}>
+            {hostedLoginPending ? 'Connecting to Auth0...' : 'Continue with Auth0'}
           </button>
         )}
         {TEST_PERSONAS_ENABLED && (
@@ -371,9 +451,19 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
   }, [location.pathname, location.search]);
 
   const logout = React.useCallback(() => {
-    clearStoredAuthToken();
-    setHasStoredToken(false);
-    navigate('/login', { replace: true });
+    void (async () => {
+      clearStoredAuthToken();
+      setHasStoredToken(false);
+      if (HOSTED_LOGIN_ENABLED && await isAuthenticatedWithAuth0()) {
+        await logoutWithAuth0({
+          logoutParams: {
+            returnTo: window.location.origin
+          }
+        });
+        return;
+      }
+      navigate('/login', { replace: true });
+    })();
   }, [navigate]);
 
   return (

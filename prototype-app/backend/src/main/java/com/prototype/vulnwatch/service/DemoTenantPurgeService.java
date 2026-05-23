@@ -15,21 +15,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class DemoTenantPurgeService {
 
     private final TenantRepository tenantRepository;
-    private final JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate resetJdbcTemplate;
+    private final JdbcTemplate tenantJdbcTemplate;
     private final AuditEventService auditEventService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
+    private final TenantSchemaService tenantSchemaService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public DemoTenantPurgeService(
             TenantRepository tenantRepository,
             @Qualifier("prototypeResetJdbcTemplate")
-            JdbcTemplate jdbcTemplate,
+            JdbcTemplate resetJdbcTemplate,
+            JdbcTemplate tenantJdbcTemplate,
             AuditEventService auditEventService,
-            TenantLifecycleGuardService tenantLifecycleGuardService
+            TenantLifecycleGuardService tenantLifecycleGuardService,
+            TenantSchemaService tenantSchemaService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.tenantRepository = tenantRepository;
-        this.jdbcTemplate = jdbcTemplate;
+        this.resetJdbcTemplate = resetJdbcTemplate;
+        this.tenantJdbcTemplate = tenantJdbcTemplate;
         this.auditEventService = auditEventService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+        this.tenantSchemaService = tenantSchemaService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -49,8 +58,8 @@ public class DemoTenantPurgeService {
             return;
         }
 
-        List<UUID> memberUserIds = jdbcTemplate.query(
-                "select distinct user_id from tenant_memberships where tenant_id = ?",
+        List<UUID> memberUserIds = resetJdbcTemplate.query(
+                "select distinct user_id from platform.tenant_memberships where tenant_id = ?",
                 (rs, rowNum) -> UUID.fromString(rs.getString(1)),
                 tenantId);
 
@@ -62,7 +71,7 @@ public class DemoTenantPurgeService {
         tenantRepository.save(tenant);
 
         try {
-            purgeTenantRows(tenantId, now);
+            purgeTenantRows(tenant, now);
             scrubDemoUserCredentials(memberUserIds, now);
             tenant.setStatus("DELETED");
             tenant.setDeletedAt(now);
@@ -101,54 +110,25 @@ public class DemoTenantPurgeService {
         auditEventService.record("demo.tenant.expired", "tenant", tenant.getId().toString(), null);
     }
 
-    private void purgeTenantRows(UUID tenantId, Instant now) {
-        jdbcTemplate.update(
-                "update demo_invites set status = ?, expires_at = least(expires_at, ?::timestamptz) where tenant_id = ? and upper(status) <> 'ACCEPTED'",
-                "TENANT_EXPIRED",
-                now,
-                tenantId);
+    private void purgeTenantRows(Tenant tenant, Instant now) {
+        UUID tenantId = tenant.getId();
+        tenantSchemaExecutionService.run(tenant, () -> {
+            tenantJdbcTemplate.update(
+                    "update demo_invites set status = ?, expires_at = least(expires_at, ?::timestamptz) where tenant_id = ? and upper(status) <> 'ACCEPTED'",
+                    "TENANT_EXPIRED",
+                    now,
+                    tenantId);
+        });
 
-        jdbcTemplate.update("delete from finding_comments where finding_id in (select id from findings where tenant_id = ?)", tenantId);
-        jdbcTemplate.update("delete from finding_events where finding_id in (select id from findings where tenant_id = ?)", tenantId);
-        jdbcTemplate.update("delete from finding_delta_queue where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from investigation_attachments where investigation_id in (select id from investigations where tenant_id = ?)", tenantId);
-        jdbcTemplate.update("delete from investigation_activities where investigation_id in (select id from investigations where tenant_id = ?)", tenantId);
+        tenantSchemaService.resetTenantSchema(tenant.getSchemaName());
 
-        jdbcTemplate.update("delete from applicability_assessments where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from investigations where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from fix_records where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from suppression_rules where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from risk_policies where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from findings where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from component_vulnerability_states where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from org_cve_records where tenant_id = ?", tenantId);
-
-        jdbcTemplate.update("delete from inventory_component_cpe_map where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from software_inventory_items where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from software_instances where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from software_identity_metadata where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from ci_aliases where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from discovery_models where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from cis where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from sbom_uploads where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from inventory_components where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from assets where tenant_id = ?", tenantId);
-
-        jdbcTemplate.update("delete from aws_discovery_targets where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from aws_discovery_configs where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from servicenow_cmdb_configs where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from sccm_cmdb_configs where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from github_sbom_sources where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from sync_runs where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from vulnerability_source_filter_configs where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from tenant_support_grants where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from service_accounts where tenant_id = ?", tenantId);
-        jdbcTemplate.update("delete from tenant_memberships where tenant_id = ?", tenantId);
+        resetJdbcTemplate.update("delete from platform.tenant_support_grants where tenant_id = ?", tenantId);
+        resetJdbcTemplate.update("delete from platform.tenant_memberships where tenant_id = ?", tenantId);
     }
 
     private void scrubDemoUserCredentials(List<UUID> userIds, Instant now) {
         for (UUID userId : userIds) {
-            jdbcTemplate.update("""
+            resetJdbcTemplate.update("""
                     update app_users u
                     set password_hash = null,
                         password_set_at = null,

@@ -22,6 +22,7 @@ export function buildFinding(overrides: Partial<Finding> = {}): Finding {
     packageVersion: '1.1.1k',
     vulnerabilityId: 'CVE-2026-1234',
     source: 'NVD',
+    creationSource: 'AUTOMATIC',
     severity: 'CRITICAL',
     inKev: true,
     epss: 0.42,

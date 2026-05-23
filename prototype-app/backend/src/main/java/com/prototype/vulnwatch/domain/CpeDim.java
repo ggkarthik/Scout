@@ -13,6 +13,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "cpe_dim",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_cpe_dim_normalized", columnNames = {"normalized_cpe"})

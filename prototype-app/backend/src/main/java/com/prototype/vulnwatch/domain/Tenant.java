@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "tenants")
+@Table(schema = "platform", name = "tenants")
 public class Tenant {
 
     @Id
@@ -22,6 +22,9 @@ public class Tenant {
 
     @Column(unique = true, length = 120)
     private String slug;
+
+    @Column(name = "schema_name", nullable = false, unique = true, length = 120)
+    private String schemaName = "tenant_default";
 
     @Column(nullable = false, length = 32)
     private String status = "ACTIVE";
@@ -61,6 +64,9 @@ public class Tenant {
 
     @Column(length = 64)
     private String demoSource;
+
+    @Column(length = 255)
+    private String demoOwnerEmail;
 
     @Column(nullable = false)
     private Integer maxConnectorCount = 10;
@@ -111,6 +117,14 @@ public class Tenant {
 
     public void setSlug(String slug) {
         this.slug = slug;
+    }
+
+    public String getSchemaName() {
+        return schemaName;
+    }
+
+    public void setSchemaName(String schemaName) {
+        this.schemaName = schemaName;
     }
 
     public String getStatus() {
@@ -187,6 +201,14 @@ public class Tenant {
 
     public void setDemoSource(String demoSource) {
         this.demoSource = demoSource;
+    }
+
+    public String getDemoOwnerEmail() {
+        return demoOwnerEmail;
+    }
+
+    public void setDemoOwnerEmail(String demoOwnerEmail) {
+        this.demoOwnerEmail = demoOwnerEmail;
     }
 
     public Instant getExpiredAt() {

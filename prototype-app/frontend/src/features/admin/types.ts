@@ -9,6 +9,24 @@ export type TenantMember = {
   createdAt: string;
 };
 
+export type PlatformUser = {
+  userId: string;
+  externalSubject: string;
+  email: string | null;
+  displayName: string | null;
+  status: string;
+  globalRoles: string[];
+  lastSeenAt: string | null;
+  createdAt: string;
+};
+
+export type PlatformUserRequest = {
+  externalSubject: string;
+  email?: string;
+  displayName?: string;
+  role: string;
+};
+
 export type TenantMemberRequest = {
   subject: string;
   email: string;
@@ -31,6 +49,7 @@ export type Tenant = {
   demoExpiresAt?: string | null;
   demoCreatedBy?: string | null;
   demoSource?: string | null;
+  demoOwnerEmail?: string | null;
   createdAt: string;
   updatedAt: string | null;
 };

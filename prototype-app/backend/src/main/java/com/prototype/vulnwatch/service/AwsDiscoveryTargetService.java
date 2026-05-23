@@ -139,7 +139,7 @@ public class AwsDiscoveryTargetService {
         if (tenant == null || tenant.getId() == null || targetId == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AWS discovery target not found");
         }
-        return targetRepository.findByIdAndTenant_Id(targetId, tenant.getId())
+        return targetRepository.findById(targetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AWS discovery target not found: " + targetId));
     }
 
@@ -147,7 +147,7 @@ public class AwsDiscoveryTargetService {
         if (tenant == null || tenant.getId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Workspace is not available");
         }
-        AwsDiscoveryConfig config = configRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+        AwsDiscoveryConfig config = configRepository.findBySourceSystemIgnoreCase("aws")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "AWS Cloud Discovery connector is not configured yet"));
         ensureLegacyTarget(config);
         return config;
@@ -177,16 +177,16 @@ public class AwsDiscoveryTargetService {
     private AwsDiscoveryTargetResponse toResponse(AwsDiscoveryTarget target) {
         String accountId = target.getAccountId();
         long hostCount = hasText(accountId)
-                ? assetRepository.countByTenant_IdAndCloudProviderAndCloudAccountIdAndType(target.getTenant().getId(), "aws", accountId, AssetType.HOST)
+                ? assetRepository.countByCloudProviderAndCloudAccountIdAndType("aws", accountId, AssetType.HOST)
                 : 0;
         long ssmManaged = hasText(accountId)
-                ? assetRepository.countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmManagedTrue(target.getTenant().getId(), "aws", accountId, AssetType.HOST)
+                ? assetRepository.countByCloudProviderAndCloudAccountIdAndTypeAndSsmManagedTrue("aws", accountId, AssetType.HOST)
                 : 0;
         long missingIam = hasText(accountId)
-                ? assetRepository.countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndMissingIamInstanceProfileTrue(target.getTenant().getId(), "aws", accountId, AssetType.HOST)
+                ? assetRepository.countByCloudProviderAndCloudAccountIdAndTypeAndMissingIamInstanceProfileTrue("aws", accountId, AssetType.HOST)
                 : 0;
         long inventory = hasText(accountId)
-                ? assetRepository.countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmInventoryAvailableTrue(target.getTenant().getId(), "aws", accountId, AssetType.HOST)
+                ? assetRepository.countByCloudProviderAndCloudAccountIdAndTypeAndSsmInventoryAvailableTrue("aws", accountId, AssetType.HOST)
                 : 0;
         return new AwsDiscoveryTargetResponse(
                 target.getId(),

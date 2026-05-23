@@ -113,4 +113,168 @@ public class ApplicabilityAssessment {
         MEDIUM,
         LOW
     }
+
+    public Long getId() {
+        return id;
+    }
+
+    public Vulnerability getVulnerability() {
+        return vulnerability;
+    }
+
+    public void setVulnerability(Vulnerability vulnerability) {
+        this.vulnerability = vulnerability;
+    }
+
+    public Tenant getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
+    }
+
+    public AssessmentStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(AssessmentStatus status) {
+        this.status = status;
+    }
+
+    public Boolean getSoftwareDetected() {
+        return softwareDetected;
+    }
+
+    public void setSoftwareDetected(Boolean softwareDetected) {
+        this.softwareDetected = softwareDetected;
+    }
+
+    public String getDetectionMethod() {
+        return detectionMethod;
+    }
+
+    public void setDetectionMethod(String detectionMethod) {
+        this.detectionMethod = detectionMethod;
+    }
+
+    public String getAffectedComponents() {
+        return affectedComponents;
+    }
+
+    public void setAffectedComponents(String affectedComponents) {
+        this.affectedComponents = affectedComponents;
+    }
+
+    public Boolean getVulnerableVersionPresent() {
+        return vulnerableVersionPresent;
+    }
+
+    public void setVulnerableVersionPresent(Boolean vulnerableVersionPresent) {
+        this.vulnerableVersionPresent = vulnerableVersionPresent;
+    }
+
+    public String getCurrentVersion() {
+        return currentVersion;
+    }
+
+    public void setCurrentVersion(String currentVersion) {
+        this.currentVersion = currentVersion;
+    }
+
+    public String getVulnerableVersionRange() {
+        return vulnerableVersionRange;
+    }
+
+    public void setVulnerableVersionRange(String vulnerableVersionRange) {
+        this.vulnerableVersionRange = vulnerableVersionRange;
+    }
+
+    public String getFixedVersion() {
+        return fixedVersion;
+    }
+
+    public void setFixedVersion(String fixedVersion) {
+        this.fixedVersion = fixedVersion;
+    }
+
+    public Boolean getVulnerableConfiguration() {
+        return vulnerableConfiguration;
+    }
+
+    public void setVulnerableConfiguration(Boolean vulnerableConfiguration) {
+        this.vulnerableConfiguration = vulnerableConfiguration;
+    }
+
+    public String getConfigurationDetails() {
+        return configurationDetails;
+    }
+
+    public void setConfigurationDetails(String configurationDetails) {
+        this.configurationDetails = configurationDetails;
+    }
+
+    public Boolean getAttackVectorAccessible() {
+        return attackVectorAccessible;
+    }
+
+    public void setAttackVectorAccessible(Boolean attackVectorAccessible) {
+        this.attackVectorAccessible = attackVectorAccessible;
+    }
+
+    public AssessmentResult getFinalResult() {
+        return finalResult;
+    }
+
+    public void setFinalResult(AssessmentResult finalResult) {
+        this.finalResult = finalResult;
+    }
+
+    public ConfidenceLevel getConfidenceLevel() {
+        return confidenceLevel;
+    }
+
+    public void setConfidenceLevel(ConfidenceLevel confidenceLevel) {
+        this.confidenceLevel = confidenceLevel;
+    }
+
+    public String getJustification() {
+        return justification;
+    }
+
+    public void setJustification(String justification) {
+        this.justification = justification;
+    }
+
+    public String getRecommendedAction() {
+        return recommendedAction;
+    }
+
+    public void setRecommendedAction(String recommendedAction) {
+        this.recommendedAction = recommendedAction;
+    }
+
+    public String getAssessedBy() {
+        return assessedBy;
+    }
+
+    public void setAssessedBy(String assessedBy) {
+        this.assessedBy = assessedBy;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
+    }
+
+    public void setCompletedAt(Instant completedAt) {
+        this.completedAt = completedAt;
+    }
 }
