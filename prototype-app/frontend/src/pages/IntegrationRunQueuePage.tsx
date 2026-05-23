@@ -177,8 +177,7 @@ export function IntegrationRunQueuePage({
   storageKey = 'integration-run-queue-table-widths',
 }: IntegrationRunQueuePageProps = {}) {
   const query = useSyncRunsQuery(queryParams);
-  const runs = query.data ?? [];
-  const rows = React.useMemo(() => buildRows(runs), [runs]);
+  const rows = React.useMemo(() => buildRows(query.data ?? []), [query.data]);
   const loading = query.isPending && !query.data;
   const refreshing = query.isFetching;
   const error = query.error instanceof Error ? query.error.message : '';

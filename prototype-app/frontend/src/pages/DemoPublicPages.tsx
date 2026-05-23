@@ -216,7 +216,7 @@ export function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [hostedLoginPending, setHostedLoginPending] = React.useState(false);
-  const [auth0CallbackPending, setAuth0CallbackPending] = React.useState(false);
+  const [_auth0CallbackPending, setAuth0CallbackPending] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const personasQuery = useQuery({

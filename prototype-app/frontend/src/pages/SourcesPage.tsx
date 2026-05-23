@@ -336,23 +336,26 @@ export function SourcesPage({
   const loadingVexRepairSummary = vexRepairSummaryQuery.isLoading;
   const refreshingVexRepairSummary = vexRepairSummaryQuery.isFetching;
   const loadingSourceFilters = sourceFilterConfigQuery.isLoading && sourceFilterConfigQuery.data == null;
+  const { refetch: refetchSyncRuns } = syncRunsQuery;
+  const { refetch: refetchVexRepairSummary } = vexRepairSummaryQuery;
+  const { refetch: refetchSourceFilterConfig } = sourceFilterConfigQuery;
 
   const refreshRuns = React.useCallback(async () => {
-    const result = await syncRunsQuery.refetch();
+    const result = await refetchSyncRuns();
     if (result.error) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [syncRunsQuery.refetch]);
+  }, [refetchSyncRuns]);
 
   const refreshVexRepairSummary = React.useCallback(async () => {
     if (!shouldLoadVexRepairSummary) {
       return;
     }
-    const result = await vexRepairSummaryQuery.refetch();
+    const result = await refetchVexRepairSummary();
     if (result.error) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [shouldLoadVexRepairSummary, vexRepairSummaryQuery.refetch]);
+  }, [shouldLoadVexRepairSummary, refetchVexRepairSummary]);
 
   const refreshSourceFilters = React.useCallback(async () => {
     if (activeSourceFilterKey == null) {
@@ -360,11 +363,11 @@ export function SourcesPage({
       setSourceFilters({});
       return;
     }
-    const result = await sourceFilterConfigQuery.refetch();
+    const result = await refetchSourceFilterConfig();
     if (result.error && !isNotFoundError(result.error)) {
       setMessage(result.error instanceof Error ? result.error.message : String(result.error));
     }
-  }, [activeSourceFilterKey, sourceFilterConfigQuery.refetch]);
+  }, [activeSourceFilterKey, refetchSourceFilterConfig]);
 
   React.useEffect(() => {
     if (refreshSignal === previousRefreshSignalRef.current) {

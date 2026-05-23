@@ -793,7 +793,7 @@ export function VulnRepoVulnerabilitiesPage() {
       });
     }
     return chips;
-  }, [initialApplicable, initialImpactedOnly, initialHasFindings, severityFilters, statusFilters, sourceFilter, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters, correlationFilter, platformScope]);
+  }, [initialApplicable, severityFilters, statusFilters, sourceFilter, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters, correlationFilter, platformScope]);
 
   const dashboardFilterChips = React.useMemo(() => {
     const keys = ['exploitOnly', 'inKev', 'createdSinceDays', 'software', 'softwareScope', 'includeAll', 'impactedOnly', 'hasFindings'];
