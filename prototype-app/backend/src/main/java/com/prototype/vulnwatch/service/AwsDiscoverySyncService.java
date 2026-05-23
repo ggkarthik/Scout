@@ -27,7 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,7 +50,8 @@ public class AwsDiscoverySyncService {
     private final TransactionTemplate transactionTemplate;
     private final CredentialEncryptionService credentialEncryptionService;
     private final WorkspaceService workspaceService;
-    private final JdbcTemplate platformJdbcTemplate;
+    private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public AwsDiscoverySyncService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
@@ -65,7 +65,8 @@ public class AwsDiscoverySyncService {
             TransactionTemplate transactionTemplate,
             CredentialEncryptionService credentialEncryptionService,
             WorkspaceService workspaceService,
-            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
@@ -78,7 +79,8 @@ public class AwsDiscoverySyncService {
         this.transactionTemplate = transactionTemplate;
         this.credentialEncryptionService = credentialEncryptionService;
         this.workspaceService = workspaceService;
-        this.platformJdbcTemplate = platformJdbcTemplate;
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public SyncTriggerResponse trigger() {
@@ -102,24 +104,20 @@ public class AwsDiscoverySyncService {
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
-        List<ConfigRef> configs = platformJdbcTemplate.query(
-                """
-                select id, tenant_id
-                from aws_discovery_configs
-                where enabled = true
-                  and auto_sync_enabled = true
-                order by updated_at asc
-                """,
-                (rs, rowNum) -> new ConfigRef(
-                        UUID.fromString(rs.getString("id")),
-                        UUID.fromString(rs.getString("tenant_id"))
-                )
-        );
+        List<ConfigRef> configs = new ArrayList<>();
+        for (Tenant tenant : tenantService.listTenants()) {
+            tenantSchemaExecutionService.run(tenant, () -> {
+                awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
+                        .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
+                        .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
+                return null;
+            });
+        }
         for (ConfigRef configRef : configs) {
-            TenantContext.setCurrentTenantId(configRef.tenantId());
-            AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findById(configRef.configId()).orElse(null);
-            ClaimedRun claimed = transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
-            TenantContext.clear();
+            ClaimedRun claimed = tenantSchemaExecutionService.run(configRef.tenantId(), () -> {
+                AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findById(configRef.configId()).orElse(null);
+                return transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
+            });
             if (claimed == null) {
                 continue;
             }
@@ -129,17 +127,14 @@ public class AwsDiscoverySyncService {
 
     @Transactional(readOnly = true)
     public boolean hasActiveRun() {
-        return !syncRunRepository.findActiveRunsByTenantAndSyncType(currentTenantId(), SYNC_TYPE_AWS_DISCOVERY, List.of("queued", "running")).isEmpty();
+        return !syncRunRepository.findActiveRunsBySyncType(SYNC_TYPE_AWS_DISCOVERY, List.of("queued", "running")).isEmpty();
     }
 
     // ── Run claiming ───────────────────────────────────────────────────────────────────────────
 
     private ClaimedRun claimManualRun() {
-        UUID tenantId = currentTenantId();
-        AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findAll().stream()
-                .filter(existing -> existing.getTenant() != null && tenantId.equals(existing.getTenant().getId()))
+        AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
                 .filter(this::isConfigured)
-                .findFirst()
                 .orElseThrow(() -> new IllegalStateException("AWS Cloud Discovery connector is not configured"));
         if (!config.isEnabled()) {
             throw new IllegalStateException("AWS Cloud Discovery connector is disabled");
@@ -156,8 +151,7 @@ public class AwsDiscoverySyncService {
 
     private ClaimedRun claimRunForConfig(AwsDiscoveryConfig config, String triggerMode, boolean allowReuseActiveRun) {
         UUID tenantId = config.getTenant().getId();
-        Optional<SyncRun> active = syncRunRepository.findActiveRunsByTenantAndSyncType(
-                tenantId,
+        Optional<SyncRun> active = syncRunRepository.findActiveRunsBySyncType(
                 SYNC_TYPE_AWS_DISCOVERY,
                 List.of("queued", "running")
         ).stream().findFirst();
@@ -188,7 +182,7 @@ public class AwsDiscoverySyncService {
 
     private boolean isDue(AwsDiscoveryConfig config) {
         SyncRun latest = syncRunRepository
-                .findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(SYNC_TYPE_AWS_DISCOVERY, config.getTenant().getId())
+                .findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(SYNC_TYPE_AWS_DISCOVERY)
                 .orElse(null);
         if (latest == null) {
             return true;
@@ -204,57 +198,57 @@ public class AwsDiscoverySyncService {
     // ── Execution ──────────────────────────────────────────────────────────────────────────────
 
     private void executeRun(UUID tenantId, UUID configId, UUID runId, String triggerMode, UUID onlyTargetId) {
-        TenantContext.setCurrentTenantId(tenantId);
-        Instant runStartTime = Instant.now();
-        markRunRunning(runId, triggerMode);
-        try {
-            AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findById(configId)
-                    .orElseThrow(() -> new EntityNotFoundException("AWS Discovery config not found: " + configId));
-            awsDiscoveryTargetService.ensureLegacyTarget(config);
+        tenantSchemaExecutionService.run(tenantId, () -> {
+            Instant runStartTime = Instant.now();
+            markRunRunning(runId, triggerMode);
+            try {
+                AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findById(configId)
+                        .orElseThrow(() -> new EntityNotFoundException("AWS Discovery config not found: " + configId));
+                awsDiscoveryTargetService.ensureLegacyTarget(config);
 
-            LOG.info("AWS Discovery sync run {} starting (trigger={})", runId, triggerMode);
+                LOG.info("AWS Discovery sync run {} starting (trigger={})", runId, triggerMode);
 
-            List<AwsDiscoveryTarget> targets = resolveTargets(config, onlyTargetId);
-            if (targets.isEmpty()) {
-                targets = List.of(legacyVirtualTarget(config));
+                List<AwsDiscoveryTarget> targets = resolveTargets(config, onlyTargetId);
+                if (targets.isEmpty()) {
+                    targets = List.of(legacyVirtualTarget(config));
+                }
+
+                int totalFetched = 0;
+                int recordsFailed = 0;
+                int assetsUpserted = 0;
+                int componentsCreated = 0;
+                int componentsUpdated = 0;
+                int assetsMarkedInactive = 0;
+                List<Map<String, Object>> targetResults = new ArrayList<>();
+
+                for (AwsDiscoveryTarget target : targets) {
+                    TargetRunResult targetResult = executeTarget(config, target, runId, triggerMode, runStartTime);
+                    totalFetched += targetResult.recordsFetched();
+                    recordsFailed += targetResult.failed() ? 1 : 0;
+                    assetsUpserted += targetResult.ingestionResult().assetsUpserted();
+                    componentsCreated += targetResult.ingestionResult().inventoryComponentsCreated();
+                    componentsUpdated += targetResult.ingestionResult().inventoryComponentsUpdated();
+                    assetsMarkedInactive += targetResult.ingestionResult().assetsMarkedInactive();
+                    targetResults.add(targetResult.metadata());
+                    updateRunProgress(runId, totalFetched, "ingesting-targets", triggerMode, config, targetResults);
+                }
+
+                completeRun(
+                        configId,
+                        runId,
+                        new IngestionResult(assetsUpserted, componentsCreated, componentsUpdated, assetsMarkedInactive),
+                        totalFetched,
+                        recordsFailed,
+                        triggerMode,
+                        config,
+                        targetResults
+                );
+            } catch (Exception e) {
+                LOG.error("AWS Discovery sync run {} failed: {}", runId, e.getMessage(), e);
+                failRun(runId, e.getMessage(), triggerMode);
             }
-
-            int totalFetched = 0;
-            int recordsFailed = 0;
-            int assetsUpserted = 0;
-            int componentsCreated = 0;
-            int componentsUpdated = 0;
-            int assetsMarkedInactive = 0;
-            List<Map<String, Object>> targetResults = new ArrayList<>();
-
-            for (AwsDiscoveryTarget target : targets) {
-                TargetRunResult targetResult = executeTarget(config, target, runId, triggerMode, runStartTime);
-                totalFetched += targetResult.recordsFetched();
-                recordsFailed += targetResult.failed() ? 1 : 0;
-                assetsUpserted += targetResult.ingestionResult().assetsUpserted();
-                componentsCreated += targetResult.ingestionResult().inventoryComponentsCreated();
-                componentsUpdated += targetResult.ingestionResult().inventoryComponentsUpdated();
-                assetsMarkedInactive += targetResult.ingestionResult().assetsMarkedInactive();
-                targetResults.add(targetResult.metadata());
-                updateRunProgress(runId, totalFetched, "ingesting-targets", triggerMode, config, targetResults);
-            }
-
-            completeRun(
-                    configId,
-                    runId,
-                    new IngestionResult(assetsUpserted, componentsCreated, componentsUpdated, assetsMarkedInactive),
-                    totalFetched,
-                    recordsFailed,
-                    triggerMode,
-                    config,
-                    targetResults
-            );
-        } catch (Exception e) {
-            LOG.error("AWS Discovery sync run {} failed: {}", runId, e.getMessage(), e);
-            failRun(runId, e.getMessage(), triggerMode);
-        } finally {
-            TenantContext.clear();
-        }
+            return null;
+        });
     }
 
     private UUID currentTenantId() {

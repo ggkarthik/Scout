@@ -57,10 +57,10 @@ public class HostInventoryReadService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Host asset not found");
         }
 
-        Ci ci = ciRepository.findByTenant_IdAndAsset_Id(tenant.getId(), assetId)
+        Ci ci = ciRepository.findByAsset_Id(assetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Host asset not found: " + assetId));
 
-        List<CiAlias> aliases = filterAliases(ciAliasRepository.findByTenant_IdAndCi_IdOrderByAliasNameAsc(tenant.getId(), ci.getId()), sourceSystem);
+        List<CiAlias> aliases = filterAliases(ciAliasRepository.findByCi_IdOrderByAliasNameAsc(ci.getId()), sourceSystem);
         List<SoftwareInstance> software = filterSoftware(softwareInstanceRepository.findByCi_IdOrderByDisplayNameAsc(ci.getId()), sourceSystem);
         List<Finding> findings = findingRepository.findByAsset(ci.getAsset()).stream()
                 .sorted(Comparator

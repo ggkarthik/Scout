@@ -10,8 +10,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     Optional<Tenant> findByNameIgnoreCase(String name);
     Optional<Tenant> findBySlugIgnoreCase(String slug);
+    Optional<Tenant> findBySchemaName(String schemaName);
     boolean existsByNameIgnoreCase(String name);
     boolean existsBySlugIgnoreCase(String slug);
+    boolean existsBySchemaName(String schemaName);
     List<Tenant> findAllByOrderByCreatedAtAsc();
     List<Tenant> findByPlanCodeIgnoreCaseAndStatusIgnoreCaseAndDemoExpiresAtBefore(String planCode, String status, Instant now);
     List<Tenant> findByPlanCodeIgnoreCaseAndDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(String planCode, Instant now);

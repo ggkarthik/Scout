@@ -7,5 +7,5 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface SuppressionRuleRepository extends JpaRepository<SuppressionRule, UUID> {
-    List<SuppressionRule> findByTenantOrderByCreatedAtAsc(Tenant tenant);
+    List<SuppressionRule> findAllByOrderByCreatedAtAsc();
 }

@@ -24,7 +24,7 @@ public interface InventoryComponentCpeMapRepository extends JpaRepository<Invent
         UUID getComponentId();
     }
 
-    List<InventoryComponentCpeMap> findByTenantAndComponent(Tenant tenant, InventoryComponent component);
+    List<InventoryComponentCpeMap> findByComponent(InventoryComponent component);
 
     List<InventoryComponentCpeMap> findByComponent_IdIn(Collection<UUID> componentIds);
 
@@ -87,5 +87,6 @@ public interface InventoryComponentCpeMapRepository extends JpaRepository<Invent
             @Param("componentStatus") InventoryComponentStatus componentStatus
     );
 
-    void deleteByTenantAndComponent(Tenant tenant, InventoryComponent component);
+    void deleteByComponent(InventoryComponent component);
+
 }

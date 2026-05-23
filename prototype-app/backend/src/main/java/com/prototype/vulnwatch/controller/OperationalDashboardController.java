@@ -134,6 +134,6 @@ public class OperationalDashboardController {
     }
 
     private Tenant defaultTenant() {
-        return workspaceService.getWorkspace();
+        return workspaceService.getDefaultWorkspace();
     }
 }

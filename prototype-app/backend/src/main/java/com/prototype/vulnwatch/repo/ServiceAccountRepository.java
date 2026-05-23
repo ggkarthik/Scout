@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ServiceAccountRepository extends JpaRepository<ServiceAccount, UUID> {
     Optional<ServiceAccount> findByKeyId(String keyId);
+    List<ServiceAccount> findAllByOrderByCreatedAtAsc();
     List<ServiceAccount> findByTenantIdOrderByCreatedAtAsc(UUID tenantId);
     long countByTenant_Id(UUID tenantId);
 }

@@ -16,9 +16,11 @@ public class TenantService {
     public static final String DEFAULT_TENANT_NAME = "Default Workspace";
 
     private final TenantRepository tenantRepository;
+    private final TenantSchemaService tenantSchemaService;
 
-    public TenantService(TenantRepository tenantRepository) {
+    public TenantService(TenantRepository tenantRepository, TenantSchemaService tenantSchemaService) {
         this.tenantRepository = tenantRepository;
+        this.tenantSchemaService = tenantSchemaService;
     }
 
     @Transactional
@@ -61,9 +63,12 @@ public class TenantService {
         Tenant tenant = new Tenant();
         tenant.setName(requireText(name, "name"));
         tenant.setSlug(normalizeSlug(slug == null || slug.isBlank() ? name : slug));
+        tenant.setSchemaName(tenantSchemaService.deriveSchemaName(tenant.getSlug()));
         tenant.setPlanCode(planCode == null || planCode.isBlank() ? "pilot" : planCode.trim());
         tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
-        return tenantRepository.save(tenant);
+        Tenant saved = tenantRepository.save(tenant);
+        tenantSchemaService.ensureSchemaExists(saved.getSchemaName());
+        return saved;
     }
 
     @Transactional

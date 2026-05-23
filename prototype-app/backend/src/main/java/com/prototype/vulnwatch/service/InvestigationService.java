@@ -3,8 +3,6 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.*;
 import com.prototype.vulnwatch.repo.InvestigationRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -13,15 +11,30 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
-@RequiredArgsConstructor
-@Slf4j
 public class InvestigationService {
+
+    private static final Logger log = LoggerFactory.getLogger(InvestigationService.class);
 
     private final InvestigationRepository investigationRepository;
     private final VulnerabilityRepository vulnerabilityRepository;
     private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
+
+    public InvestigationService(
+            InvestigationRepository investigationRepository,
+            VulnerabilityRepository vulnerabilityRepository,
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
+        this.investigationRepository = investigationRepository;
+        this.vulnerabilityRepository = vulnerabilityRepository;
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+    }
 
     @Transactional(readOnly = true)
     public Investigation getInvestigation(Long tenantId, Long investigationId) {
@@ -96,16 +109,16 @@ public class InvestigationService {
     }
 
     private Investigation getInvestigation(Tenant tenant, Long investigationId) {
-        return investigationRepository.findByIdAndTenantId(investigationId, tenant.getId())
+        return tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findById(investigationId))
                 .orElseThrow(() -> new IllegalArgumentException("Investigation not found: " + investigationId));
     }
 
     private List<Investigation> getInvestigationsByCve(Tenant tenant, String cveId) {
-        return investigationRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        return tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findByCveId(cveId));
     }
 
     private Page<Investigation> getInvestigations(Tenant tenant, Pageable pageable) {
-        return investigationRepository.findByTenantId(tenant.getId(), pageable);
+        return tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findAll(pageable));
     }
 
     private Investigation createInvestigation(Tenant tenant, String cveId, Investigation.InvestigationPriority priority, String createdBy) {
@@ -215,7 +228,7 @@ public class InvestigationService {
 
     private Investigation submitInvestigation(Tenant tenant, String cveId, SubmitInvestigationRequest request, String userId) {
         // Find the most recent non-closed investigation, or create a new one
-        List<Investigation> existing = investigationRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        List<Investigation> existing = tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findByCveId(cveId));
         Investigation investigation = existing.stream()
                 .filter(inv -> inv.getStatus() != Investigation.InvestigationStatus.CLOSED)
                 .findFirst()
@@ -247,7 +260,7 @@ public class InvestigationService {
 
         Investigation saved = investigationRepository.save(investigation);
         log.info("Submitted investigation {} for CVE {} by user {}", saved.getId(), cveId, userId);
-        return investigationRepository.findByIdAndTenantId(saved.getId(), tenant.getId()).orElse(saved);
+        return tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findById(saved.getId())).orElse(saved);
     }
 
     private void deleteInvestigation(Tenant tenant, Long investigationId) {
@@ -280,6 +293,11 @@ public class InvestigationService {
         private Investigation.InvestigationPriority priority;
         private String assignedTo;
         private String notes;
+
+        public Investigation.InvestigationStatus getStatus() { return status; }
+        public Investigation.InvestigationPriority getPriority() { return priority; }
+        public String getAssignedTo() { return assignedTo; }
+        public String getNotes() { return notes; }
     }
 
     // DTO for update requests
@@ -297,5 +315,18 @@ public class InvestigationService {
         private String businessImpact;
         private String mitigationSteps;
         private String vulnReferences;
+
+        public Investigation.InvestigationStatus getStatus() { return status; }
+        public Investigation.InvestigationPriority getPriority() { return priority; }
+        public String getAssignedTo() { return assignedTo; }
+        public String getNotes() { return notes; }
+        public Boolean getExploitAvailable() { return exploitAvailable; }
+        public String getExploitDetails() { return exploitDetails; }
+        public Boolean getPatchAvailable() { return patchAvailable; }
+        public String getPatchDetails() { return patchDetails; }
+        public String getSystemsAffected() { return systemsAffected; }
+        public String getBusinessImpact() { return businessImpact; }
+        public String getMitigationSteps() { return mitigationSteps; }
+        public String getVulnReferences() { return vulnReferences; }
     }
 }

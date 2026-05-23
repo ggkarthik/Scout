@@ -21,6 +21,7 @@ public interface SoftwareInstanceRepository extends JpaRepository<SoftwareInstan
     List<SoftwareInstance> findByInventoryComponent_IdIn(Collection<UUID> componentIds);
 
     List<SoftwareInstance> findByTenant_IdAndCi_IdIn(UUID tenantId, Collection<UUID> ciIds);
+    List<SoftwareInstance> findByCi_IdIn(Collection<UUID> ciIds);
 
     List<SoftwareInstance> findByCi_IdOrderByDisplayNameAsc(UUID ciId);
 }

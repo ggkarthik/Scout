@@ -11,6 +11,7 @@ public interface AwsDiscoveryTargetRepository extends JpaRepository<AwsDiscovery
     List<AwsDiscoveryTarget> findByConfigOrderByAccountNameAscAccountIdAsc(AwsDiscoveryConfig config);
     List<AwsDiscoveryTarget> findByConfigAndEnabledTrueOrderByAccountNameAscAccountIdAsc(AwsDiscoveryConfig config);
     Optional<AwsDiscoveryTarget> findByIdAndTenant_Id(UUID id, UUID tenantId);
+    Optional<AwsDiscoveryTarget> findById(UUID id);
     long countByConfig(AwsDiscoveryConfig config);
     long countByTenant_Id(UUID tenantId);
 }

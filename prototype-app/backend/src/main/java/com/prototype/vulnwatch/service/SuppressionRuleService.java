@@ -32,6 +32,7 @@ public class SuppressionRuleService {
     private final VulnerabilityTargetRepository vulnTargetRepository;
     private final TenantRepository tenantRepository;
     private final FindingsScoreService findingsScoreService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SuppressionRuleService(
             SuppressionRuleRepository repo,
@@ -40,7 +41,8 @@ public class SuppressionRuleService {
             ComponentVulnerabilityStateRepository cvsRepository,
             VulnerabilityTargetRepository vulnTargetRepository,
             TenantRepository tenantRepository,
-            FindingsScoreService findingsScoreService
+            FindingsScoreService findingsScoreService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.repo = repo;
         this.findingRepository = findingRepository;
@@ -49,10 +51,11 @@ public class SuppressionRuleService {
         this.vulnTargetRepository = vulnTargetRepository;
         this.tenantRepository = tenantRepository;
         this.findingsScoreService = findingsScoreService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public List<SuppressionRuleResponse> list(Tenant tenant) {
-        return repo.findByTenantOrderByCreatedAtAsc(tenant)
+        return tenantSchemaExecutionService.run(tenant, repo::findAllByOrderByCreatedAtAsc)
                 .stream()
                 .map(r -> toResponse(r, tenant))
                 .toList();
@@ -116,33 +119,35 @@ public class SuppressionRuleService {
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
 
-        List<OrgCveRecord> cveRecords = orgCveRecordRepository.findByTenantAndSuppressedByRuleId(tenant, ruleId);
-        for (OrgCveRecord record : cveRecords) {
-            record.setSuppressedByRuleId(null);
-            record.setSuppressedByRuleName(null);
-            record.setSuppressedBy(null);
-            record.setSuppressedAt(null);
-            record.setSuppressedUntil(null);
-            record.setSuppressionReason(null);
-            record.touch();
-        }
-        if (!cveRecords.isEmpty()) {
-            orgCveRecordRepository.saveAll(cveRecords);
-        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            List<OrgCveRecord> cveRecords = orgCveRecordRepository.findBySuppressedByRuleId(ruleId);
+            for (OrgCveRecord record : cveRecords) {
+                record.setSuppressedByRuleId(null);
+                record.setSuppressedByRuleName(null);
+                record.setSuppressedBy(null);
+                record.setSuppressedAt(null);
+                record.setSuppressedUntil(null);
+                record.setSuppressionReason(null);
+                record.touch();
+            }
+            if (!cveRecords.isEmpty()) {
+                orgCveRecordRepository.saveAll(cveRecords);
+            }
 
-        List<Finding> findings = findingRepository.findByTenantAndSuppressedByRuleId(tenant, ruleId);
-        for (Finding finding : findings) {
-            finding.setStatus(FindingStatus.OPEN);
-            finding.setSuppressedByRuleId(null);
-            finding.setSuppressedByRuleName(null);
-            finding.setSuppressionReason(null);
-            finding.touch();
-        }
-        if (!findings.isEmpty()) {
-            findingRepository.saveAll(findings);
-        }
+            List<Finding> findings = findingRepository.findBySuppressedByRuleId(ruleId);
+            for (Finding finding : findings) {
+                finding.setStatus(FindingStatus.OPEN);
+                finding.setSuppressedByRuleId(null);
+                finding.setSuppressedByRuleName(null);
+                finding.setSuppressionReason(null);
+                finding.touch();
+            }
+            if (!findings.isEmpty()) {
+                findingRepository.saveAll(findings);
+            }
 
-        return cveRecords.size() + findings.size();
+            return cveRecords.size() + findings.size();
+        });
     }
 
     /**
@@ -150,17 +155,19 @@ public class SuppressionRuleService {
      */
     @Transactional
     public void reopenCveRecord(Tenant tenant, UUID recordId) {
-        OrgCveRecord record = orgCveRecordRepository.findById(recordId)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new NoSuchElementException("CVE record not found: " + recordId));
-        record.setSuppressedByRuleId(null);
-        record.setSuppressedByRuleName(null);
-        record.setSuppressedBy(null);
-        record.setSuppressedAt(null);
-        record.setSuppressedUntil(null);
-        record.setSuppressionReason(null);
-        record.touch();
-        orgCveRecordRepository.save(record);
+        tenantSchemaExecutionService.run(tenant, () -> {
+            OrgCveRecord record = orgCveRecordRepository.findById(recordId)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new NoSuchElementException("CVE record not found: " + recordId));
+            record.setSuppressedByRuleId(null);
+            record.setSuppressedByRuleName(null);
+            record.setSuppressedBy(null);
+            record.setSuppressedAt(null);
+            record.setSuppressedUntil(null);
+            record.setSuppressionReason(null);
+            record.touch();
+            orgCveRecordRepository.save(record);
+        });
     }
 
     /** Nightly job — runs all APPROVED rules for every tenant at midnight. */
@@ -168,7 +175,7 @@ public class SuppressionRuleService {
     @Transactional
     public void runAllApprovedRulesNightly() {
         for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
-            for (SuppressionRule rule : repo.findByTenantOrderByCreatedAtAsc(tenant)) {
+            for (SuppressionRule rule : tenantSchemaExecutionService.run(tenant, repo::findAllByOrderByCreatedAtAsc)) {
                 if (rule.getState() == SuppressionRule.State.APPROVED) {
                     if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
                         executeCveRule(rule, tenant);
@@ -183,8 +190,10 @@ public class SuppressionRuleService {
     // ── private helpers ──────────────────────────────────────────────────────
 
     private int executeFindingRule(SuppressionRule rule, Tenant tenant) {
-        List<Finding> openFindings = findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(
-                tenant, FindingStatus.OPEN);
+        List<Finding> openFindings = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN)
+        );
 
         List<Finding> toSuppress = new ArrayList<>();
         for (Finding finding : openFindings) {
@@ -212,8 +221,10 @@ public class SuppressionRuleService {
 
     private int executeCveRule(SuppressionRule rule, Tenant tenant) {
         // Only process records not yet suppressed by any rule
-        List<OrgCveRecord> candidates = orgCveRecordRepository
-                .findByTenantAndSuppressedByRuleIdIsNull(tenant);
+        List<OrgCveRecord> candidates = tenantSchemaExecutionService.run(
+                tenant,
+                orgCveRecordRepository::findBySuppressedByRuleIdIsNull
+        );
 
         if (candidates.isEmpty()) {
             return 0;
@@ -229,7 +240,7 @@ public class SuppressionRuleService {
 
         // Map<vulnId, Set<softwareName>> — package names from matched inventory components
         java.util.Map<UUID, java.util.Set<String>> namesByVuln = new java.util.HashMap<>();
-        cvsRepository.findByTenant_IdAndVulnerability_IdIn(tenant.getId(), vulnIds)
+        tenantSchemaExecutionService.run(tenant, () -> cvsRepository.findByVulnerability_IdIn(vulnIds))
                 .forEach(cvs -> {
                     if (cvs.getComponent() != null && cvs.getComponent().getPackageName() != null
                             && !cvs.getComponent().getPackageName().isBlank()) {
@@ -303,8 +314,11 @@ public class SuppressionRuleService {
     }
 
     private SuppressionRuleResponse toResponse(SuppressionRule r, Tenant tenant) {
-        long suppressedCount = findingRepository.countByTenantAndSuppressedByRuleId(tenant, r.getId())
-                + orgCveRecordRepository.countByTenantAndSuppressedByRuleId(tenant, r.getId());
+        long suppressedCount = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.countBySuppressedByRuleId(r.getId())
+                        + orgCveRecordRepository.countBySuppressedByRuleId(r.getId())
+        );
         return new SuppressionRuleResponse(
                 r.getId(),
                 r.getName(),

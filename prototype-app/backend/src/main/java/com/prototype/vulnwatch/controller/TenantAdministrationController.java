@@ -5,6 +5,8 @@ import com.prototype.vulnwatch.domain.TenantMembership;
 import com.prototype.vulnwatch.dto.TenantCreateRequest;
 import com.prototype.vulnwatch.dto.TenantMemberRequest;
 import com.prototype.vulnwatch.dto.TenantMemberResponse;
+import com.prototype.vulnwatch.dto.PlatformUserRequest;
+import com.prototype.vulnwatch.dto.PlatformUserResponse;
 import com.prototype.vulnwatch.dto.TenantResponse;
 import com.prototype.vulnwatch.dto.TenantStatusRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 @RestController
 @RequestMapping("/api")
@@ -82,6 +85,42 @@ public class TenantAdministrationController {
         return toTenantResponse(tenant);
     }
 
+    @GetMapping("/platform/users")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public List<PlatformUserResponse> listPlatformUsers() {
+        return identityAdministrationService.listPlatformUsers();
+    }
+
+    @PostMapping("/platform/users")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public PlatformUserResponse upsertPlatformUser(@RequestBody PlatformUserRequest request) {
+        PlatformUserResponse response = identityAdministrationService.upsertPlatformUserRole(
+                request.externalSubject(),
+                request.email(),
+                request.displayName(),
+                request.role()
+        );
+        auditEventService.record(
+                "platform.user.role.granted",
+                "app_user",
+                response.userId().toString(),
+                "{\"role\":\"" + (request.role() == null ? "" : request.role()) + "\"}"
+        );
+        return response;
+    }
+
+    @DeleteMapping("/platform/users/{userId}/roles/{role}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public void revokePlatformUserRole(@PathVariable UUID userId, @PathVariable String role) {
+        identityAdministrationService.revokePlatformUserRole(userId, role);
+        auditEventService.record(
+                "platform.user.role.revoked",
+                "app_user",
+                userId.toString(),
+                "{\"role\":\"" + role + "\"}"
+        );
+    }
+
     @GetMapping("/tenants/{tenantId}/members")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     public List<TenantMemberResponse> listMembers(@PathVariable UUID tenantId) {
@@ -132,6 +171,7 @@ public class TenantAdministrationController {
                 tenant.getPurgeError(),
                 tenant.getDemoCreatedBy(),
                 tenant.getDemoSource(),
+                tenant.getDemoOwnerEmail(),
                 tenant.getCreatedAt(),
                 tenant.getUpdatedAt());
     }

@@ -1,125 +1,119 @@
 package com.prototype.vulnwatch.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.prototype.vulnwatch.domain.FixRecord;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.FixRecordResponse;
+import com.prototype.vulnwatch.repo.FixRecordRepository;
+import com.prototype.vulnwatch.service.FindingDeltaQueueService;
+import com.prototype.vulnwatch.service.FixRecordService;
+import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.Statement;
-import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
+import com.prototype.vulnwatch.support.PostgresITSupport;
+import com.prototype.vulnwatch.support.PostgresIntegrationTest;
+import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
-@SpringBootTest(properties = {
-        "app.security.api-key=test-api-key",
-        "app.tenancy.require-tenant-context=true",
-        "app.tenancy.allow-header-tenant-selection=false",
-        "app.correlation.backfill-targets-on-startup=false"
-})
-@ActiveProfiles("postgres")
-@EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
+@PostgresIntegrationTest
+@TestPropertySource(properties = "spring.main.allow-circular-references=true")
 class MultiTenantIsolationPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("multi_tenant_isolation");
-    private static final String RLS_USER = "vulnwatch_isolation_reader";
-    private static final String RLS_PASSWORD = "vulnwatch-isolation-test";
-
-    private final UUID customerA = UUID.fromString("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa");
-    private final UUID customerB = UUID.fromString("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb");
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     @DynamicPropertySource
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
-        registry.add("DB_URL", DATABASE::url);
-        registry.add("DB_USERNAME", DATABASE::username);
-        registry.add("DB_PASSWORD", DATABASE::password);
+        PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
     }
 
-    @BeforeEach
-    void seedTenantScopedRows() {
-        jdbcTemplate.update("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vulnwatch_isolation_reader') THEN
-                        CREATE ROLE vulnwatch_isolation_reader LOGIN PASSWORD 'vulnwatch-isolation-test';
-                    END IF;
-                END
-                $$;
-                """);
-        jdbcTemplate.update("""
-                INSERT INTO tenants (id, created_at, name, slug, status)
-                VALUES (?, now(), 'Customer A', 'customer-a', 'ACTIVE'),
-                       (?, now(), 'Customer B', 'customer-b', 'ACTIVE')
-                ON CONFLICT (id) DO NOTHING
-                """, customerA, customerB);
-        jdbcTemplate.update("DELETE FROM assets WHERE tenant_id IN (?, ?)", customerA, customerB);
-        setTenant(customerA);
-        insertAsset(customerA, "asset-a");
-        setTenant(customerB);
-        insertAsset(customerB, "asset-b");
-        jdbcTemplate.update("GRANT USAGE ON SCHEMA public TO " + RLS_USER);
-        jdbcTemplate.update("GRANT SELECT ON assets TO " + RLS_USER);
-    }
+    @Autowired
+    private TenantService tenantService;
+
+    @Autowired
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
+
+    @Autowired
+    private FixRecordRepository fixRecordRepository;
+
+    @Autowired
+    private FixRecordService fixRecordService;
+
+    @Autowired
+    @Qualifier("platformJdbcTemplate")
+    private JdbcTemplate platformJdbcTemplate;
+
+    @MockBean
+    private FindingDeltaQueueService findingDeltaQueueService;
 
     @Test
-    void tenantScopedRlsOnlyReturnsCurrentTenantRows() throws Exception {
-        assertEquals(1, countAssetsAsRestrictedRole(customerA));
-        assertEquals("asset-a", firstAssetIdentifierAsRestrictedRole(customerA));
+    void createsTenantSchemasAndKeepsTenantLocalRecordsIsolated() {
+        Tenant tenantA = tenantService.createTenant("Customer A", "customer-a", "pilot", null);
+        Tenant tenantB = tenantService.createTenant("Customer B", "customer-b", "pilot", null);
 
-        assertEquals(1, countAssetsAsRestrictedRole(customerB));
-        assertEquals("asset-b", firstAssetIdentifierAsRestrictedRole(customerB));
+        assertTenantSchemaProvisioned(tenantA.getSchemaName());
+        assertTenantSchemaProvisioned(tenantB.getSchemaName());
+
+        tenantSchemaExecutionService.run(tenantA, () -> {
+            fixRecordRepository.saveAndFlush(buildFixRecord(tenantA, "CVE-2099-3001", "nginx"));
+            return null;
+        });
+        tenantSchemaExecutionService.run(tenantB, () -> {
+            fixRecordRepository.saveAndFlush(buildFixRecord(tenantB, "CVE-2099-3002", "apache"));
+            return null;
+        });
+
+        List<FixRecordResponse> tenantAMatches = fixRecordService.getFixRecordsBySoftware(tenantA, "nginx");
+        List<FixRecordResponse> tenantBMatches = fixRecordService.getFixRecordsBySoftware(tenantB, "nginx");
+        List<FixRecordResponse> tenantBApacheMatches = fixRecordService.getFixRecordsBySoftware(tenantB, "apache");
+
+        assertEquals(1, tenantAMatches.size());
+        assertEquals("CVE-2099-3001", tenantAMatches.get(0).cveId());
+        assertTrue(tenantBMatches.isEmpty());
+        assertEquals(1, tenantBApacheMatches.size());
+        assertEquals("CVE-2099-3002", tenantBApacheMatches.get(0).cveId());
     }
 
-    @Test
-    void missingTenantContextMatchesNoTenantRowsWhenSentinelIsSet() throws Exception {
-        assertEquals(0, countAssetsAsRestrictedRole(new UUID(0, 0)));
+    private void assertTenantSchemaProvisioned(String schemaName) {
+        Integer assetsTableCount = platformJdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                  AND table_name = 'assets'
+                """, Integer.class, schemaName);
+        Integer fixRecordsTableCount = platformJdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                  AND table_name = 'fix_records'
+                """, Integer.class, schemaName);
+
+        assertEquals(1, assetsTableCount);
+        assertEquals(1, fixRecordsTableCount);
     }
 
-    private void setTenant(UUID tenantId) {
-        jdbcTemplate.queryForObject("SELECT set_config('app.current_tenant_id', ?, false)", String.class, tenantId.toString());
-    }
-
-    private void insertAsset(UUID tenantId, String identifier) {
-        jdbcTemplate.update("""
-                INSERT INTO assets (
-                    id, tenant_id, identifier, name, type, business_criticality,
-                    state, created_at
-                )
-                VALUES (?, ?, ?, ?, 'APPLICATION', 'MEDIUM', 'ACTIVE', now())
-                ON CONFLICT (tenant_id, identifier) DO NOTHING
-                """, UUID.randomUUID(), tenantId, identifier, identifier);
-    }
-
-    private int countAssetsAsRestrictedRole(UUID tenantId) throws Exception {
-        try (Connection connection = DriverManager.getConnection(DATABASE.url(), RLS_USER, RLS_PASSWORD);
-             Statement statement = connection.createStatement()) {
-            statement.execute("SELECT set_config('app.current_tenant_id', '" + tenantId + "', false)");
-            try (ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM assets")) {
-                resultSet.next();
-                return resultSet.getInt(1);
-            }
-        }
-    }
-
-    private String firstAssetIdentifierAsRestrictedRole(UUID tenantId) throws Exception {
-        try (Connection connection = DriverManager.getConnection(DATABASE.url(), RLS_USER, RLS_PASSWORD);
-             Statement statement = connection.createStatement()) {
-            statement.execute("SELECT set_config('app.current_tenant_id', '" + tenantId + "', false)");
-            try (ResultSet resultSet = statement.executeQuery("SELECT identifier FROM assets ORDER BY identifier LIMIT 1")) {
-                resultSet.next();
-                return resultSet.getString(1);
-            }
-        }
+    private FixRecord buildFixRecord(Tenant tenant, String cveId, String softwareName) {
+        FixRecord fixRecord = new FixRecord();
+        fixRecord.setTenant(tenant);
+        fixRecord.setCveId(cveId);
+        fixRecord.setRelatedCveIdsJson("[]");
+        fixRecord.setSummary("Upgrade " + softwareName);
+        fixRecord.setDescription("{\"primary_fix\":{\"target_version\":\"1.0.0\"}}");
+        fixRecord.setFixType(FixRecord.FixType.PATCH.name());
+        fixRecord.setSoftwareEntitiesJson("[{\"name\":\"" + softwareName + "\",\"ecosystem\":\"deb\",\"version\":\"1.0.0\",\"assetCount\":1}]");
+        fixRecord.setRecommendationSource(FixRecord.RecommendationSource.ANALYST.name());
+        fixRecord.setSourceUrlsJson("[\"https://vendor.example/advisory\"]");
+        fixRecord.setGeneratedAt(Instant.now());
+        return fixRecord;
     }
 }

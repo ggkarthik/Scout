@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,12 +46,18 @@ class SyncRunHistoryServiceTest {
     @Mock
     private RequestActorService requestActorService;
 
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
+
     @Test
     void backfillsLegacyGithubRepositoryRunsAndHistoryReadsPersistedRecords() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
         tenant.setName("Default Workspace");
         when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of());
         List<SbomUpload> uploads = List.of(
                 githubGeneratedUpload(
@@ -67,7 +74,7 @@ class SyncRunHistoryServiceTest {
                         0,
                         0,
                         "GitHub SBOM API request returned 404"));
-        when(sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(tenant, "github"))
+        when(sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github"))
                 .thenReturn(uploads);
 
         AtomicReference<List<SyncRun>> savedRuns = new AtomicReference<>(List.of());
@@ -82,14 +89,15 @@ class SyncRunHistoryServiceTest {
                 syncRunRepository,
                 sbomUploadRepository,
                 tenantService,
+                tenantSchemaExecutionService,
                 new ObjectMapper(),
                 false
         );
 
         assertEquals(1, backfillService.backfillMissingRuns());
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
-        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
-        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(savedRuns.get());
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(savedRuns.get());
 
         SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
@@ -121,8 +129,11 @@ class SyncRunHistoryServiceTest {
         persistedRun.setCompletedAt(Instant.parse("2026-03-08T12:16:30Z"));
 
         when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
         when(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(persistedRun));
-        when(sbomUploadRepository.findByTenantAndIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(tenant, "github"))
+        when(sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github"))
                 .thenReturn(List.of(
                         githubGeneratedUpload(
                                 "ggkarthik/microservices-demo-app",
@@ -136,6 +147,7 @@ class SyncRunHistoryServiceTest {
                 syncRunRepository,
                 sbomUploadRepository,
                 tenantService,
+                tenantSchemaExecutionService,
                 new ObjectMapper(),
                 false
         );
@@ -144,8 +156,8 @@ class SyncRunHistoryServiceTest {
         verify(syncRunRepository, never()).saveAll(any());
 
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
-        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
-        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(persistedRun));
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(persistedRun));
         SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 

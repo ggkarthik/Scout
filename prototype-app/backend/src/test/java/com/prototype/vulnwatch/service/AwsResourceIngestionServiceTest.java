@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,12 +67,12 @@ class AwsResourceIngestionServiceTest {
 
         AssetRepository assetRepository = mock(AssetRepository.class);
         CiRepository ciRepository = mock(CiRepository.class);
-        when(assetRepository.findByTenantAndIdentifier(tenant, CANONICAL_EC2_ARN)).thenReturn(Optional.empty());
-        when(assetRepository.findByTenantAndIdentifier(tenant, BLANK_ACCOUNT_EC2_ARN)).thenReturn(Optional.of(existingAsset));
-        when(assetRepository.findByTenant(tenant)).thenReturn(List.of());
+        when(assetRepository.findByIdentifier(CANONICAL_EC2_ARN)).thenReturn(Optional.empty());
+        when(assetRepository.findByIdentifier(BLANK_ACCOUNT_EC2_ARN)).thenReturn(Optional.of(existingAsset));
+        when(assetRepository.findAll()).thenReturn(List.of());
         when(assetRepository.save(any(Asset.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(ciRepository.findByTenantAndSysId(tenant, CANONICAL_EC2_ARN)).thenReturn(Optional.empty());
-        when(ciRepository.findByTenant_IdAndAsset_Id(eq(tenant.getId()), eq(existingAsset.getId()))).thenReturn(Optional.of(existingCi));
+        when(ciRepository.findBySysId(CANONICAL_EC2_ARN)).thenReturn(Optional.empty());
+        when(ciRepository.findByAsset_Id(eq(existingAsset.getId()))).thenReturn(Optional.of(existingCi));
         when(ciRepository.save(any(Ci.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         AwsResourceIngestionService service = service(assetRepository, ciRepository);
@@ -87,21 +88,26 @@ class AwsResourceIngestionServiceTest {
     private AwsResourceIngestionService service(Tenant tenant, List<Asset> existingAssets) {
         AssetRepository assetRepository = mock(AssetRepository.class);
         CiRepository ciRepository = mock(CiRepository.class);
-        when(assetRepository.findByTenantAndIdentifier(eq(tenant), anyString())).thenReturn(Optional.empty());
-        when(assetRepository.findByTenant(tenant)).thenReturn(existingAssets);
+        when(assetRepository.findByIdentifier(anyString())).thenReturn(Optional.empty());
+        when(assetRepository.findAll()).thenReturn(existingAssets);
         when(assetRepository.save(any(Asset.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(ciRepository.findByTenantAndSysId(eq(tenant), anyString())).thenReturn(Optional.empty());
+        when(ciRepository.findBySysId(anyString())).thenReturn(Optional.empty());
         when(ciRepository.save(any(Ci.class))).thenAnswer(invocation -> invocation.getArgument(0));
         return service(assetRepository, ciRepository);
     }
 
     private AwsResourceIngestionService service(AssetRepository assetRepository, CiRepository ciRepository) {
+        TenantSchemaExecutionService tenantSchemaExecutionService = mock(TenantSchemaExecutionService.class);
+        doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
         return new AwsResourceIngestionService(
                 assetRepository,
                 ciRepository,
                 mock(CmdbIngestionService.class),
                 new ObjectMapper(),
-                mock(EntityManager.class)
+                mock(EntityManager.class),
+                tenantSchemaExecutionService
         );
     }
 

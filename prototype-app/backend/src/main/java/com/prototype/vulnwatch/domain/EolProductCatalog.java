@@ -11,6 +11,7 @@ import java.time.Instant;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "eol_product_catalog",
         indexes = {
                 @Index(name = "idx_eol_catalog_cpe", columnList = "cpe_vendor,cpe_product"),

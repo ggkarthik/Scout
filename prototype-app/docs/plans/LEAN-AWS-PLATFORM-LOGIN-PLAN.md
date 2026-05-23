@@ -468,7 +468,7 @@ terraform plan  # Confirm: budget, 6 alarms, SNS topic, platform owner credentia
 
 #### 3a. Database migration — add password hash column to `app_users`
 
-**File:** `backend/src/main/resources/db/migration/postgres/V1075__app_user_password_hash.sql`
+**File:** Legacy path at `backend/src/main/resources/db/migration/postgres/V1075__app_user_password_hash.sql` (removed from the active reset line)
 
 ```sql
 ALTER TABLE app_users ADD COLUMN password_hash VARCHAR(255);
@@ -487,7 +487,7 @@ Add `passwordHash` and `passwordSetAt` fields with JPA `@Column` annotations.
 
 When an invite is accepted, the backend generates a one-time setup token (random 32-byte, URL-safe base64 — same pattern as the existing invite token). This token is returned in the accept response and used by the frontend to redirect to the password-setup form.
 
-**File:** `backend/src/main/resources/db/migration/postgres/V1075__app_user_password_hash.sql` (same migration)
+**File:** Legacy path at `backend/src/main/resources/db/migration/postgres/V1075__app_user_password_hash.sql` (same historical migration)
 
 ```sql
 ALTER TABLE demo_invites ADD COLUMN setup_token VARCHAR(255);
@@ -906,7 +906,7 @@ Plan output must confirm:
 | `infra/aws/terraform/main.tf` | Modify | ECS → public subnets; S3 → private + OAC; CloudFront → S3 origin with OAC; SNS topic; budget; 6 alarms; platform owner credential in secrets + ECS env |
 | `infra/aws/terraform/variables.tf` | Modify | Add `budget_alert_email`, `monthly_budget_limit_usd`, `platform_owner_email`, `platform_owner_password_hash` |
 | `infra/aws/terraform/outputs.tf` | Modify | Add `sns_alerts_topic_arn` |
-| `backend/.../db/migration/postgres/V1075__app_user_password_hash.sql` | Create | Add `password_hash`, `password_set_at` to `app_users`; add `setup_token`, `setup_token_used_at` to `demo_invites` |
+| Legacy `backend/.../db/migration/postgres/V1075__app_user_password_hash.sql` | Create | Add `password_hash`, `password_set_at` to `app_users`; add `setup_token`, `setup_token_used_at` to `demo_invites` |
 | `backend/.../domain/AppUser.java` | Modify | Add `passwordHash`, `passwordSetAt` fields |
 | `backend/.../domain/DemoInvite.java` | Modify | Add `setupToken`, `setupTokenUsedAt` fields |
 | `backend/.../controller/AuthLoginController.java` | Create | `POST /api/auth/login`, `POST /api/auth/setup-password` |

@@ -50,6 +50,8 @@ class LocalCredentialAuthServiceTest {
     private TenantSupportGrantService tenantSupportGrantService;
     @Mock
     private TenantLifecycleGuardService tenantLifecycleGuardService;
+    @Mock
+    private AppUserGlobalRoleService appUserGlobalRoleService;
 
     @Test
     void platformOwnerLoginReturnsPlatformScopeToken() {
@@ -67,6 +69,7 @@ class LocalCredentialAuthServiceTest {
                 authTokenService(),
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
+                appUserGlobalRoleService,
                 "owner@example.com",
                 BCrypt.hashpw("password-123", BCrypt.gensalt(10))
         );
@@ -79,6 +82,7 @@ class LocalCredentialAuthServiceTest {
         assertNull(jwt.getClaimAsString("active_tenant_id"));
         assertTrue(existingUser.isPlatformOwner());
         verify(userRepository).save(existingUser);
+        verify(appUserGlobalRoleService).ensureRole(existingUser, "PLATFORM_OWNER");
     }
 
     @Test
@@ -103,6 +107,7 @@ class LocalCredentialAuthServiceTest {
                 authTokenService(),
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
+                appUserGlobalRoleService,
                 "owner@example.com",
                 BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
         );
@@ -138,6 +143,7 @@ class LocalCredentialAuthServiceTest {
                 authTokenService(),
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
+                appUserGlobalRoleService,
                 "owner@example.com",
                 BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
         );

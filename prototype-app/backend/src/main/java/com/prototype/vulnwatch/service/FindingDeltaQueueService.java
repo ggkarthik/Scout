@@ -49,17 +49,20 @@ public class FindingDeltaQueueService {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final FindingRecomputeService findingRecomputeService;
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
+    private final TenantService tenantService;
 
     public FindingDeltaQueueService(
             FindingDeltaQueueEntryRepository repository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             FindingRecomputeService findingRecomputeService,
-            DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService
+            DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
+            TenantService tenantService
     ) {
         this.repository = repository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.findingRecomputeService = findingRecomputeService;
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
+        this.tenantService = tenantService;
     }
 
     // -------------------------------------------------------------------------
@@ -247,9 +250,12 @@ public class FindingDeltaQueueService {
                         .filter(Objects::nonNull)
                         .distinct()
                         .toList();
-                int affected = lifecycleOnly
-                        ? findingRecomputeService.refreshLifecycleForComponents(tenantId, componentIds)
-                        : findingRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
+                int affected = runInTenantSchema(
+                        tenantId,
+                        () -> lifecycleOnly
+                                ? findingRecomputeService.refreshLifecycleForComponents(tenantId, componentIds)
+                                : findingRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds)
+                );
                 markDone(chunk.stream().map(FindingDeltaQueueEntry::getId).toList(), affected);
                 if (!lifecycleOnly) {
                     enqueueNoiseReductionRefresh(tenantId, "software-delta");
@@ -331,7 +337,7 @@ public class FindingDeltaQueueService {
                 .collect(Collectors.groupingBy(FindingDeltaQueueEntry::getTenantId, java.util.LinkedHashMap::new, Collectors.toList()));
         byTenant.forEach((tenantId, tenantEntries) -> {
             try {
-                int refreshed = dashboardNoiseReductionProjectionService.refreshTenant(tenantId);
+                int refreshed = runInTenantSchema(tenantId, () -> dashboardNoiseReductionProjectionService.refreshTenant(tenantId));
                 markDone(tenantEntries.stream().map(FindingDeltaQueueEntry::getId).toList(), refreshed);
             } catch (RuntimeException ex) {
                 LOG.warn("Failed processing noise reduction refresh for tenant {}: {}", tenantId, ex.getMessage(), ex);
@@ -346,18 +352,23 @@ public class FindingDeltaQueueService {
     void processEntryIndividually(FindingDeltaQueueEntry entry) {
         try {
             int affected = switch (entry.getEventType()) {
-                case SOFTWARE_DELTA -> findingRecomputeService.recomputeOnSoftwareDelta(
-                        entry.getTenantId(), entry.getComponentId());
+                case SOFTWARE_DELTA -> runInTenantSchema(
+                        entry.getTenantId(),
+                        () -> findingRecomputeService.recomputeOnSoftwareDelta(entry.getTenantId(), entry.getComponentId()));
                 case CVE_DELTA -> findingRecomputeService.recomputeOnCveDelta(
                         entry.getVulnerabilityId());
                 case CVE_METADATA_DELTA -> findingRecomputeService.refreshMetadataForVulnerabilityBatch(
                         entry.getVulnerabilityId() == null ? List.of() : List.of(entry.getVulnerabilityId()));
                 case VEX_DELTA -> findingRecomputeService.applyVexDeltaForVulnerability(
                         entry.getVulnerabilityId(), entry.getSourceKey());
-                case LIFECYCLE_DELTA -> findingRecomputeService.refreshLifecycleForComponents(
+                case LIFECYCLE_DELTA -> runInTenantSchema(
                         entry.getTenantId(),
-                        entry.getComponentId() == null ? List.of() : List.of(entry.getComponentId()));
-                case NOISE_REDUCTION_REFRESH -> dashboardNoiseReductionProjectionService.refreshTenant(entry.getTenantId());
+                        () -> findingRecomputeService.refreshLifecycleForComponents(
+                                entry.getTenantId(),
+                                entry.getComponentId() == null ? List.of() : List.of(entry.getComponentId())));
+                case NOISE_REDUCTION_REFRESH -> runInTenantSchema(
+                        entry.getTenantId(),
+                        () -> dashboardNoiseReductionProjectionService.refreshTenant(entry.getTenantId()));
                 default -> {
                     LOG.warn("Unknown delta event type '{}' for entry id={}", entry.getEventType(), entry.getId());
                     yield 0;
@@ -452,6 +463,27 @@ public class FindingDeltaQueueService {
         }
         for (UUID tenantId : tenantIds) {
             enqueueNoiseReductionRefresh(tenantId, sourceTag);
+        }
+    }
+
+    private int runInTenantSchema(UUID tenantId, java.util.function.IntSupplier supplier) {
+        if (tenantId == null) {
+            return supplier.getAsInt();
+        }
+        var tenant = tenantService.resolveTenantUuid(tenantId);
+        UUID previousTenantId = TenantContext.getCurrentTenantId();
+        String previousSchema = TenantContext.getCurrentSchemaName();
+        try {
+            TenantContext.setCurrentTenantId(tenantId);
+            TenantContext.setCurrentSchemaName(tenant.getSchemaName());
+            return supplier.getAsInt();
+        } finally {
+            if (previousTenantId == null) {
+                TenantContext.clear();
+            } else {
+                TenantContext.setCurrentTenantId(previousTenantId);
+                TenantContext.setCurrentSchemaName(previousSchema);
+            }
         }
     }
 }

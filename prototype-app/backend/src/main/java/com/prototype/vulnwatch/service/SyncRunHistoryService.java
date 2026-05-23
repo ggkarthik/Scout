@@ -102,7 +102,7 @@ public class SyncRunHistoryService {
         if (actor.tenantId() == null) {
             return List.of();
         }
-        return syncRunRepository.findByTenant_IdOrderByStartedAtDesc(actor.tenantId());
+        return syncRunRepository.findAllByOrderByStartedAtDesc();
     }
 
     private List<SyncRun> queueForActor(RequestActor actor) {
@@ -114,7 +114,7 @@ public class SyncRunHistoryService {
         if (actor.tenantId() == null) {
             return List.of();
         }
-        return syncRunRepository.findQueueByTenantAndStatuses(actor.tenantId(), List.of("queued", "running"));
+        return syncRunRepository.findQueueByStatuses(List.of("queued", "running"));
     }
 
     private java.util.Optional<SyncRun> findLatestByActor(RequestActor actor, String syncType) {
@@ -126,7 +126,7 @@ public class SyncRunHistoryService {
         if (actor.tenantId() == null) {
             return java.util.Optional.empty();
         }
-        return syncRunRepository.findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(syncType, actor.tenantId());
+        return syncRunRepository.findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(syncType);
     }
 
     private SyncRunResponse toResponse(SyncRun run, Integer queuePosition) {

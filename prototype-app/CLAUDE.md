@@ -8,9 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 cd backend
-mvn spring-boot:run             # start the API server (port 8080)
-mvn test                        # unit tests (Surefire) + JaCoCo report at target/site/jacoco/index.html
-mvn -Ppostgres-it verify        # unit tests + Postgres integration tests (Failsafe, requires running Postgres)
+mvn spring-boot:run                                    # start the API server (port 8080, default profile)
+mvn spring-boot:run -Dspring-boot.run.profiles=local   # local profile: enables Auth0 JWT + header tenant selection
+mvn test                                               # unit tests (Surefire) + JaCoCo report at target/site/jacoco/index.html
+mvn -Ppostgres-it verify                               # unit + Postgres integration tests (Failsafe, requires Postgres)
+mvn test -Dtest=MyServiceTest                          # run a single unit test class
+mvn -Ppostgres-it verify -Dit.test=MyServicePostgresIntegrationTest  # run a single IT class
 ```
 
 Surefire excludes `**/*PostgresIntegrationTest.java`; Failsafe picks them up at the `integration-test` / `verify` phase. `mvn -Ppostgres-it test` runs unit tests only — use `verify` to also run the Postgres ITs.
@@ -22,7 +25,7 @@ mvn -q \
   -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
   -Dflyway.user="$USER" \
   -Dflyway.password= \
-  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres \
+  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
   flyway:repair
 ```
 
@@ -31,12 +34,16 @@ mvn -q \
 ```bash
 cd frontend
 npm install
-npm run dev      # dev server on port 5173
-npm run build    # tsc -b --force && vite build
-npm run test:unit  # vitest run (non-watch)
+npm run dev           # dev server on port 5173 (strictly)
+npm run lint          # eslint .
+npm run typecheck     # tsc -b --noEmit
+npm run build         # tsc -b --force && vite build
+npm run test:unit     # vitest run (non-watch)
+npm run test:coverage # vitest run --coverage (enforces line/branch thresholds)
+npx vitest run src/pages/FindingsPage.test.tsx  # run a single test file
 ```
 
-Frontend CI gates: `npm run lint` → `npm run typecheck` (`tsc -b --noEmit`) → `npm run build` → `npm run test:coverage` (vitest with coverage thresholds enforced).
+Frontend CI gates: `npm run lint` → `npm run typecheck` → `npm run build` → `npm run test:coverage` (vitest with coverage thresholds enforced).
 
 Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs.
 
@@ -49,19 +56,22 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 - `frontend/` — React 18 + TypeScript + Vite SPA
 - `backend/` — Java 17 + Spring Boot 3.3.2, Spring Data JPA, Spring Security
 - Database — PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
-- Schema — Flyway-owned migrations in `backend/src/main/resources/db/migration/postgres/` (`ddl-auto=none`)
+- Schema — Flyway-owned migrations in `backend/src/main/resources/db/migration/postgres_reset/` (`ddl-auto=none`)
+
+See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for directory-specific runtime detail.
 
 ### Backend Package Layout (`com.prototype.vulnwatch`)
 
 | Package | Contents |
 |---|---|
-| `controller/` | 29 REST controllers under `/api/**` |
-| `service/` | ~118 business-logic services |
-| `domain/` | JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
-| `dto/` | API request/response objects |
-| `repo/` | Spring Data JPA repositories |
-| `client/` | External API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
+| `controller/` | 37 REST controllers under `/api/**` |
+| `service/` | 180 business-logic services |
+| `domain/` | 80 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
+| `dto/` | 172 API request/response objects |
+| `repo/` | 54 Spring Data JPA repositories |
+| `client/` | 19 external API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
 | `config/` | Spring beans and security configuration |
+| `security/` | `SensitiveTenantAction` annotation and interceptor for sensitive cross-tenant operations |
 | `util/` | CPE handling, version comparison, SBOM parsing |
 
 ### Core Data Flow
@@ -83,18 +93,51 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 
 ### Security Model
 
-- Every `/api/**` request requires `X-API-Key`.
-- `X-Creator-Key` grants `ROLE_CREATOR`; required for `/api/operations/**`.
-- `X-Tenant-ID` and `X-User-ID` are used directly by CVE workflow endpoints.
-- Local defaults: API key `change-me-in-prod`, creator key `local-creator`, tenant `1`, user `local-analyst`.
+Two authentication paths, handled by `ApiKeyAuthenticationFilter`:
+
+**API key** (`X-API-Key` header, enabled when `APP_ALLOW_API_KEY_AUTH=true`):
+- Grants `ROLE_OPERATOR` + `ROLE_SECURITY_ANALYST` to all callers.
+- `X-Creator-Key` additionally grants `ROLE_CREATOR`, `ROLE_PLATFORM_OWNER`, `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`.
+- `X-User-ID` sets the user identity (defaults to `APP_DEFAULT_USER_ID` / `local-analyst`).
+- Local defaults: api-key `change-me-in-prod`, no creator-key configured (all callers get creator-level access).
+
+**JWT Bearer** (`Authorization: Bearer <token>`):
+- Active only when `APP_JWT_ISSUER_URI` is set (wires a `JwtDecoder` bean).
+- Token decoded and passed to `JwtTenantAuthenticationService`, which resolves roles from the configured claim (default `roles`; Auth0 namespaced claims ending in `/roles` also work).
+- Roles from JWT are mapped to Spring `GrantedAuthority` values.
+
+Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. All other `/api/**` require authentication. Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/demo-requests`, `/api/demo-invites/**`.
+
+`APP_ALLOW_HEADER_TENANT_SELECTION=true` enables local header-based tenant selection via `X-Tenant-ID`; must be disabled in production.
 
 ### Frontend Navigation
 
 `src/App.tsx` uses **React Router v6** with path-based routing. `src/app/routes.ts` owns all typed path-builder helpers. Legacy query-param URLs (e.g. `?tab=inventory`) are redirected via `buildLegacyCompatiblePath()` on first render.
 
-Top-level sections and their paths: Overview (`/`) → Findings (`/findings`) → Operational Dashboard (`/operations/*`) → Vulnerability Repository (`/vuln-repo/*`) → Inventory (`/inventory/*`) → End-of-Life (`/end-of-life`) → Connect (`/connect/*`) → Configurations (`/configurations`).
+Top-level routes and their paths:
 
-Overview is reserved for risk metrics and risk-focused summaries only. Do not place operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels on Overview; those belong under Operational Dashboard.
+| Path | Component | Purpose |
+|------|-----------|---------|
+| `/` | → `/exposure` redirect | |
+| `/exposure` | `ExposureDashboardPage` | Risk-focused overview (Overview) |
+| `/findings` | `FindingsPage` | Active findings |
+| `/findings/:displayId` | `FindingDetailPage` | Single finding detail |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `quality`, `pipeline`, `platform-health` |
+| `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
+| `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | **Unified Records** — org-correlated CVEs (CVE Assessment Workbench) |
+| `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | **Intelligence** — all ingested CVEs (global feed) |
+| `/vuln-repo/org-cves/:cveId/assets` | `VulnRepoCveAssetsPage` | Per-CVE affected asset breakdown |
+| `/vuln-repo/org-cves/:cveId/software` | `VulnRepoCveSoftwarePage` | Per-CVE affected software breakdown |
+| `/inventory/:inventoryView?` | varies | Default `overview` |
+| `/end-of-life` | `EolPage` | EOL status and lifecycle filters |
+| `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `integration-run-queue`, `processing-jobs` |
+| `/admin/:adminView?` | `UserManagementPage` | Tenant + service-account administration |
+| `/platform/:platformView?` | `PlatformConsolePage` | Platform-owner console; sub-views `tenants`, `demo-requests`, `support` |
+| `/configurations` | `ConfigurationsPage` | Risk policy, SLA, scoring, automation, dev tools |
+
+Demo/public routes (outside auth boundary): `/demo`, `/demo/request`, `/demo/request/success`, `/demo/expired`, `/invite/:token`.
+
+Overview (`/exposure`) is reserved for risk metrics and risk-focused summaries only. Do not place operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels on Overview; those belong under Operational Dashboard.
 Correlation Efficiency and CSAF/VEX Quality Analytics live under Operations → Pipeline.
 
 All API calls go through `src/api/client.ts`. Base URL defaults to `http://localhost:8080/api` (via `VITE_API_BASE`). Auth headers are injected on every request.
@@ -105,7 +148,7 @@ Types are **feature-colocated**, not centralised. `src/types/index.ts` re-export
 
 - `src/features/findings/types.ts` — `Finding` and related
 - `src/features/cve-workbench/types.ts` — `OrgSpecificCveExposureRecord`, `CveDetail`, etc.
-- `src/features/configurations/types.ts` — `RiskPolicy` (includes 6 triage weight fields)
+- `src/features/configurations/types.ts` — `RiskPolicy` (includes 6 triage weight fields), `OwnershipRuleResponse`, `OwnershipRuleRequest`, `SuppressionRule`
 - `src/features/inventory/types.ts` — inventory-specific types
 - `src/features/connect/types.ts` — connector and CMDB config types
 - `src/types/ownership.ts` — `OwnershipSummary` and related
@@ -156,16 +199,18 @@ unavailable. The `PolicyWeights` type mirrors the 6 `triage*` fields on `RiskPol
 
 Sidebar-nav layout. Sections in order (leftmost first):
 
-| # | Tab | Content |
-|---|---|---|
-| 1 | **SLA & Remediation** | Risk score thresholds (critical/high), remediation deadlines per severity, asset criticality SLA multipliers |
-| 2 | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
-| 3 | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
-| 4 | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; is the sole source of persisted `risk_score` on findings; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
-| 5 | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; condition builder reuses Findings Score table/column/operator structure (without weights); conditions combined with AND or OR logic; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
-| 6 | **Developer Tools** | Prototype data reset — wipes all inventory, findings, and vuln intel |
+| # | Tab key | Label | Content |
+|---|---------|-------|---------|
+| 1 | `sla` | **SLA & Remediation** | Risk score thresholds (critical/high), remediation deadlines per severity, asset criticality SLA multipliers |
+| 2 | `triage` | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
+| 3 | `automation` | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
+| 4 | `ownership` | **Ownership** | Rule-based user/group assignment; conditions stored in `ownership_rules` table (V1094) |
+| 5 | `vulnerability-sources` | **Vulnerability Sources** | Per-tenant feed filter rules; which sources participate in tenant correlation (V1095) |
+| 6 | `findings-score` | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
+| 7 | `suppress` | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
+| 8 | `auto-findings` | **Auto-Finding Rules** | Automatically create findings based on CVE, software, and asset criteria |
 
-All sections persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
+All sections except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
 `applyTriageDefaults()` normalises API responses for backends that predate the V1062 migration
 (fills missing triage fields with sensible defaults rather than crashing).
 
@@ -193,9 +238,9 @@ Key connector components:
 
 ### Adding a Database Migration
 
-Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
+Create `backend/src/main/resources/db/migration/postgres_reset/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
 
-**Current watermark: V1093** (`demo_invite_delivery_metadata`). The next migration must be **V1094**.
+The migration directory is `postgres_reset/` (configured in `application.yml` as `classpath:db/migration/postgres_reset`). The baseline migration is `V1__platform_and_default_tenant_schemas.sql`. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql.
 
 ### Scheduled Jobs
 
@@ -222,7 +267,7 @@ Create `backend/src/main/resources/db/migration/postgres/V{next}__description.sq
 ### Known Limitations
 
 - `POST /api/cve-detail/{cveId}/suppress` persists suppression state via `OrgCveRecordService.suppress()` and returns a `SuppressionResponse`. Suppression expiry is handled by the 15-minute reopen job.
-- Schema is tenant-aware but runtime is effectively single-tenant; most controllers call `TenantService.getDefaultTenant()`.
+- Schema is tenant-aware but runtime is effectively single-tenant; most controllers call `TenantService.getDefaultTenant()`. Multi-tenant hardening is in progress (V1094–V1097).
 - The live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves`. `CveDetailPage.tsx` exists but is not mounted in the router.
 - GHCR attestation ingestion does not yet perform cryptographic signature verification.
 - AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` (see V1047, V1052, V1053) so subsequent reads do not re-call the API.
@@ -270,14 +315,14 @@ A change is done when **all** of these are true:
 
 ### Naming and commit conventions
 
-- **Migrations**: `V<next>__short_snake_case.sql`. Edit the watermark in this file in the same PR.
+- **Migrations**: `V<next>__short_snake_case.sql` in `backend/src/main/resources/db/migration/postgres_reset/`.
 - **Tests**: backend Postgres ITs end with `PostgresIntegrationTest.java` (Surefire-excluded, Failsafe-included). Frontend page tests live next to the page as `<Page>.test.tsx`.
 - **Commits**: imperative subject ≤72 chars. Body explains the *why*, not the *what* — the diff already shows the what.
 - **Branch names**: `<type>/<short-slug>` where type is `fix`, `feat`, `refactor`, `chore`, `docs`. Example: `fix/correlation-applicable-state-filter`.
 
 ### Never-touch list (require explicit approval before changing)
 
-- **Already-applied Flyway migrations** (`backend/src/main/resources/db/migration/postgres/V*.sql`). Add a new migration; never edit an applied one.
+- **Already-applied Flyway migrations** (`backend/src/main/resources/db/migration/postgres_reset/V*.sql`). Add a new migration; never edit an applied one.
 - **Security config** (`com.prototype.vulnwatch.config.SecurityConfig`, `ApiKeyFilter`, anything that decides who's authenticated or authorized).
 - **Tenant scoping** (`TenantService`, `TenantContext`, multi-tenant filter logic). Cross-tenant leaks are the worst class of bug.
 - **Deploy infra** (`infra/`, `Dockerfile`, `.github/workflows/`). Changes here affect deploy/build for everyone — flag in PR description.
@@ -286,7 +331,7 @@ A change is done when **all** of these are true:
 
 ### Things that get rejected on sight
 
-- Edits to applied migrations (re-edit V1042 instead of writing V1075).
+- Edits to applied migrations (re-edit V1042 instead of writing V1098).
 - New `console.log` / `System.out.println` left in shipped code.
 - `// TODO` comments without an owner or linked issue.
 - Mocking the database in integration tests instead of using `@PostgresIntegrationTest`.

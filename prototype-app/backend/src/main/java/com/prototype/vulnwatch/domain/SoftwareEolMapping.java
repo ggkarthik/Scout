@@ -12,6 +12,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "software_eol_mapping",
         indexes = {
                 @Index(name = "idx_software_eol_mapping_identity", columnList = "software_identity_id"),

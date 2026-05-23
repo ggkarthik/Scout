@@ -106,7 +106,7 @@ class OrgCveRecordServicePostgresIntegrationTest {
 
         assertEquals(1, refreshed);
 
-        OrgCveRecord record = orgCveRecordRepository.findByTenantAndVulnerability_Id(tenant, vulnerability.getId())
+        OrgCveRecord record = orgCveRecordRepository.findByVulnerability_Id(vulnerability.getId())
                 .orElseThrow();
         assertNotNull(record.getLastEvaluatedAt());
         assertEquals(ApplicabilityState.APPLICABLE, record.getApplicabilityState());
@@ -135,13 +135,13 @@ class OrgCveRecordServicePostgresIntegrationTest {
 
         assertTrue(refreshed >= 2);
 
-        OrgCveRecord matchedRecord = orgCveRecordRepository.findByTenantAndVulnerability_Id(tenant, matchedVulnerability.getId())
+        OrgCveRecord matchedRecord = orgCveRecordRepository.findByVulnerability_Id(matchedVulnerability.getId())
                 .orElseThrow();
         assertEquals(ApplicabilityState.APPLICABLE, matchedRecord.getApplicabilityState());
         assertEquals(ImpactState.IMPACTED, matchedRecord.getImpactState());
         assertEquals(1L, matchedRecord.getMatchedSoftwareCount());
 
-        OrgCveRecord unmatchedRecord = orgCveRecordRepository.findByTenantAndVulnerability_Id(tenant, unmatchedVulnerability.getId())
+        OrgCveRecord unmatchedRecord = orgCveRecordRepository.findByVulnerability_Id(unmatchedVulnerability.getId())
                 .orElseThrow();
         assertEquals(ApplicabilityState.NOT_APPLICABLE, unmatchedRecord.getApplicabilityState());
         assertEquals(ImpactState.NOT_IMPACTED, unmatchedRecord.getImpactState());
@@ -168,7 +168,7 @@ class OrgCveRecordServicePostgresIntegrationTest {
 
         assertEquals(1, refreshed);
 
-        OrgCveRecord record = orgCveRecordRepository.findByTenantAndVulnerability_Id(tenant, vulnerability.getId())
+        OrgCveRecord record = orgCveRecordRepository.findByVulnerability_Id(vulnerability.getId())
                 .orElseThrow();
         assertEquals(ApplicabilityState.APPLICABLE, record.getApplicabilityState());
         assertEquals(ImpactState.UNDER_INVESTIGATION, record.getImpactState());

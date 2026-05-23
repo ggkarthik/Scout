@@ -50,6 +50,9 @@ public class TenantResolutionFilter implements Filter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getDetails() instanceof TenantAuthenticationDetails details) {
             TenantContext.setCurrentTenantId(details.tenantId());
+            if (details.tenantId() != null) {
+                TenantContext.setCurrentSchemaName(tenantService.resolveTenantUuid(details.tenantId()).getSchemaName());
+            }
             putTenantMdc(details.tenantId());
             return;
         }
@@ -57,7 +60,9 @@ public class TenantResolutionFilter implements Filter {
             String tenantId = req.getHeader("X-Tenant-ID");
             if (tenantId != null && !tenantId.isBlank()) {
                 try {
-                    TenantContext.setCurrentTenantId(tenantService.resolveTenantUuid(UUID.fromString(tenantId.trim())).getId());
+                    var tenant = tenantService.resolveTenantUuid(UUID.fromString(tenantId.trim()));
+                    TenantContext.setCurrentTenantId(tenant.getId());
+                    TenantContext.setCurrentSchemaName(tenant.getSchemaName());
                     putTenantMdc(TenantContext.getCurrentTenantId());
                     return;
                 } catch (IllegalArgumentException ignored) {
@@ -71,6 +76,7 @@ public class TenantResolutionFilter implements Filter {
             return;
         }
         TenantContext.setCurrentTenantId(workspaceService.getWorkspaceId());
+        TenantContext.setCurrentSchemaName(workspaceService.getWorkspace().getSchemaName());
         putTenantMdc(TenantContext.getCurrentTenantId());
     }
 

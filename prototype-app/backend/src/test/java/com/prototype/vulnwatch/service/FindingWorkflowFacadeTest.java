@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -38,6 +39,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,7 +63,7 @@ class FindingWorkflowFacadeTest {
     @Mock private OrgCveRecordService orgCveRecordService;
     @Mock private FindingSlaService findingSlaService;
     @Mock private OwnershipRuleService ownershipRuleService;
-
+    @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
     private FindingWorkflowFacade facade;
     private Tenant tenant;
     private UUID tenantId;
@@ -80,8 +82,13 @@ class FindingWorkflowFacadeTest {
                 orgCveRecordService,
                 findingSlaService,
                 ownershipRuleService,
-                new ObjectMapper().registerModule(new JavaTimeModule())
+                new ObjectMapper().registerModule(new JavaTimeModule()),
+                tenantSchemaExecutionService,
+                new FindingUpsertService(findingRepository)
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
         tenant.setId(tenantId);
@@ -152,9 +159,9 @@ class FindingWorkflowFacadeTest {
 
         assertResult(r, 1, 1, 0, 0);
         // The created finding's evidence JSON records the analyst override
-        ArgumentCaptor<List<Finding>> saved = ArgumentCaptor.forClass(List.class);
-        verify(findingRepository).saveAll(saved.capture());
-        String evidence = saved.getValue().get(0).getEvidence();
+        ArgumentCaptor<Finding> saved = ArgumentCaptor.forClass(Finding.class);
+        verify(findingRepository).saveAndFlush(saved.capture());
+        String evidence = saved.getValue().getEvidence();
         assertTrue(evidence.contains("\"analystOverrideApplied\":true"),
                 "evidence should record override, got: " + evidence);
         verify(findingWorkflowService).appendEvent(any(), eq("CREATED_BY_MANUAL_CVE_REVIEW"), eq("u"), any(), any());
@@ -264,7 +271,8 @@ class FindingWorkflowFacadeTest {
                 tenant, vulnerability, "j", "u", List.of(), Map.of(), Map.of());
 
         assertResult(r, 1, 0, 0, 1);
-        verify(findingRepository, never()).saveAll(anyList());
+        verify(findingRepository, never()).saveAndFlush(any(Finding.class));
+        verify(findingRepository, never()).save(any(Finding.class));
         verify(findingWorkflowService, never()).appendEvent(any(), any(), any(), any(), any());
     }
 
@@ -323,9 +331,9 @@ class FindingWorkflowFacadeTest {
                 tenant, vulnerability, "  needed urgently  ", "alice", List.of(), Map.of(), Map.of());
 
         assertResult(r, 1, 1, 0, 0);
-        ArgumentCaptor<List<Finding>> savedCaptor = ArgumentCaptor.forClass(List.class);
-        verify(findingRepository).saveAll(savedCaptor.capture());
-        Finding saved = savedCaptor.getValue().get(0);
+        ArgumentCaptor<Finding> savedCaptor = ArgumentCaptor.forClass(Finding.class);
+        verify(findingRepository).saveAndFlush(savedCaptor.capture());
+        Finding saved = savedCaptor.getValue();
         assertEquals(FindingStatus.OPEN, saved.getStatus());
         assertEquals("cpe-match", saved.getMatchedBy());
         assertEquals(7.5, saved.getRiskScore(), 0.0001);
@@ -348,9 +356,9 @@ class FindingWorkflowFacadeTest {
         facade.createManualFindingsForVulnerability(
                 tenant, vulnerability, "j", "u", List.of(), Map.of(), Map.of());
 
-        ArgumentCaptor<List<Finding>> saved = ArgumentCaptor.forClass(List.class);
-        verify(findingRepository).saveAll(saved.capture());
-        assertEquals("manual-org-cve-review", saved.getValue().get(0).getMatchedBy());
+        ArgumentCaptor<Finding> saved = ArgumentCaptor.forClass(Finding.class);
+        verify(findingRepository).saveAndFlush(saved.capture());
+        assertEquals("manual-org-cve-review", saved.getValue().getMatchedBy());
     }
 
     @Test
@@ -362,7 +370,8 @@ class FindingWorkflowFacadeTest {
                 tenant, vulnerability, "j", "u", List.of(), Map.of(), Map.of());
 
         verify(orgCveRecordService).refreshForTenantAndVulnerabilities(eq(tenant), eq(List.of(vulnerabilityId)));
-        verify(findingRepository, never()).saveAll(anyList());
+        verify(findingRepository, never()).saveAndFlush(any(Finding.class));
+        verify(findingRepository, never()).save(any(Finding.class));
     }
 
     // -------------------------------------------------------------------------
@@ -394,7 +403,7 @@ class FindingWorkflowFacadeTest {
 
     @Test
     void suppress_emptyFindings_returnsZeroWithoutBulkCall() {
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of());
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of());
 
         int n = facade.suppressFindingsForVulnerability(tenant, vulnerability, "RISK", "j", "u", null);
 
@@ -406,7 +415,7 @@ class FindingWorkflowFacadeTest {
     void suppress_buildsBulkRequestAndJoinsReasonWithJustification() {
         Finding f = new Finding();
         Instant expires = Instant.parse("2026-12-01T00:00:00Z");
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of(f));
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of(f));
         when(findingWorkflowService.updateWorkflowBulk(any(), any())).thenReturn(1);
 
         int n = facade.suppressFindingsForVulnerability(tenant, vulnerability, "RISK_ACCEPTED", "approved", "alice", expires);
@@ -423,7 +432,7 @@ class FindingWorkflowFacadeTest {
     @Test
     void suppress_blankReasonNormalizesToUnspecified() {
         Finding f = new Finding();
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of(f));
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of(f));
         when(findingWorkflowService.updateWorkflowBulk(any(), any())).thenReturn(1);
 
         facade.suppressFindingsForVulnerability(tenant, vulnerability, "   ", "approved", "alice", null);
@@ -436,7 +445,7 @@ class FindingWorkflowFacadeTest {
     @Test
     void suppress_blankJustificationOmitsColonSuffix() {
         Finding f = new Finding();
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of(f));
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of(f));
         when(findingWorkflowService.updateWorkflowBulk(any(), any())).thenReturn(1);
 
         facade.suppressFindingsForVulnerability(tenant, vulnerability, "RISK_ACCEPTED", "  ", "alice", null);
@@ -449,7 +458,7 @@ class FindingWorkflowFacadeTest {
     @Test
     void suppress_nullReasonAndJustification_normalizesToUnspecifiedOnly() {
         Finding f = new Finding();
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of(f));
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of(f));
         when(findingWorkflowService.updateWorkflowBulk(any(), any())).thenReturn(1);
 
         facade.suppressFindingsForVulnerability(tenant, vulnerability, null, null, "alice", null);
@@ -462,7 +471,7 @@ class FindingWorkflowFacadeTest {
     @Test
     void suppress_trimsReasonAndJustification() {
         Finding f = new Finding();
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId)).thenReturn(List.of(f));
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId)).thenReturn(List.of(f));
         when(findingWorkflowService.updateWorkflowBulk(any(), any())).thenReturn(1);
 
         facade.suppressFindingsForVulnerability(
@@ -488,10 +497,10 @@ class FindingWorkflowFacadeTest {
         facade.createManualFindingsForVulnerability(
                 tenant, vulnerability, "j", "u", List.of(), Map.of(), Map.of());
 
-        ArgumentCaptor<List<Finding>> saved = ArgumentCaptor.forClass(List.class);
-        verify(findingRepository).saveAll(saved.capture());
+        ArgumentCaptor<Finding> saved = ArgumentCaptor.forClass(Finding.class);
+        verify(findingRepository, times(4)).saveAndFlush(saved.capture());
         // Expected order: alpha/aaa/1.0, alpha/aaa/9.0, alpha/zzz/1.0, Beta/pkg/1.0
-        List<Finding> findings = saved.getValue();
+        List<Finding> findings = saved.getAllValues();
         assertEquals(4, findings.size());
         assertEquals(s4.getComponent().getId(), findings.get(0).getComponent().getId());
         assertEquals(s3.getComponent().getId(), findings.get(1).getComponent().getId());
@@ -527,10 +536,22 @@ class FindingWorkflowFacadeTest {
     // -------------------------------------------------------------------------
 
     private void wireForCreate(List<ComponentVulnerabilityState> states, List<Finding> existing) {
-        when(componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId))
+        when(componentVulnerabilityStateRepository.findByVulnerability_Id(vulnerabilityId))
                 .thenReturn(states);
-        when(findingRepository.findByTenant_IdAndVulnerability_Id(tenantId, vulnerabilityId))
+        when(findingRepository.findByVulnerability_Id(vulnerabilityId))
                 .thenReturn(existing);
+        when(findingRepository.findFirstByComponent_IdAndVulnerability_Id(any(), any())).thenAnswer(invocation -> {
+            UUID componentId = invocation.getArgument(0);
+            UUID scopedVulnerabilityId = invocation.getArgument(1);
+            return existing.stream()
+                    .filter(finding -> finding.getComponent() != null
+                            && Objects.equals(finding.getComponent().getId(), componentId)
+                            && finding.getVulnerability() != null
+                            && Objects.equals(finding.getVulnerability().getId(), scopedVulnerabilityId))
+                    .findFirst();
+        });
+        when(findingRepository.saveAndFlush(any(Finding.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(findingRepository.save(any(Finding.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(new RiskPolicy());
         when(findingsScoreService.computeFromParts(anyString(), any(), any(), any(), any())).thenReturn(7.5);
         when(findingSlaService.deriveDueAt(any(), anyDouble(), any(), any())).thenReturn(Instant.now().plusSeconds(86400));

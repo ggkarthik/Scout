@@ -14,7 +14,6 @@ The repository documentation is intentionally consolidated into four maintained 
 - [Database](docs/database.md)
 - [Business logic guide](docs/business-logic-guide.md)
 - [Production readiness](docs/production-readiness.md)
-- [AWS deployment runbook](docs/runbooks/aws-deployment.md)
 
 Historical implementation summaries, design notes, report cards, and migration checklists were folded into those files so the repo only has one source of truth per area.
 
@@ -61,17 +60,7 @@ Default local auth values used by the frontend:
 
 ## PostgreSQL Notes
 
-If an older local PostgreSQL `vulnwatch` database already has Flyway history from before the migration files stabilized, repair it once:
-
-```bash
-cd backend
-mvn -q \
-  -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
-  -Dflyway.user="$USER" \
-  -Dflyway.password= \
-  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres \
-  flyway:repair
-```
+If an older local PostgreSQL `vulnwatch` database still contains the legacy shared-schema layout, drop and recreate it so the reset-line bootstrap can initialize a clean `platform` + tenant-schema database.
 
 The old H2 files are kept only as offline archive artifacts. If you need a one-off parity comparison against an archived H2 snapshot:
 

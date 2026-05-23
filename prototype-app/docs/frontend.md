@@ -1,6 +1,6 @@
 # VulnWatch Frontend
 
-Last updated: 2026-04-29
+Last updated: 2026-05-20
 
 ## Purpose
 
@@ -36,6 +36,10 @@ Environment variables:
 - `VITE_CREATOR_KEY` defaults to `local-creator`
 - `VITE_TENANT_ID` defaults to `1`
 - `VITE_USER_ID` defaults to `local-analyst`
+- `VITE_AUTH0_DOMAIN` enables hosted login when set with `VITE_AUTH0_CLIENT_ID`
+- `VITE_AUTH0_CLIENT_ID` identifies the Auth0 SPA application
+- `VITE_AUTH0_SCOPE` defaults to `openid profile email`
+- `VITE_AUTH0_AUDIENCE` should match the Auth0 API identifier so the SPA receives a backend-usable access token
 
 Every JSON request includes:
 
@@ -43,6 +47,30 @@ Every JSON request includes:
 - `X-Tenant-ID`
 - `X-User-ID`
 - `X-Creator-Key` when configured
+
+### Auth0 Hosted Login
+
+Hosted login is already wired in `src/lib/auth0.ts` and `src/pages/DemoPublicPages.tsx`.
+The critical frontend requirement is that the SPA must request the backend API audience; otherwise Auth0 can authenticate the browser session but return no usable API access token for Scout.
+
+Recommended local Auth0 frontend env values:
+
+```env
+VITE_AUTH0_DOMAIN=dev-ws03t5n4y61lrmi4.us.auth0.com
+VITE_AUTH0_CLIENT_ID=tqpCtolsokNVLg5cMr5ObKOoOhLjYxPo
+VITE_AUTH0_SCOPE=openid profile email
+VITE_AUTH0_AUDIENCE=https://api.hossstore.in
+```
+
+For the Auth0 SPA application, keep these local URLs aligned with the app runtime:
+
+- Allowed Callback URLs: `http://localhost:5173/login`
+- Allowed Logout URLs: `http://localhost:5173`
+- Allowed Web Origins: `http://localhost:5173`
+
+If hosted login succeeds but the UI reports that no API access token is available yet, the usual cause is a missing or mismatched `VITE_AUTH0_AUDIENCE` / Auth0 API identifier pairing.
+
+The frontend also accepts Auth0 namespaced role claims such as `https://hossstore.in/roles` for platform-owner confirmation flows, so Auth0 API tokens and existing locally issued tokens can coexist during rollout.
 
 Functions are grouped by domain in the client (with the matching backend endpoint):
 
@@ -66,7 +94,8 @@ The client also parses JSON error envelopes into readable messages and handles m
 
 | Path | Component | Purpose |
 |------|-----------|---------|
-| `/` | `DashboardPage` | Risk-focused overview |
+| `/` | → `/exposure` redirect | Root redirects to the exposure dashboard |
+| `/exposure` | `ExposureDashboardPage` | Risk-focused overview |
 | `/findings` | `FindingsPage` | Active findings list with filters |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding workflow + comments |
 | `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `quality`, `pipeline`, `platform-health` |
@@ -82,7 +111,8 @@ The client also parses JSON error envelopes into readable messages and handles m
 | `/end-of-life` | `EolPage` | EOL status, lifecycle filters, slug mappings |
 | `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `integration-run-queue`, `processing-jobs` |
 | `/admin/:adminView?` | `UserManagementPage` | Tenant + service-account administration |
-| `/configurations` | `ConfigurationsPage` | Risk policy, SLA, scoring, automation, dev tools |
+| `/platform/:platformView?` | `PlatformConsolePage` | Platform-owner console; sub-views `tenants`, `demo-requests`, `support` |
+| `/configurations` | `ConfigurationsPage` | Risk policy, SLA, scoring, automation, ownership, suppression |
 
 ### Inventory sub-views
 
@@ -94,7 +124,7 @@ The topbar includes a **⌘K / Ctrl+K** keyboard shortcut that focuses the jump-
 
 ### Overview
 
-- `DashboardPage`
+- `ExposureDashboardPage` (at `/exposure`; `/` redirects here)
 - Reads `/dashboard`, `/dashboard/applicable-software`, `/dashboard/impacted-cves`, and `/dashboard/cve-inventory-map`
 - Focuses on risk posture only: high-level exposure counts, severity/risk summaries, and risk-oriented CVE views
 - Does not surface operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels
@@ -193,13 +223,18 @@ Supporting components:
 
 ### Configurations
 
-`ConfigurationsPage` manages:
+`ConfigurationsPage` manages risk policy, SLA, ownership, suppression, vulnerability source filters, and scoring settings via a sidebar-nav layout. The 8 sections in order are:
 
-- risk score and SLA policy settings via `/risk-policy`
-- auto-close and finding generation mode settings
-- scheduled GitHub SBOM sources via `/github-sbom-sources`
-- prototype data reset via `/configurations/clean-all`
-- embedded source/integration queue visibility
+| # | Key | Label |
+|---|-----|-------|
+| 1 | `sla` | SLA & Remediation |
+| 2 | `triage` | S.AI Prioritization |
+| 3 | `automation` | Workflow Automation |
+| 4 | `ownership` | Ownership (rule-based user/group assignment, `ownership_rules` table) |
+| 5 | `vulnerability-sources` | Vulnerability Sources (per-tenant feed filter rules) |
+| 6 | `findings-score` | Findings Score |
+| 7 | `suppress` | Suppression Rules |
+| 8 | `auto-findings` | Auto-Finding Rules |
 
 ## Shared Patterns
 
@@ -217,9 +252,10 @@ Types and queries are colocated per feature under `src/features/`:
 
 | Feature | Notable contents |
 |---------|------------------|
+| `admin/` | Platform console and tenant administration components |
 | `auth/` | `AuthProvider`, identity context, `queries.tsx`, `types.ts` |
 | `cve-workbench/` | `CveAssessmentWorkbench` and panels (Investigation, Applicability, Findings, Sidebar), assessment/eol/formatting helpers, hooks |
-| `configurations/` | `RiskPolicy` types (includes the 6 triage weight fields) |
+| `configurations/` | `RiskPolicy` types (includes the 6 triage weight fields), `OwnershipRuleResponse`, `OwnershipRuleRequest`, `SuppressionRule` |
 | `connect/` | Per-connector queries (ServiceNow, SCCM, AWS, GitHub, vuln sources), shared types |
 | `dashboard/` | Dashboard, ApplicableSoftware, ImpactedCves types + queries |
 | `eol/` | EolSummary, EolComponentPage, EolRelease, EolProductCatalog types + queries |
@@ -229,6 +265,7 @@ Types and queries are colocated per feature under `src/features/`:
 | `software-identities/` | SoftwareIdentityPage, SoftwareIdentityDetail types + queries |
 | `vulnerability-intel/` | Vulnerability list/detail types |
 | `vuln-repo-dashboard/` | VulnRepoDashboard types + queries |
+| `widgets/` | Shared UI widget components |
 
 `src/types/index.ts` re-exports for convenience but the source of truth is each feature directory. `src/types/ownership.ts` holds the cross-feature `OwnershipSummary`.
 
@@ -237,4 +274,4 @@ Types and queries are colocated per feature under `src/features/`:
 - `CveDetailPage.tsx` exists but is not mounted in the router; the live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves/:cveId?`.
 - The frontend assumes the backend's single-default-tenant runtime and supplies tenant/user headers from environment defaults.
 - The inventory UI exposes more conceptual categories than the backend currently models explicitly; several filter-based views share the same `/inventory/components` endpoint.
-- The frontend package ships `dev`, `build`, `preview`, and `test:unit` scripts. `test:unit` runs Vitest in non-watch mode (`vitest run`). There is no dedicated lint script in `package.json`.
+- The frontend package ships `dev`, `build`, `preview`, `lint`, `typecheck`, `test:unit`, and `test:coverage` scripts. `lint` runs `eslint .`. `test:unit` runs Vitest in non-watch mode (`vitest run`).

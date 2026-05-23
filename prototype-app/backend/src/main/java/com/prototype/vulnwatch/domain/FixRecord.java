@@ -13,6 +13,8 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -52,7 +54,8 @@ public class FixRecord {
     private String cveId;
 
     /** JSON array of CVE IDs that share the same fix, e.g. ["CVE-2024-1111","CVE-2024-2222"] */
-    @Column(name = "related_cve_ids", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "related_cve_ids", columnDefinition = "jsonb")
     private String relatedCveIdsJson;
 
     @Column(nullable = false)
@@ -65,7 +68,8 @@ public class FixRecord {
     private String fixType;
 
     /** JSON array: [{name, ecosystem, version, assetCount}] */
-    @Column(name = "software_entities", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "software_entities", columnDefinition = "jsonb")
     private String softwareEntitiesJson;
 
     /** null = all platforms; otherwise "Windows", "Linux", "macOS", etc. */
@@ -76,7 +80,8 @@ public class FixRecord {
     private String recommendationSource;
 
     /** JSON array of URLs used to generate this fix. */
-    @Column(name = "source_urls", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "source_urls", columnDefinition = "jsonb")
     private String sourceUrlsJson;
 
     @Column(name = "generated_at", nullable = false)

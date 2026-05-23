@@ -13,6 +13,7 @@ import java.time.LocalDate;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "eol_release",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_eol_release_slug_cycle", columnNames = {"product_slug", "cycle"})

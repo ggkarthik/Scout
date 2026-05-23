@@ -17,13 +17,26 @@ import java.util.UUID;
 @Repository
 public interface ApplicabilityAssessmentRepository extends JpaRepository<ApplicabilityAssessment, Long> {
 
+    @Override
+    @EntityGraph(attributePaths = "vulnerability")
+    Optional<ApplicabilityAssessment> findById(Long id);
+
     @EntityGraph(attributePaths = "vulnerability")
     Optional<ApplicabilityAssessment> findByIdAndTenantId(Long id, UUID tenantId);
+
+    Page<ApplicabilityAssessment> findAll(Pageable pageable);
 
     Page<ApplicabilityAssessment> findByTenantId(UUID tenantId, Pageable pageable);
 
     @EntityGraph(attributePaths = "vulnerability")
+    List<ApplicabilityAssessment> findByVulnerability(Vulnerability vulnerability);
+
+    @EntityGraph(attributePaths = "vulnerability")
     List<ApplicabilityAssessment> findByVulnerabilityAndTenantId(Vulnerability vulnerability, UUID tenantId);
+
+    @EntityGraph(attributePaths = "vulnerability")
+    @Query("SELECT a FROM ApplicabilityAssessment a WHERE a.vulnerability.externalId = :cveId")
+    List<ApplicabilityAssessment> findByCveId(@Param("cveId") String cveId);
 
     @EntityGraph(attributePaths = "vulnerability")
     @Query("SELECT a FROM ApplicabilityAssessment a WHERE a.tenant.id = :tenantId AND a.vulnerability.externalId = :cveId")

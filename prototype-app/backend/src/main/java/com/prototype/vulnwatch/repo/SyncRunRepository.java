@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface SyncRunRepository extends JpaRepository<SyncRun, UUID> {
     List<SyncRun> findTop10ByOrderByStartedAtDesc();
+    List<SyncRun> findAllByOrderByStartedAtDesc();
     List<SyncRun> findByStatusIgnoreCase(String status);
     List<SyncRun> findByStartedAtGreaterThanEqual(Instant fromInclusive);
     Optional<SyncRun> findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(String syncType);

@@ -40,8 +40,7 @@ public class VexQualityIssueBuilder {
                 FROM component_vulnerability_states state
                 JOIN inventory_components ic ON ic.id = state.component_id
                 JOIN vulnerabilities v ON v.id = state.vulnerability_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND state.matched_vex_assertion_id IS NULL
                   AND state.applicability_state IN ('APPLICABLE', 'UNKNOWN')
                   AND EXISTS (
@@ -125,8 +124,7 @@ public class VexQualityIssueBuilder {
                 JOIN assets a ON a.id = ic.asset_id
                 JOIN vulnerabilities v ON v.id = state.vulnerability_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND state.applicability_state = 'APPLICABLE'
                   AND state.matched_vex_assertion_id IS NULL
                   AND lower(coalesce(state.impact_reason, '')) = 'awaiting_vex_assessment'
@@ -205,8 +203,7 @@ public class VexQualityIssueBuilder {
                 JOIN assets a ON a.id = ic.asset_id
                 JOIN vulnerabilities v ON v.id = state.vulnerability_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND state.matched_vex_assertion_id IS NOT NULL
                   AND upper(coalesce(state.vex_freshness, '')) = 'STALE'
                 ORDER BY state.last_evaluated_at DESC
@@ -276,8 +273,7 @@ public class VexQualityIssueBuilder {
                 JOIN assets a ON a.id = ic.asset_id
                 JOIN vulnerabilities v ON v.id = state.vulnerability_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND state.impact_state IN ('FIXED', 'NOT_IMPACTED')
                 GROUP BY
                     state.component_id,

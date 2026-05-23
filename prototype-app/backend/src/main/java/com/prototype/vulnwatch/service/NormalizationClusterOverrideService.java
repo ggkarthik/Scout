@@ -17,56 +17,60 @@ import org.springframework.transaction.annotation.Transactional;
 public class NormalizationClusterOverrideService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
-    public NormalizationClusterOverrideService(NamedParameterJdbcTemplate jdbcTemplate) {
+    public NormalizationClusterOverrideService(
+            NamedParameterJdbcTemplate jdbcTemplate,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     /**
      * Count affected records before applying the override (impact preview).
      */
     public ClusterImpactResult getClusterImpact(UUID tenantId, String sourceType, String sourceKey) {
-        if ("DISCOVERY_MODEL".equals(sourceType) || "CLUSTER_DISCOVERY_MODEL".equals(sourceType)) {
-            String sql = """
-                    SELECT COUNT(DISTINCT ci.asset_id) AS asset_count,
-                           COUNT(si.id)               AS instance_count
-                    FROM software_instances si
-                    JOIN cis ci ON ci.id = si.ci_id
-                    JOIN discovery_models dm ON dm.id = si.discovery_model_id
-                    WHERE si.tenant_id = :tenantId
-                      AND dm.primary_key = :sourceKey
-                      AND si.active_install = true
-                    """;
-            return jdbcTemplate.query(sql,
-                    new MapSqlParameterSource()
-                            .addValue("tenantId", tenantId)
-                            .addValue("sourceKey", sourceKey),
-                    rs -> rs.next()
-                            ? new ClusterImpactResult(rs.getLong("asset_count"), rs.getLong("instance_count"))
-                            : new ClusterImpactResult(0L, 0L));
-        } else {
-            // PACKAGE_PATTERN / CLUSTER_PACKAGE_PATTERN
-            String[] parts = parsePackageKey(sourceKey);
-            String ecosystem = parts[0];
-            String packageName = parts[1];
-            String sql = """
-                    SELECT COUNT(DISTINCT ic.asset_id) AS asset_count,
-                           COUNT(ic.id)               AS component_count
-                    FROM inventory_components ic
-                    WHERE ic.tenant_id = :tenantId
-                      AND ic.ecosystem  = :ecosystem
-                      AND ic.package_name = :packageName
-                      AND ic.component_status = 'ACTIVE'
-                    """;
-            return jdbcTemplate.query(sql,
-                    new MapSqlParameterSource()
-                            .addValue("tenantId", tenantId)
-                            .addValue("ecosystem", ecosystem)
-                            .addValue("packageName", packageName),
-                    rs -> rs.next()
-                            ? new ClusterImpactResult(rs.getLong("asset_count"), rs.getLong("component_count"))
-                            : new ClusterImpactResult(0L, 0L));
-        }
+        return tenantSchemaExecutionService.run(tenantId, () -> {
+            if ("DISCOVERY_MODEL".equals(sourceType) || "CLUSTER_DISCOVERY_MODEL".equals(sourceType)) {
+                String sql = """
+                        SELECT COUNT(DISTINCT ci.asset_id) AS asset_count,
+                               COUNT(si.id)               AS instance_count
+                        FROM software_instances si
+                        JOIN cis ci ON ci.id = si.ci_id
+                        JOIN discovery_models dm ON dm.id = si.discovery_model_id
+                        WHERE dm.primary_key = :sourceKey
+                          AND si.active_install = true
+                        """;
+                return jdbcTemplate.query(sql,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("sourceKey", sourceKey),
+                        rs -> rs.next()
+                                ? new ClusterImpactResult(rs.getLong("asset_count"), rs.getLong("instance_count"))
+                                : new ClusterImpactResult(0L, 0L));
+            } else {
+                String[] parts = parsePackageKey(sourceKey);
+                String ecosystem = parts[0];
+                String packageName = parts[1];
+                String sql = """
+                        SELECT COUNT(DISTINCT ic.asset_id) AS asset_count,
+                               COUNT(ic.id)               AS component_count
+                        FROM inventory_components ic
+                        WHERE ic.ecosystem  = :ecosystem
+                          AND ic.package_name = :packageName
+                          AND ic.component_status = 'ACTIVE'
+                        """;
+                return jdbcTemplate.query(sql,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("ecosystem", ecosystem)
+                                .addValue("packageName", packageName),
+                        rs -> rs.next()
+                                ? new ClusterImpactResult(rs.getLong("asset_count"), rs.getLong("component_count"))
+                                : new ClusterImpactResult(0L, 0L));
+            }
+        });
     }
 
     /**
@@ -82,83 +86,80 @@ public class NormalizationClusterOverrideService {
             String reason,
             String actor
     ) {
-        String normalizedType = normalizeType(sourceType);
-        // Upsert the cluster link (handles re-apply after revoke).
-        String upsertSql = """
-                INSERT INTO software_identity_cluster_link
-                    (tenant_id, source_type, source_key, target_identity_id,
-                     apply_to_future, reason, confirmed_by, confirmed_at,
-                     revoked_at, revoked_by)
-                VALUES
-                    (:tenantId, :sourceType, :sourceKey, :targetIdentityId,
-                     :applyToFuture, :reason, :actor, now(),
-                     NULL, NULL)
-                ON CONFLICT (tenant_id, source_type, source_key)
-                    WHERE revoked_at IS NULL
-                DO UPDATE SET
-                    target_identity_id = EXCLUDED.target_identity_id,
-                    apply_to_future    = EXCLUDED.apply_to_future,
-                    reason             = EXCLUDED.reason,
-                    confirmed_by       = EXCLUDED.confirmed_by,
-                    confirmed_at       = EXCLUDED.confirmed_at,
-                    revoked_at         = NULL,
-                    revoked_by         = NULL
-                """;
-        // If revoked row exists, delete it first so the INSERT path works cleanly.
-        jdbcTemplate.update("""
-                DELETE FROM software_identity_cluster_link
-                WHERE tenant_id = :tenantId
-                  AND source_type = :sourceType
-                  AND source_key  = :sourceKey
-                  AND revoked_at IS NOT NULL
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("sourceType", normalizedType)
-                        .addValue("sourceKey", sourceKey));
-
-        jdbcTemplate.update(upsertSql,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("sourceType", normalizedType)
-                        .addValue("sourceKey", sourceKey)
-                        .addValue("targetIdentityId", targetIdentityId)
-                        .addValue("applyToFuture", applyToFuture)
-                        .addValue("reason", reason)
-                        .addValue("actor", actor));
-
-        // Cascade UPDATE to all matching records.
-        if ("DISCOVERY_MODEL".equals(normalizedType)) {
+        tenantSchemaExecutionService.run(tenantId, () -> {
+            String normalizedType = normalizeType(sourceType);
+            String upsertSql = """
+                    INSERT INTO software_identity_cluster_link
+                        (tenant_id, source_type, source_key, target_identity_id,
+                         apply_to_future, reason, confirmed_by, confirmed_at,
+                         revoked_at, revoked_by)
+                    VALUES
+                        (:tenantId, :sourceType, :sourceKey, :targetIdentityId,
+                         :applyToFuture, :reason, :actor, now(),
+                         NULL, NULL)
+                    ON CONFLICT (tenant_id, source_type, source_key)
+                        WHERE revoked_at IS NULL
+                    DO UPDATE SET
+                        target_identity_id = EXCLUDED.target_identity_id,
+                        apply_to_future    = EXCLUDED.apply_to_future,
+                        reason             = EXCLUDED.reason,
+                        confirmed_by       = EXCLUDED.confirmed_by,
+                        confirmed_at       = EXCLUDED.confirmed_at,
+                        revoked_at         = NULL,
+                        revoked_by         = NULL
+                    """;
             jdbcTemplate.update("""
-                    UPDATE software_instances si
-                    SET software_identity_id = :targetIdentityId
-                    FROM cis ci, discovery_models dm
-                    WHERE si.ci_id = ci.id
-                      AND si.discovery_model_id = dm.id
-                      AND si.tenant_id = :tenantId
-                      AND dm.primary_key = :sourceKey
-                      AND si.active_install = true
+                    DELETE FROM software_identity_cluster_link
+                    WHERE source_type = :sourceType
+                      AND source_key  = :sourceKey
+                      AND revoked_at IS NOT NULL
                     """,
                     new MapSqlParameterSource()
                             .addValue("tenantId", tenantId)
-                            .addValue("targetIdentityId", targetIdentityId)
+                            .addValue("sourceType", normalizedType)
                             .addValue("sourceKey", sourceKey));
-        } else {
-            String[] parts = parsePackageKey(sourceKey);
-            jdbcTemplate.update("""
-                    UPDATE inventory_components
-                    SET software_identity_id = :targetIdentityId
-                    WHERE tenant_id   = :tenantId
-                      AND ecosystem   = :ecosystem
-                      AND package_name = :packageName
-                      AND component_status = 'ACTIVE'
-                    """,
+
+            jdbcTemplate.update(upsertSql,
                     new MapSqlParameterSource()
                             .addValue("tenantId", tenantId)
+                            .addValue("sourceType", normalizedType)
+                            .addValue("sourceKey", sourceKey)
                             .addValue("targetIdentityId", targetIdentityId)
-                            .addValue("ecosystem", parts[0])
-                            .addValue("packageName", parts[1]));
-        }
+                            .addValue("applyToFuture", applyToFuture)
+                            .addValue("reason", reason)
+                            .addValue("actor", actor));
+
+            if ("DISCOVERY_MODEL".equals(normalizedType)) {
+                jdbcTemplate.update("""
+                        UPDATE software_instances si
+                        SET software_identity_id = :targetIdentityId
+                        FROM cis ci, discovery_models dm
+                        WHERE si.ci_id = ci.id
+                          AND si.discovery_model_id = dm.id
+                          AND dm.primary_key = :sourceKey
+                          AND si.active_install = true
+                        """,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("targetIdentityId", targetIdentityId)
+                                .addValue("sourceKey", sourceKey));
+            } else {
+                String[] parts = parsePackageKey(sourceKey);
+                jdbcTemplate.update("""
+                        UPDATE inventory_components
+                        SET software_identity_id = :targetIdentityId
+                        WHERE ecosystem   = :ecosystem
+                          AND package_name = :packageName
+                          AND component_status = 'ACTIVE'
+                        """,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("targetIdentityId", targetIdentityId)
+                                .addValue("ecosystem", parts[0])
+                                .addValue("packageName", parts[1]));
+            }
+            return null;
+        });
     }
 
     /**
@@ -166,55 +167,54 @@ public class NormalizationClusterOverrideService {
      */
     @Transactional
     public void revokeClusterOverride(UUID tenantId, String sourceType, String sourceKey, String actor) {
-        String normalizedType = normalizeType(sourceType);
-        int updated = jdbcTemplate.update("""
-                UPDATE software_identity_cluster_link
-                SET revoked_at = now(),
-                    revoked_by = :actor
-                WHERE tenant_id   = :tenantId
-                  AND source_type = :sourceType
-                  AND source_key  = :sourceKey
-                  AND revoked_at IS NULL
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("sourceType", normalizedType)
-                        .addValue("sourceKey", sourceKey)
-                        .addValue("actor", actor));
-
-        if (updated == 0) {
-            return; // nothing to revoke
-        }
-
-        // Reverse cascade: clear identity on records that got it via this link.
-        if ("DISCOVERY_MODEL".equals(normalizedType)) {
-            jdbcTemplate.update("""
-                    UPDATE software_instances si
-                    SET software_identity_id = NULL
-                    FROM cis ci, discovery_models dm
-                    WHERE si.ci_id = ci.id
-                      AND si.discovery_model_id = dm.id
-                      AND si.tenant_id = :tenantId
-                      AND dm.primary_key = :sourceKey
+        tenantSchemaExecutionService.run(tenantId, () -> {
+            String normalizedType = normalizeType(sourceType);
+            int updated = jdbcTemplate.update("""
+                    UPDATE software_identity_cluster_link
+                    SET revoked_at = now(),
+                        revoked_by = :actor
+                    WHERE source_type = :sourceType
+                      AND source_key  = :sourceKey
+                      AND revoked_at IS NULL
                     """,
                     new MapSqlParameterSource()
                             .addValue("tenantId", tenantId)
-                            .addValue("sourceKey", sourceKey));
-        } else {
-            String[] parts = parsePackageKey(sourceKey);
-            jdbcTemplate.update("""
-                    UPDATE inventory_components
-                    SET software_identity_id = NULL
-                    WHERE tenant_id   = :tenantId
-                      AND ecosystem   = :ecosystem
-                      AND package_name = :packageName
-                      AND component_status = 'ACTIVE'
-                    """,
-                    new MapSqlParameterSource()
-                            .addValue("tenantId", tenantId)
-                            .addValue("ecosystem", parts[0])
-                            .addValue("packageName", parts[1]));
-        }
+                            .addValue("sourceType", normalizedType)
+                            .addValue("sourceKey", sourceKey)
+                            .addValue("actor", actor));
+
+            if (updated == 0) {
+                return null;
+            }
+
+            if ("DISCOVERY_MODEL".equals(normalizedType)) {
+                jdbcTemplate.update("""
+                        UPDATE software_instances si
+                        SET software_identity_id = NULL
+                        FROM cis ci, discovery_models dm
+                        WHERE si.ci_id = ci.id
+                          AND si.discovery_model_id = dm.id
+                          AND dm.primary_key = :sourceKey
+                        """,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("sourceKey", sourceKey));
+            } else {
+                String[] parts = parsePackageKey(sourceKey);
+                jdbcTemplate.update("""
+                        UPDATE inventory_components
+                        SET software_identity_id = NULL
+                        WHERE ecosystem   = :ecosystem
+                          AND package_name = :packageName
+                          AND component_status = 'ACTIVE'
+                        """,
+                        new MapSqlParameterSource()
+                                .addValue("tenantId", tenantId)
+                                .addValue("ecosystem", parts[0])
+                                .addValue("packageName", parts[1]));
+            }
+            return null;
+        });
     }
 
     private String normalizeType(String sourceType) {

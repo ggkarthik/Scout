@@ -116,4 +116,152 @@ public class Investigation {
         attachments.add(attachment);
         attachment.setInvestigation(this);
     }
+
+    public Long getId() {
+        return id;
+    }
+
+    public Vulnerability getVulnerability() {
+        return vulnerability;
+    }
+
+    public void setVulnerability(Vulnerability vulnerability) {
+        this.vulnerability = vulnerability;
+    }
+
+    public Tenant getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
+    }
+
+    public InvestigationStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(InvestigationStatus status) {
+        this.status = status;
+    }
+
+    public String getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(String assignedTo) {
+        this.assignedTo = assignedTo;
+    }
+
+    public InvestigationPriority getPriority() {
+        return priority;
+    }
+
+    public void setPriority(InvestigationPriority priority) {
+        this.priority = priority;
+    }
+
+    public String getNotes() {
+        return notes;
+    }
+
+    public void setNotes(String notes) {
+        this.notes = notes;
+    }
+
+    public Boolean getExploitAvailable() {
+        return exploitAvailable;
+    }
+
+    public void setExploitAvailable(Boolean exploitAvailable) {
+        this.exploitAvailable = exploitAvailable;
+    }
+
+    public String getExploitDetails() {
+        return exploitDetails;
+    }
+
+    public void setExploitDetails(String exploitDetails) {
+        this.exploitDetails = exploitDetails;
+    }
+
+    public Boolean getPatchAvailable() {
+        return patchAvailable;
+    }
+
+    public void setPatchAvailable(Boolean patchAvailable) {
+        this.patchAvailable = patchAvailable;
+    }
+
+    public String getPatchDetails() {
+        return patchDetails;
+    }
+
+    public void setPatchDetails(String patchDetails) {
+        this.patchDetails = patchDetails;
+    }
+
+    public String getSystemsAffected() {
+        return systemsAffected;
+    }
+
+    public void setSystemsAffected(String systemsAffected) {
+        this.systemsAffected = systemsAffected;
+    }
+
+    public String getBusinessImpact() {
+        return businessImpact;
+    }
+
+    public void setBusinessImpact(String businessImpact) {
+        this.businessImpact = businessImpact;
+    }
+
+    public String getMitigationSteps() {
+        return mitigationSteps;
+    }
+
+    public void setMitigationSteps(String mitigationSteps) {
+        this.mitigationSteps = mitigationSteps;
+    }
+
+    public String getReferences() {
+        return references;
+    }
+
+    public void setReferences(String references) {
+        this.references = references;
+    }
+
+    public String getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(String createdBy) {
+        this.createdBy = createdBy;
+    }
+
+    public String getModifiedBy() {
+        return modifiedBy;
+    }
+
+    public void setModifiedBy(String modifiedBy) {
+        this.modifiedBy = modifiedBy;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public Instant getClosedAt() {
+        return closedAt;
+    }
+
+    public void setClosedAt(Instant closedAt) {
+        this.closedAt = closedAt;
+    }
 }

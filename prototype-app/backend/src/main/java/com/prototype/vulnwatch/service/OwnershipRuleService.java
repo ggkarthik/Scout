@@ -24,22 +24,25 @@ public class OwnershipRuleService {
     private final FindingRepository findingRepository;
     private final FindingsScoreService findingsScoreService;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public OwnershipRuleService(
             OwnershipRuleRepository repository,
             FindingRepository findingRepository,
             FindingsScoreService findingsScoreService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.repository = repository;
         this.findingRepository = findingRepository;
         this.findingsScoreService = findingsScoreService;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(readOnly = true)
     public List<OwnershipRuleResponse> list(Tenant tenant) {
-        return repository.findByTenantOrderByExecutionOrderAscCreatedAtAsc(tenant)
+        return tenantSchemaExecutionService.run(tenant, repository::findAllByOrderByExecutionOrderAscCreatedAtAsc)
                 .stream()
                 .map(rule -> toResponse(rule, tenant))
                 .toList();
@@ -87,7 +90,10 @@ public class OwnershipRuleService {
      * A finding with no matching rule retains whatever ownerGroup it already has.
      */
     public void applyOwnerGroupToFinding(Finding finding) {
-        List<OwnershipRule> rules = repository.findByTenantOrderByExecutionOrderAscCreatedAtAsc(finding.getTenant());
+        List<OwnershipRule> rules = tenantSchemaExecutionService.run(
+                finding.getTenant(),
+                repository::findAllByOrderByExecutionOrderAscCreatedAtAsc
+        );
         applyOwnerGroupToFinding(finding, rules);
     }
 
@@ -97,7 +103,10 @@ public class OwnershipRuleService {
      */
     @Transactional
     public int applyToAll(Tenant tenant) {
-        List<OwnershipRule> rules = repository.findByTenantOrderByExecutionOrderAscCreatedAtAsc(tenant);
+        List<OwnershipRule> rules = tenantSchemaExecutionService.run(
+                tenant,
+                repository::findAllByOrderByExecutionOrderAscCreatedAtAsc
+        );
         if (rules.isEmpty()) {
             return 0;
         }
@@ -118,7 +127,10 @@ public class OwnershipRuleService {
     }
 
     private int applyRulesToFindings(Tenant tenant, List<OwnershipRule> rules) {
-        List<Finding> findings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant);
+        List<Finding> findings = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findAllByOrderByUpdatedAtDesc()
+        );
         List<Finding> changed = new ArrayList<>();
         for (Finding finding : findings) {
             String previous = finding.getOwnerGroup();
@@ -177,7 +189,10 @@ public class OwnershipRuleService {
     }
 
     private OwnershipRuleResponse toResponse(OwnershipRule rule, Tenant tenant) {
-        long matchedCount = findingRepository.countByTenantAndOwnerGroup(tenant, rule.getUserGroup());
+        long matchedCount = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.countByOwnerGroup(rule.getUserGroup())
+        );
         return new OwnershipRuleResponse(
                 rule.getId(),
                 rule.getName(),

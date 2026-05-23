@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.InventoryComponent;
@@ -47,6 +48,8 @@ public class FindingWorkflowFacade {
     private final FindingSlaService findingSlaService;
     private final OwnershipRuleService ownershipRuleService;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final FindingUpsertService findingUpsertService;
 
     public FindingWorkflowFacade(
             FindingRepository findingRepository,
@@ -58,7 +61,9 @@ public class FindingWorkflowFacade {
             OrgCveRecordService orgCveRecordService,
             FindingSlaService findingSlaService,
             OwnershipRuleService ownershipRuleService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            FindingUpsertService findingUpsertService
     ) {
         this.findingRepository = findingRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
@@ -70,6 +75,8 @@ public class FindingWorkflowFacade {
         this.findingSlaService = findingSlaService;
         this.ownershipRuleService = ownershipRuleService;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.findingUpsertService = findingUpsertService;
     }
 
     @Transactional
@@ -97,6 +104,33 @@ public class FindingWorkflowFacade {
             String severityOverride,
             Instant dueDateOverride
     ) {
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> createManualFindingsForVulnerabilityInSchema(
+                        tenant,
+                        vulnerability,
+                        justification,
+                        userId,
+                        componentIds,
+                        applicabilityDecisions,
+                        analystDispositions,
+                        severityOverride,
+                        dueDateOverride
+                )
+        );
+    }
+
+    private ManualFindingCreationResult createManualFindingsForVulnerabilityInSchema(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            String justification,
+            String userId,
+            Collection<UUID> componentIds,
+            Map<UUID, ApplicabilityState> applicabilityDecisions,
+            Map<UUID, AnalystDisposition> analystDispositions,
+            String severityOverride,
+            Instant dueDateOverride
+    ) {
         if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
             return new ManualFindingCreationResult(0, 0, 0, 0);
         }
@@ -106,9 +140,9 @@ public class FindingWorkflowFacade {
         String normalizedJustification = justification == null ? "" : justification.trim();
 
         List<ComponentVulnerabilityState> states =
-                componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+                componentVulnerabilityStateRepository.findByVulnerability_Id(vulnerability.getId());
         List<Finding> existingFindings =
-                findingRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+                findingRepository.findByVulnerability_Id(vulnerability.getId());
         Map<UUID, Finding> findingsByComponentId = new LinkedHashMap<>();
         for (Finding finding : existingFindings) {
             if (finding.getComponent() != null && finding.getComponent().getId() != null) {
@@ -120,7 +154,6 @@ public class FindingWorkflowFacade {
         int createdCount = 0;
         int reopenedCount = 0;
         int alreadyOpenCount = 0;
-        List<Finding> toPersist = new ArrayList<>();
         List<Finding> createdFindings = new ArrayList<>();
         List<Finding> reopenedFindings = new ArrayList<>();
 
@@ -164,32 +197,6 @@ public class FindingWorkflowFacade {
                     analystOverrideApplied
             );
 
-            if (finding != null) {
-                if (finding.getStatus() == FindingStatus.RESOLVED || finding.getStatus() == FindingStatus.AUTO_CLOSED) {
-                    finding.setStatus(FindingStatus.OPEN);
-                    finding.setDecisionState(FindingDecisionState.AFFECTED);
-                    finding.setMatchedBy(hasText(state.getMatchedBy()) ? state.getMatchedBy() : "manual-org-cve-review");
-                    finding.setRiskScore(riskScore);
-                    finding.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(finding.getFirstObservedAt(), riskScore, component.getAsset(), policy));
-                    if (severityOverride != null && !severityOverride.isBlank()) {
-                        finding.setSeverityOverride(severityOverride.toUpperCase());
-                    }
-                    finding.setConfidenceScore(state.getConfidenceScore() == null ? 0.0 : state.getConfidenceScore());
-                    applyManualEvidence(finding, evidence);
-                    finding.setPrecedenceTrace(state.getTraceJson());
-                    finding.setSuppressionReason(null);
-                    finding.setSuppressedUntil(null);
-                    finding.setLastObservedAt(now);
-                    finding.touch();
-                    toPersist.add(finding);
-                    reopenedFindings.add(finding);
-                    reopenedCount++;
-                } else {
-                    alreadyOpenCount++;
-                }
-                continue;
-            }
-
             Finding created = createManualFinding(
                     tenant,
                     component.getAsset(),
@@ -203,9 +210,40 @@ public class FindingWorkflowFacade {
                     severityOverride,
                     dueDateOverride
             );
-            toPersist.add(created);
-            createdFindings.add(created);
-            createdCount++;
+            FindingUpsertService.UpsertResult upsertResult = findingUpsertService.upsert(created, existingFinding -> {
+                if (existingFinding.getStatus() != FindingStatus.RESOLVED
+                        && existingFinding.getStatus() != FindingStatus.AUTO_CLOSED) {
+                    return FindingUpsertService.UpsertAction.UNCHANGED;
+                }
+                existingFinding.setStatus(FindingStatus.OPEN);
+                existingFinding.setDecisionState(FindingDecisionState.AFFECTED);
+                existingFinding.setMatchedBy(hasText(state.getMatchedBy()) ? state.getMatchedBy() : "manual-org-cve-review");
+                existingFinding.setRiskScore(riskScore);
+                existingFinding.setDueAt(dueDateOverride != null
+                        ? dueDateOverride
+                        : findingSlaService.deriveDueAt(existingFinding.getFirstObservedAt(), riskScore, component.getAsset(), policy));
+                if (severityOverride != null && !severityOverride.isBlank()) {
+                    existingFinding.setSeverityOverride(severityOverride.toUpperCase());
+                }
+                existingFinding.setConfidenceScore(state.getConfidenceScore() == null ? 0.0 : state.getConfidenceScore());
+                applyManualEvidence(existingFinding, evidence);
+                existingFinding.setPrecedenceTrace(state.getTraceJson());
+                existingFinding.setSuppressionReason(null);
+                existingFinding.setSuppressedUntil(null);
+                existingFinding.setLastObservedAt(now);
+                existingFinding.touch();
+                return FindingUpsertService.UpsertAction.REOPENED;
+            });
+            findingsByComponentId.put(component.getId(), upsertResult.finding());
+            if (upsertResult.action() == FindingUpsertService.UpsertAction.CREATED) {
+                createdFindings.add(upsertResult.finding());
+                createdCount++;
+            } else if (upsertResult.action() == FindingUpsertService.UpsertAction.REOPENED) {
+                reopenedFindings.add(upsertResult.finding());
+                reopenedCount++;
+            } else {
+                alreadyOpenCount++;
+            }
         }
 
         // Phase 2: handle selected component IDs that have no ComponentVulnerabilityState for this
@@ -233,88 +271,93 @@ public class FindingWorkflowFacade {
                             policy.getFindingsScoreConfig(), vulnerability, component.getAsset(), component,
                             existing != null ? existing.getSeverityOverride() : severityOverride);
                     String evidence = buildUncorrelatedFindingEvidence(normalizedJustification, userId);
-                    if (existing != null) {
-                        if (existing.getStatus() == FindingStatus.RESOLVED || existing.getStatus() == FindingStatus.AUTO_CLOSED) {
-                            existing.setStatus(FindingStatus.OPEN);
-                            existing.setDecisionState(FindingDecisionState.AFFECTED);
-                            existing.setMatchedBy("manual-org-cve-review");
-                            existing.setRiskScore(riskScore);
-                            existing.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(existing.getFirstObservedAt(), riskScore, component.getAsset(), policy));
-                            if (severityOverride != null && !severityOverride.isBlank()) {
-                                existing.setSeverityOverride(severityOverride.toUpperCase());
-                            }
-                            existing.setConfidenceScore(0.0);
-                            applyManualEvidence(existing, evidence);
-                            existing.setSuppressionReason(null);
-                            existing.setSuppressedUntil(null);
-                            existing.setLastObservedAt(now);
-                            existing.touch();
-                            toPersist.add(existing);
-                            reopenedFindings.add(existing);
-                            reopenedCount++;
-                        } else {
-                            alreadyOpenCount++;
+                    Finding created = new Finding();
+                    created.setTenant(tenant);
+                    created.setAsset(component.getAsset());
+                    created.setComponent(component);
+                    created.setVulnerability(vulnerability);
+                    created.setStatus(FindingStatus.OPEN);
+                    created.setDecisionState(FindingDecisionState.AFFECTED);
+                    created.setCreationSource(FindingCreationSource.MANUAL);
+                    created.setMatchedBy("manual-org-cve-review");
+                    created.setRiskScore(riskScore);
+                    created.setConfidenceScore(0.0);
+                    created.setFirstObservedAt(now);
+                    created.setLastObservedAt(now);
+                    created.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(now, riskScore, component.getAsset(), policy));
+                    if (severityOverride != null && !severityOverride.isBlank()) {
+                        created.setSeverityOverride(severityOverride.toUpperCase());
+                    }
+                    created.setSuppressionReason(null);
+                    created.setSuppressedUntil(null);
+                    applyManualEvidence(created, evidence);
+                    ownershipRuleService.applyOwnerGroupToFinding(created);
+                    created.touch();
+
+                    FindingUpsertService.UpsertResult upsertResult = findingUpsertService.upsert(created, existingFinding -> {
+                        if (existingFinding.getStatus() != FindingStatus.RESOLVED
+                                && existingFinding.getStatus() != FindingStatus.AUTO_CLOSED) {
+                            return FindingUpsertService.UpsertAction.UNCHANGED;
                         }
-                    } else {
-                        Finding created = new Finding();
-                        created.setTenant(tenant);
-                        created.setAsset(component.getAsset());
-                        created.setComponent(component);
-                        created.setVulnerability(vulnerability);
-                        created.setStatus(FindingStatus.OPEN);
-                        created.setDecisionState(FindingDecisionState.AFFECTED);
-                        created.setMatchedBy("manual-org-cve-review");
-                        created.setRiskScore(riskScore);
-                        created.setConfidenceScore(0.0);
-                        created.setFirstObservedAt(now);
-                        created.setLastObservedAt(now);
-                        created.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(now, riskScore, component.getAsset(), policy));
+                        existingFinding.setStatus(FindingStatus.OPEN);
+                        existingFinding.setDecisionState(FindingDecisionState.AFFECTED);
+                        existingFinding.setMatchedBy("manual-org-cve-review");
+                        existingFinding.setRiskScore(riskScore);
+                        existingFinding.setDueAt(dueDateOverride != null
+                                ? dueDateOverride
+                                : findingSlaService.deriveDueAt(existingFinding.getFirstObservedAt(), riskScore, component.getAsset(), policy));
                         if (severityOverride != null && !severityOverride.isBlank()) {
-                            created.setSeverityOverride(severityOverride.toUpperCase());
+                            existingFinding.setSeverityOverride(severityOverride.toUpperCase());
                         }
-                        created.setSuppressionReason(null);
-                        created.setSuppressedUntil(null);
-                        applyManualEvidence(created, evidence);
-                        ownershipRuleService.applyOwnerGroupToFinding(created);
-                        created.touch();
-                        toPersist.add(created);
-                        createdFindings.add(created);
+                        existingFinding.setConfidenceScore(0.0);
+                        applyManualEvidence(existingFinding, evidence);
+                        existingFinding.setSuppressionReason(null);
+                        existingFinding.setSuppressedUntil(null);
+                        existingFinding.setLastObservedAt(now);
+                        existingFinding.touch();
+                        return FindingUpsertService.UpsertAction.REOPENED;
+                    });
+                    findingsByComponentId.put(component.getId(), upsertResult.finding());
+                    if (upsertResult.action() == FindingUpsertService.UpsertAction.CREATED) {
+                        createdFindings.add(upsertResult.finding());
                         createdCount++;
+                    } else if (upsertResult.action() == FindingUpsertService.UpsertAction.REOPENED) {
+                        reopenedFindings.add(upsertResult.finding());
+                        reopenedCount++;
+                    } else {
+                        alreadyOpenCount++;
                     }
                 }
             }
         }
 
-        if (!toPersist.isEmpty()) {
-            findingRepository.saveAll(toPersist);
-            for (Finding finding : createdFindings) {
-                findingWorkflowService.appendEvent(
-                        finding,
-                        "CREATED_BY_MANUAL_CVE_REVIEW",
-                        userId,
-                        "Finding created manually from Org CVE review",
-                        Map.of(
-                                "justification", normalizedJustification,
-                                "matchedBy", finding.getMatchedBy(),
-                                "riskScore", finding.getRiskScore(),
-                                "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
-                        )
-                );
-            }
-            for (Finding finding : reopenedFindings) {
-                findingWorkflowService.appendEvent(
-                        finding,
-                        "REOPENED_BY_MANUAL_CVE_REVIEW",
-                        userId,
-                        "Finding reopened manually from Org CVE review",
-                        Map.of(
-                                "justification", normalizedJustification,
-                                "matchedBy", finding.getMatchedBy(),
-                                "riskScore", finding.getRiskScore(),
-                                "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
-                        )
-                );
-            }
+        for (Finding finding : createdFindings) {
+            findingWorkflowService.appendEvent(
+                    finding,
+                    "CREATED_BY_MANUAL_CVE_REVIEW",
+                    userId,
+                    "Finding created manually from Org CVE review",
+                    Map.of(
+                            "justification", normalizedJustification,
+                            "matchedBy", finding.getMatchedBy(),
+                            "riskScore", finding.getRiskScore(),
+                            "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
+                    )
+            );
+        }
+        for (Finding finding : reopenedFindings) {
+            findingWorkflowService.appendEvent(
+                    finding,
+                    "REOPENED_BY_MANUAL_CVE_REVIEW",
+                    userId,
+                    "Finding reopened manually from Org CVE review",
+                    Map.of(
+                            "justification", normalizedJustification,
+                            "matchedBy", finding.getMatchedBy(),
+                            "riskScore", finding.getRiskScore(),
+                            "analystOverride", Boolean.TRUE.equals(readEvidencePayload(finding.getEvidence()).get("analystOverrideApplied"))
+                    )
+            );
         }
 
         orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
@@ -338,176 +381,17 @@ public class FindingWorkflowFacade {
             Instant dueDateOverride,
             boolean forceNew
     ) {
-        if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
-            return new ManualFindingCreationResult(0, 0, 0, 0);
-        }
-
-        RiskPolicy policy = riskPolicyService.getOrCreate(tenant);
-        Instant now = Instant.now();
-        String normalizedJustification = justification == null ? "" : justification.trim();
-
-        Set<UUID> selectedIds = componentIds == null ? Set.of() : componentIds.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-
-        List<ComponentVulnerabilityState> allStates =
-                componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
-
-        List<ComponentVulnerabilityState> eligibleStates = allStates.stream()
-                .filter(state -> isEligibleForManualFinding(state, applicabilityDecisions, analystDispositions))
-                .filter(state -> state.getComponent() != null && state.getComponent().getId() != null)
-                .filter(state -> selectedIds.isEmpty() || selectedIds.contains(state.getComponent().getId()))
-                .filter(state -> state.getComponent().getAsset() != null)
-                .filter(state -> state.getComponent().getComponentStatus() == InventoryComponentStatus.ACTIVE)
-                .toList();
-
-        // Phase 2: investigation-identified components that have no ComponentVulnerabilityState but
-        // were explicitly marked APPLICABLE + IMPACTED by the analyst.
-        List<InventoryComponent> uncorrelatedComponents = List.of();
-        if (!selectedIds.isEmpty() && applicabilityDecisions != null && analystDispositions != null) {
-            Set<UUID> coveredByState = allStates.stream()
-                    .filter(s -> s.getComponent() != null && s.getComponent().getId() != null)
-                    .map(s -> s.getComponent().getId())
-                    .collect(Collectors.toSet());
-            List<UUID> uncorrelatedIds = selectedIds.stream()
-                    .filter(id -> !coveredByState.contains(id))
-                    .filter(id -> applicabilityDecisions.get(id) == ApplicabilityState.APPLICABLE
-                            && analystDispositions.get(id) == AnalystDisposition.IMPACTED)
-                    .collect(Collectors.toList());
-            if (!uncorrelatedIds.isEmpty()) {
-                uncorrelatedComponents = inventoryComponentRepository.findAllById(uncorrelatedIds).stream()
-                        .filter(c -> c.getAsset() != null && c.getComponentStatus() == InventoryComponentStatus.ACTIVE)
-                        .collect(Collectors.toList());
-            }
-        }
-
-        if (eligibleStates.isEmpty() && uncorrelatedComponents.isEmpty()) {
-            return new ManualFindingCreationResult(0, 0, 0, 0);
-        }
-
-        int totalEligible = eligibleStates.size() + uncorrelatedComponents.size();
-
-        // Build the list of all affected asset summaries for the evidence JSON (Phase 1 + Phase 2)
-        List<Map<String, Object>> affectedAssets = new ArrayList<>();
-        for (ComponentVulnerabilityState state : eligibleStates) {
-            InventoryComponent comp = state.getComponent();
-            Map<String, Object> entry = buildAffectedAssetEntry(comp);
-            affectedAssets.add(entry);
-        }
-        for (InventoryComponent comp : uncorrelatedComponents) {
-            Map<String, Object> entry = buildAffectedAssetEntry(comp);
-            affectedAssets.add(entry);
-        }
-
-        // Use the first eligible state (preferred) or first uncorrelated component as the representative
-        ComponentVulnerabilityState primaryState = eligibleStates.isEmpty() ? null : eligibleStates.get(0);
-        InventoryComponent primaryComponent = primaryState != null
-                ? primaryState.getComponent()
-                : uncorrelatedComponents.get(0);
-        Asset primaryAsset = primaryComponent.getAsset();
-
-        // Build grouped evidence
-        Map<String, Object> evidenceMap = new LinkedHashMap<>();
-        evidenceMap.put("source", "manual-org-cve-review");
-        evidenceMap.put("analyst", userId);
-        evidenceMap.put("justification", normalizedJustification);
-        evidenceMap.put("findingCreationMode", "CVE_FIX");
-        evidenceMap.put("groupedFinding", true);
-        evidenceMap.put("affectedAssetCount", affectedAssets.size());
-        evidenceMap.put("affectedAssets", affectedAssets);
-        evidenceMap.put("effectiveApplicabilityState", ApplicabilityState.APPLICABLE.name());
-        evidenceMap.put("effectiveAnalystDisposition", AnalystDisposition.IMPACTED.name());
-        evidenceMap.put("analystOverrideApplied", true);
-        String groupedEvidence = toJson(evidenceMap);
-
-        double riskScore = findingsScoreService.computeFromParts(
-                policy.getFindingsScoreConfig(), vulnerability, primaryAsset, primaryComponent, severityOverride);
-
-        // Look for any existing grouped finding by parsing the groupedFinding flag in evidence.
-        // We must NOT match only by primaryComponent.getId() because the "primary" component can differ
-        // between calls when there are multiple eligible assets with the same name/version — the sort
-        // order is stable within a single call but not guaranteed to be the same across calls.
-        // When forceNew=true the caller explicitly requested a brand-new finding, so skip the lookup.
-        List<Finding> existingFindings =
-                findingRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
-        Finding existingGrouped = forceNew ? null : existingFindings.stream()
-                .filter(f -> {
-                    if (f.getEvidence() == null || f.getEvidence().isBlank()) return false;
-                    try {
-                        JsonNode ev = objectMapper.readTree(f.getEvidence());
-                        return ev.path("groupedFinding").asBoolean(false);
-                    } catch (Exception e) {
-                        return false;
-                    }
-                })
-                .findFirst()
-                .orElse(null);
-
-        if (existingGrouped != null) {
-            // Merge newly selected assets with those already recorded in the existing finding's evidence,
-            // so that "Add to existing finding" accumulates rather than replaces.
-            String mergedEvidence = buildMergedGroupedEvidence(evidenceMap, affectedAssets, existingGrouped.getEvidence());
-            int mergedAssetCount = countAffectedAssetsInEvidence(mergedEvidence);
-
-            if (existingGrouped.getStatus() == FindingStatus.RESOLVED || existingGrouped.getStatus() == FindingStatus.AUTO_CLOSED) {
-                existingGrouped.setStatus(FindingStatus.OPEN);
-                existingGrouped.setDecisionState(FindingDecisionState.AFFECTED);
-                existingGrouped.setRiskScore(riskScore);
-                existingGrouped.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(existingGrouped.getFirstObservedAt(), riskScore, primaryAsset, policy));
-                if (severityOverride != null && !severityOverride.isBlank()) {
-                    existingGrouped.setSeverityOverride(severityOverride.toUpperCase());
-                }
-                applyManualEvidence(existingGrouped, mergedEvidence);
-                existingGrouped.setLastObservedAt(now);
-                existingGrouped.touch();
-                findingRepository.save(existingGrouped);
-                findingWorkflowService.appendEvent(existingGrouped, "REOPENED_BY_MANUAL_CVE_REVIEW", userId,
-                        "Grouped finding (CVE+Fix) reopened", Map.of("affectedAssetCount", mergedAssetCount));
-                orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
-                return new ManualFindingCreationResult(totalEligible, 0, 1, 0);
-            }
-            // Already open — merge new assets into the evidence.
-            applyManualEvidence(existingGrouped, mergedEvidence);
-            existingGrouped.setLastObservedAt(now);
-            existingGrouped.touch();
-            findingRepository.save(existingGrouped);
-            findingWorkflowService.appendEvent(existingGrouped, "UPDATED_BY_MANUAL_CVE_REVIEW", userId,
-                    "Grouped finding (CVE+Fix) evidence updated", Map.of("affectedAssetCount", mergedAssetCount));
-            return new ManualFindingCreationResult(totalEligible, 0, 0, 1);
-        }
-
-        Finding grouped = new Finding();
-        grouped.setTenant(tenant);
-        grouped.setAsset(primaryAsset);
-        grouped.setComponent(primaryComponent);
-        grouped.setVulnerability(vulnerability);
-        grouped.setStatus(FindingStatus.OPEN);
-        grouped.setDecisionState(FindingDecisionState.AFFECTED);
-        grouped.setMatchedBy("manual-org-cve-review-cve-fix");
-        grouped.setRiskScore(riskScore);
-        grouped.setConfidenceScore(primaryState != null && primaryState.getConfidenceScore() != null ? primaryState.getConfidenceScore() : 0.0);
-        grouped.setFirstObservedAt(now);
-        grouped.setLastObservedAt(now);
-        grouped.setDueAt(dueDateOverride != null ? dueDateOverride : findingSlaService.deriveDueAt(now, riskScore, primaryAsset, policy));
-        if (severityOverride != null && !severityOverride.isBlank()) {
-            grouped.setSeverityOverride(severityOverride.toUpperCase());
-        }
-        grouped.setSuppressionReason(null);
-        grouped.setSuppressedUntil(null);
-        applyManualEvidence(grouped, groupedEvidence);
-        if (primaryState != null) {
-            grouped.setPrecedenceTrace(primaryState.getTraceJson());
-        }
-        ownershipRuleService.applyOwnerGroupToFinding(grouped);
-        grouped.touch();
-
-        findingRepository.save(grouped);
-        findingWorkflowService.appendEvent(grouped, "CREATED_BY_MANUAL_CVE_REVIEW", userId,
-                "Grouped finding (CVE+Fix) created covering " + affectedAssets.size() + " affected assets",
-                Map.of("justification", normalizedJustification, "affectedAssetCount", affectedAssets.size()));
-
-        orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
-        return new ManualFindingCreationResult(totalEligible, 1, 0, 0);
+        return createManualFindingsForVulnerability(
+                tenant,
+                vulnerability,
+                justification,
+                userId,
+                componentIds,
+                applicabilityDecisions,
+                analystDispositions,
+                severityOverride,
+                dueDateOverride
+        );
     }
 
     @Transactional
@@ -522,7 +406,10 @@ public class FindingWorkflowFacade {
         if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
             return 0;
         }
-        List<Finding> findings = findingRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+        List<Finding> findings = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findByVulnerability_Id(vulnerability.getId())
+        );
         if (findings.isEmpty()) {
             return 0;
         }
@@ -560,6 +447,7 @@ public class FindingWorkflowFacade {
         finding.setVulnerability(vulnerability);
         finding.setStatus(FindingStatus.OPEN);
         finding.setDecisionState(FindingDecisionState.AFFECTED);
+        finding.setCreationSource(FindingCreationSource.MANUAL);
         finding.setMatchedBy(hasText(state.getMatchedBy()) ? state.getMatchedBy() : "manual-org-cve-review");
         finding.setRiskScore(riskScore);
         finding.setConfidenceScore(state.getConfidenceScore() == null ? 0.0 : state.getConfidenceScore());

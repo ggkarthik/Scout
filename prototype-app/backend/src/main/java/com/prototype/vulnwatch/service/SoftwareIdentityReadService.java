@@ -35,13 +35,16 @@ public class SoftwareIdentityReadService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final SoftwareIdentitySummaryProjectionService projectionService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SoftwareIdentityReadService(
             NamedParameterJdbcTemplate jdbcTemplate,
-            SoftwareIdentitySummaryProjectionService projectionService
+            SoftwareIdentitySummaryProjectionService projectionService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.projectionService = projectionService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public SoftwareIdentityPageResponse listPage(
@@ -58,49 +61,52 @@ public class SoftwareIdentityReadService {
             int size
     ) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        int safePage = Math.max(0, page);
-        int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
-        ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState, coverage, operatingSystem);
-        MapSqlParameterSource params = filters.params()
-                .addValue("limit", safeSize)
-                .addValue("offset", (long) safePage * safeSize);
+            int safePage = Math.max(0, page);
+            int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
+            ProjectionFilters filters = buildProjectionFilters(tenant, assetTypes, sourceSystems, ecosystems, query, lifecycle, mappingState, coverage, operatingSystem);
+            MapSqlParameterSource params = filters.params()
+                    .addValue("limit", safeSize)
+                    .addValue("offset", (long) safePage * safeSize);
 
-        Long total = jdbcTemplate.queryForObject(countSql(filters.whereClause()), params, Long.class);
-        long totalElements = total == null ? 0L : total;
-        List<SoftwareIdentityProjectionRow> rows = jdbcTemplate.query(
-                summarySql(filters.whereClause()),
-                params,
-                (rs, rowNum) -> toProjectionRow(rs)
-        );
+            Long total = jdbcTemplate.queryForObject(countSql(filters.whereClause()), params, Long.class);
+            long totalElements = total == null ? 0L : total;
+            List<SoftwareIdentityProjectionRow> rows = jdbcTemplate.query(
+                    summarySql(filters.whereClause()),
+                    params,
+                    (rs, rowNum) -> toProjectionRow(rs)
+            );
 
-        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(
-                tenant.getId(),
-                rows.stream().map(SoftwareIdentityProjectionRow::id).toList(),
-                operatingSystem != null && !operatingSystem.isBlank()
-        );
-        List<SoftwareIdentitySummaryResponse> content = rows.stream()
-                .map(row -> toSummaryResponse(row, exposureCounts.getOrDefault(row.id(), ExposureCounts.ZERO)))
-                .toList();
+            Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(
+                    tenant.getId(),
+                    rows.stream().map(SoftwareIdentityProjectionRow::id).toList(),
+                    operatingSystem != null && !operatingSystem.isBlank()
+            );
+            List<SoftwareIdentitySummaryResponse> content = rows.stream()
+                    .map(row -> toSummaryResponse(row, exposureCounts.getOrDefault(row.id(), ExposureCounts.ZERO)))
+                    .toList();
 
-        return new SoftwareIdentityPageResponse(
-                content,
-                safePage,
-                safeSize,
-                totalElements,
-                totalElements == 0L ? 0 : (int) Math.ceil((double) totalElements / (double) safeSize)
-        );
+            return new SoftwareIdentityPageResponse(
+                    content,
+                    safePage,
+                    safeSize,
+                    totalElements,
+                    totalElements == 0L ? 0 : (int) Math.ceil((double) totalElements / (double) safeSize)
+            );
+        });
     }
 
     public SoftwareIdentityFunnelResponse getFunnel(Tenant tenant) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId());
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId());
 
-        return jdbcTemplate.query("""
+            return jdbcTemplate.query("""
                 WITH active_components AS (
                     SELECT
                         ic.id AS component_id,
@@ -119,8 +125,7 @@ public class SoftwareIdentityReadService {
                         ) AS source_system
                     FROM inventory_components ic
                     LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                    WHERE ic.tenant_id = :tenantId
-                      AND ic.component_status = 'ACTIVE'
+                    WHERE ic.component_status = 'ACTIVE'
                       AND ic.software_identity_id IS NOT NULL
                 ),
                 vulnerable_software AS (
@@ -128,7 +133,6 @@ public class SoftwareIdentityReadService {
                     FROM active_components ac
                     JOIN component_vulnerability_states cvs
                       ON cvs.component_id = ac.component_id
-                     AND cvs.tenant_id = :tenantId
                      AND cvs.applicability_state = 'APPLICABLE'
                      AND upper(coalesce(cvs.impact_state, 'UNKNOWN')) NOT IN ('FIXED', 'NOT_IMPACTED')
                 ),
@@ -137,132 +141,134 @@ public class SoftwareIdentityReadService {
                     FROM active_components ac
                     JOIN findings f
                       ON f.component_id = ac.component_id
-                     AND f.tenant_id = :tenantId
                      AND f.status = 'OPEN'
                 )
                 SELECT
                     (SELECT COUNT(*) FROM active_components) AS records_found,
-                    (SELECT COUNT(*) FROM software_identity_summary sis WHERE sis.tenant_id = :tenantId) AS unique_software,
+                    (SELECT COUNT(*) FROM software_identity_summary sis) AS unique_software,
                     (SELECT COUNT(*) FROM vulnerable_software) AS software_with_vulnerabilities,
                     (SELECT COUNT(*) FROM finding_software) AS software_with_findings,
                     (SELECT COUNT(DISTINCT source_system) FROM active_components WHERE source_system IS NOT NULL) AS source_count,
-                    (SELECT MAX(summary_updated_at) FROM software_identity_summary sis WHERE sis.tenant_id = :tenantId) AS updated_at
-                """, params, rs -> {
-            if (!rs.next()) {
-                return new SoftwareIdentityFunnelResponse(0L, 0L, 0L, 0L, 0L, null);
-            }
-            return new SoftwareIdentityFunnelResponse(
-                    rs.getLong("records_found"),
-                    rs.getLong("unique_software"),
-                    rs.getLong("software_with_vulnerabilities"),
-                    rs.getLong("software_with_findings"),
-                    rs.getLong("source_count"),
-                    getInstant(rs, "updated_at")
-            );
+                    (SELECT MAX(summary_updated_at) FROM software_identity_summary sis) AS updated_at
+                    """, params, rs -> {
+                if (!rs.next()) {
+                    return new SoftwareIdentityFunnelResponse(0L, 0L, 0L, 0L, 0L, null);
+                }
+                return new SoftwareIdentityFunnelResponse(
+                        rs.getLong("records_found"),
+                        rs.getLong("unique_software"),
+                        rs.getLong("software_with_vulnerabilities"),
+                        rs.getLong("software_with_findings"),
+                        rs.getLong("source_count"),
+                        getInstant(rs, "updated_at")
+                );
+            });
         });
     }
 
     public SoftwareIdentityDetailResponse getDetail(Tenant tenant, UUID softwareIdentityId) {
         requireTenant(tenant);
-        projectionService.ensureTenantProjection(tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            projectionService.ensureTenantProjection(tenant);
 
-        MapSqlParameterSource summaryParams = new MapSqlParameterSource()
-                .addValue("tenantId", tenant.getId())
-                .addValue("softwareIdentityId", softwareIdentityId);
-        SoftwareIdentityProjectionRow summary = jdbcTemplate.query(
-                detailSummarySql(),
-                summaryParams,
-                rs -> rs.next() ? toProjectionRow(rs) : null
-        );
-        if (summary == null) {
-            projectionService.refreshTenant(tenant);
-            summary = jdbcTemplate.query(
+            MapSqlParameterSource summaryParams = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("softwareIdentityId", softwareIdentityId);
+            SoftwareIdentityProjectionRow summary = jdbcTemplate.query(
                     detailSummarySql(),
                     summaryParams,
                     rs -> rs.next() ? toProjectionRow(rs) : null
             );
-        }
-        if (summary == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Software identity not found in active inventory");
-        }
+            if (summary == null) {
+                projectionService.refreshTenant(tenant);
+                summary = jdbcTemplate.query(
+                        detailSummarySql(),
+                        summaryParams,
+                        rs -> rs.next() ? toProjectionRow(rs) : null
+                );
+            }
+            if (summary == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Software identity not found in active inventory");
+            }
 
-        Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(tenant.getId(), List.of(softwareIdentityId), false);
-        ExposureCounts counts = exposureCounts.getOrDefault(softwareIdentityId, ExposureCounts.ZERO);
+            Map<UUID, ExposureCounts> exposureCounts = loadExposureCounts(tenant.getId(), List.of(softwareIdentityId), false);
+            ExposureCounts counts = exposureCounts.getOrDefault(softwareIdentityId, ExposureCounts.ZERO);
 
-        SqlFilters filters = buildIdentityScope(tenant, softwareIdentityId);
-        List<SoftwareIdentityVersionResponse> versions = jdbcTemplate.query(
-                detailVersionsSql(filters.whereClause()),
-                filters.params(),
-                (rs, rowNum) -> new SoftwareIdentityVersionResponse(
-                        rs.getString("version"),
-                        rs.getString("eol_slug"),
-                        rs.getString("eol_cycle"),
-                        rs.getObject("eol_date", LocalDate.class),
-                        rs.getObject("support_end_date", LocalDate.class),
-                        rs.getObject("is_eol") == null ? null : rs.getBoolean("is_eol"),
-                        rs.getObject("eol_days_remaining") == null ? null : rs.getInt("eol_days_remaining"),
-                        rs.getLong("asset_count"),
-                        rs.getLong("component_count"),
-                        rs.getLong("open_finding_count"),
-                        rs.getLong("open_vulnerability_count"),
-                        getInstant(rs, "last_observed_at")
-                )
-        );
+            SqlFilters filters = buildIdentityScope(tenant, softwareIdentityId);
+            List<SoftwareIdentityVersionResponse> versions = jdbcTemplate.query(
+                    detailVersionsSql(filters.whereClause()),
+                    filters.params(),
+                    (rs, rowNum) -> new SoftwareIdentityVersionResponse(
+                            rs.getString("version"),
+                            rs.getString("eol_slug"),
+                            rs.getString("eol_cycle"),
+                            rs.getObject("eol_date", LocalDate.class),
+                            rs.getObject("support_end_date", LocalDate.class),
+                            rs.getObject("is_eol") == null ? null : rs.getBoolean("is_eol"),
+                            rs.getObject("eol_days_remaining") == null ? null : rs.getInt("eol_days_remaining"),
+                            rs.getLong("asset_count"),
+                            rs.getLong("component_count"),
+                            rs.getLong("open_finding_count"),
+                            rs.getLong("open_vulnerability_count"),
+                            getInstant(rs, "last_observed_at")
+                    )
+            );
 
-        MapSqlParameterSource assetParams = new MapSqlParameterSource()
-                .addValues(filters.params().getValues())
-                .addValue("assetLimit", DETAIL_ASSET_LIMIT);
-        List<SoftwareIdentityAssetResponse> assets = jdbcTemplate.query(
-                detailAssetsSql(filters.whereClause()),
-                assetParams,
-                (rs, rowNum) -> new SoftwareIdentityAssetResponse(
-                        getUuid(rs, "asset_id"),
-                        rs.getString("asset_name"),
-                        rs.getString("asset_identifier"),
-                        rs.getString("asset_type"),
-                        getUuid(rs, "component_id"),
-                        rs.getString("package_name"),
-                        rs.getString("ecosystem"),
-                        rs.getString("version"),
-                        rs.getString("source_system"),
-                        rs.getString("eol_slug"),
-                        rs.getString("eol_cycle"),
-                        rs.getObject("eol_date", LocalDate.class),
-                        rs.getObject("is_eol") == null ? null : rs.getBoolean("is_eol"),
-                        rs.getObject("eol_days_remaining") == null ? null : rs.getInt("eol_days_remaining"),
-                        rs.getLong("open_finding_count"),
-                        rs.getLong("open_vulnerability_count"),
-                        getInstant(rs, "last_observed_at")
-                )
-        );
+            MapSqlParameterSource assetParams = new MapSqlParameterSource()
+                    .addValues(filters.params().getValues())
+                    .addValue("assetLimit", DETAIL_ASSET_LIMIT);
+            List<SoftwareIdentityAssetResponse> assets = jdbcTemplate.query(
+                    detailAssetsSql(filters.whereClause()),
+                    assetParams,
+                    (rs, rowNum) -> new SoftwareIdentityAssetResponse(
+                            getUuid(rs, "asset_id"),
+                            rs.getString("asset_name"),
+                            rs.getString("asset_identifier"),
+                            rs.getString("asset_type"),
+                            getUuid(rs, "component_id"),
+                            rs.getString("package_name"),
+                            rs.getString("ecosystem"),
+                            rs.getString("version"),
+                            rs.getString("source_system"),
+                            rs.getString("eol_slug"),
+                            rs.getString("eol_cycle"),
+                            rs.getObject("eol_date", LocalDate.class),
+                            rs.getObject("is_eol") == null ? null : rs.getBoolean("is_eol"),
+                            rs.getObject("eol_days_remaining") == null ? null : rs.getInt("eol_days_remaining"),
+                            rs.getLong("open_finding_count"),
+                            rs.getLong("open_vulnerability_count"),
+                            getInstant(rs, "last_observed_at")
+                    )
+            );
 
-        return new SoftwareIdentityDetailResponse(
-                summary.id(),
-                summary.displayName(),
-                summary.canonicalKey(),
-                summary.vendor(),
-                summary.product(),
-                summary.normalizedKey(),
-                summary.purl(),
-                summary.cpe23(),
-                summary.assetTypes(),
-                summary.ecosystems(),
-                summary.sourceSystems(),
-                summary.eolSlug(),
-                summary.mappingConfirmed(),
-                summary.needsEolMapping(),
-                summary.assetCount(),
-                summary.componentCount(),
-                summary.versionCount(),
-                summary.eolComponentCount(),
-                summary.nearEolComponentCount(),
-                summary.unknownEolComponentCount(),
-                counts.openFindingCount(),
-                counts.openVulnerabilityCount(),
-                summary.lastObservedAt(),
-                versions,
-                assets
-        );
+            return new SoftwareIdentityDetailResponse(
+                    summary.id(),
+                    summary.displayName(),
+                    summary.canonicalKey(),
+                    summary.vendor(),
+                    summary.product(),
+                    summary.normalizedKey(),
+                    summary.purl(),
+                    summary.cpe23(),
+                    summary.assetTypes(),
+                    summary.ecosystems(),
+                    summary.sourceSystems(),
+                    summary.eolSlug(),
+                    summary.mappingConfirmed(),
+                    summary.needsEolMapping(),
+                    summary.assetCount(),
+                    summary.componentCount(),
+                    summary.versionCount(),
+                    summary.eolComponentCount(),
+                    summary.nearEolComponentCount(),
+                    summary.unknownEolComponentCount(),
+                    counts.openFindingCount(),
+                    counts.openVulnerabilityCount(),
+                    summary.lastObservedAt(),
+                    versions,
+                    assets
+            );
+        });
     }
 
     private void requireTenant(Tenant tenant) {
@@ -336,7 +342,7 @@ public class SoftwareIdentityReadService {
     ) {
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenant.getId());
         StringBuilder where = new StringBuilder("""
-                WHERE sis.tenant_id = :tenantId
+                WHERE 1 = 1
                 """);
 
         List<String> normalizedAssetTypes = assetTypes == null ? List.of() : assetTypes.stream().map(Enum::name).distinct().toList();
@@ -444,10 +450,8 @@ public class SoftwareIdentityReadService {
                              FROM inventory_components ic_cov
                              JOIN component_vulnerability_states cvs_cov
                                ON cvs_cov.component_id = ic_cov.id
-                              AND cvs_cov.tenant_id = :tenantId
                               AND cvs_cov.impact_state = 'IMPACTED'
-                             WHERE ic_cov.tenant_id = :tenantId
-                               AND ic_cov.component_status = 'ACTIVE'
+                             WHERE ic_cov.component_status = 'ACTIVE'
                                AND ic_cov.software_identity_id = sis.software_identity_id
                          )
                         """;
@@ -457,10 +461,8 @@ public class SoftwareIdentityReadService {
                              FROM inventory_components ic_cov
                              JOIN findings f_cov
                                ON f_cov.component_id = ic_cov.id
-                              AND f_cov.tenant_id = :tenantId
                               AND f_cov.status = 'OPEN'
-                             WHERE ic_cov.tenant_id = :tenantId
-                               AND ic_cov.component_status = 'ACTIVE'
+                             WHERE ic_cov.component_status = 'ACTIVE'
                                AND ic_cov.software_identity_id = sis.software_identity_id
                          )
                         """;
@@ -491,15 +493,12 @@ public class SoftwareIdentityReadService {
                            ON a_os.id = ic_os.asset_id
                          JOIN cis ci_os
                            ON ci_os.asset_id = a_os.id
-                          AND ci_os.tenant_id = :tenantId
-                         WHERE ic_os.tenant_id = :tenantId
-                           AND ic_os.component_status = 'ACTIVE'
+                         WHERE ic_os.component_status = 'ACTIVE'
                            AND ic_os.software_identity_id = sis.software_identity_id
                            AND NOT EXISTS (
                                SELECT 1
                                FROM software_instances si_os
-                               WHERE si_os.tenant_id = :tenantId
-                                 AND si_os.ci_id = ci_os.id
+                               WHERE si_os.ci_id = ci_os.id
                                  AND lower(concat_ws(' ',
                                    si_os.display_name,
                                    si_os.publisher,
@@ -558,8 +557,7 @@ public class SoftwareIdentityReadService {
                 .addValue("tenantId", tenant.getId())
                 .addValue("softwareIdentityId", softwareIdentityId);
         return new SqlFilters("""
-                WHERE ic.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND ic.software_identity_id = :softwareIdentityId
                 """, params);
     }
@@ -584,19 +582,15 @@ public class SoftwareIdentityReadService {
                 FROM inventory_components ic
                 LEFT JOIN findings f
                     ON f.component_id = ic.id
-                   AND f.tenant_id = :tenantId
                    AND f.status = 'OPEN'
                 """ + (assetScopedVulnerabilities ? """
                 LEFT JOIN inventory_components exposure_ic
-                    ON exposure_ic.tenant_id = ic.tenant_id
-                   AND exposure_ic.asset_id = ic.asset_id
+                    ON exposure_ic.asset_id = ic.asset_id
                    AND exposure_ic.component_status = 'ACTIVE'
                 """ : "") + """
                 LEFT JOIN component_vulnerability_states cvs
                     ON cvs.component_id = """ + (assetScopedVulnerabilities ? "exposure_ic.id" : "ic.id") + """
-                   AND cvs.tenant_id = :tenantId
-                WHERE ic.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND ic.software_identity_id IN (:softwareIdentityIds)
                 GROUP BY ic.software_identity_id
                 """, params, (ResultSet rs) -> {
@@ -677,8 +671,7 @@ public class SoftwareIdentityReadService {
                     sis.unknown_eol_component_count,
                     sis.last_observed_at
                 FROM software_identity_summary sis
-                WHERE sis.tenant_id = :tenantId
-                  AND sis.software_identity_id = :softwareIdentityId
+                WHERE sis.software_identity_id = :softwareIdentityId
                 """;
     }
 
@@ -743,7 +736,6 @@ public class SoftwareIdentityReadService {
                 FROM filtered_components fc
                 LEFT JOIN findings f
                     ON f.component_id = fc.component_id
-                   AND f.tenant_id = :tenantId
                    AND f.status = 'OPEN'
                 GROUP BY COALESCE(NULLIF(trim(fc.version), ''), '(unknown)')
                 ORDER BY
@@ -778,7 +770,6 @@ public class SoftwareIdentityReadService {
                 FROM filtered_components fc
                 LEFT JOIN findings f
                     ON f.component_id = fc.component_id
-                   AND f.tenant_id = :tenantId
                    AND f.status = 'OPEN'
                 GROUP BY
                     fc.asset_id,

@@ -31,14 +31,12 @@ public class ProjectionFreshnessIssueBuilder {
         long activeIdentityComponents = support.queryLong("""
                 SELECT COUNT(*)
                 FROM inventory_components
-                WHERE tenant_id = :tenantId
-                  AND component_status = 'ACTIVE'
+                WHERE component_status = 'ACTIVE'
                   AND software_identity_id IS NOT NULL
                 """, params);
         long identitySummaryRows = support.queryLong("""
                 SELECT COUNT(*)
                 FROM software_identity_summary
-                WHERE tenant_id = :tenantId
                 """, params);
         if (activeIdentityComponents > 0 && identitySummaryRows == 0) {
             Map<String, Object> evidence = new LinkedHashMap<>();
@@ -80,8 +78,7 @@ public class ProjectionFreshnessIssueBuilder {
             long openFindingCount = support.queryLong("""
                     SELECT COUNT(*)
                     FROM findings
-                    WHERE tenant_id = :tenantId
-                      AND status = 'OPEN'
+                    WHERE status = 'OPEN'
                     """, params);
             Map<String, Object> evidence = new LinkedHashMap<>();
             evidence.put("vulnerabilityCount", vulnerabilityCount);
@@ -125,14 +122,12 @@ public class ProjectionFreshnessIssueBuilder {
         long activeIdentityComponents = support.queryLong("""
                 SELECT COUNT(*)
                 FROM inventory_components
-                WHERE tenant_id = :tenantId
-                  AND component_status = 'ACTIVE'
+                WHERE component_status = 'ACTIVE'
                   AND software_identity_id IS NOT NULL
                 """, params);
         long projectedIdentityComponents = support.queryLong("""
                 SELECT COALESCE(SUM(component_count), 0)
                 FROM software_identity_summary
-                WHERE tenant_id = :tenantId
                 """, params);
         if (activeIdentityComponents > 0
                 && projectedIdentityComponents > 0
@@ -140,8 +135,7 @@ public class ProjectionFreshnessIssueBuilder {
             long openFindingCount = support.queryLong("""
                     SELECT COUNT(*)
                     FROM findings
-                    WHERE tenant_id = :tenantId
-                      AND status = 'OPEN'
+                    WHERE status = 'OPEN'
                     """, params);
             Map<String, Object> evidence = new LinkedHashMap<>();
             evidence.put("activeIdentityComponents", activeIdentityComponents);
@@ -182,8 +176,7 @@ public class ProjectionFreshnessIssueBuilder {
             long openFindingCount = support.queryLong("""
                     SELECT COUNT(*)
                     FROM findings
-                    WHERE tenant_id = :tenantId
-                      AND status = 'OPEN'
+                    WHERE status = 'OPEN'
                     """, params);
             Map<String, Object> evidence = new LinkedHashMap<>();
             evidence.put("vulnerabilityCount", vulnerabilityCount);

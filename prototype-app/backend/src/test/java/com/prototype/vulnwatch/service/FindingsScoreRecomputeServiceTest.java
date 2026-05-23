@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,6 +32,7 @@ class FindingsScoreRecomputeServiceTest {
     @Mock private RiskPolicyService riskPolicyService;
     @Mock private FindingsScoreService findingsScoreService;
     @Mock private FindingSlaService findingSlaService;
+    @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     private FindingsScoreRecomputeService service;
 
@@ -40,8 +42,12 @@ class FindingsScoreRecomputeServiceTest {
                 findingRepository,
                 riskPolicyService,
                 findingsScoreService,
-                findingSlaService
+                findingSlaService,
+                tenantSchemaExecutionService
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
     }
 
     @Test
@@ -68,7 +74,7 @@ class FindingsScoreRecomputeServiceTest {
         finding.setFirstObservedAt(Instant.now());
 
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(policy);
-        when(findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(tenant, FindingStatus.OPEN))
+        when(findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN))
                 .thenReturn(List.of(finding));
         when(findingsScoreService.computeFromParts(anyString(), any(), any(), any(), isNull()))
                 .thenReturn(5.0);
@@ -88,7 +94,7 @@ class FindingsScoreRecomputeServiceTest {
         tenant.setName("workspace");
 
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(new RiskPolicy());
-        when(findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(tenant, FindingStatus.OPEN))
+        when(findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN))
                 .thenReturn(List.of());
 
         int updated = service.recomputeAll(tenant);
@@ -117,7 +123,7 @@ class FindingsScoreRecomputeServiceTest {
         finding.setFirstObservedAt(Instant.now());
 
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(policy);
-        when(findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(tenant, FindingStatus.OPEN))
+        when(findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN))
                 .thenReturn(List.of(finding));
         when(findingsScoreService.computeFromParts(anyString(), any(), any(), any(), isNull()))
                 .thenReturn(10.0);

@@ -31,7 +31,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -62,7 +61,8 @@ public class ServiceNowCmdbSyncService {
     private final TaskExecutor integrationQueueExecutor;
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceService workspaceService;
-    private final JdbcTemplate platformJdbcTemplate;
+    private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public ServiceNowCmdbSyncService(
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
@@ -75,7 +75,8 @@ public class ServiceNowCmdbSyncService {
             @Qualifier("integrationQueueExecutor") TaskExecutor integrationQueueExecutor,
             TransactionTemplate transactionTemplate,
             WorkspaceService workspaceService,
-            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
@@ -87,7 +88,8 @@ public class ServiceNowCmdbSyncService {
         this.integrationQueueExecutor = integrationQueueExecutor;
         this.transactionTemplate = transactionTemplate;
         this.workspaceService = workspaceService;
-        this.platformJdbcTemplate = platformJdbcTemplate;
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public SyncTriggerResponse trigger() {
@@ -101,24 +103,20 @@ public class ServiceNowCmdbSyncService {
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
-        List<ConfigRef> configs = platformJdbcTemplate.query(
-                """
-                select id, tenant_id
-                from servicenow_cmdb_configs
-                where enabled = true
-                  and auto_sync_enabled = true
-                order by updated_at asc
-                """,
-                (rs, rowNum) -> new ConfigRef(
-                        UUID.fromString(rs.getString("id")),
-                        UUID.fromString(rs.getString("tenant_id"))
-                )
-        );
+        List<ConfigRef> configs = new ArrayList<>();
+        for (var tenant : tenantService.listTenants()) {
+            tenantSchemaExecutionService.run(tenant, () -> {
+                serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
+                        .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
+                        .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
+                return null;
+            });
+        }
         for (ConfigRef configRef : configs) {
-            TenantContext.setCurrentTenantId(configRef.tenantId());
-            ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findById(configRef.configId()).orElse(null);
-            ClaimedRun claimed = transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
-            TenantContext.clear();
+            ClaimedRun claimed = tenantSchemaExecutionService.run(configRef.tenantId(), () -> {
+                ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findById(configRef.configId()).orElse(null);
+                return transactionTemplate.execute(status -> config == null ? null : claimScheduledRun(config));
+            });
             if (claimed == null) {
                 continue;
             }
@@ -128,15 +126,12 @@ public class ServiceNowCmdbSyncService {
 
     @Transactional(readOnly = true)
     public boolean hasActiveRun() {
-        return !syncRunRepository.findActiveRunsByTenantAndSyncType(currentTenantId(), SYNC_TYPE_SERVICENOW_CMDB, List.of("queued", "running")).isEmpty();
+        return !syncRunRepository.findActiveRunsBySyncType(SYNC_TYPE_SERVICENOW_CMDB, List.of("queued", "running")).isEmpty();
     }
 
     private ClaimedRun claimManualRun() {
-        UUID tenantId = currentTenantId();
-        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findAll().stream()
-                .filter(existing -> existing.getTenant() != null && tenantId.equals(existing.getTenant().getId()))
+        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
                 .filter(this::isConfigured)
-                .findFirst()
                 .orElseThrow(() -> new IllegalStateException("ServiceNow CMDB connector is not configured"));
         if (!config.isEnabled()) {
             throw new IllegalStateException("ServiceNow CMDB connector is disabled");
@@ -153,8 +148,7 @@ public class ServiceNowCmdbSyncService {
 
     private ClaimedRun claimRunForConfig(ServiceNowCmdbConfig config, String triggerMode, boolean allowReuseActiveRun) {
         UUID tenantId = config.getTenant().getId();
-        Optional<SyncRun> active = syncRunRepository.findActiveRunsByTenantAndSyncType(
-                tenantId,
+        Optional<SyncRun> active = syncRunRepository.findActiveRunsBySyncType(
                 SYNC_TYPE_SERVICENOW_CMDB,
                 List.of("queued", "running")
         ).stream().findFirst();
@@ -180,9 +174,8 @@ public class ServiceNowCmdbSyncService {
     }
 
     private boolean isDue(ServiceNowCmdbConfig config) {
-        SyncRun latest = syncRunRepository.findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(
-                SYNC_TYPE_SERVICENOW_CMDB,
-                config.getTenant().getId()
+        SyncRun latest = syncRunRepository.findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(
+                SYNC_TYPE_SERVICENOW_CMDB
         ).orElse(null);
         if (latest == null) {
             return true;
@@ -196,59 +189,59 @@ public class ServiceNowCmdbSyncService {
     }
 
     private void executeRun(UUID tenantId, UUID configId, UUID runId, String triggerMode) {
-        TenantContext.setCurrentTenantId(tenantId);
-        markRunRunning(runId, triggerMode);
-        try {
-            ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findById(configId)
-                    .orElseThrow(() -> new EntityNotFoundException("ServiceNow CMDB config not found: " + configId));
-            ServiceNowCmdbConfigService.ServiceNowRuntimeConfig runtimeConfig = serviceNowCmdbConfigService
-                    .resolveRuntimeConfig(config.getTenant())
-                    .orElseThrow(() -> new IllegalStateException("ServiceNow CMDB connector is not configured"));
+        tenantSchemaExecutionService.run(tenantId, () -> {
+            markRunRunning(runId, triggerMode);
+            try {
+                ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findById(configId)
+                        .orElseThrow(() -> new EntityNotFoundException("ServiceNow CMDB config not found: " + configId));
+                ServiceNowCmdbConfigService.ServiceNowRuntimeConfig runtimeConfig = serviceNowCmdbConfigService
+                        .resolveRuntimeConfig(config.getTenant())
+                        .orElseThrow(() -> new IllegalStateException("ServiceNow CMDB connector is not configured"));
 
-            List<Map<String, String>> discoveryRows = fetchTableRows(
-                    runtimeConfig,
-                    runtimeConfig.discoveryModelTable(),
-                    runtimeConfig.discoveryQuery(),
-                    runtimeConfig.discoveryFields(),
-                    fetched -> updateRunProgress(runId, fetched, "fetching-discovery", runtimeConfig.discoveryModelTable())
-            );
-            Map<String, Map<String, String>> discoveryBySysId = indexDiscoveryRows(discoveryRows);
-            List<Map<String, String>> installRows = fetchTableRows(
-                    runtimeConfig,
-                    runtimeConfig.installTable(),
-                    runtimeConfig.installQuery(),
-                    runtimeConfig.installFields(),
-                    fetched -> updateRunProgress(
-                            runId,
-                            discoveryRows.size() + fetched,
-                            "fetching-install",
-                            runtimeConfig.installTable()
-                    )
-            );
-            enrichInstallRows(installRows, discoveryBySysId);
+                List<Map<String, String>> discoveryRows = fetchTableRows(
+                        runtimeConfig,
+                        runtimeConfig.discoveryModelTable(),
+                        runtimeConfig.discoveryQuery(),
+                        runtimeConfig.discoveryFields(),
+                        fetched -> updateRunProgress(runId, fetched, "fetching-discovery", runtimeConfig.discoveryModelTable())
+                );
+                Map<String, Map<String, String>> discoveryBySysId = indexDiscoveryRows(discoveryRows);
+                List<Map<String, String>> installRows = fetchTableRows(
+                        runtimeConfig,
+                        runtimeConfig.installTable(),
+                        runtimeConfig.installQuery(),
+                        runtimeConfig.installFields(),
+                        fetched -> updateRunProgress(
+                                runId,
+                                discoveryRows.size() + fetched,
+                                "fetching-install",
+                                runtimeConfig.installTable()
+                        )
+                );
+                enrichInstallRows(installRows, discoveryBySysId);
 
-            CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
-                    config.getTenant(),
-                    defaultIfBlank(config.getSourceSystem(), "servicenow"),
-                    installRows,
-                    discoveryRows,
-                    new CmdbIngestionService.HostInventorySourceDescriptor(
-                            "servicenow-live-sync",
-                            "servicenow-table-api",
-                            defaultIfBlank(config.getSourceSystem(), "servicenow"),
-                            runtimeConfig.installTable(),
-                            runtimeConfig.baseUrl(),
-                            MediaType.APPLICATION_JSON_VALUE,
-                            null
-                    )
-            );
+                CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
+                        config.getTenant(),
+                        defaultIfBlank(config.getSourceSystem(), "servicenow"),
+                        installRows,
+                        discoveryRows,
+                        new CmdbIngestionService.HostInventorySourceDescriptor(
+                                "servicenow-live-sync",
+                                "servicenow-table-api",
+                                defaultIfBlank(config.getSourceSystem(), "servicenow"),
+                                runtimeConfig.installTable(),
+                                runtimeConfig.baseUrl(),
+                                MediaType.APPLICATION_JSON_VALUE,
+                                null
+                        )
+                );
 
-            completeRun(configId, runId, response, discoveryRows.size() + installRows.size(), triggerMode);
-        } catch (Exception e) {
-            failRun(runId, e.getMessage(), triggerMode);
-        } finally {
-            TenantContext.clear();
-        }
+                completeRun(configId, runId, response, discoveryRows.size() + installRows.size(), triggerMode);
+            } catch (Exception e) {
+                failRun(runId, e.getMessage(), triggerMode);
+            }
+            return null;
+        });
     }
 
     private UUID currentTenantId() {

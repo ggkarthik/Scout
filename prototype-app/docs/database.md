@@ -1,17 +1,17 @@
 # VulnWatch Database
 
-Last updated: 2026-04-29
+Last updated: 2026-05-22
 
-The runtime database is PostgreSQL, with Flyway-managed migrations under `backend/src/main/resources/db/migration/postgres`. H2 is retained only as an offline archive format for legacy data snapshots.
+The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line. H2 is retained only as an offline archive format for legacy data snapshots.
 
 ## Engine
 
 - Runtime: PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
-- Schema strategy: Flyway-owned PostgreSQL migrations with `ddl-auto=none`
+- Schema strategy: Flyway-owned PostgreSQL reset-line bootstrap with `ddl-auto=none`
 
 ## Tenant Model
 
-The schema is tenant-aware even though the current runtime mostly uses one default tenant.
+The schema is tenant-aware and uses a shared `platform` schema plus one schema per tenant. The reset-line baseline is the only supported bootstrap path for development and test databases.
 
 Tenant-scoped tables include:
 
@@ -202,9 +202,9 @@ Added to support the Software Identities inventory view and the Operations Quali
   - stores `never_opened_not_applicable`, `deferred_under_investigation`, `category_counts_json`, and `last_computed_at`
   - powers the executive dashboard noise-reduction widget without re-running correlation logic on read
 
-### Schema Evolution V1046–V1072
+### Historical Schema Evolution V1046–V1097
 
-The current Flyway watermark is **V1072** (`tenant_exposure_refresh_quota`). The next migration must be `V1073__*.sql`.
+The following notes describe the legacy numbered migration line that existed before the reset-line bootstrap became the only supported development and test path.
 
 New tables added in this range:
 
@@ -245,6 +245,16 @@ Other notable migrations in this range:
 - V1065 — `cloud_asset_summary` view backing the cloud-asset overview panel
 - V1068 — drop AWS tag filter scope columns
 - V1069 — narrow AWS discovery to EC2-only (RDS/Lambda/S3/ECS/EKS scope removed)
+- V1075 — demo tenant lifecycle tables
+- V1079 — `findings_score_config` JSONB column on `risk_policies`; evaluated by `FindingsScoreService`
+- V1082 — `suppression_rules` table (name, state, record type, valid from/to, execution order, reason)
+- V1088 — `vulnerability_intel_source_relations` for source-level junction data
+- V1089 — `app_user_password_setup_tokens`
+- V1094 — `ownership_rules` table (rule-based user/group assignment) in the legacy numbered line
+- V1094 — `tenant_support_grants` table (support access grants with expiry) in the legacy numbered line
+- V1095 — `tenant_vulnerability_source_correlation` (per-tenant feed filter rules; backing the Vulnerability Sources configuration section)
+- V1096 — demo tenant purge lifecycle
+- V1097 — multi-tenant ownership hardening (cross-tenant access guards)
 
 ## Key Relationships
 
@@ -352,3 +362,5 @@ The data model preserves explainability rather than only final status:
 
 - Flyway owns the PostgreSQL startup path and normal runtime no longer relies on startup schema mutation.
 - Because schema evolution was compatibility-oriented, some tables and columns reflect transitional states rather than a clean-room final design.
+- Flyway owns the PostgreSQL startup path through the reset-line bootstrap under `db/migration/postgres_reset`.
+- Legacy numbered migrations are retained only as historical documentation and are no longer part of the active runtime path.

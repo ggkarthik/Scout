@@ -19,6 +19,7 @@ import {
   titleForTab
 } from './app/routes';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
+import { isAuthenticatedWithAuth0, logoutWithAuth0 } from './lib/auth0';
 import { ActorContextState, useActor } from './features/auth/context';
 import { AUTH_CONTEXT_QUERY_ROOT, useActorQuery } from './features/auth/queries';
 import type { ActorContext } from './features/auth/types';
@@ -734,6 +735,20 @@ function AppShell() {
     }
   });
 
+  const handleLogout = React.useCallback(() => {
+    void (async () => {
+      clearStoredAuthToken();
+      queryClient.clear();
+      if (await isAuthenticatedWithAuth0()) {
+        await logoutWithAuth0({
+          logoutParams: { returnTo: `${window.location.origin}/login` }
+        });
+        return;
+      }
+      navigate('/login', { replace: true });
+    })();
+  }, [navigate, queryClient]);
+
   const openPersonaDialog = (): void => {
     setSettingsMenuOpen(false);
     setPersonaDialogOpen(true);
@@ -958,6 +973,14 @@ function AppShell() {
                         <small>Open non-production test personas</small>
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="settings-menu-item settings-menu-item-logout"
+                      role="menuitem"
+                      onClick={handleLogout}
+                    >
+                      <span>Log out</span>
+                    </button>
                   </div>
                 )}
               </div>

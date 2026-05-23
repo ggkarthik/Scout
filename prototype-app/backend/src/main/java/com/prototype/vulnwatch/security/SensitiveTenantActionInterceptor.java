@@ -44,6 +44,11 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         if (!actor.actingAsPlatformOwner()) {
             return true;
         }
+        // Platform and operations endpoints are platform-administration actions gated by ROLE_PLATFORM_OWNER;
+        // they are not tenant-data operations so the support-grant check does not apply.
+        if (isPlatformAdminPath(request.getRequestURI())) {
+            return true;
+        }
         if (isSafeMethod(request.getMethod())) {
             tenantSupportGrantService.requireActiveGrant(actor.userId(), actor.tenantId());
             return true;
@@ -85,6 +90,10 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         return "GET".equalsIgnoreCase(method)
                 || "HEAD".equalsIgnoreCase(method)
                 || "OPTIONS".equalsIgnoreCase(method);
+    }
+
+    private boolean isPlatformAdminPath(String uri) {
+        return uri != null && (uri.startsWith("/api/platform/") || uri.startsWith("/api/operations/"));
     }
 
     private Instant parseConfirmationTime(String confirmedAt) {

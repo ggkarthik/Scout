@@ -72,6 +72,8 @@ import type {
   DemoStatus,
   AuthTokenResponse,
   InventoryConnectorHealth,
+  PlatformUser,
+  PlatformUserRequest,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -218,6 +220,22 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+function extractTokenRoles(payload: Record<string, unknown>): string[] {
+  const directRoles = Array.isArray(payload.roles) ? payload.roles : null;
+  if (directRoles) {
+    return directRoles.map(String);
+  }
+
+  for (const [claimName, value] of Object.entries(payload)) {
+    if (!claimName.endsWith('/roles') || !Array.isArray(value)) {
+      continue;
+    }
+    return value.map(String);
+  }
+
+  return [];
+}
+
 function currentPlatformTenantContext():
   | { tenantId: string; roles: string[] }
   | null {
@@ -229,7 +247,7 @@ function currentPlatformTenantContext():
   if (!payload) {
     return null;
   }
-  const rawRoles = Array.isArray(payload.roles) ? payload.roles.map(String) : [];
+  const rawRoles = extractTokenRoles(payload);
   const roles = rawRoles.map((role) => role.replace(/^ROLE_/, '').toUpperCase());
   if (!roles.includes('PLATFORM_OWNER')) {
     return null;
@@ -371,6 +389,7 @@ export const api = {
       severity?: string[];
       status?: string[];
       decisionState?: string[];
+      creationSource?: Array<'MANUAL' | 'AUTOMATIC'>;
       matchMethod?: string[];
       vexStatus?: string[];
       vexFreshness?: string[];
@@ -387,6 +406,7 @@ export const api = {
     params?.severity?.forEach((value) => searchParams.append('severity', value));
     params?.status?.forEach((value) => searchParams.append('status', value));
     params?.decisionState?.forEach((value) => searchParams.append('decisionState', value));
+    params?.creationSource?.forEach((value) => searchParams.append('creationSource', value));
     params?.matchMethod?.forEach((value) => searchParams.append('matchMethod', value));
     params?.vexStatus?.forEach((value) => searchParams.append('vexStatus', value));
     params?.vexFreshness?.forEach((value) => searchParams.append('vexFreshness', value));
@@ -836,6 +856,16 @@ export const api = {
     request<Tenant>('/platform/tenants', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  listPlatformUsers: () => request<PlatformUser[]>('/platform/users'),
+  upsertPlatformUser: (payload: PlatformUserRequest) =>
+    request<PlatformUser>('/platform/users', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  revokePlatformUserRole: (userId: string, role: string) =>
+    request<void>(`/platform/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`, {
+      method: 'DELETE'
     }),
   listPlatformSupportGrants: () => request<TenantSupportGrant[]>('/platform/support-grants'),
   acceptPlatformSupportGrant: (grantId: string) =>

@@ -62,6 +62,7 @@ public class CveDetailQueryFacade {
     private final ObjectMapper objectMapper;
     private final VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler;
     private final VulnerabilityIntelRelationRepository relationRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public CveDetailQueryFacade(
             VulnerabilityRepository vulnerabilityRepository,
@@ -79,7 +80,8 @@ public class CveDetailQueryFacade {
             FixRecordRepository fixRecordRepository,
             ObjectMapper objectMapper,
             VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler,
-            VulnerabilityIntelRelationRepository relationRepository
+            VulnerabilityIntelRelationRepository relationRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.orgCveRecordRepository = orgCveRecordRepository;
@@ -97,6 +99,7 @@ public class CveDetailQueryFacade {
         this.objectMapper = objectMapper;
         this.vulnerabilityIntelDetailAssembler = vulnerabilityIntelDetailAssembler;
         this.relationRepository = relationRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public ResponseEntity<CveDetailController.CveDetailResponse> getCveDetail(String cveId) {
@@ -107,29 +110,33 @@ public class CveDetailQueryFacade {
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new IllegalArgumentException("CVE not found: " + cveId));
 
-        OrgCveRecord orgCveRecord = orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
-                .orElse(null);
+        OrgCveRecord orgCveRecord = tenantSchemaExecutionService.run(
+                tenant,
+                () -> orgCveRecordRepository.findByVulnerability(vulnerability)
+        ).orElse(null);
         UUID matchedSoftwareTenantId = orgCveRecord != null
                 && orgCveRecord.getTenant() != null
                 && orgCveRecord.getTenant().getId() != null
                 ? orgCveRecord.getTenant().getId()
                 : tenant.getId();
-        List<CveDetailController.MatchedSoftwareDto> matchedSoftware = componentVulnerabilityStateRepository
-                .findByTenant_IdAndVulnerability_Id(matchedSoftwareTenantId, vulnerability.getId()).stream()
+        List<CveDetailController.MatchedSoftwareDto> matchedSoftware = tenantSchemaExecutionService.run(
+                tenant,
+                () -> componentVulnerabilityStateRepository.findByVulnerability_Id(vulnerability.getId())
+        ).stream()
                 .filter(state -> state.getComponent() != null)
                 .filter(state -> state.getComponent().getComponentStatus() == InventoryComponentStatus.ACTIVE)
                 .map(this::toMatchedSoftwareDto)
                 .toList();
 
         CveDetailController.CveDetailResponse response = new CveDetailController.CveDetailResponse();
-        response.setSummary(buildSummary(vulnerability));
+        response.summary = buildSummary(vulnerability);
 
         List<VulnerabilityTarget> targets = vulnerabilityTargetRepository.findByVulnerability(vulnerability);
-        response.setSignals(buildSignals(vulnerability, orgCveRecord, matchedSoftware, targets));
-        response.setMatchedSoftware(matchedSoftware);
-        response.setVendorIntelligence(buildVendorIntelligence(vulnerability, targets));
-        response.setReferences(buildReferences(vulnerability));
-        response.setFixes(fixRecordRepository.findByTenantAndCveIdOrderByCreatedAtAsc(tenant, cveId)
+        response.signals = buildSignals(vulnerability, orgCveRecord, matchedSoftware, targets);
+        response.matchedSoftware = matchedSoftware;
+        response.vendorIntelligence = buildVendorIntelligence(vulnerability, targets);
+        response.references = buildReferences(vulnerability);
+        response.fixes = tenantSchemaExecutionService.run(tenant, () -> fixRecordRepository.findByCveIdOrderByCreatedAtAsc(cveId))
                 .stream()
                 .map(r -> {
                     com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>> strListType =
@@ -145,10 +152,10 @@ public class CveDetailQueryFacade {
                             r.getFixType(), entities, r.getOsHint(), r.getRecommendationSource(),
                             sourceUrls, r.getGeneratedAt(), r.getCreatedAt());
                 })
-                .toList());
+                .toList();
         if (orgCveRecord != null) {
-            response.setSuppressedByRuleId(orgCveRecord.getSuppressedByRuleId());
-            response.setSuppressedByRuleName(orgCveRecord.getSuppressedByRuleName());
+            response.suppressedByRuleId = orgCveRecord.getSuppressedByRuleId();
+            response.suppressedByRuleName = orgCveRecord.getSuppressedByRuleName();
         }
         List<VulnerabilityIntelObservation> observations =
                 observationRepository.findByVulnerabilityOrderByLastSeenAtDesc(vulnerability);
@@ -171,22 +178,23 @@ public class CveDetailQueryFacade {
             }
         }
 
-        response.setSourceRecords(vulnerabilityIntelDetailAssembler.toSourceRecordResponses(allObservations));
-        response.setRelations(vulnerabilityIntelDetailAssembler.toRelationResponses(relations));
-        response.setInvestigations(investigationService.getInvestigationsByCve(tenantId, cveId).stream()
+        response.sourceRecords = vulnerabilityIntelDetailAssembler.toSourceRecordResponses(allObservations);
+        response.relations = vulnerabilityIntelDetailAssembler.toRelationResponses(relations);
+        response.investigations = investigationService.getInvestigationsByCve(tenantId, cveId).stream()
                 .map(this::toInvestigationDto)
-                .collect(Collectors.toList()));
-        response.setAssessments(assessmentService.getAssessmentsByCve(tenantId, cveId).stream()
+                .collect(Collectors.toList());
+        response.assessments = assessmentService.getAssessmentsByCve(tenantId, cveId).stream()
                 .map(this::toAssessmentDto)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList());
         return ResponseEntity.ok(response);
     }
 
     public ResponseEntity<CveDetailController.VexEvidenceResponse> getVexEvidence(String cveId, UUID componentId) {
         Tenant tenant = requestTenant();
-        ComponentVulnerabilityState state = componentVulnerabilityStateRepository
-                .findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(tenant.getId(), cveId, componentId)
-                .orElse(null);
+        ComponentVulnerabilityState state = tenantSchemaExecutionService.run(
+                tenant,
+                () -> componentVulnerabilityStateRepository.findByVulnerability_ExternalIdAndComponent_Id(cveId, componentId)
+        ).orElse(null);
         if (state == null || state.getMatchedVexAssertionId() == null) {
             return ResponseEntity.notFound().build();
         }
@@ -208,14 +216,16 @@ public class CveDetailQueryFacade {
         Tenant tenant = requestTenant();
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new IllegalArgumentException("CVE not found: " + cveId));
-        OrgCveRecord orgCveRecord = orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
-                .orElse(null);
+        OrgCveRecord orgCveRecord = tenantSchemaExecutionService.run(
+                tenant,
+                () -> orgCveRecordRepository.findByVulnerability(vulnerability)
+        ).orElse(null);
 
         CveDetailController.ExportResponse response = new CveDetailController.ExportResponse();
-        response.setCveId(cveId);
-        response.setFormat(request.getFormat());
-        response.setContent(generateReport(vulnerability, orgCveRecord, request.getFormat()));
-        response.setGeneratedAt(Instant.now());
+        response.cveId = cveId;
+        response.format = request.format;
+        response.content = generateReport(vulnerability, orgCveRecord, request.format);
+        response.generatedAt = Instant.now();
         return ResponseEntity.ok(response);
     }
 
@@ -254,24 +264,23 @@ public class CveDetailQueryFacade {
     private CveDetailController.CveSummary buildSummary(Vulnerability vulnerability) {
         CveDetailController.CveSummary summary = new CveDetailController.CveSummary();
         String description = vulnerabilityIntelQueryService.resolveDetailDescription(vulnerability);
-        summary.setExternalId(vulnerability.getExternalId());
-        summary.setTitle(vulnerability.getTitle());
-        summary.setDescription(description);
-        summary.setSeverity(vulnerability.getSeverity());
-        summary.setCvssScore(vulnerability.getCvssScore());
-        summary.setCvssVector(vulnerability.getCvssVector());
-        summary.setEpssScore(vulnerability.getEpssScore());
-        summary.setEpssSevenDayDelta(
+        summary.externalId = vulnerability.getExternalId();
+        summary.title = vulnerability.getTitle();
+        summary.description = description;
+        summary.severity = vulnerability.getSeverity();
+        summary.cvssScore = vulnerability.getCvssScore();
+        summary.cvssVector = vulnerability.getCvssVector();
+        summary.epssScore = vulnerability.getEpssScore();
+        summary.epssSevenDayDelta =
                 epssTrendService.fetchSevenDayDelta(
                         vulnerability.getExternalId(),
                         vulnerability.getEpssScore(),
                         vulnerability.getEpssUpdatedAt()
-                )
-        );
-        summary.setEpssUpdatedAt(vulnerability.getEpssUpdatedAt());
-        summary.setCweIds(vulnerability.getCweIds());
-        summary.setSource(vulnerability.getSource());
-        summary.setInKev(vulnerability.getInKev());
+                );
+        summary.epssUpdatedAt = vulnerability.getEpssUpdatedAt();
+        summary.cweIds = vulnerability.getCweIds();
+        summary.source = vulnerability.getSource();
+        summary.inKev = vulnerability.getInKev();
 
         // Fetch all observations once to fill gaps in canonical fields
         List<VulnerabilityIntelObservation> observations =
@@ -285,7 +294,7 @@ public class CveDetailQueryFacade {
         Instant publishedAt = vulnerability.getPublishedAt() != null
                 ? vulnerability.getPublishedAt()
                 : (nvdObs != null ? nvdObs.getPublishedAt() : null);
-        summary.setPublishedAt(publishedAt);
+        summary.publishedAt = publishedAt;
 
         // Only use modifiedAt/publishedAt from actual NVD source dates — never from fallback sync timestamps.
         // If no NVD observation exists, these fields remain null so the UI doesn't show misleading dates.
@@ -294,7 +303,7 @@ public class CveDetailQueryFacade {
             // NVD obs exists but its lastModifiedAt is null — use what the entity has
             modifiedAt = vulnerability.getModifiedAt();
         }
-        summary.setModifiedAt(modifiedAt);
+        summary.modifiedAt = modifiedAt;
 
         // KEV dates: prefer entity fields; fall back to raw payload parsing for legacy records
         LocalDate kevDateAdded = vulnerability.getKevDateAdded();
@@ -323,9 +332,9 @@ public class CveDetailQueryFacade {
                 } catch (Exception ignored) { /* raw payload unparseable */ }
             }
         }
-        summary.setKevDateAdded(kevDateAdded);
-        summary.setKevDueDate(kevDueDate);
-        summary.setKevRequiredAction(kevRequiredAction);
+        summary.kevDateAdded = kevDateAdded;
+        summary.kevDueDate = kevDueDate;
+        summary.kevRequiredAction = kevRequiredAction;
         return summary;
     }
 
@@ -358,16 +367,16 @@ public class CveDetailQueryFacade {
                     .filter(m -> m.get("url") instanceof String)
                     .map(m -> {
                         CveDetailController.CveReference ref = new CveDetailController.CveReference();
-                        ref.setUrl((String) m.get("url"));
+                        ref.url = (String) m.get("url");
                         if (m.get("source") instanceof String s) {
-                            ref.setSource(s);
+                            ref.source = s;
                         }
                         Object tagsObj = m.get("tags");
                         if (tagsObj instanceof List<?> tagList) {
-                            ref.setTags(tagList.stream()
+                            ref.tags = tagList.stream()
                                     .filter(t -> t instanceof String)
                                     .map(t -> (String) t)
-                                    .toList());
+                                    .toList();
                         }
                         return ref;
                     })
@@ -380,7 +389,7 @@ public class CveDetailQueryFacade {
                         .filter(u -> u != null && !u.isBlank())
                         .map(u -> {
                             CveDetailController.CveReference ref = new CveDetailController.CveReference();
-                            ref.setUrl(u);
+                            ref.url = u;
                             return ref;
                         })
                         .toList();
@@ -399,37 +408,37 @@ public class CveDetailQueryFacade {
         CveDetailController.KeySignals signals = new CveDetailController.KeySignals();
         boolean exploitAvailable = vulnerability.getInKev()
                 || (vulnerability.getEpssScore() != null && vulnerability.getEpssScore() > HIGH_EPSS_EXPLOIT_THRESHOLD);
-        signals.setExploitAvailable(exploitAvailable);
-        signals.setExploitReason(exploitAvailable
+        signals.exploitAvailable = exploitAvailable;
+        signals.exploitReason = exploitAvailable
                 ? (vulnerability.getInKev()
                         ? "In CISA KEV Catalog"
                         : "High EPSS Score (" + String.format("%.1f%%", vulnerability.getEpssScore() * 100) + ")")
-                : "No known exploits");
+                : "No known exploits";
 
         if (orgCveRecord != null) {
-            signals.setSystemsImpacted(true);
-            signals.setComponentCount(orgCveRecord.getMatchedComponentCount());
-            signals.setSoftwareCount(orgCveRecord.getMatchedSoftwareCount());
-            signals.setAssetCount(matchedSoftware.stream()
-                    .map(CveDetailController.MatchedSoftwareDto::getAssetId)
+            signals.systemsImpacted = true;
+            signals.componentCount = orgCveRecord.getMatchedComponentCount();
+            signals.softwareCount = orgCveRecord.getMatchedSoftwareCount();
+            signals.assetCount = matchedSoftware.stream()
+                    .map(item -> item.assetId)
                     .filter(Objects::nonNull)
                     .distinct()
-                    .count());
+                    .count();
         } else {
-            signals.setSystemsImpacted(false);
-            signals.setComponentCount(0L);
-            signals.setSoftwareCount(0L);
-            signals.setAssetCount(0L);
+            signals.systemsImpacted = false;
+            signals.componentCount = 0L;
+            signals.softwareCount = 0L;
+            signals.assetCount = 0L;
         }
 
         boolean patchAvailable = targets.stream().anyMatch(t -> t.getFixedVersion() != null);
-        signals.setPatchAvailable(patchAvailable);
+        signals.patchAvailable = patchAvailable;
         if (patchAvailable) {
-            signals.setPatchVersions(targets.stream()
+            signals.patchVersions = targets.stream()
                     .filter(t -> t.getFixedVersion() != null)
                     .map(VulnerabilityTarget::getFixedVersion)
                     .distinct()
-                    .collect(Collectors.joining(", ")));
+                    .collect(Collectors.joining(", "));
         }
         return signals;
     }
@@ -447,22 +456,22 @@ public class CveDetailQueryFacade {
             String source = (target.getSource() == null || target.getSource().isBlank() || "unknown".equalsIgnoreCase(target.getSource()))
                     ? (vulnerability.getSource() != null ? vulnerability.getSource().name() : VulnerabilitySource.ADVISORY.name())
                     : target.getSource().toUpperCase();
-            dto.setSource(source);
-            dto.setEcosystem(target.getEcosystem());
-            dto.setPackageName(target.getPackageName());
+            dto.source = source;
+            dto.ecosystem = target.getEcosystem();
+            dto.packageName = target.getPackageName();
             String affectedVersions = formatVersionRange(target);
-            dto.setAffectedVersions(affectedVersions);
-            dto.setFixedVersion(target.getFixed() != null && !target.getFixed().isBlank() ? target.getFixed() : null);
+            dto.affectedVersions = affectedVersions;
+            dto.fixedVersion = target.getFixed() != null && !target.getFixed().isBlank() ? target.getFixed() : null;
             String cpe = target.getCpe() != null && !target.getCpe().isBlank() ? target.getCpe() : null;
-            dto.setCpe(cpe);
-            dto.setVexStatus(vexStatusByTargetId.get(target.getId()));
+            dto.cpe = cpe;
+            dto.vexStatus = vexStatusByTargetId.get(target.getId());
             String dedupeKey = source + "|" + nullToEmpty(target.getPackageName()) + "|" + affectedVersions + "|" + nullToEmpty(target.getFixed());
             CveDetailController.VendorIntelligenceDto existing = dtoByKey.get(dedupeKey);
             if (existing == null) {
                 dtoByKey.put(dedupeKey, dto);
-            } else if (cpe != null && existing.getCpe() == null) {
+            } else if (cpe != null && existing.cpe == null) {
                 // Merge CPE from this (CPE-type) target into the already-added DTO
-                existing.setCpe(cpe);
+                existing.cpe = cpe;
             }
         }
         return new ArrayList<>(dtoByKey.values());
@@ -517,55 +526,55 @@ public class CveDetailQueryFacade {
     private CveDetailController.VexEvidenceResponse toVexEvidenceResponse(ComponentVulnerabilityState state, VexAssertion assertion) {
         Map<String, Object> evidence = parseEvidenceJson(assertion.getEvidenceJson());
         CveDetailController.VexEvidenceResponse response = new CveDetailController.VexEvidenceResponse();
-        response.setComponentId(state.getComponent() == null ? null : state.getComponent().getId());
-        response.setAssetName(state.getComponent() != null && state.getComponent().getAsset() != null
+        response.componentId = state.getComponent() == null ? null : state.getComponent().getId();
+        response.assetName = state.getComponent() != null && state.getComponent().getAsset() != null
                 ? state.getComponent().getAsset().getName()
-                : null);
-        response.setAssetIdentifier(state.getComponent() != null && state.getComponent().getAsset() != null
+                : null;
+        response.assetIdentifier = state.getComponent() != null && state.getComponent().getAsset() != null
                 ? state.getComponent().getAsset().getIdentifier()
-                : null);
-        response.setAssetType(state.getComponent() != null
+                : null;
+        response.assetType = state.getComponent() != null
                 && state.getComponent().getAsset() != null
                 && state.getComponent().getAsset().getType() != null
                 ? state.getComponent().getAsset().getType().name()
-                : null);
-        response.setEcosystem(state.getComponent() == null ? null : state.getComponent().getEcosystem());
-        response.setInstalledVersion(state.getComponent() == null ? null : state.getComponent().getVersion());
-        response.setMatchedBy(state.getMatchedBy());
-        response.setApplicabilityState(state.getApplicabilityState() == null ? null : state.getApplicabilityState().name());
-        response.setApplicabilityReason(state.getApplicabilityReason());
-        response.setApplicabilityReasonDetail(state.getApplicabilityReasonDetail());
-        response.setMatchedVexAssertionId(assertion.getId());
-        response.setSourceSystem(assertion.getSourceSystem());
-        response.setProvider(assertion.getProvider());
-        response.setStatus(assertion.getStatus());
-        response.setTrustTier(assertion.getTrustTier());
-        response.setFreshness(assertion.getFreshness());
-        response.setDocumentId(assertion.getDocumentId());
-        response.setPackageName(assertion.getPackageName());
-        response.setNormalizedProductKey(assertion.getNormalizedProductKey());
-        response.setVersionExact(assertion.getVersionExact());
-        response.setVersionStart(assertion.getVersionStart());
-        response.setStartInclusive(assertion.getStartInclusive());
-        response.setVersionEnd(assertion.getVersionEnd());
-        response.setEndInclusive(assertion.getEndInclusive());
-        response.setFixedVersion(assertion.getFixedVersion());
-        response.setPublishedAt(assertion.getPublishedAt());
-        response.setLastSeenAt(assertion.getLastSeenAt());
-        response.setEvidenceUrl(extractEvidenceUrl(evidence));
-        response.setComputedImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
-        response.setComputedImpactReason(state.getImpactReason());
-        response.setComputedImpactReasonDetail(state.getImpactReasonDetail());
+                : null;
+        response.ecosystem = state.getComponent() == null ? null : state.getComponent().getEcosystem();
+        response.installedVersion = state.getComponent() == null ? null : state.getComponent().getVersion();
+        response.matchedBy = state.getMatchedBy();
+        response.applicabilityState = state.getApplicabilityState() == null ? null : state.getApplicabilityState().name();
+        response.applicabilityReason = state.getApplicabilityReason();
+        response.applicabilityReasonDetail = state.getApplicabilityReasonDetail();
+        response.matchedVexAssertionId = assertion.getId();
+        response.sourceSystem = assertion.getSourceSystem();
+        response.provider = assertion.getProvider();
+        response.status = assertion.getStatus();
+        response.trustTier = assertion.getTrustTier();
+        response.freshness = assertion.getFreshness();
+        response.documentId = assertion.getDocumentId();
+        response.packageName = assertion.getPackageName();
+        response.normalizedProductKey = assertion.getNormalizedProductKey();
+        response.versionExact = assertion.getVersionExact();
+        response.versionStart = assertion.getVersionStart();
+        response.startInclusive = assertion.getStartInclusive();
+        response.versionEnd = assertion.getVersionEnd();
+        response.endInclusive = assertion.getEndInclusive();
+        response.fixedVersion = assertion.getFixedVersion();
+        response.publishedAt = assertion.getPublishedAt();
+        response.lastSeenAt = assertion.getLastSeenAt();
+        response.evidenceUrl = extractEvidenceUrl(evidence);
+        response.computedImpactState = state.getImpactState() == null ? null : state.getImpactState().name();
+        response.computedImpactReason = state.getImpactReason();
+        response.computedImpactReasonDetail = state.getImpactReasonDetail();
         if (state.getAnalystDisposition() != null) {
-            response.setImpactState(state.getAnalystDisposition().name());
-            response.setImpactReason(state.getAnalystReason());
-            response.setImpactReasonDetail("Analyst override");
+            response.impactState = state.getAnalystDisposition().name();
+            response.impactReason = state.getAnalystReason();
+            response.impactReasonDetail = "Analyst override";
         } else {
-            response.setImpactState(state.getImpactState() == null ? null : state.getImpactState().name());
-            response.setImpactReason(state.getImpactReason());
-            response.setImpactReasonDetail(state.getImpactReasonDetail());
+            response.impactState = state.getImpactState() == null ? null : state.getImpactState().name();
+            response.impactReason = state.getImpactReason();
+            response.impactReasonDetail = state.getImpactReasonDetail();
         }
-        response.setEvidence(evidence);
+        response.evidence = evidence;
         return response;
     }
 
@@ -596,89 +605,89 @@ public class CveDetailQueryFacade {
 
     private CveDetailController.InvestigationDto toInvestigationDto(Investigation investigation) {
         CveDetailController.InvestigationDto dto = new CveDetailController.InvestigationDto();
-        dto.setId(investigation.getId());
-        dto.setCveId(investigation.getVulnerability().getExternalId());
-        dto.setStatus(investigation.getStatus());
-        dto.setAssignedTo(investigation.getAssignedTo());
-        dto.setPriority(investigation.getPriority());
-        dto.setNotes(investigation.getNotes());
-        dto.setCreatedAt(investigation.getCreatedAt());
-        dto.setUpdatedAt(investigation.getUpdatedAt());
+        dto.id = investigation.getId();
+        dto.cveId = investigation.getVulnerability().getExternalId();
+        dto.status = investigation.getStatus();
+        dto.assignedTo = investigation.getAssignedTo();
+        dto.priority = investigation.getPriority();
+        dto.notes = investigation.getNotes();
+        dto.createdAt = investigation.getCreatedAt();
+        dto.updatedAt = investigation.getUpdatedAt();
         return dto;
     }
 
     private CveDetailController.AssessmentDto toAssessmentDto(ApplicabilityAssessment assessment) {
         CveDetailController.AssessmentDto dto = new CveDetailController.AssessmentDto();
-        dto.setId(assessment.getId());
-        dto.setCveId(assessment.getVulnerability().getExternalId());
-        dto.setStatus(assessment.getStatus());
-        dto.setSoftwareDetected(assessment.getSoftwareDetected());
-        dto.setVulnerableVersionPresent(assessment.getVulnerableVersionPresent());
-        dto.setVulnerableConfiguration(assessment.getVulnerableConfiguration());
-        dto.setFinalResult(assessment.getFinalResult());
-        dto.setConfidenceLevel(assessment.getConfidenceLevel());
-        dto.setJustification(assessment.getJustification());
-        dto.setRecommendedAction(assessment.getRecommendedAction());
-        dto.setCreatedAt(assessment.getCreatedAt());
-        dto.setCompletedAt(assessment.getCompletedAt());
+        dto.id = assessment.getId();
+        dto.cveId = assessment.getVulnerability().getExternalId();
+        dto.status = assessment.getStatus();
+        dto.softwareDetected = assessment.getSoftwareDetected();
+        dto.vulnerableVersionPresent = assessment.getVulnerableVersionPresent();
+        dto.vulnerableConfiguration = assessment.getVulnerableConfiguration();
+        dto.finalResult = assessment.getFinalResult();
+        dto.confidenceLevel = assessment.getConfidenceLevel();
+        dto.justification = assessment.getJustification();
+        dto.recommendedAction = assessment.getRecommendedAction();
+        dto.createdAt = assessment.getCreatedAt();
+        dto.completedAt = assessment.getCompletedAt();
         return dto;
     }
 
     private CveDetailController.MatchedSoftwareDto toMatchedSoftwareDto(ComponentVulnerabilityState state) {
         CveDetailController.MatchedSoftwareDto dto = new CveDetailController.MatchedSoftwareDto();
-        dto.setComponentId(state.getComponent().getId());
-        dto.setAssetId(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getId());
-        dto.setAssetName(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getName());
-        dto.setAssetIdentifier(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getIdentifier());
-        dto.setAssetType(state.getComponent().getAsset() != null && state.getComponent().getAsset().getType() != null
+        dto.componentId = state.getComponent().getId();
+        dto.assetId = state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getId();
+        dto.assetName = state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getName();
+        dto.assetIdentifier = state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getIdentifier();
+        dto.assetType = state.getComponent().getAsset() != null && state.getComponent().getAsset().getType() != null
                 ? state.getComponent().getAsset().getType().name()
-                : null);
-        dto.setEcosystem(state.getComponent().getEcosystem());
-        dto.setPackageName(state.getComponent().getPackageName());
-        dto.setVersion(state.getComponent().getVersion());
-        dto.setApplicabilityState(state.getApplicabilityState());
-        dto.setApplicabilityReason(state.getApplicabilityReason());
-        dto.setApplicabilityReasonDetail(state.getApplicabilityReasonDetail());
-        dto.setComputedImpactState(state.getImpactState());
-        dto.setComputedImpactReason(state.getImpactReason());
-        dto.setComputedImpactReasonDetail(state.getImpactReasonDetail());
+                : null;
+        dto.ecosystem = state.getComponent().getEcosystem();
+        dto.packageName = state.getComponent().getPackageName();
+        dto.version = state.getComponent().getVersion();
+        dto.applicabilityState = state.getApplicabilityState();
+        dto.applicabilityReason = state.getApplicabilityReason();
+        dto.applicabilityReasonDetail = state.getApplicabilityReasonDetail();
+        dto.computedImpactState = state.getImpactState();
+        dto.computedImpactReason = state.getImpactReason();
+        dto.computedImpactReasonDetail = state.getImpactReasonDetail();
         if (state.getAnalystDisposition() != null) {
-            dto.setImpactState(ImpactState.valueOf(state.getAnalystDisposition().name()));
-            dto.setImpactReason(state.getAnalystReason());
-            dto.setImpactReasonDetail("Analyst override");
+            dto.impactState = ImpactState.valueOf(state.getAnalystDisposition().name());
+            dto.impactReason = state.getAnalystReason();
+            dto.impactReasonDetail = "Analyst override";
         } else {
-            dto.setImpactState(state.getImpactState());
-            dto.setImpactReason(state.getImpactReason());
-            dto.setImpactReasonDetail(state.getImpactReasonDetail());
+            dto.impactState = state.getImpactState();
+            dto.impactReason = state.getImpactReason();
+            dto.impactReasonDetail = state.getImpactReasonDetail();
         }
-        dto.setVexStatus(state.getVexStatus());
-        dto.setVexProvider(state.getVexProvider());
-        dto.setVexFreshness(state.getVexFreshness());
-        dto.setVexSource(state.getVexSource());
-        dto.setMatchedVexAssertionId(state.getMatchedVexAssertionId());
-        dto.setAnalystDisposition(state.getAnalystDisposition() == null ? null : state.getAnalystDisposition().name());
-        dto.setAnalystReason(state.getAnalystReason());
-        dto.setMatchedBy(state.getMatchedBy());
-        dto.setEligibleForFinding(state.isEligibleForFinding());
-        dto.setFindingEligibilityReason(resolveFindingEligibilityReason(state));
-        dto.setFindingEligibilityDetail(resolveFindingEligibilityDetail(state));
-        dto.setEolSlug(state.getComponent().getEolSlug());
-        dto.setEolCycle(state.getComponent().getEolCycle());
+        dto.vexStatus = state.getVexStatus();
+        dto.vexProvider = state.getVexProvider();
+        dto.vexFreshness = state.getVexFreshness();
+        dto.vexSource = state.getVexSource();
+        dto.matchedVexAssertionId = state.getMatchedVexAssertionId();
+        dto.analystDisposition = state.getAnalystDisposition() == null ? null : state.getAnalystDisposition().name();
+        dto.analystReason = state.getAnalystReason();
+        dto.matchedBy = state.getMatchedBy();
+        dto.eligibleForFinding = state.isEligibleForFinding();
+        dto.findingEligibilityReason = resolveFindingEligibilityReason(state);
+        dto.findingEligibilityDetail = resolveFindingEligibilityDetail(state);
+        dto.eolSlug = state.getComponent().getEolSlug();
+        dto.eolCycle = state.getComponent().getEolCycle();
         LocalDate eolDate = state.getComponent().getEolDate();
         boolean effectiveEol = Boolean.TRUE.equals(state.getComponent().getIsEol())
                 || (eolDate != null && !LocalDate.now().isBefore(eolDate));
-        dto.setEolDate(eolDate);
-        dto.setIsEol(effectiveEol);
+        dto.eolDate = eolDate;
+        dto.isEol = effectiveEol;
         if (eolDate != null && !effectiveEol) {
             int daysRemaining = (int) ChronoUnit.DAYS.between(LocalDate.now(), eolDate);
             if (daysRemaining >= 0) {
-                dto.setEolDaysRemaining(daysRemaining);
+                dto.eolDaysRemaining = daysRemaining;
             }
         }
-        dto.setEolSupportEndDate(state.getComponent().getEolSupportEndDate());
-        dto.setSupportPhase(state.getComponent().getSupportPhase());
-        dto.setSupportGroup(state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getSupportGroup());
-        dto.setSoftwareIdentityId(state.getComponent().getSoftwareIdentity() == null ? null : state.getComponent().getSoftwareIdentity().getId());
+        dto.eolSupportEndDate = state.getComponent().getEolSupportEndDate();
+        dto.supportPhase = state.getComponent().getSupportPhase();
+        dto.supportGroup = state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getSupportGroup();
+        dto.softwareIdentityId = state.getComponent().getSoftwareIdentity() == null ? null : state.getComponent().getSoftwareIdentity().getId();
         return dto;
     }
 

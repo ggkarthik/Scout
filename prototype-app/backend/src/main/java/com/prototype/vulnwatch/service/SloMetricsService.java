@@ -1,13 +1,13 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.SbomIngestionStatus;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.SloStatusResponse;
 import com.prototype.vulnwatch.dto.SloStatusResponse.SloEntry;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SloMetricsService {
 
-    private final JdbcTemplate platformJdbcTemplate;
+    private final JdbcTemplate jdbcTemplate;
+    private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Value("${app.slo.sbom-success-rate-min-pct:95.0}")
     private double sbomSuccessRateMinPct;
@@ -38,9 +40,13 @@ public class SloMetricsService {
     private long queueStaleMaxCount;
 
     public SloMetricsService(
-            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
+            JdbcTemplate jdbcTemplate,
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
-        this.platformJdbcTemplate = platformJdbcTemplate;
+        this.jdbcTemplate = jdbcTemplate;
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(readOnly = true)
@@ -80,9 +86,45 @@ public class SloMetricsService {
         );
     }
 
+    private static double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private long countUploadsSince(Instant since, String status) {
+        return sumAcrossTenants(tenant -> {
+            if (status == null) {
+                return queryCount(
+                        "select count(*) from sbom_uploads where uploaded_at >= ?",
+                        java.sql.Timestamp.from(since)
+                );
+            }
+            return queryCount(
+                    "select count(*) from sbom_uploads where uploaded_at >= ? and upper(status) = ?",
+                    java.sql.Timestamp.from(since),
+                    status.toUpperCase()
+            );
+        });
+    }
+
+    private long queryCount(String sql, Object... args) {
+        Long value = jdbcTemplate.queryForObject(sql, Long.class, args);
+        return value == null ? 0L : value;
+    }
+
+    private long sumAcrossTenants(java.util.function.Function<Tenant, Long> aggregator) {
+        long total = 0L;
+        for (Tenant tenant : tenantService.listTenants()) {
+            total += tenantSchemaExecutionService.run(tenant, () -> {
+                Long value = aggregator.apply(tenant);
+                return value == null ? 0L : value;
+            });
+        }
+        return total;
+    }
+
     private SloEntry evaluateQueueDepth() {
-        long pending = queryCount(
-                "select count(*) from finding_delta_queue where upper(status) = 'PENDING'"
+        long pending = sumAcrossTenants(tenant ->
+                queryCount("select count(*) from finding_delta_queue where upper(status) = 'PENDING'")
         );
         return new SloEntry(
                 "delta_queue_depth",
@@ -96,17 +138,17 @@ public class SloMetricsService {
     }
 
     private SloEntry evaluateQueueStaleness(Instant now) {
-        // A visible item that has not been claimed after the threshold window
-        // indicates the poller is falling behind or has stalled.
         Instant staleThreshold = now.minus(queueStaleThresholdMinutes, ChronoUnit.MINUTES);
-        long staleCount = queryCount(
-                """
-                select count(*)
-                from finding_delta_queue
-                where upper(status) = 'PENDING'
-                  and visible_at <= ?
-                """,
-                java.sql.Timestamp.from(staleThreshold)
+        long staleCount = sumAcrossTenants(tenant ->
+                queryCount(
+                        """
+                        select count(*)
+                        from finding_delta_queue
+                        where upper(status) = 'PENDING'
+                          and visible_at <= ?
+                        """,
+                        java.sql.Timestamp.from(staleThreshold)
+                )
         );
         return new SloEntry(
                 "delta_queue_stale_visible",
@@ -117,28 +159,5 @@ public class SloMetricsService {
                 staleCount <= queueStaleMaxCount,
                 queueStaleThresholdMinutes + "m staleness window"
         );
-    }
-
-    private static double round2(double value) {
-        return Math.round(value * 100.0) / 100.0;
-    }
-
-    private long countUploadsSince(Instant since, String status) {
-        if (status == null) {
-            return queryCount(
-                    "select count(*) from sbom_uploads where uploaded_at >= ?",
-                    java.sql.Timestamp.from(since)
-            );
-        }
-        return queryCount(
-                "select count(*) from sbom_uploads where uploaded_at >= ? and upper(status) = ?",
-                java.sql.Timestamp.from(since),
-                status.toUpperCase()
-        );
-    }
-
-    private long queryCount(String sql, Object... args) {
-        Long value = platformJdbcTemplate.queryForObject(sql, Long.class, args);
-        return value == null ? 0L : value;
     }
 }

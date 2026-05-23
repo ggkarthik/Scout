@@ -25,13 +25,16 @@ public class InventoryComponentCpeMappingService {
 
     private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
     private final CpeDimensionService cpeDimensionService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public InventoryComponentCpeMappingService(
             InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
-            CpeDimensionService cpeDimensionService
+            CpeDimensionService cpeDimensionService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.inventoryComponentCpeMapRepository = inventoryComponentCpeMapRepository;
         this.cpeDimensionService = cpeDimensionService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -76,7 +79,7 @@ public class InventoryComponentCpeMappingService {
         if (component == null || component.getTenant() == null) {
             return;
         }
-        inventoryComponentCpeMapRepository.deleteByTenantAndComponent(component.getTenant(), component);
+        tenantSchemaExecutionService.run(component.getTenant(), () -> inventoryComponentCpeMapRepository.deleteByComponent(component));
     }
 
     private void syncTenantComponentMappings(
@@ -101,8 +104,10 @@ public class InventoryComponentCpeMappingService {
         }
 
         Map<String, CpeDim> cpeDimsByNormalized = cpeDimensionService.resolveOrCreateAllByNormalizedCpe(allNormalizedCpes);
-        List<InventoryComponentCpeMap> existing = inventoryComponentCpeMapRepository
-                .findByTenant_IdAndComponent_IdIn(tenant.getId(), componentIds);
+        List<InventoryComponentCpeMap> existing = tenantSchemaExecutionService.run(
+                tenant,
+                () -> inventoryComponentCpeMapRepository.findByComponent_IdIn(componentIds)
+        );
 
         Map<UUID, List<InventoryComponentCpeMap>> existingByComponentId = new HashMap<>();
         for (InventoryComponentCpeMap row : existing) {

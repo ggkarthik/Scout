@@ -23,6 +23,7 @@ public class FindingCorrelationProjectionService {
     private final RiskPolicyService riskPolicyService;
     private final PrecedenceResolverService precedenceResolverService;
     private final FindingCorrelationAnalysisService findingCorrelationAnalysisService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FindingCorrelationProjectionService(
             InventoryComponentRepository inventoryComponentRepository,
@@ -30,7 +31,8 @@ public class FindingCorrelationProjectionService {
             CorrelationCandidateService correlationCandidateService,
             RiskPolicyService riskPolicyService,
             PrecedenceResolverService precedenceResolverService,
-            FindingCorrelationAnalysisService findingCorrelationAnalysisService
+            FindingCorrelationAnalysisService findingCorrelationAnalysisService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.findingRepository = findingRepository;
@@ -38,12 +40,15 @@ public class FindingCorrelationProjectionService {
         this.riskPolicyService = riskPolicyService;
         this.precedenceResolverService = precedenceResolverService;
         this.findingCorrelationAnalysisService = findingCorrelationAnalysisService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional(readOnly = true)
     public NotApplicableProjection projectNotApplicableByCorrelation(Tenant tenant) {
-        List<InventoryComponent> components = inventoryComponentRepository
-                .findByTenantAndComponentStatusOrderByLastObservedAtDesc(tenant, InventoryComponentStatus.ACTIVE);
+        List<InventoryComponent> components = tenantSchemaExecutionService.run(
+                tenant,
+                () -> inventoryComponentRepository.findByComponentStatusOrderByLastObservedAtDesc(InventoryComponentStatus.ACTIVE)
+        );
         if (components.isEmpty()) {
             return new NotApplicableProjection(0, 0, Map.of());
         }
@@ -51,7 +56,7 @@ public class FindingCorrelationProjectionService {
         CorrelationCandidateService.CandidateBundle candidateBundle =
                 correlationCandidateService.buildCandidateBundle(components);
         Map<String, Finding> existingByKey = new HashMap<>();
-        for (Finding finding : findingRepository.findByTenantOrderByUpdatedAtDesc(tenant)) {
+        for (Finding finding : tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc())) {
             existingByKey.put(exposureKey(finding.getComponent().getId(), finding.getVulnerability().getId()), finding);
         }
         RiskPolicy policy = riskPolicyService.getOrCreate(tenant);

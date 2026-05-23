@@ -596,6 +596,9 @@ export function FindingDetailPage() {
                 <KVRow label="Status">
                   <span className={statusCls(currentFinding)}>{statusLabel(currentFinding)}</span>
                 </KVRow>
+                <KVRow label="Created By">
+                  {currentFinding.creationSource === 'MANUAL' ? 'Manual' : 'Automatic'}
+                </KVRow>
                 {(() => {
                   const p = computeFindingPriorityScore(currentFinding, policyQuery.data);
                   const cls = `risk-score-badge risk-score-badge--${riskScoreLabel(p.score).toLowerCase()}`;

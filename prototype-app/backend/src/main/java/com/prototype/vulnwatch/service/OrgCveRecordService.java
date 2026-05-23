@@ -50,17 +50,20 @@ public class OrgCveRecordService {
     private final VulnerabilityRepository vulnerabilityRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final TenantRepository tenantRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public OrgCveRecordService(
             OrgCveRecordRepository orgCveRecordRepository,
             VulnerabilityRepository vulnerabilityRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
-            TenantRepository tenantRepository
+            TenantRepository tenantRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.orgCveRecordRepository = orgCveRecordRepository;
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.tenantRepository = tenantRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -107,6 +110,10 @@ public class OrgCveRecordService {
 
     @Transactional
     public int refreshForTenantAndVulnerabilities(Tenant tenant, Collection<UUID> vulnerabilityIds) {
+        return tenantSchemaExecutionService.run(tenant, () -> refreshForTenantAndVulnerabilitiesInSchema(tenant, vulnerabilityIds));
+    }
+
+    private int refreshForTenantAndVulnerabilitiesInSchema(Tenant tenant, Collection<UUID> vulnerabilityIds) {
         if (tenant == null || tenant.getId() == null || vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return 0;
         }
@@ -138,7 +145,7 @@ public class OrgCveRecordService {
                 .toList();
 
         Map<UUID, OrgCveRecord> existingByVulnerability = new HashMap<>();
-        orgCveRecordRepository.findByTenantAndVulnerability_IdIn(tenant, existingVulnerabilityIds).forEach(record -> {
+        orgCveRecordRepository.findByVulnerability_IdIn(existingVulnerabilityIds).forEach(record -> {
             if (record.getVulnerability() != null && record.getVulnerability().getId() != null) {
                 existingByVulnerability.put(record.getVulnerability().getId(), record);
             }
@@ -261,7 +268,7 @@ public class OrgCveRecordService {
         if (tenant == null || tenant.getId() == null || vulnerability == null) {
             return false;
         }
-        return orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
+        return tenantSchemaExecutionService.run(tenant, () -> orgCveRecordRepository.findByVulnerability(vulnerability))
                 .map(record -> record.isActivelySuppressed(at))
                 .orElse(false);
     }
@@ -280,18 +287,20 @@ public class OrgCveRecordService {
             throw new IllegalArgumentException("Tenant and vulnerability are required");
         }
         Instant now = suppressedAt == null ? Instant.now() : suppressedAt;
-        OrgCveRecord record = orgCveRecordRepository.findByTenantIdAndVulnerability(tenant.getId(), vulnerability)
-                .orElseGet(() -> initializeRecord(tenant, vulnerability, now));
-        record.setSuppressionReason(trimToNull(reason));
-        record.setSuppressionJustification(trimToNull(justification));
-        record.setSuppressedBy(trimToNull(suppressedBy));
-        record.setSuppressedAt(now);
-        record.setSuppressedUntil(suppressedUntil);
-        if (record.getLastEvaluatedAt() == null) {
-            record.setLastEvaluatedAt(now);
-        }
-        record.touch();
-        return orgCveRecordRepository.save(record);
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            OrgCveRecord record = orgCveRecordRepository.findByVulnerability(vulnerability)
+                    .orElseGet(() -> initializeRecord(tenant, vulnerability, now));
+            record.setSuppressionReason(trimToNull(reason));
+            record.setSuppressionJustification(trimToNull(justification));
+            record.setSuppressedBy(trimToNull(suppressedBy));
+            record.setSuppressedAt(now);
+            record.setSuppressedUntil(suppressedUntil);
+            if (record.getLastEvaluatedAt() == null) {
+                record.setLastEvaluatedAt(now);
+            }
+            record.touch();
+            return orgCveRecordRepository.save(record);
+        });
     }
 
     private boolean applySnapshot(OrgCveRecord record, OrgCveSnapshot snapshot) {

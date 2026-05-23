@@ -15,6 +15,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "vex_assertions",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_vex_assertions_target", columnNames = "target_id"),

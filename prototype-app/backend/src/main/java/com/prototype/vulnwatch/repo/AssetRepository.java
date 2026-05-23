@@ -13,10 +13,10 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface AssetRepository extends JpaRepository<Asset, UUID> {
+    List<Asset> findAllByOrderByNameAsc();
     List<Asset> findByTenant(Tenant tenant);
-    long countByTenant(Tenant tenant);
-    Optional<Asset> findByTenantAndIdentifier(Tenant tenant, String identifier);
     List<Asset> findByTenant_IdAndIdentifierIn(UUID tenantId, Collection<String> identifiers);
+    List<Asset> findByIdentifierIn(Collection<String> identifiers);
     Optional<Asset> findByIdentifier(String identifier);
     List<Asset> findByState(AssetState state);
 
@@ -31,36 +31,33 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     @Query("select distinct a.supportGroup from Asset a where a.tenant = :tenant and a.supportGroup is not null order by a.supportGroup")
     List<String> findDistinctSupportGroupsByTenant(@Param("tenant") Tenant tenant);
+    @Query("select distinct a.supportGroup from Asset a where a.supportGroup is not null order by a.supportGroup")
+    List<String> findDistinctSupportGroups();
 
     @Query("select distinct a.assignedTo from Asset a where a.tenant = :tenant and a.assignedTo is not null order by a.assignedTo")
     List<String> findDistinctAssignedToByTenant(@Param("tenant") Tenant tenant);
+    @Query("select distinct a.assignedTo from Asset a where a.assignedTo is not null order by a.assignedTo")
+    List<String> findDistinctAssignedTo();
 
-    @Query("select a from Asset a where a.tenant = :tenant and a.cloudProvider is not null order by a.name")
-    List<Asset> findByTenantAndCloudProviderNotNull(@Param("tenant") Tenant tenant);
-
-    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndType(
-            UUID tenantId,
+    long countByCloudProviderAndCloudAccountIdAndType(
             String cloudProvider,
             String cloudAccountId,
             com.prototype.vulnwatch.domain.AssetType type
     );
 
-    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmManagedTrue(
-            UUID tenantId,
+    long countByCloudProviderAndCloudAccountIdAndTypeAndSsmManagedTrue(
             String cloudProvider,
             String cloudAccountId,
             com.prototype.vulnwatch.domain.AssetType type
     );
 
-    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndMissingIamInstanceProfileTrue(
-            UUID tenantId,
+    long countByCloudProviderAndCloudAccountIdAndTypeAndMissingIamInstanceProfileTrue(
             String cloudProvider,
             String cloudAccountId,
             com.prototype.vulnwatch.domain.AssetType type
     );
 
-    long countByTenant_IdAndCloudProviderAndCloudAccountIdAndTypeAndSsmInventoryAvailableTrue(
-            UUID tenantId,
+    long countByCloudProviderAndCloudAccountIdAndTypeAndSsmInventoryAvailableTrue(
             String cloudProvider,
             String cloudAccountId,
             com.prototype.vulnwatch.domain.AssetType type

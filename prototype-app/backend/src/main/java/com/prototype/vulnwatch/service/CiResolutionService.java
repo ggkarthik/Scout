@@ -48,6 +48,7 @@ public class CiResolutionService {
     private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Value("${app.cmdb.servicenow.base-url:}")
     private String serviceNowBaseUrl;
@@ -65,7 +66,8 @@ public class CiResolutionService {
             OutboundHttpClient outboundHttpClient,
             OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper,
-            ServiceNowCmdbConfigService serviceNowCmdbConfigService
+            ServiceNowCmdbConfigService serviceNowCmdbConfigService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.ciRepository = ciRepository;
         this.ciAliasRepository = ciAliasRepository;
@@ -74,6 +76,7 @@ public class CiResolutionService {
         this.outboundPolicyFactory = outboundPolicyFactory;
         this.objectMapper = objectMapper;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Transactional
@@ -194,7 +197,7 @@ public class CiResolutionService {
 
         Map<String, Ci> ciBySysId = new LinkedHashMap<>();
         if (!sysIds.isEmpty()) {
-            for (Ci ci : ciRepository.findByTenant_IdAndSysIdIn(tenant.getId(), sysIds)) {
+            for (Ci ci : ciRepository.findBySysIdIn(sysIds)) {
                 if (ci != null && hasText(ci.getSysId())) {
                     ciBySysId.put(ci.getSysId(), ci);
                 }
@@ -203,7 +206,7 @@ public class CiResolutionService {
 
         Map<String, Asset> assetsByIdentifier = new LinkedHashMap<>();
         if (!assetIdentifiers.isEmpty()) {
-            for (Asset asset : assetRepository.findByTenant_IdAndIdentifierIn(tenant.getId(), assetIdentifiers)) {
+            for (Asset asset : assetRepository.findByIdentifierIn(assetIdentifiers)) {
                 if (asset != null && hasText(asset.getIdentifier())) {
                     assetsByIdentifier.put(asset.getIdentifier(), asset);
                 }
@@ -218,7 +221,7 @@ public class CiResolutionService {
         Map<String, CiAlias> aliasBySourceAndName = new LinkedHashMap<>();
         Map<String, List<CiAlias>> aliasesByNormalizedName = new LinkedHashMap<>();
         if (!aliasNames.isEmpty()) {
-            for (CiAlias alias : ciAliasRepository.findByTenant_IdAndNormalizedAliasNameIn(tenant.getId(), aliasNames)) {
+            for (CiAlias alias : ciAliasRepository.findByNormalizedAliasNameIn(aliasNames)) {
                 if (alias == null || !hasText(alias.getNormalizedAliasName())) {
                     continue;
                 }
@@ -333,18 +336,17 @@ public class CiResolutionService {
         if (!hasText(normalized) || tenant == null || tenant.getId() == null) {
             return null;
         }
-        return ciAliasRepository.findByTenant_IdAndNormalizedAliasNameAndSourceSystem(
-                        tenant.getId(),
+        return ciAliasRepository.findByNormalizedAliasNameAndSourceSystem(
                         normalized,
                         sourceSystem
                 )
                 .map(alias -> new Resolution(alias.getCi(), false, false, isLowConfidence(alias.getConfidence()), "alias-cache"))
                 .orElseGet(() -> {
-                    List<CiAlias> aliases = ciAliasRepository.findByTenant_IdAndNormalizedAliasName(tenant.getId(), normalized);
+                    List<CiAlias> aliases = ciAliasRepository.findByNormalizedAliasName(normalized);
                     if (aliases.isEmpty()) {
                         String shortHost = shortHost(normalized);
                         if (!shortHost.equals(normalized)) {
-                            aliases = ciAliasRepository.findByTenant_IdAndNormalizedAliasName(tenant.getId(), shortHost);
+                            aliases = ciAliasRepository.findByNormalizedAliasName(shortHost);
                         }
                     }
                     if (aliases.isEmpty()) {
@@ -412,7 +414,7 @@ public class CiResolutionService {
             String method
     ) {
         Instant now = Instant.now();
-        Ci ci = ciRepository.findByTenantAndSysId(tenant, sysId).orElse(null);
+        Ci ci = tenantSchemaExecutionService.run(tenant, () -> ciRepository.findBySysId(sysId)).orElse(null);
         boolean created = ci == null;
         Asset asset = null;
         if (created) {
@@ -424,7 +426,7 @@ public class CiResolutionService {
         }
         if (asset == null) {
             String assetIdentifier = "ci:" + sysId.toLowerCase(Locale.ROOT);
-            asset = assetRepository.findByTenantAndIdentifier(tenant, assetIdentifier).orElseGet(Asset::new);
+            asset = tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByIdentifier(assetIdentifier)).orElseGet(Asset::new);
             if (asset.getId() == null) {
                 asset.setTenant(tenant);
                 asset.setIdentifier(assetIdentifier);
@@ -582,8 +584,7 @@ public class CiResolutionService {
             return false;
         }
         Instant now = Instant.now();
-        CiAlias alias = ciAliasRepository.findByTenant_IdAndNormalizedAliasNameAndSourceSystem(
-                        ci.getTenant().getId(),
+        CiAlias alias = ciAliasRepository.findByNormalizedAliasNameAndSourceSystem(
                         normalizedAliasName,
                         sourceSystem
                 )

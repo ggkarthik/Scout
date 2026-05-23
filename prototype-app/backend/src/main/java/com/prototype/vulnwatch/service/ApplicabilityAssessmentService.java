@@ -29,6 +29,7 @@ public class ApplicabilityAssessmentService {
     private final VulnerabilityRepository vulnerabilityRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Transactional(readOnly = true)
     public ApplicabilityAssessment getAssessment(Long tenantId, Long assessmentId) {
@@ -121,16 +122,16 @@ public class ApplicabilityAssessmentService {
     }
 
     private ApplicabilityAssessment getAssessment(Tenant tenant, Long assessmentId) {
-        return assessmentRepository.findByIdAndTenantId(assessmentId, tenant.getId())
+        return tenantSchemaExecutionService.run(tenant, () -> assessmentRepository.findById(assessmentId))
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found: " + assessmentId));
     }
 
     private List<ApplicabilityAssessment> getAssessmentsByCve(Tenant tenant, String cveId) {
-        return assessmentRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        return tenantSchemaExecutionService.run(tenant, () -> assessmentRepository.findByCveId(cveId));
     }
 
     private Page<ApplicabilityAssessment> getAssessments(Tenant tenant, Pageable pageable) {
-        return assessmentRepository.findByTenantId(tenant.getId(), pageable);
+        return tenantSchemaExecutionService.run(tenant, () -> assessmentRepository.findAll(pageable));
     }
 
     private ApplicabilityAssessment createAssessment(Tenant tenant, String cveId, String assessedBy) {
@@ -231,7 +232,10 @@ public class ApplicabilityAssessmentService {
 
     private ApplicabilityAssessment submitAssessment(Tenant tenant, String cveId, SubmitAssessmentRequest request, String userId) {
         // Find existing in-progress assessment or create new
-        List<ApplicabilityAssessment> existing = assessmentRepository.findByTenantIdAndCveId(tenant.getId(), cveId);
+        List<ApplicabilityAssessment> existing = tenantSchemaExecutionService.run(
+                tenant,
+                () -> assessmentRepository.findByCveId(cveId)
+        );
         ApplicabilityAssessment assessment = existing.stream()
                 .filter(a -> a.getStatus() == ApplicabilityAssessment.AssessmentStatus.IN_PROGRESS)
                 .findFirst()
@@ -271,7 +275,10 @@ public class ApplicabilityAssessmentService {
         if (analystDispositions != null && !analystDispositions.isEmpty()) {
             Vulnerability vulnerability = saved.getVulnerability();
             List<ComponentVulnerabilityState> states =
-                    componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_Id(tenant.getId(), vulnerability.getId());
+                    tenantSchemaExecutionService.run(
+                            tenant,
+                            () -> componentVulnerabilityStateRepository.findByVulnerability_Id(vulnerability.getId())
+                    );
             boolean anyChanged = false;
             for (ComponentVulnerabilityState state : states) {
                 if (state.getComponent() == null || state.getComponent().getId() == null) continue;
@@ -300,7 +307,7 @@ public class ApplicabilityAssessmentService {
             }
         }
 
-        return assessmentRepository.findByIdAndTenantId(saved.getId(), tenant.getId()).orElse(saved);
+        return tenantSchemaExecutionService.run(tenant, () -> assessmentRepository.findById(saved.getId())).orElse(saved);
     }
 
     private void deleteAssessment(Tenant tenant, Long assessmentId) {

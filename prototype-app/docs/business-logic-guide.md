@@ -1,5 +1,7 @@
 # VulnWatch — End-to-End Business Logic Guide
 
+Last updated: 2026-05-20
+
 **Audience:** Business stakeholders, product owners, and process reviewers
 **Purpose:** Plain-language explanation of every decision, rule, and process inside the application — written so that tweaks to the logic can be proposed without needing to read code
 **How to use it:** Each section has a short summary followed by a numbered, step-by-step walkthrough. Every section is detailed enough to draw a flow diagram from.

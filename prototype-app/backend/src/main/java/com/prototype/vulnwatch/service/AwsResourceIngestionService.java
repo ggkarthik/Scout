@@ -52,19 +52,22 @@ public class AwsResourceIngestionService {
     private final CmdbIngestionService cmdbIngestionService;
     private final ObjectMapper objectMapper;
     private final EntityManager entityManager;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public AwsResourceIngestionService(
             AssetRepository assetRepository,
             CiRepository ciRepository,
             CmdbIngestionService cmdbIngestionService,
             ObjectMapper objectMapper,
-            EntityManager entityManager
+            EntityManager entityManager,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.assetRepository = assetRepository;
         this.ciRepository = ciRepository;
         this.cmdbIngestionService = cmdbIngestionService;
         this.objectMapper = objectMapper;
         this.entityManager = entityManager;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public record IngestionResult(
@@ -197,16 +200,16 @@ public class AwsResourceIngestionService {
 
     private void upsertCi(AwsResourceRecord record, Asset asset, Tenant tenant) {
         String sysId = asset.getIdentifier();
-        Ci ci = ciRepository.findByTenantAndSysId(tenant, sysId)
-                .or(() -> asset.getId() == null || tenant.getId() == null
+        Ci ci = tenantSchemaExecutionService.run(tenant, () -> ciRepository.findBySysId(sysId)
+                .or(() -> asset.getId() == null
                         ? Optional.empty()
-                        : ciRepository.findByTenant_IdAndAsset_Id(tenant.getId(), asset.getId()))
+                        : ciRepository.findByAsset_Id(asset.getId()))
                 .orElseGet(() -> {
                     Ci c = new Ci();
                     c.setTenant(tenant);
                     c.setAsset(asset);
                     return c;
-                });
+                }));
         ci.setSysId(sysId);
         ci.setAsset(asset);
         ci.setDisplayName(hasText(record.name()) ? record.name() : sysId);
@@ -384,7 +387,7 @@ public class AwsResourceIngestionService {
                 || observedScopes == null || observedScopes.isEmpty()) {
             return 0;
         }
-        List<Asset> candidates = assetRepository.findByTenant(tenant).stream()
+        List<Asset> candidates = tenantSchemaExecutionService.run(tenant, () -> assetRepository.findAll()).stream()
                 .filter(a -> "aws".equals(a.getCloudProvider()))
                 .filter(a -> awsAccountId.equals(a.getCloudAccountId()))
                 .filter(a -> observedScopes.contains(scopeFor(a.getCloudResourceType(), a.getCloudRegion())))
@@ -409,11 +412,11 @@ public class AwsResourceIngestionService {
             AwsResourceRecord record,
             String resourceIdentifier
     ) {
-        Optional<Asset> exact = assetRepository.findByTenantAndIdentifier(tenant, resourceIdentifier);
+        Optional<Asset> exact = tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByIdentifier(resourceIdentifier));
         if (exact.isPresent() || !hasText(record.arn()) || resourceIdentifier.equals(record.arn())) {
             return exact;
         }
-        return assetRepository.findByTenantAndIdentifier(tenant, record.arn());
+        return tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByIdentifier(record.arn()));
     }
 
     private String canonicalResourceIdentifier(AwsResourceRecord record, String fallbackAccountId) {

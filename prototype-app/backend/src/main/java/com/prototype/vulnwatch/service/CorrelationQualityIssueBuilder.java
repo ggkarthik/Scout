@@ -50,8 +50,7 @@ public class CorrelationQualityIssueBuilder {
                 JOIN inventory_components ic ON ic.id = state.component_id
                 JOIN assets a ON a.id = ic.asset_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND lower(coalesce(state.applicability_reason, '')) = 'no_candidates'
                   AND state.analyst_disposition IS NULL
                 GROUP BY ic.id, ic.asset_id, a.name, a.identifier, a.type, u.ingestion_source_system, ic.ecosystem, ic.package_name, ic.version
@@ -130,8 +129,7 @@ public class CorrelationQualityIssueBuilder {
                 JOIN inventory_components ic ON ic.id = state.component_id
                 JOIN assets a ON a.id = ic.asset_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND trim(coalesce(state.matched_by, '')) <> ''
                   AND state.analyst_disposition IS NULL
                 GROUP BY ic.id, ic.asset_id, a.name, a.identifier, a.type, u.ingestion_source_system, ic.ecosystem, ic.package_name, ic.version
@@ -213,8 +211,7 @@ public class CorrelationQualityIssueBuilder {
                 JOIN inventory_components ic ON ic.id = state.component_id
                 JOIN assets a ON a.id = ic.asset_id
                 LEFT JOIN sbom_uploads u ON u.id = ic.sbom_upload_id
-                WHERE state.tenant_id = :tenantId
-                  AND ic.component_status = 'ACTIVE'
+                WHERE ic.component_status = 'ACTIVE'
                   AND state.confidence_score IS NOT NULL
                   AND state.confidence_score < :confidenceThreshold
                   AND trim(coalesce(state.matched_by, '')) <> ''

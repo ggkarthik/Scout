@@ -3,9 +3,12 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +59,8 @@ class DemoLifecycleServiceTest {
     private DemoTenantPurgeService demoTenantPurgeService;
     @Mock
     private TenantLifecycleGuardService tenantLifecycleGuardService;
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Test
     void approveMarksRequestAndInviteSentWhenEmailDeliverySucceeds() {
@@ -255,6 +260,34 @@ class DemoLifecycleServiceTest {
     }
 
     @Test
+    void resendInviteRejectsAlreadyAcceptedInvite() {
+        DemoRequest request = pendingRequest();
+        request.setStatus("SENT");
+        Tenant tenant = provisionedTenant();
+        request.setTenantId(tenant.getId());
+
+        DemoInvite acceptedInvite = new DemoInvite();
+        ReflectionTestUtils.setField(acceptedInvite, "id", UUID.randomUUID());
+        acceptedInvite.setRequest(request);
+        acceptedInvite.setTenant(tenant);
+        acceptedInvite.setEmail(request.getEmail());
+        acceptedInvite.setToken("invite-token-accepted");
+        acceptedInvite.setStatus("ACCEPTED");
+        acceptedInvite.setAcceptedAt(java.time.Instant.now());
+        acceptedInvite.setExpiresAt(java.time.Instant.now().plusSeconds(86400));
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId())).thenReturn(List.of(acceptedInvite));
+
+        DemoLifecycleService service = service();
+        DemoAccessException ex = assertThrows(
+                DemoAccessException.class,
+                () -> service.resendInvite(request.getId())
+        );
+        assertEquals("DEMO_INVITE_ALREADY_ACCEPTED", ex.getCode());
+    }
+
+    @Test
     void issueSetupLinkMarksInviteAcceptedAndReturnsSetupUrl() {
         DemoRequest request = pendingRequest();
         request.setStatus("PROVISIONED");
@@ -315,6 +348,9 @@ class DemoLifecycleServiceTest {
     }
 
     private DemoLifecycleService service() {
+        lenient().doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
         return new DemoLifecycleService(
                 demoRequestRepository,
                 demoInviteRepository,
@@ -327,6 +363,7 @@ class DemoLifecycleServiceTest {
                 sbomUploadRepository,
                 demoTenantPurgeService,
                 tenantLifecycleGuardService,
+                tenantSchemaExecutionService,
                 "https://app.example.com"
         );
     }

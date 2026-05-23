@@ -1,6 +1,8 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -17,8 +19,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class FindingCorrelationProjectionServiceTest {
 
     @Mock
@@ -38,6 +43,8 @@ class FindingCorrelationProjectionServiceTest {
 
     @Mock
     private FindingCorrelationAnalysisService findingCorrelationAnalysisService;
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     private FindingCorrelationProjectionService findingCorrelationProjectionService;
 
@@ -49,8 +56,12 @@ class FindingCorrelationProjectionServiceTest {
                 correlationCandidateService,
                 riskPolicyService,
                 precedenceResolverService,
-                findingCorrelationAnalysisService
+                findingCorrelationAnalysisService,
+                tenantSchemaExecutionService
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
     }
 
     @Test
@@ -58,8 +69,7 @@ class FindingCorrelationProjectionServiceTest {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
 
-        when(inventoryComponentRepository.findByTenantAndComponentStatusOrderByLastObservedAtDesc(
-                org.mockito.ArgumentMatchers.eq(tenant),
+        when(inventoryComponentRepository.findByComponentStatusOrderByLastObservedAtDesc(
                 org.mockito.ArgumentMatchers.any()
         )).thenReturn(List.of());
 
@@ -143,13 +153,12 @@ class FindingCorrelationProjectionServiceTest {
                         Map.of()
                 );
 
-        when(inventoryComponentRepository.findByTenantAndComponentStatusOrderByLastObservedAtDesc(
-                org.mockito.ArgumentMatchers.eq(tenant),
+        when(inventoryComponentRepository.findByComponentStatusOrderByLastObservedAtDesc(
                 org.mockito.ArgumentMatchers.any()
         )).thenReturn(List.of(component));
         when(correlationCandidateService.buildCandidateBundle(List.of(component))).thenReturn(bundle);
         when(correlationCandidateService.candidatesForComponent(component, bundle)).thenReturn(List.of(candidateMatch));
-        when(findingRepository.findByTenantOrderByUpdatedAtDesc(tenant)).thenReturn(List.of());
+        when(findingRepository.findAllByOrderByUpdatedAtDesc()).thenReturn(List.of());
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(new com.prototype.vulnwatch.domain.RiskPolicy());
         when(findingCorrelationAnalysisService.buildCandidateDecisionsByVulnerability(
                 org.mockito.ArgumentMatchers.eq(component),

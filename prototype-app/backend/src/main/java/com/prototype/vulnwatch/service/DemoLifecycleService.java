@@ -44,6 +44,7 @@ public class DemoLifecycleService {
     private final SbomUploadRepository sbomUploadRepository;
     private final DemoTenantPurgeService demoTenantPurgeService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final String appBaseUrl;
 
@@ -59,6 +60,7 @@ public class DemoLifecycleService {
             SbomUploadRepository sbomUploadRepository,
             DemoTenantPurgeService demoTenantPurgeService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
             @Value("${app.demo.app-base-url:http://localhost:5173}") String appBaseUrl
     ) {
         this.demoRequestRepository = demoRequestRepository;
@@ -72,6 +74,7 @@ public class DemoLifecycleService {
         this.sbomUploadRepository = sbomUploadRepository;
         this.demoTenantPurgeService = demoTenantPurgeService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
     }
 
@@ -110,7 +113,10 @@ public class DemoLifecycleService {
             tenant = tenantRepository.findById(request.getTenantId())
                     .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
         } else {
-            tenant = provisionTenant(request, actor);
+            tenant = demoRequestRepository
+                    .findFirstByEmailIgnoreCaseAndTenantIdIsNotNullOrderByRequestedAtAsc(request.getEmail())
+                    .flatMap(prior -> tenantRepository.findById(prior.getTenantId()))
+                    .orElseGet(() -> provisionTenant(request, actor));
         }
 
         DemoInvite invite = latestInvite(requestId);
@@ -154,6 +160,9 @@ public class DemoLifecycleService {
             Tenant tenant = tenantRepository.findById(request.getTenantId())
                     .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
             invite = createInvite(request, tenant);
+        }
+        if ("ACCEPTED".equalsIgnoreCase(invite.getStatus()) || invite.getAcceptedAt() != null) {
+            throw new DemoAccessException("DEMO_INVITE_ALREADY_ACCEPTED", "This invite has already been accepted and cannot be resent", HttpStatus.CONFLICT);
         }
         invite = deliverInvite(invite, request);
         request.setStatus(requestStatusForInvite(invite));
@@ -240,7 +249,7 @@ public class DemoLifecycleService {
     public DemoStatusResponse statusForTenant(Tenant tenant) {
         boolean demo = isDemoTenant(tenant);
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
-        long uploads = sbomUploadRepository.countByTenantAndUploadedAtGreaterThanEqual(tenant, since);
+        long uploads = tenantSchemaExecutionService.run(tenant, () -> sbomUploadRepository.countByUploadedAtGreaterThanEqual(since));
         return new DemoStatusResponse(
                 demo,
                 tenant.getPlanCode(),
@@ -277,7 +286,10 @@ public class DemoLifecycleService {
             return;
         }
         int max = tenant.getMaxDailySbomUploads() == null ? 0 : Math.max(0, tenant.getMaxDailySbomUploads());
-        long current = sbomUploadRepository.countByTenantAndUploadedAtGreaterThanEqual(tenant, Instant.now().minus(24, ChronoUnit.HOURS));
+        long current = tenantSchemaExecutionService.run(
+                tenant,
+                () -> sbomUploadRepository.countByUploadedAtGreaterThanEqual(Instant.now().minus(24, ChronoUnit.HOURS))
+        );
         if (current >= max) {
             throw new DemoAccessException("DEMO_QUOTA_EXCEEDED", "Demo SBOM upload limit reached for the last 24 hours", HttpStatus.TOO_MANY_REQUESTS);
         }
@@ -314,6 +326,7 @@ public class DemoLifecycleService {
         tenant.setDemoExpiresAt(expiresAt);
         tenant.setDemoCreatedBy(trimToNull(actor));
         tenant.setDemoSource("REQUEST_REVIEW");
+        tenant.setDemoOwnerEmail(request.getEmail());
         tenant.setMaxConnectorCount(25);
         tenant.setMaxServiceAccountCount(0);
         tenant.setMaxDailySbomUploads(5);
@@ -345,10 +358,13 @@ public class DemoLifecycleService {
             auditEventService.record("demo.invite.email.sent", "demo_invite", invite.getId().toString(), null);
         } else {
             invite.setStatus("ERROR");
+            String reasonJson = deliveryResult.detail() != null
+                    ? "{\"reason\":\"" + escapeJson(deliveryResult.detail()) + "\"}"
+                    : null;
             if (deliveryResult.state() == ResendEmailClient.DeliveryState.SKIPPED) {
-                auditEventService.record("demo.invite.email.skipped", "demo_invite", invite.getId().toString(), null);
+                auditEventService.record("demo.invite.email.skipped", "demo_invite", invite.getId().toString(), reasonJson);
             } else {
-                auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), null);
+                auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), reasonJson);
             }
         }
         return demoInviteRepository.save(invite);

@@ -28,6 +28,7 @@ const ALL_COLUMNS = [
   { key: 'package',        label: 'Package',        alwaysVisible: false },
   { key: 'severity',       label: 'Severity',       alwaysVisible: false },
   { key: 'status',         label: 'Status',         alwaysVisible: false },
+  { key: 'creationSource', label: 'Created By',     alwaysVisible: false },
   { key: 'risk',           label: 'Risk',           alwaysVisible: false },
   { key: 'priority',      label: 'S.AI Priority',  alwaysVisible: false },
   { key: 'ownerGroup',     label: 'Owner Group',    alwaysVisible: false },
@@ -44,7 +45,7 @@ type ColKey = typeof ALL_COLUMNS[number]['key'];
 
 const DEFAULT_VISIBLE: ColKey[] = [
   'findingId', 'cveId', 'asset', 'owner', 'supportGroup', 'package',
-  'severity', 'status', 'risk', 'priority', 'ownerGroup', 'assignedTo', 'dueDate', 'incidentId',
+  'severity', 'status', 'creationSource', 'risk', 'priority', 'ownerGroup', 'assignedTo', 'dueDate', 'incidentId',
 ];
 
 const SEV_COLORS: Record<string, string> = {
@@ -89,6 +90,7 @@ type ColFilters = {
   package:    string;
   severity:   string[];
   status:     string[];
+  creationSource: Array<'MANUAL' | 'AUTOMATIC'>;
   risk:       string;
   assignedTo: string;
   dueDate:    string;
@@ -99,6 +101,7 @@ const DEFAULT_COL_FILTERS: ColFilters = {
   findingId: '', cveId: '', asset: '', owner: '', supportGroup: '', package: '',
   severity: [],
   status: [],
+  creationSource: [],
   risk: '', assignedTo: '', dueDate: '', incidentId: '',
 };
 
@@ -140,6 +143,7 @@ function ownershipSupportGroup(row: Finding): string {
 function groupValue(r: Finding, key: string): string {
   if (key === 'severity')        return r.severity || 'UNKNOWN';
   if (key === 'status')          return r.status;
+  if (key === 'creationSource')  return r.creationSource;
   if (key === 'owner')           return ownershipDisplayName(r);
   if (key === 'assetName')       return r.assetName;
   if (key === 'packageName')     return r.packageName;
@@ -159,6 +163,7 @@ function applyColFilters(rows: Finding[], f: ColFilters, dueDateBand: DueDateBan
     if (f.package && !r.packageName.toLowerCase().includes(f.package.toLowerCase())) return false;
     if (f.severity.length > 0 && !f.severity.includes(r.severity)) return false;
     if (f.status.length > 0 && !f.status.includes(r.status)) return false;
+    if (f.creationSource.length > 0 && !f.creationSource.includes(r.creationSource)) return false;
     if (f.assignedTo && !(r.assignedTo ?? '').toLowerCase().includes(f.assignedTo.toLowerCase())) return false;
     if (f.incidentId && !(r.incidentId ?? '').toLowerCase().includes(f.incidentId.toLowerCase())) return false;
     if (f.risk) { const min = parseFloat(f.risk); if (!isNaN(min) && r.riskScore < min) return false; }
@@ -188,6 +193,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     ...DEFAULT_COL_FILTERS,
     severity: searchParams.getAll('severity').length ? searchParams.getAll('severity') : DEFAULT_COL_FILTERS.severity,
     status:   searchParams.getAll('status').length   ? searchParams.getAll('status')   : DEFAULT_COL_FILTERS.status,
+    creationSource: searchParams.getAll('creationSource').length
+      ? searchParams.getAll('creationSource').filter((value): value is 'MANUAL' | 'AUTOMATIC' => value === 'MANUAL' || value === 'AUTOMATIC')
+      : DEFAULT_COL_FILTERS.creationSource,
     cveId:    searchParams.get('vulnerabilityId') ?? '',
     package:  searchParams.get('packageName') ?? '',
     asset:    searchParams.get('assetName') ?? '',
@@ -230,6 +238,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     size: PAGE_SIZE,
     severity:        colFilters.severity.length > 0 ? colFilters.severity : undefined,
     status:          colFilters.status.length > 0   ? colFilters.status   : undefined,
+    creationSource:  colFilters.creationSource.length > 0 ? colFilters.creationSource : undefined,
     vulnerabilityId: colFilters.cveId.trim()    || undefined,
     packageName:     colFilters.package.trim()  || undefined,
   });
@@ -340,9 +349,19 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setColFilters(prev=>({ ...prev, status: prev.status.includes(v) ? prev.status.filter(s=>s!==v) : [...prev.status,v] }));
     setPage(0);
   }
+  function toggleCreationSourceFilter(v: 'MANUAL' | 'AUTOMATIC') {
+    setColFilters(prev=>({
+      ...prev,
+      creationSource: prev.creationSource.includes(v)
+        ? prev.creationSource.filter(source=>source!==v)
+        : [...prev.creationSource, v]
+    }));
+    setPage(0);
+  }
   function hasColFilter(key: ColKey): boolean {
     if (key==='severity') return colFilters.severity.length>0;
     if (key==='status')   return colFilters.status.length>0;
+    if (key==='creationSource') return colFilters.creationSource.length>0;
     if (key==='findingId') return !!colFilters.findingId;
     if (key==='cveId')    return !!colFilters.cveId;
     if (key==='asset')    return !!colFilters.asset;
@@ -358,6 +377,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   function clearColFilter(key: ColKey) {
     if (key==='severity')   setColFilter('severity',[]);
     else if (key==='status') setColFilter('status',[]);
+    else if (key==='creationSource') setColFilter('creationSource',[]);
     else if (key==='findingId') setColFilter('findingId','');
     else if (key==='cveId')  setColFilter('cveId','');
     else if (key==='asset')  setColFilter('asset','');
@@ -379,6 +399,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const activeChips: Array<{ label: string; onRemove: ()=>void }> = [];
   if (colFilters.severity.length>0) activeChips.push({ label:`Severity: ${colFilters.severity.join(', ')}`, onRemove:()=>setColFilter('severity',[]) });
   if (colFilters.status.length>0)   activeChips.push({ label:`Status: ${colFilters.status.map(fmt).join(', ')}`, onRemove:()=>setColFilter('status',[]) });
+  if (colFilters.creationSource.length>0) activeChips.push({ label:`Created By: ${colFilters.creationSource.map(fmt).join(', ')}`, onRemove:()=>setColFilter('creationSource',[]) });
   if (colFilters.cveId)    activeChips.push({ label:`CVE: ${colFilters.cveId}`,  onRemove:()=>setColFilter('cveId','') });
   if (colFilters.package)  activeChips.push({ label:`Package: ${colFilters.package}`, onRemove:()=>setColFilter('package','') });
   if (colFilters.asset)    activeChips.push({ label:`Asset: ${colFilters.asset}`, onRemove:()=>setColFilter('asset','') });
@@ -497,6 +518,16 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             ))}
           </div>
         )}
+        {colKey==='creationSource' && (
+          <div className="fpl-col-filter-checks">
+            {(['MANUAL','AUTOMATIC'] as const).map(v=>(
+              <label key={v} className="fpl-col-filter-check">
+                <input type="checkbox" checked={colFilters.creationSource.includes(v)} onChange={()=>toggleCreationSourceFilter(v)}/>
+                <span>{v === 'MANUAL' ? 'Manual' : 'Automatic'}</span>
+              </label>
+            ))}
+          </div>
+        )}
         {(['findingId','cveId','asset','owner','supportGroup','package','assignedTo','incidentId'] as readonly string[]).includes(colKey) && (
           <input autoFocus className="fpl-col-filter-input"
             placeholder={`Search ${ALL_COLUMNS.find(c=>c.key===colKey)?.label}…`}
@@ -568,6 +599,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     if (key==='package') return <div><div className="fpl-cell-main">{row.packageName}</div><div className="fpl-cell-sub mono">{row.packageVersion}</div></div>;
     if (key==='severity') return <span className={severityClass(row.severity)}>{row.severity}</span>;
     if (key==='status') return <span className={statusClass(row.status)}>{statusLabel(row)}</span>;
+    if (key==='creationSource') return <span className="fpl-assigned">{row.creationSource === 'MANUAL' ? 'Manual' : 'Automatic'}</span>;
     if (key==='risk') return <span className="fpl-risk">{row.riskScore.toFixed(1)}</span>;
     if (key==='priority') {
       const p = computeFindingPriorityScore(row, policyQuery.data);

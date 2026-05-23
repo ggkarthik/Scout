@@ -25,15 +25,16 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
         Long getResolvedCount();
     }
 
-    Optional<OrgCveRecord> findByTenantAndVulnerability_Id(Tenant tenant, UUID vulnerabilityId);
+    Optional<OrgCveRecord> findByVulnerability(Vulnerability vulnerability);
+    Optional<OrgCveRecord> findByVulnerability_Id(UUID vulnerabilityId);
 
-    List<OrgCveRecord> findByTenantAndSuppressedByRuleIdIsNull(Tenant tenant);
+    List<OrgCveRecord> findBySuppressedByRuleIdIsNull();
 
-    long countByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+    long countBySuppressedByRuleId(UUID suppressedByRuleId);
 
-    List<OrgCveRecord> findByTenantAndSuppressedByRuleId(Tenant tenant, UUID suppressedByRuleId);
+    List<OrgCveRecord> findBySuppressedByRuleId(UUID suppressedByRuleId);
 
-    List<OrgCveRecord> findByTenantAndVulnerability_IdIn(Tenant tenant, Collection<UUID> vulnerabilityIds);
+    List<OrgCveRecord> findByVulnerability_IdIn(Collection<UUID> vulnerabilityIds);
 
     @Query("""
             select distinct o.tenant.id
@@ -49,11 +50,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             """)
     java.time.Instant findLatestLastEvaluatedAt(@Param("tenant") Tenant tenant);
 
-    long countByTenant(Tenant tenant);
+    long countByApplicabilityState(ApplicabilityState applicabilityState);
 
-    long countByTenantAndApplicabilityState(Tenant tenant, ApplicabilityState applicabilityState);
-
-    long countByTenantAndImpactedTrue(Tenant tenant);
+    long countByImpactedTrue();
 
     @Query("select o from OrgCveRecord o where o.tenant.id = :tenantId and o.vulnerability = :vulnerability")
     Optional<OrgCveRecord> findByTenantIdAndVulnerability(@Param("tenantId") UUID tenantId,

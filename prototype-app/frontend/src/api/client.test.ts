@@ -59,4 +59,30 @@ describe('api client auth headers', () => {
     expect(headers.get('X-Platform-Action-Tenant')).toBe('tenant-123');
     expect(headers.get('X-Platform-Action-Time')).toBeTruthy();
   });
+
+  it('accepts namespaced Auth0 roles claims for platform-owner confirmation headers', async () => {
+    setStoredAuthToken(buildToken({
+      sub: 'owner@example.com',
+      'https://hossstore.in/roles': ['PLATFORM_OWNER'],
+      active_tenant_id: 'tenant-456'
+    }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json'
+      }
+    }));
+
+    await apiRequest('/findings', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'update' })
+    });
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(window.confirm).toHaveBeenCalled();
+    expect(headers.get('X-Platform-Action-Confirm')).toBe('true');
+    expect(headers.get('X-Platform-Action-Tenant')).toBe('tenant-456');
+  });
 });

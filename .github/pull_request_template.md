@@ -38,6 +38,18 @@ the testability gap as a follow-up issue if it exists. -->
 - Blast radius:
 - Rollback plan:
 
+## Documentation
+
+<!-- Check "No docs impact" if this PR changes no user-visible behavior, APIs, or architecture.
+Otherwise check every doc you updated. The CI docs-check job will warn if source changed without docs. -->
+
+- [ ] No docs impact
+- [ ] `docs/architecture.md` — structural or cross-cutting changes
+- [ ] `docs/backend.md` — new or changed API endpoints / services
+- [ ] `docs/frontend.md` — new components, routes, or pages
+- [ ] `docs/database.md` — schema or migration changes
+- [ ] `docs/business-logic-guide.md` — business logic changes
+
 ## Pre-merge checklist
 
 - [ ] `mvn -Ppostgres-it verify` passes locally (backend changes)

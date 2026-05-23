@@ -877,6 +877,16 @@ body {
   font-size: 0.9rem;
 }
 
+.settings-menu-item-logout {
+  border-top: 2px solid color-mix(in srgb, var(--border) 72%, transparent);
+  min-height: unset;
+  padding: 12px 20px;
+}
+
+.settings-menu-item-logout span {
+  color: var(--muted);
+}
+
 .test-persona-row small {
   color: var(--muted);
   font-size: 0.82rem;

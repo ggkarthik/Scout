@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -60,6 +61,8 @@ class DashboardServiceTest {
 
     @Mock
     private SyncRunRepository syncRunRepository;
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Test
     void buildNoiseReductionUsesProjectionInsteadOfLiveCorrelationRead() {
@@ -73,8 +76,12 @@ class DashboardServiceTest {
                 findingQueryService,
                 dashboardNoiseReductionProjectionService,
                 syncRunRepository,
-                new ObjectMapper()
+                new ObjectMapper(),
+                tenantSchemaExecutionService
         );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
 
@@ -88,14 +95,12 @@ class DashboardServiceTest {
                         ),
                         Instant.parse("2026-03-22T08:00:00Z")
                 ));
-        when(findingRepository.countByTenantAndStatusAndDecisionStateWithEvent(
-                tenant,
+        when(findingRepository.countByStatusAndDecisionStateWithEvent(
                 FindingStatus.RESOLVED,
                 FindingDecisionState.NOT_AFFECTED,
                 "AUTO_RESOLVED_NOT_OBSERVED"
         )).thenReturn(5L);
-        when(findingEventRepository.findByTenantAndEventTypeSince(
-                eq(tenant),
+        when(findingEventRepository.findByEventTypeAndCreatedAtGreaterThanEqual(
                 eq("AUTO_RESOLVED_NOT_OBSERVED"),
                 any(Instant.class)
         )).thenReturn(List.of());

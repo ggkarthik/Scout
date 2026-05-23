@@ -312,9 +312,9 @@ public class CveDetailController {
             @SuppressWarnings("unchecked")
             Map<String, Object> parsed = objectMapper.readValue(saved.get().contentJson(), Map.class);
             AiSolutionResponse r = new AiSolutionResponse();
-            r.setSuccess(true);
-            r.setData(parsed);
-            r.setGeneratedAt(saved.get().generatedAt());
+            r.success = true;
+            r.data = parsed;
+            r.generatedAt = saved.get().generatedAt();
             return ResponseEntity.ok(r);
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
@@ -336,8 +336,8 @@ public class CveDetailController {
         if (softwarePrompt != null && !softwarePrompt.isBlank()) {
             AiSolutionResponse r = new AiSolutionResponse();
             if (!openAiClient.isAvailable()) {
-                r.setSuccess(false);
-                r.setRecommendation(trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200));
+                r.success = false;
+                r.recommendation = trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200);
                 return ResponseEntity.ok(r);
             }
 
@@ -348,19 +348,19 @@ public class CveDetailController {
                     """;
             String raw = openAiClient.chatCompletion(systemPrompt, softwarePrompt, 800);
             if (raw == null || raw.isBlank()) {
-                r.setSuccess(false);
-                r.setRecommendation(trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200));
+                r.success = false;
+                r.recommendation = trimWords(buildSoftwareFallbackRecommendation(recommendationContext), 200);
                 return ResponseEntity.ok(r);
             }
-            r.setSuccess(true);
-            r.setRecommendation(trimWords(raw.trim(), 200));
+            r.success = true;
+            r.recommendation = trimWords(raw.trim(), 200);
             return ResponseEntity.ok(r);
         }
 
         if (!openAiClient.isAvailable()) {
             AiSolutionResponse r = new AiSolutionResponse();
-            r.setSuccess(false);
-            r.setRecommendation("OpenAI is not configured. Please set app.openai.api-key in application properties.");
+            r.success = false;
+            r.recommendation = "OpenAI is not configured. Please set app.openai.api-key in application properties.";
             return ResponseEntity.ok(r);
         }
 
@@ -490,8 +490,8 @@ public class CveDetailController {
 
         if (raw == null || raw.isBlank()) {
             AiSolutionResponse r = new AiSolutionResponse();
-            r.setSuccess(false);
-            r.setRecommendation("AI recommendation generation failed. Please check the OpenAI configuration and try again.");
+            r.success = false;
+            r.recommendation = "AI recommendation generation failed. Please check the OpenAI configuration and try again.";
             return ResponseEntity.ok(r);
         }
 
@@ -507,13 +507,13 @@ public class CveDetailController {
                         .warn("Failed to persist AI solution for {}: {}", cveId, saveError.getMessage());
             }
             AiSolutionResponse r = new AiSolutionResponse();
-            r.setSuccess(true);
-            r.setData(parsed);
+            r.success = true;
+            r.data = parsed;
             return ResponseEntity.ok(r);
         } catch (Exception parseError) {
             AiSolutionResponse r = new AiSolutionResponse();
-            r.setSuccess(true);
-            r.setRecommendation(raw.trim());
+            r.success = true;
+            r.recommendation = raw.trim();
             return ResponseEntity.ok(r);
         }
     }
@@ -576,9 +576,9 @@ public class CveDetailController {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> parsed = objectMapper.readValue(saved.contentJson(), Map.class);
                         AiActionsResponse r = new AiActionsResponse();
-                        r.setSuccess(true);
-                        r.setData(parsed);
-                        r.setGeneratedAt(saved.generatedAt());
+                        r.success = true;
+                        r.data = parsed;
+                        r.generatedAt = saved.generatedAt();
                         return ResponseEntity.ok(r);
                     } catch (Exception e) {
                         return ResponseEntity.ok(new AiActionsResponse());
@@ -586,7 +586,7 @@ public class CveDetailController {
                 })
                 .orElseGet(() -> {
                     AiActionsResponse r = new AiActionsResponse();
-                    r.setSuccess(false);
+                    r.success = false;
                     return ResponseEntity.ok(r);
                 });
     }
@@ -604,8 +604,8 @@ public class CveDetailController {
 
         if (!openAiClient.isAvailable()) {
             AiActionsResponse r = new AiActionsResponse();
-            r.setSuccess(false);
-            r.setError("OpenAI is not configured.");
+            r.success = false;
+            r.error = "OpenAI is not configured.";
             return ResponseEntity.ok(r);
         }
 
@@ -652,8 +652,8 @@ public class CveDetailController {
 
         if (raw == null || raw.isBlank()) {
             AiActionsResponse r = new AiActionsResponse();
-            r.setSuccess(false);
-            r.setError("AI action generation failed.");
+            r.success = false;
+            r.error = "AI action generation failed.";
             return ResponseEntity.ok(r);
         }
 
@@ -667,14 +667,14 @@ public class CveDetailController {
                         .warn("Failed to persist AI actions for {}: {}", cveId, saveError.getMessage());
             }
             AiActionsResponse r = new AiActionsResponse();
-            r.setSuccess(true);
-            r.setData(parsed);
-            r.setGeneratedAt(Instant.now());
+            r.success = true;
+            r.data = parsed;
+            r.generatedAt = Instant.now();
             return ResponseEntity.ok(r);
         } catch (Exception e) {
             AiActionsResponse r = new AiActionsResponse();
-            r.setSuccess(false);
-            r.setError("Failed to parse AI response: " + e.getMessage());
+            r.success = false;
+            r.error = "Failed to parse AI response: " + e.getMessage();
             return ResponseEntity.ok(r);
         }
     }
@@ -691,10 +691,10 @@ public class CveDetailController {
 
     @Data
     public static class AiActionsResponse {
-        private boolean success;
-        private Map<String, Object> data;
-        private String error;
-        private Instant generatedAt;
+        public boolean success;
+        public Map<String, Object> data;
+        public String error;
+        public Instant generatedAt;
     }
 
     private void assertDemoAllowsAiAction() {
@@ -706,255 +706,255 @@ public class CveDetailController {
 
     @Data
     public static class CveDetailResponse {
-        private CveSummary summary;
-        private KeySignals signals;
-        private List<InvestigationDto> investigations;
-        private List<AssessmentDto> assessments;
-        private List<MatchedSoftwareDto> matchedSoftware;
-        private List<VendorIntelligenceDto> vendorIntelligence;
-        private List<CveReference> references;
-        private List<FixRecordResponse> fixes;
-        private java.util.UUID suppressedByRuleId;
-        private String suppressedByRuleName;
-        private List<com.prototype.vulnwatch.dto.VulnerabilityIntelSourceRecordResponse> sourceRecords;
-        private List<com.prototype.vulnwatch.dto.VulnerabilityIntelRelationResponse> relations;
+        public CveSummary summary;
+        public KeySignals signals;
+        public List<InvestigationDto> investigations;
+        public List<AssessmentDto> assessments;
+        public List<MatchedSoftwareDto> matchedSoftware;
+        public List<VendorIntelligenceDto> vendorIntelligence;
+        public List<CveReference> references;
+        public List<FixRecordResponse> fixes;
+        public java.util.UUID suppressedByRuleId;
+        public String suppressedByRuleName;
+        public List<com.prototype.vulnwatch.dto.VulnerabilityIntelSourceRecordResponse> sourceRecords;
+        public List<com.prototype.vulnwatch.dto.VulnerabilityIntelRelationResponse> relations;
     }
 
     @Data
     public static class CveReference {
-        private String url;
-        private String source;
-        private List<String> tags;
+        public String url;
+        public String source;
+        public List<String> tags;
     }
 
     @Data
     public static class VendorIntelligenceDto {
-        private String source;
-        private String ecosystem;
-        private String packageName;
-        private String affectedVersions;
-        private String fixedVersion;
-        private String cpe;
-        private String vexStatus;
+        public String source;
+        public String ecosystem;
+        public String packageName;
+        public String affectedVersions;
+        public String fixedVersion;
+        public String cpe;
+        public String vexStatus;
     }
 
     @Data
     public static class CveSummary {
-        private String externalId;
-        private String title;
-        private String description;
-        private String severity;
-        private Double cvssScore;
-        private String cvssVector;
-        private Double epssScore;
-        private Double epssSevenDayDelta;
+        public String externalId;
+        public String title;
+        public String description;
+        public String severity;
+        public Double cvssScore;
+        public String cvssVector;
+        public Double epssScore;
+        public Double epssSevenDayDelta;
         /** BLG-016: when the EPSS score was last refreshed from the FIRST.org feed. */
-        private Instant epssUpdatedAt;
-        private String cweIds;
-        private Instant publishedAt;
-        private Instant modifiedAt;
-        private VulnerabilitySource source;
-        private Boolean inKev;
-        private LocalDate kevDateAdded;
-        private LocalDate kevDueDate;
-        private String kevRequiredAction;
+        public Instant epssUpdatedAt;
+        public String cweIds;
+        public Instant publishedAt;
+        public Instant modifiedAt;
+        public VulnerabilitySource source;
+        public Boolean inKev;
+        public LocalDate kevDateAdded;
+        public LocalDate kevDueDate;
+        public String kevRequiredAction;
     }
 
     @Data
     public static class KeySignals {
-        private boolean exploitAvailable;
-        private String exploitReason;
-        private boolean systemsImpacted;
-        private long componentCount;
-        private long softwareCount;
-        private long assetCount;
-        private boolean patchAvailable;
-        private String patchVersions;
+        public boolean exploitAvailable;
+        public String exploitReason;
+        public boolean systemsImpacted;
+        public long componentCount;
+        public long softwareCount;
+        public long assetCount;
+        public boolean patchAvailable;
+        public String patchVersions;
     }
 
     @Data
     public static class InvestigationDto {
-        private Long id;
-        private String cveId;
-        private Investigation.InvestigationStatus status;
-        private String assignedTo;
-        private Investigation.InvestigationPriority priority;
-        private String notes;
-        private Instant createdAt;
-        private Instant updatedAt;
+        public Long id;
+        public String cveId;
+        public Investigation.InvestigationStatus status;
+        public String assignedTo;
+        public Investigation.InvestigationPriority priority;
+        public String notes;
+        public Instant createdAt;
+        public Instant updatedAt;
     }
 
     @Data
     public static class AssessmentDto {
-        private Long id;
-        private String cveId;
-        private ApplicabilityAssessment.AssessmentStatus status;
-        private Boolean softwareDetected;
-        private Boolean vulnerableVersionPresent;
-        private Boolean vulnerableConfiguration;
-        private ApplicabilityAssessment.AssessmentResult finalResult;
-        private ApplicabilityAssessment.ConfidenceLevel confidenceLevel;
-        private String justification;
-        private String recommendedAction;
-        private Instant createdAt;
-        private Instant completedAt;
+        public Long id;
+        public String cveId;
+        public ApplicabilityAssessment.AssessmentStatus status;
+        public Boolean softwareDetected;
+        public Boolean vulnerableVersionPresent;
+        public Boolean vulnerableConfiguration;
+        public ApplicabilityAssessment.AssessmentResult finalResult;
+        public ApplicabilityAssessment.ConfidenceLevel confidenceLevel;
+        public String justification;
+        public String recommendedAction;
+        public Instant createdAt;
+        public Instant completedAt;
     }
 
     @Data
     public static class MatchedSoftwareDto {
-        private UUID componentId;
-        private UUID assetId;
-        private String assetName;
-        private String assetIdentifier;
-        private String assetType;
-        private String ecosystem;
-        private String packageName;
-        private String version;
-        private ApplicabilityState applicabilityState;
-        private String applicabilityReason;
-        private String applicabilityReasonDetail;
-        private ImpactState computedImpactState;
-        private String computedImpactReason;
-        private String computedImpactReasonDetail;
-        private ImpactState impactState;
-        private String impactReason;
-        private String impactReasonDetail;
-        private String vexStatus;
-        private String vexProvider;
-        private String vexFreshness;
-        private String vexSource;
-        private UUID matchedVexAssertionId;
-        private String analystDisposition;
-        private String analystReason;
-        private String matchedBy;
-        private boolean eligibleForFinding;
-        private String findingEligibilityReason;
-        private String findingEligibilityDetail;
-        private String eolSlug;
-        private String eolCycle;
-        private java.time.LocalDate eolDate;
-        private Boolean isEol;
-        private Integer eolDaysRemaining;
-        private java.time.LocalDate eolSupportEndDate;
-        private String supportPhase;
-        private String supportGroup;
-        private UUID softwareIdentityId;
+        public UUID componentId;
+        public UUID assetId;
+        public String assetName;
+        public String assetIdentifier;
+        public String assetType;
+        public String ecosystem;
+        public String packageName;
+        public String version;
+        public ApplicabilityState applicabilityState;
+        public String applicabilityReason;
+        public String applicabilityReasonDetail;
+        public ImpactState computedImpactState;
+        public String computedImpactReason;
+        public String computedImpactReasonDetail;
+        public ImpactState impactState;
+        public String impactReason;
+        public String impactReasonDetail;
+        public String vexStatus;
+        public String vexProvider;
+        public String vexFreshness;
+        public String vexSource;
+        public UUID matchedVexAssertionId;
+        public String analystDisposition;
+        public String analystReason;
+        public String matchedBy;
+        public boolean eligibleForFinding;
+        public String findingEligibilityReason;
+        public String findingEligibilityDetail;
+        public String eolSlug;
+        public String eolCycle;
+        public java.time.LocalDate eolDate;
+        public Boolean isEol;
+        public Integer eolDaysRemaining;
+        public java.time.LocalDate eolSupportEndDate;
+        public String supportPhase;
+        public String supportGroup;
+        public UUID softwareIdentityId;
     }
 
     @Data
     public static class VexEvidenceResponse {
-        private UUID componentId;
-        private String assetName;
-        private String assetIdentifier;
-        private String assetType;
-        private String ecosystem;
-        private String installedVersion;
-        private String matchedBy;
-        private String applicabilityState;
-        private String applicabilityReason;
-        private String applicabilityReasonDetail;
-        private UUID matchedVexAssertionId;
-        private String sourceSystem;
-        private String provider;
-        private String status;
-        private String trustTier;
-        private String freshness;
-        private String documentId;
-        private String packageName;
-        private String normalizedProductKey;
-        private String versionExact;
-        private String versionStart;
-        private Boolean startInclusive;
-        private String versionEnd;
-        private Boolean endInclusive;
-        private String fixedVersion;
-        private Instant publishedAt;
-        private Instant lastSeenAt;
-        private String evidenceUrl;
-        private String computedImpactState;
-        private String computedImpactReason;
-        private String computedImpactReasonDetail;
-        private String impactState;
-        private String impactReason;
-        private String impactReasonDetail;
-        private Map<String, Object> evidence;
+        public UUID componentId;
+        public String assetName;
+        public String assetIdentifier;
+        public String assetType;
+        public String ecosystem;
+        public String installedVersion;
+        public String matchedBy;
+        public String applicabilityState;
+        public String applicabilityReason;
+        public String applicabilityReasonDetail;
+        public UUID matchedVexAssertionId;
+        public String sourceSystem;
+        public String provider;
+        public String status;
+        public String trustTier;
+        public String freshness;
+        public String documentId;
+        public String packageName;
+        public String normalizedProductKey;
+        public String versionExact;
+        public String versionStart;
+        public Boolean startInclusive;
+        public String versionEnd;
+        public Boolean endInclusive;
+        public String fixedVersion;
+        public Instant publishedAt;
+        public Instant lastSeenAt;
+        public String evidenceUrl;
+        public String computedImpactState;
+        public String computedImpactReason;
+        public String computedImpactReasonDetail;
+        public String impactState;
+        public String impactReason;
+        public String impactReasonDetail;
+        public Map<String, Object> evidence;
     }
 
     @Data
     public static class CreateInvestigationRequest {
-        private Investigation.InvestigationPriority priority;
+        public Investigation.InvestigationPriority priority;
     }
 
     @Data
     public static class CreateManualFindingRequest {
-        private String justification;
-        private List<String> componentIds;
-        private Map<String, String> componentApplicabilityDecisions;
-        private Map<String, String> componentAnalystDispositions;
-        private String severity;
-        private String dueDate;
+        public String justification;
+        public List<String> componentIds;
+        public Map<String, String> componentApplicabilityDecisions;
+        public Map<String, String> componentAnalystDispositions;
+        public String severity;
+        public String dueDate;
         /** ASSET_CVE (default) or CVE_FIX */
-        private String findingCreationMode;
+        public String findingCreationMode;
         /** ADD_TO_EXISTING (default) or CREATE_NEW — only relevant for CVE_FIX mode */
-        private String existingFindingBehavior;
+        public String existingFindingBehavior;
     }
 
     @Data
     public static class ManualFindingResponse {
-        private String cveId;
-        private int eligibleComponentCount;
-        private int createdCount;
-        private int reopenedCount;
-        private int alreadyOpenCount;
-        private String message;
+        public String cveId;
+        public int eligibleComponentCount;
+        public int createdCount;
+        public int reopenedCount;
+        public int alreadyOpenCount;
+        public String message;
     }
 
     @Data
     public static class CompleteAssessmentRequest {
-        private ApplicabilityAssessment.AssessmentResult result;
-        private ApplicabilityAssessment.ConfidenceLevel confidence;
-        private String justification;
-        private String recommendedAction;
+        public ApplicabilityAssessment.AssessmentResult result;
+        public ApplicabilityAssessment.ConfidenceLevel confidence;
+        public String justification;
+        public String recommendedAction;
     }
 
     @Data
     public static class SuppressRequest {
-        private String reason;
-        private String justification;
-        private Integer duration; // days
+        public String reason;
+        public String justification;
+        public Integer duration; // days
     }
 
     @Data
     public static class SuppressionResponse {
-        private String cveId;
-        private boolean suppressed;
-        private String reason;
-        private String suppressedBy;
-        private Instant suppressedAt;
-        private Instant expiresAt;
+        public String cveId;
+        public boolean suppressed;
+        public String reason;
+        public String suppressedBy;
+        public Instant suppressedAt;
+        public Instant expiresAt;
     }
 
     @Data
     public static class ExportRequest {
-        private String format; // pdf, csv, json, excel
+        public String format; // pdf, csv, json, excel
     }
 
     @Data
     public static class ExportResponse {
-        private String cveId;
-        private String format;
-        private String content;
-        private Instant generatedAt;
+        public String cveId;
+        public String format;
+        public String content;
+        public Instant generatedAt;
     }
 
     @Data
     public static class AiSolutionResponse {
-        private boolean success;
+        public boolean success;
         /** Plain-text fallback when JSON parsing fails or OpenAI unavailable. */
-        private String recommendation;
+        public String recommendation;
         /** Structured JSON content from OpenAI JSON mode. */
-        private Map<String, Object> data;
+        public Map<String, Object> data;
         /** Timestamp when this recommendation was generated/saved. */
-        private Instant generatedAt;
+        public Instant generatedAt;
     }
 }

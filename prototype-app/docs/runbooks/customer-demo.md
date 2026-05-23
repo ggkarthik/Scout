@@ -1,5 +1,7 @@
 # Customer Demo Runbook
 
+Last updated: 2026-05-20
+
 ## Demo Shape
 
 - Access is invite-only.

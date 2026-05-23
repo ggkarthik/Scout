@@ -17,8 +17,6 @@ public class ProductionSafetyValidator {
     private final String credentialEncryptionKey;
     private final boolean allowHeaderTenantSelection;
     private final boolean requireTenantContext;
-    private final String archiveStorageBackend;
-    private final String archiveS3Bucket;
     private final String corsAllowedOrigins;
     private final boolean testPersonasEnabled;
 
@@ -32,8 +30,6 @@ public class ProductionSafetyValidator {
             @Value("${app.security.credential-encryption-key:}") String credentialEncryptionKey,
             @Value("${app.tenancy.allow-header-tenant-selection:false}") boolean allowHeaderTenantSelection,
             @Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
-            @Value("${app.archive.storage-backend:filesystem}") String archiveStorageBackend,
-            @Value("${app.archive.s3-bucket:}") String archiveS3Bucket,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins,
             @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled
     ) {
@@ -46,8 +42,6 @@ public class ProductionSafetyValidator {
         this.credentialEncryptionKey = credentialEncryptionKey;
         this.allowHeaderTenantSelection = allowHeaderTenantSelection;
         this.requireTenantContext = requireTenantContext;
-        this.archiveStorageBackend = archiveStorageBackend;
-        this.archiveS3Bucket = archiveS3Bucket;
         this.corsAllowedOrigins = corsAllowedOrigins;
         this.testPersonasEnabled = testPersonasEnabled;
     }
@@ -75,12 +69,6 @@ public class ProductionSafetyValidator {
         if (!hasStrongValue(credentialEncryptionKey) || isPlaceholder(credentialEncryptionKey)
                 || "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".equals(credentialEncryptionKey)) {
             throw new IllegalStateException("APP_CREDENTIAL_ENCRYPTION_KEY must be set to a non-default 256-bit base64 key for production startup.");
-        }
-        if (!"s3".equalsIgnoreCase(archiveStorageBackend)) {
-            throw new IllegalStateException("ARCHIVE_STORAGE_BACKEND must be set to s3 for production startup.");
-        }
-        if (archiveS3Bucket == null || archiveS3Bucket.isBlank() || isPlaceholder(archiveS3Bucket)) {
-            throw new IllegalStateException("ARCHIVE_S3_BUCKET must be set to the production vulnerability archive bucket.");
         }
         if (corsAllowedOrigins == null || corsAllowedOrigins.isBlank() || corsAllowedOrigins.contains("*")) {
             throw new IllegalStateException("APP_CORS_ALLOWED_ORIGINS must be set to explicit production origins.");

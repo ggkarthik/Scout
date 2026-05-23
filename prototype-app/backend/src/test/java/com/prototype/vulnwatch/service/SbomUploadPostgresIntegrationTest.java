@@ -154,7 +154,7 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(initialUpload.path("findingsGenerated").asInt() >= 0);
 
         Tenant tenant = tenantService.getDefaultTenant();
-        Asset asset = assetRepository.findByTenantAndIdentifier(tenant, ASSET_IDENTIFIER).orElseThrow();
+        Asset asset = assetRepository.findByIdentifier(ASSET_IDENTIFIER).orElseThrow();
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(CVE_ID).orElseThrow();
 
         List<InventoryComponent> initialActiveComponents = inventoryComponentRepository
@@ -167,9 +167,7 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(vulnerabilityTargetRepository.findByVulnerability(vulnerability).stream()
                 .anyMatch(target -> target.getTargetType() == VulnerabilityTargetType.CPE));
         assertFalse(inventoryComponentCpeMapRepository.findByComponent_Id(initialActiveComponents.get(0).getId()).isEmpty());
-        List<ComponentVulnerabilityState> states = componentVulnerabilityStateRepository.findByTenantAndComponent(
-                tenant,
-                initialActiveComponents.get(0));
+        List<ComponentVulnerabilityState> states = componentVulnerabilityStateRepository.findByComponent(initialActiveComponents.get(0));
         assertEquals(1, states.size());
         assertEquals(ApplicabilityState.APPLICABLE, states.get(0).getApplicabilityState());
         assertEquals(ImpactState.IMPACTED, states.get(0).getImpactState());
@@ -180,7 +178,7 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(openFindings.get(0).getMatchedBy() != null && openFindings.get(0).getMatchedBy().startsWith("cpe-"));
 
         OrgCveRecord initialExposure = orgCveRecordRepository
-                .findByTenantAndVulnerability_Id(tenant, vulnerability.getId())
+                .findByVulnerability_Id(vulnerability.getId())
                 .orElseThrow();
         assertTrue(initialExposure.isImpacted());
         assertEquals(ApplicabilityState.APPLICABLE, initialExposure.getApplicabilityState());
@@ -210,7 +208,7 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN).isEmpty());
 
         OrgCveRecord resolvedExposure = orgCveRecordRepository
-                .findByTenantAndVulnerability_Id(tenant, vulnerability.getId())
+                .findByVulnerability_Id(vulnerability.getId())
                 .orElseThrow();
         assertFalse(resolvedExposure.isImpacted());
         assertEquals(0L, resolvedExposure.getMatchedSoftwareCount());

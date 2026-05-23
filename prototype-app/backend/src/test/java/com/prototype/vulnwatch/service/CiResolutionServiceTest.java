@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -55,9 +56,13 @@ class CiResolutionServiceTest {
         CiRepository ciRepository = mock(CiRepository.class);
         CiAliasRepository ciAliasRepository = mock(CiAliasRepository.class);
         ServiceNowCmdbConfigService configService = mock(ServiceNowCmdbConfigService.class);
+        TenantSchemaExecutionService tenantSchemaExecutionService = mock(TenantSchemaExecutionService.class);
         when(assetRepository.save(any(Asset.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(ciRepository.save(any(Ci.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(ciAliasRepository.save(any(CiAlias.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
 
         RestTemplate restTemplate = new RestTemplate();
         CiResolutionService service = new CiResolutionService(
@@ -67,7 +72,8 @@ class CiResolutionServiceTest {
                 new OutboundHttpClient(restTemplate),
                 new OutboundPolicyFactory(new OutboundPolicyDefaults(0L, 1, 1L, 60_000L, true, true)),
                 new ObjectMapper(),
-                configService
+                configService,
+                tenantSchemaExecutionService
         );
         CiResolutionService.BatchResolutionContext context = new CiResolutionService.BatchResolutionContext(
                 tenant,

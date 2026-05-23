@@ -25,17 +25,20 @@ public class FindingsScoreRecomputeService {
     private final RiskPolicyService riskPolicyService;
     private final FindingsScoreService findingsScoreService;
     private final FindingSlaService findingSlaService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FindingsScoreRecomputeService(
             FindingRepository findingRepository,
             RiskPolicyService riskPolicyService,
             FindingsScoreService findingsScoreService,
-            FindingSlaService findingSlaService
+            FindingSlaService findingSlaService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.findingRepository = findingRepository;
         this.riskPolicyService = riskPolicyService;
         this.findingsScoreService = findingsScoreService;
         this.findingSlaService = findingSlaService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     /**
@@ -48,8 +51,10 @@ public class FindingsScoreRecomputeService {
         RiskPolicy policy = riskPolicyService.getOrCreate(tenant);
         String scoreConfig = policy.getFindingsScoreConfig();
 
-        List<Finding> openFindings = findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(
-                tenant, FindingStatus.OPEN);
+        List<Finding> openFindings = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN)
+        );
 
         List<Finding> toSave = new ArrayList<>();
         for (Finding finding : openFindings) {

@@ -67,6 +67,7 @@ public class OperationalDashboardService {
     private final FindingEventRepository findingEventRepository;
     private final SbomUploadRepository sbomUploadRepository;
     private final SyncRunRepository syncRunRepository;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public OperationalDashboardService(
             WorkspaceService workspaceService,
@@ -80,7 +81,8 @@ public class OperationalDashboardService {
             FindingRepository findingRepository,
             FindingEventRepository findingEventRepository,
             SbomUploadRepository sbomUploadRepository,
-            SyncRunRepository syncRunRepository
+            SyncRunRepository syncRunRepository,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.workspaceService = workspaceService;
         this.dashboardService = dashboardService;
@@ -94,21 +96,24 @@ public class OperationalDashboardService {
         this.findingEventRepository = findingEventRepository;
         this.sbomUploadRepository = sbomUploadRepository;
         this.syncRunRepository = syncRunRepository;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public OperationalDashboardResponse get() {
         Instant now = Instant.now();
-        Tenant tenant = workspaceService.getWorkspace();
+        Tenant tenant = workspaceService.getDefaultWorkspace();
         DashboardResponse dashboard = dashboardService.get(tenant);
         DashboardNoiseReductionResponse noise = dashboard.noiseReduction();
 
         // Time-bounded loads: no full table scans
         Instant sevenDaysAgo = now.minus(Duration.ofHours(HOURS_24_X_7));
         Instant thirtyDaysAgo = now.minus(Duration.ofDays(30));
-        List<Finding> findings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant);
-        List<SbomUpload> uploads = sbomUploadRepository
-                .findByTenantAndUploadedAtGreaterThanEqualOrderByUploadedAtDesc(tenant, thirtyDaysAgo);
-        List<SyncRun> syncRuns = syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId()).stream()
+        List<Finding> findings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc());
+        List<SbomUpload> uploads = tenantSchemaExecutionService.run(
+                tenant,
+                () -> sbomUploadRepository.findByUploadedAtGreaterThanEqualOrderByUploadedAtDesc(thirtyDaysAgo)
+        );
+        List<SyncRun> syncRuns = syncRunRepository.findAllByOrderByStartedAtDesc().stream()
                 .filter(run -> run.getStartedAt() != null && !run.getStartedAt().isBefore(sevenDaysAgo))
                 .toList();
         List<SyncRun> syncRuns24h = syncRuns.stream()
@@ -340,10 +345,12 @@ public class OperationalDashboardService {
     }
 
     private double buildAutoResolvedReopenRate(List<Finding> findings, Tenant tenant) {
-        List<UUID> autoResolvedFindingIds = findingEventRepository.findByTenantAndEventTypeSince(
+        List<UUID> autoResolvedFindingIds = tenantSchemaExecutionService.run(
                         tenant,
-                        AUTO_RESOLVED_EVENT,
-                        Instant.EPOCH
+                        () -> findingEventRepository.findByEventTypeAndCreatedAtGreaterThanEqual(
+                                AUTO_RESOLVED_EVENT,
+                                Instant.EPOCH
+                        )
                 ).stream()
                 .map(event -> event.getFinding() == null ? null : event.getFinding().getId())
                 .filter(id -> id != null)

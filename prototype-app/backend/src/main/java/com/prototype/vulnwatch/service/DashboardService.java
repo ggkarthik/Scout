@@ -68,6 +68,7 @@ public class DashboardService {
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final SyncRunRepository syncRunRepository;
     private final ObjectMapper objectMapper;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public DashboardService(
             AssetRepository assetRepository,
@@ -79,7 +80,8 @@ public class DashboardService {
             FindingQueryService findingQueryService,
             DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
             SyncRunRepository syncRunRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.assetRepository = assetRepository;
         this.inventoryComponentRepository = inventoryComponentRepository;
@@ -91,41 +93,44 @@ public class DashboardService {
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.syncRunRepository = syncRunRepository;
         this.objectMapper = objectMapper;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     @Cacheable(value = "dashboard", key = "#tenant.id")
     public DashboardResponse get(Tenant tenant) {
-        long assets = assetRepository.countByTenant(tenant);
-        long components = inventoryComponentRepository.countByTenantAndComponentStatus(tenant, InventoryComponentStatus.ACTIVE);
+        long assets = tenantSchemaExecutionService.run(tenant, () -> assetRepository.count());
+        long components = tenantSchemaExecutionService.run(
+                tenant,
+                () -> inventoryComponentRepository.countByComponentStatus(InventoryComponentStatus.ACTIVE)
+        );
         long openFindings = findingQueryService.countOpen(tenant);
         long criticalFindings = findingQueryService.countCritical(tenant);
-        long openCritical = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "CRITICAL");
-        long openHigh = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "HIGH");
-        long openMedium = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "MEDIUM");
-        long openLow = findingRepository.countByTenantAndStatusAndSeverity(tenant, FindingStatus.OPEN, "LOW");
-        double averageOpenRisk = findingRepository.averageRiskScoreByTenantAndStatus(tenant, FindingStatus.OPEN);
-        double averageOpenConfidence = findingRepository.averageConfidenceScoreByTenantAndStatus(tenant, FindingStatus.OPEN);
-        long highConfidenceOpen = findingRepository.countByTenantAndStatusAndConfidenceScoreGreaterThanEqual(
+        long openCritical = tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "CRITICAL"));
+        long openHigh = tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "HIGH"));
+        long openMedium = tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "MEDIUM"));
+        long openLow = tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "LOW"));
+        double averageOpenRisk = tenantSchemaExecutionService.run(tenant, () -> findingRepository.averageRiskScoreByTenantAndStatus(tenant, FindingStatus.OPEN));
+        double averageOpenConfidence = tenantSchemaExecutionService.run(tenant, () -> findingRepository.averageConfidenceScoreByTenantAndStatus(tenant, FindingStatus.OPEN));
+        long highConfidenceOpen = tenantSchemaExecutionService.run(
                 tenant,
-                FindingStatus.OPEN,
-                0.8);
-        List<TopFindingMetricResponse> topVulnerabilities = findingRepository.findTopVulnerabilitiesByTenantAndStatus(
+                () -> findingRepository.countByStatusAndConfidenceScoreGreaterThanEqual(FindingStatus.OPEN, 0.8)
+        );
+        List<TopFindingMetricResponse> topVulnerabilities = tenantSchemaExecutionService.run(
                 tenant,
-                FindingStatus.OPEN,
-                PageRequest.of(0, 5));
-        List<TopFindingMetricResponse> topInstalledComponents = findingRepository.findTopInstalledComponentsByTenantAndStatus(
+                () -> findingRepository.findTopVulnerabilitiesByTenantAndStatus(tenant, FindingStatus.OPEN, PageRequest.of(0, 5)));
+        List<TopFindingMetricResponse> topInstalledComponents = tenantSchemaExecutionService.run(
                 tenant,
-                FindingStatus.OPEN,
-                PageRequest.of(0, 5));
-        List<TopFindingMetricResponse> topAssetsAtRisk = findingRepository.findTopAssetsByTenantAndStatus(
+                () -> findingRepository.findTopInstalledComponentsByTenantAndStatus(tenant, FindingStatus.OPEN, PageRequest.of(0, 5)));
+        List<TopFindingMetricResponse> topAssetsAtRisk = tenantSchemaExecutionService.run(
                 tenant,
-                FindingStatus.OPEN,
-                PageRequest.of(0, 5));
+                () -> findingRepository.findTopAssetsByTenantAndStatus(tenant, FindingStatus.OPEN, PageRequest.of(0, 5)));
         List<TopFindingMetricResponse> topVulnerabilityProductIdentities =
-                findingRepository.findTopVulnerabilityProductIdentitiesByTenantAndStatus(
+                tenantSchemaExecutionService.run(
                         tenant,
-                        FindingStatus.OPEN,
-                        PageRequest.of(0, 5));
+                        () -> findingRepository.findTopVulnerabilityProductIdentitiesByTenantAndStatus(
+                                tenant,
+                                FindingStatus.OPEN,
+                                PageRequest.of(0, 5)));
         List<FindingResponse> latest = findingQueryService.listLatestByTenant(tenant, 10);
         DashboardNoiseReductionResponse noiseReduction = buildNoiseReduction(tenant, openFindings);
         DashboardCsafVexAnalyticsResponse csafVexAnalytics = buildCsafVexAnalytics(tenant, noiseReduction);
@@ -263,12 +268,13 @@ public class DashboardService {
             aggregatesByVulnerability.put(row.getVulnerabilityId(), row);
         }
 
-        List<ComponentVulnerabilityState> impactedStates =
-                componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_IdInAndImpactStateIn(
-                        tenant.getId(),
+        List<ComponentVulnerabilityState> impactedStates = tenantSchemaExecutionService.run(
+                tenant,
+                () -> componentVulnerabilityStateRepository.findByVulnerability_IdInAndImpactStateIn(
                         requestedIds,
                         FINDING_ELIGIBLE_IMPACT_STATES
-                );
+                )
+        );
 
         Map<UUID, LinkedHashSet<String>> mappedSoftwareByVulnerability = new HashMap<>();
         Map<UUID, Set<UUID>> componentIdsByVulnerability = new HashMap<>();
@@ -291,7 +297,7 @@ public class DashboardService {
         componentIdsByVulnerability.values().forEach(allImpactedComponentIds::addAll);
         List<InventoryComponentCpeMap> componentCpeMaps = allImpactedComponentIds.isEmpty()
                 ? List.of()
-                : inventoryComponentCpeMapRepository.findByTenant_IdAndComponent_IdIn(tenant.getId(), allImpactedComponentIds);
+                : tenantSchemaExecutionService.run(tenant, () -> inventoryComponentCpeMapRepository.findByComponent_IdIn(allImpactedComponentIds));
 
         Map<UUID, Set<String>> cpesByComponentId = new HashMap<>();
         for (InventoryComponentCpeMap map : componentCpeMaps) {
@@ -470,14 +476,19 @@ public class DashboardService {
     }
 
     private DashboardCorrelationEfficiencyResponse buildCorrelationEfficiency(Tenant tenant, long activeComponents) {
-        long cpeEligibleActiveComponents = inventoryComponentCpeMapRepository
-                .countDistinctComponentIdsByTenantAndComponentStatus(tenant, InventoryComponentStatus.ACTIVE);
+        long cpeEligibleActiveComponents = tenantSchemaExecutionService.run(
+                tenant,
+                () -> inventoryComponentCpeMapRepository.countDistinctComponentIdsByTenantAndComponentStatus(tenant, InventoryComponentStatus.ACTIVE)
+        );
         long cpeIneligibleActiveComponents = Math.max(0L, activeComponents - cpeEligibleActiveComponents);
         double cpeCoveragePercent = activeComponents <= 0L
                 ? 0.0
                 : ((double) cpeEligibleActiveComponents * 100.0) / (double) activeComponents;
 
-        List<Finding> openFindings = findingRepository.findByTenantAndStatusOrderByUpdatedAtDesc(tenant, FindingStatus.OPEN);
+        List<Finding> openFindings = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN)
+        );
         long openFindingsMatchedByCpe = 0L;
         long openFindingsCpeDirect = 0L;
         long openFindingsCpeFallback = 0L;
@@ -508,7 +519,7 @@ public class DashboardService {
                 : totalOpenCpeConfidence / (double) openFindingsMatchedByCpe;
 
         Instant createdCutoff = Instant.now().minusSeconds(24L * 60L * 60L);
-        List<Finding> recentFindings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant).stream()
+        List<Finding> recentFindings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc()).stream()
                 .filter(finding -> finding.getFirstObservedAt() != null && !finding.getFirstObservedAt().isBefore(createdCutoff))
                 .toList();
         long cpeFindingsCreatedLast24Hours = recentFindings.stream()
@@ -537,11 +548,13 @@ public class DashboardService {
                 dashboardNoiseReductionProjectionService.getTenantProjection(tenant);
         long neverOpenedNotApplicable = projection.neverOpenedNotApplicable();
         long deferredUnderInvestigation = projection.deferredUnderInvestigation();
-        long autoResolvedNotApplicable = findingRepository.countByTenantAndStatusAndDecisionStateWithEvent(
+        long autoResolvedNotApplicable = tenantSchemaExecutionService.run(
                 tenant,
-                FindingStatus.RESOLVED,
-                FindingDecisionState.NOT_AFFECTED,
-                "AUTO_RESOLVED_NOT_OBSERVED"
+                () -> findingRepository.countByStatusAndDecisionStateWithEvent(
+                        FindingStatus.RESOLVED,
+                        FindingDecisionState.NOT_AFFECTED,
+                        "AUTO_RESOLVED_NOT_OBSERVED"
+                )
         );
         long totalFilteredNotApplicable = neverOpenedNotApplicable + autoResolvedNotApplicable;
         long potentialFindingsWithoutCorrelation = openFindings + totalFilteredNotApplicable;
@@ -621,7 +634,7 @@ public class DashboardService {
                 + categoryCount(notApplicableCategories, "VEX Fixed");
         long suppressedByStaleVex = categoryCount(notApplicableCategories, "VEX Stale Or Untrusted");
 
-        List<Finding> tenantFindings = findingRepository.findByTenantOrderByUpdatedAtDesc(tenant);
+        List<Finding> tenantFindings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc());
         Map<String, Long> providerCounts = new HashMap<>();
         long underInvestigationAging = 0L;
         Instant underInvestigationAgingCutoff = now.minusSeconds(14L * 24L * 60L * 60L);
@@ -815,10 +828,12 @@ public class DashboardService {
         LocalDate todayUtc = LocalDate.now(ZoneOffset.UTC);
         LocalDate startDate = todayUtc.minusDays(29);
         Instant fromInclusive = startDate.atStartOfDay().toInstant(ZoneOffset.UTC);
-        List<FindingEvent> events = findingEventRepository.findByTenantAndEventTypeSince(
+        List<FindingEvent> events = tenantSchemaExecutionService.run(
                 tenant,
-                "AUTO_RESOLVED_NOT_OBSERVED",
-                fromInclusive
+                () -> findingEventRepository.findByEventTypeAndCreatedAtGreaterThanEqual(
+                        "AUTO_RESOLVED_NOT_OBSERVED",
+                        fromInclusive
+                )
         );
 
         Map<LocalDate, Long> countsByDay = new TreeMap<>();

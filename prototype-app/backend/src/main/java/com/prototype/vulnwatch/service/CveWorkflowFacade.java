@@ -59,7 +59,7 @@ public class CveWorkflowFacade {
         Investigation investigation = investigationService.createInvestigation(
                 actor.tenantId(),
                 cveId,
-                request.getPriority(),
+                request.priority,
                 actor.userId()
         );
         return ResponseEntity.ok(toInvestigationDto(investigation));
@@ -132,10 +132,10 @@ public class CveWorkflowFacade {
         ApplicabilityAssessment assessment = assessmentService.completeAssessment(
                 requestActorService.currentActor().tenantId(),
                 assessmentId,
-                request.getResult(),
-                request.getConfidence(),
-                request.getJustification(),
-                request.getRecommendedAction()
+                request.result,
+                request.confidence,
+                request.justification,
+                request.recommendedAction
         );
         return ResponseEntity.ok(toAssessmentDto(assessment));
     }
@@ -150,45 +150,45 @@ public class CveWorkflowFacade {
         Tenant tenant = tenantService.resolveTenantUuid(actor.tenantId());
 
         Instant dueDateOverride = null;
-        if (request.getDueDate() != null && !request.getDueDate().isBlank()) {
+        if (request.dueDate != null && !request.dueDate.isBlank()) {
             try {
-                dueDateOverride = LocalDate.parse(request.getDueDate()).atStartOfDay(ZoneOffset.UTC).toInstant();
+                dueDateOverride = LocalDate.parse(request.dueDate).atStartOfDay(ZoneOffset.UTC).toInstant();
             } catch (Exception ignored) {
                 // invalid date format — fall back to SLA-computed value
             }
         }
 
-        boolean cveFix = "CVE_FIX".equalsIgnoreCase(request.getFindingCreationMode());
-        boolean forceNew = "CREATE_NEW".equalsIgnoreCase(request.getExistingFindingBehavior());
+        boolean cveFix = "CVE_FIX".equalsIgnoreCase(request.findingCreationMode);
+        boolean forceNew = "CREATE_NEW".equalsIgnoreCase(request.existingFindingBehavior);
         ManualFindingCreationResult result = cveFix
                 ? findingWorkflowFacade.createCveFixGroupedFinding(
                         tenant,
                         vulnerability,
-                        request.getJustification(),
+                        request.justification,
                         actor.userId(),
-                        parseComponentIds(request.getComponentIds()),
-                        parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
-                        parseAnalystDispositions(request.getComponentAnalystDispositions()),
-                        request.getSeverity(),
+                        parseComponentIds(request.componentIds),
+                        parseApplicabilityDecisions(request.componentApplicabilityDecisions),
+                        parseAnalystDispositions(request.componentAnalystDispositions),
+                        request.severity,
                         dueDateOverride,
                         forceNew)
                 : findingWorkflowFacade.createManualFindingsForVulnerability(
                         tenant,
                         vulnerability,
-                        request.getJustification(),
+                        request.justification,
                         actor.userId(),
-                        parseComponentIds(request.getComponentIds()),
-                        parseApplicabilityDecisions(request.getComponentApplicabilityDecisions()),
-                        parseAnalystDispositions(request.getComponentAnalystDispositions()),
-                        request.getSeverity(),
+                        parseComponentIds(request.componentIds),
+                        parseApplicabilityDecisions(request.componentApplicabilityDecisions),
+                        parseAnalystDispositions(request.componentAnalystDispositions),
+                        request.severity,
                         dueDateOverride);
 
         CveDetailController.ManualFindingResponse response = new CveDetailController.ManualFindingResponse();
-        response.setCveId(cveId);
-        response.setEligibleComponentCount(result.eligibleComponentCount());
-        response.setCreatedCount(result.createdCount());
-        response.setReopenedCount(result.reopenedCount());
-        response.setAlreadyOpenCount(result.alreadyOpenCount());
+        response.cveId = cveId;
+        response.eligibleComponentCount = result.eligibleComponentCount();
+        response.createdCount = result.createdCount();
+        response.reopenedCount = result.reopenedCount();
+        response.alreadyOpenCount = result.alreadyOpenCount();
         String message;
         if (result.createdCount() + result.reopenedCount() > 0) {
             findingDeltaQueueService.enqueueNoiseReductionRefresh(tenant.getId(), "manual-finding");
@@ -198,7 +198,7 @@ public class CveWorkflowFacade {
         } else {
             message = "No eligible components found. Findings require either exact impacted or no-patch evidence, or an analyst override marking the component Applicable and Impacted.";
         }
-        response.setMessage(message);
+        response.message = message;
         return ResponseEntity.ok(response);
     }
 
@@ -210,16 +210,16 @@ public class CveWorkflowFacade {
         Tenant tenant = tenantService.resolveTenantUuid(actor.tenantId());
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new IllegalArgumentException("CVE not found: " + cveId));
-        if (!hasText(request.getReason()) || !hasText(request.getJustification())) {
+        if (!hasText(request.reason) || !hasText(request.justification)) {
             throw new IllegalArgumentException("Suppression reason and justification are required");
         }
         Instant suppressedAt = Instant.now();
-        Instant expiresAt = resolveSuppressedUntil(request.getDuration(), suppressedAt);
+        Instant expiresAt = resolveSuppressedUntil(request.duration, suppressedAt);
         orgCveRecordService.suppress(
                 tenant,
                 vulnerability,
-                request.getReason(),
-                request.getJustification(),
+                request.reason,
+                request.justification,
                 actor.userId(),
                 suppressedAt,
                 expiresAt
@@ -227,49 +227,49 @@ public class CveWorkflowFacade {
         findingWorkflowFacade.suppressFindingsForVulnerability(
                 tenant,
                 vulnerability,
-                request.getReason(),
-                request.getJustification(),
+                request.reason,
+                request.justification,
                 actor.userId(),
                 expiresAt
         );
 
         CveDetailController.SuppressionResponse response = new CveDetailController.SuppressionResponse();
-        response.setCveId(cveId);
-        response.setSuppressed(true);
-        response.setReason(request.getReason());
-        response.setSuppressedBy(actor.userId());
-        response.setSuppressedAt(suppressedAt);
-        response.setExpiresAt(expiresAt);
+        response.cveId = cveId;
+        response.suppressed = true;
+        response.reason = request.reason;
+        response.suppressedBy = actor.userId();
+        response.suppressedAt = suppressedAt;
+        response.expiresAt = expiresAt;
         return ResponseEntity.ok(response);
     }
 
     private CveDetailController.InvestigationDto toInvestigationDto(Investigation investigation) {
         CveDetailController.InvestigationDto dto = new CveDetailController.InvestigationDto();
-        dto.setId(investigation.getId());
-        dto.setCveId(investigation.getVulnerability().getExternalId());
-        dto.setStatus(investigation.getStatus());
-        dto.setAssignedTo(investigation.getAssignedTo());
-        dto.setPriority(investigation.getPriority());
-        dto.setNotes(investigation.getNotes());
-        dto.setCreatedAt(investigation.getCreatedAt());
-        dto.setUpdatedAt(investigation.getUpdatedAt());
+        dto.id = investigation.getId();
+        dto.cveId = investigation.getVulnerability().getExternalId();
+        dto.status = investigation.getStatus();
+        dto.assignedTo = investigation.getAssignedTo();
+        dto.priority = investigation.getPriority();
+        dto.notes = investigation.getNotes();
+        dto.createdAt = investigation.getCreatedAt();
+        dto.updatedAt = investigation.getUpdatedAt();
         return dto;
     }
 
     private CveDetailController.AssessmentDto toAssessmentDto(ApplicabilityAssessment assessment) {
         CveDetailController.AssessmentDto dto = new CveDetailController.AssessmentDto();
-        dto.setId(assessment.getId());
-        dto.setCveId(assessment.getVulnerability().getExternalId());
-        dto.setStatus(assessment.getStatus());
-        dto.setSoftwareDetected(assessment.getSoftwareDetected());
-        dto.setVulnerableVersionPresent(assessment.getVulnerableVersionPresent());
-        dto.setVulnerableConfiguration(assessment.getVulnerableConfiguration());
-        dto.setFinalResult(assessment.getFinalResult());
-        dto.setConfidenceLevel(assessment.getConfidenceLevel());
-        dto.setJustification(assessment.getJustification());
-        dto.setRecommendedAction(assessment.getRecommendedAction());
-        dto.setCreatedAt(assessment.getCreatedAt());
-        dto.setCompletedAt(assessment.getCompletedAt());
+        dto.id = assessment.getId();
+        dto.cveId = assessment.getVulnerability().getExternalId();
+        dto.status = assessment.getStatus();
+        dto.softwareDetected = assessment.getSoftwareDetected();
+        dto.vulnerableVersionPresent = assessment.getVulnerableVersionPresent();
+        dto.vulnerableConfiguration = assessment.getVulnerableConfiguration();
+        dto.finalResult = assessment.getFinalResult();
+        dto.confidenceLevel = assessment.getConfidenceLevel();
+        dto.justification = assessment.getJustification();
+        dto.recommendedAction = assessment.getRecommendedAction();
+        dto.createdAt = assessment.getCreatedAt();
+        dto.completedAt = assessment.getCompletedAt();
         return dto;
     }
 

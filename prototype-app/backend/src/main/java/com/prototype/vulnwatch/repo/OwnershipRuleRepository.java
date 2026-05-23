@@ -7,5 +7,5 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OwnershipRuleRepository extends JpaRepository<OwnershipRule, UUID> {
-    List<OwnershipRule> findByTenantOrderByExecutionOrderAscCreatedAtAsc(Tenant tenant);
+    List<OwnershipRule> findAllByOrderByExecutionOrderAscCreatedAtAsc();
 }

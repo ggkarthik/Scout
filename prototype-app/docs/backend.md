@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-04-29
+Last updated: 2026-05-22
 
 ## Purpose
 
@@ -15,7 +15,22 @@ The backend ingests software inventory and vulnerability intelligence, correlate
 - Spring Security
 - Spring Validation
 - PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
-- Flyway-managed PostgreSQL schema with `spring.jpa.hibernate.ddl-auto=none`
+- Flyway-managed PostgreSQL schema with reset-line migrations under `db/migration/postgres_reset`
+- Hibernate schema mutation is disabled; the reset-line catalog is expected to come from Flyway `postgres_reset/V1`
+
+## Package Layout (`com.prototype.vulnwatch`)
+
+| Package | Contents |
+|---------|----------|
+| `controller/` | REST controllers under `/api/**` |
+| `service/` | Business-logic services |
+| `domain/` | JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
+| `dto/` | API request/response objects |
+| `repo/` | Spring Data JPA repositories |
+| `client/` | External API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
+| `config/` | Spring beans and security configuration |
+| `security/` | `SensitiveTenantAction` annotation and `SensitiveTenantActionInterceptor` for sensitive cross-tenant operations |
+| `util/` | CPE handling, version comparison, SBOM parsing |
 
 ## Security Model
 
@@ -32,6 +47,70 @@ The backend ingests software inventory and vulnerability intelligence, correlate
 
 The UI also sends `X-Tenant-ID` and `X-User-ID`; several newer workflow endpoints depend on those headers directly.
 `APP_ALLOW_HEADER_TENANT_SELECTION=true` keeps that local compatibility mode available. It must be disabled for production once tenant context is derived from verified identity claims.
+
+### Auth0 Hosted Login
+
+For local Auth0-backed hosted login, the backend should validate the Auth0 issuer and API audience, then map the authenticated identity onto existing `app_users` and `tenant_memberships`.
+
+Recommended local Auth0 env vars:
+
+```env
+APP_JWT_ISSUER_URI=https://dev-ws03t5n4y61lrmi4.us.auth0.com/
+APP_SECURITY_JWT_AUDIENCE=https://api.hossstore.in
+APP_SECURITY_JWT_SUBJECT_CLAIM=email
+APP_JWT_EMAIL_CLAIM=email
+APP_JWT_NAME_CLAIM=name
+APP_JWT_ROLES_CLAIM=https://hossstore.in/roles
+```
+
+Why `APP_SECURITY_JWT_SUBJECT_CLAIM=email` matters in this codebase:
+
+- `JwtTenantAuthenticationService` looks up `app_users.external_subject` and `tenant_memberships.user_external_subject` using the configured JWT subject.
+- Current local users and memberships are typically keyed by email, not by Auth0's opaque `sub`.
+- If Auth0 login uses `sub` before the data model is migrated, login can succeed while tenant membership resolution fails with authorization errors.
+
+`https://hossstore.in/roles` is intended for an Auth0 Post Login Action that copies Auth0 roles into the API access token. `PLATFORM_OWNER` can then be granted directly from Auth0 without creating a separate local bootstrap path.
+
+For rollout safety, `JwtTenantAuthenticationService` also falls back to the plain `roles` claim when `APP_JWT_ROLES_CLAIM` points at a namespaced Auth0 claim. That keeps existing locally issued HMAC tokens working while Auth0-backed hosted login is introduced.
+
+## Schema Ownership
+
+The backend is mid-migration to a shared database with a shared `platform` schema plus one schema per tenant.
+
+| Ownership | Tables / entities |
+|---------|----------|
+| `platform` | `Tenant`, `AppUser`, `TenantMembership`, `TenantSupportGrant`, central vulnerability/reference/intelligence entities such as `Vulnerability`, `VulnerabilityIntelSummary`, `VulnerabilityIntelObservation`, `CpeDim`, `EolProductCatalog`, `EolRelease` |
+| tenant-local | assets, inventory components, software instances, findings, finding events/comments, risk policy, org CVE records, component vulnerability states, suppression rules, ownership rules, fix records, connector configs, SBOM uploads, service accounts, quality projections |
+| hybrid | sync history, audit history, demo lifecycle/admin/support paths, and services that read `platform` vulnerability data but write tenant-local findings or projections |
+
+Current default:
+
+- keep `tenant_id` on existing entities and tables for compatibility unless removal is required for correctness
+- prefer `TenantSchemaExecutionService` plus schema-local repository methods for tenant-owned runtime paths
+- keep explicit `platform.*` access for true shared-plane data
+- `ServiceLayerSchemaIsolationTest` guards against reintroducing tenant-qualified shared-schema repository access inside `service/`
+
+## Reset-Line Bootstrap Status
+
+Current reset-line foundation:
+
+- Flyway uses `db/migration/postgres_reset`
+- `V1__platform_and_default_tenant_schemas.sql` bootstraps `platform` and `tenant_default`
+- `TenantSchemaService` / `TenantBootstrapService` provision additional tenant schemas
+- `DatabaseResetCompatibilityGuardService` fails fast on unsupported legacy shared-schema layouts
+
+Current reset-line contract:
+
+- `spring.jpa.hibernate.ddl-auto=none` is the expected mode
+- `postgres_reset/V1__platform_and_default_tenant_schemas.sql` now includes the runtime catalog used by the current branch:
+  - `platform`: tenant registry, software identity/reference, CPE, vulnerability-intel summary/observation/target, VEX, and EOL catalog tables
+  - `tenant_default`: demo, audit, investigation, assets, inventory, CI, software-instance, software-inventory, CPE-map, findings, policies, org-CVE, connector-config, sync, service-account, and GitHub SBOM source tables
+
+Practical rule for the remaining reset work:
+
+- keep new schema changes explicit in Flyway reset SQL
+- do not reintroduce Hibernate-driven schema mutation
+- `ResetLineBootstrapPostgresIntegrationTest` is the current source of truth for the minimum platform and tenant-default catalog that must exist after boot
 
 ## Local Database Runtime
 
@@ -53,16 +132,13 @@ the token needs at least package-read access.
 The same resolved token is shared by GitHub repo SBOM fetches, GHCR image SBOM ingestion,
 and GHSA advisory syncs.
 
-If an existing local PostgreSQL `vulnwatch` database was created before the Flyway migration files stabilized, repair the Flyway history once:
+If an existing local PostgreSQL `vulnwatch` database was created before the reset-line baseline landed, do not repair it in place. Recreate the database from the `postgres_reset` baseline instead.
 
 ```bash
 cd backend
-mvn -q \
-  -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
-  -Dflyway.user="$USER" \
-  -Dflyway.password= \
-  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres \
-  flyway:repair
+dropdb vulnwatch
+createdb vulnwatch
+mvn -q test -Dtest=SchemaMigrationStartupPostgresIntegrationTest
 ```
 
 To validate PostgreSQL data against an archived H2 source snapshot:
@@ -212,7 +288,25 @@ Scope is currently EC2-only via SSM (V1069). RDS/Lambda/S3/ECS/EKS scope was rem
 - `POST /api/cve-detail/{cveId}/suppress`
 - `POST /api/cve-detail/{cveId}/export`
 - `POST /api/cve-detail/{cveId}/servicenow-incident` — opens a ServiceNow incident; writes `incident_id`/`incident_status` onto the underlying findings (V1054)
-- `POST /api/cve-detail/{cveId}/ai-investigation-summary`, `/ai-solution`, `/ai-actions` — AI-assisted writers; persist results onto `org_cve_records` (V1047/V1052/V1053) so subsequent reads do not re-call OpenAI
+- `POST /api/cve-detail/{cveId}/ai-investigation-summary`, `/ai-solution`, `/ai-actions` — AI-assisted writers; persist results in `org_cve_ai_artifacts` so subsequent reads do not re-call OpenAI
+
+## Flyway rollout audit
+
+Before promoting a migration-bearing build, inspect `flyway_schema_history` in every active environment and verify:
+
+- no row exists for version `1073`
+- versions `1090` and `1092` either both exist or both do not exist
+- versions `1091` and `1093` either both exist or both do not exist
+- no rows are marked failed
+- no rows were applied out of order
+- any manually repaired entries are documented in the deployment record
+
+Migration review policy for new changes:
+
+- one version, one file
+- no comment-only or whitespace-only migrations
+- idempotence is allowed for compatibility and repair, not as a substitute for root-cause analysis
+- new structured payload columns default to typed storage such as `jsonb`, not JSON-in-`TEXT`
 - `POST /api/operations/vulnerability-archive/migrate`
 - `GET /api/operations/vulnerability-archive/status`
 - `GET /api/operations/vulnerability-archive/{externalId}/description`
@@ -427,14 +521,14 @@ Executors:
 - SBOM fetch: `SBOM_FETCH_MAX_PAYLOAD_BYTES`, `SBOM_FETCH_ALLOWED_HOSTS`, `SBOM_FETCH_ALLOW_USER_AUTH_HEADER`
 - CSAF/GHSA/HTTP tuning: `CSAF_*`, `GHSA_*`, `HTTP_*`
 - Asset lifecycle: `ASSET_STALE_DAYS_TO_INACTIVE`
-- Archive storage: `ARCHIVE_STORAGE_BACKEND`, `ARCHIVE_LOCAL_PATH`, `ARCHIVE_S3_BUCKET`, `ARCHIVE_S3_REGION`
+- Archive storage: `ARCHIVE_LOCAL_PATH`
 - CMDB: `CMDB_SERVICENOW_*`, `CMDB_SCCM_*` (JDBC URL, credentials, mock mode)
 - AWS Discovery: configured per-tenant via `aws_discovery_configs` (no global env)
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` (default `gpt-4o-mini`), `OPENAI_ENABLED`
 
 ## Current Caveats
 
-- Runtime workspace handling is now explicitly single-workspace. `WorkspaceService` resolves and caches the active workspace at startup, request-scoped tenant context is derived from that cached workspace, and controllers should depend on `WorkspaceService` rather than request-time tenant fallback.
+- Runtime workspace handling is currently single-workspace. `WorkspaceService` resolves and caches the active workspace at startup, request-scoped tenant context is derived from that cached workspace, and controllers should depend on `WorkspaceService` rather than request-time tenant fallback while the broader multi-tenant runtime rollout continues.
 - `POST /api/cve-detail/{cveId}/suppress` is fully implemented: persists suppression via `OrgCveRecordService.suppress()` and suppresses related findings via `FindingService.suppressFindingsForVulnerability()`.
 - Flyway owns the PostgreSQL startup path. Remaining schema cleanup is now mostly historical normalization rather than runtime compatibility work.
 - The vulnerability optimization is only partially landed: archive/snippet fields exist, but legacy CVSS/source/status fields are still present on `Vulnerability` for compatibility.

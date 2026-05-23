@@ -9,4 +9,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface DemoRequestRepository extends JpaRepository<DemoRequest, UUID> {
     List<DemoRequest> findAllByOrderByRequestedAtDesc();
     Optional<DemoRequest> findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(String email, List<String> statuses);
+    Optional<DemoRequest> findFirstByEmailIgnoreCaseAndTenantIdIsNotNullOrderByRequestedAtAsc(String email);
 }

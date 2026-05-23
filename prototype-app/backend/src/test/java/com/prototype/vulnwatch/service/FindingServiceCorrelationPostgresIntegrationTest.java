@@ -12,6 +12,7 @@ import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.BusinessCriticality;
 import com.prototype.vulnwatch.domain.CpeDim;
 import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.InventoryComponent;
@@ -224,6 +225,102 @@ class FindingServiceCorrelationPostgresIntegrationTest {
         assertEquals(FindingDecisionState.AFFECTED, finding.getDecisionState());
         assertTrue(finding.getMatchedBy().startsWith("cpe-"));
         assertNotNull(finding.getEvidence());
+    }
+
+    @Test
+    void manualFindingRemainsCanonicalWhenAutoModeIsEnabledLater() {
+        Tenant tenant = tenantService.getDefaultTenant();
+        TestFixture fixture = createAssetAndComponent(
+                tenant,
+                "manual-then-auto",
+                "maven",
+                "log4j-core",
+                "2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
+        );
+
+        Vulnerability vulnerability = createVulnerability("CVE-2099-5010", VulnerabilitySource.NVD, "HIGH", 8.4);
+        createCpeTarget(
+                vulnerability,
+                "nvd",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+                "2.0.0",
+                "2.17.1"
+        );
+
+        ManualFindingCreationResult result = findingService.createManualFindingsForVulnerability(
+                tenant,
+                vulnerability,
+                "Created manually first",
+                "local-analyst",
+                List.of(fixture.component().getId()),
+                Map.of(fixture.component().getId(), ApplicabilityState.APPLICABLE),
+                Map.of(fixture.component().getId(), AnalystDisposition.IMPACTED)
+        );
+        assertEquals(1, result.createdCount());
+
+        Finding manualFinding = findingRepository.findByComponent(fixture.component()).get(0);
+        UUID findingId = manualFinding.getId();
+        assertEquals(FindingCreationSource.MANUAL, manualFinding.getCreationSource());
+
+        setFindingGenerationMode(RiskPolicy.FindingGenerationMode.AUTO);
+        int active = findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
+        assertEquals(1, active);
+
+        List<Finding> findings = findingRepository.findByComponent(fixture.component());
+        assertEquals(1, findings.size());
+        assertEquals(findingId, findings.get(0).getId());
+        assertEquals(FindingCreationSource.MANUAL, findings.get(0).getCreationSource());
+    }
+
+    @Test
+    void manualCreateAgainstExistingAutoFindingDoesNotCreateDuplicate() {
+        setFindingGenerationMode(RiskPolicy.FindingGenerationMode.AUTO);
+        Tenant tenant = tenantService.getDefaultTenant();
+        TestFixture fixture = createAssetAndComponent(
+                tenant,
+                "auto-then-manual",
+                "maven",
+                "log4j-core",
+                "2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
+        );
+
+        Vulnerability vulnerability = createVulnerability("CVE-2099-5011", VulnerabilitySource.NVD, "HIGH", 8.4);
+        createCpeTarget(
+                vulnerability,
+                "nvd",
+                "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+                "2.0.0",
+                "2.17.1"
+        );
+
+        int active = findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
+        assertEquals(1, active);
+
+        Finding autoFinding = findingRepository.findByComponent(fixture.component()).get(0);
+        UUID findingId = autoFinding.getId();
+        assertEquals(FindingCreationSource.AUTOMATIC, autoFinding.getCreationSource());
+
+        ManualFindingCreationResult result = findingService.createManualFindingsForVulnerability(
+                tenant,
+                vulnerability,
+                "Confirmed manually after correlation",
+                "local-analyst",
+                List.of(fixture.component().getId()),
+                Map.of(fixture.component().getId(), ApplicabilityState.APPLICABLE),
+                Map.of(fixture.component().getId(), AnalystDisposition.IMPACTED)
+        );
+
+        assertEquals(0, result.createdCount());
+        assertEquals(0, result.reopenedCount());
+        assertEquals(1, result.alreadyOpenCount());
+
+        List<Finding> findings = findingRepository.findByComponent(fixture.component());
+        assertEquals(1, findings.size());
+        assertEquals(findingId, findings.get(0).getId());
     }
 
     private void setFindingGenerationMode(RiskPolicy.FindingGenerationMode mode) {

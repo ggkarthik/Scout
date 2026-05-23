@@ -12,6 +12,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
+        schema = "platform",
         name = "software_identities",
         indexes = {
                 @Index(name = "idx_software_identity_key", columnList = "canonical_key")

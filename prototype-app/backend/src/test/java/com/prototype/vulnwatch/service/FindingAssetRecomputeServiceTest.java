@@ -67,6 +67,9 @@ class FindingAssetRecomputeServiceTest {
     @Mock
     private FindingCorrelationMutationService findingCorrelationMutationService;
 
+    @Mock
+    private FindingUpsertService findingUpsertService;
+
     private FindingAssetRecomputeService findingAssetRecomputeService;
 
     @BeforeEach
@@ -84,7 +87,8 @@ class FindingAssetRecomputeServiceTest {
                 orgCveRecordService,
                 findingSlaService,
                 findingCorrelationAnalysisService,
-                findingCorrelationMutationService
+                findingCorrelationMutationService,
+                findingUpsertService
         );
     }
 

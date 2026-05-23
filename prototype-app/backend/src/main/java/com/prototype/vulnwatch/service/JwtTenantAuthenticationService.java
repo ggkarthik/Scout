@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,12 +31,15 @@ public class JwtTenantAuthenticationService {
     private final TenantMembershipRepository membershipRepository;
     private final TenantSupportGrantService tenantSupportGrantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
+    private final AppUserGlobalRoleService appUserGlobalRoleService;
+    private final String subjectClaim;
     private final String tenantIdClaim;
     private final String activeTenantIdClaim;
     private final String tenantSlugClaim;
     private final String emailClaim;
     private final String nameClaim;
     private final String rolesClaim;
+    private final String keycloakClientId;
 
     public JwtTenantAuthenticationService(
             AppUserRepository userRepository,
@@ -42,29 +47,35 @@ public class JwtTenantAuthenticationService {
             TenantMembershipRepository membershipRepository,
             TenantSupportGrantService tenantSupportGrantService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
+            AppUserGlobalRoleService appUserGlobalRoleService,
+            @Value("${app.security.jwt.subject-claim:sub}") String subjectClaim,
             @Value("${app.security.jwt.tenant-id-claim:tenant_id}") String tenantIdClaim,
             @Value("${app.security.jwt.active-tenant-id-claim:active_tenant_id}") String activeTenantIdClaim,
             @Value("${app.security.jwt.tenant-slug-claim:tenant_slug}") String tenantSlugClaim,
             @Value("${app.security.jwt.email-claim:email}") String emailClaim,
             @Value("${app.security.jwt.name-claim:name}") String nameClaim,
-            @Value("${app.security.jwt.roles-claim:roles}") String rolesClaim
+            @Value("${app.security.jwt.roles-claim:roles}") String rolesClaim,
+            @Value("${app.security.jwt.keycloak-client-id:}") String keycloakClientId
     ) {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.tenantSupportGrantService = tenantSupportGrantService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+        this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this.subjectClaim = subjectClaim;
         this.tenantIdClaim = tenantIdClaim;
         this.activeTenantIdClaim = activeTenantIdClaim;
         this.tenantSlugClaim = tenantSlugClaim;
         this.emailClaim = emailClaim;
         this.nameClaim = nameClaim;
         this.rolesClaim = rolesClaim;
+        this.keycloakClientId = keycloakClientId;
     }
 
     @Transactional
     public AuthenticatedTenantActor authenticate(Jwt jwt) {
-        String subject = requireText(jwt.getSubject(), "JWT subject is required");
+        String subject = resolveSubject(jwt);
         AppUser user = userRepository.findByExternalSubject(subject)
                 .orElseGet(() -> createUser(subject));
         user.setEmail(claimAsString(jwt, emailClaim));
@@ -73,9 +84,18 @@ public class JwtTenantAuthenticationService {
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
 
-        Set<String> jwtRoles = normalizeRoles(jwt.getClaim(rolesClaim));
-        Tenant tenant = resolveTenant(jwt, subject, jwtRoles);
+        Set<String> jwtRoles = extractJwtRoles(jwt);
+        if (jwtRoles.contains("PLATFORM_OWNER")) {
+            appUserGlobalRoleService.ensureRole(user, "PLATFORM_OWNER");
+        }
         Set<String> roles = new LinkedHashSet<>(jwtRoles);
+        roles.addAll(appUserGlobalRoleService.rolesForUser(user.getId()));
+        if (roles.contains("PLATFORM_OWNER") && !user.isPlatformOwner()) {
+            user.setPlatformOwner(true);
+            user.setUpdatedAt(Instant.now());
+            userRepository.save(user);
+        }
+        Tenant tenant = resolveTenant(jwt, subject, roles);
 
         if (tenant != null) {
             TenantMembership membership = membershipRepository
@@ -155,6 +175,66 @@ public class JwtTenantAuthenticationService {
         return user;
     }
 
+    private String resolveSubject(Jwt jwt) {
+        String configuredSubject = claimAsString(jwt, subjectClaim);
+        if (hasText(configuredSubject)) {
+            return configuredSubject;
+        }
+        return requireText(jwt.getSubject(), "JWT subject is required");
+    }
+
+    private Set<String> extractJwtRoles(Jwt jwt) {
+        LinkedHashSet<String> roles = new LinkedHashSet<>(normalizeRoles(jwt.getClaim(rolesClaim)));
+        if (!"roles".equals(rolesClaim)) {
+            roles.addAll(normalizeRoles(jwt.getClaim("roles")));
+        }
+        // Auth0 and other IdPs inject roles under a namespaced URI claim (e.g. https://example.com/roles).
+        // Fall back to scanning all claims whose name ends with "/roles" when the configured claim yields nothing.
+        if (roles.isEmpty()) {
+            roles.addAll(extractNamespacedRoles(jwt));
+        }
+        roles.addAll(extractKeycloakRealmRoles(jwt));
+        roles.addAll(extractKeycloakClientRoles(jwt));
+        return roles;
+    }
+
+    private Set<String> extractNamespacedRoles(Jwt jwt) {
+        Set<String> roles = new LinkedHashSet<>();
+        jwt.getClaims().forEach((claimName, value) -> {
+            if (claimName.endsWith("/roles")) {
+                roles.addAll(normalizeRoles(value));
+            }
+        });
+        return roles;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> extractKeycloakRealmRoles(Jwt jwt) {
+        Object claim = jwt.getClaim("realm_access");
+        if (!(claim instanceof Map<?, ?> access)) {
+            return Set.of();
+        }
+        Object roles = access.get("roles");
+        return normalizeRoles(roles);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> extractKeycloakClientRoles(Jwt jwt) {
+        if (!hasText(keycloakClientId)) {
+            return Set.of();
+        }
+        Object claim = jwt.getClaim("resource_access");
+        if (!(claim instanceof Map<?, ?> access)) {
+            return Set.of();
+        }
+        Object clientEntry = access.get(keycloakClientId);
+        if (!(clientEntry instanceof Map<?, ?> clientAccess)) {
+            return Set.of();
+        }
+        Object roles = clientAccess.get("roles");
+        return normalizeRoles(roles);
+    }
+
     private UUID parseUuid(String value) {
         try {
             return UUID.fromString(value.trim());
@@ -179,7 +259,7 @@ public class JwtTenantAuthenticationService {
         if (role == null || role.isBlank()) {
             return;
         }
-        roles.add(role.trim().toUpperCase().replace('-', '_').replace(' ', '_').replaceFirst("^ROLE_", ""));
+        roles.add(role.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_').replaceFirst("^ROLE_", ""));
     }
 
     private String claimAsString(Jwt jwt, String claimName) {
@@ -196,5 +276,9 @@ public class JwtTenantAuthenticationService {
             throw new ResponseStatusException(UNAUTHORIZED, message);
         }
         return value.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

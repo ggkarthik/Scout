@@ -10,7 +10,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
@@ -146,29 +148,8 @@ public class OrgCveRecord {
     @Column(name = "last_evaluated_at", nullable = false)
     private Instant lastEvaluatedAt = Instant.now();
 
-    @Column(name = "investigation_summary_input_json", length = 200000)
-    private String investigationSummaryInputJson;
-
-    @Column(name = "investigation_summary_output_json", length = 200000)
-    private String investigationSummaryOutputJson;
-
-    @Column(name = "investigation_summary_mode", length = 32)
-    private String investigationSummaryMode;
-
-    @Column(name = "investigation_summary_generated_at")
-    private Instant investigationSummaryGeneratedAt;
-
-    @Column(name = "ai_solution_json", length = 200000)
-    private String aiSolutionJson;
-
-    @Column(name = "ai_solution_generated_at")
-    private Instant aiSolutionGeneratedAt;
-
-    @Column(name = "ai_actions_json", length = 50000)
-    private String aiActionsJson;
-
-    @Column(name = "ai_actions_generated_at")
-    private Instant aiActionsGeneratedAt;
+    @OneToOne(mappedBy = "orgCveRecord", cascade = CascadeType.ALL, orphanRemoval = true)
+    private OrgCveAiArtifact aiArtifact;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "org_impact", length = 10)
@@ -450,67 +431,67 @@ public class OrgCveRecord {
     }
 
     public String getInvestigationSummaryInputJson() {
-        return investigationSummaryInputJson;
+        return aiArtifact == null ? null : aiArtifact.getInvestigationSummaryInputJson();
     }
 
     public void setInvestigationSummaryInputJson(String investigationSummaryInputJson) {
-        this.investigationSummaryInputJson = investigationSummaryInputJson;
+        ensureAiArtifact().setInvestigationSummaryInputJson(investigationSummaryInputJson);
     }
 
     public String getInvestigationSummaryOutputJson() {
-        return investigationSummaryOutputJson;
+        return aiArtifact == null ? null : aiArtifact.getInvestigationSummaryOutputJson();
     }
 
     public void setInvestigationSummaryOutputJson(String investigationSummaryOutputJson) {
-        this.investigationSummaryOutputJson = investigationSummaryOutputJson;
+        ensureAiArtifact().setInvestigationSummaryOutputJson(investigationSummaryOutputJson);
     }
 
     public String getInvestigationSummaryMode() {
-        return investigationSummaryMode;
+        return aiArtifact == null ? null : aiArtifact.getInvestigationSummaryMode();
     }
 
     public void setInvestigationSummaryMode(String investigationSummaryMode) {
-        this.investigationSummaryMode = investigationSummaryMode;
+        ensureAiArtifact().setInvestigationSummaryMode(investigationSummaryMode);
     }
 
     public Instant getInvestigationSummaryGeneratedAt() {
-        return investigationSummaryGeneratedAt;
+        return aiArtifact == null ? null : aiArtifact.getInvestigationSummaryGeneratedAt();
     }
 
     public void setInvestigationSummaryGeneratedAt(Instant investigationSummaryGeneratedAt) {
-        this.investigationSummaryGeneratedAt = investigationSummaryGeneratedAt;
+        ensureAiArtifact().setInvestigationSummaryGeneratedAt(investigationSummaryGeneratedAt);
     }
 
     public String getAiSolutionJson() {
-        return aiSolutionJson;
+        return aiArtifact == null ? null : aiArtifact.getAiSolutionJson();
     }
 
     public void setAiSolutionJson(String aiSolutionJson) {
-        this.aiSolutionJson = aiSolutionJson;
+        ensureAiArtifact().setAiSolutionJson(aiSolutionJson);
     }
 
     public Instant getAiSolutionGeneratedAt() {
-        return aiSolutionGeneratedAt;
+        return aiArtifact == null ? null : aiArtifact.getAiSolutionGeneratedAt();
     }
 
     public void setAiSolutionGeneratedAt(Instant aiSolutionGeneratedAt) {
-        this.aiSolutionGeneratedAt = aiSolutionGeneratedAt;
+        ensureAiArtifact().setAiSolutionGeneratedAt(aiSolutionGeneratedAt);
     }
 
     public String getAiActionsJson() {
-        return aiActionsJson;
+        return aiArtifact == null ? null : aiArtifact.getAiActionsJson();
     }
 
     public void setAiActionsJson(String aiActionsJson) {
-        this.aiActionsJson = aiActionsJson;
+        ensureAiArtifact().setAiActionsJson(aiActionsJson);
     }
 
     public Instant getAiActionsGeneratedAt() {
-        return aiActionsGeneratedAt;
+        return aiArtifact == null ? null : aiArtifact.getAiActionsGeneratedAt();
     }
 
     public void setAiActionsGeneratedAt(Instant aiActionsGeneratedAt) {
-        this.aiActionsGeneratedAt = aiActionsGeneratedAt;
+        ensureAiArtifact().setAiActionsGeneratedAt(aiActionsGeneratedAt);
     }
 
     public OrgImpact getOrgImpact() {
@@ -531,5 +512,20 @@ public class OrgCveRecord {
 
     public void touch() {
         this.updatedAt = Instant.now();
+        if (aiArtifact != null) {
+            aiArtifact.touch();
+        }
+    }
+
+    public OrgCveAiArtifact getAiArtifact() {
+        return aiArtifact;
+    }
+
+    private OrgCveAiArtifact ensureAiArtifact() {
+        if (aiArtifact == null) {
+            aiArtifact = new OrgCveAiArtifact();
+            aiArtifact.setOrgCveRecord(this);
+        }
+        return aiArtifact;
     }
 }
