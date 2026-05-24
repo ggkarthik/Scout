@@ -155,7 +155,7 @@ There are three distinct views under the Vulnerability Intelligence flyout:
 - Vulnerability list/detail: `InventoryPage` in `vulnerability-intelligence` mode using `/vulnerability-intelligence`, `/vulnerability-intelligence/filters`, and `/vulnerability-intelligence/{externalId}`
 - CVE Assessment Workbench: `VulnerabilityIntelOrgCvePage` using `/vulnerability-intelligence/org-cves` and `/vulnerability-intelligence/org-cves/status` (flyout label: "CVE Assessment Workbench", view key: `org-cves`)
 
-CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `CveAssessmentWorkbench`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
+CVE Assessment Workbench is the primary place where the current UI exposes CVE drill-down. It opens `VulnRepoCveAssessmentWorkbench`, which uses the `/cve-detail/*` workflow APIs for investigations, applicability assessments, manual finding creation, suppression, and export.
 
 Current workbench behavior:
 
@@ -242,7 +242,7 @@ Supporting components:
 - `FilterBuilder` and `FilterValueSelectCard` drive reusable filter UX
 - `StatCard` is used for summary metrics
 - `GithubPipelineManager` is a self-contained GitHub source pipeline editor used inside `ConnectPage`
-- `CveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vuln Intel
+- `VulnRepoCveAssessmentWorkbench` drives the CVE assessment drawer workflow under Vuln Intel
 - `SoftwareIdentityDetailDrawer` is a slide-over for per-identity detail, EOL status, and slug mapping; used from `SoftwareIdentitiesPage`
 - Most long-running actions surface inline status text instead of global toasts
 
@@ -254,7 +254,7 @@ Types and queries are colocated per feature under `src/features/`:
 |---------|------------------|
 | `admin/` | Platform console and tenant administration components |
 | `auth/` | `AuthProvider`, identity context, `queries.tsx`, `types.ts` |
-| `cve-workbench/` | `CveAssessmentWorkbench` and panels (Investigation, Applicability, Findings, Sidebar), assessment/eol/formatting helpers, hooks |
+| `cve-workbench/` | Shared workbench data layer and helpers: `types`, `queries`, `api`, assessment helpers, asset reporting, formatting, investigation context, and workflow/EOL utilities used by the live vulnerability drill-down flows |
 | `configurations/` | `RiskPolicy` types (includes the 6 triage weight fields), `OwnershipRuleResponse`, `OwnershipRuleRequest`, `SuppressionRule` |
 | `connect/` | Per-connector queries (ServiceNow, SCCM, AWS, GitHub, vuln sources), shared types |
 | `dashboard/` | Dashboard, ApplicableSoftware, ImpactedCves types + queries |

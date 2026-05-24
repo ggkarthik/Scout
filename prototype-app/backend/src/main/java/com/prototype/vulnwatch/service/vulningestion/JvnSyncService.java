@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.service.ObservationIngestionService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelligenceService;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -47,9 +48,12 @@ public class JvnSyncService {
     }
 
     public SyncTriggerResponse triggerJvnSync() {
-        SyncRun run = syncRunService.createQueuedRun("JVN");
-        ingestionExecutor.execute(() -> executeJvnSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "JVN sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("JVN", List.of("JVN"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeJvnSyncAsync(decision.run().getId()));
+        }
+        return decision.toResponse("JVN sync is already in progress", "JVN sync queued");
     }
 
     public void executeJvnSyncAsync(UUID runId) {

@@ -129,9 +129,12 @@ public class GhsaSyncService {
     }
 
     public SyncTriggerResponse triggerGhsaSync() {
-        SyncRun run = syncRunService.createQueuedRun("GHSA");
-        ingestionExecutor.execute(() -> executeGhsaSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "GHSA sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("GHSA", List.of("GHSA"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeGhsaSyncAsync(decision.run().getId()));
+        }
+        return decision.toResponse("GHSA sync is already in progress", "GHSA sync queued");
     }
 
     public void executeGhsaSyncAsync(UUID runId) {

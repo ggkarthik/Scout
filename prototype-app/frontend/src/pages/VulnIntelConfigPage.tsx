@@ -11,26 +11,9 @@ import type {
 import { useSourceFilterConfigQuery } from '../features/connect/queries';
 import { useActor } from '../features/auth/context';
 import { canManageSourceFilters } from '../features/auth/roles';
+import { formatTimestamp, timeAgo } from '../lib/time';
 
 const SEVERITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
-
-function timeAgo(iso?: string): string | null {
-  if (!iso) return null;
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hr ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
-}
-
-function formatTimestamp(value?: string): string {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
 
 function isNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;

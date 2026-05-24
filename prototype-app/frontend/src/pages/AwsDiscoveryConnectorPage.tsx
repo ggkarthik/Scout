@@ -2,6 +2,7 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
+import { InfoTooltip } from '../components/InfoTooltip';
 import { useActor } from '../features/auth/context';
 import { canManageInventorySources } from '../features/auth/roles';
 import type {
@@ -14,18 +15,7 @@ import type {
   SyncTriggerResponse
 } from '../features/connect/types';
 import { useAwsDiscoveryConfigQuery, useAwsDiscoveryTargetsQuery } from '../features/connect/queries';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatTimestamp(value?: string): string {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
-function Tooltip({ text }: { text: string }) {
-  return <span className="sn-tooltip" title={text} aria-label={text}>ⓘ</span>;
-}
+import { formatTimestamp } from '../lib/time';
 
 // ── Region constants ─────────────────────────────────────────────────────────
 
@@ -453,7 +443,7 @@ export function AwsDiscoveryConnectorPage() {
           <label>
             <span>
               Auth Method <span className="sn-required">*</span>{' '}
-              <Tooltip text="How VulnWatch authenticates to AWS. Instance Metadata uses the EC2/ECS IAM role. Access Key uses static credentials. Cross-Account Role assumes a role in another account." />
+              <InfoTooltip text="How VulnWatch authenticates to AWS. Instance Metadata uses the EC2/ECS IAM role. Access Key uses static credentials. Cross-Account Role assumes a role in another account." />
             </span>
             <select
               value={form.authType}
@@ -481,7 +471,7 @@ export function AwsDiscoveryConnectorPage() {
               <label>
                 <span>
                   Secret Access Key <span className="sn-required">*</span>{' '}
-                  <Tooltip text={config?.hasCredential ? 'A secret is saved. Enter a new value only to rotate it.' : 'Required to authenticate API calls.'} />
+                  <InfoTooltip text={config?.hasCredential ? 'A secret is saved. Enter a new value only to rotate it.' : 'Required to authenticate API calls.'} />
                 </span>
                 <div className="secure-input-row">
                   <input
@@ -511,7 +501,7 @@ export function AwsDiscoveryConnectorPage() {
               <label>
                 <span>
                   Cross-Account Role ARN <span className="sn-required">*</span>{' '}
-                  <Tooltip text="The ARN of the IAM role in the target AWS account that VulnWatch should assume." />
+                  <InfoTooltip text="The ARN of the IAM role in the target AWS account that VulnWatch should assume." />
                 </span>
                 <input
                   type="text"
@@ -523,7 +513,7 @@ export function AwsDiscoveryConnectorPage() {
               <label>
                 <span>
                   External ID{' '}
-                  <Tooltip text="Optional external ID for the AssumeRole call. Recommended for cross-account trust." />
+                  <InfoTooltip text="Optional external ID for the AssumeRole call. Recommended for cross-account trust." />
                 </span>
                 <input
                   type="text"
@@ -537,7 +527,7 @@ export function AwsDiscoveryConnectorPage() {
 
           {config?.awsAccountId && (
             <label>
-              <span>Resolved AWS Account ID <Tooltip text="Populated automatically after a successful Test Connection." /></span>
+              <span>Resolved AWS Account ID <InfoTooltip text="Populated automatically after a successful Test Connection." /></span>
               <input type="text" value={config.awsAccountId} readOnly />
             </label>
           )}
@@ -550,7 +540,7 @@ export function AwsDiscoveryConnectorPage() {
         <fieldset className="aws-region-fieldset">
           <legend className="aws-region-legend">
             AWS Regions <span className="sn-required">*</span>{' '}
-            <Tooltip text="Select one or more AWS regions to discover resources in." />
+            <InfoTooltip text="Select one or more AWS regions to discover resources in." />
           </legend>
           <div className="aws-region-actions">
             <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([...AWS_REGIONS])}>Select all</button>
@@ -591,13 +581,13 @@ export function AwsDiscoveryConnectorPage() {
               onChange={(e) => updateField('autoSyncEnabled', e.target.checked)}
             />
             <span>Enable scheduled sync</span>
-            <Tooltip text="Automatically discovers AWS resources on the configured interval." />
+            <InfoTooltip text="Automatically discovers AWS resources on the configured interval." />
           </label>
         </div>
         {form.autoSyncEnabled && (
           <div className="form-grid sn-sync-interval-grid" style={{ marginTop: 8 }}>
             <label>
-              <span>Sync Interval <Tooltip text="How frequently the scheduled sync runs." /></span>
+              <span>Sync Interval <InfoTooltip text="How frequently the scheduled sync runs." /></span>
               <select
                 value={form.intervalMinutes ?? 1440}
                 onChange={(e) => updateField('intervalMinutes', Number(e.target.value))}

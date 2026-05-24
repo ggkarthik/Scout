@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.service.ObservationIngestionService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelligenceService;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -46,9 +47,12 @@ public class EuvdSyncService {
     }
 
     public SyncTriggerResponse triggerEuvdSync() {
-        SyncRun run = syncRunService.createQueuedRun("EUVD");
-        ingestionExecutor.execute(() -> executeEuvdSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EUVD sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("EUVD", List.of("EUVD"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeEuvdSyncAsync(decision.run().getId()));
+        }
+        return decision.toResponse("EUVD sync is already in progress", "EUVD sync queued");
     }
 
     public void executeEuvdSyncAsync(UUID runId) {
