@@ -60,10 +60,11 @@ class DemoInviteEmailServiceTest {
         verify(resendEmailClient).send(messageCaptor.capture());
         ResendEmailClient.EmailMessage message = messageCaptor.getValue();
         assertEquals("alex@example.com", message.to());
-        assertTrue(message.subject().contains("validation workspace"));
+        assertTrue(message.subject().contains("Welcome to Scout.ai"));
         assertTrue(message.html().contains("/invite/invite-token-123"));
         assertTrue(message.html().contains("/login"));
-        assertTrue(message.text().contains("set your initial password"));
-        assertTrue(message.text().contains("shared login portal"));
+        assertTrue(message.text().contains("activation link"));
+        assertTrue(message.text().contains("Activation link expires:"));
+        assertTrue(message.text().contains("inventory connectors workspace"));
     }
 }
