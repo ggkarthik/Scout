@@ -109,7 +109,7 @@ describe('Demo public pages', () => {
     expect(screen.getByRole('button', { name: /Activate your workspace/i })).toBeEnabled();
   });
 
-  it('routes tenant owners to exposure after credential login', async () => {
+  it('routes demo tenant owners to inventory connectors after credential login', async () => {
     vi.spyOn(api, 'login').mockResolvedValue({
       token: 'tenant-token',
       tokenType: 'Bearer',
@@ -121,6 +121,7 @@ describe('Demo public pages', () => {
       userId: 'alex@example.com',
       tenantId: 'tenant-1',
       tenantName: 'Example Co',
+      planCode: 'DEMO',
       roles: ['TENANT_ADMIN'],
       platformScope: false
     };
@@ -131,7 +132,7 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/exposure" element={<ExposureActorProbe />} />
+        <Route path="/connect/sources" element={<ExposureActorProbe />} />
         <Route path="/platform/tenants" element={<div>Platform Tenants</div>} />
       </Routes>,
       { queryClient, route: '/login' }
@@ -218,34 +219,25 @@ describe('Demo public pages', () => {
     expect(await screen.findByText(/Set a password for your tenant workspace/i)).toBeInTheDocument();
   });
 
-  it('completes password setup and routes to the tenant workspace', async () => {
+  it('completes password setup and returns to login with a success message', async () => {
     vi.spyOn(api, 'setupPassword').mockResolvedValue({
       token: 'tenant-token',
       tokenType: 'Bearer',
       expiresAt: '2026-05-09T00:00:00Z'
     });
-    vi.spyOn(api, 'getAuthContext').mockResolvedValue({
-      creator: false,
-      principal: 'alex@example.com',
-      userId: 'alex@example.com',
-      tenantId: 'tenant-1',
-      tenantName: 'Example Co',
-      roles: ['TENANT_ADMIN'],
-      platformScope: false
-    });
 
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/exposure" element={<div>Exposure Home</div>} />
       </Routes>,
-      { route: '/login?setup=setup-token-123' }
+      { route: '/login?setup=setup-token-123&email=alex%40example.com' }
     );
 
     fireEvent.change(screen.getByLabelText(/New password/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Set password/i }));
 
-    await screen.findByText('Exposure Home');
+    expect(await screen.findByText(/Password created successfully/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('alex@example.com')).toBeInTheDocument();
     expect(api.setupPassword).toHaveBeenCalledWith('setup-token-123', 'password-123');
   });
 
@@ -261,6 +253,7 @@ describe('Demo public pages', () => {
       userId: 'alex@example.com',
       tenantId: 'tenant-1',
       tenantName: 'Example Co',
+      planCode: 'DEMO',
       roles: ['TENANT_ADMIN'],
       platformScope: false
     });
@@ -273,14 +266,14 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/exposure" element={<div>Exposure Home</div>} />
+        <Route path="/connect/sources" element={<div>Inventory Connectors</div>} />
       </Routes>,
-      { route: '/login?setup=setup-token-123' }
+      { route: '/login?setup=setup-token-123&email=alex%40example.com' }
     );
 
     fireEvent.change(screen.getByLabelText(/New password/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Set password/i }));
-    await screen.findByText('Exposure Home');
+    await screen.findByText(/Password created successfully/i);
 
     clearStoredAuthToken();
     cleanup();
@@ -288,7 +281,7 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/exposure" element={<div>Exposure Home</div>} />
+        <Route path="/connect/sources" element={<div>Inventory Connectors</div>} />
       </Routes>,
       { route: '/login' }
     );
@@ -297,7 +290,7 @@ describe('Demo public pages', () => {
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
-    await screen.findByText('Exposure Home');
+    await screen.findByText('Inventory Connectors');
     expect(loginSpy).toHaveBeenCalledWith('alex@example.com', 'password-123');
   });
 

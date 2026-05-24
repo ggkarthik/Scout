@@ -132,10 +132,10 @@ function PlatformUsersPanel() {
         </button>
       </div>
       <p className="panel-caption">
-        Provision platform access with the external subject emitted by Auth0 for the configured JWT subject claim.
+        Provision platform access with the external subject emitted by your configured identity provider subject claim.
       </p>
       <form className="platform-create-tenant-form" onSubmit={handleSubmit}>
-        <input name="externalSubject" placeholder="Auth0 subject" aria-label="Auth0 subject" />
+        <input name="externalSubject" placeholder="External subject" aria-label="External subject" />
         <input name="email" placeholder="Email" aria-label="Email" />
         <input name="displayName" placeholder="Display name" aria-label="Display name" />
         <input name="role" placeholder="PLATFORM_OWNER" aria-label="Role" defaultValue="PLATFORM_OWNER" />

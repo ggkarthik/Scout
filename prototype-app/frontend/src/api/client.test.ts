@@ -60,7 +60,7 @@ describe('api client auth headers', () => {
     expect(headers.get('X-Platform-Action-Time')).toBeTruthy();
   });
 
-  it('accepts namespaced Auth0 roles claims for platform-owner confirmation headers', async () => {
+  it('accepts namespaced roles claims for platform-owner confirmation headers', async () => {
     setStoredAuthToken(buildToken({
       sub: 'owner@example.com',
       'https://hossstore.in/roles': ['PLATFORM_OWNER'],

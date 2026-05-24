@@ -159,7 +159,7 @@ class JwtTenantAuthenticationServiceTest {
     }
 
     @Test
-    void namespacedRolesClaimSupportsAuth0PlatformOwnerTokens() {
+    void namespacedRolesClaimSupportsPlatformOwnerTokens() {
         AppUser user = new AppUser();
         user.setId(java.util.UUID.randomUUID());
         user.setExternalSubject("owner@example.com");
@@ -186,7 +186,7 @@ class JwtTenantAuthenticationServiceTest {
 
         AuthenticatedTenantActor actor = service.authenticate(Jwt.withTokenValue("token")
                 .header("alg", "RS256")
-                .subject("auth0|123")
+                .subject("owner-subject-123")
                 .claim("email", "owner@example.com")
                 .claim("https://hossstore.in/roles", List.of("PLATFORM_OWNER"))
                 .issuedAt(Instant.now())

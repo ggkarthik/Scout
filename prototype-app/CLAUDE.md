@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cd backend
 mvn spring-boot:run                                    # start the API server (port 8080, default profile)
-mvn spring-boot:run -Dspring-boot.run.profiles=local   # local profile: enables Auth0 JWT + header tenant selection
+mvn spring-boot:run -Dspring-boot.run.profiles=local   # local profile: enables JWT auth + header tenant selection
 mvn test                                               # unit tests (Surefire) + JaCoCo report at target/site/jacoco/index.html
 mvn -Ppostgres-it verify                               # unit + Postgres integration tests (Failsafe, requires Postgres)
 mvn test -Dtest=MyServiceTest                          # run a single unit test class
@@ -103,7 +103,7 @@ Two authentication paths, handled by `ApiKeyAuthenticationFilter`:
 
 **JWT Bearer** (`Authorization: Bearer <token>`):
 - Active only when `APP_JWT_ISSUER_URI` is set (wires a `JwtDecoder` bean).
-- Token decoded and passed to `JwtTenantAuthenticationService`, which resolves roles from the configured claim (default `roles`; Auth0 namespaced claims ending in `/roles` also work).
+- Token decoded and passed to `JwtTenantAuthenticationService`, which resolves roles from the configured claim (default `roles`; namespaced claims ending in `/roles` also work).
 - Roles from JWT are mapped to Spring `GrantedAuthority` values.
 
 Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. All other `/api/**` require authentication. Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/demo-requests`, `/api/demo-invites/**`.

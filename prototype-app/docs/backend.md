@@ -48,31 +48,6 @@ The backend ingests software inventory and vulnerability intelligence, correlate
 The UI also sends `X-Tenant-ID` and `X-User-ID`; several newer workflow endpoints depend on those headers directly.
 `APP_ALLOW_HEADER_TENANT_SELECTION=true` keeps that local compatibility mode available. It must be disabled for production once tenant context is derived from verified identity claims.
 
-### Auth0 Hosted Login
-
-For local Auth0-backed hosted login, the backend should validate the Auth0 issuer and API audience, then map the authenticated identity onto existing `app_users` and `tenant_memberships`.
-
-Recommended local Auth0 env vars:
-
-```env
-APP_JWT_ISSUER_URI=https://dev-ws03t5n4y61lrmi4.us.auth0.com/
-APP_SECURITY_JWT_AUDIENCE=https://api.hossstore.in
-APP_SECURITY_JWT_SUBJECT_CLAIM=email
-APP_JWT_EMAIL_CLAIM=email
-APP_JWT_NAME_CLAIM=name
-APP_JWT_ROLES_CLAIM=https://hossstore.in/roles
-```
-
-Why `APP_SECURITY_JWT_SUBJECT_CLAIM=email` matters in this codebase:
-
-- `JwtTenantAuthenticationService` looks up `app_users.external_subject` and `tenant_memberships.user_external_subject` using the configured JWT subject.
-- Current local users and memberships are typically keyed by email, not by Auth0's opaque `sub`.
-- If Auth0 login uses `sub` before the data model is migrated, login can succeed while tenant membership resolution fails with authorization errors.
-
-`https://hossstore.in/roles` is intended for an Auth0 Post Login Action that copies Auth0 roles into the API access token. `PLATFORM_OWNER` can then be granted directly from Auth0 without creating a separate local bootstrap path.
-
-For rollout safety, `JwtTenantAuthenticationService` also falls back to the plain `roles` claim when `APP_JWT_ROLES_CLAIM` points at a namespaced Auth0 claim. That keeps existing locally issued HMAC tokens working while Auth0-backed hosted login is introduced.
-
 ## Schema Ownership
 
 The backend is mid-migration to a shared database with a shared `platform` schema plus one schema per tenant.
