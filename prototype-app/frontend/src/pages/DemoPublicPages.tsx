@@ -390,10 +390,22 @@ export function LoginPage() {
           </form>
         )}
         {error && <div className="notice error" role="alert">{error}</div>}
-        {!setupToken && HOSTED_LOGIN_ENABLED && (
-          <button className="btn btn-secondary" type="button" onClick={startHostedLogin} disabled={hostedLoginPending}>
-            {hostedLoginPending ? 'Connecting to Auth0...' : 'Continue with Auth0'}
-          </button>
+        {!setupToken && (
+          <>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={startHostedLogin}
+              disabled={hostedLoginPending || !HOSTED_LOGIN_ENABLED}
+            >
+              {hostedLoginPending ? 'Connecting to Auth0...' : 'Continue with SSO'}
+            </button>
+            {!HOSTED_LOGIN_ENABLED && (
+              <div className="panel-caption">
+                SSO is not configured for this deployment yet. Set the Auth0 frontend environment values to enable hosted login.
+              </div>
+            )}
+          </>
         )}
         {TEST_PERSONAS_ENABLED && (
           <div className="section-block">
