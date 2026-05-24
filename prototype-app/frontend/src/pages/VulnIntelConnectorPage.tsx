@@ -17,10 +17,6 @@ function formatTimestamp(value?: string): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
-function Tooltip({ text }: { text: string }) {
-  return <span className="sn-tooltip" title={text} aria-label={text}>ⓘ</span>;
-}
-
 export type VulnIntelConnectorConfig = {
   /** Display title shown in the section header */
   title: string;
@@ -30,6 +26,10 @@ export type VulnIntelConnectorConfig = {
   triggerSync: () => Promise<SyncTriggerResponse>;
   /** Optional: extra config fields rendered between status row and sync settings */
   configFields?: React.ReactNode;
+  /** Optional: guidance rendered near the action area */
+  runNote?: React.ReactNode;
+  /** Optional: custom action label */
+  triggerLabel?: string;
   /** Optional: test connection button (NVD API key check etc.) */
   onTestConnection?: () => Promise<{ ok: boolean; message: string }>;
 };
@@ -43,8 +43,6 @@ export function VulnIntelConnectorPage({ config, lastRun }: Props) {
   const [running, setRunning] = React.useState(false);
   const [result, setResult] = React.useState<SyncTriggerResponse | null>(null);
   const [error, setError] = React.useState('');
-  const [autoSyncEnabled, setAutoSyncEnabled] = React.useState(false);
-  const [intervalHours, setIntervalHours] = React.useState(24);
 
   const trigger = async () => {
     setRunning(true);
@@ -104,35 +102,6 @@ export function VulnIntelConnectorPage({ config, lastRun }: Props) {
         </div>
       )}
 
-      {/* Sync Settings */}
-      <div className="form-section">
-        <h4 className="form-section-title">Sync Settings</h4>
-        <div className="sn-toggle-group">
-          <label className="sn-toggle-row">
-            <input
-              type="checkbox"
-              checked={autoSyncEnabled}
-              onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-            />
-            <span>Enable scheduled sync</span>
-            <Tooltip text="Automatically runs this feed on the configured interval." />
-          </label>
-        </div>
-        {autoSyncEnabled && (
-          <div className="form-grid sn-sync-interval-grid">
-            <label>
-              <span>Sync Interval (hours) <Tooltip text="How often the scheduled sync runs. Minimum 1 hour." /></span>
-              <input
-                type="number"
-                min={1}
-                value={intervalHours}
-                onChange={(e) => setIntervalHours(Math.max(1, Number(e.target.value)))}
-              />
-            </label>
-          </div>
-        )}
-      </div>
-
       {/* Action bar */}
       <div className="button-row section-actions sn-action-bar">
         <button
@@ -141,9 +110,15 @@ export function VulnIntelConnectorPage({ config, lastRun }: Props) {
           onClick={() => void trigger()}
           disabled={running}
         >
-          {running ? 'Running...' : 'Run Integration now'}
+          {running ? 'Running...' : (config.triggerLabel ?? 'Run Integration now')}
         </button>
       </div>
+
+      {config.runNote && (
+        <div className="panel-caption">
+          {config.runNote}
+        </div>
+      )}
 
       {result && (
         <div className="notice">

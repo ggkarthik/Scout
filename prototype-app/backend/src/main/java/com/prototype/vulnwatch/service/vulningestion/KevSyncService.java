@@ -16,6 +16,7 @@ import com.prototype.vulnwatch.service.ObservationIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.VulnerabilityIntelligenceService;
 import com.prototype.vulnwatch.service.VulnerabilitySourceFilterConfigService;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -73,9 +74,12 @@ public class KevSyncService {
     }
 
     public SyncTriggerResponse triggerKevSync() {
-        SyncRun run = syncRunService.createQueuedRun("KEV");
-        ingestionExecutor.execute(() -> executeKevSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "KEV sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("KEV", List.of("KEV"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeKevSyncAsync(decision.run().getId()));
+        }
+        return decision.toResponse("KEV sync is already in progress", "KEV sync queued");
     }
 
     public void executeKevSyncAsync(UUID runId) {

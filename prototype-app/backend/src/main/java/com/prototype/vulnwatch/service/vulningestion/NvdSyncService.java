@@ -104,9 +104,12 @@ public class NvdSyncService {
     }
 
     public SyncTriggerResponse triggerNvdSync(int lookbackHours) {
-        SyncRun run = syncRunService.createQueuedRun("NVD");
-        ingestionExecutor.execute(() -> executeNvdSyncAsync(run.getId(), lookbackHours));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "NVD incremental sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("NVD", List.of("NVD", "NVD_FULL"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeNvdSyncAsync(decision.run().getId(), lookbackHours));
+        }
+        return decision.toResponse("NVD sync is already in progress", "NVD incremental sync queued");
     }
 
     public void executeNvdSyncAsync(UUID runId, int lookbackHours) {
@@ -115,9 +118,12 @@ public class NvdSyncService {
     }
 
     public SyncTriggerResponse triggerNvdFullSync(String apiKeyOverride) {
-        SyncRun run = syncRunService.createQueuedRun("NVD_FULL");
-        ingestionExecutor.execute(() -> executeNvdFullSyncAsync(run.getId(), apiKeyOverride));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "NVD full sync queued");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("NVD_FULL", List.of("NVD", "NVD_FULL"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeNvdFullSyncAsync(decision.run().getId(), apiKeyOverride));
+        }
+        return decision.toResponse("NVD sync is already in progress", "NVD full sync queued");
     }
 
     public void executeNvdFullSyncAsync(UUID runId, String apiKeyOverride) {

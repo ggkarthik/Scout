@@ -74,14 +74,12 @@ public class CsafSyncService {
     }
 
     public SyncTriggerResponse triggerMicrosoftCsafSync() {
-        java.util.Optional<SyncRun> activeRun = syncRunService.findFirstActiveRun(List.of("CSAF_MICROSOFT", "VEX_ROLLOUT_BACKFILL"));
-        if (activeRun.isPresent()) {
-            SyncRun run = activeRun.get();
-            return new SyncTriggerResponse(run.getId(), run.getStatus(), "Microsoft CSAF/VEX sync is already in progress");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("CSAF_MICROSOFT", List.of("CSAF_MICROSOFT", "VEX_ROLLOUT_BACKFILL"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeMicrosoftCsafSyncAsync(decision.run().getId()));
         }
-        SyncRun run = syncRunService.createQueuedRun("CSAF_MICROSOFT");
-        ingestionExecutor.execute(() -> executeMicrosoftCsafSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "Microsoft CSAF/VEX sync queued");
+        return decision.toResponse("Microsoft CSAF/VEX sync is already in progress", "Microsoft CSAF/VEX sync queued");
     }
 
     public void executeMicrosoftCsafSyncAsync(UUID runId) {
@@ -95,14 +93,12 @@ public class CsafSyncService {
     }
 
     public SyncTriggerResponse triggerRedhatCsafSync() {
-        java.util.Optional<SyncRun> activeRun = syncRunService.findFirstActiveRun(List.of("CSAF_REDHAT", "VEX_ROLLOUT_BACKFILL"));
-        if (activeRun.isPresent()) {
-            SyncRun run = activeRun.get();
-            return new SyncTriggerResponse(run.getId(), run.getStatus(), "Red Hat CSAF/VEX sync is already in progress");
+        VulnerabilitySyncRunService.TriggerDecision decision =
+                syncRunService.prepareQueuedRun("CSAF_REDHAT", List.of("CSAF_REDHAT", "VEX_ROLLOUT_BACKFILL"));
+        if (decision.queuedNewRun()) {
+            ingestionExecutor.execute(() -> executeRedhatCsafSyncAsync(decision.run().getId()));
         }
-        SyncRun run = syncRunService.createQueuedRun("CSAF_REDHAT");
-        ingestionExecutor.execute(() -> executeRedhatCsafSyncAsync(run.getId()));
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "Red Hat CSAF/VEX sync queued");
+        return decision.toResponse("Red Hat CSAF/VEX sync is already in progress", "Red Hat CSAF/VEX sync queued");
     }
 
     public void executeRedhatCsafSyncAsync(UUID runId) {

@@ -2,6 +2,7 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
+import { InfoTooltip } from '../components/InfoTooltip';
 import { useActor } from '../features/auth/context';
 import { canManageInventorySources } from '../features/auth/roles';
 import type {
@@ -12,6 +13,7 @@ import type {
   SyncTriggerResponse
 } from '../features/connect/types';
 import { useSccmCmdbConfigQuery } from '../features/connect/queries';
+import { formatTimestamp } from '../lib/time';
 
 function connectHref(view: 'run-history'): string {
   return pathForConnectView(view);
@@ -19,12 +21,6 @@ function connectHref(view: 'run-history'): string {
 
 function inventoryHref(view: 'hosts'): string {
   return pathForInventoryView(view);
-}
-
-function formatTimestamp(value?: string): string {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
 function defaultForm(): SccmCmdbConfigRequest {
@@ -60,12 +56,6 @@ function formFromConfig(config: SccmCmdbConfig | null): SccmCmdbConfigRequest {
     autoSyncEnabled: config.autoSyncEnabled,
     intervalMinutes: config.intervalMinutes ?? 1440
   };
-}
-
-function Tooltip({ text }: { text: string }) {
-  return (
-    <span className="sn-tooltip" title={text} aria-label={text}>ⓘ</span>
-  );
 }
 
 export function SccmConnectorPage() {
@@ -207,7 +197,7 @@ export function SccmConnectorPage() {
           <label id="sccm-jdbc-url">
             <span>
               JDBC URL <span className="sn-required">*</span>{' '}
-              <Tooltip text="Full SQL Server JDBC URL including database name and TLS options." />
+              <InfoTooltip text="Full SQL Server JDBC URL including database name and TLS options." />
             </span>
             <input
               type="text"
@@ -221,7 +211,7 @@ export function SccmConnectorPage() {
           <label>
             <span>
               Auth Method <span className="sn-required">*</span>{' '}
-              <Tooltip text="SQL Auth uses a SQL Server login. Windows Auth uses integrated Kerberos/NTLM." />
+              <InfoTooltip text="SQL Auth uses a SQL Server login. Windows Auth uses integrated Kerberos/NTLM." />
             </span>
             <select
               value={form.authType}
@@ -237,7 +227,7 @@ export function SccmConnectorPage() {
             <label>
               <span>
                 SQL Login Username <span className="sn-required">*</span>{' '}
-                <Tooltip text="A SQL Server login with db_datareader access to the SCCM database." />
+                <InfoTooltip text="A SQL Server login with db_datareader access to the SCCM database." />
               </span>
               <input
                 type="text"
@@ -253,7 +243,7 @@ export function SccmConnectorPage() {
             <label id="sccm-credential">
               <span>
                 SQL Login Password <span className="sn-required">*</span>{' '}
-                <Tooltip text={config?.hasCredential ? 'A password is already saved. Enter a new value only to rotate it.' : 'Required before live syncs can work.'} />
+                <InfoTooltip text={config?.hasCredential ? 'A password is already saved. Enter a new value only to rotate it.' : 'Required before live syncs can work.'} />
               </span>
               <div className="secure-input-row">
                 <input
@@ -281,7 +271,7 @@ export function SccmConnectorPage() {
           <label>
             <span>
               Site Code{' '}
-              <Tooltip text="The SCCM/MECM three-character site code (e.g. P01)." />
+              <InfoTooltip text="The SCCM/MECM three-character site code (e.g. P01)." />
             </span>
             <input
               type="text"
@@ -295,7 +285,7 @@ export function SccmConnectorPage() {
           <label>
             <span>
               Database Name <span className="sn-required">*</span>{' '}
-              <Tooltip text="The SCCM SQL Server database name. Typically CM_ followed by your site code." />
+              <InfoTooltip text="The SCCM SQL Server database name. Typically CM_ followed by your site code." />
             </span>
             <input
               type="text"
@@ -319,7 +309,7 @@ export function SccmConnectorPage() {
               onChange={(e) => updateField('mockMode', e.target.checked)}
             />
             <span>Mock mode (fixture data, no real SQL Server needed)</span>
-            <Tooltip text="When enabled, every sync returns hardcoded fixture rows — useful for testing without a live SCCM deployment." />
+            <InfoTooltip text="When enabled, every sync returns hardcoded fixture rows — useful for testing without a live SCCM deployment." />
           </label>
           <label className="sn-toggle-row">
             <input
@@ -328,7 +318,7 @@ export function SccmConnectorPage() {
               onChange={(e) => updateField('autoSyncEnabled', e.target.checked)}
             />
             <span>Enable scheduled live sync</span>
-            <Tooltip text="Automatically syncs SCCM inventory on the configured interval." />
+            <InfoTooltip text="Automatically syncs SCCM inventory on the configured interval." />
           </label>
         </div>
         {form.autoSyncEnabled && (
@@ -336,7 +326,7 @@ export function SccmConnectorPage() {
             <label>
               <span>
                 Sync Interval (hours){' '}
-                <Tooltip text="How often the scheduled sync runs. Minimum 1 hour." />
+                <InfoTooltip text="How often the scheduled sync runs. Minimum 1 hour." />
               </span>
               <input
                 type="number"
