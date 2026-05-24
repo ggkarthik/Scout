@@ -70,8 +70,15 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                false,
                 "owner@example.com",
-                BCrypt.hashpw("password-123", BCrypt.gensalt(10))
+                BCrypt.hashpw("password-123", BCrypt.gensalt(10)),
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
         );
 
         AuthTokenResponse response = service.login("OWNER@example.com", "password-123");
@@ -108,8 +115,15 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                false,
                 "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
+                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
         );
 
         AuthTokenResponse response = service.login("tenant.owner@example.com", "password-123");
@@ -144,8 +158,15 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                false,
                 "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10))
+                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
         );
 
         AuthTokenResponse response = service.setupPassword("setup-token-123", "password-123");
@@ -161,6 +182,84 @@ class LocalCredentialAuthServiceTest {
                 () -> service.setupPassword("setup-token-123", "password-456")
         );
         assertEquals(400, error.getStatusCode().value());
+    }
+
+    @Test
+    void localhostSharedPlatformOwnerLoginWorksWithoutConfiguredPlatformOwner() {
+        when(userRepository.findByExternalSubject("platform.owner@localhost")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("platform.owner@localhost")).thenReturn(Optional.empty());
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                false,
+                "",
+                "",
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.login("platform.owner@localhost", "LocalDevPlatform123!");
+        Jwt jwt = decode(response.token());
+
+        assertEquals("platform.owner@localhost", jwt.getSubject());
+        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+    }
+
+    @Test
+    void localhostSharedTenantAdminLoginBootstrapsDefaultWorkspaceMembership() {
+        Tenant tenant = tenant("Default Workspace");
+        AppUser user = new AppUser();
+        user.setExternalSubject("tenant.admin@localhost");
+        user.setEmail("tenant.admin@localhost");
+
+        when(tenantRepository.findByNameIgnoreCase("Default Workspace")).thenReturn(Optional.of(tenant));
+        when(userRepository.findByExternalSubject("tenant.admin@localhost")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "tenant.admin@localhost",
+                tenant.getId(),
+                "ACTIVE"
+        )).thenReturn(Optional.empty());
+        when(membershipRepository.save(any(TenantMembership.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                false,
+                "",
+                "",
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.login("tenant.admin@localhost", "LocalDevTenant123!");
+        Jwt jwt = decode(response.token());
+
+        assertEquals("tenant.admin@localhost", jwt.getSubject());
+        assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
+        assertEquals("TENANT_ADMIN", jwt.getClaimAsStringList("roles").get(0));
+        assertTrue(BCrypt.checkpw("LocalDevTenant123!", user.getPasswordHash()));
+        verify(membershipRepository).save(any(TenantMembership.class));
     }
 
     private AuthTokenService authTokenService() {

@@ -16,6 +16,8 @@ import {
 
 const HOSTED_LOGIN_ENABLED = isAuth0Configured();
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
+const SHARED_LOCALHOST_LOGIN_HINTS_ENABLED = typeof window !== 'undefined'
+  && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
 export function DemoLandingPage() {
   return (
@@ -380,6 +382,13 @@ export function LoginPage() {
               {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+        )}
+        {!setupToken && SHARED_LOCALHOST_LOGIN_HINTS_ENABLED && (
+          <div className="notice success" aria-label="Shared localhost credentials">
+            Localhost shared login:
+            {' '}platform owner <strong>platform.owner@localhost</strong> / <strong>LocalDevPlatform123!</strong>
+            {' '}and tenant admin <strong>tenant.admin@localhost</strong> / <strong>LocalDevTenant123!</strong>.
+          </div>
         )}
         {setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
