@@ -188,7 +188,7 @@ public class JwtTenantAuthenticationService {
         if (!"roles".equals(rolesClaim)) {
             roles.addAll(normalizeRoles(jwt.getClaim("roles")));
         }
-        // Auth0 and other IdPs inject roles under a namespaced URI claim (e.g. https://example.com/roles).
+        // Some identity providers inject roles under a namespaced URI claim (e.g. https://example.com/roles).
         // Fall back to scanning all claims whose name ends with "/roles" when the configured claim yields nothing.
         if (roles.isEmpty()) {
             roles.addAll(extractNamespacedRoles(jwt));

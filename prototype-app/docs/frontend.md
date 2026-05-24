@@ -36,10 +36,6 @@ Environment variables:
 - `VITE_CREATOR_KEY` defaults to `local-creator`
 - `VITE_TENANT_ID` defaults to `1`
 - `VITE_USER_ID` defaults to `local-analyst`
-- `VITE_AUTH0_DOMAIN` enables hosted login when set with `VITE_AUTH0_CLIENT_ID`
-- `VITE_AUTH0_CLIENT_ID` identifies the Auth0 SPA application
-- `VITE_AUTH0_SCOPE` defaults to `openid profile email`
-- `VITE_AUTH0_AUDIENCE` should match the Auth0 API identifier so the SPA receives a backend-usable access token
 
 Every JSON request includes:
 
@@ -47,30 +43,6 @@ Every JSON request includes:
 - `X-Tenant-ID`
 - `X-User-ID`
 - `X-Creator-Key` when configured
-
-### Auth0 Hosted Login
-
-Hosted login is already wired in `src/lib/auth0.ts` and `src/pages/DemoPublicPages.tsx`.
-The critical frontend requirement is that the SPA must request the backend API audience; otherwise Auth0 can authenticate the browser session but return no usable API access token for Scout.
-
-Recommended local Auth0 frontend env values:
-
-```env
-VITE_AUTH0_DOMAIN=dev-ws03t5n4y61lrmi4.us.auth0.com
-VITE_AUTH0_CLIENT_ID=tqpCtolsokNVLg5cMr5ObKOoOhLjYxPo
-VITE_AUTH0_SCOPE=openid profile email
-VITE_AUTH0_AUDIENCE=https://api.hossstore.in
-```
-
-For the Auth0 SPA application, keep these local URLs aligned with the app runtime:
-
-- Allowed Callback URLs: `http://localhost:5173/login`
-- Allowed Logout URLs: `http://localhost:5173`
-- Allowed Web Origins: `http://localhost:5173`
-
-If hosted login succeeds but the UI reports that no API access token is available yet, the usual cause is a missing or mismatched `VITE_AUTH0_AUDIENCE` / Auth0 API identifier pairing.
-
-The frontend also accepts Auth0 namespaced role claims such as `https://hossstore.in/roles` for platform-owner confirmation flows, so Auth0 API tokens and existing locally issued tokens can coexist during rollout.
 
 Functions are grouped by domain in the client (with the matching backend endpoint):
 

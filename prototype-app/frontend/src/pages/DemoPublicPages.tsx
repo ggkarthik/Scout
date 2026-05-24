@@ -1,20 +1,10 @@
 import React from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { pathForConnectView } from '../app/routes';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
 import { getAuthContextQueryKey } from '../features/auth/queries';
 import type { ActorContext } from '../features/auth/types';
-import {
-  getAuth0AccessToken,
-  getAuth0User,
-  handleAuth0RedirectCallbackIfNeeded,
-  isAuthenticatedWithAuth0,
-  isAuth0Configured,
-  loginWithAuth0,
-  logoutWithAuth0
-} from '../lib/auth0';
-
-const HOSTED_LOGIN_ENABLED = isAuth0Configured();
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
 const SHARED_LOCALHOST_LOGIN_HINTS_ENABLED = typeof window !== 'undefined'
   && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
@@ -161,7 +151,11 @@ export function DemoInvitePage() {
     mutationFn: () => api.acceptDemoInvite(token),
     onSuccess: (response) => {
       if (response.setupToken) {
-        navigate(`/login?setup=${encodeURIComponent(response.setupToken)}`);
+        const nextParams = new URLSearchParams({
+          setup: response.setupToken,
+          email: response.email
+        });
+        navigate(`/login?${nextParams.toString()}`);
       }
     }
   });
@@ -212,13 +206,12 @@ export function DemoInvitePage() {
 
 export function LoginPage() {
   const [searchParams] = useSearchParams();
-  const invite = searchParams.get('invite');
   const setupToken = searchParams.get('setup');
-  const [email, setEmail] = React.useState('');
+  const loginEmailParam = searchParams.get('email') ?? '';
+  const activationComplete = searchParams.get('activated') === '1';
+  const [email, setEmail] = React.useState(loginEmailParam);
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
-  const [hostedLoginPending, setHostedLoginPending] = React.useState(false);
-  const [_auth0CallbackPending, setAuth0CallbackPending] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const personasQuery = useQuery({
@@ -232,25 +225,16 @@ export function LoginPage() {
       navigate('/platform/tenants', { replace: true });
       return;
     }
+    if ((actor.planCode ?? '').toUpperCase() === 'DEMO') {
+      navigate(pathForConnectView('sources'), { replace: true });
+      return;
+    }
     navigate('/exposure', { replace: true });
   }, [navigate]);
 
-  const startHostedLogin = () => {
-    void (async () => {
-      try {
-        setError(null);
-        setHostedLoginPending(true);
-        await loginWithAuth0(
-          invite
-            ? { appState: { invite } }
-            : undefined
-        );
-      } catch (hostedLoginError) {
-        setHostedLoginPending(false);
-        setError(hostedLoginError instanceof Error ? hostedLoginError.message : 'Auth0 login failed to initialize');
-      }
-    })();
-  };
+  React.useEffect(() => {
+    setEmail(loginEmailParam);
+  }, [loginEmailParam]);
 
   const applyToken = React.useCallback(async (token: string) => {
     setStoredAuthToken(token);
@@ -275,9 +259,14 @@ export function LoginPage() {
       if (!setupToken) {
         throw new Error('Password setup token is missing');
       }
-      const response = await api.setupPassword(setupToken, password);
-      await applyToken(response.token);
-      return response;
+      return api.setupPassword(setupToken, password);
+    },
+    onSuccess: () => {
+      const nextParams = new URLSearchParams({ activated: '1' });
+      if (loginEmailParam.trim()) {
+        nextParams.set('email', loginEmailParam.trim());
+      }
+      navigate(`/login?${nextParams.toString()}`, { replace: true });
     },
     onError: (mutationError) => {
       setError(mutationError instanceof Error ? mutationError.message : 'Password setup failed');
@@ -305,75 +294,20 @@ export function LoginPage() {
     loginMutation.mutate();
   };
 
-  React.useEffect(() => {
-    if (!HOSTED_LOGIN_ENABLED || setupToken) {
-      return;
-    }
-    let cancelled = false;
-    // Only block the button when we're actively processing a redirect callback from Auth0.
-    // The background "already authenticated?" check must never disable the button.
-    const isRedirectCallback = searchParams.has('code') && searchParams.has('state');
-    const isErrorCallback = !!searchParams.get('error');
-    if (isRedirectCallback || isErrorCallback) {
-      setHostedLoginPending(true);
-    } else {
-      setAuth0CallbackPending(true);
-    }
-    setError(null);
-
-    void (async () => {
-      try {
-        if (isErrorCallback) {
-          throw new Error(
-            `Auth0 error: ${searchParams.get('error')} - ${searchParams.get('error_description') ?? 'Unknown error'}`
-          );
-        }
-
-        await handleAuth0RedirectCallbackIfNeeded();
-
-        if (!(await isAuthenticatedWithAuth0())) {
-          if (!cancelled) {
-            setHostedLoginPending(false);
-            setAuth0CallbackPending(false);
-          }
-          return;
-        }
-
-        const accessToken = await getAuth0AccessToken();
-        if (!accessToken) {
-          const user = await getAuth0User();
-          throw new Error(
-            user?.email
-              ? `Auth0 login succeeded for ${user.email}, but no API access token is available yet. Configure an Auth0 API audience before using hosted login with the backend.`
-              : 'Auth0 login succeeded, but no API access token is available yet. Configure an Auth0 API audience before using hosted login with the backend.'
-          );
-        }
-        if (!cancelled) {
-          await applyToken(accessToken);
-        }
-      } catch (hostedLoginError) {
-        if (!cancelled) {
-          setError(hostedLoginError instanceof Error ? hostedLoginError.message : 'Auth0 login failed');
-          setHostedLoginPending(false);
-          setAuth0CallbackPending(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applyToken, searchParams, setupToken]);
-
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Log in to Scout.ai</h1>
         <p>
           {setupToken
-            ? 'Set a password for your tenant workspace. You will be signed in as soon as the password is saved.'
+            ? 'Set a password for your tenant workspace. After saving it, return to the login screen and sign in with your email and new password.'
             : 'Use your email and password to access your tenant workspace or the platform console.'}
         </p>
+        {!setupToken && activationComplete && (
+          <div className="notice success" role="status">
+            Password created successfully. Sign in with your email and new password to continue.
+          </div>
+        )}
         {!setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
             <label>Work email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
@@ -399,23 +333,6 @@ export function LoginPage() {
           </form>
         )}
         {error && <div className="notice error" role="alert">{error}</div>}
-        {!setupToken && (
-          <>
-            <button
-              className="btn btn-secondary"
-              type="button"
-              onClick={startHostedLogin}
-              disabled={hostedLoginPending || !HOSTED_LOGIN_ENABLED}
-            >
-              {hostedLoginPending ? 'Connecting to Auth0...' : 'Continue with SSO'}
-            </button>
-            {!HOSTED_LOGIN_ENABLED && (
-              <div className="panel-caption">
-                SSO is not configured for this deployment yet. Set the Auth0 frontend environment values to enable hosted login.
-              </div>
-            )}
-          </>
-        )}
         {TEST_PERSONAS_ENABLED && (
           <div className="section-block">
             <h2 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Non-production test personas</h2>
@@ -472,19 +389,9 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
   }, [location.pathname, location.search]);
 
   const logout = React.useCallback(() => {
-    void (async () => {
-      clearStoredAuthToken();
-      setHasStoredToken(false);
-      if (HOSTED_LOGIN_ENABLED && await isAuthenticatedWithAuth0()) {
-        await logoutWithAuth0({
-          logoutParams: {
-            returnTo: window.location.origin
-          }
-        });
-        return;
-      }
-      navigate('/login', { replace: true });
-    })();
+    clearStoredAuthToken();
+    setHasStoredToken(false);
+    navigate('/login', { replace: true });
   }, [navigate]);
 
   return (
