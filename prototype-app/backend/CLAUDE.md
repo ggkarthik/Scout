@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Run the API server (port 8080, default profile)
 mvn spring-boot:run
 
-# Run with local profile (enables header-based tenant selection, Auth0 JWT, no prod-secret check)
+# Run with local profile (enables header-based tenant selection, JWT auth, no prod-secret check)
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 # Unit tests only (Surefire; excludes *PostgresIntegrationTest.java)
@@ -46,7 +46,7 @@ Every `/api/**` request goes through `ApiKeyAuthenticationFilter` (runs before `
 
 **JWT Bearer auth** (`Authorization: Bearer <token>`):
 - `JwtDecoder` bean is only created when `APP_JWT_ISSUER_URI` is set (see `JwtDecoderConfig`).
-- Decoded JWT is passed to `JwtTenantAuthenticationService.authenticate()`, which: resolves or creates the `platform.app_users` record, extracts roles from `APP_JWT_ROLES_CLAIM` (default `roles`), also handles Auth0-style namespaced claims ending in `/roles`, sets `TenantContext` from JWT tenant claims.
+- Decoded JWT is passed to `JwtTenantAuthenticationService.authenticate()`, which: resolves or creates the `platform.app_users` record, extracts roles from `APP_JWT_ROLES_CLAIM` (default `roles`), also handles namespaced claims ending in `/roles`, sets `TenantContext` from JWT tenant claims.
 - The resulting `AuthenticatedTenantActor` is stored as a `TenantAuthenticationDetails` on the `SecurityContext`.
 
 **Authorization rules** (from `SecurityConfig`):
@@ -83,7 +83,7 @@ Set in `application-local.yml` or as env vars:
 | Env var | Purpose | Local default |
 |---|---|---|
 | `DB_URL` | JDBC URL | `jdbc:postgresql://localhost:5432/vulnwatch` |
-| `APP_JWT_ISSUER_URI` | Auth0 / OIDC issuer; enables JWT auth when set | (empty = disabled) |
+| `APP_JWT_ISSUER_URI` | OIDC issuer; enables JWT auth when set | (empty = disabled) |
 | `APP_SECURITY_JWT_AUDIENCE` | Expected JWT audience | (empty) |
 | `APP_JWT_ROLES_CLAIM` | Claim name for roles in JWT | `roles` |
 | `APP_ALLOW_HEADER_TENANT_SELECTION` | Trust `X-Tenant-ID` header | `false` (local: `true`) |

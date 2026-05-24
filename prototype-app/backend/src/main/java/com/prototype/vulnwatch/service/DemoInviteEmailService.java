@@ -35,9 +35,7 @@ public class DemoInviteEmailService {
         String loginUrl = appBaseUrl + "/login";
         String displayName = request.getFullName() == null || request.getFullName().isBlank() ? request.getEmail() : request.getFullName().trim();
         String tenantName = tenant.getName();
-        String subject = "Your Scout.ai validation workspace for " + tenantName + " is ready";
-        String validationAuthOption = "For the validation phase, use the one-time activation link below to set your initial password. "
-                + "After that, sign in from the shared login portal with your email and password.";
+        String subject = "Welcome to Scout.ai: activate your " + tenantName + " workspace";
 
         Map<String, String> tags = new LinkedHashMap<>();
         tags.put("flow", "demo_validation");
@@ -49,8 +47,8 @@ public class DemoInviteEmailService {
         return resendEmailClient.send(new ResendEmailClient.EmailMessage(
                 invite.getEmail(),
                 subject,
-                htmlBody(displayName, tenantName, inviteUrl, loginUrl, invite.getExpiresAt(), tenant.getDemoExpiresAt(), validationAuthOption),
-                textBody(displayName, tenantName, inviteUrl, loginUrl, invite.getExpiresAt(), tenant.getDemoExpiresAt(), validationAuthOption),
+                htmlBody(displayName, tenantName, inviteUrl, loginUrl, invite.getExpiresAt(), tenant.getDemoExpiresAt()),
+                textBody(displayName, tenantName, inviteUrl, loginUrl, invite.getExpiresAt(), tenant.getDemoExpiresAt()),
                 tags,
                 null
         ));
@@ -62,26 +60,26 @@ public class DemoInviteEmailService {
             String inviteUrl,
             String loginUrl,
             Instant inviteExpiresAt,
-            Instant demoExpiresAt,
-            String validationAuthOption
+            Instant demoExpiresAt
     ) {
         StringBuilder body = new StringBuilder();
-        body.append("<p>Hi ").append(escape(displayName)).append(",</p>");
-        body.append("<p>Your Scout.ai validation workspace for <strong>").append(escape(tenantName)).append("</strong> is ready.</p>");
-        body.append("<p>").append(escape(validationAuthOption)).append("</p>");
+        body.append("<p>Welcome to Scout.ai, ").append(escape(displayName)).append(".</p>");
+        body.append("<p>Your demo workspace for <strong>").append(escape(tenantName)).append("</strong> is ready.</p>");
+        body.append("<p>Use the activation link below to create your tenant admin password and finish setup.</p>");
         body.append("<p><a href=\"").append(inviteUrl).append("\">Activate your workspace</a></p>");
         body.append("<ul>");
+        body.append("<li><strong>Activation link:</strong> ").append("<a href=\"").append(inviteUrl).append("\">").append(inviteUrl).append("</a></li>");
+        body.append("<li><strong>Activation link expires:</strong> ").append(formatInstant(inviteExpiresAt)).append("</li>");
         body.append("<li><strong>Shared login portal:</strong> <a href=\"").append(loginUrl).append("\">").append(loginUrl).append("</a></li>");
-        body.append("<li><strong>Invite expires:</strong> ").append(formatInstant(inviteExpiresAt)).append("</li>");
         body.append("<li><strong>Validation workspace access through:</strong> ").append(formatInstant(demoExpiresAt)).append("</li>");
         body.append("</ul>");
-        body.append("<p>What to expect in this validation environment:</p>");
+        body.append("<p>After activation:</p>");
         body.append("<ul>");
-        body.append("<li>Dedicated tenant workspace for your company</li>");
-        body.append("<li>Tenant-owner access only to your validation tenant</li>");
-        body.append("<li>Limited demo quotas and no live connectors</li>");
+        body.append("<li>Return to the shared login portal and sign in with your email address and the password you created</li>");
+        body.append("<li>You will land in the inventory connectors workspace for initial setup</li>");
+        body.append("<li>Your access remains limited to the ").append(escape(tenantName)).append(" tenant demo workspace</li>");
         body.append("</ul>");
-        body.append("<p>If the invite link expires, reply to this email and we can resend access.</p>");
+        body.append("<p>If the activation link expires, contact us and we will send you a new one.</p>");
         return body.toString();
     }
 
@@ -91,21 +89,20 @@ public class DemoInviteEmailService {
             String inviteUrl,
             String loginUrl,
             Instant inviteExpiresAt,
-            Instant demoExpiresAt,
-            String validationAuthOption
+            Instant demoExpiresAt
     ) {
-        return "Hi " + displayName + ",\n\n"
-                + "Your Scout.ai validation workspace for " + tenantName + " is ready.\n\n"
-                + validationAuthOption + "\n\n"
+        return "Welcome to Scout.ai, " + displayName + ".\n\n"
+                + "Your demo workspace for " + tenantName + " is ready.\n\n"
+                + "Use the activation link below to create your tenant admin password and finish setup.\n\n"
                 + "Activate your workspace: " + inviteUrl + "\n"
+                + "Activation link expires: " + formatInstant(inviteExpiresAt) + "\n"
                 + "Shared login portal: " + loginUrl + "\n"
-                + "Invite expires: " + formatInstant(inviteExpiresAt) + "\n"
                 + "Validation workspace access through: " + formatInstant(demoExpiresAt) + "\n\n"
-                + "What to expect in this validation environment:\n"
-                + "- Dedicated tenant workspace for your company\n"
-                + "- Tenant-owner access only to your validation tenant\n"
-                + "- Limited demo quotas and no live connectors\n\n"
-                + "If the invite link expires, reply to this email and we can resend access.\n";
+                + "After activation:\n"
+                + "- Return to the shared login portal and sign in with your email address and the password you created\n"
+                + "- You will land in the inventory connectors workspace for initial setup\n"
+                + "- Your access remains limited to the " + tenantName + " tenant demo workspace\n\n"
+                + "If the activation link expires, contact us and we will send you a new one.\n";
     }
 
     private String formatInstant(Instant value) {

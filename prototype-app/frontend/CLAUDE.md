@@ -32,14 +32,8 @@ All variables are prefixed `VITE_`. Copy `.env.example` to `.env.local` to start
 | `VITE_API_KEY` | `X-API-Key` header value | `change-me-in-prod` |
 | `VITE_CREATOR_KEY` | `X-Creator-Key` for PLATFORM_OWNER endpoints | `local-creator` |
 | `VITE_AUTH_TOKEN` | Static bearer token (overrides stored token) | (empty) |
-| `VITE_AUTH0_DOMAIN` | Auth0 tenant domain | required for SSO |
-| `VITE_AUTH0_CLIENT_ID` | Auth0 SPA client ID | required for SSO |
-| `VITE_AUTH0_AUDIENCE` | JWT audience for the backend API | required for SSO |
-| `VITE_AUTH0_SCOPE` | OIDC scopes | `openid profile email` |
 | `VITE_SENTRY_DSN` | Sentry error reporting | (empty = disabled) |
 | `VITE_ENABLE_TEST_PERSONAS` | Enable impersonation switcher | `false` |
-
-When `VITE_AUTH0_DOMAIN` and `VITE_AUTH0_CLIENT_ID` are both set, the Login page shows "Continue with Auth0". The Auth0 client uses Authorization Code + PKCE, stores tokens in `localStorage`, and uses refresh tokens. The `pendingCallbackPromise` guard in `src/lib/auth0.ts` prevents React StrictMode's double-effect from consuming the PKCE state twice.
 
 ## Auth model in the browser
 
@@ -80,7 +74,6 @@ src/
     admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent
     widgets/           # Shared chart/widget components
   lib/
-    auth0.ts           # Auth0 SPA SDK wrapper (PKCE, refresh tokens, dedup guard)
     riskScoring.ts     # Pure TS: computeCveRiskScore, computeFindingPriorityScore
     queryClient.ts     # createQueryClient factory (shared between app and tests)
   pages/               # One file per route; lazy-loaded via React.lazy in App.tsx
@@ -129,5 +122,5 @@ describe('FindingsPage', () => {
 
 - Components in `src/components/` must stay under ~300 lines. New substantial components go under `src/features/<feature>/`.
 - `src/lib/riskScoring.ts` is pure TypeScript — no React imports, no API calls. `computeCveRiskScore` and `computeFindingPriorityScore` are computed in the browser from already-fetched data; they are not persisted.
-- The app uses React StrictMode (see `src/main.tsx`) — effects run twice in development. Any singleton resource that must be acquired exactly once (Auth0 PKCE callback, etc.) needs an explicit deduplication guard.
+- The app uses React StrictMode (see `src/main.tsx`) — effects run twice in development, so side effects should be idempotent.
 - Theme (`dark` / `light`) is persisted in `localStorage` under `scoutai-theme` and applied as `data-theme` on `<html>`.
