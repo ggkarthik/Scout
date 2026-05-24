@@ -51,6 +51,13 @@ Default local auth values used by the frontend:
 - `X-Tenant-ID`: `1`
 - `X-User-ID`: `local-analyst`
 
+Shared localhost credential login is also available against the local backend only:
+
+- Platform owner: `platform.owner@localhost` / `LocalDevPlatform123!`
+- Tenant admin: `tenant.admin@localhost` / `LocalDevTenant123!`
+
+Those shared credentials are loopback-only conveniences for local development. They do not activate for non-localhost hosts and do not replace the normal invite/setup-password flow.
+
 ## Core Runtime Shape
 
 - `frontend/`: React 18 + TypeScript + Vite SPA
