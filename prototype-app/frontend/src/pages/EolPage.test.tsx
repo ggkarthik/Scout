@@ -20,9 +20,8 @@ function buildPackageStatus(overrides: Partial<PackageEolStatus> = {}): PackageE
   return {
     packageName: 'openssl',
     ecosystem: 'deb',
-    version: '1.1.1k',
     assetCount: 3,
-    eolStatus: 'EOL',
+    isEol: true,
     eolDate: '2023-09-11',
     eolDaysRemaining: -600,
     ...overrides,
