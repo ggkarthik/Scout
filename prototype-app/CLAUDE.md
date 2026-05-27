@@ -336,7 +336,7 @@ A change is done when **all** of these are true:
 - `// TODO` comments without an owner or linked issue.
 - Mocking the database in integration tests instead of using `@PostgresIntegrationTest`.
 - Adding `--no-verify` / `--no-gpg-sign` to git commands in CI or scripts.
-- Coverage thresholds lowered without justification (raising them is fine).
+- Coverage thresholds lowered — floors only move up, never down. Raise them as new tests are added.
 - New `any` types in TypeScript or `@SuppressWarnings("unchecked")` in Java without a comment explaining why.
 - New external HTTP calls without a corresponding `MockRestServiceServer` test (see `ApiContractGoldenPostgresIntegrationTest`).
 - Files added to `frontend/src/components/` larger than ~300 lines — split into a feature directory under `frontend/src/features/<feature>/`.

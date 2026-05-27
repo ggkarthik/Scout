@@ -22,9 +22,9 @@ export default mergeConfig(viteConfig, defineConfig({
       // (~19.9% lines as of 2026-05) so this catches regressions without
       // blocking the current state. Ratchet up as page tests are added.
       thresholds: {
-        lines: 19,
+        lines: 20,
         statements: 18,
-        functions: 13,
+        functions: 14,
         branches: 13
       }
     }
