@@ -1,81 +1,109 @@
 # VulnWatch Prototype
 
-Last updated: 2026-04-29
+Last updated: 2026-05-27
 
-VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection.
+VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection and workflow.
 
 ## Documentation
 
-The repository documentation is intentionally consolidated into four maintained documents:
-
-- [Architecture](docs/architecture.md)
-- [Frontend](docs/frontend.md)
-- [Backend](docs/backend.md)
-- [Database](docs/database.md)
-- [Business logic guide](docs/business-logic-guide.md)
-- [Production readiness](docs/production-readiness.md)
-
-Historical implementation summaries, design notes, report cards, and migration checklists were folded into those files so the repo only has one source of truth per area.
+| Document | Contents |
+|----------|---------|
+| [Architecture](docs/architecture.md) | System shape, data flow, security model, tech decisions |
+| [Backend](docs/backend.md) | REST API reference, services, external integrations, config |
+| [Business Logic Guide](docs/business-logic-guide.md) | Domain concepts, pipeline flows, finding lifecycle, EOL tracking |
+| [Database](docs/database.md) | Schema design, table inventory, migration strategy |
+| [Frontend](docs/frontend.md) | React app structure, routes, components, state management |
+| [Production Readiness](docs/production-readiness.md) | Deployment, env vars, health checks, monitoring |
+| [Non-Production Test Personas](docs/non-production-test-personas.md) | Dev/preprod persona setup and manual check procedures |
+| [Customer Demo Runbook](docs/runbooks/customer-demo.md) | Step-by-step demo provisioning and walkthrough |
 
 ## Quick Start
 
-Backend:
+### Backend
 
 ```bash
 cd backend
-mvn spring-boot:run
+mvn spring-boot:run                                    # default profile (port 8080)
+mvn spring-boot:run -Dspring-boot.run.profiles=local   # local profile: JWT auth + header tenant selection
 ```
 
-If you want GitHub-backed repo or GHCR SBOM ingestion locally, put a GitHub token in
-`backend/secrets/github-api-token` before starting the backend. That path is gitignored.
-The same token is reused across GitHub repo SBOM fetches, GHCR ingestion, and GitHub advisory syncs.
-It needs package-read access for GHCR discovery.
+For GitHub SBOM / GHCR / GHSA features, place a GitHub token in `backend/secrets/github-api-token` before starting. That path is gitignored. Token resolution order: `GITHUB_API_TOKEN_FILE` → `backend/secrets/github-api-token` → `GITHUB_API_TOKEN`.
 
-Frontend:
+### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev    # dev server on port 5173
 ```
 
-Default local URLs:
+### Default Local URLs
 
 - Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:8080/api`
 
-Default local auth values used by the frontend:
+### Default Local Auth
 
-- `X-API-Key`: `change-me-in-prod`
-- `X-Creator-Key`: `local-creator`
-- `X-Tenant-ID`: `1`
-- `X-User-ID`: `local-analyst`
+The frontend injects these headers automatically in local dev:
 
-Shared localhost credential login is also available against the local backend only:
+| Header | Default value |
+|--------|--------------|
+| `X-API-Key` | `change-me-in-prod` |
+| `X-Creator-Key` | `local-creator` |
+| `X-Tenant-ID` | `1` |
+| `X-User-ID` | `local-analyst` |
 
-- Platform owner: `platform.owner@localhost` / `LocalDevPlatform123!`
-- Tenant admin: `tenant.admin@localhost` / `LocalDevTenant123!`
+Localhost credential login is also available for convenience:
 
-Those shared credentials are loopback-only conveniences for local development. They do not activate for non-localhost hosts and do not replace the normal invite/setup-password flow.
+| Account | Email | Password |
+|---------|-------|----------|
+| Platform owner | `platform.owner@localhost` | `LocalDevPlatform123!` |
+| Tenant admin | `tenant.admin@localhost` | `LocalDevTenant123!` |
+
+These credentials are loopback-only and do not activate for non-localhost hosts.
 
 ## Core Runtime Shape
 
-- `frontend/`: React 18 + TypeScript + Vite SPA
-- `backend/`: Java 17 + Spring Boot 3.3, Spring Web, Spring Data JPA, Spring Security
-- Database: PostgreSQL
-- Schema management: Flyway-managed PostgreSQL migrations with `spring.jpa.hibernate.ddl-auto=none`
+| Component | Stack |
+|-----------|-------|
+| Frontend | React 18 + TypeScript + Vite |
+| Backend | Java 17 + Spring Boot 3.3.2 + Spring Data JPA + Spring Security |
+| Database | PostgreSQL, schema-per-tenant |
+| Migrations | Flyway (`postgres_reset/` line), `ddl-auto=none` |
 
-## PostgreSQL Notes
+## Database Setup
 
-If an older local PostgreSQL `vulnwatch` database still contains the legacy shared-schema layout, drop and recreate it so the reset-line bootstrap can initialize a clean `platform` + tenant-schema database.
+The reset-line migration at `backend/src/main/resources/db/migration/postgres_reset/V1__platform_and_default_tenant_schemas.sql` creates the `platform` schema and `tenant_default` schema. Hibernate (in `update` mode, temporary) materializes the full table structure on first start.
 
-The old H2 files are kept only as offline archive artifacts. If you need a one-off parity comparison against an archived H2 snapshot:
+If your local `vulnwatch` database has the old shared-schema layout, drop and recreate it before running the reset-line migrations:
+
+```bash
+psql postgres -c "DROP DATABASE IF EXISTS vulnwatch;"
+psql postgres -c "CREATE DATABASE vulnwatch;"
+```
+
+For an offline parity comparison against an archived H2 snapshot:
 
 ```bash
 cd backend
 ./tools/run-database-parity.sh
 ```
 
-The parity helper is outside the Maven build on purpose, so H2 is no longer part of the normal app or test dependency graph.
+## Tests
 
-For implementation details, API groupings, schema notes, and current limitations, use the docs above instead of older milestone-style markdown.
+```bash
+# Backend
+cd backend
+mvn test                          # unit tests + JaCoCo
+mvn -Ppostgres-it verify          # unit + Postgres integration tests
+
+# Frontend
+cd frontend
+npm run lint && npm run typecheck && npm run test:coverage
+```
+
+## CI Gates
+
+Backend: `mvn -q verify` — Surefire (units) + Failsafe (Postgres ITs) + JaCoCo coverage floor + SpotBugs.
+
+Frontend: `npm run lint` → `npm run typecheck` → `npm run build` → `npm run test:coverage`.

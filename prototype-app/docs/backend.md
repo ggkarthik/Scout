@@ -1,516 +1,537 @@
 # VulnWatch Backend
 
-Last updated: 2026-05-22
+Last updated: 2026-05-27
 
-## Purpose
+## Tech Stack
 
-The backend ingests software inventory and vulnerability intelligence, correlates them using deterministic CPE-based matching, projects exposure state at component and organization level, and manages finding workflows.
+| Component | Version / Detail |
+|-----------|-----------------|
+| Java | 17 |
+| Spring Boot | 3.3.2 |
+| Spring Security | JWT Bearer + API key dual-auth |
+| Spring Data JPA | PostgreSQL via HikariCP |
+| Database | PostgreSQL (Flyway migrations in `postgres_reset/`) |
+| Build | Maven, JaCoCo coverage, SpotBugs, Failsafe ITs |
+| External HTTP | Custom `OutboundHttpClient` with circuit-breaker + retry |
 
-## Runtime Stack
+Package root: `com.prototype.vulnwatch`
 
-- Java 17
-- Spring Boot 3.3.2
-- Spring Web
-- Spring Data JPA
-- Spring Security
-- Spring Validation
-- PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
-- Flyway-managed PostgreSQL schema with reset-line migrations under `db/migration/postgres_reset`
-- Hibernate schema mutation is disabled; the reset-line catalog is expected to come from Flyway `postgres_reset/V1`
+---
 
-## Package Layout (`com.prototype.vulnwatch`)
+## Authentication
 
-| Package | Contents |
-|---------|----------|
-| `controller/` | REST controllers under `/api/**` |
-| `service/` | Business-logic services |
-| `domain/` | JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
-| `dto/` | API request/response objects |
-| `repo/` | Spring Data JPA repositories |
-| `client/` | External API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
-| `config/` | Spring beans and security configuration |
-| `security/` | `SensitiveTenantAction` annotation and `SensitiveTenantActionInterceptor` for sensitive cross-tenant operations |
-| `util/` | CPE handling, version comparison, SBOM parsing |
+Two paths, handled by `ApiKeyAuthenticationFilter`:
 
-## Security Model
+### API Key (dev/ops)
 
-- `ApiKeyAuthenticationFilter` authenticates every `/api/**` request through `X-API-Key`.
-- The same filter accepts bearer JWTs when `APP_JWT_ISSUER_URI`, `APP_JWT_JWK_SET_URI`, or `APP_JWT_HMAC_SECRET` is configured.
-- JWT requests upsert `app_users`, resolve an active tenant membership from `tenant_id`, `tenant_slug`, or the user's first active membership, and set `TenantContext` from the authenticated identity.
-- `X-Creator-Key` grants `ROLE_CREATOR` when it matches the configured creator key.
-- Creator callers are also granted production-readiness bootstrap roles: `ROLE_PLATFORM_OWNER`, `ROLE_TENANT_ADMIN`, and `ROLE_INVENTORY_ADMIN`.
-- `/api/operations/**` requires `ROLE_CREATOR`.
-- `/api/platform/**` requires `ROLE_PLATFORM_OWNER`.
-- `/actuator/health` and `/actuator/info` are open.
-- CORS allow-list is driven by `app.cors.allowed-origins`.
-- Production startup can reject unsafe local defaults when `APP_REQUIRE_PRODUCTION_SECRETS=true`.
-
-The UI also sends `X-Tenant-ID` and `X-User-ID`; several newer workflow endpoints depend on those headers directly.
-`APP_ALLOW_HEADER_TENANT_SELECTION=true` keeps that local compatibility mode available. It must be disabled for production once tenant context is derived from verified identity claims.
-
-## Schema Ownership
-
-The backend is mid-migration to a shared database with a shared `platform` schema plus one schema per tenant.
-
-| Ownership | Tables / entities |
-|---------|----------|
-| `platform` | `Tenant`, `AppUser`, `TenantMembership`, `TenantSupportGrant`, central vulnerability/reference/intelligence entities such as `Vulnerability`, `VulnerabilityIntelSummary`, `VulnerabilityIntelObservation`, `CpeDim`, `EolProductCatalog`, `EolRelease` |
-| tenant-local | assets, inventory components, software instances, findings, finding events/comments, risk policy, org CVE records, component vulnerability states, suppression rules, ownership rules, fix records, connector configs, SBOM uploads, service accounts, quality projections |
-| hybrid | sync history, audit history, demo lifecycle/admin/support paths, and services that read `platform` vulnerability data but write tenant-local findings or projections |
-
-Current default:
-
-- keep `tenant_id` on existing entities and tables for compatibility unless removal is required for correctness
-- prefer `TenantSchemaExecutionService` plus schema-local repository methods for tenant-owned runtime paths
-- keep explicit `platform.*` access for true shared-plane data
-- `ServiceLayerSchemaIsolationTest` guards against reintroducing tenant-qualified shared-schema repository access inside `service/`
-
-## Reset-Line Bootstrap Status
-
-Current reset-line foundation:
-
-- Flyway uses `db/migration/postgres_reset`
-- `V1__platform_and_default_tenant_schemas.sql` bootstraps `platform` and `tenant_default`
-- `TenantSchemaService` / `TenantBootstrapService` provision additional tenant schemas
-- `DatabaseResetCompatibilityGuardService` fails fast on unsupported legacy shared-schema layouts
-
-Current reset-line contract:
-
-- `spring.jpa.hibernate.ddl-auto=none` is the expected mode
-- `postgres_reset/V1__platform_and_default_tenant_schemas.sql` now includes the runtime catalog used by the current branch:
-  - `platform`: tenant registry, software identity/reference, CPE, vulnerability-intel summary/observation/target, VEX, and EOL catalog tables
-  - `tenant_default`: demo, audit, investigation, assets, inventory, CI, software-instance, software-inventory, CPE-map, findings, policies, org-CVE, connector-config, sync, service-account, and GitHub SBOM source tables
-
-Practical rule for the remaining reset work:
-
-- keep new schema changes explicit in Flyway reset SQL
-- do not reintroduce Hibernate-driven schema mutation
-- `ResetLineBootstrapPostgresIntegrationTest` is the current source of truth for the minimum platform and tenant-default catalog that must exist after boot
-
-## Local Database Runtime
-
-Default local runtime:
-
-```bash
-cd backend
-mvn spring-boot:run
-```
-
-For GitHub-backed repo SBOM and GHCR image SBOM ingestion, the backend resolves a token in this order:
-
-- `GITHUB_API_TOKEN_FILE`
-- local fallback file `backend/secrets/github-api-token`
-- `GITHUB_API_TOKEN`
-
-The local fallback file is gitignored and is intended for developer machines. For GHCR discovery,
-the token needs at least package-read access.
-The same resolved token is shared by GitHub repo SBOM fetches, GHCR image SBOM ingestion,
-and GHSA advisory syncs.
-
-If an existing local PostgreSQL `vulnwatch` database was created before the reset-line baseline landed, do not repair it in place. Recreate the database from the `postgres_reset` baseline instead.
-
-```bash
-cd backend
-dropdb vulnwatch
-createdb vulnwatch
-mvn -q test -Dtest=SchemaMigrationStartupPostgresIntegrationTest
-```
-
-To validate PostgreSQL data against an archived H2 source snapshot:
-
-```bash
-cd backend
-./tools/run-database-parity.sh
-```
-
-If the JDBC jars are not already present under `~/.m2/repository`, set `H2_JAR=/path/to/h2-*.jar` and `POSTGRES_JAR=/path/to/postgresql-*.jar` when invoking the script.
-
-## Main API Groups
-
-### Dashboard and Auth
-
-- `GET /api/auth/context`
-- `GET /api/me`
-- `GET /api/tenants`
-- `POST /api/platform/tenants`
-- `PATCH /api/platform/tenants/{tenantId}/status`
-- `GET /api/tenants/{tenantId}/members`
-- `POST /api/tenants/{tenantId}/members`
-- `GET /api/service-accounts`
-- `POST /api/service-accounts`
-- `GET /api/audit-events`
-- `GET /api/audit-events/export`
-- `GET /api/audit-events/support-bundle`
-- `GET /api/dashboard`
-- `GET /api/dashboard/applicable-software`
-- `GET /api/dashboard/impacted-cves`
-- `GET /api/dashboard/cve-inventory-map`
-- `GET /api/operations/dashboard`
-- `GET /api/operations/normalization-quality`
-- `GET /api/operations/quality/summary` — quality issue counts by domain/severity
-- `GET /api/operations/quality/issues` — paged quality issue list (filterable by domain, severity, asset type, source system)
-- `GET /api/operations/quality/issues/{issueId}` — single quality issue detail
-- `GET /api/operations/quality/filters` — available filter values for quality issues
-
-### Findings and Policy
-
-- `GET /api/findings`
-- `GET /api/findings/filters`
-- `GET /api/risk-policy`
-- `POST /api/risk-policy`
-- `POST /api/configurations/clean-all`
-
-### Inventory and Assets
-
-- `GET /api/inventory/components`
-- `GET /api/inventory/components/filters`
-- `GET /api/inventory/software-identities` — paged software identity summary with lifecycle and mapping-state filters
-- `GET /api/inventory/software-identities/{softwareIdentityId}` — single software identity detail
-- `GET /api/assets`
-- `POST /api/assets/cmdb-sync`
-- `GET /api/assets/hosts/{assetId}` — host CI detail with aliases, software instances, and findings
-- `GET /api/sbom-uploads`
-
-### ServiceNow CMDB Connector
-
-- `GET /api/connectors/servicenow-cmdb` — retrieve saved connector config for the default tenant
-- `PUT /api/connectors/servicenow-cmdb` — create or update connector config (URL, auth type, tables, sync schedule)
-- `POST /api/connectors/servicenow-cmdb/test` — save config then run a live connection test against all three ServiceNow tables
-- `POST /api/connectors/servicenow-cmdb/sync` — enqueue a live CMDB inventory pull via `ServiceNowCmdbSyncService`
-
-### SCCM CMDB Connector
-
-- `GET /api/connectors/sccm-cmdb` — retrieve saved SCCM/MECM connector config
-- `PUT /api/connectors/sccm-cmdb` — create or update config (JDBC URL, auth, site code, database, fetch size, scheduling)
-- `POST /api/connectors/sccm-cmdb/test` — save and run a live JDBC connection test
-- `POST /api/connectors/sccm-cmdb/sync` — enqueue a SCCM sync via `SccmCmdbSyncService`
-
-### AWS Cloud Discovery Connector
-
-- `GET /api/connectors/aws-discovery` — retrieve AWS discovery config (auth, account, regions)
-- `PUT /api/connectors/aws-discovery` — save AWS discovery config; supports IAM access keys or cross-account role assumption
-- `POST /api/connectors/aws-discovery/test` — live AWS authentication probe
-- `POST /api/connectors/aws-discovery/sync` — trigger an EC2 discovery sweep via `AwsDiscoverySyncService`
-- `GET /api/connectors/aws-discovery/targets` — list cross-account / multi-region targets
-- `POST /api/connectors/aws-discovery/targets` — create a target
-- `PUT /api/connectors/aws-discovery/targets/{id}` — update a target
-- `DELETE /api/connectors/aws-discovery/targets/{id}` — delete a target
-- `POST /api/connectors/aws-discovery/targets/{id}/test` — per-target connection probe
-- `POST /api/connectors/aws-discovery/targets/{id}/sync` — per-target sync run
-
-Scope is currently EC2-only via SSM (V1069). RDS/Lambda/S3/ECS/EKS scope was removed.
-
-### Vulnerability Source Filter Config
-
-- `GET /api/connectors/vulnerability-sources` — get tenant feed-filter rules
-- `PUT /api/connectors/vulnerability-sources` — save tenant feed-filter rules (V1046 schema)
-
-### Vulnerability Intelligence
-
-- `GET /api/vulnerability-intelligence`
-- `GET /api/vulnerability-intelligence/filters`
-- `GET /api/vulnerability-intelligence/sources`
-- `GET /api/vulnerability-intelligence/{externalId}`
-- `GET /api/vulnerability-intelligence/org-cves`
-- `GET /api/vulnerability-intelligence/org-cves/status`
-- `POST /api/vulnerability-intelligence/org-cves/refresh` — tenant-scoped exposure refresh from the current central vulnerability repository
-- `POST /api/vulnerability-intelligence/org-cves/recompute` — platform-owner repair/backfill endpoint
-- `GET /api/vulnerabilities/{externalId}`
-
-### Ingestion and Automation
-
-- `POST /api/sbom-upload`
-- `POST /api/sbom-fetch`
-- `POST /api/ingestion/nvd-sync`
-- `POST /api/ingestion/nvd-full-sync`
-- `POST /api/ingestion/kev-sync`
-- `POST /api/ingestion/ghsa-sync`
-- `POST /api/ingestion/csaf/microsoft-sync`
-- `POST /api/ingestion/csaf/redhat-sync`
-- `POST /api/ingestion/advisories`
-- `GET /api/sync-runs`
-- `GET /api/github-sbom-sources`
-- `POST /api/github-sbom-sources`
-- `PUT /api/github-sbom-sources/{id}`
-- `POST /api/github-sbom-sources/repository/run`
-- `POST /api/github-sbom-sources/ghcr/run`
-- `POST /api/github-sbom-sources/{id}/run`
-- `POST /api/demo/seed`
-
-### EOL (End-of-Life)
-
-- `GET /api/eol/status/summary` — EOL/near-EOL/supported/unknown counts for active inventory
-- `GET /api/eol/status/components` — paged component list with EOL status; `filter` param: `eol | near-eol | ok | unknown`
-- `GET /api/eol/products` — full EOL product catalog (slugs + CPE/PURL identifiers)
-- `GET /api/eol/products/{slug}/releases` — all release cycles for a product slug
-- `POST /api/eol/mappings/confirm` — manually confirm or override an EOL slug mapping for a normalized product key
-- `GET /api/eol/mappings/unresolved` — software identities with no EOL slug mapping (up to 200, for analyst review)
-- `POST /api/eol/admin/refresh/catalog` — trigger stage 1: catalog refresh
-- `POST /api/eol/admin/refresh/releases` — trigger stage 2: release data refresh
-- `POST /api/eol/admin/refresh/mappings` — trigger stage 3: slug resolution
-- `POST /api/eol/admin/refresh/denormalize` — trigger stage 4: denormalization
-- `POST /api/eol/admin/refresh/full` — trigger all 4 stages in sequence
-
-### CVE Drill-Down and Archive Operations
-
-- `GET /api/cve-detail/{cveId}`
-- `POST /api/cve-detail/{cveId}/investigation`
-- `PUT /api/cve-detail/investigation/{investigationId}`
-- `POST /api/cve-detail/{cveId}/applicability-assessment`
-- `PUT /api/cve-detail/applicability-assessment/{assessmentId}`
-- `POST /api/cve-detail/applicability-assessment/{assessmentId}/complete`
-- `POST /api/cve-detail/{cveId}/manual-finding`
-- `POST /api/cve-detail/{cveId}/suppress`
-- `POST /api/cve-detail/{cveId}/export`
-- `POST /api/cve-detail/{cveId}/servicenow-incident` — opens a ServiceNow incident; writes `incident_id`/`incident_status` onto the underlying findings (V1054)
-- `POST /api/cve-detail/{cveId}/ai-investigation-summary`, `/ai-solution`, `/ai-actions` — AI-assisted writers; persist results in `org_cve_ai_artifacts` so subsequent reads do not re-call OpenAI
-
-## Flyway rollout audit
-
-Before promoting a migration-bearing build, inspect `flyway_schema_history` in every active environment and verify:
-
-- no row exists for version `1073`
-- versions `1090` and `1092` either both exist or both do not exist
-- versions `1091` and `1093` either both exist or both do not exist
-- no rows are marked failed
-- no rows were applied out of order
-- any manually repaired entries are documented in the deployment record
-
-Migration review policy for new changes:
-
-- one version, one file
-- no comment-only or whitespace-only migrations
-- idempotence is allowed for compatibility and repair, not as a substitute for root-cause analysis
-- new structured payload columns default to typed storage such as `jsonb`, not JSON-in-`TEXT`
-- `POST /api/operations/vulnerability-archive/migrate`
-- `GET /api/operations/vulnerability-archive/status`
-- `GET /api/operations/vulnerability-archive/{externalId}/description`
-- `GET /api/operations/vulnerability-archive/{externalId}/raw-payload`
-- `POST /api/operations/normalization-overrides` / `DELETE` — manual normalization-cluster overrides (V1056–V1059)
-- `POST /api/operations/correlation-overrides` / `DELETE` — manual correlation overrides
-- `GET /api/upgrade-recommendation` — version-upgrade-path recommendations
-- `GET /api/slo` — service level objective status snapshot
-
-## Core Flows
-
-### 1. SBOM Ingestion
-
-The ingestion controllers hand off to `SbomIngestionService` and related services to:
-
-1. validate payload size and host rules
-2. upsert assets and write `sbom_uploads`
-3. parse CycloneDX/SPDX components
-4. upsert `inventory_components`
-5. maintain software identity metadata and `software_inventory_items`
-6. normalize CPEs into `cpe_dim`
-7. sync `inventory_component_cpe_map`
-8. enqueue component-scoped recomputation
-
-GitHub-backed SBOM ingestion now supports two modes:
-
-- repository dependency-graph SBOM queueing via `POST /api/github-sbom-sources/repository/run`
-- GHCR owner-wide image attestation queueing via `POST /api/github-sbom-sources/ghcr/run`
-- saved GitHub source execution via `POST /api/github-sbom-sources/{id}/run`
-
-The GHCR batch path enumerates container packages and image versions in GHCR for a GitHub owner,
-looks up each image digest in GitHub artifact attestations, and feeds every discovered SBOM
-through the same parsing and correlation pipeline used for uploaded SBOM files.
-
-**Canonical-tag filter:** The GitHub Packages API returns every stored version for a package,
-including untagged platform-specific sub-manifests (linux/amd64, linux/arm64 layers inside a
-multi-arch index) and OCI referrer entries created by `actions/attest-sbom` or cosign
-(these are tagged `sha256-{64-hex-chars}` with no human-readable tag). The backend now skips
-any version whose tags are all in the `sha256-{digest}` referrer format or whose tag list is
-empty. Only versions with at least one canonical tag (e.g. `main-*`, `latest`, `v1.2.3`) are
-processed for attestation lookup. This prevents false failure counts from non-image registry
-artifacts.
-
-Current trust model:
-
-- the backend filters GitHub attestations to `predicate_type=sbom`
-- it matches the attestation subject against the requested image digest and repository
-- it does not yet perform cryptographic signature or trusted-publisher verification of the DSSE bundle
-
-That means this endpoint is ready for automated ingestion, but it should not yet be treated as a hard provenance gate for policy enforcement. The next trust-stage improvement is a verification step against GitHub/Sigstore identity before marking the attestation as verified.
-
-### 2. Vulnerability Intelligence Ingestion
-
-`VulnerabilityIngestionService` pulls data from NVD, KEV, GHSA, CSAF, VEX, and advisory feeds. The ingest path:
-
-1. stores source observations
-2. merges canonical vulnerability rows
-3. refreshes the vulnerability read model
-4. builds normalized target rows and config expressions
-5. transactionally enqueues projection deltas into `finding_delta_queue`
-6. lets the background projector update component exposure and org-CVE projections
-7. enqueues tenant-scoped noise-reduction projection refreshes when correlation-affecting work completes
-
-Production ownership boundary:
-
-- central vulnerability feed mutations under `/api/ingestion/*` are platform-owner operations
-- tenant users refresh exposure through `/api/vulnerability-intelligence/org-cves/refresh` or `/api/vuln-repo/org-cves/refresh`, which recomputes tenant projections from already-ingested central data
-- `/org-cves/recompute` remains a platform-owner repair/backfill endpoint
-
-Tenant quota boundary:
-
-- service account creation checks `tenants.max_service_account_count`
-- ServiceNow, SCCM, AWS discovery config, and AWS discovery target creation check `tenants.max_connector_count`
-- tenant exposure refresh checks `tenants.max_daily_exposure_refreshes` against successful `tenant.org_cves.refresh` audit events from the previous 24 hours
-- audit/support export row counts check `tenants.max_export_rows`
-- quota failures return HTTP `429` with `code=QUOTA_EXCEEDED` and a stable `quotaCode`
-
-Tenant lifecycle boundary:
-
-- suspended or deleted tenants receive `423` with `code=TENANT_SUSPENDED` for normal tenant API routes
-- `/api/platform/**`, `/api/auth/**`, and `/api/me` remain available so platform owners can inspect or restore tenant state
-
-Connector credential boundary:
-
-- ServiceNow, SCCM, and AWS access-key secrets are encrypted before save
-- runtime services decrypt credentials only at outbound connector boundaries
-- API responses expose only `hasCredentialSecret`
-- legacy plaintext secret values remain readable for migration compatibility, but newly written values use `enc:v1:` envelopes
-
-Request correlation boundary:
-
-- every backend response includes `X-Request-ID`
-- safe caller-provided request IDs are echoed; unsafe values are replaced with generated UUIDs
-- MDC includes `requestId`, `tenantId`, `actorId`, `actorRoles`, `httpMethod`, and `httpPath`
-- audit events persist the active `requestId`
-
-Delta producers are now split by change type:
-
-- inventory changes enqueue `SOFTWARE_DELTA`
-- vulnerability/advisory target changes enqueue `CVE_DELTA`
-- metadata-only changes such as KEV and EPSS enqueue `CVE_METADATA_DELTA`
-- exact vendor impact changes enqueue `VEX_DELTA`
-- EOL/EOS mapping and date-driven lifecycle changes enqueue `LIFECYCLE_DELTA`
-- dashboard refreshes enqueue `NOISE_REDUCTION_REFRESH`
-
-### 3. Correlation and Exposure Projection
-
-The active correlation model is deterministic and CPE-first, but the workbench itself is now projection-driven:
-
-- candidates are generated by joining `inventory_component_cpe_map` with `vulnerability_targets.cpe_id`
-- version checks are applied by `ApplicabilityDecisionService`
-- precedence is resolved across NVD, GHSA, CSAF/advisories, and VEX overlays
-- component-level state is projected into `component_vulnerability_states`
-- tenant-level CVE rollups are projected into `org_cve_records`
-- finding creation/update logic is managed by `FindingService`
-- `recomputeOnSoftwareDeltaBatch(...)` is the sole owner of org-CVE refresh for component recompute scope; CVE/VEX delta wrappers only do metadata-only fallback refresh for tenants with no affected component recompute in that batch
-- the queue worker batches deltas by event type instead of processing one row at a time
-- normal analyst freshness comes from the queue worker, not from `POST /org-cves/recompute`
-
-### 3a. Dashboard Noise Reduction Projection
-
-The dashboard noise-reduction widget is now projection-backed instead of re-running correlation preview logic on every read.
-
-- `DashboardNoiseReductionProjectionService` reads persisted `component_vulnerability_states`
-- it excludes tuples that already have a finding for the same tenant/component/CVE
-- it stores tenant-scoped totals and category buckets in `dashboard_noise_reduction_projection`
-- `DashboardService` reads that projection and keeps only auto-resolved counts and the 30-day trend as lightweight read-time queries
-- `OperationalDashboardService` exposes projection readiness, age, failures, and refresh p95 in Platform Health
-
-Observed `matchedBy` evidence values are CPE-based, such as:
-
-- `cpe-indexed-direct+version`
-- `cpe-indexed-fallback+version`
-
-### 4. ServiceNow CMDB Host Inventory Ingestion
-
-`ServiceNowCmdbSyncService` drives live host inventory pulls from ServiceNow Table APIs:
-
-1. reads connector config from `servicenow_cmdb_configs` via `ServiceNowCmdbConfigService`
-2. paginates the install table (`cmdb_sam_sw_install`) using the configured page size, field list, and optional query override
-3. paginates the discovery model table (`cmdb_sam_sw_discovery_model`) and resolves normalized software metadata
-4. resolves or creates CI rows in the `cis` table via `CiResolutionService`, matching by `sys_id` or `cmdb_ci` lookup
-5. upserts CI aliases from hostname/FQDN variants
-6. normalizes software names/publishers via `HostSoftwareNormalizationService`
-7. resolves or creates `SoftwareIdentity` rows via `SoftwareIdentityService`
-8. upserts `SoftwareInstance` rows linking CIs to software identities
-9. mirrors each CI as an `InventoryComponent` via `CmdbIngestionService` and enqueues `SOFTWARE_DELTA`
-10. records a `SyncRun` row with `runDomain=INVENTORY` and detailed metadata JSON
-
-`SyncRunHistoryService` reads persisted `sync_runs` history and is the single point of truth for API history responses across inventory and vulnerability-intelligence run types. Run lifecycle creation/update happens in the owning ingestion services and sync-run helpers, and legacy GitHub inventory evidence is backfilled into `sync_runs` on startup or via the dedicated tool.
-
-### 5. CVE Workflow Layer
-
-The newer CVE workflow APIs add:
-
-- investigations
-- applicability assessments
-- manual finding creation
-- export/report responses
-- org-level CVE drill-down data assembly
-
-These APIs depend on `X-Tenant-ID` and `X-User-ID`, and are currently consumed by the org-CVE drawer in the frontend.
-
-### 5. EOL Pipeline
-
-`EolRefreshService` runs a 4-stage pipeline to track software end-of-life status:
-
-1. **Catalog refresh** — calls `EolApiClient.fetchAllProducts()` and batch-upserts product slugs, CPE/PURL identifiers into `eol_product_catalog` (100-row JDBC batches, `ON CONFLICT (slug) DO UPDATE`)
-2. **Release data refresh** — fetches release cycles per tracked slug using `If-Modified-Since` headers to avoid redundant downloads; upserts into `eol_releases`; computes `support_phase` (`active | lts | extended | eol | discontinued`) per cycle
-3. **Slug resolution** — `EolSlugResolverService.resolveAll()` maps `SoftwareIdentity` rows to EOL slugs in-memory; writes or updates `software_eol_mapping` rows
-4. **Denormalization** — two set-based `UPDATE ... FROM (SELECT DISTINCT ON ...)` statements write EOL status onto `inventory_components` and `software_instances`; then enqueues `LIFECYCLE_DELTA` for the affected component set so `org_cve_records` refresh in the background
-5. **Date sweep** — a daily `EOL_DATE_SWEEP` job marks components as effectively EOL when dates roll over and enqueues `LIFECYCLE_DELTA` for components that crossed the EOL/EOS threshold even if no source feed changed
-
-All stages record a `SyncRun` row with `run_domain` matching the stage name. Each stage is also callable on-demand from the Connect UI via `POST /api/eol/admin/refresh/*`.
-
-## Scheduling and Async Execution
-
-Scheduled jobs currently defined in code:
-
-- `01:00` daily: NVD incremental sync plus KEV sync
-- `01:15` daily: GHSA sync
-- `01:45` daily: Microsoft and Red Hat CSAF/VEX sync
-- `02:05` daily: mark stale assets inactive
-- `02:30` daily: VEX staleness sweep enqueues `SOFTWARE_DELTA`
-- `03:15` daily: EPSS score refresh (`EpssRefreshService`)
-- `00:15` daily: lifecycle date sweep (`EOL_DATE_SWEEP`)
-- `07:00` daily: ServiceNow incident status sync (`FindingIncidentSyncService`) — pulls `incident_status` changes back onto findings
-- every `5` minutes: run enabled GitHub SBOM sources, ServiceNow CMDB syncs, SCCM CMDB syncs, AWS Discovery syncs
-- every `15` minutes: reopen expired suppressions
-- every `2` seconds: drain `finding_delta_queue` (configurable, batches up to 100)
-- hourly: auto-close findings by policy
-- `02:00` Sunday: EOL catalog refresh (stage 1 — `EolRefreshService.fullCatalogRefresh`)
-- `03:00` Sunday: EOL release data refresh (stage 2 — `EolRefreshService.releaseDataRefresh`)
-- `03:30` Sunday: EOL slug mapping resolution (stage 3 — `EolRefreshService.resolveInstanceMappings`)
-- `04:00` Sunday: EOL denormalization (stage 4 — `EolRefreshService.denormalizeEolStatus`)
-
-All EOL jobs are configurable via `app.eol.*-cron` properties and can be disabled entirely with `app.eol.enabled=false`. Each job writes a `SyncRun` row for queue visibility.
-
-Executors:
-
-- `ingestionExecutor`: concurrent ingest and GitHub source execution
-- `integrationQueueExecutor`: serialized integration/read-model work
-- the durable delta queue itself is polled every 2 seconds and batches up to 100 pending rows per pass
-
-## Key Configuration
-
-- Security: `APP_API_KEY`, `APP_CREATOR_KEY`, `APP_CREDENTIAL_ENCRYPTION_KEY`, `APP_REQUIRE_PRODUCTION_SECRETS`, `APP_REQUIRE_TENANT_CONTEXT`, `APP_ALLOW_HEADER_TENANT_SELECTION`, `APP_JWT_*`
-- Feature flags: `FEATURE_VEX_POLICY_ENABLED`, `FEATURE_VEX_RISK_MODIFIERS_ENABLED`, `FEATURE_VEX_ROLLOUT_CONTROLS_ENABLED`, `FEATURE_VEX_ROLLOUT_BACKFILL_ENABLED`, `FEATURE_SOFTWARE_MODEL_ENABLED`
-- EOL: `app.eol.enabled` (default `true`), `app.eol.catalog-refresh-cron`, `app.eol.release-refresh-cron`, `app.eol.resolve-mappings-cron`, `app.eol.denormalize-cron`, `app.eol.lifecycle-date-sweep-cron`
-- NVD: `NVD_API_KEY`, `NVD_API_KEY_FILE`, `NVD_*`
-- GitHub: `GITHUB_API_TOKEN`, `GITHUB_API_TOKEN_FILE`, `GITHUB_*`
-- SBOM fetch: `SBOM_FETCH_MAX_PAYLOAD_BYTES`, `SBOM_FETCH_ALLOWED_HOSTS`, `SBOM_FETCH_ALLOW_USER_AUTH_HEADER`
-- CSAF/GHSA/HTTP tuning: `CSAF_*`, `GHSA_*`, `HTTP_*`
-- Asset lifecycle: `ASSET_STALE_DAYS_TO_INACTIVE`
-- Archive storage: `ARCHIVE_LOCAL_PATH`
-- CMDB: `CMDB_SERVICENOW_*`, `CMDB_SCCM_*` (JDBC URL, credentials, mock mode)
-- AWS Discovery: configured per-tenant via `aws_discovery_configs` (no global env)
-- OpenAI: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` (default `gpt-4o-mini`), `OPENAI_ENABLED`
-
-## Current Caveats
-
-- Runtime workspace handling is currently single-workspace. `WorkspaceService` resolves and caches the active workspace at startup, request-scoped tenant context is derived from that cached workspace, and controllers should depend on `WorkspaceService` rather than request-time tenant fallback while the broader multi-tenant runtime rollout continues.
-- `POST /api/cve-detail/{cveId}/suppress` is fully implemented: persists suppression via `OrgCveRecordService.suppress()` and suppresses related findings via `FindingService.suppressFindingsForVulnerability()`.
-- Flyway owns the PostgreSQL startup path. Remaining schema cleanup is now mostly historical normalization rather than runtime compatibility work.
-- The vulnerability optimization is only partially landed: archive/snippet fields exist, but legacy CVSS/source/status fields are still present on `Vulnerability` for compatibility.
-
-## Local Run
-
-```bash
-cd backend
-mvn spring-boot:run
-```
+Enabled when `APP_ALLOW_API_KEY_AUTH=true`.
+
+| Header | Role granted |
+|--------|-------------|
+| `X-API-Key: <key>` | `ROLE_OPERATOR`, `ROLE_SECURITY_ANALYST` |
+| `X-Creator-Key: <key>` | additionally: `ROLE_CREATOR`, `ROLE_PLATFORM_OWNER`, `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN` |
+| `X-User-ID: <id>` | sets actor identity (defaults to `APP_DEFAULT_USER_ID`) |
+
+Default local api-key: `change-me-in-prod`. No creator-key configured locally means all callers get creator-level access.
+
+### JWT Bearer (production)
+
+Active when `APP_JWT_ISSUER_URI` is set. Token decoded by `JwtTenantAuthenticationService`. Roles resolved from the `roles` JWT claim (or any namespaced claim ending in `/roles`). Tenant ID resolved from `tenant_id` claim.
+
+### Tenant Resolution
+
+`TenantResolutionFilter` populates thread-local `TenantContext` from:
+1. JWT `tenant_id` claim (production)
+2. `X-Tenant-ID` header (only when `APP_ALLOW_HEADER_TENANT_SELECTION=true` — local dev only)
+3. Default tenant fallback
+
+`TenantStatusFilter` follows and rejects requests with HTTP 403 if tenant is `SUSPENDED` or `EXPIRED`.
+
+### Local Credential Auth
+
+`LocalAuthController` / `AuthLoginController` (`POST /api/auth/login`, `POST /api/auth/setup-password`) provides bcrypt-based login for platform owner and tenant admins in validation/preprod environments.
+
+---
+
+## Authorization Rules
+
+| Path prefix | Required |
+|-------------|---------|
+| `OPTIONS /*` | Public |
+| `GET /actuator/health`, `GET /actuator/info` | Public |
+| `POST /api/auth/login`, `POST /api/auth/setup-password` | Public |
+| `POST /api/demo-requests` | Public |
+| `/api/demo-invites/**` | Public |
+| `/api/platform/**` | `ROLE_PLATFORM_OWNER` |
+| `/api/operations/**` | `ROLE_PLATFORM_OWNER` |
+| All other `/api/**` | Authenticated |
+
+---
+
+## REST Controllers
+
+### AssetController — `/api/assets`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/assets` | List assets for tenant (paginated, filterable) |
+| GET | `/api/assets/{id}` | Get single asset |
+| POST | `/api/assets` | Create asset manually |
+| PUT | `/api/assets/{id}` | Update asset |
+| DELETE | `/api/assets/{id}` | Delete asset |
+
+Asset domain: `Asset` entity. Types: `AssetType` enum. States: `AssetState` enum (ACTIVE, INACTIVE). Criticality: `BusinessCriticality` enum.
+
+### IngestionController — `/api/ingestion`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/ingestion/sbom` | Upload SBOM file (multipart) |
+| POST | `/api/ingestion/sbom/endpoint` | Trigger SBOM fetch from a configured endpoint URL |
+| GET | `/api/ingestion/sbom/uploads` | List SBOM upload history |
+| GET | `/api/ingestion/sbom/uploads/{id}` | Get upload status and result |
+
+Supported SBOM formats (`SbomFormat` enum): CycloneDX, SPDX. Processing is async — status tracked via `SbomUpload` entity (`SbomIngestionStatus` enum: PENDING, PROCESSING, COMPLETE, FAILED).
+
+### GithubSbomSourceController — `/api/github-sbom-sources`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/github-sbom-sources` | List configured GitHub SBOM sources |
+| POST | `/api/github-sbom-sources` | Add GitHub repo or GHCR source |
+| PUT | `/api/github-sbom-sources/{id}` | Update source config |
+| DELETE | `/api/github-sbom-sources/{id}` | Remove source |
+| POST | `/api/github-sbom-sources/{id}/run` | Trigger manual run |
+
+`GithubSbomSource` entity. Frequency: `GithubIngestionFrequency` enum (EVERY_5_MIN, HOURLY, DAILY).
+
+### InventoryController — `/api/inventory`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/inventory` | List inventory components (paginated) |
+| GET | `/api/inventory/{id}` | Get inventory component detail |
+| GET | `/api/inventory/software-identities` | List software identities |
+| GET | `/api/inventory/software-identities/{id}` | Get software identity |
+
+`InventoryComponent` entity. Status: `InventoryComponentStatus` enum. CPE mappings via `InventoryComponentCpeMap`.
+
+### VulnerabilityController — `/api/vulnerabilities`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/vulnerabilities` | List all vulnerabilities in intel store |
+| GET | `/api/vulnerabilities/{id}` | Get vulnerability detail |
+| GET | `/api/vulnerabilities/{cveId}/targets` | Get CPE targets for a CVE |
+| GET | `/api/vulnerabilities/{cveId}/config-expr` | Get configuration expressions |
+
+`Vulnerability` entity. `VulnerabilityTarget` entities link CVEs to CPE patterns.
+
+### VulnerabilityIntelligenceController — `/api/vuln-intel`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/vuln-intel` | Paginated vulnerability intel summary |
+| GET | `/api/vuln-intel/{cveId}` | Get intel for specific CVE |
+| GET | `/api/vuln-intel/{cveId}/observations` | Get intel observations (KEV, CSAF, EPSS) |
+
+Backed by `vulnerability_intel_summary` + `vulnerability_intel_observations` projections.
+
+### FindingController — `/api/findings`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/findings` | List findings (paginated, filterable) |
+| GET | `/api/findings/{id}` | Get finding detail |
+| PUT | `/api/findings/{id}` | Update finding (status, assignee, etc.) |
+| POST | `/api/findings/{id}/comments` | Add comment to finding |
+| GET | `/api/findings/{id}/events` | Get finding event history |
+| DELETE | `/api/findings/{id}` | Delete finding |
+
+`Finding` entity. Status: `FindingStatus` enum (OPEN, ACKNOWLEDGED, IN_PROGRESS, RESOLVED, SUPPRESSED, FALSE_POSITIVE, RISK_ACCEPTED). Decision state: `FindingDecisionState`. Creation source: `FindingCreationSource` enum.
+
+### CveDetailController — `/api/cve-detail`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/cve-detail/{cveId}` | Full CVE detail including org impact |
+| GET | `/api/cve-detail/{cveId}/applicable-software` | Affected software for org |
+| GET | `/api/cve-detail/{cveId}/inventory-mappings` | CPE-to-inventory mappings |
+| POST | `/api/cve-detail/{cveId}/suppress` | Suppress CVE org-wide |
+| POST | `/api/cve-detail/{cveId}/investigate` | Start investigation |
+| POST | `/api/cve-detail/{cveId}/ai-summary` | Generate AI investigation summary (OpenAI) |
+| POST | `/api/cve-detail/{cveId}/servicenow-incident` | Create ServiceNow incident for CVE |
+
+`OrgCveRecord` entity stores per-tenant CVE state. `OrgCveAiArtifact` stores persisted AI outputs.
+
+### DashboardController — `/api/dashboard`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/dashboard` | Main dashboard metrics |
+| GET | `/api/dashboard/noise-reduction` | Noise reduction analytics |
+| GET | `/api/dashboard/correlation-efficiency` | Correlation efficiency metrics |
+| GET | `/api/dashboard/cve-inventory-map` | CVE-to-inventory mapping summary |
+| GET | `/api/dashboard/csaf-vex-analytics` | CSAF/VEX analytics |
+
+Results are cached in memory (Caffeine) for the dashboard queries.
+
+### VulnRepoDashboardController — `/api/vuln-repo-dashboard`
+
+Dashboard metrics for the Vulnerability Repository view.
+
+### EolController — `/api/eol`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/eol/products` | EOL product catalog |
+| GET | `/api/eol/releases` | EOL release data |
+| GET | `/api/eol/mappings` | Component → EOL product mappings |
+| POST | `/api/eol/mappings/confirm` | Confirm/reject a suggested EOL mapping |
+| GET | `/api/eol/slug-suggestions` | AI-suggested EOL slugs for unmatched components |
+
+`EolProductCatalog`, `EolRelease`, `SoftwareEolMapping` entities. Data sourced from endoflife.date API.
+
+### RiskPolicyController — `/api/risk-policy`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/risk-policy` | Get tenant risk policy |
+| PUT | `/api/risk-policy` | Update risk policy |
+| POST | `/api/risk-policy/recompute-findings-scores` | Recompute all finding scores |
+
+`RiskPolicy` entity. Fields include: `sla*`, `triage*` (6 weight fields), `autoClose*`, `findingGenerationMode`, `findingsScoreConfig` (JSONB).
+
+### SuppressionRuleController — `/api/suppression-rules`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/suppression-rules` | List suppression rules |
+| POST | `/api/suppression-rules` | Create suppression rule |
+| PUT | `/api/suppression-rules/{id}` | Update rule |
+| DELETE | `/api/suppression-rules/{id}` | Delete rule |
+
+`SuppressionRule` entity. States: DRAFT, APPROVED, IN_REVIEW, REJECTED, EXPIRED. Types: CVE, FINDING.
+
+### OwnershipRuleController — `/api/ownership-rules`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/ownership-rules` | List ownership rules |
+| POST | `/api/ownership-rules` | Create rule |
+| PUT | `/api/ownership-rules/{id}` | Update rule |
+| DELETE | `/api/ownership-rules/{id}` | Delete rule |
+
+`OwnershipRule` entity. Conditions stored as JSONB. Evaluated by priority to auto-assign findings.
+
+### VulnerabilitySourceFilterConfigController — `/api/vuln-source-filter`
+
+Per-tenant configuration of which vulnerability intelligence sources participate in correlation.
+
+### ServiceNowCmdbConfigController — `/api/servicenow-cmdb`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/servicenow-cmdb/config` | Get CMDB config |
+| POST | `/api/servicenow-cmdb/config` | Create/update config |
+| POST | `/api/servicenow-cmdb/sync` | Trigger CMDB sync |
+| GET | `/api/servicenow-cmdb/sync/status` | Get sync status |
+
+`ServiceNowCmdbConfig` entity. Auth type: `ServiceNowAuthType` enum.
+
+### ServiceNowIncidentController — `/api/servicenow-incidents`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/servicenow-incidents` | Create ServiceNow incident |
+| GET | `/api/servicenow-incidents/{id}` | Get incident |
+
+### SccmCmdbController — `/api/sccm-cmdb`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/sccm-cmdb/config` | Get SCCM config |
+| POST | `/api/sccm-cmdb/config` | Create/update config |
+| POST | `/api/sccm-cmdb/sync` | Trigger sync |
+
+`SccmCmdbConfig` entity. Auth type: `SccmAuthType` enum.
+
+### AwsDiscoveryController — `/api/aws-discovery`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/aws-discovery/config` | Get discovery config |
+| POST | `/api/aws-discovery/config` | Create/update config |
+| POST | `/api/aws-discovery/targets` | Add discovery target (account + region) |
+| DELETE | `/api/aws-discovery/targets/{id}` | Remove target |
+| POST | `/api/aws-discovery/test` | Test AWS credentials |
+| POST | `/api/aws-discovery/run` | Trigger discovery run |
+
+`AwsDiscoveryConfig`, `AwsDiscoveryTarget` entities. Auth types: `AwsAuthType` enum (IAM_ROLE, ACCESS_KEY, INSTANCE_PROFILE). Discovery scoped to EC2 instances via SSM.
+
+### SyncController — `/api/sync`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/sync/runs` | List sync run history |
+| GET | `/api/sync/runs/{id}` | Get sync run detail |
+| POST | `/api/sync/trigger` | Trigger manual sync |
+
+`SyncRun` entity tracks each connector sync job.
+
+### AuthContextController — `/api/me`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/me` | Get current user auth context |
+| PUT | `/api/me/tenant` | Switch tenant context |
+
+Returns `AuthContextResponse` with roles, tenant, user details.
+
+### LocalAuthController / AuthLoginController — `/api/auth`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Credential login (email + password) |
+| POST | `/api/auth/setup-password` | Set password via one-time setup token |
+
+### TestPersonaController — `/api/dev/test-personas`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/dev/test-personas` | List available personas |
+| POST | `/api/dev/test-personas/{personaKey}/token` | Issue JWT for persona |
+
+Only registered when `app.test-personas.enabled=true`.
+
+### TenantAdministrationController — `/api/platform/tenants`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/platform/tenants` | List all tenants |
+| GET | `/api/platform/tenants/{id}` | Get tenant |
+| PUT | `/api/platform/tenants/{id}` | Update tenant |
+| POST | `/api/platform/tenants` | Provision tenant |
+
+Requires `ROLE_PLATFORM_OWNER`.
+
+### TenantSupportGrantController — `/api/platform/support-grants`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/platform/support-grants` | Grant support access to a tenant |
+| DELETE | `/api/platform/support-grants/{tenantId}` | Revoke support grant |
+
+### DemoController — `/api/demo-requests`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/demo-requests` | Submit a demo request (public) |
+| GET | `/api/platform/demo-requests` | List demo requests (platform owner) |
+| POST | `/api/platform/demo-requests/{id}/decision` | Approve or decline |
+
+### DemoLifecycleController — `/api/demo-invites`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/demo-invites/{token}` | Validate invite token |
+| POST | `/api/demo-invites/{token}/accept` | Accept invite (returns setupToken) |
+
+### AuditEventController — `/api/audit-events`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/audit-events` | List audit events for tenant |
+
+### ServiceAccountController — `/api/service-accounts`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/service-accounts` | List service accounts |
+| POST | `/api/service-accounts` | Create service account |
+| DELETE | `/api/service-accounts/{id}` | Delete service account |
+
+### SloController — `/api/slo`
+
+SLO metrics and configuration.
+
+### OperationalDashboardController — `/api/operations`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/operations/metrics` | Operational pipeline metrics |
+| GET | `/api/operations/quality` | Data quality metrics |
+| GET | `/api/operations/platform-health` | Platform health status |
+
+Requires `ROLE_PLATFORM_OWNER`.
+
+### PlatformVulnRepoController — `/api/platform/vuln-repo`
+
+Platform-level vulnerability repository management (ROLE_PLATFORM_OWNER).
+
+### PlatformInventoryConnectorHealthController — `/api/platform/connector-health`
+
+Health status for all tenant connectors, visible to platform owners.
+
+### UpgradeRecommendationController — `/api/upgrade-recommendations`
+
+Upgrade recommendations based on EOL and vulnerability data.
+
+### VulnerabilityArchiveController — `/api/vulnerability-archive`
+
+Archive management for resolved/closed vulnerabilities.
+
+### OperationsOverrideController — `/api/operations/override`
+
+Platform-owner operations overrides.
+
+### ApiExceptionHandler
+
+`@RestControllerAdvice` providing consistent error responses for all controllers.
+
+---
+
+## External Integrations (Clients)
+
+### NVD API (`NvdApiClient`)
+
+Fetches CVE data from NIST National Vulnerability Database. Used in daily incremental sync (`01:00` UTC) and on-demand CVE lookups. API key via `NVD_API_KEY`.
+
+### EUVD API (`EuvdApiClient`)
+
+European Union Vulnerability Database — alternative CVE source.
+
+### JVN API (`JvnApiClient`)
+
+Japan Vulnerability Notes — Japanese CVE database.
+
+### GitHub API (`GithubApiClient`)
+
+SBOM ingestion from GitHub repos (dependency graph export) and GHCR (container image attestations). Also GHSA (GitHub Security Advisory) feed sync. Token via file `backend/secrets/github-api-token` or `GITHUB_API_TOKEN`.
+
+### EOL API (`EolApiClient`)
+
+Fetches product lifecycle data from endoflife.date. Drives the 4-stage EOL pipeline (Sunday, stages 1–4).
+
+### AWS (`AwsDiscoveryClient`, `AwsCredentialProvider`)
+
+Discovers EC2 instances via AWS SSM. Supports IAM role assumption, access keys, and instance profile auth. Multi-account via cross-account role ARN + external ID in `AwsDiscoveryTarget`.
+
+### OpenAI (`OpenAiClient`)
+
+AI investigation summaries, CVE triage, and AI-assisted actions. Gated by `OPENAI_ENABLED`. Results persisted in `org_cve_ai_artifacts` to avoid redundant API calls.
+
+### Resend (`ResendEmailClient`)
+
+Transactional email (invite delivery, notifications). API key via `RESEND_API_KEY`.
+
+### Outbound HTTP Infrastructure
+
+All outbound HTTP calls go through `OutboundHttpClient` which wraps Spring's `RestClient`. Configured via `OutboundPolicy` / `OutboundPolicyFactory`. `OutboundFailureClassifier` categorizes failures. `OutboundFailureDecision` controls retry vs. circuit-break behavior. `OutboundPolicyDefaults` provides sensible per-service defaults. `AdvisoryFetchService` handles bulk advisory fetching for CSAF/VEX sources.
+
+---
+
+## Service Layer
+
+### SBOM Ingestion (`service/sbomingestion/`)
+
+Parses CycloneDX and SPDX SBOMs, normalizes component names and versions, resolves CPEs against `cpe_dim`, writes `inventory_components` and `inventory_component_cpe_map`. Deduplicates components within a tenant by normalized identity.
+
+### CMDB Ingestion (`service/cmdbingestion/`)
+
+ServiceNow CMDB sync: pulls CI records, resolves identity via `IdentityMatchRule`, writes `assets` and `cis`. SCCM sync performs full sweep of device records. Both write to `software_instances` and `discovery_models`.
+
+### Vulnerability Ingestion (`service/vulningestion/`)
+
+Processes NVD CVE JSON, GHSA advisories, CISA KEV list, and Microsoft/Red Hat CSAF/VEX documents. Writes `vulnerabilities`, `vulnerability_targets`, and `vex_assertions`. `ApplicabilityDecisionService` re-evaluates component states after new intel arrives.
+
+### Finding Service
+
+`FindingService` drives finding lifecycle: create when `component_vulnerability_state` flips to applicable, reopen when suppression expires or VEX assertion is withdrawn, resolve when component is patched or suppressed. Delta queue (`finding_delta_queue`) batches state changes, drained every 2 seconds in batches of 100.
+
+### EOL Pipeline
+
+Four-stage weekly pipeline (Sunday):
+1. Catalog refresh — fetch product list from endoflife.date
+2. Release data — fetch release cycles per product
+3. Slug resolution — match `inventory_components` to EOL catalog slugs (AI-assisted via OpenAI)
+4. Denormalization — write `is_eol`, `eol_days_remaining`, `eol_date` onto `inventory_components`
+
+### Ownership Rule Evaluation
+
+`OwnershipRuleEvaluationService` evaluates `ownership_rules` by priority when findings are created or updated. First matching rule assigns ownership. Evaluated server-side, not stored as a trigger.
+
+### Findings Score
+
+`FindingsScoreService` evaluates the `findings_score_config` JSONB from `risk_policies` against each finding's attributes. Score (0–10) returned as `findingsScore` on every `FindingResponse`. `FindingsScoreRecomputeService.recomputeAll()` is triggered by `POST /api/risk-policy/recompute-findings-scores`.
+
+### Suppression
+
+Suppression rules evaluated at finding creation and on the 15-minute reopen sweep. `SuppressionRuleService` handles expiry, transitions, and finding state changes triggered by rule changes.
+
+---
+
+## Configuration Properties
+
+| Property | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `app.api-key` | `APP_API_KEY` | `change-me-in-prod` | API key for `X-API-Key` auth |
+| `app.creator-key` | `APP_CREATOR_KEY` | (none) | Creator key for elevated access |
+| `app.allow-api-key-auth` | `APP_ALLOW_API_KEY_AUTH` | `false` | Enable API key auth path |
+| `app.allow-header-tenant-selection` | `APP_ALLOW_HEADER_TENANT_SELECTION` | `false` | Allow `X-Tenant-ID` header |
+| `app.require-tenant-context` | `APP_REQUIRE_TENANT_CONTEXT` | `true` | Reject requests without tenant |
+| `app.test-personas.enabled` | `APP_TEST_PERSONAS_ENABLED` | `false` | Enable test persona endpoints |
+| `app.jwt.hmac-secret` | `APP_JWT_HMAC_SECRET` | — | HMAC secret for HS256 JWT signing |
+| `app.jwt.issuer-uri` | `APP_JWT_ISSUER_URI` | — | OIDC issuer for RS256 JWT validation |
+| `app.security.platform-owner-email` | `APP_PLATFORM_OWNER_EMAIL` | — | Platform owner email for credential login |
+| `app.security.platform-owner-password-hash` | `APP_PLATFORM_OWNER_PASSWORD_HASH` | — | Bcrypt hash for platform owner password |
+| `app.cors.allowed-origins` | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins |
+| `app.credential-encryption-key` | `APP_CREDENTIAL_ENCRYPTION_KEY` | — | AES-256 key (base64) for credential storage |
+| `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/vulnwatch` | Database URL |
+| `openai.enabled` | `OPENAI_ENABLED` | `false` | Enable OpenAI integration |
+| `openai.api-key` | `OPENAI_API_KEY` | — | OpenAI API key |
+| `nvd.api-key` | `NVD_API_KEY` | — | NVD API key (higher rate limit) |
+| `resend.api-key` | `RESEND_API_KEY` | — | Resend email API key |
+| `github.api-token` | `GITHUB_API_TOKEN` | — | GitHub personal access token |
+
+---
+
+## Scheduled Jobs
+
+| Time | Job |
+|------|-----|
+| `00:15` daily | Lifecycle date sweep (EOL/EOS transitions) |
+| `01:00` daily | NVD incremental + KEV sync |
+| `01:15` daily | GHSA sync |
+| `01:45` daily | Microsoft + Red Hat CSAF/VEX sync |
+| `02:05` daily | Mark stale assets inactive |
+| `02:30` daily | VEX staleness recompute |
+| `03:15` daily | EPSS score refresh |
+| `07:00` daily | ServiceNow incident status sync |
+| `02:00` Sunday | EOL catalog refresh (stage 1) |
+| `03:00` Sunday | EOL release data (stage 2) |
+| `03:30` Sunday | EOL slug resolution (stage 3) |
+| `04:00` Sunday | EOL denormalization (stage 4) |
+| Every 5 min | GitHub SBOM sources |
+| Every 5 min | ServiceNow / SCCM / AWS Discovery scheduled syncs |
+| Every 15 min | Reopen expired suppressions |
+| Every 2 sec | Drain `finding_delta_queue` (batches of 100) |
+| Hourly | Policy-based auto-close findings |
+| Hourly | Demo tenant expiry check |
+
+---
+
+## Actuator Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /actuator/health` | Overall health |
+| `GET /actuator/health/readiness` | Readiness probe |
+| `GET /actuator/health/liveness` | Liveness probe (prod only) |
+| `GET /actuator/info` | Build info |
+
+---
+
+## Operational Metrics
+
+`OperationalMetricsInterceptor` tracks response time (ms) for 23 monitored endpoints. Metrics are exposed for query via `OperationalDashboardController`.
