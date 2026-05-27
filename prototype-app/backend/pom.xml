@@ -249,7 +249,7 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.24</minimum>
+                                            <minimum>0.27</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

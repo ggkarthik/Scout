@@ -86,3 +86,101 @@ describe('api client auth headers', () => {
     expect(headers.get('X-Platform-Action-Tenant')).toBe('tenant-456');
   });
 });
+
+describe('api method coverage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearStoredAuthToken();
+  });
+
+  it('listFindings sends GET to /findings with query params', async () => {
+    const payload = { items: [], page: 0, size: 25, totalItems: 0, totalPages: 0 };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.listFindings({ page: 0, size: 25, severity: ['CRITICAL'], status: ['OPEN'] });
+
+    const [url] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain('/findings');
+    expect(String(url)).toContain('severity=CRITICAL');
+    expect(String(url)).toContain('status=OPEN');
+  });
+
+  it('getRiskPolicy sends GET to /risk-policy', async () => {
+    const policy = { criticalSlaDays: 7, highSlaDays: 14 };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(policy), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.getRiskPolicy();
+
+    const [url] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain('/risk-policy');
+  });
+
+  it('updateRiskPolicy sends POST to /risk-policy with policy body', async () => {
+    const updated = { criticalSlaDays: 3, highSlaDays: 7 };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(updated), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.updateRiskPolicy({ criticalSlaDays: 3 });
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain('/risk-policy');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toContain('"criticalSlaDays":3');
+  });
+
+  it('getRiskPolicy returns parsed JSON response', async () => {
+    const policy = { criticalSlaDays: 7, highSlaDays: 14, mediumSlaDays: 30, lowSlaDays: 60 };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(policy), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    const result = await api.getRiskPolicy();
+
+    expect(result).toMatchObject({ criticalSlaDays: 7 });
+  });
+
+  it('listFindings without filters still sends request', async () => {
+    const payload = { items: [], page: 0, size: 25, totalItems: 0, totalPages: 0 };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.listFindings({});
+
+    const [url] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain('/findings');
+  });
+
+  it('injects X-API-Key header when no bearer token is present', async () => {
+    clearStoredAuthToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.getRiskPolicy();
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.has('X-API-Key')).toBe(true);
+    expect(headers.has('Authorization')).toBe(false);
+  });
+
+  it('injects Authorization bearer header when session token is present', async () => {
+    setStoredAuthToken('test-session-token');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+
+    await api.getRiskPolicy();
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer test-session-token');
+    expect(headers.has('X-API-Key')).toBe(false);
+  });
+});
