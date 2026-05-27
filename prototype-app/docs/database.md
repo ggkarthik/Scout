@@ -1,366 +1,1003 @@
 # VulnWatch Database
 
-Last updated: 2026-05-22
+Last updated: 2026-05-27
 
 The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line. H2 is retained only as an offline archive format for legacy data snapshots.
 
-## Engine
+---
 
-- Runtime: PostgreSQL at `jdbc:postgresql://localhost:5432/vulnwatch`
-- Schema strategy: Flyway-owned PostgreSQL reset-line bootstrap with `ddl-auto=none`
+## Overview
 
-## Tenant Model
+- **Database name (local):** `vulnwatch`
+- **JDBC URL default:** `jdbc:postgresql://localhost:5432/vulnwatch`
+- **Migration directory:** `backend/src/main/resources/db/migration/postgres_reset/`
+- **Flyway baseline migration:** `V1__platform_and_default_tenant_schemas.sql`
+- **All statements:** `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` (idempotent replay via psql is safe)
+- **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate is `update` temporarily until reset-line DDL is complete for all tenant tables)
 
-The schema is tenant-aware and uses a shared `platform` schema plus one schema per tenant. The reset-line baseline is the only supported bootstrap path for development and test databases.
+---
 
-Tenant-scoped tables include:
+## Schema Structure
 
-- `assets`
-- `sbom_uploads`
-- `inventory_components`
-- `inventory_component_cpe_map`
-- `software_inventory_items`
-- `component_vulnerability_states`
-- `org_cve_records`
-- `findings`
-- `risk_policies`
-- `audit_events` for tenant-visible administration, tenant exposure refresh usage counting, and workflow audit trails
+The database is split into two PostgreSQL schemas:
 
-Global or mostly global intelligence tables include:
+| Schema | Purpose |
+|---|---|
+| `platform` | Shared, cross-tenant data: tenants, users, global vulnerabilities, software identities, EOL catalog |
+| `tenant_default` | Template for per-tenant operational data: assets, inventory, findings, org CVE records, connectors, policies |
 
-- `vulnerabilities`
-- `vulnerability_intel_observations`
-- `vulnerability_intel_summary`
-- `vulnerability_intel_summary_sources`
-- `vulnerability_targets`
-- `vulnerability_rules`
-- `vulnerability_config_expr`
-
-Identity and administration tables include:
-
-- `app_users`
-- `tenant_memberships`
-- `service_accounts`
-- tenant lifecycle metadata on `tenants`
-
-## Major Table Groups
-
-### Inventory and Identity
-
-- `tenants`
-  - production lifecycle fields include slug, status, plan code, billing reference, suspension/deletion timestamps, quota limits, and updated timestamp
-- `app_users`
-  - one row per authenticated external subject
-- `tenant_memberships`
-  - maps users to tenants and roles
-- `service_accounts`
-  - tenant-scoped machine identities for automation and future API access
-- `assets`
-  - unique key on `(tenant_id, identifier)`
-  - stores asset type, owner metadata, and lifecycle state
-- `sbom_uploads`
-  - immutable ingestion evidence and counts
-- `inventory_components`
-  - tenant asset components, active/retired lifecycle, normalized package fields
-- `software_identities`
-  - canonical normalized software product records; extended by V1030 with `vendor`, `product`, `product_hash`, `purl`, `cpe23`, `vendor_product_id` columns for deterministic CMDB-to-CPE linkage
-- `software_identifiers`
-- `identity_links`
-  - extended by V1030 with `source_type`, `source_id`, `target_type`, `target_id`, `match_rule`, `last_seen_at` for flexible cross-domain identity resolution
-- `software_inventory_items`
-  - flattened software inventory projection used by read/reporting paths
-
-### Host Inventory (CMDB)
-
-Added by V1030–V1033:
-
-- `cis`
-  - one row per CMDB Configuration Item per tenant; links to `assets`
-  - stores `sys_id`, `display_name`, `business_criticality`, `environment`, `owner_email`, and sync timestamps
-  - unique index on `(tenant_id, sys_id)`
-- `ci_aliases`
-  - hostname/FQDN variants for a CI; supports fuzzy host resolution
-  - stores `alias_name` and `normalized_alias_name`
-- `discovery_models`
-  - normalized software product metadata rows from `cmdb_sam_sw_discovery_model`
-  - stores `primary_key`, `normalized_product`, `normalized_publisher`, `product_hash`, `version_hash`, `platform`, `normalization_status`
-- `software_instances`
-  - one row per installed software per CI
-  - links `ci_id` and `software_identity_id`
-  - stores install date, last scanned, last used, active/unlicensed flags
-- `servicenow_cmdb_configs`
-  - one config row per `(tenant_id, source_system)`
-  - stores `base_url`, `auth_type`, credential secret (encrypted at rest), table names, field selection overrides, `page_size`, `enabled`, `auto_sync_enabled`, `interval_minutes`, and last test status/timestamp
-
-### Correlation Inputs
-
-- `cpe_dim`
-  - canonical normalized CPE dimension
-- `inventory_component_cpe_map`
-  - bridge from component to normalized CPE
-- `vulnerability_targets`
-  - normalized target rows with version bounds, qualifiers, and optional `cpe_id`
-- `vulnerability_rules`
-- `vulnerability_config_expr`
-
-### Vulnerability Intelligence
-
-- `vulnerabilities`
-  - canonical vulnerability record keyed by `external_id`
-  - stores severity, CVSS, EPSS, KEV, title, snippet, archive keys, timestamps
-- `vulnerability_intel_observations`
-  - source-specific raw observations
-- `vulnerability_intel_summary`
-  - list/read-model projection
-- `vulnerability_intel_summary_sources`
-  - projected source list per summary row
-
-### Exposure and Findings
-
-- `component_vulnerability_states`
-  - component-level applicability and impact projection
-  - stores matched method, selected target source, VEX fields, confidence, eligibility, and trace JSON
-- `org_cve_records`
-  - tenant-level rollup for one row per CVE per tenant
-  - stores applicability, impact state, matched component count, and software count
-- `findings`
-  - tenant-scoped workflow records
-  - unique key on `(component_id, vulnerability_id)`
-- `finding_events`
-- `finding_comments`
-- `risk_policies`
-
-### End-of-Life Tracking
-
-Added by V1034–V1042:
-
-- `eol_product_catalog`
-  - one row per endoflife.date product slug
-  - stores `slug`, `display_name`, `cpe_vendor`, `cpe_product`, `purl_type`, `purl_namespace`, `aliases`, `last_modified`, `last_fetched_at`
-  - unique index on `slug`
-- `eol_releases`
-  - one row per release cycle per product slug
-  - stores `product_slug`, `cycle`, `release_date`, `eol_date`, `eol_boolean`, `support_end_date`, `extended_support_date`, `security_support_date`, `latest_version`, `latest_release_date`, `lts`, `is_eol`, `eoas`, `eoes`, `discontinued`, `official_source_url`, `support_phase`
-  - unique index on `(product_slug, cycle)`
-- `software_eol_mapping`
-  - maps a `software_identity_id` (or `normalized_key` string) to an EOL slug
-  - stores `normalized_key`, `eol_slug`, `match_confidence`, `match_method`, `confirmed`, `software_identity_id`
-  - `confirmed = true` for analyst-reviewed mappings; `match_method = MANUAL` for those set via the UI
-
-EOL denormalized columns added to `inventory_components` and `software_instances` (V1036, V1038–V1041):
-- `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, `latest_supported_version`, `eol_checked_at`
-
-EOL summary columns added to `org_cve_records` (V1040):
-- `eol_component_count`, `eos_component_count`
-
-### Operational and Workflow Support
-
-- `finding_delta_queue`
-  - durable background projection queue for workbench freshness
-  - stores `event_type`, tenant/component/vulnerability scope, source metadata, dedupe key, retry state, visibility timestamps, completion timestamps, and failure text
-
-## Production Isolation Controls
-
-`APP_REQUIRE_TENANT_CONTEXT=true` hardens the tenant-aware datasource for production. When a request or worker path reaches the normal datasource without a resolved tenant, the datasource sets `app.current_tenant_id` to `00000000-0000-0000-0000-000000000000`. Existing tenant-scoped RLS policies then match no tenant rows instead of using the legacy unset-tenant fallback.
-
-The platform still needs deliberate cross-tenant paths for administration and feed maintenance. Those should use a separate platform datasource or job role rather than the normal request datasource.
-  - active event types are `SOFTWARE_DELTA`, `CVE_DELTA`, `CVE_METADATA_DELTA`, `VEX_DELTA`, `LIFECYCLE_DELTA`, and `NOISE_REDUCTION_REFRESH`
-- `sync_runs`
-  - extended by V1029 with `metadata_json` for structured run metrics
-  - `run_domain` column distinguishes `INVENTORY` runs (ServiceNow CMDB, GitHub SBOM/GHCR) from `VULNERABILITY` runs (NVD, KEV, GHSA, CSAF/VEX)
-- `github_sbom_sources`
-- `investigations`
-- `investigation_activities`
-- `investigation_attachments`
-- `applicability_assessments`
-
-### Read-Model Projections (V1043–V1045)
-
-Added to support the Software Identities inventory view and the Operations Quality dashboard:
-
-- `software_identity_summary` (V1043)
-  - one row per `(tenant_id, software_identity_id)`
-  - stores `display_name`, `canonical_key`, `vendor`, `product`, `normalized_key`, `purl`, `cpe23`
-  - aggregates: `asset_count`, `component_count`, `version_count`, `eol_component_count`, `near_eol_component_count`, `unknown_eol_component_count`
-  - EOL fields: `eol_slug`, `mapping_confirmed`, `needs_eol_mapping`, `last_observed_at`, `summary_updated_at`
-  - `asset_types`, `ecosystems`, `source_systems` (arrays) for filtering
-  - indexes on `(tenant_id, component_count DESC)`, `(tenant_id, needs_eol_mapping)`, EOL lifecycle counts, and `normalized_key`
-
-- `quality_issue_projection` (V1044)
-  - one row per `(tenant_id, issue_key)` — deterministic keying allows upsert on recompute
-  - stores `domain`, `issue_type`, `severity`, `reason_code`, `source_object_type`
-  - cross-domain foreign references: `asset_id`, `component_id`, `software_identity_id`, `vulnerability_id`, `sync_run_id`
-  - labels: `title`, `primary_label`, `secondary_label`
-  - filter facets: `asset_type`, `source_system`, `ecosystem`
-  - impact counts: `affects_active_findings`, `affected_asset_count`, `affected_component_count`, `open_finding_count`, `open_vulnerability_count`
-  - structured payloads: `evidence_json`, `drilldown_json`
-  - timestamps: `first_seen_at`, `last_seen_at`, `last_computed_at`
-  - indexes on domain+severity, filter facets, and cross-domain reference columns
-
-- `dashboard_noise_reduction_projection` (V1045)
-  - one row per tenant
-  - stores `never_opened_not_applicable`, `deferred_under_investigation`, `category_counts_json`, and `last_computed_at`
-  - powers the executive dashboard noise-reduction widget without re-running correlation logic on read
-
-### Historical Schema Evolution V1046–V1097
-
-The following notes describe the legacy numbered migration line that existed before the reset-line bootstrap became the only supported development and test path.
-
-New tables added in this range:
-
-- `vulnerability_source_filter_configs` (V1046)
-  - per-tenant source feed filter rules
-  - stores `tenant_id`, `source_system`, `filters_json`
-- `software_identity_cluster_link` (V1059)
-  - cluster-level normalization overrides with audit trail
-  - stores `source_type`, `source_key`, `target_identity_id`, `apply_to_future`, `reason`, `confirmed_by`, `confirmed_at`, `revoked_at`, `revoked_by`
-- `sccm_cmdb_configs` (V1060)
-  - SCCM/MECM CMDB connector configuration
-  - stores `jdbc_url`, `auth_type`, `credential_secret`, `site_code`, `database_name`, `fetch_size`, `query_timeout_seconds`, `mock_mode`, scheduling fields, last test status, and `last_sync_at` (V1062)
-- `aws_discovery_configs` (V1063)
-  - AWS Cloud Discovery connector settings
-  - stores `auth_type`, `access_key_id`, `credential_secret`, `cross_account_role_arn`, `external_id`, `aws_account_id`, `regions_json`, `resource_types_json`, scope fields, scheduling, and last sync status
-- `aws_discovery_targets` (V1067)
-  - cross-account / multi-region AWS discovery targets
-  - paired with an `ssm_readiness` column on `assets` for SSM-based EC2 discovery health
-- `app_users` (V1070)
-  - first-class user identity table backing `tenant_memberships`
-  - stores external subject, email, display name, status, and lifecycle timestamps
-
-New columns added in this range, grouped by target table:
-
-- **`org_cve_records`** — V1047 added `investigation_summary_input_json`, `investigation_summary_output_json`, `investigation_summary_mode`, `investigation_summary_generated_at`. V1052 added `ai_solution_json`, `ai_solution_generated_at`. V1053 added `ai_actions_json`, `ai_actions_generated_at`. These power the AI investigation summary, AI solution, and AI actions panels in the workbench (gated by `OPENAI_ENABLED`).
-- **`findings`** — V1048 added `display_id` backed by a sequence (analyst-friendly IDs). V1054 added `incident_id` and `incident_status` (ServiceNow incident tracking).
-- **`assets`** — V1049 added ServiceNow ownership fields `managed_by`, `department`, `support_group`, `assigned_to`. V1064 added cloud-asset metadata `cloud_provider`, `cloud_region`, `cloud_availability_zone`, `cloud_account_id`, `cloud_resource_type`, `cloud_instance_type`, `cloud_vpc_id`, `cloud_subnet_id`, `cloud_arn`, `cloud_tags_json`. V1067 added `ssm_readiness`.
-- **`cis`** — V1049 mirrored the ServiceNow ownership fields onto CMDB CIs.
-- **`vulnerabilities`** — V1050/V1051 added `kev_date_added`, `kev_due_date`, `kev_required_action`.
-- **`inventory_components`** — V1056 added manual identity override fields: `manual_identity_id`, `manual_identity_reason`, `manual_identity_confirmed_by`, `manual_identity_confirmed_at`. V1058 is an idempotent backstop.
-- **`software_instances`** — V1057 mirrored the manual identity override fields.
-- **`software_eol_mapping`** — V1055 added `confirmed_by`, `confirmed_at`, `previous_slug`.
-- **`servicenow_cmdb_configs`** — V1061 added `last_sync_at`. V1066 is an idempotent repair.
-- **`tenants`** — V1070 added `slug`, `status`, `plan_code`, `billing_ref`, `suspended_at`, `deleted_at`, `updated_at`. V1071 added `max_connector_count`, `max_service_account_count`, `max_daily_sbom_uploads`, `max_export_rows` with CHECK constraints. V1072 added `max_daily_exposure_refreshes`.
-
-Other notable migrations in this range:
-
-- V1065 — `cloud_asset_summary` view backing the cloud-asset overview panel
-- V1068 — drop AWS tag filter scope columns
-- V1069 — narrow AWS discovery to EC2-only (RDS/Lambda/S3/ECS/EKS scope removed)
-- V1075 — demo tenant lifecycle tables
-- V1079 — `findings_score_config` JSONB column on `risk_policies`; evaluated by `FindingsScoreService`
-- V1082 — `suppression_rules` table (name, state, record type, valid from/to, execution order, reason)
-- V1088 — `vulnerability_intel_source_relations` for source-level junction data
-- V1089 — `app_user_password_setup_tokens`
-- V1094 — `ownership_rules` table (rule-based user/group assignment) in the legacy numbered line
-- V1094 — `tenant_support_grants` table (support access grants with expiry) in the legacy numbered line
-- V1095 — `tenant_vulnerability_source_correlation` (per-tenant feed filter rules; backing the Vulnerability Sources configuration section)
-- V1096 — demo tenant purge lifecycle
-- V1097 — multi-tenant ownership hardening (cross-tenant access guards)
-
-## Key Relationships
-
-- `tenants` 1->N inventory, findings, org-CVE, policy, and CMDB config records
-- `assets` 1->N `sbom_uploads`, `inventory_components`, `software_inventory_items`, and `findings`
-- `assets` 1->1 `cis` (host assets only)
-- `cis` 1->N `ci_aliases`, `software_instances`
-- `software_identities` 1->N `software_instances`, `software_identifiers`, `identity_links`
-- `discovery_models` resolves into `software_identities` during CMDB ingestion
-- `inventory_components` 1->N `inventory_component_cpe_map`, `component_vulnerability_states`, and `findings`
-- `cpe_dim` 1->N `inventory_component_cpe_map` and `vulnerability_targets`
-- `vulnerabilities` 1->N `vulnerability_targets`, `vulnerability_intel_observations`, `component_vulnerability_states`, `org_cve_records`, and `findings`
-- `vulnerabilities` 1->1 `vulnerability_intel_summary` via unique `vulnerability_id`
-
-## Important Write Paths
-
-### SBOM Ingestion
-
-1. upsert asset and upload evidence
-2. upsert component rows and retire missing components
-3. maintain software identity and software inventory projections
-4. normalize CPEs and bridge them to components
-5. enqueue component recomputation
-
-### Vulnerability Ingestion
-
-1. upsert source observations
-2. merge canonical vulnerability records
-3. refresh vulnerability summary projections
-4. upsert targets, rules, and config expressions
-5. enqueue CVE-level recomputation
-6. enqueue tenant-scoped noise-reduction refresh after correlation-affecting work completes
-
-### Exposure Projection
-
-The current backend writes two important projection tables before or alongside finding updates:
-
-- `component_vulnerability_states` for component-level truth
-- `org_cve_records` for tenant/CVE rollups
-
-This is a major change from the older documentation set and is now the correct place to look for current applicability and org-CVE exposure state.
-
-### EOL Pipeline
-
-1. batch-upsert product slugs into `eol_product_catalog` (stage 1)
-2. conditional fetch and upsert release cycles into `eol_releases` (stage 2)
-3. in-memory slug resolution writes `software_eol_mapping` rows (stage 3)
-4. set-based `UPDATE ... FROM (SELECT DISTINCT ON (...))` denormalizes EOL status onto `inventory_components` and `software_instances` (stage 4)
-5. scoped `LIFECYCLE_DELTA` events refresh `org_cve_records` after denormalization instead of tenant-wide foreground rebuild
-6. daily `EOL_DATE_SWEEP` updates date-driven lifecycle transitions and enqueues `LIFECYCLE_DELTA` even when no feed changed
-
-### Workflow Operations
-
-- investigations and applicability assessments are persisted directly from `/api/cve-detail/*`
-- finding events/comments capture audit trail around status and suppression changes
-- scheduled jobs mutate asset state, suppression expiry, and policy-based auto-close behavior
-
-## Optimization and Archive Notes
-
-The vulnerability archival work is partially realized in the active schema:
-
-- `vulnerabilities` includes `description_snippet`, `description_archive_key`, and `raw_payload_archive_key`
-- legacy columns such as expanded CVSS fields, `source_identifier`, and `vuln_status` still remain in the `Vulnerability` entity for compatibility
-
-That means the database is still somewhat broader than a fully slimmed final form, even though PostgreSQL and Flyway now own the live runtime path cleanly.
-
-## Cutover Validation
-
-The backend includes a parity validator for comparing an archived H2 source snapshot with a PostgreSQL target:
-
-```bash
-cd backend
-./tools/run-database-parity.sh
+At runtime, `TenantAwareDataSource` sets PostgreSQL session variables on every connection:
+```sql
+SELECT set_config('app.current_tenant_id', '<uuid>', FALSE);
+SELECT set_config('search_path', '<tenant_schema>,platform', FALSE);
 ```
 
-Default inputs:
+JPA queries reference tables without schema prefixes and always land in the correct tenant schema via `search_path`.
 
-- H2: `jdbc:h2:file:./data/archive/h2-archive-20260308-postgres-cutover/vulnwatch;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH`
-- PostgreSQL: `jdbc:postgresql://localhost:5432/vulnwatch`
-- PostgreSQL user: the current OS user
+New tenant schemas are created by `TenantSchemaService` by cloning `tenant_default`.
 
-Overridable properties:
+---
 
-- `-Dh2.url=...`
-- `-Dh2.user=...`
-- `-Dh2.password=...`
-- `-Dpostgres.url=...`
-- `-Dpostgres.user=...`
-- `-Dpostgres.password=...`
-- `H2_JAR=/path/to/h2-*.jar`
-- `POSTGRES_JAR=/path/to/postgresql-*.jar`
+## Platform Schema Tables
 
-The validator is intentionally outside Maven so H2 does not remain in the normal build or test dependency graph.
+### `platform.tenants`
 
-## Determinism and Auditability
+Stores every registered tenant (organization).
 
-The data model preserves explainability rather than only final status:
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `name` | `varchar(255)` | NOT NULL; unique |
+| `schema_name` | `varchar(255)` | NOT NULL; unique |
+| `slug` | `varchar(255)` | unique |
+| `status` | `varchar(255)` | NOT NULL |
+| `plan_code` | `varchar(255)` | NOT NULL |
+| `billing_ref` | `varchar(255)` | |
+| `max_connector_count` | `integer` | NOT NULL |
+| `max_daily_exposure_refreshes` | `integer` | NOT NULL |
+| `max_daily_sbom_uploads` | `integer` | NOT NULL |
+| `max_export_rows` | `integer` | NOT NULL |
+| `max_service_account_count` | `integer` | NOT NULL |
+| `demo_created_by` / `demo_owner_email` / `demo_source` | `varchar(255)` | |
+| `demo_expires_at` | `timestamptz` | |
+| `expired_at` / `suspended_at` | `timestamptz` | |
+| `purge_status` / `purge_error` | `varchar(255)` | |
+| `purge_started_at` / `purged_at` / `deleted_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
 
-- `component_vulnerability_states.trace_json` stores component-level reasoning
-- `findings.evidence` and `findings.precedence_trace` preserve decision traces
-- `finding_events` records workflow changes
-- `sync_runs` records ingest execution history
+---
 
-## Current Caveats
+### `platform.app_users`
 
-- Flyway owns the PostgreSQL startup path and normal runtime no longer relies on startup schema mutation.
-- Because schema evolution was compatibility-oriented, some tables and columns reflect transitional states rather than a clean-room final design.
-- Flyway owns the PostgreSQL startup path through the reset-line bootstrap under `db/migration/postgres_reset`.
-- Legacy numbered migrations are retained only as historical documentation and are no longer part of the active runtime path.
+Platform-level user accounts. Supports both OAuth (`external_subject`) and local password auth.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `external_subject` | `varchar(255)` | NOT NULL; unique |
+| `email` | `varchar(255)` | |
+| `display_name` | `varchar(255)` | |
+| `platform_owner` | `boolean` | NOT NULL |
+| `status` | `varchar(255)` | NOT NULL |
+| `password_hash` | `varchar(255)` | bcrypt hash for local credential auth |
+| `password_set_at` | `timestamptz` | |
+| `password_setup_token_hash` | `varchar(255)` | one-time setup token (hashed) |
+| `password_setup_token_expires_at` | `timestamptz` | |
+| `last_seen_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `platform.tenant_memberships`
+
+Links users to tenants with a role.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK → `platform.tenants(id)` |
+| `user_id` | `uuid` | FK → `platform.app_users(id)` |
+| `invited_by` | `uuid` | FK → `platform.app_users(id)` |
+| `role` | `varchar(255)` | NOT NULL |
+| `status` | `varchar(255)` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `platform.app_user_global_roles`
+
+Platform-wide roles for users (e.g., PLATFORM_OWNER).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `app_user_id` | `uuid` | FK → `platform.app_users(id)` |
+| `role` | `varchar(64)` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+Unique constraint: `(app_user_id, role)`. Index: `idx_app_user_global_roles_role` on `(role)`.
+
+---
+
+### `platform.tenant_support_grants`
+
+Platform-owner support access grants with expiry and audit trail.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK → `platform.tenants(id)` |
+| `granted_by` | `uuid` | FK → `platform.app_users(id)`, NOT NULL |
+| `accepted_by` / `revoked_by` | `uuid` | FK → `platform.app_users(id)` |
+| `invited_platform_subject` | `varchar(255)` | NOT NULL |
+| `access_mode` | `varchar(255)` | NOT NULL |
+| `scope` / `reason` | `varchar(255)` | |
+| `status` | `varchar(255)` | NOT NULL |
+| `expires_at` | `timestamptz` | NOT NULL |
+| `requested_at` | `timestamptz` | NOT NULL |
+| `accepted_at` / `revoked_at` / `updated_at` | `timestamptz` | |
+
+Indexes: `idx_tenant_support_grants_subject_status_expires` on `(invited_platform_subject, status, expires_at)`, `idx_tenant_support_grants_tenant_requested` on `(tenant_id, requested_at)`.
+
+---
+
+### `platform.vulnerabilities`
+
+Master vulnerability (CVE) catalog. Platform-wide; shared across all tenants.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `external_id` | `varchar(50)` | NOT NULL; unique (CVE ID) |
+| `source` | `varchar(20)` | NOT NULL (NVD, GHSA, etc.) |
+| `title` | `varchar(500)` | NOT NULL |
+| `description_snippet` | `varchar(500)` | |
+| `description_archive_key` | `varchar(200)` | S3/local archive key for full description |
+| `cvss_score` | `double precision` | |
+| `severity` | `varchar(20)` | NOT NULL |
+| `epss_score` | `double precision` | |
+| `in_kev` | `boolean` | NOT NULL |
+| `cvss_vector` | `varchar(300)` | |
+| `cvss_version` | `varchar(20)` | |
+| `attack_vector` / `attack_complexity` / `privileges_required` / `user_interaction` / `cvss_scope` | `varchar(20)` | |
+| `exploitability_score` / `impact_score` | `double precision` | |
+| `cwe_ids` | `varchar(200)` | |
+| `source_identifier` | `varchar(255)` | |
+| `vuln_status` | `varchar(80)` | |
+| `kev_date_added` / `kev_due_date` | `date` | |
+| `kev_required_action` | `varchar(500)` | |
+| `references_json` | `text` | |
+| `raw_payload_archive_key` | `varchar(200)` | |
+| `published_at` / `last_modified_at` / `epss_updated_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_vulnerabilities_severity`, `idx_vulnerabilities_in_kev`, `idx_vulnerabilities_epss`, `idx_vulnerabilities_published`, `idx_vulnerabilities_external_cvss_lastmod_updated`, `idx_vulnerabilities_cvss_lastmod_updated`.
+
+---
+
+### `platform.software_identities`
+
+Canonical software product identities (deduplicated across all tenants).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `canonical_key` | `varchar(400)` | NOT NULL; unique |
+| `display_name` | `varchar(300)` | NOT NULL |
+| `vendor` / `product` | `varchar(255)` | |
+| `product_hash` | `varchar(255)` | |
+| `purl` | `varchar(1200)` | |
+| `cpe23` | `varchar(1200)` | |
+| `vendor_product_id` | `varchar(255)` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Index: `idx_software_identity_key` on `(canonical_key)`.
+
+---
+
+### `platform.software_identifiers`
+
+Alternative identifier records (CPE, PURL, SWID, etc.) attached to a software identity.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `software_identity_id` | `uuid` | FK → `platform.software_identities(id)` |
+| `id_type` | `varchar(40)` | NOT NULL |
+| `normalized_value` | `varchar(1000)` | NOT NULL |
+| `raw_value` | `varchar(1000)` | |
+| `source` | `varchar(80)` | NOT NULL |
+| `confidence` | `double precision` | |
+| `provenance_note` | `varchar(500)` | |
+| `verified` | `boolean` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(software_identity_id, id_type, normalized_value)`. Indexes: `idx_software_identifier_type_value` on `(id_type, normalized_value)`, `idx_software_identifier_identity` on `(software_identity_id)`.
+
+---
+
+### `platform.cpe_dim`
+
+Parsed/normalized CPE dimension table. One row per unique CPE string.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `raw_cpe` | `varchar(1200)` | NOT NULL |
+| `normalized_cpe` | `varchar(1200)` | NOT NULL; unique |
+| `part` / `vendor` / `product` | `varchar(500)` | NOT NULL |
+| `version` / `update` / `edition` / `language` / `sw_edition` / `target_sw` / `target_hw` / `other` | `varchar(500)` | |
+| `cpe_key` | `varchar(1000)` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_cpe_dim_key` on `(cpe_key)`, `idx_cpe_dim_normalized` on `(normalized_cpe)`.
+
+---
+
+### `platform.vulnerability_intel_summary`
+
+Read-model projection: one row per vulnerability. Backs the Vulnerability Intelligence feed UI (`/vuln-repo/vulnerabilities`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)`; unique |
+| `external_id` | `varchar(255)` | NOT NULL |
+| `title` | `varchar(255)` | NOT NULL |
+| `description_snippet` | `varchar(220)` | |
+| `severity` | `varchar(255)` | NOT NULL |
+| `cvss_score` / `epss_score` | `double precision` | |
+| `in_kev` | `boolean` | NOT NULL |
+| `vuln_status` | `varchar(255)` | |
+| `source_count` | `integer` | NOT NULL |
+| `published_at` / `last_modified_at` / `summary_updated_at` / `updated_at` / `created_at` | `timestamptz` | |
+
+Indexes: `idx_vintel_summary_external_id`, `idx_vintel_summary_severity`, `idx_vintel_summary_in_kev`, `idx_vintel_summary_vuln_status`, `idx_vintel_summary_external_cvss_lastmod_updated`.
+
+---
+
+### `platform.vulnerability_intel_summary_sources`
+
+Which source systems contributed data to each `vulnerability_intel_summary` row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | NOT NULL |
+| `source_system` | `varchar(80)` | NOT NULL |
+
+Unique: `(vulnerability_id, source_system)`.
+
+---
+
+### `platform.vulnerability_intel_observations`
+
+Raw observation records from each source system (NVD, GHSA, CSAF, etc.) for a given CVE.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `source_system` | `varchar(80)` | NOT NULL |
+| `source_record_id` | `varchar(255)` | NOT NULL |
+| `source_url` | `varchar(1200)` | |
+| `title` / `description` / `severity` | various | |
+| `cvss_score` / `cvss_vector` / `epss_score` | various | |
+| `in_kev` | `boolean` | |
+| `vuln_status` | `varchar(120)` | |
+| `cwe_ids` | `varchar(2000)` | |
+| `references_json` / `raw_payload` | `text` | |
+| `payload_hash` | `varchar(128)` | |
+| `published_at` / `last_modified_at` / `observed_at` / `last_seen_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(source_system, source_record_id)`. Indexes: `idx_vuln_intel_obs_vulnerability`, `idx_vuln_intel_obs_source`, `idx_vuln_intel_obs_last_seen`.
+
+---
+
+### `platform.vulnerability_intel_relations`
+
+Relationships between observations (e.g., CSAF document → CVE observation).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `from_observation_id` / `to_observation_id` | `uuid` | FK → `platform.vulnerability_intel_observations(id)` |
+| `relation_type` | `varchar(80)` | NOT NULL |
+| `source_system` | `varchar(80)` | NOT NULL |
+| `confidence` | `double precision` | |
+| `verified` | `boolean` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(from_observation_id, to_observation_id, relation_type, source_system)`.
+
+---
+
+### `platform.vulnerability_targets`
+
+Affected software targets for each vulnerability (CPE nodes, package ranges, version bounds).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `software_identity_id` | `uuid` | FK → `platform.software_identities(id)` |
+| `cpe_id` | `uuid` | FK → `platform.cpe_dim(id)` |
+| `target_type` | `varchar(40)` | NOT NULL |
+| `raw_target` | `varchar(1200)` | |
+| `normalized_target_key` | `varchar(500)` | NOT NULL |
+| `ecosystem` / `namespace` / `package_name` | various | |
+| `version_exact` / `version_start` / `version_end` / `fixed` / `introduced` | `varchar(255)` | |
+| `start_inclusive` / `end_inclusive` | `boolean` | |
+| `version_scheme` | `varchar(40)` | NOT NULL |
+| `constraint_type` | `varchar(40)` | |
+| `cpe` | `varchar(1200)` | |
+| `cpe_wildcard_score` | `integer` | |
+| `qualifier_*` fields (part, vendor, product, etc.) | `varchar(255)` | |
+| `qualifiers_json` | `text` | |
+| `source` | `varchar(80)` | NOT NULL |
+| `kb_version` | `varchar(120)` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_vuln_target_vuln`, `idx_vuln_target_type_key`, `idx_vuln_target_package`, `idx_vuln_target_identity`, `idx_vuln_target_cpe_id`, `idx_vuln_target_type_cpe_id`.
+
+---
+
+### `platform.vex_assertions`
+
+VEX (Vulnerability Exploitability eXchange) statements from vendors (Microsoft CSAF, Red Hat CSAF). Governs applicability overrides.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `observation_id` | `uuid` | FK → `platform.vulnerability_intel_observations(id)` |
+| `target_id` | `uuid` | FK → `platform.vulnerability_targets(id)`; unique |
+| `software_identity_id` | `uuid` | FK → `platform.software_identities(id)` |
+| `cpe_id` | `uuid` | FK → `platform.cpe_dim(id)` |
+| `source_system` | `varchar(80)` | NOT NULL |
+| `provider` | `varchar(120)` | NOT NULL |
+| `document_id` | `varchar(255)` | NOT NULL |
+| `statement_key` | `varchar(512)` | NOT NULL |
+| `status` | `varchar(64)` | NOT NULL |
+| `trust_tier` | `varchar(40)` | NOT NULL |
+| `freshness` | `varchar(40)` | NOT NULL |
+| `normalized_product_key` | `varchar(500)` | NOT NULL |
+| `version_exact` / `version_start` / `version_end` / `fixed_version` | `varchar(255)` | |
+| `ecosystem` / `namespace` / `package_name` | various | |
+| `raw_target` / `evidence_json` | `text` | |
+| `published_at` / `last_seen_at` / `created_at` / `updated_at` | `timestamptz` | |
+
+Unique: `(vulnerability_id, source_system, document_id, statement_key)`. Indexes: `idx_vex_assertions_vulnerability`, `idx_vex_assertions_source`, `idx_vex_assertions_target`, `idx_vex_assertions_identity`, `idx_vex_assertions_cpe`.
+
+---
+
+### `platform.vulnerability_rules`
+
+Simplified matching rules derived from NVD/GHSA configuration nodes.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `ecosystem` / `package_name` | `varchar(255)` | NOT NULL |
+| `cpe` / `cpe_product` / `cpe_vendor` | `varchar(255)` | |
+| `version_exact` / `version_start` / `version_end` | `varchar(255)` | |
+| `version_start_inclusive` / `version_end_inclusive` | `boolean` | |
+| `created_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_vuln_rules_vulnerability`, `idx_vuln_rules_ecosystem_package`.
+
+---
+
+### `platform.vulnerability_config_expr`
+
+NVD CPE configuration expression tree nodes.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `config_index` / `node_path` / `parent_path` | various | NOT NULL |
+| `operator` | `varchar(32)` | |
+| `negate` | `boolean` | NOT NULL |
+| `child_node_count` / `match_criteria_count` | `integer` | |
+| `expr_json` | `text` | |
+| `source` | `varchar(40)` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `platform.eol_product_catalog`
+
+End-of-life product catalog from endoflife.date API.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint` | GENERATED BY DEFAULT AS IDENTITY PK |
+| `slug` | `varchar(200)` | NOT NULL; unique |
+| `cpe_vendor` / `cpe_product` | `varchar(200)` | |
+| `purl_type` / `purl_namespace` | `varchar(200)` | |
+| `display_name` | `varchar(200)` | |
+| `aliases` | `text` | |
+| `last_modified` | `varchar(50)` | |
+| `last_fetched_at` / `created_at` / `updated_at` | `timestamptz` | |
+
+Indexes: `idx_eol_catalog_cpe` on `(cpe_vendor, cpe_product)`, `idx_eol_catalog_purl` on `(purl_type, purl_namespace)`.
+
+---
+
+### `platform.eol_release`
+
+Per-product release cycle data from endoflife.date.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint` | GENERATED BY DEFAULT AS IDENTITY PK |
+| `product_slug` | `varchar(200)` | NOT NULL |
+| `cycle` | `varchar(100)` | NOT NULL |
+| `release_date` / `eol_date` / `support_end_date` / `extended_support_date` / `latest_release_date` / `security_support_date` | `date` | |
+| `eol_boolean` | `boolean` | |
+| `latest_version` | `varchar(100)` | |
+| `is_lts` / `is_eol` | `boolean` | NOT NULL |
+| `is_eoas` / `is_eoes` | `boolean` | |
+| `official_source_url` | `varchar(500)` | |
+| `support_phase` | `varchar(30)` | |
+| `discontinued` | `boolean` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(product_slug, cycle)`. Index: `idx_eol_release_product_slug`, `idx_eol_release_is_eol`.
+
+---
+
+### `platform.software_eol_mapping`
+
+Resolved mapping between a software identity canonical key and an EOL product slug.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint` | GENERATED BY DEFAULT AS IDENTITY PK |
+| `software_identity_id` | `uuid` | |
+| `normalized_key` | `varchar(500)` | NOT NULL; unique |
+| `eol_slug` | `varchar(200)` | |
+| `match_confidence` | `varchar(20)` | |
+| `match_method` | `varchar(50)` | |
+| `confirmed` | `boolean` | NOT NULL |
+| `confirmed_by` / `confirmed_at` | various | |
+| `previous_slug` | `varchar(200)` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_software_eol_mapping_identity`, `idx_software_eol_mapping_slug`.
+
+---
+
+### `platform.identity_links`
+
+Graph edges connecting `software_identifier` nodes across identity resolution.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `from_identifier_id` / `to_identifier_id` | `uuid` | FK → `platform.software_identifiers(id)` |
+| `link_type` | `varchar(80)` | NOT NULL |
+| `match_rule` | `varchar(40)` | |
+| `source` | `varchar(80)` | NOT NULL |
+| `confidence` | `double precision` | |
+| `verified` | `boolean` | NOT NULL |
+| `verified_at` | `timestamptz` | |
+| `last_seen_at` / `created_at` / `updated_at` | `timestamptz` | |
+
+Unique: `(from_identifier_id, to_identifier_id, link_type, source)`. Indexes: `idx_identity_links_from`, `idx_identity_links_to`.
+
+---
+
+## Tenant Schema Tables (`tenant_default`)
+
+All tables below live in `tenant_default` (or the active tenant's schema). All have `tenant_id uuid NOT NULL FK → platform.tenants(id)`.
+
+---
+
+### `assets`
+
+Every discoverable asset (application, host, container image, cloud resource).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `identifier` | `varchar(255)` | NOT NULL; unique with `tenant_id` |
+| `name` | `varchar(255)` | NOT NULL |
+| `type` | `varchar(255)` | NOT NULL; CHECK IN (`APPLICATION`, `HOST`, `CONTAINER_IMAGE`, `CLOUD_RESOURCE`) |
+| `state` | `varchar(255)` | NOT NULL; CHECK IN (`ACTIVE`, `INACTIVE`, `RETIRED`, `DECOMMISSIONED`) |
+| `business_criticality` | `varchar(255)` | NOT NULL; CHECK IN (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) |
+| `environment` / `owner_email` / `owner_team` / `department` | `varchar(255)` | |
+| `cloud_provider` / `cloud_region` / `cloud_account_id` / `cloud_arn` / `cloud_resource_type` | `varchar(255)` | |
+| `cloud_instance_type` / `cloud_subnet_id` / `cloud_vpc_id` | `varchar(255)` | |
+| `cloud_launch_time` | `timestamptz` | |
+| `cloud_tags_json` | `varchar(255)` | |
+| `image_digest` / `image_tag` / `image_repository` | `varchar(255)` | Container image fields |
+| `ssm_managed` | `boolean` | AWS SSM managed flag |
+| `ssm_ping_status` | `varchar(255)` | |
+| `ssm_last_ping_at` / `ssm_inventory_last_captured_at` | `timestamptz` | |
+| `ssm_inventory_available` / `missing_iam_instance_profile` | `boolean` | |
+| `last_cmdb_sync_at` / `last_inventory_at` | `timestamptz` | |
+| `created_at` | `timestamptz` | NOT NULL |
+
+Index: `idx_assets_tenant_id`.
+
+---
+
+### `sbom_uploads`
+
+Tracks every SBOM document ingestion attempt.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `asset_id` | `uuid` | FK → `assets(id)` |
+| `tenant_id` | `uuid` | FK |
+| `format` | `varchar(255)` | CHECK IN (`CYCLONEDX`, `SPDX`, `HOST_INVENTORY`, `UNKNOWN`) |
+| `status` | `varchar(255)` | CHECK IN (`IN_PROGRESS`, `SUCCESS`, `FAILURE`) |
+| `original_filename` | `varchar(255)` | NOT NULL |
+| `content_sha256` | `varchar(255)` | |
+| `component_count` / `findings_generated` / `fetch_status_code` | `integer` | |
+| `source_endpoint` / `source_reference` / `ingestion_source_system` / `ingestion_source_type` | `varchar(255)` | |
+| `evidence_json` | `text` | |
+| `uploaded_at` | `timestamptz` | NOT NULL |
+
+Indexes: `idx_sbom_upload_asset_uploaded`, `idx_sbom_upload_tenant_uploaded`.
+
+---
+
+### `inventory_components`
+
+Individual software components discovered within an asset's SBOM.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `asset_id` | `uuid` | FK → `assets(id)` |
+| `sbom_upload_id` | `uuid` | FK → `sbom_uploads(id)` |
+| `software_identity_id` | `uuid` | FK → `platform.software_identities(id)` |
+| `manual_identity_id` | `uuid` | FK (for manually overridden identity) |
+| `tenant_id` | `uuid` | FK |
+| `purl` | `varchar(255)` | NOT NULL |
+| `normalized_purl` | `varchar(255)` | |
+| `package_name` | `varchar(255)` | NOT NULL |
+| `normalized_name` / `version` / `normalized_version` | `varchar(255)` | |
+| `ecosystem` | `varchar(255)` | NOT NULL |
+| `coord_key` / `component_digest` | `varchar(255)` | |
+| `component_status` | `varchar(255)` | CHECK IN (`ACTIVE`, `RETIRED`) |
+| `is_eol` | `boolean` | |
+| `eol_slug` / `eol_cycle` | `varchar(255)` | |
+| `eol_date` / `eol_support_end_date` | `date` | |
+| `eol_checked_at` | `timestamptz` | |
+| `support_phase` | `varchar(255)` | |
+| `manual_identity_reason` | `varchar(400)` | |
+| `manual_identity_confirmed_by` | `varchar(255)` | |
+| `manual_identity_confirmed_at` | `timestamptz` | |
+| `ingested_at` / `last_observed_at` | `timestamptz` | NOT NULL |
+| `retired_at` | `timestamptz` | |
+
+Indexes: `idx_inventory_tenant_asset`, `idx_inventory_sbom_upload`, `idx_inventory_software_identity`, `idx_inventory_component_digest`, `idx_inventory_coord_key_tenant`, `idx_inventory_norm_purl_tenant`.
+
+---
+
+### `inventory_component_cpe_map`
+
+Maps each inventory component to one or more CPE dimension rows (drives CPE-based correlation).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `component_id` | `uuid` | FK → `inventory_components(id)` |
+| `cpe_id` | `uuid` | FK → `platform.cpe_dim(id)` |
+| `tenant_id` | `uuid` | FK |
+| `observed_version` | `varchar(255)` | |
+| `first_seen_at` / `last_seen_at` | `timestamptz` | NOT NULL |
+
+Unique: `(tenant_id, component_id, cpe_id)`. Indexes: `idx_iccm_tenant_cpe`, `idx_iccm_tenant_component`.
+
+---
+
+### `component_vulnerability_states`
+
+**Central correlation truth table.** One row per `(component, vulnerability)` pair per tenant.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `component_id` | `uuid` | FK → `inventory_components(id)` |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `applicability_state` | `varchar(40)` | NOT NULL |
+| `applicability_reason` / `applicability_reason_detail` | text | |
+| `impact_state` | `varchar(40)` | NOT NULL |
+| `impact_reason` / `impact_reason_detail` | text | |
+| `eligible_for_finding` | `boolean` | NOT NULL |
+| `confidence_score` | `double precision` | |
+| `matched_by` | `varchar(120)` | |
+| `matched_vex_assertion_id` | `uuid` | |
+| `vex_status` / `vex_freshness` / `vex_provider` / `vex_source` | `varchar(*)` | |
+| `vex_target_id` | `uuid` | |
+| `analyst_disposition` | `varchar(40)` | |
+| `analyst_reason` | `text` | |
+| `analyst_updated_at` / `analyst_updated_by` | various | |
+| `precedence_reason` | `varchar(120)` | |
+| `trace_json` | `text` | |
+| `last_evaluated_at` / `state_changed_at` | `timestamptz` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(tenant_id, component_id, vulnerability_id)`. Indexes: `idx_comp_vuln_state_tenant_component_vuln`, `idx_comp_vuln_state_tenant_applicability`, `idx_comp_vuln_state_tenant_eligible`, `idx_comp_vuln_state_tenant_impact`.
+
+---
+
+### `findings`
+
+Analyst-visible finding records. One row per `(component, vulnerability)` pair that passes eligibility.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `asset_id` | `uuid` | FK → `assets(id)` |
+| `component_id` | `uuid` | FK → `inventory_components(id)` |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `display_id` | `varchar(16)` | NOT NULL (e.g. `F-001234`) |
+| `status` | `varchar(255)` | CHECK IN (`OPEN`, `RESOLVED`, `SUPPRESSED`, `AUTO_CLOSED`) |
+| `decision_state` | `varchar(255)` | NOT NULL |
+| `creation_source` | `varchar(255)` | CHECK IN (`MANUAL`, `AUTOMATIC`) |
+| `matched_by` | `varchar(255)` | NOT NULL |
+| `confidence_score` | `double precision` | |
+| `risk_score` | `double precision` | NOT NULL |
+| `severity_override` | `varchar(16)` | |
+| `due_at` | `timestamptz` | |
+| `assigned_to` / `assigned_by` | `varchar(255)` | |
+| `assigned_at` | `timestamptz` | |
+| `owner_group` | `varchar(255)` | |
+| `evidence` | `jsonb` | |
+| `first_observed_at` / `last_observed_at` | `timestamptz` | |
+| `incident_id` / `incident_status` | `varchar(64)` | ServiceNow integration |
+| `suppressed_by_rule_id` | `uuid` | |
+| `suppressed_by_rule_name` / `suppression_reason` | various | |
+| `suppressed_until` | `timestamptz` | |
+| `vex_freshness` / `vex_provider` / `vex_status` | `varchar(*)` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(component_id, vulnerability_id)`. Indexes: `idx_findings_tenant_status_updated`, `idx_findings_tenant_component_vuln`, `idx_findings_asset_id`, `idx_findings_vulnerability_id`, `idx_findings_vulnerability_status`.
+
+---
+
+### `finding_events`
+
+Immutable audit trail for all finding state changes.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `finding_id` | `uuid` | FK → `findings(id)` |
+| `event_type` | `varchar(255)` | NOT NULL |
+| `summary` | `varchar(255)` | NOT NULL |
+| `actor` | `varchar(255)` | NOT NULL |
+| `details_json` | `jsonb` | |
+| `created_at` | `timestamptz` | NOT NULL |
+
+Index: `idx_finding_events_finding_created`.
+
+---
+
+### `finding_comments`
+
+User-authored comments on findings.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `finding_id` | `uuid` | FK → `findings(id)` |
+| `author` | `varchar(255)` | NOT NULL |
+| `body` | `varchar(255)` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `finding_delta_queue`
+
+Async work queue driving incremental finding recomputation. Drained every 2 seconds in batches of 100.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint` | GENERATED BY DEFAULT AS IDENTITY PK |
+| `dedupe_key` | `varchar(700)` | NOT NULL |
+| `event_type` | `varchar(30)` | NOT NULL |
+| `status` | `varchar(20)` | NOT NULL; DEFAULT `PENDING` |
+| `tenant_id` / `component_id` / `vulnerability_id` | `uuid` | |
+| `source_key` / `source_tag` | `varchar(*)` | |
+| `attempt_count` / `max_attempts` | `integer` | NOT NULL; defaults 0 / 3 |
+| `enqueued_at` / `visible_after` | `timestamptz` | NOT NULL; DEFAULT `now()` |
+| `processing_started_at` / `completed_at` | `timestamptz` | |
+| `error_message` | `text` | |
+
+Indexes: `idx_fdq_dedupe_pending` (unique partial WHERE `status = 'PENDING'`), `idx_fdq_pending_visible` (partial WHERE `status = 'PENDING'`).
+
+---
+
+### `org_cve_records`
+
+**CVE Assessment Workbench backing table.** One row per `(tenant, vulnerability)`. Backs `/vuln-repo/org-cves`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
+| `external_id` | `varchar(255)` | NOT NULL |
+| `applicability_state` | `varchar(255)` | CHECK IN (`APPLICABLE`, `NOT_APPLICABLE`, `UNKNOWN`) |
+| `impact_state` | `varchar(255)` | |
+| `org_impact` | `varchar(255)` | CHECK IN (`NONE`, `LOW`, `MEDIUM`, `HIGH`) |
+| `impacted` | `boolean` | NOT NULL |
+| `cvss_score` / `epss_score` | `double precision` | |
+| `severity` | `varchar(255)` | NOT NULL |
+| `in_kev` | `boolean` | NOT NULL |
+| `matched_asset_count` / `matched_component_count` / `matched_software_count` | `bigint` | NOT NULL |
+| `applicable_component_count` / `impacted_component_count` / `fixed_component_count` | `bigint` | NOT NULL |
+| `not_affected_component_count` / `under_investigation_component_count` / `unknown_component_count` / `no_patch_component_count` | `bigint` | NOT NULL |
+| `eol_component_count` / `eos_component_count` | `bigint` | NOT NULL |
+| `suppressed_at` | `timestamptz` | |
+| `suppressed_by` / `suppressed_by_rule_id` / `suppressed_by_rule_name` | various | |
+| `suppressed_until` / `suppression_reason` | various | |
+| `last_evaluated_at` | `timestamptz` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(tenant_id, vulnerability_id)`. Indexes: `idx_org_cve_record_tenant_applicability`, `idx_org_cve_record_tenant_external_id`, `idx_org_cve_record_tenant_impacted`, `idx_org_cve_record_tenant_vulnerability`.
+
+---
+
+### `org_cve_ai_artifacts`
+
+Persisted AI-generated outputs for a CVE record.
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_cve_record_id` | `uuid` | PK; FK → `org_cve_records(id)` |
+| `ai_actions_json` | `jsonb` | |
+| `ai_actions_generated_at` | `timestamptz` | |
+| `ai_solution_json` | `jsonb` | |
+| `ai_solution_generated_at` | `timestamptz` | |
+| `investigation_summary_output_json` / `investigation_summary_input_json` | `jsonb` | |
+| `investigation_summary_mode` | `varchar(255)` | |
+| `investigation_summary_generated_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `risk_policies`
+
+One row per tenant. Controls finding generation mode, SLA, auto-close, triage weights, and custom scoring.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK; unique |
+| `finding_generation_mode` | `varchar(20)` | CHECK IN (`AUTO`, `MANUAL`) |
+| `critical_threshold` / `high_threshold` | `double precision` | NOT NULL |
+| `critical_sla_days` / `high_sla_days` / `medium_sla_days` / `low_sla_days` | `integer` | NOT NULL |
+| `asset_critical_sla_multiplier` / `asset_high_sla_multiplier` / `asset_medium_sla_multiplier` / `asset_low_sla_multiplier` | `double precision` | NOT NULL |
+| `auto_close_enabled` | `boolean` | NOT NULL |
+| `auto_close_after_days` | `integer` | NOT NULL |
+| `auto_close_asset_identifier` | `varchar(255)` | |
+| `findings_score_config` | `jsonb` | Custom attribute-based scoring rules |
+| `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `suppression_rules`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `name` | `varchar(255)` | NOT NULL |
+| `record_type` | `varchar(255)` | CHECK IN (`CVE`, `FINDING`) |
+| `state` | `varchar(255)` | CHECK IN (`DRAFT`, `APPROVED`, `IN_REVIEW`, `REJECTED`, `EXPIRED`) |
+| `condition_logic` | `varchar(255)` | NOT NULL |
+| `conditions_json` | `jsonb` | NOT NULL |
+| `reason` | `varchar(255)` | |
+| `valid_from` / `valid_to` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `ownership_rules`
+
+Rule-based finding ownership assignment.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `name` | `varchar(255)` | NOT NULL |
+| `user_group` | `varchar(255)` | NOT NULL |
+| `condition_json` | `text` | NOT NULL |
+| `execution_order` | `integer` | NOT NULL |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+---
+
+### `vulnerability_source_filter_configs`
+
+Per-tenant, per-source configuration for which feeds participate in correlation.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | FK |
+| `source_system` | `varchar(255)` | NOT NULL |
+| `enabled_for_correlation` | `boolean` | NOT NULL |
+| `filters_json` | `text` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(tenant_id, source_system)`.
+
+---
+
+### `aws_discovery_configs` / `aws_discovery_targets`
+
+AWS EC2 discovery connector configuration and multi-account targets.
+
+`aws_discovery_configs`: one row per tenant. Fields include `auth_type` (CHECK IN `INSTANCE_METADATA`, `ACCESS_KEY`, `CROSS_ACCOUNT_ROLE`), `aws_account_id`, `access_key_id`, `credential_secret` (encrypted), `cross_account_role_arn`, `external_id`, `regions_json`, `resource_types_json`, `enabled`, `auto_sync_enabled`, `interval_minutes`.
+
+`aws_discovery_targets`: sub-entries per config for multi-account discovery. Fields include `account_id`, `account_name`, `role_arn`, `external_id`, `regions_json`, `resource_types_json`, `enabled`.
+
+---
+
+### `sccm_cmdb_configs`
+
+SCCM/MECM CMDB connector configuration.
+
+Fields: `auth_type` (CHECK IN `SQL_AUTH`, `WINDOWS_AUTH`), `database_name`, `jdbc_url`, `username`, `credential_secret` (encrypted), `site_code`, `fetch_size`, `interval_minutes`, `query_timeout_seconds`, `enabled`, `auto_sync_enabled`, `mock_mode`.
+
+---
+
+### `servicenow_cmdb_configs`
+
+ServiceNow CMDB connector configuration.
+
+Fields: `auth_type` (CHECK IN `BASIC`, `BEARER`), `base_url`, `username`, `credential_secret` (encrypted), `ci_table`, `discovery_model_table`, `install_table`, `discovery_fields`, `install_fields`, `discovery_query`, `install_query`, `page_size`, `interval_minutes`, `enabled`, `auto_sync_enabled`.
+
+---
+
+### `github_sbom_sources`
+
+Scheduled GitHub SBOM ingestion jobs.
+
+Fields: `name`, `owner`, `repo`, `path`, `asset_identifier`, `asset_name`, `asset_type`, `frequency`, `interval_minutes`, `enabled`, `last_run_at`, `last_run_status`, `last_error`.
+
+---
+
+### `cis` / `ci_aliases`
+
+`cis`: Configuration Items synced from ServiceNow CMDB. FK → `assets(id)`. Fields include `sys_id` (unique with `tenant_id`), `display_name`, `business_criticality`, `environment`, CMDB sync timestamps.
+
+`ci_aliases`: Alternative names for a CI. Unique: `(tenant_id, normalized_alias_name, source_system)`.
+
+---
+
+### `software_instances`
+
+Software installed on a CI (from ServiceNow/SCCM discovery). Links CI → SoftwareIdentity → InventoryComponent.
+
+---
+
+### `discovery_models`
+
+Software discovery model records from SCCM/ServiceNow. Fields: `primary_key` (unique with `tenant_id`), `normalized_product` / `publisher` / `version`, `ml_model_version`, `normalization_status`, `product_hash` / `version_hash`, `approved`.
+
+---
+
+### `software_inventory_items`
+
+Flattened inventory view for reporting. One row per unique component per asset. Fields: `purl`, `package_name`, `version`, `ecosystem`, `component_status`, `first_seen_at`, `last_observed_at`, `synced_at`.
+
+---
+
+### `sync_runs`
+
+Audit log for all sync job executions.
+
+Fields: `sync_type`, `run_scope`, `status`, `records_fetched` / `inserted` / `updated` / `failed`, `started_at`, `completed_at`, `error_message`, `metadata_json`.
+
+---
+
+### `service_accounts`
+
+API service accounts scoped to a tenant.
+
+Fields: `key_id` (unique), `name`, `role`, `status`, `last_used_at`.
+
+---
+
+### `audit_events`
+
+Platform-wide audit log. Every security-relevant action appended here.
+
+Fields: `actor_user_id`, `occurred_at`, `actor_subject`, `actor_role`, `action`, `target_type`, `target_id`, `request_id`, `source_ip`, `outcome`, `details_json` (jsonb).
+
+---
+
+### `fix_records`
+
+AI-generated or analyst-authored remediation recommendations for a CVE.
+
+Fields: `cve_id`, `fix_type`, `recommendation_source`, `summary`, `description`, `os_hint`, `related_cve_ids` / `software_entities` / `source_urls` (jsonb), `generated_at`.
+
+---
+
+### Read-Model Projections (Tenant Schema)
+
+| Table | Purpose |
+|---|---|
+| `software_identity_summary` | Per-identity aggregation (asset/component/version counts, EOL breakdown) — backs Software Identities view |
+| `quality_issue_projection` | Data quality issues by domain/severity — backs Operations Quality view |
+| `dashboard_noise_reduction_projection` | Single-row-per-tenant CVE noise reduction counts |
+| `software_identity_cluster_link` | Bulk normalization override links (source_type + source_key → canonical identity) |
+
+---
+
+### `applicability_assessments`
+
+Manual applicability assessment records attached to a CVE. Fields include `vulnerability_id`, `status`, `final_result`, `assessed_by`, `detection_method`, `confidence_level`, `software_detected`, `vulnerable_version_present`, `current_version`, `fixed_version`, `justification`, `completed_at`.
+
+---
+
+### `investigations` / `investigation_activities` / `investigation_attachments`
+
+Investigation lifecycle for a CVE within a tenant. Activities are append-only event log entries. Attachments reference `storage_path` for uploaded files.
+
+---
+
+### `demo_requests` / `demo_invites`
+
+`demo_requests`: public demo access requests. Fields: company, email, full_name, company_size, role_title, use_case, notes, status, decided_at/by, rejection_reason, tenant_id.
+
+`demo_invites`: unique token (96 chars), email, status, expires_at, accepted_at, last_sent_at, request_id FK, tenant_id FK.
+
+---
+
+## Migration Conventions
+
+- File pattern: `V{next}__short_snake_case.sql` in `backend/src/main/resources/db/migration/postgres_reset/`
+- **Never edit an already-applied migration file.** Add a new migration instead.
+- All DDL uses `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` — idempotent when replayed via psql.
+- `flyway.validate-on-migrate: true` in all profiles; `out-of-order: false`.
+- `flyway.baseline-on-migrate: true` only in the `local` profile; `false` in production.
+
+To repair Flyway history after schema drift:
+```bash
+cd backend
+mvn -q \
+  -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
+  -Dflyway.user="$USER" \
+  -Dflyway.password= \
+  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
+  flyway:repair
+```
+
+---
+
+## Connection Pool (HikariCP)
+
+| Parameter | Default | Production override |
+|---|---|---|
+| `maximum-pool-size` | 20 | `${DB_MAX_POOL_SIZE:30}` |
+| `minimum-idle` | 5 | `${DB_MIN_IDLE:5}` |
+| `connection-timeout` | 30,000 ms | |
+| `idle-timeout` | 600,000 ms | |
+| `max-lifetime` | 1,800,000 ms | |
+
+---
+
+## Dashboard Cache (Caffeine)
+
+- **Cache name:** `dashboard`
+- **Maximum size:** 100 entries
+- **TTL:** 60 seconds after write (`expireAfterWrite=60s`)

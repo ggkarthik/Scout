@@ -1,203 +1,263 @@
 # VulnWatch Architecture
 
-Last updated: 2026-05-20
+Last updated: 2026-05-27
 
-## Why This Fourth Document Exists
+---
 
-`frontend.md`, `backend.md`, and `database.md` cover implementation details by layer. This file is the cross-cutting view: system behavior, operational shape, major feature boundaries, and the important caveats that used to be spread across design notes, migration guides, and report cards.
+## System Shape
 
-## System Overview
+VulnWatch is a security operations prototype: SBOM ingestion → vulnerability intelligence ingestion → deterministic CPE-based correlation → finding projection and workflow.
 
-VulnWatch is an internal security operations prototype with four primary responsibilities:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Browser — React 18 + TypeScript + Vite (port 5173 local)           │
+│  Nginx (port 8080 container) ← static SPA                           │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │ REST API (http://localhost:8080/api)
+┌─────────────────────────────▼───────────────────────────────────────┐
+│  Spring Boot 3.3.2 — Java 17 (port 8080)                            │
+│  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐ │
+│  │ Controllers  │  │   Services     │  │  Scheduled Jobs          │ │
+│  │ (37 REST)    │  │   (180+)       │  │  (daily + hourly + 2s)   │ │
+│  └──────┬───────┘  └───────┬────────┘  └──────────────────────────┘ │
+│         │                  │                                         │
+│  ┌──────▼──────────────────▼──────┐   ┌────────────────────────────┐│
+│  │  Spring Data JPA / HikariCP    │   │  OutboundHttpClient        ││
+│  │  TenantAwareDataSource         │   │  (retry + circuit breaker) ││
+│  └──────────────┬─────────────────┘   └──────────┬─────────────────┘│
+└─────────────────┼──────────────────────────────────┼────────────────┘
+                  │ JDBC                             │ HTTPS
+┌─────────────────▼──────────────────┐  ┌───────────▼────────────────┐
+│  PostgreSQL — schema-per-tenant    │  │  External APIs             │
+│  platform schema (shared)          │  │  NVD, KEV, GHSA, CSAF      │
+│  tenant_<id> schema (per tenant)   │  │  EPSS, EOL, GitHub         │
+│  Flyway migrations (postgres_reset)│  │  ServiceNow, SCCM, AWS     │
+└────────────────────────────────────┘  │  OpenAI, Resend            │
+                                        └────────────────────────────┘
+```
 
-1. ingest asset and software inventory from SBOM sources and CMDB-like inputs
-2. ingest vulnerability intelligence from external feeds
-3. correlate inventory to vulnerabilities using deterministic CPE-based matching
-4. project tenant-scoped exposure into org-CVE records and findings workflows
+---
 
-Runtime shape:
-
-- React SPA in `frontend/`
-- Spring Boot API in `backend/`
-- PostgreSQL as the only live application database
-- scheduled feed synchronization plus async queue processing
-
-## End-to-End Flow
+## Core Data Flow
 
 ### 1. Inventory In
 
-**SBOM path:** Users upload or fetch SBOMs, or configure GitHub-generated SBOM pulls. The backend writes `assets`, `sbom_uploads`, `inventory_components`, identity records, `software_inventory_items`, and normalized CPE links.
+Three ingestion paths populate the inventory:
 
-**ServiceNow CMDB path:** Users configure a live connector (base URL, auth, table names) via `AssetsPage`. The backend paginates ServiceNow Table APIs, resolves or creates `cis` and `ci_alias` rows, normalizes software via `discovery_models` and `software_identities`, upserts `software_instances`, mirrors each CI as an `inventory_component`, and records the run in `sync_runs` with `run_domain=INVENTORY`.
+**SBOM ingestion** (CycloneDX / SPDX):
+- File upload or configured endpoint fetch → `SbomIngestionService` → parse → normalize CPEs → write `inventory_components` + `inventory_component_cpe_map`
+- GitHub repos or GHCR images → `GithubSbomIngestionService` → same normalization pipeline
+- Runs every 5 minutes for configured sources; on-demand via upload
+
+**CMDB sync:**
+- ServiceNow CMDB → `ServiceNowCmdbSyncService` → CI records → `Asset`, `Ci`, `CiAlias`
+- SCCM/MECM → `SccmCmdbSyncService` → device inventory → `Asset`, `SoftwareInstance`, `DiscoveryModel`
+- Runs every 5 minutes for scheduled syncs
+
+**AWS Discovery:**
+- `AwsDiscoveryClient` → SSM `DescribeInstanceInformation` → EC2 instances → `Asset`, `DiscoveryModel`
+- Runs every 5 minutes for configured targets
+
+All paths normalize software identities into `software_identities` and `software_instances`, and resolve CPEs into `cpe_dim` + `inventory_component_cpe_map`.
 
 ### 2. Vulnerability Intelligence In
 
-- The backend syncs NVD, KEV, GHSA, Microsoft CSAF/VEX, Red Hat CSAF/VEX, and advisory imports.
-- Canonical vulnerability rows and summary/read-model tables are refreshed.
-- Normalized target records are built for later matching.
+Daily scheduled jobs pull from external feeds:
 
-### 3. Deterministic Correlation
+| Feed | Time | Tables written |
+|------|------|----------------|
+| NVD + CISA KEV | 01:00 | `vulnerabilities`, `vulnerability_targets`, `vulnerability_intel_observations` |
+| GHSA | 01:15 | `vulnerabilities`, `vulnerability_targets` |
+| Microsoft + Red Hat CSAF/VEX | 01:45 | `vex_assertions`, `vulnerability_intel_relations` |
+| EPSS | 03:15 | `vulnerability_intel_observations` |
 
-- Active correlation is CPE-first.
-- Candidate generation is based on `cpe_id` joins.
-- Applicability is resolved through version bounds and VEX/precedence logic.
-- Component-level truth is stored in `component_vulnerability_states`.
+The `vulnerability_intel_summary` table is a read-model projection aggregating all intel signals per CVE.
 
-### 4. Org-CVE Projection
+### 3. Correlation
 
-- Component states are rolled up into `org_cve_records`.
-- The frontend uses this view for the Org CVEs table and workbench workflow.
-- Freshness is now durable and event-driven inside the monolith: ingest paths enqueue projection deltas, and the background worker refreshes `component_vulnerability_states` and `org_cve_records`.
+CPE-based matching runs after each inventory or intel update:
 
-### 5. Dashboard Noise Projection
+1. Join `inventory_component_cpe_map` × `vulnerability_targets` on CPE vendor + product
+2. `ApplicabilityDecisionService` evaluates version range constraints using `VersionScheme`-aware comparison
+3. Result written to `component_vulnerability_states` (one row per component × vulnerability, with `applicabilityState`)
+4. States roll up to `org_cve_records` (one row per CVE per tenant): `matchedAssetCount`, `matchedSoftwareCount`, `maxSeverity`, `hasKev`, `epssScore`
 
-The executive dashboard no longer calculates noise reduction by re-running correlation-style logic on every read.
+### 4. Finding Projection
 
-- Correlation outcomes are persisted in `component_vulnerability_states`.
-- A tenant-scoped `dashboard_noise_reduction_projection` row is refreshed asynchronously from the durable queue.
-- Reads now combine that projection with lightweight finding-event queries for auto-resolved trends.
-- Platform Health exposes projection readiness, age, failures, and refresh latency so operators can tell whether the dashboard is fresh.
+`FindingService` watches `component_vulnerability_states` via the delta queue:
 
-### 6. Delta-Driven Workbench Automation
+1. When a state flips to APPLICABLE: create `Finding` (if in AUTO generation mode)
+2. When a state flips to NOT_APPLICABLE: auto-resolve linked findings
+3. Suppression rules evaluated at creation; matching rules suppress immediately
+4. Delta queue (`finding_delta_queue`) batches changes; drain job processes 100 per 2 seconds
 
-The workbench no longer relies on foreground full recompute for day-to-day freshness.
+### 5. EOL Pipeline
 
-- `SOFTWARE_DELTA` is emitted from SBOM and CMDB inventory changes.
-- `CVE_DELTA` is emitted when advisory/target data changes can affect applicability.
-- `CVE_METADATA_DELTA` is emitted for metadata-only changes such as KEV and EPSS.
-- `VEX_DELTA` is emitted for exact vendor impact changes and VEX repair/backfill flows.
-- `LIFECYCLE_DELTA` is emitted for EOL mapping refreshes and lifecycle date rollovers.
+Runs weekly (Sunday), 4 stages:
 
-The queue worker batches those deltas and updates only the affected scopes. It also enqueues tenant-scoped `NOISE_REDUCTION_REFRESH` events after correlation-affecting work so the dashboard projection stays warm. Manual full recompute still exists as an admin repair tool, but it is no longer the normal analyst path.
+1. Catalog refresh (02:00) → `eol_product_catalog`
+2. Release data (03:00) → `eol_release`
+3. Slug resolution (03:30) → `software_eol_mapping` (OpenAI-assisted for unmatched)
+4. Denormalization (04:00) → `inventory_components.is_eol`, `eol_days_remaining`, `eol_date`
 
-### 7. Findings and Workflow
+Daily sweep (00:15) catches components that crossed their EOL date between weekly runs.
 
-- Findings are created, reopened, resolved, suppressed, or auto-closed according to policy and recomputation logic.
-- Analysts can create investigations, run applicability assessments, and manually create findings from the CVE workflow APIs.
+---
 
-### 8. Operational Maintenance
+## Multi-Tenant Architecture
 
-- Scheduled jobs keep external feeds fresh, expire suppressions, auto-close findings by policy, and age stale assets inactive.
+### Schema-Per-Tenant
 
-### 9. EOL Pipeline
+Each tenant gets a dedicated PostgreSQL schema. Connection-level `search_path` isolation means:
+- Tenant A queries can never reach Tenant B's tables
+- All JPA entities are schema-agnostic — they just use table names, and the schema is set at the connection level
 
-A 4-stage weekly pipeline tracks software end-of-life status for all active inventory:
+**TenantAwareDataSource** wraps HikariCP:
+- On checkout: `SET search_path = tenant_<id>, public`; `SET LOCAL app.current_tenant_id = '<id>'`
+- On return: reset to prevent leakage
 
-1. **Catalog refresh** — fetches all product slugs and CPE/PURL identifiers from endoflife.date into `eol_product_catalog`
-2. **Release data refresh** — conditionally fetches release cycles for tracked slugs (respects `If-Modified-Since`) into `eol_releases`
-3. **Slug resolution** — maps `SoftwareIdentity` rows to EOL slugs via `EolSlugResolverService` into `software_eol_mapping`
-4. **Denormalization** — set-based `DISTINCT ON` update writes `eol_slug`, `eol_cycle`, `eol_date`, `is_eol`, `eol_support_end_date`, `support_phase`, and `latest_supported_version` onto both `inventory_components` and `software_instances`, then enqueues lifecycle deltas for scoped org-CVE refresh
-5. **Date sweep** — daily lifecycle sweep catches date-driven EOL/EOS transitions even when no source feed changed
+**Platform schema** holds: `tenants`, `app_users`, `tenant_memberships`, `tenant_support_grants`, `demo_invites`, `audit_events`, and the global vulnerability intel tables.
 
-Each stage can also be triggered manually from the Connect UI via `/api/eol/admin/refresh/*`. Near-EOL threshold is 90 days.
+**Per-tenant schemas** hold: all operational data — `findings`, `assets`, `inventory_components`, `org_cve_records`, `risk_policies`, `suppression_rules`, etc.
 
-## Current Product Surface
+### Tenant Context Flow
 
-What is actively exposed in the UI today:
+```
+HTTP Request
+  → ApiKeyAuthenticationFilter (API key or JWT Bearer)
+  → TenantResolutionFilter (populate TenantContext from JWT or X-Tenant-ID header)
+  → TenantStatusFilter (block SUSPENDED/EXPIRED tenants)
+  → Controller → Service → Repository (correct schema via HikariCP connection)
+```
 
-- dashboard metrics (with EOL risk widget)
-- findings management
-- operational metrics (Quality, Pipeline, Platform Health sub-views)
-- vulnerability intelligence list/detail
-- org-CVE exposure list with CVE Assessment Workbench drawer
-- inventory component views (Software Identities, Hosts, Container Images, Repositories)
-- host asset detail page with CI metadata, aliases, software instances, and findings
-- ServiceNow CMDB live connector setup, connection testing, and live sync trigger
-- SCCM/MECM CMDB live connector setup and sync trigger
-- AWS Cloud Discovery connector (EC2-only via SSM) with multi-account targets
-- Vulnerability source filter configuration (per-tenant feed filtering)
-- Inventory Run Queue showing all host/container/SBOM ingestion run history
-- risk policy and GitHub pipeline configuration
-- End-of-Life component tracking (EolPage) with filter tabs, CSV export, and unresolved-mapping review
-- EOL source panel in Connect UI for manual pipeline stage triggers
-- AI-assisted CVE workflow (investigation summary, AI solution, AI actions) — gated by `OPENAI_ENABLED`, persisted on `org_cve_records`
-- Tenant administration, service-account management, audit-event browser, and support bundle export
+### New Tenant Bootstrap
 
-What exists in code but is not fully surfaced or is still transitional:
+`TenantSchemaService` creates new tenant schemas by cloning `tenant_default` (tables, sequences, defaults, foreign keys). This happens on `Tenant` creation.
 
-- standalone `CveDetailPage.tsx`
-- archive migration endpoints and manual SQL migration support
-- several conceptual inventory categories without dedicated backend models
+---
 
-## Major Architectural Decisions
+## Security Model
 
-### Managed SaaS, Modular Monolith First
+### Authentication Paths
 
-The production direction is a managed SaaS deployment. The first customer-ready version should keep the Spring Boot backend as one deployable modular monolith while enforcing internal boundaries for identity/tenant management, inventory, vulnerability intelligence, correlation/projection, findings/workflow, connectors, and operations. Vulnerability-feed ingestion and inventory ingestion are the most likely future service extractions once scale or blast-radius demands it.
+**API Key** (local/ops): `X-API-Key` header → `ApiKeyAuthenticationFilter` → injects OPERATOR + ANALYST roles. `X-Creator-Key` additionally grants PLATFORM_OWNER, TENANT_ADMIN, INVENTORY_ADMIN, CREATOR. Only active when `APP_ALLOW_API_KEY_AUTH=true`.
 
-### Platform-Owned Vulnerability Repository
+**JWT Bearer** (production): OIDC token validated against `APP_JWT_ISSUER_URI`. Tenant and roles resolved from claims by `JwtTenantAuthenticationService`.
 
-Canonical vulnerability intelligence is platform-owned and global. The platform owner runs and validates NVD, KEV, GHSA, CSAF/VEX, EPSS, EOL, advisory, and archive refreshes. Tenants own inventory configuration, source filters, risk policy, workflow decisions, and tenant-scoped exposure refreshes.
+**Credential login** (validation/preprod): `POST /api/auth/login` validates against bcrypt hash in config. Issues HS256 JWT signed with `APP_JWT_HMAC_SECRET`.
 
-### Deterministic Matching First
+### Role Hierarchy
 
-The backend deliberately centers on deterministic evidence rather than fuzzy package matching. The current production path is CPE-based with version checks and source precedence.
+| Role | Access |
+|------|--------|
+| `PLATFORM_OWNER` | `/api/platform/**`, `/api/operations/**`, all tenant data via support grants |
+| `TENANT_ADMIN` | Full tenant admin — users, connectors, all settings |
+| `INVENTORY_ADMIN` | Connector configuration, CMDB/SBOM management |
+| `SECURITY_ANALYST` | Finding triage, investigation workflow, CVE workbench |
+| `READ_ONLY_AUDITOR` | Read-only across all tenant data |
+| `OPERATOR` | API key default — read/write operations, no admin |
+| `CREATOR` | Creator key default — includes all platform-level operations |
 
-### Tenant-Aware Schema, Multi-Tenant Hardening In Progress
+### Security Filters (in order)
 
-Most tables carry tenant boundaries for schema compatibility. The live runtime has been resolving one cached workspace at startup while the broader multi-tenant rollout continues. The system is tenant-aware in schema design, uses schema-per-tenant routing at runtime, and still retains some compatibility-oriented table shapes during the transition.
+1. `ApiKeyAuthenticationFilter` — API key / JWT resolution
+2. `RequestCorrelationFilter` — inject `X-Request-ID`, `X-Trace-ID` into MDC
+3. `TenantResolutionFilter` — populate `TenantContext`
+4. `TenantStatusFilter` — block suspended tenants
 
-### Projection Tables Matter
+### Production Safety Checks
 
-The current architecture relies on materialized projection-style tables, not only raw domain entities:
+`ProductionSafetyValidator` runs at startup and fails if (when `require-production-secrets=true`):
+- `APP_ALLOW_API_KEY_AUTH=true`
+- `APP_CREATOR_KEY` is set
+- No JWT issuer or JWK URI configured
+- `APP_ALLOW_HEADER_TENANT_SELECTION=true`
+- `APP_REQUIRE_TENANT_CONTEXT=false`
+- `APP_CREDENTIAL_ENCRYPTION_KEY` is weak/default
+- `APP_CORS_ALLOWED_ORIGINS` is `*`
+- `APP_TEST_PERSONAS_ENABLED=true`
 
-- `vulnerability_intel_summary`
-- `software_inventory_items`
-- `component_vulnerability_states`
-- `org_cve_records`
-- `dashboard_noise_reduction_projection`
+---
 
-Those tables are now central to read performance and workflow UX.
+## Projection Tables
 
-### Compatibility-Oriented Schema History
+Six read-model projections are central to performance:
 
-The schema evolved through a compatibility-heavy migration period. PostgreSQL and Flyway now own the live runtime path, but some tables and columns still reflect that transitional history.
+| Table | Purpose |
+|-------|---------|
+| `component_vulnerability_states` | Component-level CPE applicability truth — drives all downstream work |
+| `org_cve_records` | Per-tenant CVE rollup — backs the CVE Assessment Workbench UI |
+| `vulnerability_intel_summary` | Global CVE read model — backs the Intelligence view |
+| `software_inventory_items` | Flattened software inventory — backs reporting |
+| `software_identity_summary` | Per-identity aggregation (asset count, version count, EOL status) |
+| `quality_issue_projection` | Data quality issues by domain/severity — backs Operations Quality view |
 
-## Current Limitations and Risks
+These tables are never the authoritative source; they are rebuilt from the underlying entities when the source changes.
 
-### CVE Suppression
+---
 
-`/api/cve-detail/{cveId}/suppress` is fully implemented. The controller calls `OrgCveRecordService.suppress()` to persist suppression state and `FindingService.suppressFindingsForVulnerability()` to suppress related findings. Suppression expiry is handled by the every-15-minutes reopen job.
+## Outbound HTTP Infrastructure
 
-### Schema Cleanup Is Still Transitional
+All external HTTP calls use `OutboundHttpClient` (wraps Spring `RestClient`):
 
-The repo now boots PostgreSQL through Flyway without runtime schema mutation, but archive-oriented helpers and some compatibility-era columns still remain.
+- `OutboundPolicy` — per-service config (timeout, max retries, circuit-breaker threshold)
+- `OutboundPolicyFactory` — creates policies with `OutboundPolicyDefaults`
+- `OutboundFailureClassifier` — distinguishes transient vs. permanent failures
+- `OutboundFailureDecision` — controls retry vs. circuit-break behavior
+- `OutboundResponseHandler` — parses and validates responses
 
-### Frontend Scope Is Ahead of Backend Shape in Places
+`AdvisoryFetchService` handles bulk advisory fetching (CSAF/VEX sources with large document sets).
 
-The UI presents a broader inventory taxonomy than the backend currently models with distinct APIs. Some sections are filtered views over the same component endpoint rather than truly separate domains.
+---
 
-### Release Hygiene Is Still Prototype-Level
+## Frontend Architecture
 
-The repository has strong feature breadth, but the delivery model is still prototype-oriented:
+### Tech Stack
 
-- schema changes are not migration-managed end to end
-- frontend quality gates are minimal
-- many docs had become milestone snapshots instead of maintained references
+React 18 + TypeScript + Vite + React Router v6 + TanStack Query (React Query).
 
-## Operational Timers
+### Routing
 
-Important built-in jobs:
+All routes defined in `src/App.tsx` with typed helpers in `src/app/routes.ts`. Legacy query-param URLs redirected via `buildLegacyCompatiblePath()` on first render.
 
-- daily feed syncs starting at `01:00` (NVD+KEV `01:00`, GHSA `01:15`, CSAF `01:45`)
-- stale asset inactivation at `02:05`
-- nightly VEX freshness sweep at `02:30` (queue-driven)
-- daily EPSS refresh at `03:15`
-- ServiceNow incident status sync at `07:00` (one-way pull-back of incident state onto findings)
-- lifecycle date sweep at `00:15`
-- GitHub SBOM, ServiceNow, SCCM, and AWS Discovery scheduled syncs every `5` minutes
-- delta queue drained every `2` seconds (batches of 100)
-- suppression expiry reopening every `15` minutes
-- hourly policy-based auto-close sweep
-- weekly EOL pipeline (Sunday): catalog `02:00`, releases `03:00`, slug resolution `03:30`, denormalization `04:00`
+### Key Architectural Decisions
 
-## Documentation Boundaries
+**Feature-colocated types:** TypeScript types live in the feature directory that owns them (`src/features/findings/types.ts`, etc.). `src/types/index.ts` re-exports them for convenience but is not the source of truth.
 
-Use the docs like this:
+**Two distinct CVE views:**
+- `/vuln-repo/org-cves` → **Unified Vulnerability Records** — CVEs correlated to the org's inventory (query: `org_cve_records`)
+- `/vuln-repo/vulnerabilities` → **Vulnerability Intelligence** — all ingested CVEs regardless of inventory match (query: `vulnerability_intel_summary`)
 
-- `frontend.md`: UI shell, pages, API client behavior, and frontend caveats
-- `backend.md`: controllers, services, schedules, auth, and backend caveats
-- `database.md`: schema groups, write paths, projections, and migration notes
-- `architecture.md`: cross-cutting behavior, current status, and known system-level gaps
+**S.AI Scoring (browser-side only):** `src/lib/riskScoring.ts` computes CVE Risk Score and Finding Priority Score from data already returned by the API. Not stored in the database. Recalculates on every render. Accepts optional `PolicyWeights` from the tenant's risk policy.
 
-Any new feature documentation should extend one of those four files instead of creating a new standalone markdown document unless the feature genuinely needs its own long-lived specification.
+**ExposureDashboard vs. OperationalDashboard:** `/exposure` is risk-focused (CVE counts, SLA status, risk score). `/operations` is pipeline-focused (correlation efficiency, CSAF/VEX analytics, quality issues). Do not add operational/pipeline panels to the Exposure Dashboard.
+
+### API Layer
+
+All API calls go through `src/api/client.ts`. Base URL: `VITE_API_BASE` (defaults to `http://localhost:8080/api`). Auth headers injected on every request. TanStack Query provides caching, deduplication, and background refresh.
+
+---
+
+## Deployment (Validation Environment)
+
+- **Backend container:** `eclipse-temurin:17-jre`, non-root user, port 8080, JVM flags: `-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError`
+- **Frontend container:** `nginx:1.27-alpine`, port 8080, `try_files $uri $uri/ /index.html` for SPA routing
+- **AWS (validation):** ECS Fargate (public subnet, assign_public_ip=true), ALB, RDS PostgreSQL db.t4g.small (private subnet), S3 + CloudFront OAC for frontend
+
+See [Production Readiness](production-readiness.md) for full deployment details and environment variable reference.
+
+---
+
+## Key Constraints and Design Decisions
+
+1. **CPE-based correlation only** — matching uses normalized CPE strings. No fuzzy name matching. This makes false positives rare but requires good CPE coverage in the vulnerability feeds.
+
+2. **Deterministic correlation** — `ApplicabilityDecisionService` applies version constraints mechanically. The system does not use AI for correlation — AI is used only for EOL slug suggestion and investigation summaries.
+
+3. **Schema-per-tenant over row-level isolation** — row-level security with a `tenant_id` column was rejected because it requires every query to include a filter, which is easy to miss. Schema-level isolation via `search_path` enforces isolation at the database connection level.
+
+4. **Projection tables over on-the-fly joins** — the `org_cve_records` rollup and `vulnerability_intel_summary` exist because joining `component_vulnerability_states × vulnerabilities × inventory_components` at query time is too slow at scale. The projections trade storage for query speed.
+
+5. **Delta queue over synchronous writes** — `finding_delta_queue` decouples correlation (high-write bursts) from finding creation (requires policy evaluation, suppression checks). The 2-second drain window batches work and avoids thundering-herd under large SBOM ingestion events.
+
+6. **`ddl-auto=update` (temporary)** — Hibernate currently creates tenant schema tables via schema validation/update mode. The goal is to switch to `validate` once the reset-line DDL explicitly creates all tables. Don't add logic that depends on `update` behavior; it will be removed.
