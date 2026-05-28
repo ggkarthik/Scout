@@ -18,12 +18,11 @@ export default mergeConfig(viteConfig, defineConfig({
         'src/vite-env.d.ts',
         'src/**/*.d.ts',
       ],
-      // Global line-coverage floor. Set just below current measured coverage
-      // (~19.9% lines as of 2026-05) so this catches regressions without
-      // blocking the current state. Ratchet up as page tests are added.
+      // Global line-coverage floor. Ratchet up as page/widget tests are added.
+      // Measured 2026-05: lines 20.71%, statements 19.41%, functions 14.69%, branches 13.95%
       thresholds: {
         lines: 20,
-        statements: 18,
+        statements: 19,
         functions: 14,
         branches: 13
       }
