@@ -114,7 +114,8 @@ describe('HBarChart', () => {
   it('calls onClick when a row is clicked', () => {
     const onClick = vi.fn();
     render(<HBarChart items={[bar('Critical', 12, onClick)]} />);
-    screen.getByText('Critical').closest('.fpl-hbar-row')?.click();
+    const row = screen.getByText('Critical').closest('.fpl-hbar-row');
+    if (row) fireEvent.click(row);
     expect(onClick).toHaveBeenCalledOnce();
   });
 });
