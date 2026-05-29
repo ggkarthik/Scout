@@ -590,6 +590,7 @@ public class SoftwareIdentityReadService {
                 """ : "") + """
                 LEFT JOIN component_vulnerability_states cvs
                     ON cvs.component_id = """ + (assetScopedVulnerabilities ? "exposure_ic.id" : "ic.id") + """
+
                 WHERE ic.component_status = 'ACTIVE'
                   AND ic.software_identity_id IN (:softwareIdentityIds)
                 GROUP BY ic.software_identity_id

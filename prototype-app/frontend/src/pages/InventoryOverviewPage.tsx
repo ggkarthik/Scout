@@ -741,6 +741,7 @@ export function InventoryOverviewPage() {
     ),
     enabled: hostAssets.length > 0
   });
+  const hostDetailsPending = hostAssets.length > 0 && hostDetailsQuery.isPending;
 
   const dashboard = dashboardQuery.data ?? null;
   const softwarePage = softwareQuery.data ?? null;
@@ -941,7 +942,7 @@ export function InventoryOverviewPage() {
     || applicableSoftwareQuery.isPending
     || inventoryComponentsQuery.isPending;
   const assetLoading = assetsQuery.isPending
-    || hostDetailsQuery.isPending
+    || hostDetailsPending
     || applicableSoftwareQuery.isPending
     || inventoryComponentsQuery.isPending;
   const softwareError = firstErrorMessage([
