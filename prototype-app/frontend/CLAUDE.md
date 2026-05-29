@@ -20,8 +20,6 @@ npx vitest run src/pages/FindingsPage.test.tsx
 
 CI gates in order: `lint` → `typecheck` → `build` → `test:coverage`.
 
-Vite proxies `/api/**` to `http://localhost:8080` in dev, so the frontend talks to the backend directly without a separate CORS config.
-
 ## Environment variables
 
 All variables are prefixed `VITE_`. Copy `.env.example` to `.env.local` to start.
@@ -40,14 +38,14 @@ All variables are prefixed `VITE_`. Copy `.env.example` to `.env.local` to start
 Authentication state flows through a single read path:
 
 1. `getStoredAuthToken()` reads `vulnwatch.authToken` from `localStorage` (or falls back to `VITE_AUTH_TOKEN`).
-2. `api.client.ts` attaches this as `Authorization: Bearer <token>` on every request. When no token is present it falls back to `X-API-Key` / `X-Creator-Key` headers (local dev only).
+2. `api/client.ts` attaches this as `Authorization: Bearer <token>` on every request. When no token is present it falls back to `X-API-Key` / `X-Creator-Key` headers (local dev only).
 3. `useActorQuery()` calls `GET /api/auth/context` and returns an `ActorContext`. The query key includes the raw token so it busts automatically on login/logout.
 4. `AuthSessionBoundary` in `App.tsx` wraps all authenticated routes. If the query fails or returns no data it redirects to `/login`.
 5. The loaded `ActorContext` is published via `ActorContextState` (React context). Read it with `useActor()` from `src/features/auth/context.ts`.
 
 Role checks **must** go through the helper functions in `src/features/auth/roles.ts` (`hasRole`, `canAccessPlatformConsole`, etc.). Do not check `actor.roles` directly — the helpers normalize `ROLE_` prefixes and handle `platformScope` edge cases.
 
-`ActorContext.platformScope = true` means the user is a platform owner who has not yet entered a tenant. In this state, tenant-scoped routes (`/exposure`, `/findings`, etc.) redirect to `/platform/tenants`. After selecting a tenant, `actingAsPlatformOwner = true`.
+`ActorContext.platformScope = true` means the user is a platform owner who has not yet entered a tenant. In this state, tenant-scoped routes redirect to `/platform/tenants`. After selecting a tenant, `actingAsPlatformOwner = true`.
 
 ## Source layout
 
@@ -62,7 +60,7 @@ src/
   features/            # Feature-colocated modules; types live here, not in src/types/
     auth/              # ActorContext type, context, role helpers, queries
     findings/          # Finding type, queries, filters
-    cve-workbench/     # OrgSpecificCveExposureRecord, CVE Assessment Workbench types
+    cve-workbench/     # Largest feature — CVE Assessment Workbench types and helpers
     configurations/    # RiskPolicy (6 triage weight fields), OwnershipRule, SuppressionRule
     inventory/         # Asset, HostAssetDetail, InventoryComponentPage
     connect/           # Connector configs, sync run types
@@ -73,11 +71,17 @@ src/
     eol/
     admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent
     widgets/           # Shared chart/widget components
+  hooks/
+    useDebouncedValue.ts  # Generic debounce hook
+    polling.ts            # Polling helpers for run-queue pages
   lib/
-    riskScoring.ts     # Pure TS: computeCveRiskScore, computeFindingPriorityScore
+    riskScoring.ts     # Pure TS: computeCveRiskScore, computeFindingPriorityScore, computeOrgImpact
     queryClient.ts     # createQueryClient factory (shared between app and tests)
+    time.ts            # timeAgo, formatTimestamp
   pages/               # One file per route; lazy-loaded via React.lazy in App.tsx
   components/          # Shared presentational components (≤ 300 lines each)
+  styles/              # Global CSS — index.css, finding-detail.css, and per-feature sheets
+  types/               # Re-exports only — source of truth is always in the feature directory
   test/
     setup.ts           # @testing-library/jest-dom/vitest import
     test-utils.tsx     # renderWithProviders (QueryClientProvider + MemoryRouter)
@@ -85,6 +89,25 @@ src/
 ```
 
 `src/types/index.ts` re-exports feature types but the **source of truth** is always the feature directory file. Edit the feature file, not the re-export.
+
+## cve-workbench feature internals
+
+`src/features/cve-workbench/` has its own `api.ts` (separate from `src/api/client.ts`) for CVE-workbench-specific endpoints. The feature is also the largest pure-logic surface:
+
+| File | Purpose |
+|---|---|
+| `types.ts` | `OrgSpecificCveExposureRecord`, `CveDetail`, `CveMatchedSoftware`, `VendorIntelligence`, etc. |
+| `queries.ts` | React Query hooks for org CVEs, CVE detail, vendor intel |
+| `api.ts` | CVE-workbench API calls (`cveWorkbenchApi` object) — mock this in tests, not `api` from client.ts |
+| `formatting.ts` | `formatDate`, `formatLabel`, `severityClassName`, `statusClassName`, `softwareLabel` |
+| `eol-helpers.ts` | `eosDisplay` (returns ReactElement), `eolRiskSummary` |
+| `view-helpers.ts` | `formatAssetType`, `formatEpssPercent`, `epssTrendMeta` |
+| `vendor-helpers.ts` | CPE parsing, correlation scoring, false-positive status, advisory labels |
+| `source-helpers.ts` | Builds view models from `CveDetail` — affected products, reference links, source record views |
+| `assessment-helpers.ts` | `buildSoftwareGroups` — groups `CveMatchedSoftware[]` by package into `SoftwareGroup[]` |
+| `investigation-context.ts` | `assetInventoryFieldMatches` — pure string matcher used by source-helpers and workflow |
+| `workflow.ts` | Assessment workflow state machine helpers |
+| `view-models.ts` | Composite view-model builders combining multiple helper outputs |
 
 ## Page test scaffolding
 
@@ -115,12 +138,43 @@ describe('FindingsPage', () => {
 
 - Mock only the API methods the page actually calls.
 - Use `vi.spyOn(api, 'method').mockResolvedValue(...)` / `mockRejectedValue(...)`.
+- For cve-workbench pages, mock `cveWorkbenchApi` from `../features/cve-workbench/api` in addition to `api`.
 - Pass `{ initialEntries: [{ pathname, state }] }` when the page reads `useLocation().state`.
+- Pass `{ initialEntries: [{ pathname: '/path/:id', search: '?key=value' }] }` for search-param pages.
+- Wrap route-param pages in `<Routes><Route path="/path/:id" element={<Page />} /></Routes>` so `useParams` resolves.
 - Call `localStorage.clear()` in `afterEach` for pages that persist filter/column preferences.
+
+## Pure-logic test files
+
+Helper modules that return no JSX should use `.ts` test files (not `.tsx`). Functions that return React elements can be tested by inspecting `.props` directly — no rendering required:
+
+```ts
+// eol-helpers.test.ts (pure .ts — no JSX)
+import React from 'react';
+const el = eosDisplay('2024-01-01') as React.ReactElement;
+expect(el.props.className).toContain('eol-badge--eol');
+```
+
+## React Query v5 — behavior that affects tests
+
+`@tanstack/react-query` v5 changed `isLoading`:
+
+| Condition | `isPending` | `isLoading` | `isFetching` |
+|---|---|---|---|
+| Disabled query (`enabled: false`), no data | `true` | **`false`** | `false` |
+| Fetching for the first time | `true` | `true` | `true` |
+
+Pages that use `isPending` in a loading guard will show a spinner forever in tests when a dependent query is disabled. **Fix:** provide non-empty data so the page's `hasData` flag becomes `true`, bypassing the loading branch. Pages that use `isLoading` work normally with disabled queries.
+
+The test `QueryClient` uses `retry: false` so failed queries settle immediately without network retries.
+
+## Coverage thresholds
+
+Thresholds are enforced by `vitest.config.ts` and **only move up, never down**. After adding a new batch of tests, run `npm run test:coverage`, read the summary line, and ratchet the floor in `vitest.config.ts` to match the new measured value.
 
 ## Key constraints
 
 - Components in `src/components/` must stay under ~300 lines. New substantial components go under `src/features/<feature>/`.
-- `src/lib/riskScoring.ts` is pure TypeScript — no React imports, no API calls. `computeCveRiskScore` and `computeFindingPriorityScore` are computed in the browser from already-fetched data; they are not persisted.
+- `src/lib/riskScoring.ts` is pure TypeScript — no React imports, no API calls.
 - The app uses React StrictMode (see `src/main.tsx`) — effects run twice in development, so side effects should be idempotent.
 - Theme (`dark` / `light`) is persisted in `localStorage` under `scoutai-theme` and applied as `data-theme` on `<html>`.
