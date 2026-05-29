@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeCveRiskScore,
   computeFindingPriorityScore,
+  computeOrgImpact,
   riskScoreLabel,
   riskScoreColor,
   type PolicyWeights,
@@ -684,5 +685,47 @@ describe('computeFindingPriorityScore — capping and policy weights', () => {
       })
     );
     expect(result.topReasons.length).toBeLessThanOrEqual(3);
+  });
+});
+
+// ── computeOrgImpact ──────────────────────────────────────────────────────────
+
+describe('computeOrgImpact', () => {
+  function baseItem(overrides: Partial<OrgSpecificCveExposureRecord> = {}): OrgSpecificCveExposureRecord {
+    return buildCve({ matchedAssetCount: 1, cvssScore: 5.0, epssScore: 0, inKev: false, ...overrides });
+  }
+
+  it('returns NONE when matchedAssetCount is 0', () => {
+    expect(computeOrgImpact(baseItem({ matchedAssetCount: 0 }), 5, 0)).toBe('NONE');
+  });
+
+  it('returns HIGH when cvss >= 9.0 (critical)', () => {
+    expect(computeOrgImpact(baseItem({ cvssScore: 9.0 }), 5, 0)).toBe('HIGH');
+  });
+
+  it('returns HIGH when inKev is true', () => {
+    expect(computeOrgImpact(baseItem({ inKev: true }), 5, 0)).toBe('HIGH');
+  });
+
+  it('returns HIGH when epss >= 0.3', () => {
+    expect(computeOrgImpact(baseItem({ epssScore: 0.3 }), 5, 0)).toBe('HIGH');
+  });
+
+  it('returns HIGH when saiScore exceeds cvss by more than 1', () => {
+    expect(computeOrgImpact(baseItem({ cvssScore: 5.0 }), 7.0, 0)).toBe('HIGH');
+  });
+
+  it('returns HIGH when externalFacingCount > 0', () => {
+    expect(computeOrgImpact(baseItem({ cvssScore: 5.0 }), 5.0, 1)).toBe('HIGH');
+  });
+
+  it('returns MEDIUM when saiScore is within ±1 of cvss and no HIGH conditions apply', () => {
+    // cvss=5.0, saiScore=5.5 → |5.5-5.0|=0.5 ≤ 1.0 → MEDIUM
+    expect(computeOrgImpact(baseItem({ cvssScore: 5.0 }), 5.5, 0)).toBe('MEDIUM');
+  });
+
+  it('returns LOW when saiScore is more than 1 below cvss and no HIGH conditions apply', () => {
+    // cvss=5.0, saiScore=3.0 → |3.0-5.0|=2.0 > 1.0, saiScore < cvss+1 → LOW
+    expect(computeOrgImpact(baseItem({ cvssScore: 5.0 }), 3.0, 0)).toBe('LOW');
   });
 });
