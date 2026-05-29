@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ConnectRouteView } from '../app/routes';
+import { EolSourcePanel } from '../components/EolSourcePanel';
 import { usePlatformInventoryConnectorHealthQuery } from '../features/admin/queries';
 import type { InventoryConnectorHealth } from '../features/admin/types';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
@@ -67,6 +68,9 @@ export function PlatformConnectorsPage({
       onViewChange('run-history');
       return;
     }
+    if (view === 'tenant-integrations-history') {
+      return;
+    }
     onViewChange('connectors');
   };
 
@@ -99,6 +103,12 @@ export function PlatformConnectorsPage({
       {activeView === 'vulnerability-sources' ? (
         <section className="panel">
           <VulnIntelConfigPage vulnSummary={vulnSummaryQuery.data ?? null} />
+          <div style={{ marginTop: 16 }}>
+            <EolSourcePanel
+              title="endoflife.date EOL Feed"
+              caption="Refresh lifecycle catalog, release cycles, mapping resolution, and denormalized EOL status from the platform console."
+            />
+          </div>
         </section>
       ) : activeView === 'vulnerability-run-history' ? (
         <IntegrationRunQueuePage
