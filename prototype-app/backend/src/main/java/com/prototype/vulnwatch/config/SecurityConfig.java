@@ -43,6 +43,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-invites/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/operations/quality/**", "/api/operations/software-identities/search")
+                        .hasAnyRole("PLATFORM_OWNER", "TENANT_ADMIN", "INVENTORY_ADMIN", "SECURITY_ANALYST", "READ_ONLY_AUDITOR")
                         .requestMatchers("/api/platform/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/**").authenticated()

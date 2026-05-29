@@ -175,6 +175,31 @@ describe('InventoryOverviewPage', () => {
     expect(screen.getByText('Loading combined inventory overview…')).toBeInTheDocument();
   });
 
+  it('renders empty-state widgets for a new tenant without hanging on loading', async () => {
+    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'listSoftwareIdentities').mockResolvedValue({
+      content: [],
+      number: 0,
+      size: 25,
+      totalElements: 0,
+      totalPages: 0,
+    });
+    vi.spyOn(api, 'getEolSummary').mockResolvedValue(EMPTY_EOL_SUMMARY);
+    vi.spyOn(api, 'listEolUnresolvedMappings').mockResolvedValue(EMPTY_EOL_MAPPING_PAGE);
+    vi.spyOn(api, 'getOperationalQualitySummary').mockResolvedValue(EMPTY_QUALITY_SUMMARY);
+    vi.spyOn(api, 'listInventoryComponents').mockResolvedValue(EMPTY_COMPONENT_PAGE);
+    vi.spyOn(api, 'listApplicableSoftware').mockResolvedValue(EMPTY_SW_APPLICABLE_PAGE);
+    vi.spyOn(api, 'listAssets').mockResolvedValue([]);
+
+    renderWithProviders(<InventoryOverviewPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Inventory Funnel')).toBeInTheDocument()
+    );
+    expect(screen.queryByText('Loading combined inventory overview…')).not.toBeInTheDocument();
+    expect(screen.getByText('Total assets')).toBeInTheDocument();
+  });
+
   it('renders the Inventory Funnel stat card label after data loads', async () => {
     mockAllResolved();
     renderWithProviders(<InventoryOverviewPage />);

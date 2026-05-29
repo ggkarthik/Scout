@@ -92,7 +92,7 @@ public class OperationalDashboardController {
 
     @GetMapping("/quality/summary")
     public OperationalQualitySummaryResponse getQualitySummary() {
-        return operationalQualityReadService.getSummary(defaultTenant());
+        return operationalQualityReadService.getSummary(workspace());
     }
 
     @GetMapping("/quality/issues")
@@ -109,7 +109,7 @@ public class OperationalDashboardController {
             @RequestParam(defaultValue = "25") int size
     ) {
         return operationalQualityReadService.listIssues(
-                defaultTenant(),
+                workspace(),
                 domain,
                 issueType,
                 severity,
@@ -125,15 +125,15 @@ public class OperationalDashboardController {
 
     @GetMapping("/quality/issues/{issueId}")
     public OperationalQualityIssueDetailResponse getQualityIssue(@PathVariable String issueId) {
-        return operationalQualityReadService.getIssueDetail(defaultTenant(), issueId);
+        return operationalQualityReadService.getIssueDetail(workspace(), issueId);
     }
 
     @GetMapping("/quality/filters")
     public OperationalQualityFilterValuesResponse getQualityFilters() {
-        return operationalQualityReadService.listFilterValues(defaultTenant());
+        return operationalQualityReadService.listFilterValues(workspace());
     }
 
-    private Tenant defaultTenant() {
-        return workspaceService.getDefaultWorkspace();
+    private Tenant workspace() {
+        return workspaceService.getWorkspace();
     }
 }
