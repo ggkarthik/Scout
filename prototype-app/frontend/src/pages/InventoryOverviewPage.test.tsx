@@ -4,14 +4,6 @@ import { api } from '../api/client';
 import { renderWithProviders } from '../test/test-utils';
 import { InventoryOverviewPage } from './InventoryOverviewPage';
 
-const EMPTY_SW_PAGE = {
-  content: [],
-  number: 0,
-  size: 25,
-  totalElements: 0,
-  totalPages: 0,
-};
-
 function buildSoftwareIdentity(overrides = {}) {
   return {
     id: 'si-1',
