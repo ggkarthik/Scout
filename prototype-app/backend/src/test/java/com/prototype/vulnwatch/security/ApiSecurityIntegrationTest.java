@@ -1,6 +1,8 @@
 package com.prototype.vulnwatch.security;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -15,10 +17,11 @@ import com.prototype.vulnwatch.controller.AuthContextController;
 import com.prototype.vulnwatch.controller.DashboardController;
 import com.prototype.vulnwatch.controller.OperationalDashboardController;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.OperationalQualitySummaryResponse;
 import com.prototype.vulnwatch.repo.TenantRepository;
-import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
 import com.prototype.vulnwatch.service.AllowedTenantContextService;
+import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
@@ -28,6 +31,7 @@ import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.Set;
 import java.util.List;
@@ -204,5 +208,44 @@ class ApiSecurityIntegrationTest {
                 .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
                 .andExpect(jsonPath("$.tenantName").value("Acme Security"))
                 .andExpect(jsonPath("$.roles[0]").exists());
+    }
+
+    @Test
+    void tenantJwtCanReadOperationalQualitySummaryInActiveWorkspace() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(42L);
+        tenant.setName("Acme Security");
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(operationalQualityReadService.getSummary(tenant)).thenReturn(new OperationalQualitySummaryResponse(
+                Instant.EPOCH,
+                0,
+                0,
+                0,
+                0,
+                List.of()
+        ));
+
+        Jwt jwt = Jwt.withTokenValue("quality.jwt")
+                .header("alg", "none")
+                .subject("tenant-admin-1")
+                .claim("email", "tenant.admin@example.com")
+                .build();
+        when(jwtDecoder.decode("quality.jwt")).thenReturn(jwt);
+        when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
+                "tenant-admin-1",
+                UUID.randomUUID(),
+                "tenant.admin@example.com",
+                "Tenant Admin",
+                tenantId,
+                "Acme Security",
+                Set.of("TENANT_ADMIN")));
+
+        mockMvc.perform(get("/api/operations/quality/summary").header("Authorization", "Bearer quality.jwt"))
+                .andExpect(status().isOk());
+
+        verify(workspaceService).getWorkspace();
+        verify(workspaceService, never()).getDefaultWorkspace();
+        verify(operationalQualityReadService).getSummary(tenant);
     }
 }

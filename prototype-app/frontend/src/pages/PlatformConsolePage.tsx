@@ -5,6 +5,7 @@ import { api, setStoredAuthToken } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { PlatformConnectorsPage } from './PlatformConnectorsPage';
 import { AUTH_CONTEXT_QUERY_ROOT } from '../features/auth/queries';
 import { useAcceptPlatformSupportGrantMutation, usePlatformInventoryConnectorHealthQuery, usePlatformSupportGrantsQuery } from '../features/admin/queries';
 import type { TenantSupportGrant } from '../features/admin/types';
@@ -13,6 +14,7 @@ const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: stri
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
+  { key: 'connectors', label: 'Connectors', helper: 'Platform-owned sources and tenant integration visibility' },
   { key: 'support', label: 'Support', helper: 'Audited support access workspace' }
 ];
 
@@ -66,6 +68,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
         {selectedView === 'tenants' && <TenantLifecyclePanel grants={grants} />}
         {selectedView === 'users' && <PlatformUsersPanel />}
         {selectedView === 'demo-requests' && <DemoRequestsPanel />}
+        {selectedView === 'connectors' && <PlatformConnectorsPage initialView="connectors" />}
         {selectedView === 'support' && (
           <PlatformSupportPanel
             grants={grants}
