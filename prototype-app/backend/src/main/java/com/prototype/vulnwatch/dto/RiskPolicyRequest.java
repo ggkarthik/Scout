@@ -15,6 +15,12 @@ public record RiskPolicyRequest(
         String autoCloseAssetIdentifier,
         Integer autoCloseAfterDays,
         String findingGenerationMode,
-        String findingsScoreConfig
+        String findingsScoreConfig,
+        Boolean copilotEnabled,
+        Boolean copilotShadowMode,
+        Boolean copilotAutoRun,
+        Double agentAutoThreshold,
+        Double agentReviewThreshold,
+        Integer agentMaxConcurrent
 ) {
 }

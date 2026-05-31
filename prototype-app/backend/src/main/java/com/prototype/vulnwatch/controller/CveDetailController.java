@@ -61,6 +61,10 @@ public class CveDetailController {
     private final WorkspaceService workspaceService;
     private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
     private final FixRecordService fixRecordService;
+    private final com.prototype.vulnwatch.service.InvestigationRunbookService investigationRunbookService;
+    private final com.prototype.vulnwatch.service.InventoryResolutionService inventoryResolutionService;
+    private final com.prototype.vulnwatch.service.FalsePositiveAnalysisService falsePositiveAnalysisService;
+    private final com.prototype.vulnwatch.service.EolAnalysisService eolAnalysisService;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -956,5 +960,89 @@ public class CveDetailController {
         public Map<String, Object> data;
         /** Timestamp when this recommendation was generated/saved. */
         public Instant generatedAt;
+    }
+
+    // -------------------------------------------------------------------------
+    // Investigation Runbook endpoints (Phase 2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/cve-detail/{cveId}/investigation/runbook
+     * Returns the persisted runbook state for the CVE, or an empty shell if none exists yet.
+     */
+    @GetMapping("/{cveId}/investigation/runbook")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.dto.InvestigationRunbookResponse> getRunbook(
+            @PathVariable String cveId) {
+        return ResponseEntity.ok(investigationRunbookService.getRunbook(cveId));
+    }
+
+    /**
+     * PUT /api/cve-detail/{cveId}/investigation/runbook
+     * Idempotent upsert — replaces the full runbook state for the CVE.
+     */
+    @PutMapping("/{cveId}/investigation/runbook")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.runbook.saved")
+    public ResponseEntity<com.prototype.vulnwatch.dto.InvestigationRunbookResponse> saveRunbook(
+            @PathVariable String cveId,
+            @RequestBody com.prototype.vulnwatch.dto.InvestigationRunbookRequest request) {
+        return ResponseEntity.ok(investigationRunbookService.saveRunbook(cveId, request));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/log
+     * Appends a single log entry to the runbook. Creates the runbook record if absent.
+     */
+    @PostMapping("/{cveId}/investigation/log")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.log.added")
+    public ResponseEntity<com.prototype.vulnwatch.dto.RunbookLogEntryResponse> appendLog(
+            @PathVariable String cveId,
+            @RequestBody com.prototype.vulnwatch.dto.RunbookLogEntryRequest request) {
+        return ResponseEntity.ok(investigationRunbookService.appendLogEntry(cveId, request));
+    }
+
+    // -------------------------------------------------------------------------
+    // Investigation analysis endpoints (Phase 3)
+    // -------------------------------------------------------------------------
+
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/resolve-inventory
+     * Resolves asset criteria against the tenant software inventory.
+     */
+    @PostMapping("/{cveId}/investigation/resolve-inventory")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.dto.InventoryResolutionResponse> resolveInventory(
+            @PathVariable String cveId,
+            @RequestBody com.prototype.vulnwatch.dto.InventoryResolutionRequest request) {
+        return ResponseEntity.ok(
+                inventoryResolutionService.resolveInventory(request.criteria()));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/false-positive-analysis
+     * Checks VEX correlation data for false-positive signals per software/version.
+     */
+    @PostMapping("/{cveId}/investigation/false-positive-analysis")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.dto.FalsePositiveAnalysisResponse> analyzeFalsePositives(
+            @PathVariable String cveId,
+            @RequestBody com.prototype.vulnwatch.dto.FalsePositiveAnalysisRequest request) {
+        return ResponseEntity.ok(
+                falsePositiveAnalysisService.analyzeFalsePositives(cveId, request.criteria()));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/eol-analysis
+     * Returns EOL lifecycle status for each criterion matched against inventory.
+     */
+    @PostMapping("/{cveId}/investigation/eol-analysis")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.dto.EolAnalysisResponse> analyzeEol(
+            @PathVariable String cveId,
+            @RequestBody com.prototype.vulnwatch.dto.EolAnalysisRequest request) {
+        return ResponseEntity.ok(
+                eolAnalysisService.analyzeEol(request.criteria()));
     }
 }
