@@ -79,6 +79,24 @@ public class RiskPolicy {
     @Column(name = "findings_score_config", columnDefinition = "jsonb")
     private String findingsScoreConfig = "[]";
 
+    @Column(name = "copilot_enabled", nullable = false)
+    private boolean copilotEnabled = false;
+
+    @Column(name = "copilot_shadow_mode", nullable = false)
+    private boolean copilotShadowMode = true;
+
+    @Column(name = "copilot_auto_run", nullable = false)
+    private boolean copilotAutoRun = false;
+
+    @Column(name = "agent_auto_threshold", nullable = false)
+    private double agentAutoThreshold = 0.85;
+
+    @Column(name = "agent_review_threshold", nullable = false)
+    private double agentReviewThreshold = 0.60;
+
+    @Column(name = "agent_max_concurrent", nullable = false)
+    private int agentMaxConcurrent = 10;
+
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
 
@@ -217,6 +235,24 @@ public class RiskPolicy {
     public Instant getUpdatedAt() {
         return updatedAt;
     }
+
+    public boolean isCopilotEnabled() { return copilotEnabled; }
+    public void setCopilotEnabled(boolean copilotEnabled) { this.copilotEnabled = copilotEnabled; }
+
+    public boolean isCopilotShadowMode() { return copilotShadowMode; }
+    public void setCopilotShadowMode(boolean copilotShadowMode) { this.copilotShadowMode = copilotShadowMode; }
+
+    public boolean isCopilotAutoRun() { return copilotAutoRun; }
+    public void setCopilotAutoRun(boolean copilotAutoRun) { this.copilotAutoRun = copilotAutoRun; }
+
+    public double getAgentAutoThreshold() { return agentAutoThreshold; }
+    public void setAgentAutoThreshold(double agentAutoThreshold) { this.agentAutoThreshold = agentAutoThreshold; }
+
+    public double getAgentReviewThreshold() { return agentReviewThreshold; }
+    public void setAgentReviewThreshold(double agentReviewThreshold) { this.agentReviewThreshold = agentReviewThreshold; }
+
+    public int getAgentMaxConcurrent() { return agentMaxConcurrent; }
+    public void setAgentMaxConcurrent(int agentMaxConcurrent) { this.agentMaxConcurrent = agentMaxConcurrent; }
 
     public void touch() {
         this.updatedAt = Instant.now();

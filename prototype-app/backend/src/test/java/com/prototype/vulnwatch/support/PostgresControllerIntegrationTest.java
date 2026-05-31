@@ -23,7 +23,12 @@ import org.springframework.test.context.ActiveProfiles;
 @SpringBootTest(properties = {
         "app.security.api-key=" + PostgresITSupport.API_KEY,
         "app.security.creator-key=" + PostgresITSupport.CREATOR_KEY,
-        "app.correlation.backfill-targets-on-startup=false"
+        "app.correlation.backfill-targets-on-startup=false",
+        // TenantResolutionFilter runs before ApiKeyAuthenticationFilter so API key
+        // auth never gets a chance to set TenantContext. Disable the strict
+        // require-tenant-context guard so the filter falls back to the default
+        // workspace tenant instead of throwing FORBIDDEN on every POST/PUT.
+        "app.tenancy.require-tenant-context=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("postgres")

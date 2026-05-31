@@ -97,7 +97,8 @@ class RiskPolicyServiceTest {
         RiskPolicyRequest req = new RiskPolicyRequest(
                 null, null, 3, null, null, null,
                 null, null, null, null,
-                null, null, null, null, null
+                null, null, null, null, null,
+                null, null, null, null, null, null
         );
 
         RiskPolicyResponse response = service.update(tenant, req);
@@ -118,7 +119,8 @@ class RiskPolicyServiceTest {
         RiskPolicyRequest req = new RiskPolicyRequest(
                 null, null, -5, null, null, null,
                 null, null, null, null,
-                null, null, null, null, null
+                null, null, null, null, null,
+                null, null, null, null, null, null
         );
 
         service.update(tenant, req);
@@ -138,7 +140,8 @@ class RiskPolicyServiceTest {
         RiskPolicyRequest req = new RiskPolicyRequest(
                 null, null, null, null, null, null,
                 null, null, null, null,
-                null, null, null, null, null
+                null, null, null, null, null,
+                null, null, null, null, null, null
         );
 
         service.update(tenant, req);
