@@ -56,8 +56,11 @@ import { StatCard } from '../components/StatCard';
 import {
   type PipelinePayload,
   type PlatformHealthPayload,
+  useRebuildFindingProjectionMutation,
   useOperationsViewQuery
 } from '../features/operations/queries';
+import { useActor } from '../features/auth/context';
+import { hasAnyRole } from '../features/auth/roles';
 
 export type OperationsViewKey =
   | 'quality'
@@ -157,6 +160,10 @@ const METRIC_HELP: Record<string, string> = {
   'Projection Last Computed': 'Timestamp of the last completed noise-reduction projection refresh.',
   'Projection Refresh P95': 'P95 processing time for the background projection refresh worker.',
   'Projection Refresh Failures': 'Number of failed projection refresh attempts in the current metrics sample.',
+  'Findings Projection Drift': 'Difference between canonical findings and the current findings workspace projection row count.',
+  'Findings Projection Count': 'Rows currently materialized in the findings workspace projection.',
+  'Findings Source Count': 'Canonical findings count used to validate the projection.',
+  'Findings Projection Last Rebuild': 'Duration of the most recent tenant-scoped findings projection rebuild.',
   'Filter Cache State': 'Whether the read-path filter cache is warm and serving requests.',
   'Filter Cache Hit Ratio': 'Percent of filter-cache eligible requests served from cache.',
   'Stale Threshold (h)': 'Configured freshness threshold, in hours, before a source is treated as stale.',
@@ -192,6 +199,13 @@ function isCreatorAccessError(error: string): boolean {
 
 function formatGeneratedAt(generatedAt: string): string {
   return `Last updated ${new Date(generatedAt).toLocaleString()}`;
+}
+
+function formatDurationMs(value?: number | null): string {
+  if (value == null || value < 0) {
+    return '-';
+  }
+  return `${value.toFixed(0)} ms`;
 }
 
 function MetricDistribution({ title, items = [], emptyLabel }: { title: string; items?: TopFindingMetric[]; emptyLabel: string }) {
@@ -715,6 +729,7 @@ function renderPipeline(payload: PipelinePayload) {
 function renderPlatformHealth(payload: PlatformHealthPayload) {
   const readPath = payload.readPath.data;
   const sloItems = payload.slo?.slos ?? [];
+  const findingsProjection = payload.findingsProjection;
 
   return (
     <div className="page-grid">
@@ -734,6 +749,29 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
       ) : null}
 
       {renderReadPath(payload.readPath)}
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Findings Projection Health</h3>
+          <span className="panel-caption">
+            {findingsProjection.lastComputedAt
+              ? `Last computed ${new Date(findingsProjection.lastComputedAt).toLocaleString()}`
+              : 'Projection has not been built yet'}
+          </span>
+        </div>
+        <div className="noise-summary-grid">
+          <SummaryMetricCard label="Findings Projection Count" value={(findingsProjection.findingCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Findings Source Count" value={(findingsProjection.sourceFindingCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Findings Projection Drift" value={(findingsProjection.driftCount ?? 0).toLocaleString()} />
+          <SummaryMetricCard label="Projection Age" value={findingsProjection.lastComputedAt ? formatAgeSeconds((Date.now() - new Date(findingsProjection.lastComputedAt).getTime()) / 1000) : '-'} />
+          <SummaryMetricCard label="Findings Projection Last Rebuild" value={formatDurationMs(findingsProjection.lastRebuildDurationMs)} />
+          <SummaryMetricCard label="Summary Model" value={findingsProjection.stale ? 'Stale' : 'Ready'} />
+        </div>
+        {findingsProjection.stale ? (
+          <div className="notice">Findings projection drift or age is outside the healthy window. Rebuild the tenant projection to realign Findings records and analytics.</div>
+        ) : (
+          <div className="panel-caption">Findings list, queue analytics, and portfolio rollups are aligned to the latest tenant projection.</div>
+        )}
+      </section>
       {renderSlo(payload.slo)}
       {renderCatalog(payload.catalog)}
     </div>
@@ -741,6 +779,9 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
 }
 
 export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: OperationalDashboardPageProps) {
+  const actor = useActor();
+  const canRebuildFindingsProjection = hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN']);
+  const rebuildFindingProjection = useRebuildFindingProjectionMutation();
   const normalizedView = normalizeOperationsView(selectedView);
   const operationsViewQuery = useOperationsViewQuery(normalizedView);
   const payload = operationsViewQuery.data ?? null;
@@ -839,7 +880,21 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
       <div className="ops-context-bar">
         <span className="ops-context-label">Operations</span>
         <span className="ops-context-view">{normalizedView === 'pipeline' ? 'Pipeline Analytics' : 'Platform Health'}</span>
+        {normalizedView === 'platform-health' && canRebuildFindingsProjection ? (
+          <button
+            type="button"
+            className="cvd-ov-btn-secondary"
+            onClick={() => rebuildFindingProjection.mutate()}
+            disabled={rebuildFindingProjection.isPending}
+            style={{ marginLeft: 'auto' }}
+          >
+            {rebuildFindingProjection.isPending ? 'Rebuilding Findings Projection…' : 'Rebuild Findings Projection'}
+          </button>
+        ) : null}
       </div>
+      {rebuildFindingProjection.error instanceof Error ? (
+        <div className="panel">Failed to rebuild findings projection: {rebuildFindingProjection.error.message}</div>
+      ) : null}
       {content}
     </OperationsSectionErrorBoundary>
   );

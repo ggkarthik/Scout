@@ -1,4 +1,5 @@
 import type { TopFindingMetric } from '../dashboard/types';
+import type { FindingProjectionStatus } from '../findings/types';
 
 export type OperationalEndpointMetric = {
   key: string;
@@ -89,6 +90,8 @@ export type OperationalApiReadPath = {
   filterCacheHitRatioPercent: number;
   endpointMetrics: OperationalEndpointMetric[];
 };
+
+export type FindingsProjectionHealth = FindingProjectionStatus;
 
 export type OperationalSourceFreshness = {
   source: string;

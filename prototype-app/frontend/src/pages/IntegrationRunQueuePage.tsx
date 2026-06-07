@@ -24,6 +24,11 @@ function formatSyncType(value: string): string {
   if (n === 'CSAF_MICROSOFT') return 'Microsoft CSAF + VEX';
   if (n === 'CSAF_REDHAT') return 'Red Hat CSAF + VEX';
   if (n === 'ADVISORY') return 'Advisory Imports';
+  if (n === 'EOL_CATALOG_REFRESH') return 'EOL Catalog Refresh';
+  if (n === 'EOL_RELEASE_REFRESH') return 'EOL Release Refresh';
+  if (n === 'EOL_MAPPING_RESOLVE') return 'EOL Mapping Resolve';
+  if (n === 'EOL_DENORMALIZE') return 'EOL Denormalize';
+  if (n === 'EOL_FULL_REFRESH') return 'EOL Full Refresh';
   if (n === 'EOL_DATE_SWEEP') return 'EOL Date Sweep';
   return value;
 }

@@ -22,8 +22,10 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -208,10 +210,13 @@ public class KevSyncService {
 
     private String fetchKevFeed() {
         try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN, MediaType.ALL));
+            headers.set("User-Agent", "Mozilla/5.0 (compatible; VulnWatch/1.0; +https://www.cisa.gov/known-exploited-vulnerabilities-catalog)");
             return outboundHttpClient.execute(
                     KEV_URL,
                     HttpMethod.GET,
-                    HttpEntity.EMPTY,
+                    new HttpEntity<>(headers),
                     String.class,
                     "KEV feed request",
                     outboundPolicy(),

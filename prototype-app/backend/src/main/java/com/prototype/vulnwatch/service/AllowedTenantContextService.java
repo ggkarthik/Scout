@@ -10,16 +10,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class AllowedTenantContextService {
 
     private final TenantMembershipRepository tenantMembershipRepository;
-    private final TenantSupportGrantService tenantSupportGrantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
 
     public AllowedTenantContextService(
             TenantMembershipRepository tenantMembershipRepository,
-            TenantSupportGrantService tenantSupportGrantService,
             TenantLifecycleGuardService tenantLifecycleGuardService
     ) {
         this.tenantMembershipRepository = tenantMembershipRepository;
-        this.tenantSupportGrantService = tenantSupportGrantService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
     }
 
@@ -29,16 +26,7 @@ public class AllowedTenantContextService {
             return List.of();
         }
         if (actor.hasRole("PLATFORM_OWNER")) {
-            return tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()).stream()
-                    .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
-                    .map(grant -> new AllowedTenantResponse(
-                            grant.getTenant().getId().toString(),
-                            grant.getTenant().getName(),
-                            grant.getTenant().getSlug(),
-                            "PLATFORM_SUPPORT",
-                            grant.getAccessMode(),
-                            grant.getExpiresAt()))
-                    .toList();
+            return List.of();
         }
         return tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
                 .filter(membership -> tenantLifecycleGuardService.isTenantAccessible(membership.getTenant()))

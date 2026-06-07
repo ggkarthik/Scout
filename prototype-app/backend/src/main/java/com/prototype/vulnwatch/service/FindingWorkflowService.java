@@ -42,6 +42,7 @@ public class FindingWorkflowService {
     private final ObjectMapper objectMapper;
     private final ObjectProvider<AuditEventService> auditEventServiceProvider;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final FindingListProjectionService findingListProjectionService;
 
     public FindingWorkflowService(
             FindingRepository findingRepository,
@@ -51,7 +52,8 @@ public class FindingWorkflowService {
             AssetRepository assetRepository,
             ObjectMapper objectMapper,
             ObjectProvider<AuditEventService> auditEventServiceProvider,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            FindingListProjectionService findingListProjectionService
     ) {
         this.findingRepository = findingRepository;
         this.findingCommentRepository = findingCommentRepository;
@@ -61,6 +63,7 @@ public class FindingWorkflowService {
         this.objectMapper = objectMapper;
         this.auditEventServiceProvider = auditEventServiceProvider;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.findingListProjectionService = findingListProjectionService;
     }
 
     @Transactional
@@ -70,7 +73,9 @@ public class FindingWorkflowService {
         applyWorkflowUpdate(finding, request);
         finding.touch();
         audit("finding.workflow.updated", "finding", finding.getId().toString(), null);
-        return findingRepository.save(finding);
+        Finding saved = findingRepository.save(finding);
+        findingListProjectionService.refreshTenant(saved.getTenant());
+        return saved;
     }
 
     @Transactional
@@ -83,6 +88,7 @@ public class FindingWorkflowService {
         }
         if (!findings.isEmpty()) {
             findingRepository.saveAll(findings);
+            findingListProjectionService.refreshTenant(findings.get(0).getTenant());
             audit("finding.workflow.bulk_updated", "finding", null,
                     "{\"updated\":" + updated + "}");
         }
@@ -109,6 +115,7 @@ public class FindingWorkflowService {
             findingEventRepository.deleteAll(findingEventRepository.findByFindingOrderByCreatedAtAsc(finding));
         }
         findingRepository.deleteAll(findings);
+        findingListProjectionService.refreshTenant(findings.get(0).getTenant());
         audit("finding.bulk_deleted", "finding", null,
                 "{\"deleted\":" + findings.size() + "}");
         return findings.size();
@@ -270,6 +277,7 @@ public class FindingWorkflowService {
         }
         if (!expired.isEmpty()) {
             findingRepository.saveAll(expired);
+            findingListProjectionService.refreshTenant(expired.get(0).getTenant());
         }
     }
 
@@ -332,6 +340,7 @@ public class FindingWorkflowService {
             }
             if (!toPersist.isEmpty()) {
                 findingRepository.saveAll(toPersist);
+                findingListProjectionService.refreshTenant(policy.getTenant());
             }
         }
     }

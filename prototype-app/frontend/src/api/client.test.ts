@@ -168,6 +168,8 @@ describe('api method coverage', () => {
     const headers = new Headers(init?.headers);
     expect(headers.has('X-API-Key')).toBe(true);
     expect(headers.has('Authorization')).toBe(false);
+    expect(headers.get('X-Tenant-ID')).toBe('1');
+    expect(headers.get('X-User-ID')).toBe('local-analyst');
   });
 
   it('injects Authorization bearer header when session token is present', async () => {

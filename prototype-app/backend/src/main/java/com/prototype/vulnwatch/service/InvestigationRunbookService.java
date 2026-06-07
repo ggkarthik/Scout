@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.InvestigationRunbook;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.AgentTaskMetaDto;
 import com.prototype.vulnwatch.dto.InvestigationRunbookRequest;
 import com.prototype.vulnwatch.dto.InvestigationRunbookResponse;
 import com.prototype.vulnwatch.dto.RunbookLogEntryDto;
@@ -126,6 +127,35 @@ public class InvestigationRunbookService {
                 newEntry.actor(),
                 newEntry.producedBy(),
                 now);
+    }
+
+    /** Persists agent run metadata (confidence map + full task meta + completed task IDs) onto the runbook. */
+    public void saveAgentRun(
+            String cveExternalId,
+            Map<String, String> confidenceMap,
+            Map<String, AgentTaskMetaDto> taskMeta,
+            List<String> completedTaskIds
+    ) {
+        UUID tenantId = TenantContext.getCurrentTenantId();
+        Tenant tenant = tenantService.requireTenantUuid(tenantId);
+
+        InvestigationRunbook runbook = repository
+                .findByTenantIdAndCveExternalId(tenantId, cveExternalId)
+                .orElseGet(() -> {
+                    InvestigationRunbook r = new InvestigationRunbook();
+                    r.setTenant(tenant);
+                    r.setCveExternalId(cveExternalId);
+                    return r;
+                });
+
+        runbook.setAgentConfidenceJson(toJson(confidenceMap));
+        runbook.setAgentRunMetaJson(toJson(
+                java.util.Map.of(
+                        "taskMeta", taskMeta,
+                        "completedTaskIds", completedTaskIds,
+                        "ranAt", java.time.Instant.now().toString()
+                )));
+        repository.save(runbook);
     }
 
     // --- helpers ---
