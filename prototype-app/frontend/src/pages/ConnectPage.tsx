@@ -606,7 +606,7 @@ type ConnectPageProps = {
 
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
   const actor = useActor();
-  const inventoryConnectorsDisabledForDemo = actor.demoCapabilities?.liveConnectors === false;
+  const inventoryConnectorsDisabledForDemo = actor?.demoCapabilities?.liveConnectors === false;
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
