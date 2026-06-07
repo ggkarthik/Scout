@@ -84,3 +84,12 @@ Tests in `service/`, `repo/`, `contract/`, `security/` packages still use the
 expanded form. They work — don't touch them just to migrate. New tests should
 use the scaffolding; migrate old ones opportunistically when you're already in
 the file for another reason.
+
+## Findings workspace scale validation
+
+- Use `FindingWorkspaceProjectionPostgresIntegrationTest` for repeatable high-volume
+  findings projection validation.
+- Run with:
+  `mvn -Ppostgres-it -Dtest=FindingWorkspaceProjectionPostgresIntegrationTest verify`
+- That suite seeds a larger synthetic findings tenant, refreshes the projection,
+  and exercises cursor paging plus projection-backed read timings.

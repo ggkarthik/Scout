@@ -5,6 +5,7 @@ import { IngestionPage } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
+import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
@@ -16,7 +17,6 @@ import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole, hasRole } from '../features/auth/roles';
 import { timeAgo } from '../lib/time';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
-import { PlatformConnectorsPage } from './PlatformConnectorsPage';
 
 type ConnectorId =
   | 'sbom-endpoint'
@@ -34,7 +34,7 @@ type ConnectorId =
   | 'euvd-feed'
   | 'jvn-feed';
 
-type ConnectView = 'sources' | 'connectors' | 'run-history' | 'processing-jobs';
+type ConnectView = 'sources' | 'connectors' | 'run-history';
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -581,7 +581,6 @@ type ConnectPageProps = {
 
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
   const actor = useActor();
-  const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
@@ -627,7 +626,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
 
   const availableViews = React.useMemo(
     () => (canAccessPlatformConnectors
-      ? (['sources', 'connectors', 'run-history'] as const)
+      ? (['connectors', 'run-history'] as const)
       : (['sources', 'run-history'] as const)),
     [canAccessPlatformConnectors]
   );
@@ -648,10 +647,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
-
-  if (platformScope) {
-    return <PlatformConnectorsPage initialView={initialView} onViewChange={onViewChange} />;
-  }
 
   const cmdbConnectors = CONNECTORS
     .filter((connector) => CMDB_CONNECTOR_IDS.includes(connector.id));
@@ -778,20 +773,23 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
         </section>
       )}
 
-      {activeView === 'run-history' && <IntegrationRunQueuePage />}
-
-      {activeView === 'processing-jobs' && (
-        <section className="panel">
-          <div className="notice" role="note">
-            Processing jobs are platform-owned maintenance work. Use the Platform console to run or inspect repair and rollout jobs.
-          </div>
-        </section>
+      {activeView === 'run-history' && (
+        canAccessPlatformConnectors ? (
+          <IntegrationRunQueuePage
+            title="Vulnerability Integration Run History"
+            caption="Track platform-owned vulnerability ingestion jobs triggered from the Connect workspace."
+            queryParams={{ category: 'vuln-intel', limit: 200 }}
+            storageKey="platform-vulnerability-run-history-table-widths"
+          />
+        ) : (
+          <InventoryRunQueuePage />
+        )
       )}
 
       {activeConnector && selectedConnector && !selectedConnectorAllowed && (
         <section className="panel">
           <div className="notice" role="note">
-            {'Central vulnerability repository feeds are platform-owned. Use the Platform console to run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, or repair jobs.'}
+            Central vulnerability repository feeds are platform-owned. Sign in as a Platform Owner to manage NVD, KEV, GHSA, CSAF/VEX, advisory, or EOL sources.
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setActiveConnector(null)}>
             Back to customer sources

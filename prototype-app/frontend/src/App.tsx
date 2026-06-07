@@ -1,5 +1,5 @@
 import React from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { InventoryViewKey } from './features/inventory/types';
 import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
@@ -20,7 +20,7 @@ import {
 } from './app/routes';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
 import { ActorContextState, useActor } from './features/auth/context';
-import { AUTH_CONTEXT_QUERY_ROOT, useActorQuery } from './features/auth/queries';
+import { useActorQuery } from './features/auth/queries';
 import type { ActorContext } from './features/auth/types';
 import {
   canAccessPlatformConsole,
@@ -479,18 +479,18 @@ function actorFromPersona(persona: TestPersona): ActorContext {
     creator: platformOwner,
     principal: persona.subject,
     userId: persona.subject,
-    tenantId: persona.tenantSlug ? `preview:${persona.tenantSlug}` : null,
-    tenantName: persona.tenantName,
+    tenantId: platformOwner ? null : persona.tenantSlug ? `preview:${persona.tenantSlug}` : null,
+    tenantName: platformOwner ? null : persona.tenantName,
     roles: persona.roles,
-    allowedTenants: persona.tenantSlug && persona.tenantName ? [{
+    allowedTenants: !platformOwner && persona.tenantSlug && persona.tenantName ? [{
       id: `preview:${persona.tenantSlug}`,
       name: persona.tenantName,
       slug: persona.tenantSlug,
       role: persona.roles[0] ?? 'SECURITY_ANALYST'
     }] : [],
-    platformScope: platformOwner && !persona.tenantSlug,
-    actingAsPlatformOwner: platformOwner && !!persona.tenantSlug,
-    sensitiveActionConfirmationRequired: platformOwner && !!persona.tenantSlug,
+    platformScope: platformOwner,
+    actingAsPlatformOwner: false,
+    sensitiveActionConfirmationRequired: false,
     planCode: null,
     demoExpiresAt: null,
     demoDaysRemaining: null,
@@ -721,18 +721,9 @@ function AppShell() {
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
   const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
-  const actingAsPlatformOwner = actor?.actingAsPlatformOwner ?? false;
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
-  const clearTenantContext = useMutation({
-    mutationFn: api.clearTenantContext,
-    onSuccess: (response) => {
-      setStoredAuthToken(response.token);
-      void queryClient.invalidateQueries({ queryKey: AUTH_CONTEXT_QUERY_ROOT });
-      navigate(pathForPlatformView('tenants'));
-    }
-  });
 
   const handleLogout = React.useCallback(() => {
     clearStoredAuthToken();
@@ -899,16 +890,6 @@ function AppShell() {
                   UI preview only - backend authorization still uses the current real session.
                 </div>
               )}
-              {actingAsPlatformOwner && (
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => clearTenantContext.mutate()}
-                  disabled={clearTenantContext.isPending}
-                >
-                  {clearTenantContext.isPending ? 'Returning...' : 'Return to Platform'}
-                </button>
-              )}
               <button
                 className="btn btn-secondary nav-toggle"
                 onClick={() => setNavOpen((current) => !current)}
@@ -931,28 +912,6 @@ function AppShell() {
                       <div className="brand-mark settings-menu-mark">SA</div>
                       <strong>Settings</strong>
                     </div>
-                    {canManageTenant(actor) && (
-                      <button
-                        type="button"
-                        className="settings-menu-item"
-                        role="menuitem"
-                        onClick={() => navigate('/admin/users')}
-                      >
-                        <span>Tenant Administration</span>
-                        <small>Users, roles, service accounts and audit</small>
-                      </button>
-                    )}
-                    {canAccessPlatformConsole(actor) && (
-                      <button
-                        type="button"
-                        className="settings-menu-item"
-                        role="menuitem"
-                        onClick={() => navigate(pathForPlatformView('tenants'))}
-                      >
-                        <span>Platform Console</span>
-                        <small>Tenants, connectors, support access and global repository views</small>
-                      </button>
-                    )}
                     {testPersonas.enabled && (
                       <button
                         type="button"
@@ -985,24 +944,6 @@ function AppShell() {
               </button>
             </div>
           </header>
-
-          {actingAsPlatformOwner && (
-            <div className="section-tab-row" role="status" aria-live="polite">
-              <span style={{ fontWeight: 600 }}>
-                Viewing {actor?.tenantName} as Platform Owner
-                {actor?.supportAccessMode ? ` · ${actor.supportAccessMode.replace(/_/g, ' ')}` : ''}
-                {actor?.supportGrantExpiresAt ? ` · expires ${new Date(actor.supportGrantExpiresAt).toLocaleString()}` : ''}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => clearTenantContext.mutate()}
-                disabled={clearTenantContext.isPending}
-              >
-                Return to Platform
-              </button>
-            </div>
-          )}
 
           {activeTab === 'vuln-repo' && (
             <div className="section-tab-row">

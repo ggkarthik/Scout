@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
@@ -42,7 +43,7 @@ public class Finding {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "display_id", nullable = false, updatable = false, insertable = false, length = 16)
+    @Column(name = "display_id", nullable = false, updatable = false, length = 16)
     private String displayId;
 
     @ManyToOne(optional = false)
@@ -392,6 +393,17 @@ public class Finding {
 
     public void setSeverityOverride(String severityOverride) {
         this.severityOverride = severityOverride;
+    }
+
+    @PrePersist
+    void ensureIdentifiers() {
+        if (id == null) {
+            id = UUID.randomUUID();
+        }
+        if (displayId == null || displayId.isBlank()) {
+            String compactId = id.toString().replace("-", "").toUpperCase();
+            displayId = "F-" + compactId.substring(0, 12);
+        }
     }
 
     public void touch() {

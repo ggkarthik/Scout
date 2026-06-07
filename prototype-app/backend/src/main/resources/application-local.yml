@@ -6,10 +6,6 @@ spring:
 app:
   security:
     allow-api-key-auth: true
-    jwt:
-      issuer-uri: https://dev-ws03t5n4y61lrmi4.us.auth0.com/
-      audience: https://api.hossstore.in
-      roles-claim: https://api.hossstore.in/roles
   tenancy:
     allow-header-tenant-selection: true
     require-tenant-context: false

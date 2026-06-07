@@ -2,12 +2,28 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.FindingBacklogHealthResponse;
 import com.prototype.vulnwatch.dto.FindingBulkWorkflowRequest;
 import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
+import com.prototype.vulnwatch.dto.FindingDistributionsResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
+import com.prototype.vulnwatch.dto.FindingProjectionStatusResponse;
+import com.prototype.vulnwatch.dto.FindingQueueAnalyticsResponse;
+import com.prototype.vulnwatch.dto.FindingQueueAnalyticsTrendPointResponse;
+import com.prototype.vulnwatch.dto.FindingQueueDefinitionResponse;
+import com.prototype.vulnwatch.dto.FindingQueueUpsertRequest;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
+import com.prototype.vulnwatch.dto.FindingPortfolioRollupResponse;
+import com.prototype.vulnwatch.dto.FindingSummaryResponse;
+import com.prototype.vulnwatch.dto.FindingsFilterRequest;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
+import com.prototype.vulnwatch.service.FindingAnalyticsService;
+import com.prototype.vulnwatch.service.FindingListProjectionService;
+import com.prototype.vulnwatch.service.FindingPortfolioRollupService;
+import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
+import com.prototype.vulnwatch.service.FindingQueueAnalyticsService;
+import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -31,15 +47,30 @@ public class FindingController {
 
     private final WorkspaceService workspaceService;
     private final FindingQueryService findingQueryService;
+    private final FindingAnalyticsService findingAnalyticsService;
+    private final FindingQueueAnalyticsService findingQueueAnalyticsService;
+    private final FindingPortfolioRollupService findingPortfolioRollupService;
+    private final FindingProjectionOperationsService findingProjectionOperationsService;
+    private final FindingQueueService findingQueueService;
     private final FindingWorkflowService findingWorkflowService;
 
     public FindingController(
             WorkspaceService workspaceService,
             FindingQueryService findingQueryService,
+            FindingAnalyticsService findingAnalyticsService,
+            FindingQueueAnalyticsService findingQueueAnalyticsService,
+            FindingPortfolioRollupService findingPortfolioRollupService,
+            FindingProjectionOperationsService findingProjectionOperationsService,
+            FindingQueueService findingQueueService,
             FindingWorkflowService findingWorkflowService
     ) {
         this.workspaceService = workspaceService;
         this.findingQueryService = findingQueryService;
+        this.findingAnalyticsService = findingAnalyticsService;
+        this.findingQueueAnalyticsService = findingQueueAnalyticsService;
+        this.findingPortfolioRollupService = findingPortfolioRollupService;
+        this.findingProjectionOperationsService = findingProjectionOperationsService;
+        this.findingQueueService = findingQueueService;
         this.findingWorkflowService = findingWorkflowService;
     }
 
@@ -47,37 +78,139 @@ public class FindingController {
     public FindingPageResponse list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) List<String> severity,
-            @RequestParam(required = false) List<String> status,
-            @RequestParam(required = false) List<String> decisionState,
-            @RequestParam(required = false) List<String> creationSource,
-            @RequestParam(required = false) List<String> matchMethod,
-            @RequestParam(required = false) List<String> vexStatus,
-            @RequestParam(required = false) List<String> vexFreshness,
-            @RequestParam(required = false) List<String> vexProvider,
-            @RequestParam(required = false) Double minConfidence,
-            @RequestParam(required = false) String vulnerabilityId,
-            @RequestParam(required = false) String packageName,
-            @RequestParam(required = false) String ecosystem
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit,
+            FindingsFilterRequest filterRequest
     ) {
         Tenant tenant = workspaceService.getWorkspace();
-        return findingQueryService.listByTenantPage(
+        var filter = findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter());
+        if (cursor != null || limit != null) {
+            return findingQueryService.listByTenantCursor(
+                    tenant,
+                    cursor,
+                    limit != null ? limit : size,
+                    filter
+            );
+        }
+        return findingQueryService.listByTenantPage(tenant, page, size, filter);
+    }
+
+    @GetMapping("/summary")
+    public FindingSummaryResponse summary(FindingsFilterRequest filterRequest) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingAnalyticsService.getSummary(tenant, findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()));
+    }
+
+    @GetMapping("/distributions")
+    public FindingDistributionsResponse distributions(FindingsFilterRequest filterRequest) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingAnalyticsService.getDistributions(tenant, findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()));
+    }
+
+    @GetMapping("/backlog-health")
+    public FindingBacklogHealthResponse backlogHealth(FindingsFilterRequest filterRequest) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingAnalyticsService.getBacklogHealth(tenant, findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()));
+    }
+
+    @GetMapping("/queue-analytics")
+    public FindingQueueAnalyticsResponse queueAnalytics(FindingsFilterRequest filterRequest) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueAnalyticsService.getQueueAnalytics(
                 tenant,
-                page,
-                size,
-                severity,
-                status,
-                decisionState,
-                creationSource,
-                matchMethod,
-                vexStatus,
-                vexFreshness,
-                vexProvider,
-                minConfidence,
-                vulnerabilityId,
-                packageName,
-                ecosystem
+                findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter())
         );
+    }
+
+    @GetMapping("/queue-analytics/trend")
+    public List<FindingQueueAnalyticsTrendPointResponse> queueAnalyticsTrend(
+            @RequestParam(defaultValue = "30") int days,
+            FindingsFilterRequest filterRequest
+    ) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueAnalyticsService.getQueueAnalyticsTrend(
+                tenant,
+                findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()),
+                days
+        );
+    }
+
+    @GetMapping("/portfolio-rollups")
+    public FindingPortfolioRollupResponse portfolioRollups() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingPortfolioRollupService.getPortfolioRollup(tenant);
+    }
+
+    @GetMapping("/projection-status")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    public FindingProjectionStatusResponse projectionStatus() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return toProjectionStatusResponse(findingProjectionOperationsService.inspectStatus(tenant));
+    }
+
+    @PostMapping("/projection-rebuild")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("finding.projection.rebuilt")
+    public FindingProjectionStatusResponse rebuildProjection() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return toProjectionStatusResponse(findingProjectionOperationsService.rebuild(tenant));
+    }
+
+    @GetMapping("/queues")
+    public List<FindingQueueDefinitionResponse> queues() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueService.listQueues(tenant);
+    }
+
+    @GetMapping("/queues/{queueKey}")
+    public FindingQueueDefinitionResponse queue(@PathVariable String queueKey) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueService.getQueue(tenant, queueKey);
+    }
+
+    @PostMapping("/queues")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.queue.created")
+    public FindingQueueDefinitionResponse createQueue(@RequestBody FindingQueueUpsertRequest request) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueService.createQueue(tenant, request);
+    }
+
+    @PutMapping("/queues/{queueRef}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.queue.updated")
+    public FindingQueueDefinitionResponse updateQueue(
+            @PathVariable String queueRef,
+            @RequestBody FindingQueueUpsertRequest request
+    ) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueService.updateQueue(tenant, queueRef, request);
+    }
+
+    @PostMapping("/queues/{queueRef}/duplicate")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.queue.duplicated")
+    public FindingQueueDefinitionResponse duplicateQueue(@PathVariable String queueRef) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueueService.duplicateQueue(tenant, queueRef);
+    }
+
+    @PostMapping("/queues/{queueRef}/default")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.queue.default_set")
+    public ResponseEntity<Void> setDefaultQueue(@PathVariable String queueRef) {
+        Tenant tenant = workspaceService.getWorkspace();
+        findingQueueService.setDefaultQueue(tenant, queueRef);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/queues/{queueRef}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("finding.queue.deleted")
+    public ResponseEntity<Void> deleteQueue(@PathVariable String queueRef) {
+        Tenant tenant = workspaceService.getWorkspace();
+        findingQueueService.deleteQueue(tenant, queueRef);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/filters")
@@ -132,5 +265,16 @@ public class FindingController {
         }
         int deleted = findingWorkflowService.bulkDelete(request.findingIds());
         return ResponseEntity.ok(new BulkDeleteResponse(deleted, deleted + " finding(s) permanently deleted"));
+    }
+
+    private FindingProjectionStatusResponse toProjectionStatusResponse(FindingListProjectionService.ProjectionStatus status) {
+        return new FindingProjectionStatusResponse(
+                status.lastComputedAt(),
+                status.findingCount(),
+                status.sourceFindingCount(),
+                status.stale(),
+                status.driftCount(),
+                status.lastRebuildDurationMs()
+        );
     }
 }

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -214,6 +215,7 @@ class LocalCredentialAuthServiceTest {
 
         assertEquals("platform.owner@localhost", jwt.getSubject());
         assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+        verifyNoInteractions(tenantSupportGrantService);
     }
 
     @Test

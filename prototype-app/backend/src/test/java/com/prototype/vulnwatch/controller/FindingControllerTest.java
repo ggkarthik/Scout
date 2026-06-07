@@ -17,16 +17,36 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.FindingBacklogHealthResponse;
 import com.prototype.vulnwatch.dto.FindingBulkWorkflowRequest;
 import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
+import com.prototype.vulnwatch.dto.FindingCountBucketResponse;
+import com.prototype.vulnwatch.dto.FindingDistributionsResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
+import com.prototype.vulnwatch.dto.FindingQueueAgingBucketResponse;
+import com.prototype.vulnwatch.dto.FindingQueueAnalyticsResponse;
+import com.prototype.vulnwatch.dto.FindingQueueAnalyticsTrendPointResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
+import com.prototype.vulnwatch.dto.FindingPortfolioQueueRollupResponse;
+import com.prototype.vulnwatch.dto.FindingPortfolioRollupResponse;
+import com.prototype.vulnwatch.dto.FindingQueueDefinitionResponse;
+import com.prototype.vulnwatch.dto.FindingQueueUpsertRequest;
+import com.prototype.vulnwatch.dto.FindingQueueWorkloadBreakdownResponse;
+import com.prototype.vulnwatch.dto.FindingSummaryResponse;
+import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
+import com.prototype.vulnwatch.service.FindingAnalyticsService;
+import com.prototype.vulnwatch.service.FindingListProjectionService;
+import com.prototype.vulnwatch.service.FindingPortfolioRollupService;
+import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
+import com.prototype.vulnwatch.service.FindingQueueAnalyticsService;
+import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,6 +62,11 @@ class FindingControllerTest {
 
     @Mock private WorkspaceService workspaceService;
     @Mock private FindingQueryService findingQueryService;
+    @Mock private FindingAnalyticsService findingAnalyticsService;
+    @Mock private FindingQueueAnalyticsService findingQueueAnalyticsService;
+    @Mock private FindingPortfolioRollupService findingPortfolioRollupService;
+    @Mock private FindingProjectionOperationsService findingProjectionOperationsService;
+    @Mock private FindingQueueService findingQueueService;
     @Mock private FindingWorkflowService findingWorkflowService;
 
     private MockMvc mockMvc;
@@ -51,7 +76,15 @@ class FindingControllerTest {
     @BeforeEach
     void setUp() {
         FindingController controller = new FindingController(
-                workspaceService, findingQueryService, findingWorkflowService);
+                workspaceService,
+                findingQueryService,
+                findingAnalyticsService,
+                findingQueueAnalyticsService,
+                findingPortfolioRollupService,
+                findingProjectionOperationsService,
+                findingQueueService,
+                findingWorkflowService
+        );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         tenant = new Tenant();
         tenant.setId(UUID.fromString("00000000-0000-0000-0000-000000000001"));
@@ -61,11 +94,8 @@ class FindingControllerTest {
     @Test
     void listReturnsPagedFindings() throws Exception {
         when(workspaceService.getWorkspace()).thenReturn(tenant);
-        when(findingQueryService.listByTenantPage(
-                eq(tenant), eq(0), eq(25),
-                isNull(), isNull(), isNull(), isNull(), isNull(),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull()
-        )).thenReturn(new FindingPageResponse(List.of(), 0, 25, 3L, 1));
+        when(findingQueryService.listByTenantPage(eq(tenant), eq(0), eq(25), any()))
+                .thenReturn(new FindingPageResponse(List.of(), 0, 25, 3L, 1, null));
 
         mockMvc.perform(get("/api/findings"))
                 .andExpect(status().isOk())
@@ -78,11 +108,8 @@ class FindingControllerTest {
     @Test
     void listPassesFilterParamsToQueryService() throws Exception {
         when(workspaceService.getWorkspace()).thenReturn(tenant);
-        when(findingQueryService.listByTenantPage(
-                eq(tenant), eq(1), eq(10),
-                eq(List.of("CRITICAL")), eq(List.of("OPEN")),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull()
-        )).thenReturn(new FindingPageResponse(List.of(), 1, 10, 0L, 0));
+        when(findingQueryService.listByTenantPage(eq(tenant), eq(1), eq(10), any()))
+                .thenReturn(new FindingPageResponse(List.of(), 1, 10, 0L, 0, null));
 
         mockMvc.perform(get("/api/findings")
                         .param("page", "1")
@@ -92,10 +119,248 @@ class FindingControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.page").value(1));
 
-        verify(findingQueryService).listByTenantPage(
-                eq(tenant), eq(1), eq(10),
-                eq(List.of("CRITICAL")), eq(List.of("OPEN")),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull());
+        verify(findingQueryService).listByTenantPage(eq(tenant), eq(1), eq(10), any());
+    }
+
+    @Test
+    void summaryDelegatesToAnalyticsService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingAnalyticsService.getSummary(eq(tenant), any()))
+                .thenReturn(new FindingSummaryResponse(12, 4, 5, 3, 2, 1));
+
+        mockMvc.perform(get("/api/findings/summary").param("severity", "CRITICAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openCount").value(12))
+                .andExpect(jsonPath("$.criticalOpenCount").value(4));
+
+        verify(findingAnalyticsService).getSummary(eq(tenant), any());
+    }
+
+    @Test
+    void listQueuesDelegatesToQueueService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingQueueService.listQueues(tenant)).thenReturn(List.of(
+                new FindingQueueDefinitionResponse(
+                        null,
+                        "all-findings",
+                        "All Findings",
+                        "Full findings backlog across the active tenant.",
+                        "BUILT_IN",
+                        "SYSTEM",
+                        false,
+                        false,
+                        10,
+                        new FindingsFilter(null, null, null, null, null, null, null, null,
+                                null, null, null, null, null, null, null, null, null, null, null, null, null),
+                        new FindingSummaryResponse(10, 3, 2, 4, 1, 0)
+                )
+        ));
+
+        mockMvc.perform(get("/api/findings/queues"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].key").value("all-findings"))
+                .andExpect(jsonPath("$[0].summary.openCount").value(10));
+
+        verify(findingQueueService).listQueues(tenant);
+    }
+
+    @Test
+    void projectionStatusReturnsDriftMetadata() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingProjectionOperationsService.inspectStatus(tenant))
+                .thenReturn(new FindingListProjectionService.ProjectionStatus(
+                        java.time.Instant.parse("2026-06-05T10:15:30Z"),
+                        90,
+                        100,
+                        275L,
+                        true,
+                        10
+                ));
+
+        mockMvc.perform(get("/api/findings/projection-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.findingCount").value(90))
+                .andExpect(jsonPath("$.sourceFindingCount").value(100))
+                .andExpect(jsonPath("$.driftCount").value(10))
+                .andExpect(jsonPath("$.stale").value(true))
+                .andExpect(jsonPath("$.lastRebuildDurationMs").value(275));
+    }
+
+    @Test
+    void rebuildProjectionRefreshesTenantAndReturnsUpdatedStatus() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingProjectionOperationsService.rebuild(tenant))
+                .thenReturn(new FindingListProjectionService.ProjectionStatus(
+                        java.time.Instant.parse("2026-06-05T10:16:00Z"),
+                        100,
+                        100,
+                        311L,
+                        false,
+                        0
+                ));
+
+        mockMvc.perform(post("/api/findings/projection-rebuild"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.findingCount").value(100))
+                .andExpect(jsonPath("$.stale").value(false));
+
+        verify(findingProjectionOperationsService).rebuild(tenant);
+    }
+
+    @Test
+    void listWithQueueKeyResolvesQueueFilter() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingQueueService.resolveEffectiveFilter(eq("critical-open"), any()))
+                .thenReturn(new FindingsFilter(List.of("CRITICAL"), List.of("OPEN"), null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, null, null, null, null, null, null));
+        when(findingQueryService.listByTenantPage(eq(tenant), eq(0), eq(25), any()))
+                .thenReturn(new FindingPageResponse(List.of(), 0, 25, 0L, 0, null));
+
+        mockMvc.perform(get("/api/findings").param("queueKey", "critical-open"))
+                .andExpect(status().isOk());
+
+        verify(findingQueueService).resolveEffectiveFilter(eq("critical-open"), any());
+        verify(findingQueryService).listByTenantPage(eq(tenant), eq(0), eq(25), any());
+    }
+
+    @Test
+    void createQueueDelegatesToQueueService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingQueueService.createQueue(eq(tenant), any())).thenReturn(
+                new FindingQueueDefinitionResponse(
+                        UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                        "personal:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                        "My Queue",
+                        "Saved view",
+                        "PERSONAL",
+                        "USER",
+                        true,
+                        true,
+                        3,
+                        new FindingsFilter(List.of("CRITICAL"), List.of("OPEN"), null, null, null, null, null, null,
+                                null, null, null, null, null, null, null, null, null, null, null, null, null),
+                        new FindingSummaryResponse(3, 1, 0, 0, 0, 0)
+                )
+        );
+
+        mockMvc.perform(post("/api/findings/queues")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new FindingQueueUpsertRequest(
+                                "My Queue",
+                                "Saved view",
+                                new FindingsFilter(List.of("CRITICAL"), List.of("OPEN"), null, null, null, null, null, null,
+                                        null, null, null, null, null, null, null, null, null, null, null, null, null),
+                                null,
+                                "critical-open",
+                                true
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("My Queue"))
+                .andExpect(jsonPath("$.isDefault").value(true));
+    }
+
+    @Test
+    void distributionsDelegatesToAnalyticsService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingAnalyticsService.getDistributions(eq(tenant), any()))
+                .thenReturn(new FindingDistributionsResponse(
+                        List.of(new FindingCountBucketResponse("CRITICAL", 2)),
+                        List.of(new FindingCountBucketResponse("OPEN", 7)),
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/api/findings/distributions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.severityCounts[0].key").value("CRITICAL"));
+
+        verify(findingAnalyticsService).getDistributions(eq(tenant), any());
+    }
+
+    @Test
+    void backlogHealthDelegatesToAnalyticsService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingAnalyticsService.getBacklogHealth(eq(tenant), any()))
+                .thenReturn(new FindingBacklogHealthResponse(3, 2, 5, 1));
+
+        mockMvc.perform(get("/api/findings/backlog-health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overdue").value(3))
+                .andExpect(jsonPath("$.noSla").value(1));
+
+        verify(findingAnalyticsService).getBacklogHealth(eq(tenant), any());
+    }
+
+    @Test
+    void queueAnalyticsDelegatesToQueueAnalyticsService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingQueueAnalyticsService.getQueueAnalytics(eq(tenant), any()))
+                .thenReturn(new FindingQueueAnalyticsResponse(
+                        List.of(new FindingQueueAgingBucketResponse("0-7d", 2)),
+                        12.5,
+                        3,
+                        6,
+                        1,
+                        4,
+                        3,
+                        42,
+                        9,
+                        List.of(),
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/api/findings/queue-analytics").param("queueKey", "critical-open"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reopenRatePercent").value(12.5))
+                .andExpect(jsonPath("$.agingBuckets[0].key").value("0-7d"));
+
+        verify(findingQueueService).resolveEffectiveFilter(eq("critical-open"), any());
+        verify(findingQueueAnalyticsService).getQueueAnalytics(eq(tenant), any());
+    }
+
+    @Test
+    void portfolioRollupsDelegateToPortfolioService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingPortfolioRollupService.getPortfolioRollup(eq(tenant)))
+                .thenReturn(new FindingPortfolioRollupResponse(
+                        14,
+                        3,
+                        2,
+                        List.of(new FindingPortfolioQueueRollupResponse("all-findings", "All Findings", 14, 14, 3, 2, 4, 5)),
+                        List.of(new FindingQueueWorkloadBreakdownResponse("Platform", 5)),
+                        List.of(new FindingQueueWorkloadBreakdownResponse("Ops", 6))
+                ));
+
+        mockMvc.perform(get("/api/findings/portfolio-rollups"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOpenCount").value(14))
+                .andExpect(jsonPath("$.queueRollups[0].queueKey").value("all-findings"))
+                .andExpect(jsonPath("$.topSupportGroups[0].label").value("Ops"));
+
+        verify(findingPortfolioRollupService).getPortfolioRollup(eq(tenant));
+    }
+
+    @Test
+    void queueAnalyticsTrendDelegatesToQueueAnalyticsService() throws Exception {
+        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(findingQueueAnalyticsService.getQueueAnalyticsTrend(eq(tenant), any(), eq(14)))
+                .thenReturn(List.of(new FindingQueueAnalyticsTrendPointResponse(
+                        LocalDate.of(2026, 6, 1),
+                        2,
+                        1,
+                        1
+                )));
+
+        mockMvc.perform(get("/api/findings/queue-analytics/trend")
+                        .param("queueKey", "critical-open")
+                        .param("days", "14"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].date[0]").value(2026))
+                .andExpect(jsonPath("$[0].date[1]").value(6))
+                .andExpect(jsonPath("$[0].date[2]").value(1))
+                .andExpect(jsonPath("$[0].openedCount").value(2));
+
+        verify(findingQueueService).resolveEffectiveFilter(eq("critical-open"), any());
+        verify(findingQueueAnalyticsService).getQueueAnalyticsTrend(eq(tenant), any(), eq(14));
     }
 
     @Test
