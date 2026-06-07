@@ -33,22 +33,34 @@ public class SyncRunHistoryService {
     private static final List<String> VULN_INTEL_TYPES = List.of(
             "NVD", "KEV", "GHSA", "CSAF_MICROSOFT", "CSAF_REDHAT", "ADVISORY"
     );
-    private static final Set<String> PROCESSING_RUN_TYPES = Set.of(
-            "VEX_ASSERTION_REPAIR",
-            "VEX_ROLLOUT_BACKFILL",
+    private static final Set<String> EOL_CONNECTOR_RUN_TYPES = Set.of(
             "EOL_CATALOG_REFRESH",
             "EOL_RELEASE_REFRESH",
             "EOL_MAPPING_RESOLVE",
             "EOL_DENORMALIZE",
             "EOL_FULL_REFRESH"
     );
+    private static final Set<String> PROCESSING_RUN_TYPES = Set.of(
+            "VEX_ASSERTION_REPAIR",
+            "VEX_ROLLOUT_BACKFILL",
+            "EOL_DATE_SWEEP"
+    );
 
     private final SyncRunRepository syncRunRepository;
     private final RequestActorService requestActorService;
+    private final WorkspaceService workspaceService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
-    public SyncRunHistoryService(SyncRunRepository syncRunRepository, RequestActorService requestActorService) {
+    public SyncRunHistoryService(
+            SyncRunRepository syncRunRepository,
+            RequestActorService requestActorService,
+            WorkspaceService workspaceService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
+    ) {
         this.syncRunRepository = syncRunRepository;
         this.requestActorService = requestActorService;
+        this.workspaceService = workspaceService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public List<SyncRunResponse> list(String category, int limit) {
@@ -57,7 +69,8 @@ public class SyncRunHistoryService {
         RequestActor actor = requestActorService.currentActor();
 
         Map<UUID, Integer> queuePositions = activeQueuePositions(actor, normalizedCategory);
-        return runsForActor(actor).stream()
+        return runsForActor(actor, normalizedCategory).stream()
+                .filter(run -> actorCanViewRun(actor, run))
                 .filter(run -> matchesCategory(run.getSyncType(), normalizedCategory))
                 .map(run -> toResponse(run, queuePositions.get(run.getId())))
                 .sorted(Comparator
@@ -82,7 +95,8 @@ public class SyncRunHistoryService {
     }
 
     private Map<UUID, Integer> activeQueuePositions(RequestActor actor, String category) {
-        List<SyncRun> queue = queueForActor(actor).stream()
+        List<SyncRun> queue = queueForActor(actor, category).stream()
+                .filter(run -> actorCanViewRun(actor, run))
                 .filter(run -> matchesCategory(run.getSyncType(), category))
                 .sorted(Comparator
                         .comparingInt((SyncRun run) -> "running".equalsIgnoreCase(run.getStatus()) ? 0 : 1)
@@ -95,9 +109,10 @@ public class SyncRunHistoryService {
         return queuePositions;
     }
 
-    private List<SyncRun> runsForActor(RequestActor actor) {
-        if (actor.platformScope()) {
-            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt"));
+    private List<SyncRun> runsForActor(RequestActor actor, String category) {
+        if (shouldUsePlatformVulnerabilityScope(actor, category)) {
+            return inPlatformWorkspace(() ->
+                    syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")));
         }
         if (actor.tenantId() == null) {
             return List.of();
@@ -105,11 +120,12 @@ public class SyncRunHistoryService {
         return syncRunRepository.findAllByOrderByStartedAtDesc();
     }
 
-    private List<SyncRun> queueForActor(RequestActor actor) {
-        if (actor.platformScope()) {
-            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")).stream()
-                    .filter(run -> "queued".equalsIgnoreCase(run.getStatus()) || "running".equalsIgnoreCase(run.getStatus()))
-                    .toList();
+    private List<SyncRun> queueForActor(RequestActor actor, String category) {
+        if (shouldUsePlatformVulnerabilityScope(actor, category)) {
+            return inPlatformWorkspace(() ->
+                    syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")).stream()
+                            .filter(run -> "queued".equalsIgnoreCase(run.getStatus()) || "running".equalsIgnoreCase(run.getStatus()))
+                            .toList());
         }
         if (actor.tenantId() == null) {
             return List.of();
@@ -118,15 +134,32 @@ public class SyncRunHistoryService {
     }
 
     private java.util.Optional<SyncRun> findLatestByActor(RequestActor actor, String syncType) {
-        if (actor.platformScope()) {
-            return syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")).stream()
-                    .filter(run -> syncType.equalsIgnoreCase(run.getSyncType()))
-                    .findFirst();
+        if (actor.hasRole("PLATFORM_OWNER")) {
+            return inPlatformWorkspace(() ->
+                    syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")).stream()
+                            .filter(run -> syncType.equalsIgnoreCase(run.getSyncType()))
+                            .findFirst());
         }
         if (actor.tenantId() == null) {
             return java.util.Optional.empty();
         }
+        if (!isInventoryRunType(syncType)) {
+            return java.util.Optional.empty();
+        }
         return syncRunRepository.findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc(syncType);
+    }
+
+    private boolean actorCanViewRun(RequestActor actor, SyncRun run) {
+        if (actor.hasRole("PLATFORM_OWNER") && "PLATFORM_VULNERABILITY".equalsIgnoreCase(safe(run.getRunScope()))) {
+            return true;
+        }
+        if (actor.platformScope()) {
+            return true;
+        }
+        if (actor.tenantId() == null) {
+            return false;
+        }
+        return isInventoryRunType(run.getSyncType());
     }
 
     private SyncRunResponse toResponse(SyncRun run, Integer queuePosition) {
@@ -184,10 +217,24 @@ public class SyncRunHistoryService {
         return normalized.isBlank() ? CATEGORY_ALL : normalized;
     }
 
+    private boolean shouldUsePlatformVulnerabilityScope(RequestActor actor, String category) {
+        if (actor == null || !actor.hasRole("PLATFORM_OWNER")) {
+            return false;
+        }
+        return !CATEGORY_INVENTORY.equals(category);
+    }
+
+    private <T> T inPlatformWorkspace(java.util.function.Supplier<T> supplier) {
+        return tenantSchemaExecutionService.run(workspaceService.getDefaultWorkspace(), supplier);
+    }
+
     private SyncRunClassification classifyRunType(String syncType) {
         String normalizedType = safe(syncType).toUpperCase(Locale.ROOT);
         if (isInventoryRunType(normalizedType)) {
             return new SyncRunClassification(RUN_DOMAIN_INVENTORY, RUN_CLASS_INGESTION);
+        }
+        if (EOL_CONNECTOR_RUN_TYPES.contains(normalizedType)) {
+            return new SyncRunClassification(RUN_DOMAIN_VULN_INTEL, RUN_CLASS_INGESTION);
         }
         if (PROCESSING_RUN_TYPES.contains(normalizedType)) {
             return new SyncRunClassification(RUN_DOMAIN_PROCESSING, classifyRunClass(normalizedType));

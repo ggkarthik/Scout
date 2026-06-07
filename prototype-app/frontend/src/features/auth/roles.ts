@@ -50,7 +50,8 @@ export function canRefreshTenantExposure(actor: ActorContext | null): boolean {
 }
 
 export function canManageSourceFilters(actor: ActorContext | null): boolean {
-  return !isPlatformScopeOnly(actor) && hasAnyRole(actor, ['PLATFORM_OWNER', 'TENANT_ADMIN', 'SECURITY_ANALYST']);
+  return hasRole(actor, 'PLATFORM_OWNER')
+    || (!isPlatformScopeOnly(actor) && hasAnyRole(actor, ['TENANT_ADMIN', 'SECURITY_ANALYST']));
 }
 
 export function canViewReadOnly(actor: ActorContext | null): boolean {

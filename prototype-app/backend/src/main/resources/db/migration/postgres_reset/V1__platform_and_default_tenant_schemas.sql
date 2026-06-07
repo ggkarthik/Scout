@@ -1658,3 +1658,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_cluster_link_active
 CREATE INDEX IF NOT EXISTS idx_cluster_link_tenant
     ON tenant_default.software_identity_cluster_link (tenant_id)
     WHERE revoked_at IS NULL;
+
+-- Investigation runbook state + agent/copilot config (Phase 2+3)
+
+CREATE TABLE IF NOT EXISTS tenant_default.investigation_runbook (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id           UUID NOT NULL
+                            REFERENCES platform.tenants(id),
+    cve_external_id     VARCHAR(50) NOT NULL,
+    task_states         JSONB NOT NULL DEFAULT '[]',
+    agent_suggestions   JSONB NOT NULL DEFAULT '{}',
+    fp_overrides        JSONB NOT NULL DEFAULT '[]',
+    log_entries         JSONB NOT NULL DEFAULT '[]',
+    lead_analyst        VARCHAR(100),
+    agent_confidence    JSONB,
+    agent_run_meta      JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_runbook_tenant_cve UNIQUE (tenant_id, cve_external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runbook_tenant_id
+    ON tenant_default.investigation_runbook(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_runbook_cve_external_id
+    ON tenant_default.investigation_runbook(cve_external_id);
+
+ALTER TABLE tenant_default.risk_policies
+    ADD COLUMN IF NOT EXISTS copilot_enabled            BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS copilot_shadow_mode        BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS copilot_auto_run           BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS agent_auto_threshold       DOUBLE PRECISION NOT NULL DEFAULT 0.85,
+    ADD COLUMN IF NOT EXISTS agent_review_threshold     DOUBLE PRECISION NOT NULL DEFAULT 0.60,
+    ADD COLUMN IF NOT EXISTS agent_max_concurrent       INTEGER NOT NULL DEFAULT 10;

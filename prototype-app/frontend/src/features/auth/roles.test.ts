@@ -23,6 +23,15 @@ function actor(roles: string[]): ActorContext {
   };
 }
 
+function platformScopeActor(roles: string[]): ActorContext {
+  return {
+    ...actor(roles),
+    tenantId: null,
+    tenantName: null,
+    platformScope: true
+  };
+}
+
 describe('role helpers', () => {
   it('keeps platform-owner operations separate from customer roles', () => {
     expect(canAccessPlatformConsole(actor(['PLATFORM_OWNER']))).toBe(true);
@@ -43,6 +52,11 @@ describe('role helpers', () => {
     expect(canRefreshTenantExposure(actor(['SECURITY_ANALYST']))).toBe(true);
     expect(canManageInventorySources(actor(['SECURITY_ANALYST']))).toBe(false);
     expect(canManageRiskPolicy(actor(['SECURITY_ANALYST']))).toBe(false);
+  });
+
+  it('allows platform-scope owners to manage vulnerability source filters', () => {
+    expect(canManageSourceFilters(platformScopeActor(['PLATFORM_OWNER']))).toBe(true);
+    expect(canManageRiskPolicy(platformScopeActor(['PLATFORM_OWNER']))).toBe(false);
   });
 
   it('allows read-only actors to view but not mutate', () => {

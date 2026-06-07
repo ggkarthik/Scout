@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.AppUser;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -32,9 +34,6 @@ class JwtTenantAuthenticationServiceTest {
 
     @Mock
     TenantMembershipRepository membershipRepository;
-
-    @Mock
-    TenantSupportGrantService tenantSupportGrantService;
     @Mock
     TenantLifecycleGuardService tenantLifecycleGuardService;
     @Mock
@@ -54,7 +53,6 @@ class JwtTenantAuthenticationServiceTest {
                 userRepository,
                 tenantRepository,
                 membershipRepository,
-                tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 "sub",
@@ -95,7 +93,6 @@ class JwtTenantAuthenticationServiceTest {
                 userRepository,
                 tenantRepository,
                 membershipRepository,
-                tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 "sub",
@@ -134,7 +131,6 @@ class JwtTenantAuthenticationServiceTest {
                 userRepository,
                 tenantRepository,
                 membershipRepository,
-                tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 "sub",
@@ -172,7 +168,6 @@ class JwtTenantAuthenticationServiceTest {
                 userRepository,
                 tenantRepository,
                 membershipRepository,
-                tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 "email",
@@ -196,5 +191,45 @@ class JwtTenantAuthenticationServiceTest {
         assertEquals("owner@example.com", actor.subject());
         assertEquals(Set.of("PLATFORM_OWNER"), actor.roles());
         verify(appUserGlobalRoleService).ensureRole(user, "PLATFORM_OWNER");
+    }
+
+    @Test
+    void platformOwnerIgnoresActiveTenantContextClaims() {
+        AppUser user = new AppUser();
+        user.setId(UUID.randomUUID());
+        user.setExternalSubject("owner@example.com");
+
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of("PLATFORM_OWNER"));
+
+        JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                "sub",
+                "tenant_id",
+                "active_tenant_id",
+                "tenant_slug",
+                "email",
+                "name",
+                "roles",
+                "scout-ui");
+
+        AuthenticatedTenantActor actor = service.authenticate(Jwt.withTokenValue("token")
+                        .header("alg", "HS256")
+                        .subject("owner@example.com")
+                        .claim("email", "owner@example.com")
+                        .claim("roles", List.of("PLATFORM_OWNER"))
+                        .claim("active_tenant_id", UUID.fromString("11111111-1111-1111-1111-111111111111").toString())
+                        .issuedAt(Instant.now())
+                        .expiresAt(Instant.now().plusSeconds(3600))
+                        .build(),
+                "/api/ingestion/nvd-sync");
+
+        assertNull(actor.tenantId());
+        assertNull(actor.tenantName());
     }
 }

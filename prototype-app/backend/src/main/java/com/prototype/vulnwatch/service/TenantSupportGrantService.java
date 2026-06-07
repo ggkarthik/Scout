@@ -13,6 +13,7 @@ import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.TenantSupportGrantRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -174,6 +175,29 @@ public class TenantSupportGrantService {
 
     public boolean isWriteEnabled(String accessMode) {
         return ACCESS_MODE_WRITE_ENABLED.equals(normalizeAccessMode(accessMode));
+    }
+
+    @Transactional
+    public TenantSupportGrant ensureLocalDevelopmentWriteGrant(Tenant tenant, AppUser platformOwner) {
+        TenantSupportGrant existing = findActiveGrant(platformOwner.getExternalSubject(), tenant.getId()).orElse(null);
+        if (existing != null && isWriteEnabled(existing.getAccessMode())) {
+            return existing;
+        }
+        Instant now = Instant.now();
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setTenant(tenant);
+        grant.setGrantedBy(platformOwner);
+        grant.setAcceptedBy(platformOwner);
+        grant.setInvitedPlatformSubject(normalizeSubject(platformOwner.getExternalSubject()));
+        grant.setReason("Localhost development bootstrap access");
+        grant.setScope("LOCALHOST_BOOTSTRAP");
+        grant.setAccessMode(ACCESS_MODE_WRITE_ENABLED);
+        grant.setStatus("ACTIVE");
+        grant.setRequestedAt(now);
+        grant.setAcceptedAt(now);
+        grant.setExpiresAt(now.plus(3650, ChronoUnit.DAYS));
+        grant.setUpdatedAt(now);
+        return tenantSupportGrantRepository.save(grant);
     }
 
     private TenantSupportGrant refreshExpiredStatus(TenantSupportGrant grant) {

@@ -4,28 +4,25 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Finding;
-import com.prototype.vulnwatch.domain.FindingCreationSource;
+import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
-import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
+import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingResponse;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -44,19 +41,22 @@ public class FindingQueryService {
     private final FindingsScoreService findingsScoreService;
     private final RiskPolicyService riskPolicyService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final FindingListProjectionService findingListProjectionService;
 
     public FindingQueryService(
             FindingRepository findingRepository,
             ObjectMapper objectMapper,
             FindingsScoreService findingsScoreService,
             RiskPolicyService riskPolicyService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            FindingListProjectionService findingListProjectionService
     ) {
         this.findingRepository = findingRepository;
         this.objectMapper = objectMapper;
         this.findingsScoreService = findingsScoreService;
         this.riskPolicyService = riskPolicyService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.findingListProjectionService = findingListProjectionService;
     }
 
     @Transactional(readOnly = true)
@@ -64,79 +64,57 @@ public class FindingQueryService {
             Tenant tenant,
             int page,
             int size,
-            List<String> severity,
-            List<String> status,
-            List<String> decisionState,
-            List<String> creationSource,
-            List<String> matchMethod,
-            List<String> vexStatus,
-            List<String> vexFreshness,
-            List<String> vexProvider,
-            Double minConfidence,
-            String vulnerabilityId,
-            String packageName,
-            String ecosystem
+            FindingsFilter filter
     ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(200, size));
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "updatedAt"));
 
-        Specification<Finding> specification = byFilter(
-                tenant,
-                severity,
-                status,
-                decisionState,
-                creationSource,
-                matchMethod,
-                vexStatus,
-                vexFreshness,
-                vexProvider,
-                minConfidence,
-                vulnerabilityId,
-                packageName,
-                ecosystem
-        );
+        Specification<Finding> specification = FindingFilterSpecifications.byFilter(tenant, filter);
         Page<Finding> findings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAll(specification, pageable));
         return new FindingPageResponse(
                 findings.getContent().stream().map(this::toResponse).toList(),
                 findings.getNumber(),
                 findings.getSize(),
                 findings.getTotalElements(),
-                findings.getTotalPages()
+                findings.getTotalPages(),
+                null
         );
     }
 
     @Transactional(readOnly = true)
-    public List<Finding> listEntitiesByTenantFilter(
+    public FindingPageResponse listByTenantCursor(
             Tenant tenant,
-            List<String> severity,
-            List<String> status,
-            List<String> decisionState,
-            List<String> creationSource,
-            List<String> matchMethod,
-            List<String> vexStatus,
-            List<String> vexFreshness,
-            List<String> vexProvider,
-            Double minConfidence,
-            String vulnerabilityId,
-            String packageName,
-            String ecosystem
+            String cursor,
+            int limit,
+            FindingsFilter filter
     ) {
-        Specification<Finding> specification = byFilter(
-                tenant,
-                severity,
-                status,
-                decisionState,
-                creationSource,
-                matchMethod,
-                vexStatus,
-                vexFreshness,
-                vexProvider,
-                minConfidence,
-                vulnerabilityId,
-                packageName,
-                ecosystem
+        int safeLimit = Math.max(1, Math.min(200, limit));
+        FindingListProjectionService.ProjectionPage projectionPage =
+                findingListProjectionService.queryPage(tenant, filter, cursor, safeLimit);
+        Map<UUID, Finding> findingsById = findingRepository.findAllById(projectionPage.findingIds()).stream()
+                .collect(Collectors.toMap(Finding::getId, finding -> finding, (left, right) -> left, LinkedHashMap::new));
+        List<FindingResponse> items = projectionPage.findingIds().stream()
+                .map(findingsById::get)
+                .filter(Objects::nonNull)
+                .map(this::toResponse)
+                .toList();
+        int totalPages = projectionPage.totalItems() == 0
+                ? 0
+                : (int) Math.ceil((double) projectionPage.totalItems() / safeLimit);
+        return new FindingPageResponse(
+                items,
+                0,
+                safeLimit,
+                projectionPage.totalItems(),
+                totalPages,
+                projectionPage.nextCursor()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public List<Finding> listEntitiesByTenantFilter(Tenant tenant, FindingsFilter filter) {
+        Specification<Finding> specification = FindingFilterSpecifications.byFilter(tenant, filter);
         return tenantSchemaExecutionService.run(
                 tenant,
                 () -> findingRepository.findAll(specification, Sort.by(Sort.Direction.DESC, "updatedAt"))
@@ -166,7 +144,7 @@ public class FindingQueryService {
     public FindingFilterValuesResponse listAvailableFilters(Tenant tenant) {
         LinkedHashSet<String> severities = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctSeveritiesByTenant(tenant)).stream()
-                .filter(this::hasText)
+                .filter(FindingFilterSpecifications::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(severities::add);
         severities.addAll(List.of("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE", "UNKNOWN"));
@@ -191,41 +169,41 @@ public class FindingQueryService {
 
         LinkedHashSet<String> matchMethods = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctMatchMethodsByTenant(tenant)).stream()
-                .filter(this::hasText)
+                .filter(FindingFilterSpecifications::hasText)
                 .map(value -> value.trim().toLowerCase(Locale.ROOT))
                 .forEach(matchMethods::add);
 
         LinkedHashSet<String> vexStatuses = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexStatusesByTenant(tenant)).stream()
-                .filter(this::hasText)
+                .filter(FindingFilterSpecifications::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(vexStatuses::add);
         vexStatuses.addAll(List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "NO_PATCH", "UNDER_INVESTIGATION", "UNKNOWN"));
 
         LinkedHashSet<String> vexFreshness = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexFreshnessByTenant(tenant)).stream()
-                .filter(this::hasText)
+                .filter(FindingFilterSpecifications::hasText)
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .forEach(vexFreshness::add);
         vexFreshness.addAll(List.of("FRESH", "STALE", "UNKNOWN"));
 
         LinkedHashSet<String> vexProviders = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctVexProvidersByTenant(tenant)).stream()
-                .filter(this::hasText)
+                .filter(FindingFilterSpecifications::hasText)
                 .map(value -> value.trim().toLowerCase(Locale.ROOT))
                 .forEach(vexProviders::add);
         vexProviders.add("unknown");
 
         return new FindingFilterValuesResponse(
-                sortByPreferredOrder(severities, List.of("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE", "UNKNOWN")),
-                sortByPreferredOrder(statuses, List.of("OPEN", "RESOLVED", "SUPPRESSED", "AUTO_CLOSED")),
-                sortByPreferredOrder(
+                FindingFilterSpecifications.sortByPreferredOrder(severities, List.of("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE", "UNKNOWN")),
+                FindingFilterSpecifications.sortByPreferredOrder(statuses, List.of("OPEN", "RESOLVED", "SUPPRESSED", "AUTO_CLOSED")),
+                FindingFilterSpecifications.sortByPreferredOrder(
                         decisionStates,
                         List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "UNDER_INVESTIGATION", "NEEDS_REVIEW")
                 ),
                 matchMethods.stream().sorted().toList(),
-                sortByPreferredOrder(vexStatuses, List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "NO_PATCH", "UNDER_INVESTIGATION", "UNKNOWN")),
-                sortByPreferredOrder(vexFreshness, List.of("FRESH", "STALE", "UNKNOWN")),
+                FindingFilterSpecifications.sortByPreferredOrder(vexStatuses, List.of("AFFECTED", "NOT_AFFECTED", "FIXED", "NO_PATCH", "UNDER_INVESTIGATION", "UNKNOWN")),
+                FindingFilterSpecifications.sortByPreferredOrder(vexFreshness, List.of("FRESH", "STALE", "UNKNOWN")),
                 vexProviders.stream().sorted().toList()
         );
     }
@@ -322,207 +300,6 @@ public class FindingQueryService {
         }
     }
 
-    private Specification<Finding> byTenant(Tenant tenant) {
-        return (root, query, cb) -> cb.equal(root.get("tenant"), tenant);
-    }
-
-    private Specification<Finding> byFilter(
-            Tenant tenant,
-            List<String> severity,
-            List<String> status,
-            List<String> decisionState,
-            List<String> creationSource,
-            List<String> matchMethod,
-            List<String> vexStatus,
-            List<String> vexFreshness,
-            List<String> vexProvider,
-            Double minConfidence,
-            String vulnerabilityId,
-            String packageName,
-            String ecosystem
-    ) {
-        return byTenant(tenant)
-                .and(bySeverity(severity))
-                .and(byStatus(status))
-                .and(byDecisionState(decisionState))
-                .and(byCreationSource(creationSource))
-                .and(byMatchMethod(matchMethod))
-                .and(byVexStatus(vexStatus))
-                .and(byVexFreshness(vexFreshness))
-                .and(byVexProvider(vexProvider))
-                .and(byMinConfidence(minConfidence))
-                .and(byVulnerabilityId(vulnerabilityId))
-                .and(byPackageName(packageName))
-                .and(byEcosystem(ecosystem));
-    }
-
-    private Specification<Finding> bySeverity(List<String> severities) {
-        Set<String> normalized = normalizeFilterValues(severities);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        Set<String> upper = normalized.stream().map(String::toUpperCase).collect(Collectors.toSet());
-        return (root, query, cb) -> {
-            jakarta.persistence.criteria.Expression<String> override =
-                    cb.upper(root.<String>get("severityOverride"));
-            jakarta.persistence.criteria.Expression<String> vulnSev =
-                    cb.upper(root.join("vulnerability").get("severity"));
-            jakarta.persistence.criteria.Expression<String> effective = cb.coalesce(override, vulnSev);
-            return effective.in(upper);
-        };
-    }
-
-    private Specification<Finding> byStatus(List<String> statuses) {
-        Set<String> normalized = normalizeFilterValues(statuses);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        Set<FindingStatus> findingStatuses = new HashSet<>();
-        for (String value : normalized) {
-            try {
-                findingStatuses.add(FindingStatus.valueOf(value.toUpperCase(Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // Ignore unknown status values and proceed with valid tokens.
-            }
-        }
-        if (findingStatuses.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> root.get("status").in(findingStatuses);
-    }
-
-    private Specification<Finding> byDecisionState(List<String> decisionStates) {
-        Set<String> normalized = normalizeFilterValues(decisionStates);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        Set<FindingDecisionState> states = new HashSet<>();
-        for (String value : normalized) {
-            try {
-                states.add(FindingDecisionState.valueOf(value.toUpperCase(Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // Ignore unknown values and continue with valid tokens.
-            }
-        }
-        if (states.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> root.get("decisionState").in(states);
-    }
-
-    private Specification<Finding> byCreationSource(List<String> creationSources) {
-        Set<String> normalized = normalizeFilterValues(creationSources);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        Set<FindingCreationSource> sources = new HashSet<>();
-        for (String value : normalized) {
-            try {
-                sources.add(FindingCreationSource.valueOf(value.toUpperCase(Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // Ignore unknown values and continue with valid tokens.
-            }
-        }
-        if (sources.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> root.get("creationSource").in(sources);
-    }
-
-    private Specification<Finding> byMatchMethod(List<String> matchMethods) {
-        Set<String> normalized = normalizeFilterValues(matchMethods);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        Set<String> lower = normalized.stream().map(value -> value.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
-        return (root, query, cb) -> cb.lower(root.get("matchedBy")).in(lower);
-    }
-
-    private Specification<Finding> byVexStatus(List<String> vexStatuses) {
-        Set<String> normalized = normalizeUpperFilterValues(vexStatuses);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> {
-            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
-            if (normalized.contains("UNKNOWN")) {
-                predicates.add(cb.isNull(root.get("vexStatus")));
-            }
-            predicates.add(cb.upper(root.get("vexStatus")).in(normalized));
-            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
-        };
-    }
-
-    private Specification<Finding> byVexFreshness(List<String> vexFreshness) {
-        Set<String> normalized = normalizeUpperFilterValues(vexFreshness);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> {
-            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
-            if (normalized.contains("UNKNOWN")) {
-                predicates.add(cb.isNull(root.get("vexFreshness")));
-            }
-            predicates.add(cb.upper(root.get("vexFreshness")).in(normalized));
-            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
-        };
-    }
-
-    private Specification<Finding> byVexProvider(List<String> vexProviders) {
-        Set<String> normalized = normalizeLowerFilterValues(vexProviders);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        return (root, query, cb) -> {
-            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
-            if (normalized.contains("unknown")) {
-                predicates.add(cb.isNull(root.get("vexProvider")));
-            }
-            predicates.add(cb.lower(root.get("vexProvider")).in(normalized));
-            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
-        };
-    }
-
-    private Specification<Finding> byMinConfidence(Double minConfidence) {
-        if (minConfidence == null) {
-            return null;
-        }
-        return (root, query, cb) -> cb.greaterThanOrEqualTo(root.get("confidenceScore"), minConfidence);
-    }
-
-    private Specification<Finding> byVulnerabilityId(String vulnerabilityId) {
-        if (!hasText(vulnerabilityId)) {
-            return null;
-        }
-        String expected = vulnerabilityId.trim().toUpperCase(Locale.ROOT);
-        return (root, query, cb) -> cb.equal(
-                cb.upper(root.join("vulnerability").get("externalId")),
-                expected
-        );
-    }
-
-    private Specification<Finding> byPackageName(String packageName) {
-        if (!hasText(packageName)) {
-            return null;
-        }
-        String expected = packageName.trim().toLowerCase(Locale.ROOT);
-        return (root, query, cb) -> cb.equal(
-                cb.lower(root.join("component").get("packageName")),
-                expected
-        );
-    }
-
-    private Specification<Finding> byEcosystem(String ecosystem) {
-        if (!hasText(ecosystem)) {
-            return null;
-        }
-        String expected = ecosystem.trim().toLowerCase(Locale.ROOT);
-        return (root, query, cb) -> cb.equal(
-                cb.lower(root.join("component").get("ecosystem")),
-                expected
-        );
-    }
-
     private Map<String, Object> readEvidencePayload(String evidence) {
         if (!hasText(evidence)) {
             return new LinkedHashMap<>();
@@ -546,51 +323,6 @@ public class FindingQueryService {
         }
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? null : text;
-    }
-
-    private Set<String> normalizeUpperFilterValues(List<String> rawValues) {
-        return normalizeFilterValues(rawValues).stream()
-                .map(value -> value.trim().toUpperCase(Locale.ROOT))
-                .collect(Collectors.toSet());
-    }
-
-    private Set<String> normalizeLowerFilterValues(List<String> rawValues) {
-        return normalizeFilterValues(rawValues).stream()
-                .map(value -> value.trim().toLowerCase(Locale.ROOT))
-                .collect(Collectors.toSet());
-    }
-
-    private Set<String> normalizeFilterValues(List<String> rawValues) {
-        if (rawValues == null || rawValues.isEmpty()) {
-            return Set.of();
-        }
-        Set<String> values = new HashSet<>();
-        for (String rawValue : rawValues) {
-            if (!hasText(rawValue)) {
-                continue;
-            }
-            String[] splitValues = rawValue.split(",");
-            for (String splitValue : splitValues) {
-                String normalized = splitValue == null ? "" : splitValue.trim();
-                if (normalized.isEmpty() || "ALL".equalsIgnoreCase(normalized)) {
-                    continue;
-                }
-                values.add(normalized);
-            }
-        }
-        return values;
-    }
-
-    private List<String> sortByPreferredOrder(Set<String> values, List<String> preferredOrder) {
-        Set<String> remaining = new LinkedHashSet<>(values);
-        List<String> sorted = new ArrayList<>();
-        for (String preferredValue : preferredOrder) {
-            if (remaining.remove(preferredValue)) {
-                sorted.add(preferredValue);
-            }
-        }
-        sorted.addAll(remaining.stream().sorted().toList());
-        return sorted;
     }
 
     private boolean hasText(String value) {

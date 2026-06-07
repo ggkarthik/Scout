@@ -24,4 +24,17 @@ public interface SoftwareInventoryItemRepository extends JpaRepository<SoftwareI
             @Param("tenantId") UUID tenantId,
             @Param("componentIds") Collection<UUID> componentIds
     );
+
+    @Query("""
+            select item from SoftwareInventoryItem item
+            join fetch item.component ic
+            where item.tenant.id = :tenantId
+              and item.componentStatus = com.prototype.vulnwatch.domain.InventoryComponentStatus.ACTIVE
+              and (lower(item.packageName) like lower(concat('%', :term, '%'))
+                   or lower(ic.packageName) like lower(concat('%', :term, '%')))
+            """)
+    List<SoftwareInventoryItem> searchActiveByPackageNameContaining(
+            @Param("tenantId") UUID tenantId,
+            @Param("term") String term
+    );
 }

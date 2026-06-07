@@ -3,26 +3,17 @@ package com.prototype.vulnwatch.security;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
-import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import java.lang.reflect.Method;
-import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
@@ -34,12 +25,6 @@ class SensitiveTenantActionInterceptorTest {
     @Mock
     private RequestActorService requestActorService;
 
-    @Mock
-    private AuditEventService auditEventService;
-
-    @Mock
-    private TenantSupportGrantService tenantSupportGrantService;
-
     @Test
     void nonPlatformActorsDoNotNeedConfirmation() throws Exception {
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
@@ -50,16 +35,14 @@ class SensitiveTenantActionInterceptorTest {
                 Set.of("TENANT_ADMIN")));
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
-                requestActorService,
-                tenantSupportGrantService,
-                emptyProvider()
+                requestActorService
         );
 
         assertTrue(interceptor.preHandle(request(), new MockHttpServletResponse(), sensitiveMethod()));
     }
 
     @Test
-    void platformOwnersInTenantContextNeedConfirmationHeaders() throws Exception {
+    void platformOwnersCannotPerformTenantScopedActions() throws Exception {
         UUID tenantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
                 "platform-owner",
@@ -69,9 +52,7 @@ class SensitiveTenantActionInterceptorTest {
                 Set.of("PLATFORM_OWNER")));
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
-                requestActorService,
-                tenantSupportGrantService,
-                emptyProvider()
+                requestActorService
         );
 
         ResponseStatusException error = assertThrows(
@@ -79,11 +60,11 @@ class SensitiveTenantActionInterceptorTest {
                 () -> interceptor.preHandle(request(), new MockHttpServletResponse(), sensitiveMethod())
         );
 
-        assertEquals(428, error.getStatusCode().value());
+        assertEquals(403, error.getStatusCode().value());
     }
 
     @Test
-    void validConfirmationHeadersAllowSensitiveActionAndAudit() throws Exception {
+    void platformOwnedIngestionPathsBypassTenantSupportChecks() throws Exception {
         UUID tenantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
                 "platform-owner",
@@ -91,49 +72,15 @@ class SensitiveTenantActionInterceptorTest {
                 tenantId,
                 "Example Co",
                 Set.of("PLATFORM_OWNER")));
-        when(tenantSupportGrantService.requireActiveGrantForWrite("platform-owner", tenantId)).thenReturn(null);
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
-                requestActorService,
-                tenantSupportGrantService,
-                providerWithAudit()
+                requestActorService
         );
-        MockHttpServletRequest request = request();
-        request.addHeader("X-Platform-Action-Confirm", "true");
-        request.addHeader("X-Platform-Action-Tenant", tenantId.toString());
-        request.addHeader("X-Platform-Action-Time", Instant.now().toString());
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/ingestion/nvd-sync");
+        request.setRequestURI("/api/ingestion/nvd-sync");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), sensitiveMethod()));
-        verify(tenantSupportGrantService).requireActiveGrantForWrite("platform-owner", tenantId);
-        verify(auditEventService).record(
-                eq("platform.tenant_action.confirmed"),
-                eq("tenant"),
-                eq(tenantId.toString()),
-                contains("/api/test/sensitive"));
-    }
-
-    @Test
-    void safeSensitiveReadsOnlyRequireActiveGrant() throws Exception {
-        UUID tenantId = UUID.randomUUID();
-        when(requestActorService.currentActor()).thenReturn(new RequestActor(
-                "platform-owner",
-                true,
-                tenantId,
-                "Example Co",
-                Set.of("PLATFORM_OWNER")));
-
-        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
-                requestActorService,
-                tenantSupportGrantService,
-                providerWithAudit()
-        );
-
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/test/sensitive-read");
-        request.setRequestURI("/api/test/sensitive-read");
-
-        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), sensitiveReadMethod()));
-        verify(tenantSupportGrantService).requireActiveGrant("platform-owner", tenantId);
-        verifyNoInteractions(auditEventService);
     }
 
     private MockHttpServletRequest request() {
@@ -147,28 +94,9 @@ class SensitiveTenantActionInterceptorTest {
         return new HandlerMethod(new TestController(), method);
     }
 
-    private HandlerMethod sensitiveReadMethod() throws NoSuchMethodException {
-        Method method = TestController.class.getDeclaredMethod("sensitiveRead");
-        return new HandlerMethod(new TestController(), method);
-    }
-
-    private ObjectProvider<AuditEventService> emptyProvider() {
-        return new StaticListableBeanFactory().getBeanProvider(AuditEventService.class);
-    }
-
-    private ObjectProvider<AuditEventService> providerWithAudit() {
-        StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
-        beanFactory.addBean("auditEventService", auditEventService);
-        return beanFactory.getBeanProvider(AuditEventService.class);
-    }
-
     private static final class TestController {
         @SensitiveTenantAction
         public void sensitive() {
-        }
-
-        @SensitiveTenantAction
-        public void sensitiveRead() {
         }
     }
 }

@@ -17,9 +17,9 @@ export type AppTab =
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
-export type ConnectRouteView = 'sources' | 'connectors' | 'run-history' | 'processing-jobs';
-export type AdminRouteView = 'users' | 'invites' | 'support' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests' | 'connectors' | 'support';
+export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
+export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
+export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -62,20 +62,18 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
   'sources',
   'connectors',
-  'run-history',
-  'processing-jobs'
+  'run-history'
 ]);
 
 const ADMIN_VIEWS = new Set<AdminRouteView>([
   'users',
   'invites',
-  'support',
   'roles',
   'service-accounts',
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests', 'connectors', 'support']);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests']);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {

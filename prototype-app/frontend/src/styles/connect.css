@@ -332,6 +332,48 @@
   color: var(--muted);
 }
 
+.eol-source-jobs {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.eol-source-job {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.eol-source-job:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.eol-source-job:last-child {
+  padding-bottom: 0;
+}
+
+.eol-source-job-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.eol-source-job-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .eol-source-job {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 /* Connector inline page */
 .connector-page-back-row {
   display: flex;

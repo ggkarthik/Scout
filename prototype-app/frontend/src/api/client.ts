@@ -8,8 +8,18 @@ import type {
 import type {
   FindingBulkWorkflowRequest,
   FindingBulkWorkflowResponse,
+  FindingBacklogHealth,
+  FindingDistributions,
   FindingFilterValues,
-  FindingPage
+  FindingProjectionStatus,
+  FindingQueueAnalytics,
+  FindingQueueAnalyticsTrendPoint,
+  FindingQueueDefinition,
+  FindingQueueUpsertRequest,
+  FindingPage,
+  FindingPortfolioRollup,
+  FindingsFilterModel,
+  FindingSummary
 } from '../features/findings/types';
 import type {
   ApplicableSoftwarePage,
@@ -71,15 +81,12 @@ import type {
   DemoRequestCreateRequest,
   DemoStatus,
   AuthTokenResponse,
-  InventoryConnectorHealth,
   PlatformUser,
   PlatformUserRequest,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
   TenantCreateRequest,
-  TenantSupportGrant,
-  TenantSupportGrantRequest,
   TenantMember,
   TenantMemberRequest
 } from '../features/admin/types';
@@ -114,10 +121,13 @@ import type {
   SoftwareIdentityPage,
   VulnRepoSoftwareAssetsDetail
 } from '../features/software-identities/types';
+import { resolveApiBase } from './base';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
+const API_BASE = resolveApiBase();
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
 const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
+const DEFAULT_TENANT_ID = import.meta.env.VITE_TENANT_ID ?? '1';
+const DEFAULT_USER_ID = import.meta.env.VITE_USER_ID ?? 'local-analyst';
 const STATIC_AUTH_TOKEN = import.meta.env.VITE_AUTH_TOKEN ?? '';
 const AUTH_TOKEN_STORAGE_KEY = 'vulnwatch.authToken';
 
@@ -203,6 +213,12 @@ function applyAuthHeaders(headers: Headers): void {
   headers.set('X-API-Key', API_KEY);
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
+  }
+  if (DEFAULT_TENANT_ID.trim().length > 0) {
+    headers.set('X-Tenant-ID', DEFAULT_TENANT_ID.trim());
+  }
+  if (DEFAULT_USER_ID.trim().length > 0) {
+    headers.set('X-User-ID', DEFAULT_USER_ID.trim());
   }
 }
 
@@ -344,6 +360,37 @@ async function publicRequest<T>(path: string, options?: RequestInit): Promise<T>
   return contentType.includes('application/json') ? response.json() : undefined as T;
 }
 
+function buildFindingsSearchParams(params?: FindingsFilterModel): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params?.page != null) searchParams.set('page', String(params.page));
+  if (params?.size != null) searchParams.set('size', String(params.size));
+  if (params?.cursor && params.cursor.trim().length > 0) searchParams.set('cursor', params.cursor.trim());
+  if (params?.limit != null) searchParams.set('limit', String(params.limit));
+  if (params?.queueKey && params.queueKey.trim().length > 0) searchParams.set('queueKey', params.queueKey.trim());
+  params?.severity?.forEach((value) => searchParams.append('severity', value));
+  params?.status?.forEach((value) => searchParams.append('status', value));
+  params?.decisionState?.forEach((value) => searchParams.append('decisionState', value));
+  params?.creationSource?.forEach((value) => searchParams.append('creationSource', value));
+  params?.matchMethod?.forEach((value) => searchParams.append('matchMethod', value));
+  params?.vexStatus?.forEach((value) => searchParams.append('vexStatus', value));
+  params?.vexFreshness?.forEach((value) => searchParams.append('vexFreshness', value));
+  params?.vexProvider?.forEach((value) => searchParams.append('vexProvider', value));
+  if (params?.minConfidence != null) searchParams.set('minConfidence', String(params.minConfidence));
+  if (params?.vulnerabilityId && params.vulnerabilityId.trim().length > 0) searchParams.set('vulnerabilityId', params.vulnerabilityId.trim());
+  if (params?.packageName && params.packageName.trim().length > 0) searchParams.set('packageName', params.packageName.trim());
+  if (params?.ecosystem && params.ecosystem.trim().length > 0) searchParams.set('ecosystem', params.ecosystem.trim());
+  if (params?.ownerGroup && params.ownerGroup.trim().length > 0) searchParams.set('ownerGroup', params.ownerGroup.trim());
+  if (params?.assignedTo && params.assignedTo.trim().length > 0) searchParams.set('assignedTo', params.assignedTo.trim());
+  if (params?.unassignedOnly != null) searchParams.set('unassignedOnly', String(params.unassignedOnly));
+  if (params?.incidentLinked != null) searchParams.set('incidentLinked', String(params.incidentLinked));
+  if (params?.dueDateBand) searchParams.set('dueDateBand', params.dueDateBand);
+  if (params?.assetName && params.assetName.trim().length > 0) searchParams.set('assetName', params.assetName.trim());
+  if (params?.supportGroup && params.supportGroup.trim().length > 0) searchParams.set('supportGroup', params.supportGroup.trim());
+  if (params?.patchAvailable != null) searchParams.set('patchAvailable', String(params.patchAvailable));
+  if (params?.suppressedUntilBand) searchParams.set('suppressedUntilBand', params.suppressedUntilBand);
+  return searchParams;
+}
+
 export const api = {
   createDemoRequest: (payload: DemoRequestCreateRequest) => publicRequest<DemoRequest>('/demo-requests', {
     method: 'POST',
@@ -382,48 +429,65 @@ export const api = {
     return request<ImpactedCvePage>(`/dashboard/impacted-cves${suffix}`);
   },
   getCveInventoryMap: (limit = 5) => request<DashboardCveInventoryMap>(`/dashboard/cve-inventory-map?limit=${limit}`),
-  listFindings: (
-    params?: {
-      page?: number;
-      size?: number;
-      severity?: string[];
-      status?: string[];
-      decisionState?: string[];
-      creationSource?: Array<'MANUAL' | 'AUTOMATIC'>;
-      matchMethod?: string[];
-      vexStatus?: string[];
-      vexFreshness?: string[];
-      vexProvider?: string[];
-      minConfidence?: number;
-      vulnerabilityId?: string;
-      packageName?: string;
-      ecosystem?: string;
-    }
-  ) => {
-    const searchParams = new URLSearchParams();
-    if (params?.page != null) searchParams.set('page', String(params.page));
-    if (params?.size != null) searchParams.set('size', String(params.size));
-    params?.severity?.forEach((value) => searchParams.append('severity', value));
-    params?.status?.forEach((value) => searchParams.append('status', value));
-    params?.decisionState?.forEach((value) => searchParams.append('decisionState', value));
-    params?.creationSource?.forEach((value) => searchParams.append('creationSource', value));
-    params?.matchMethod?.forEach((value) => searchParams.append('matchMethod', value));
-    params?.vexStatus?.forEach((value) => searchParams.append('vexStatus', value));
-    params?.vexFreshness?.forEach((value) => searchParams.append('vexFreshness', value));
-    params?.vexProvider?.forEach((value) => searchParams.append('vexProvider', value));
-    if (params?.minConfidence != null) searchParams.set('minConfidence', String(params.minConfidence));
-    if (params?.vulnerabilityId && params.vulnerabilityId.trim().length > 0) {
-      searchParams.set('vulnerabilityId', params.vulnerabilityId.trim());
-    }
-    if (params?.packageName && params.packageName.trim().length > 0) {
-      searchParams.set('packageName', params.packageName.trim());
-    }
-    if (params?.ecosystem && params.ecosystem.trim().length > 0) {
-      searchParams.set('ecosystem', params.ecosystem.trim());
-    }
+  listFindings: (params?: FindingsFilterModel) => {
+    const searchParams = buildFindingsSearchParams(params);
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<FindingPage>(`/findings${suffix}`);
   },
+  getFindingSummary: (params?: FindingsFilterModel) => {
+    const searchParams = buildFindingsSearchParams(params);
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<FindingSummary>(`/findings/summary${suffix}`);
+  },
+  getFindingDistributions: (params?: FindingsFilterModel) => {
+    const searchParams = buildFindingsSearchParams(params);
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<FindingDistributions>(`/findings/distributions${suffix}`);
+  },
+  getFindingBacklogHealth: (params?: FindingsFilterModel) => {
+    const searchParams = buildFindingsSearchParams(params);
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<FindingBacklogHealth>(`/findings/backlog-health${suffix}`);
+  },
+  getFindingQueueAnalytics: (params?: FindingsFilterModel) => {
+    const searchParams = buildFindingsSearchParams(params);
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<FindingQueueAnalytics>(`/findings/queue-analytics${suffix}`);
+  },
+  getFindingQueueAnalyticsTrend: (params?: FindingsFilterModel, days = 30) => {
+    const searchParams = buildFindingsSearchParams(params);
+    searchParams.set('days', String(days));
+    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+    return request<FindingQueueAnalyticsTrendPoint[]>(`/findings/queue-analytics/trend${suffix}`);
+  },
+  getFindingPortfolioRollups: () => request<FindingPortfolioRollup>('/findings/portfolio-rollups'),
+  getFindingProjectionStatus: () => request<FindingProjectionStatus>('/findings/projection-status'),
+  rebuildFindingProjection: () => request<FindingProjectionStatus>('/findings/projection-rebuild', { method: 'POST' }),
+  listFindingQueues: () => request<FindingQueueDefinition[]>('/findings/queues'),
+  getFindingQueue: (queueKey: string) => request<FindingQueueDefinition>(`/findings/queues/${encodeURIComponent(queueKey)}`),
+  createFindingQueue: (payload: FindingQueueUpsertRequest) => request<FindingQueueDefinition>('/findings/queues', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateFindingQueue: (queueRef: string, payload: FindingQueueUpsertRequest) => request<FindingQueueDefinition>(
+    `/findings/queues/${encodeURIComponent(queueRef)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }
+  ),
+  duplicateFindingQueue: (queueRef: string) => request<FindingQueueDefinition>(
+    `/findings/queues/${encodeURIComponent(queueRef)}/duplicate`,
+    { method: 'POST' }
+  ),
+  setDefaultFindingQueue: (queueRef: string) => request<void>(
+    `/findings/queues/${encodeURIComponent(queueRef)}/default`,
+    { method: 'POST' }
+  ),
+  deleteFindingQueue: (queueRef: string) => request<void>(
+    `/findings/queues/${encodeURIComponent(queueRef)}`,
+    { method: 'DELETE' }
+  ),
   listFindingFilters: () => request<FindingFilterValues>('/findings/filters'),
   getOperationalDashboard: () => request<OperationalDashboard>('/operations/dashboard'),
   getOperationalOverview: () => request<OperationalSectionResponse<OperationalDashboard['executiveHealth']>>('/operations/overview'),
@@ -839,13 +903,6 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ setupToken, password })
   }),
-  selectTenantContext: (tenantId: string) => request<AuthTokenResponse>('/auth/context/tenant', {
-    method: 'POST',
-    body: JSON.stringify({ tenantId })
-  }),
-  clearTenantContext: () => request<AuthTokenResponse>('/auth/context/clear', {
-    method: 'POST'
-  }),
   listTestPersonas: () => request<TestPersona[]>('/dev/test-personas'),
   issueTestPersonaToken: (personaKey: string) =>
     request<TestPersonaToken>(`/dev/test-personas/${encodeURIComponent(personaKey)}/token`, {
@@ -867,30 +924,12 @@ export const api = {
     request<void>(`/platform/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`, {
       method: 'DELETE'
     }),
-  listPlatformSupportGrants: () => request<TenantSupportGrant[]>('/platform/support-grants'),
-  acceptPlatformSupportGrant: (grantId: string) =>
-    request<TenantSupportGrant>(`/platform/support-grants/${encodeURIComponent(grantId)}/accept`, {
-      method: 'POST'
-    }),
-  listPlatformInventoryConnectorHealth: () =>
-    request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   listTenantMembers: (tenantId: string) =>
     request<TenantMember[]>(`/tenants/${encodeURIComponent(tenantId)}/members`),
   addTenantMember: (tenantId: string, payload: TenantMemberRequest) =>
     request<TenantMember>(`/tenants/${encodeURIComponent(tenantId)}/members`, {
       method: 'POST',
       body: JSON.stringify(payload)
-    }),
-  listTenantSupportGrants: (tenantId: string) =>
-    request<TenantSupportGrant[]>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`),
-  createTenantSupportGrant: (tenantId: string, payload: TenantSupportGrantRequest) =>
-    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }),
-  revokeTenantSupportGrant: (tenantId: string, grantId: string) =>
-    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants/${encodeURIComponent(grantId)}`, {
-      method: 'DELETE'
     }),
   listServiceAccounts: () => request<ServiceAccount[]>('/service-accounts'),
   createServiceAccount: (payload: ServiceAccountRequest) =>

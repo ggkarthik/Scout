@@ -29,7 +29,6 @@ public class JwtTenantAuthenticationService {
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
-    private final TenantSupportGrantService tenantSupportGrantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
     private final String subjectClaim;
@@ -45,7 +44,6 @@ public class JwtTenantAuthenticationService {
             AppUserRepository userRepository,
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository,
-            TenantSupportGrantService tenantSupportGrantService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
             AppUserGlobalRoleService appUserGlobalRoleService,
             @Value("${app.security.jwt.subject-claim:sub}") String subjectClaim,
@@ -60,7 +58,6 @@ public class JwtTenantAuthenticationService {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
-        this.tenantSupportGrantService = tenantSupportGrantService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
         this.subjectClaim = subjectClaim;
@@ -75,6 +72,11 @@ public class JwtTenantAuthenticationService {
 
     @Transactional
     public AuthenticatedTenantActor authenticate(Jwt jwt) {
+        return authenticate(jwt, null);
+    }
+
+    @Transactional
+    public AuthenticatedTenantActor authenticate(Jwt jwt, String requestUri) {
         String subject = resolveSubject(jwt);
         AppUser user = userRepository.findByExternalSubject(subject)
                 .orElseGet(() -> createUser(subject));
@@ -95,7 +97,7 @@ public class JwtTenantAuthenticationService {
             user.setUpdatedAt(Instant.now());
             userRepository.save(user);
         }
-        Tenant tenant = resolveTenant(jwt, subject, roles);
+        Tenant tenant = resolveTenant(jwt, subject, roles, requestUri);
 
         if (tenant != null) {
             TenantMembership membership = membershipRepository
@@ -123,13 +125,13 @@ public class JwtTenantAuthenticationService {
                 Set.copyOf(roles));
     }
 
-    private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles) {
+    private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles, String requestUri) {
         String activeTenantId = claimAsString(jwt, activeTenantIdClaim);
         if (activeTenantId != null) {
-            UUID tenantId = parseUuid(activeTenantId);
             if (roles.contains("PLATFORM_OWNER")) {
-                tenantSupportGrantService.requireActiveGrant(subject, tenantId);
+                return null;
             }
+            UUID tenantId = parseUuid(activeTenantId);
             Tenant tenant = tenantRepository.findById(tenantId)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT active_tenant_id is not registered"));
             tenantLifecycleGuardService.assertTenantAccessible(tenant);

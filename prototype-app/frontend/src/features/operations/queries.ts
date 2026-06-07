@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import { DASHBOARD_REFRESH_INTERVAL_MS, OPERATIONS_REFRESH_INTERVAL_MS } from '../../lib/polling';
 import type {
   ClusterImpactResult,
+  FindingsProjectionHealth,
   CorrelationOverridePayload,
   NormalizationOverridePayload,
   OperationalApiReadPath,
@@ -32,6 +33,7 @@ export type PipelinePayload = {
 
 export type PlatformHealthPayload = {
   readPath: OperationalSectionResponse<OperationalApiReadPath>;
+  findingsProjection: FindingsProjectionHealth;
   slo: SloStatus;
   catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
 };
@@ -61,13 +63,15 @@ async function loadOperationsView(selectedView: OperationsDashboardViewKey): Pro
       };
     }
     case 'platform-health': {
-      const [readPath, slo, catalog] = await Promise.all([
+      const [readPath, findingsProjection, slo, catalog] = await Promise.all([
         api.getOperationalApiReadPath(),
+        api.getFindingProjectionStatus(),
         api.getSloStatus(),
         api.getOperationalMetricCatalog()
       ]);
       return {
         readPath,
+        findingsProjection,
         slo,
         catalog
       };
@@ -165,6 +169,24 @@ export function useRevokeCorrelationOverrideMutation(issueId: string) {
     mutationFn: () => api.revokeCorrelationOverride(issueId),
     onSuccess: () => {
       qualityInvalidationKeys(issueId).forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+    }
+  });
+}
+
+export function useRebuildFindingProjectionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.rebuildFindingProjection,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operations-view', 'platform-health'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-projection-status'] });
+      queryClient.invalidateQueries({ queryKey: ['findings'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-distributions'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-backlog-health'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-queue-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-queue-analytics-trend'] });
+      queryClient.invalidateQueries({ queryKey: ['findings-portfolio-rollups'] });
     }
   });
 }

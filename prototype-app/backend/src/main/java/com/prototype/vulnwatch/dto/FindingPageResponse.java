@@ -7,6 +7,7 @@ public record FindingPageResponse(
         int page,
         int size,
         long totalItems,
-        int totalPages
+        int totalPages,
+        String nextCursor
 ) {
 }

@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
+import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingResponse;
@@ -62,68 +63,13 @@ public class FindingService {
             Tenant tenant,
             int page,
             int size,
-            List<String> severity,
-            List<String> status,
-            List<String> decisionState,
-            List<String> creationSource,
-            List<String> matchMethod,
-            List<String> vexStatus,
-            List<String> vexFreshness,
-            List<String> vexProvider,
-            Double minConfidence,
-            String vulnerabilityId,
-            String packageName,
-            String ecosystem
+            FindingsFilter filter
     ) {
-        return findingQueryService.listByTenantPage(
-                tenant,
-                page,
-                size,
-                severity,
-                status,
-                decisionState,
-                creationSource,
-                matchMethod,
-                vexStatus,
-                vexFreshness,
-                vexProvider,
-                minConfidence,
-                vulnerabilityId,
-                packageName,
-                ecosystem
-        );
+        return findingQueryService.listByTenantPage(tenant, page, size, filter);
     }
 
-    public List<Finding> listEntitiesByTenantFilter(
-            Tenant tenant,
-            List<String> severity,
-            List<String> status,
-            List<String> decisionState,
-            List<String> creationSource,
-            List<String> matchMethod,
-            List<String> vexStatus,
-            List<String> vexFreshness,
-            List<String> vexProvider,
-            Double minConfidence,
-            String vulnerabilityId,
-            String packageName,
-            String ecosystem
-    ) {
-        return findingQueryService.listEntitiesByTenantFilter(
-                tenant,
-                severity,
-                status,
-                decisionState,
-                creationSource,
-                matchMethod,
-                vexStatus,
-                vexFreshness,
-                vexProvider,
-                minConfidence,
-                vulnerabilityId,
-                packageName,
-                ecosystem
-        );
+    public List<Finding> listEntitiesByTenantFilter(Tenant tenant, FindingsFilter filter) {
+        return findingQueryService.listEntitiesByTenantFilter(tenant, filter);
     }
 
     public List<Finding> listEntitiesByTenantAndIds(Tenant tenant, List<UUID> findingIds) {

@@ -34,6 +34,8 @@ class FindingQueryServiceTest {
     private RiskPolicyService riskPolicyService;
     @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock
+    private FindingListProjectionService findingListProjectionService;
 
     @Test
     void listAvailableFiltersNormalizesRepositoryValuesAndAppliesPreferredOrdering() {
@@ -55,7 +57,7 @@ class FindingQueryServiceTest {
                 .run(any(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
 
         FindingQueryService service = new FindingQueryService(
-                findingRepository, new ObjectMapper(), findingsScoreService, riskPolicyService, tenantSchemaExecutionService);
+                findingRepository, new ObjectMapper(), findingsScoreService, riskPolicyService, tenantSchemaExecutionService, findingListProjectionService);
 
         FindingFilterValuesResponse filters = service.listAvailableFilters(tenant);
 
@@ -98,7 +100,7 @@ class FindingQueryServiceTest {
         when(findingsScoreService.compute("{}", finding)).thenThrow(new NullPointerException("missing relations"));
 
         FindingQueryService service = new FindingQueryService(
-                findingRepository, new ObjectMapper(), findingsScoreService, riskPolicyService, tenantSchemaExecutionService);
+                findingRepository, new ObjectMapper(), findingsScoreService, riskPolicyService, tenantSchemaExecutionService, findingListProjectionService);
 
         FindingResponse response = service.toResponse(finding);
 

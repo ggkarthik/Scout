@@ -27,19 +27,20 @@ public class RequestActorService {
     public RequestActor currentActor() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getDetails() instanceof TenantAuthenticationDetails details) {
+            boolean platformOwner = details.roles().contains("PLATFORM_OWNER");
             if (details.tenantId() != null) {
                 return new RequestActor(
                         details.userId(),
-                        details.roles().contains("PLATFORM_OWNER") || details.roles().contains("CREATOR"),
-                        details.tenantId(),
-                        details.tenantName(),
+                        platformOwner || details.roles().contains("CREATOR"),
+                        platformOwner ? null : details.tenantId(),
+                        platformOwner ? null : details.tenantName(),
                         details.roles());
             }
             return new RequestActor(
                     details.userId(),
-                    details.roles().contains("PLATFORM_OWNER") || details.roles().contains("CREATOR"),
-                    details.tenantId(),
-                    details.tenantName(),
+                    platformOwner || details.roles().contains("CREATOR"),
+                    null,
+                    null,
                     details.roles());
         }
         String principal = resolvePrincipal(authentication);
