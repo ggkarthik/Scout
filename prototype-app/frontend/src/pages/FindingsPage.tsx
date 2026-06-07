@@ -279,7 +279,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setActiveQueueKey,
     builtInQueues,
     personalQueues,
-    activeQueue,
     defaultQueue,
     activeQueryContext,
   } = useFindingsQueryContext({
@@ -291,7 +290,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const {
     page,
     setPage,
-    pageCursors,
     setPageCursors,
     effectiveServerFilterModel,
   } = useFindingsCursorPaging(activeQueryContext.queueKey, adHocFilterModel, PAGE_SIZE);

@@ -26,7 +26,6 @@ import {
   canAccessPlatformConsole,
   canManageInventorySources,
   canManageRiskPolicy,
-  canManageTenant,
   canRunSecurityWorkflow,
   canViewReadOnly
 } from './features/auth/roles';
