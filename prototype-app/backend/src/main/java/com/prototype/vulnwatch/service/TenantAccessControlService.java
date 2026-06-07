@@ -1,18 +1,15 @@
 package com.prototype.vulnwatch.service;
 
-import static org.springframework.http.HttpStatus.FORBIDDEN;
-
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+
 @Service
 public class TenantAccessControlService {
 
-    private final TenantSupportGrantService tenantSupportGrantService;
-
-    public TenantAccessControlService(TenantSupportGrantService tenantSupportGrantService) {
-        this.tenantSupportGrantService = tenantSupportGrantService;
+    public TenantAccessControlService() {
     }
 
     public void assertTenantAccess(RequestActor actor, UUID tenantId) {
@@ -23,11 +20,7 @@ public class TenantAccessControlService {
             throw new ResponseStatusException(FORBIDDEN, "Authenticated actor is required");
         }
         if (actor.hasRole("PLATFORM_OWNER")) {
-            if (actor.tenantId() == null || !actor.tenantId().equals(tenantId)) {
-                throw new ResponseStatusException(FORBIDDEN, "Platform owner must switch into the approved tenant context first");
-            }
-            tenantSupportGrantService.requireActiveGrant(actor.userId(), tenantId);
-            return;
+            throw new ResponseStatusException(FORBIDDEN, "Platform owners cannot access tenant-scoped administration");
         }
         if (actor.tenantId() == null || !actor.tenantId().equals(tenantId)) {
             throw new ResponseStatusException(FORBIDDEN, "Cannot access another tenant");

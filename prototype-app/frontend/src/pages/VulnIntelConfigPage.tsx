@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { EolSourcePanel } from '../components/EolSourcePanel';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import type {
   SyncTriggerResponse,
@@ -593,7 +594,7 @@ export function VulnIntelConfigPage({ vulnSummary }: Props) {
       <div className="panel-header">
         <h3>Vulnerability Intelligence Sources</h3>
         <span className="panel-caption">
-          Configure ingestion filters and run NVD, KEV, GHSA, CSAF/VEX, and advisory feeds.
+          Configure ingestion filters and run NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, EUVD, and JVN feeds.
         </span>
       </div>
       {SOURCES.map((src, i) => (
@@ -602,6 +603,11 @@ export function VulnIntelConfigPage({ vulnSummary }: Props) {
           <SourceSection {...src} />
         </React.Fragment>
       ))}
+      <div className="vi-source-divider" />
+      <EolSourcePanel
+        title="endoflife.date EOL Feed"
+        caption="Refresh the shared endoflife.date catalog, release lifecycle data, inventory mappings, and denormalized EOL status."
+      />
     </section>
   );
 }

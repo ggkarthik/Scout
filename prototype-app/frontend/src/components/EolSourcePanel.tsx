@@ -74,31 +74,47 @@ export function EolSourcePanel({
   };
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
-        <span className="panel-caption">{caption}</span>
+    <div className="vi-source-section">
+      <div className="vi-source-header">
+        <span className="vi-source-icon" aria-hidden="true">📅</span>
+        <span className="vi-source-name">{title}</span>
+        <span className="connect-source-dot connect-source-dot--ok" />
       </div>
+      {caption && <p className="vi-source-note">{caption}</p>}
 
       {message && (
-        <div className={`notice${message.includes('failed') ? ' error' : ''}`} style={{ margin: '0 0 12px' }}>
+        <div className={`notice${message.includes('failed') ? ' error' : ''}`}>
           {message}
         </div>
       )}
 
-      <div className="button-row section-actions">
-        {JOBS.map((job) => (
-          <button
-            key={job.key}
-            type="button"
-            className={job.key === 'full' ? 'btn btn-primary' : 'btn btn-secondary'}
-            disabled={busy !== null}
-            title={job.description}
-            onClick={() => runJob(job)}
-          >
-            {busy === job.key ? 'Running...' : job.label}
-          </button>
-        ))}
+      <div className="vi-source-config">
+        <div className="vi-source-filters">
+          <div className="vi-source-filters-header">
+            <span className="vi-source-filters-title">Lifecycle Refresh Jobs</span>
+          </div>
+          <div className="eol-source-jobs">
+            {JOBS.map((job) => (
+              <div key={job.key} className="eol-source-job">
+                <div className="eol-source-job-copy">
+                  <div className="eol-source-job-title">{job.label}</div>
+                  <div className="field-hint">{job.description}</div>
+                </div>
+                <button
+                  type="button"
+                  className={job.key === 'full' ? 'btn btn-primary' : 'btn btn-secondary'}
+                  disabled={busy !== null}
+                  onClick={() => runJob(job)}
+                >
+                  {busy === job.key ? 'Running...' : job.label}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="vi-source-actions">
         <a
           href={eolCatalogHref}
           className="btn btn-secondary"
@@ -106,7 +122,6 @@ export function EolSourcePanel({
           Open EOL Catalog
         </a>
       </div>
-
     </div>
   );
 }

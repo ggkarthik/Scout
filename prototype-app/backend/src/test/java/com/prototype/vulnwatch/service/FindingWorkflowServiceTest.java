@@ -46,6 +46,7 @@ class FindingWorkflowServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private ObjectProvider<AuditEventService> auditEventServiceProvider;
     @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock private FindingListProjectionService findingListProjectionService;
 
     private FindingWorkflowService service;
 
@@ -59,7 +60,8 @@ class FindingWorkflowServiceTest {
                 assetRepository,
                 new ObjectMapper(),
                 auditEventServiceProvider,
-                tenantSchemaExecutionService
+                tenantSchemaExecutionService,
+                findingListProjectionService
         );
     }
 

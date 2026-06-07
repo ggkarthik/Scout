@@ -54,6 +54,165 @@ export type FindingPage = {
   size: number;
   totalItems: number;
   totalPages: number;
+  nextCursor?: string | null;
+};
+
+export type FindingsFilterModel = {
+  page?: number;
+  size?: number;
+  cursor?: string;
+  limit?: number;
+  queueKey?: string;
+  severity?: string[];
+  status?: string[];
+  decisionState?: string[];
+  creationSource?: Array<'MANUAL' | 'AUTOMATIC'>;
+  matchMethod?: string[];
+  vexStatus?: string[];
+  vexFreshness?: string[];
+  vexProvider?: string[];
+  minConfidence?: number;
+  vulnerabilityId?: string;
+  packageName?: string;
+  ecosystem?: string;
+  ownerGroup?: string;
+  assignedTo?: string;
+  unassignedOnly?: boolean;
+  incidentLinked?: boolean;
+  dueDateBand?: 'overdue' | 'due-soon' | 'on-track' | 'no-sla';
+  assetName?: string;
+  supportGroup?: string;
+  patchAvailable?: boolean;
+  suppressedUntilBand?: 'expiring-soon' | 'expired';
+};
+
+export type FindingQueueKind = 'BUILT_IN' | 'PERSONAL';
+
+export type FindingQueueSummary = FindingSummary;
+
+export type FindingQueueDefinition = {
+  id?: string | null;
+  key: string;
+  title: string;
+  description?: string | null;
+  kind: FindingQueueKind;
+  ownerType: 'SYSTEM' | 'USER' | 'TEAM';
+  editable: boolean;
+  isDefault: boolean;
+  matchingCount: number;
+  filter: FindingsFilterModel;
+  summary: FindingQueueSummary;
+};
+
+export type ActiveFindingsQueryContext = {
+  queueKey: string;
+  title: string;
+  queueKind: FindingQueueKind;
+  editable: boolean;
+  baseFilter: FindingsFilterModel;
+  adHocFilters: FindingsFilterModel;
+  healthScopeLabel: string;
+};
+
+export type FindingQueueUpsertRequest = {
+  title: string;
+  description?: string;
+  filter: FindingsFilterModel;
+  displayOrder?: number;
+  sourceQueueKey?: string;
+  setAsDefault?: boolean;
+};
+
+export type FindingCountBucket = {
+  key: string;
+  count: number;
+};
+
+export type FindingAssetCount = {
+  assetName: string;
+  count: number;
+};
+
+export type FindingSummary = {
+  openCount: number;
+  criticalOpenCount: number;
+  withIncidentCount: number;
+  unassignedOpenCount: number;
+  overdueOpenCount: number;
+  noSlaOpenCount: number;
+};
+
+export type FindingDistributions = {
+  severityCounts: FindingCountBucket[];
+  statusCounts: FindingCountBucket[];
+  topAssets: FindingAssetCount[];
+};
+
+export type FindingBacklogHealth = {
+  overdue: number;
+  dueSoon: number;
+  onTrack: number;
+  noSla: number;
+};
+
+export type FindingQueueAgingBucket = {
+  key: string;
+  count: number;
+};
+
+export type FindingQueueWorkloadBreakdown = {
+  label: string;
+  count: number;
+};
+
+export type FindingQueueAnalytics = {
+  agingBuckets: FindingQueueAgingBucket[];
+  reopenRatePercent: number;
+  reopenedCountLast30Days: number;
+  assignedOpenCount: number;
+  unassignedOpenCount: number;
+  withIncidentCount: number;
+  withoutIncidentCount: number;
+  oldestOpenAgeDays: number;
+  medianOpenAgeDays: number;
+  topOwners: FindingQueueWorkloadBreakdown[];
+  topSupportGroups: FindingQueueWorkloadBreakdown[];
+};
+
+export type FindingQueueAnalyticsTrendPoint = {
+  date: string;
+  openedCount: number;
+  resolvedCount: number;
+  reopenedCount: number;
+};
+
+export type FindingPortfolioQueueRollup = {
+  queueKey: string;
+  title: string;
+  matchingCount: number;
+  openCount: number;
+  criticalOpenCount: number;
+  overdueOpenCount: number;
+  unassignedOpenCount: number;
+  withIncidentCount: number;
+};
+
+export type FindingPortfolioRollup = {
+  totalOpenCount: number;
+  totalCriticalOpenCount: number;
+  totalOverdueOpenCount: number;
+  queueRollups: FindingPortfolioQueueRollup[];
+  topOwnerGroups: FindingQueueWorkloadBreakdown[];
+  topSupportGroups: FindingQueueWorkloadBreakdown[];
+};
+
+export type FindingProjectionStatus = {
+  lastComputedAt?: string;
+  findingCount: number;
+  sourceFindingCount: number;
+  stale: boolean;
+  driftCount: number;
+  lastRebuildDurationMs?: number | null;
 };
 
 export type FindingFilterValues = {

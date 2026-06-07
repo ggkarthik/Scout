@@ -3,6 +3,7 @@ import {
   activeTabForPath,
   appendSearchToPath,
   buildLegacyCompatiblePath,
+  normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryViewWithSearch,
   pathForOperationsView,
@@ -83,5 +84,9 @@ describe('routes', () => {
 
   it('returns null when the URL does not contain legacy navigation state', () => {
     expect(buildLegacyCompatiblePath('?page=1&size=25')).toBeNull();
+  });
+
+  it('falls back to the default platform console view for removed platform connector routes', () => {
+    expect(normalizePlatformRouteView('connectors')).toBe('tenants');
   });
 });

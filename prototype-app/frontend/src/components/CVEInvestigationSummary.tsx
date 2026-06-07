@@ -11,6 +11,7 @@ import {
   TextRun,
   WidthType,
 } from 'docx';
+import { resolveApiBase } from '../api/base';
 
 const deterministicLocalKey = (cveId: string) => `vulnrepo:${cveId}:det-summary`;
 const aiLocalKey = (cveId: string) => `vulnrepo:${cveId}:ai-summary`;
@@ -33,7 +34,7 @@ const COLORS = {
   track: 'var(--track)',
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
+const API_BASE = resolveApiBase();
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
 const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
 

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -45,6 +46,9 @@ class SyncRunHistoryServiceTest {
 
     @Mock
     private RequestActorService requestActorService;
+
+    @Mock
+    private WorkspaceService workspaceService;
 
     @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
@@ -99,7 +103,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(savedRuns.get());
 
-        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
+        SyncRunHistoryService historyService = newHistoryService(tenant);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -158,7 +162,7 @@ class SyncRunHistoryServiceTest {
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
         when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(persistedRun));
-        SyncRunHistoryService historyService = new SyncRunHistoryService(syncRunRepository, requestActorService);
+        SyncRunHistoryService historyService = newHistoryService(tenant);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -177,7 +181,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt"))).thenReturn(List.of(processingRun));
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(processingRun, feedRun));
 
-        SyncRunHistoryService service = new SyncRunHistoryService(syncRunRepository, requestActorService);
+        SyncRunHistoryService service = newHistoryService(defaultWorkspace());
 
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
         List<SyncRunResponse> feedRuns = service.list("vuln-intel", 20);
@@ -194,6 +198,109 @@ class SyncRunHistoryServiceTest {
         assertEquals("INGESTION", feedRuns.get(0).runClass());
 
         assertEquals(2, legacyVulnerabilityRuns.size());
+    }
+
+    @Test
+    void classifiesManualEolConnectorRunsAsVulnIntelButKeepsDateSweepAsProcessing() {
+        SyncRun eolConnectorRun = syncRun("EOL_FULL_REFRESH", "queued", Instant.parse("2026-03-15T12:18:00Z"));
+        SyncRun eolDateSweepRun = syncRun("EOL_DATE_SWEEP", "completed", Instant.parse("2026-03-15T12:17:00Z"));
+
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("platform-owner", false, null, null, java.util.Set.of("PLATFORM_OWNER")));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")))
+                .thenReturn(List.of(eolConnectorRun));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")))
+                .thenReturn(List.of(eolConnectorRun, eolDateSweepRun));
+
+        SyncRunHistoryService service = newHistoryService(defaultWorkspace());
+
+        List<SyncRunResponse> vulnIntelRuns = service.list("vuln-intel", 20);
+        List<SyncRunResponse> processingRuns = service.list("processing", 20);
+
+        assertEquals(1, vulnIntelRuns.size());
+        assertEquals("EOL_FULL_REFRESH", vulnIntelRuns.get(0).syncType());
+        assertEquals("VULN_INTEL", vulnIntelRuns.get(0).runDomain());
+        assertEquals("INGESTION", vulnIntelRuns.get(0).runClass());
+
+        assertEquals(1, processingRuns.size());
+        assertEquals("EOL_DATE_SWEEP", processingRuns.get(0).syncType());
+        assertEquals("PROCESSING", processingRuns.get(0).runDomain());
+    }
+
+    @Test
+    void tenantScopedActorsOnlySeeInventoryRuns() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Default Workspace");
+
+        SyncRun inventoryRun = syncRun("SERVICENOW_CMDB", "completed", Instant.parse("2026-03-15T12:15:00Z"));
+        SyncRun vulnIntelRun = syncRun("GHSA", "completed", Instant.parse("2026-03-15T12:16:00Z"));
+        SyncRun processingRun = syncRun("VEX_ROLLOUT_BACKFILL", "running", Instant.parse("2026-03-15T12:17:00Z"));
+
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-admin", false, tenant.getId(), tenant.getName(), java.util.Set.of("TENANT_ADMIN")));
+        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(processingRun, vulnIntelRun, inventoryRun));
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of(processingRun));
+
+        SyncRunHistoryService service = newHistoryService(tenant);
+
+        List<SyncRunResponse> allRuns = service.list("all", 20);
+        List<SyncRunResponse> inventoryRuns = service.list("inventory", 20);
+        List<SyncRunResponse> vulnerabilityRuns = service.list("vulnerability", 20);
+        List<SyncRunResponse> processingRuns = service.list("processing", 20);
+
+        assertEquals(1, allRuns.size());
+        assertEquals("SERVICENOW_CMDB", allRuns.get(0).syncType());
+        assertEquals(1, inventoryRuns.size());
+        assertEquals("SERVICENOW_CMDB", inventoryRuns.get(0).syncType());
+        assertTrue(vulnerabilityRuns.isEmpty());
+        assertTrue(processingRuns.isEmpty());
+        assertFalse(allRuns.stream().anyMatch(run -> "GHSA".equals(run.syncType())));
+        assertFalse(allRuns.stream().anyMatch(run -> "VEX_ROLLOUT_BACKFILL".equals(run.syncType())));
+    }
+
+    @Test
+    void platformOwnersInTenantContextStillSeePlatformVulnerabilityRunHistory() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Acme Security");
+
+        SyncRun platformFeedRun = syncRun("GHSA", "completed", Instant.parse("2026-03-15T12:16:00Z"));
+        platformFeedRun.setRunScope("PLATFORM_VULNERABILITY");
+        SyncRun platformProcessingRun = syncRun("VEX_ROLLOUT_BACKFILL", "running", Instant.parse("2026-03-15T12:17:00Z"));
+        platformProcessingRun.setRunScope("PLATFORM_VULNERABILITY");
+        SyncRun tenantInventoryRun = syncRun("SERVICENOW_CMDB", "completed", Instant.parse("2026-03-15T12:15:00Z"));
+
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "platform-owner",
+                false,
+                tenant.getId(),
+                tenant.getName(),
+                java.util.Set.of("PLATFORM_OWNER")));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")))
+                .thenReturn(List.of(platformProcessingRun, platformFeedRun));
+        when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")))
+                .thenReturn(List.of(platformProcessingRun));
+        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(tenantInventoryRun));
+        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
+
+        SyncRunHistoryService service = newHistoryService(tenant);
+
+        List<SyncRunResponse> vulnerabilityRuns = service.list("vuln-intel", 20);
+        List<SyncRunResponse> processingRuns = service.list("processing", 20);
+        List<SyncRunResponse> inventoryRuns = service.list("inventory", 20);
+        var summary = service.sourcesSummary();
+
+        assertEquals(1, vulnerabilityRuns.size());
+        assertEquals("GHSA", vulnerabilityRuns.get(0).syncType());
+        assertEquals("VULN_INTEL", vulnerabilityRuns.get(0).runDomain());
+
+        assertEquals(1, processingRuns.size());
+        assertEquals("VEX_ROLLOUT_BACKFILL", processingRuns.get(0).syncType());
+        assertEquals("PROCESSING", processingRuns.get(0).runDomain());
+
+        assertEquals(1, inventoryRuns.size());
+        assertEquals("SERVICENOW_CMDB", inventoryRuns.get(0).syncType());
+
+        assertEquals("completed", summary.sources().get("GHSA").status());
     }
 
     private SbomUpload githubGeneratedUpload(
@@ -236,5 +343,20 @@ class SyncRunHistoryServiceTest {
         run.setStartedAt(startedAt);
         run.setCompletedAt(startedAt.plusSeconds(30));
         return run;
+    }
+
+    private SyncRunHistoryService newHistoryService(Tenant defaultWorkspace) {
+        org.mockito.Mockito.lenient().when(workspaceService.getDefaultWorkspace()).thenReturn(defaultWorkspace);
+        org.mockito.Mockito.lenient().doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
+        return new SyncRunHistoryService(syncRunRepository, requestActorService, workspaceService, tenantSchemaExecutionService);
+    }
+
+    private Tenant defaultWorkspace() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Default Workspace");
+        return tenant;
     }
 }

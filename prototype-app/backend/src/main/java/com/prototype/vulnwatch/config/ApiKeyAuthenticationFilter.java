@@ -73,7 +73,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
         String authorization = request.getHeader("Authorization");
         if (authorization != null && authorization.startsWith("Bearer ")) {
-            if (!authenticateJwt(authorization.substring("Bearer ".length()).trim(), response)) {
+            if (!authenticateJwt(authorization.substring("Bearer ".length()).trim(), request, response)) {
                 return;
             }
             try {
@@ -130,7 +130,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
     }
 
-    private boolean authenticateJwt(String token, HttpServletResponse response) throws IOException {
+    private boolean authenticateJwt(String token, HttpServletRequest request, HttpServletResponse response) throws IOException {
         JwtDecoder jwtDecoder = jwtDecoderProvider.getIfAvailable();
         JwtTenantAuthenticationService jwtTenantAuthenticationService = jwtTenantAuthenticationServiceProvider.getIfAvailable();
         if (jwtDecoder == null || jwtTenantAuthenticationService == null) {
@@ -139,7 +139,9 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
         try {
             Jwt jwt = jwtDecoder.decode(token);
-            AuthenticatedTenantActor actor = jwtTenantAuthenticationService.authenticate(jwt);
+            AuthenticatedTenantActor actor = jwtTenantAuthenticationService.authenticate(
+                    jwt,
+                    request == null ? null : request.getRequestURI());
             List<SimpleGrantedAuthority> authorities = actor.roles().stream()
                     .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
                     .map(SimpleGrantedAuthority::new)

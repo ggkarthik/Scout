@@ -193,7 +193,7 @@ class ApiSecurityIntegrationTest {
                 .claim("email", "analyst@example.com")
                 .build();
         when(jwtDecoder.decode("test.jwt")).thenReturn(jwt);
-        when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/auth/context")).thenReturn(new AuthenticatedTenantActor(
                 "user-123",
                 UUID.randomUUID(),
                 "analyst@example.com",
@@ -232,7 +232,7 @@ class ApiSecurityIntegrationTest {
                 .claim("email", "tenant.admin@example.com")
                 .build();
         when(jwtDecoder.decode("quality.jwt")).thenReturn(jwt);
-        when(jwtTenantAuthenticationService.authenticate(jwt)).thenReturn(new AuthenticatedTenantActor(
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/operations/quality/summary")).thenReturn(new AuthenticatedTenantActor(
                 "tenant-admin-1",
                 UUID.randomUUID(),
                 "tenant.admin@example.com",

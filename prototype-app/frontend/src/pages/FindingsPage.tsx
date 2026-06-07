@@ -2,17 +2,38 @@ import React from 'react';
 import '../styles/findings-list.css';
 import { Link, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForConnectView } from '../app/routes';
-import type { Finding, FindingBulkWorkflowRequest } from '../features/findings/types';
+import type {
+  Finding,
+  FindingBulkWorkflowRequest,
+  FindingQueueDefinition,
+  FindingQueueUpsertRequest,
+  FindingsFilterModel
+} from '../features/findings/types';
 import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
-import { useFindingFiltersQuery, useFindingsQuery } from '../features/findings/queries';
+import {
+  useFindingBacklogHealthQuery,
+  useFindingDistributionsQuery,
+  useFindingFiltersQuery,
+  useFindingPortfolioRollupQuery,
+  useFindingProjectionStatusQuery,
+  useFindingQueueAnalyticsQuery,
+  useFindingQueueAnalyticsTrendQuery,
+  useFindingQueuesQuery,
+  useFindingsQuery,
+  useFindingSummaryQuery
+} from '../features/findings/queries';
+import { useFindingsCursorPaging, useFindingsQueryContext } from '../features/findings/hooks';
+import { FindingsWorkspaceHeader } from '../features/findings/components/FindingsWorkspaceHeader';
+import { FindingsSummaryWidgets } from '../features/findings/components/FindingsSummaryWidgets';
+import { FindingsPortfolioRollupsPanel } from '../features/findings/components/FindingsPortfolioRollupsPanel';
+import { FindingsQueueHealthPanel } from '../features/findings/components/FindingsQueueHealthPanel';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { useActor } from '../features/auth/context';
 import { canRunSecurityWorkflow } from '../features/auth/roles';
 import { api } from '../api/client';
 import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
-import { DonutChart, HBarChart, WidgetCard } from '../features/widgets/FplWidgets';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -81,7 +102,7 @@ const GROUP_OPTIONS: MultiGroupByOption[] = [
 
 type DueDateBand = 'overdue' | 'due-soon' | 'on-track' | 'no-sla' | null;
 
-type ColFilters = {
+export type ColFilters = {
   findingId:  string;
   cveId:      string;
   asset:      string;
@@ -185,10 +206,9 @@ type FindingsPageProps = { onOpenCveWorkbench?: (vulnerabilityId: string) => voi
 export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const actor = useActor();
   const canMutateFindings = canRunSecurityWorkflow(actor);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // ── filter state ───────────────────────────────────────────────────────────
-  const [page, setPage] = React.useState(0);
   const [colFilters, setColFilters] = React.useState<ColFilters>(() => ({
     ...DEFAULT_COL_FILTERS,
     severity: searchParams.getAll('severity').length ? searchParams.getAll('severity') : DEFAULT_COL_FILTERS.severity,
@@ -226,30 +246,70 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [incidentAssignedTo, setIncidentAssignedTo] = React.useState('');
   const [incidentAssignmentGroup, setIncidentAssignmentGroup] = React.useState('');
   const [incidentDueDate, setIncidentDueDate] = React.useState('');
+  const [queueDialogMode, setQueueDialogMode] = React.useState<'create' | 'edit' | null>(null);
+  const [queueDialogTarget, setQueueDialogTarget] = React.useState<FindingQueueDefinition | null>(null);
+  const [queueTitle, setQueueTitle] = React.useState('');
+  const [queueDescription, setQueueDescription] = React.useState('');
+  const [queueSetAsDefault, setQueueSetAsDefault] = React.useState(false);
+  const [queueActionLoading, setQueueActionLoading] = React.useState(false);
+  const [queueActionError, setQueueActionError] = React.useState('');
 
   // ── queries ────────────────────────────────────────────────────────────────
   const policyQuery = useRiskPolicyQuery();
   const filtersQuery = useFindingFiltersQuery();
+  const queuesQuery = useFindingQueuesQuery();
   const filterValues = filtersQuery.data;
+
+  const adHocFilterModel = React.useMemo<FindingsFilterModel>(() => ({
+    severity: colFilters.severity.length > 0 ? colFilters.severity : undefined,
+    status: colFilters.status.length > 0 ? colFilters.status : undefined,
+    creationSource: colFilters.creationSource.length > 0 ? colFilters.creationSource : undefined,
+    vulnerabilityId: colFilters.cveId.trim() || undefined,
+    packageName: colFilters.package.trim() || undefined,
+    assignedTo: colFilters.assignedTo.trim() || undefined,
+    dueDateBand: dueDateBand ?? undefined,
+    assetName: colFilters.asset.trim() || undefined,
+    supportGroup: colFilters.supportGroup.trim() || undefined,
+    incidentLinked: colFilters.incidentId.trim().length > 0 ? true : undefined,
+  }), [colFilters, dueDateBand]);
+
+  const availableQueues = queuesQuery.data ?? [];
+  const {
+    activeQueueKey,
+    setActiveQueueKey,
+    builtInQueues,
+    personalQueues,
+    defaultQueue,
+    activeQueryContext,
+  } = useFindingsQueryContext({
+    searchParams,
+    setSearchParams,
+    availableQueues,
+    adHocFilterModel,
+  });
+  const {
+    page,
+    setPage,
+    setPageCursors,
+    effectiveServerFilterModel,
+  } = useFindingsCursorPaging(activeQueryContext.queueKey, adHocFilterModel, PAGE_SIZE);
 
   // main table query — uses active column filters
   const findingsQuery = useFindingsQuery({
-    page,
-    size: PAGE_SIZE,
-    severity:        colFilters.severity.length > 0 ? colFilters.severity : undefined,
-    status:          colFilters.status.length > 0   ? colFilters.status   : undefined,
-    creationSource:  colFilters.creationSource.length > 0 ? colFilters.creationSource : undefined,
-    vulnerabilityId: colFilters.cveId.trim()    || undefined,
-    packageName:     colFilters.package.trim()  || undefined,
+    ...effectiveServerFilterModel,
   });
-
-  // widget data — loads broader sample, unfiltered except by any search params
-  const widgetQuery = useFindingsQuery({ page: 0, size: 500 });
+  const summaryQuery = useFindingSummaryQuery(effectiveServerFilterModel);
+  const distributionsQuery = useFindingDistributionsQuery(effectiveServerFilterModel);
+  const backlogHealthQuery = useFindingBacklogHealthQuery(effectiveServerFilterModel);
+  const queueAnalyticsQuery = useFindingQueueAnalyticsQuery(effectiveServerFilterModel);
+  const queueAnalyticsTrendQuery = useFindingQueueAnalyticsTrendQuery(effectiveServerFilterModel, 30);
+  const portfolioRollupQuery = useFindingPortfolioRollupQuery();
+  const projectionStatusQuery = useFindingProjectionStatusQuery();
 
   const allRows  = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data]);
-  const wRows    = React.useMemo(() => widgetQuery.data?.items ?? [], [widgetQuery.data]);
   const totalItems = findingsQuery.data?.totalItems ?? 0;
   const totalPages = findingsQuery.data?.totalPages ?? 0;
+  const nextCursor = findingsQuery.data?.nextCursor ?? null;
   const loading    = findingsQuery.isLoading || findingsQuery.isFetching;
 
   const rows = React.useMemo(
@@ -271,36 +331,27 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   // ── widget data computations ───────────────────────────────────────────────
 
-  const sevCounts = React.useMemo(() => {
-    const m = new Map<string,number>();
-    wRows.forEach(r => m.set(r.severity, (m.get(r.severity)??0)+1));
-    return m;
-  }, [wRows]);
+  const severityCounts = React.useMemo(() => {
+    const map = new Map<string, number>();
+    (distributionsQuery.data?.severityCounts ?? []).forEach((bucket) => map.set(bucket.key, bucket.count));
+    return map;
+  }, [distributionsQuery.data]);
 
   const statusCounts = React.useMemo(() => {
-    const m = new Map<string,number>();
-    wRows.forEach(r => m.set(r.status, (m.get(r.status)??0)+1));
-    return m;
-  }, [wRows]);
+    const map = new Map<string, number>();
+    (distributionsQuery.data?.statusCounts ?? []).forEach((bucket) => map.set(bucket.key, bucket.count));
+    return map;
+  }, [distributionsQuery.data]);
 
-  const assetCounts = React.useMemo(() => {
-    const m = new Map<string,number>();
-    wRows.filter(r=>r.status==='OPEN').forEach(r => m.set(r.assetName,(m.get(r.assetName)??0)+1));
-    return Array.from(m.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  }, [wRows]);
+  const assetCounts = React.useMemo(
+    () => (distributionsQuery.data?.topAssets ?? []).map((item) => [item.assetName, item.count] as const),
+    [distributionsQuery.data]
+  );
 
-  const dueDateCounts = React.useMemo(() => {
-    const now = Date.now(), soon = 7*24*3600*1000;
-    let overdue=0, dueSoon=0, onTrack=0, noSla=0;
-    wRows.filter(r=>r.status==='OPEN').forEach(r => {
-      const t = r.dueAt ? new Date(r.dueAt).getTime() : null;
-      if (!t) { noSla++; return; }
-      if (t < now) overdue++;
-      else if (t < now+soon) dueSoon++;
-      else onTrack++;
-    });
-    return { overdue, dueSoon, onTrack, noSla };
-  }, [wRows]);
+  const dueDateCounts = backlogHealthQuery.data ?? { overdue: 0, dueSoon: 0, onTrack: 0, noSla: 0 };
+  const queueAnalytics = queueAnalyticsQuery.data;
+  const queueTrendPoints = queueAnalyticsTrendQuery.data ?? [];
+  const portfolioRollup = portfolioRollupQuery.data;
 
   // ── outside click ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -315,12 +366,14 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   // ── widget click helpers ───────────────────────────────────────────────────
   function filterBySeverity(sev: string) {
+    if (activeQueryContext.baseFilter.severity && !activeQueryContext.baseFilter.severity.includes(sev)) return;
     const toggled = colFilters.severity.length===1 && colFilters.severity[0]===sev;
     setColFilters(p=>({...p, severity: toggled ? [] : [sev], status: []}));
     setDueDateBand(null);
     setPage(0);
   }
   function filterByStatus(s: string) {
+    if (activeQueryContext.baseFilter.status && !activeQueryContext.baseFilter.status.includes(s)) return;
     const toggled = colFilters.status.length===1 && colFilters.status[0]===s;
     setColFilters(p=>({...p, status: toggled ? [] : [s], severity: []}));
     setDueDateBand(null);
@@ -332,8 +385,173 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setPage(0);
   }
   function filterByDueBand(band: DueDateBand) {
+    if (band && activeQueryContext.baseFilter.dueDateBand && activeQueryContext.baseFilter.dueDateBand !== band) return;
     setDueDateBand(prev => prev===band ? null : band);
     setPage(0);
+  }
+
+  function mergeQueueFilter(baseFilter: FindingsFilterModel, adHocFilters: FindingsFilterModel): FindingsFilterModel {
+    return {
+      severity: adHocFilters.severity && adHocFilters.severity.length > 0 ? adHocFilters.severity : baseFilter.severity,
+      status: adHocFilters.status && adHocFilters.status.length > 0 ? adHocFilters.status : baseFilter.status,
+      decisionState: adHocFilters.decisionState && adHocFilters.decisionState.length > 0 ? adHocFilters.decisionState : baseFilter.decisionState,
+      creationSource: adHocFilters.creationSource && adHocFilters.creationSource.length > 0 ? adHocFilters.creationSource : baseFilter.creationSource,
+      matchMethod: adHocFilters.matchMethod && adHocFilters.matchMethod.length > 0 ? adHocFilters.matchMethod : baseFilter.matchMethod,
+      vexStatus: adHocFilters.vexStatus && adHocFilters.vexStatus.length > 0 ? adHocFilters.vexStatus : baseFilter.vexStatus,
+      vexFreshness: adHocFilters.vexFreshness && adHocFilters.vexFreshness.length > 0 ? adHocFilters.vexFreshness : baseFilter.vexFreshness,
+      vexProvider: adHocFilters.vexProvider && adHocFilters.vexProvider.length > 0 ? adHocFilters.vexProvider : baseFilter.vexProvider,
+      minConfidence: adHocFilters.minConfidence ?? baseFilter.minConfidence,
+      vulnerabilityId: adHocFilters.vulnerabilityId ?? baseFilter.vulnerabilityId,
+      packageName: adHocFilters.packageName ?? baseFilter.packageName,
+      ecosystem: adHocFilters.ecosystem ?? baseFilter.ecosystem,
+      ownerGroup: adHocFilters.ownerGroup ?? baseFilter.ownerGroup,
+      assignedTo: adHocFilters.assignedTo ?? baseFilter.assignedTo,
+      unassignedOnly: adHocFilters.unassignedOnly ?? baseFilter.unassignedOnly,
+      incidentLinked: adHocFilters.incidentLinked ?? baseFilter.incidentLinked,
+      dueDateBand: adHocFilters.dueDateBand ?? baseFilter.dueDateBand,
+      assetName: adHocFilters.assetName ?? baseFilter.assetName,
+      supportGroup: adHocFilters.supportGroup ?? baseFilter.supportGroup,
+      patchAvailable: adHocFilters.patchAvailable ?? baseFilter.patchAvailable,
+      suppressedUntilBand: adHocFilters.suppressedUntilBand ?? baseFilter.suppressedUntilBand,
+    };
+  }
+
+  function applyQueueSelection(nextQueueKey: string) {
+    const nextQueue = availableQueues.find((queue) => queue.key === nextQueueKey);
+    const queueFilter = nextQueue?.filter ?? {};
+    if (queueFilter.severity && queueFilter.severity.length > 0) {
+      setColFilters((prev) => ({
+        ...prev,
+        severity: prev.severity.every((value) => queueFilter.severity?.includes(value)) ? prev.severity : [],
+      }));
+    }
+    if (queueFilter.status && queueFilter.status.length > 0) {
+      setColFilters((prev) => ({
+        ...prev,
+        status: prev.status.every((value) => queueFilter.status?.includes(value)) ? prev.status : [],
+      }));
+    }
+    if (queueFilter.dueDateBand && dueDateBand && queueFilter.dueDateBand !== dueDateBand) {
+      setDueDateBand(null);
+    }
+    setActiveQueueKey(nextQueueKey);
+    setPage(0);
+    setSelectedIds(new Set());
+  }
+
+  function openCreateQueueDialog() {
+    setQueueDialogMode('create');
+    setQueueDialogTarget(null);
+    setQueueTitle(activeQueryContext.title === 'All Findings' ? 'My Queue' : activeQueryContext.title);
+    setQueueDescription('');
+    setQueueSetAsDefault(false);
+    setQueueActionError('');
+  }
+
+  function openEditQueueDialog(queue: FindingQueueDefinition) {
+    setQueueDialogMode('edit');
+    setQueueDialogTarget(queue);
+    setQueueTitle(queue.title);
+    setQueueDescription(queue.description ?? '');
+    setQueueSetAsDefault(queue.isDefault);
+    setQueueActionError('');
+  }
+
+  function closeQueueDialog() {
+    setQueueDialogMode(null);
+    setQueueDialogTarget(null);
+    setQueueTitle('');
+    setQueueDescription('');
+    setQueueSetAsDefault(false);
+    setQueueActionError('');
+  }
+
+  async function refreshQueueWorkspace(nextQueueKey?: string | null) {
+    const refreshed = await queuesQuery.refetch();
+    const refreshedQueues = refreshed.data ?? [];
+    if (nextQueueKey) {
+      setActiveQueueKey(nextQueueKey);
+    } else if (!refreshedQueues.some((queue) => queue.key === activeQueueKey)) {
+      setActiveQueueKey(refreshedQueues.find((queue) => queue.isDefault)?.key ?? 'all-findings');
+    }
+      await Promise.all([
+        findingsQuery.refetch(),
+        summaryQuery.refetch(),
+        distributionsQuery.refetch(),
+        backlogHealthQuery.refetch(),
+        queueAnalyticsQuery.refetch(),
+        queueAnalyticsTrendQuery.refetch(),
+        portfolioRollupQuery.refetch(),
+      ]);
+  }
+
+  async function saveQueue() {
+    const effectiveFilter = queueDialogMode === 'edit' && queueDialogTarget
+      ? queueDialogTarget.filter
+      : mergeQueueFilter(activeQueryContext.baseFilter, activeQueryContext.adHocFilters);
+    const payload: FindingQueueUpsertRequest = {
+      title: queueTitle.trim(),
+      description: queueDescription.trim() || undefined,
+      filter: effectiveFilter,
+      sourceQueueKey: activeQueryContext.queueKey,
+      setAsDefault: queueSetAsDefault,
+    };
+    setQueueActionLoading(true);
+    setQueueActionError('');
+    try {
+      const saved = queueDialogMode === 'edit' && queueDialogTarget
+        ? await api.updateFindingQueue(queueDialogTarget.key, payload)
+        : await api.createFindingQueue(payload);
+      closeQueueDialog();
+      await refreshQueueWorkspace(saved.key);
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQueueActionLoading(false);
+    }
+  }
+
+  async function duplicateQueue(queue: FindingQueueDefinition) {
+    setQueueActionLoading(true);
+    setQueueActionError('');
+    try {
+      const duplicated = await api.duplicateFindingQueue(queue.key);
+      await refreshQueueWorkspace(duplicated.key);
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQueueActionLoading(false);
+    }
+  }
+
+  async function setDefaultQueue(queue: FindingQueueDefinition) {
+    setQueueActionLoading(true);
+    setQueueActionError('');
+    try {
+      await api.setDefaultFindingQueue(queue.key);
+      await refreshQueueWorkspace(queue.key);
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQueueActionLoading(false);
+    }
+  }
+
+  async function deleteQueue(queue: FindingQueueDefinition) {
+    if (!window.confirm(`Delete saved queue "${queue.title}"?`)) return;
+    setQueueActionLoading(true);
+    setQueueActionError('');
+    try {
+      await api.deleteFindingQueue(queue.key);
+      const fallbackQueue = defaultQueue?.key === queue.key ? 'all-findings' : activeQueueKey === queue.key
+        ? (availableQueues.find((candidate) => candidate.isDefault && candidate.key !== queue.key)?.key ?? 'all-findings')
+        : null;
+      await refreshQueueWorkspace(fallbackQueue);
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQueueActionLoading(false);
+    }
   }
 
   // ── filter helpers ─────────────────────────────────────────────────────────
@@ -451,7 +669,16 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       suppressedUntil: payload.suppressedUntil as string | undefined,
       actor: payload.actor as string | undefined,
     });
-    void findingsQuery.refetch(); setSelectedIds(new Set());
+    await Promise.all([
+      findingsQuery.refetch(),
+      summaryQuery.refetch(),
+      distributionsQuery.refetch(),
+      backlogHealthQuery.refetch(),
+      queueAnalyticsQuery.refetch(),
+      queueAnalyticsTrendQuery.refetch(),
+      portfolioRollupQuery.refetch(),
+    ]);
+    setSelectedIds(new Set());
   }
   async function handleResolve()     { setActionLoading(true); try { await execAll({status:'RESOLVED',actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleReopen()      { if (!hasSelection) return; setActionLoading(true); try { await execAll({status:'OPEN',actor:'local-analyst'}); } catch(e){console.error(e);} finally{setActionLoading(false); setShowMoreActions(false);} }
@@ -462,7 +689,15 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setActionLoading(true);
     try {
       await api.bulkDeleteFindings(selectedFindings.map(f => f.id));
-      void findingsQuery.refetch(); void widgetQuery.refetch(); setSelectedIds(new Set()); closeModal();
+      void findingsQuery.refetch();
+      void summaryQuery.refetch();
+      void distributionsQuery.refetch();
+      void backlogHealthQuery.refetch();
+      void queueAnalyticsQuery.refetch();
+      void queueAnalyticsTrendQuery.refetch();
+      void portfolioRollupQuery.refetch();
+      setSelectedIds(new Set());
+      closeModal();
     } catch(e) { setActionError(String(e)); } finally { setActionLoading(false); }
   }
   async function handleCreateIncident() {
@@ -725,16 +960,80 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     );
   }
 
+  function renderQueueDialog() {
+    if (!queueDialogMode) return null;
+    return (
+      <div className="fd3-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)closeQueueDialog();}}>
+        <div className="fd3-modal" style={{maxWidth:460}}>
+          <div className="fd3-modal-header">
+            <span>{queueDialogMode === 'create' ? 'Save Current View' : 'Edit Saved Queue'}</span>
+            <button className="fd3-modal-close" onClick={closeQueueDialog}>✕</button>
+          </div>
+          <div className="fd3-modal-body">
+            {queueActionError && <div className="notice error" style={{marginBottom:12}}>{queueActionError}</div>}
+            <div className="fpl-form">
+              <div className="fpl-form-row">
+                <label>Title</label>
+                <input className="fpl-form-input" value={queueTitle} onChange={e=>setQueueTitle(e.target.value)} placeholder="Queue title"/>
+              </div>
+              <div className="fpl-form-row">
+                <label>Description</label>
+                <textarea className="fpl-form-textarea" rows={3} value={queueDescription} onChange={e=>setQueueDescription(e.target.value)} placeholder="Optional description"/>
+              </div>
+              <label className="fpl-col-filter-check" style={{marginTop:8}}>
+                <input type="checkbox" checked={queueSetAsDefault} onChange={e=>setQueueSetAsDefault(e.target.checked)} />
+                <span>Set as my default queue</span>
+              </label>
+              <div className="fpl-form-info">
+                Saving the current workspace scope plus any active narrowing filters.
+              </div>
+            </div>
+          </div>
+          <div className="fd3-modal-footer">
+            <button className="btn btn-secondary" onClick={closeQueueDialog} disabled={queueActionLoading}>Cancel</button>
+            <button className="btn btn-primary" onClick={()=>void saveQueue()} disabled={queueActionLoading || queueTitle.trim().length === 0}>
+              {queueActionLoading ? 'Saving…' : queueDialogMode === 'create' ? 'Save Queue' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="fpl-root">
+      <FindingsWorkspaceHeader
+        builtInQueues={builtInQueues}
+        personalQueues={personalQueues}
+        activeQueueKey={activeQueryContext.queueKey}
+        projectionStatus={projectionStatusQuery.data}
+        queueLoading={queuesQuery.isLoading}
+        queueActionError={queueActionError}
+        projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
+        workspaceError={
+          findingsQuery.error instanceof Error ? findingsQuery.error
+            : summaryQuery.error instanceof Error ? summaryQuery.error
+            : distributionsQuery.error instanceof Error ? distributionsQuery.error
+            : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
+            : null
+        }
+        onSelectQueue={applyQueueSelection}
+        onOpenCreateQueue={openCreateQueueDialog}
+        onOpenEditQueue={openEditQueueDialog}
+        onDuplicateQueue={(queue) => void duplicateQueue(queue)}
+        onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
+        onDeleteQueue={(queue) => void deleteQueue(queue)}
+        workspaceTitle={activeQueryContext.title}
+      />
 
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div className="fpl-toolbar">
         <div className="fpl-toolbar-left">
           <MultiGroupBy options={GROUP_OPTIONS} value={groupBy} onChange={setGroupBy}
             label="GROUP BY" placeholder="None" allowEmptyPrimary emptyPrimaryLabel="None" showSelectorsByDefault={false}/>
+          <button className="btn btn-secondary" onClick={openCreateQueueDialog}>Save Current View</button>
 
           {/* active filter chips */}
           {activeChips.length>0 && (
@@ -751,113 +1050,41 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         </div>
       </div>
 
-      {/* ── 5 dashboard widgets ─────────────────────────────────────────── */}
-      <div className="fpl-widgets">
+      <FindingsSummaryWidgets
+        colFilters={colFilters}
+        dueDateBand={dueDateBand}
+        severityCounts={severityCounts}
+        statusCounts={statusCounts}
+        assetCounts={assetCounts}
+        dueDateCounts={dueDateCounts}
+        summary={summaryQuery.data}
+        severityColors={SEV_COLORS}
+        statusColors={STATUS_COLORS}
+        formatLabel={fmt}
+        onFilterBySeverity={filterBySeverity}
+        onFilterByStatus={filterByStatus}
+        onFilterByAsset={filterByAsset}
+        onFilterByDueBand={filterByDueBand}
+        onCriticalOpenClick={() => { setColFilters((p) => ({ ...p, severity: ['CRITICAL'], status: ['OPEN'] })); setDueDateBand(null); setPage(0); }}
+        onUnassignedClick={() => { setColFilters((p) => ({ ...p, severity: [], status: ['OPEN'], assignedTo: '' })); setDueDateBand('no-sla'); setPage(0); }}
+        onWithIncidentsClick={() => { setColFilters((p) => ({ ...p, severity: [], status: [] })); setDueDateBand(null); setPage(0); setColFilter('incidentId', 'INC'); }}
+      />
 
-        {/* Widget 1: Exposure by Severity (donut) */}
-        <WidgetCard title="Exposure by Severity" active={colFilters.severity.length>0&&colFilters.severity.length<6}>
-          <div className="fpl-widget-donut-layout">
-            <DonutChart
-              size={90} sw={16}
-              segs={(['CRITICAL','HIGH','MEDIUM','LOW','NONE'] as const).map(s=>({
-                key:s, label:s, value:sevCounts.get(s)??0, color:SEV_COLORS[s],
-                onClick:()=>filterBySeverity(s),
-              }))}
-            />
-            <div className="fpl-widget-legend">
-              {(['CRITICAL','HIGH','MEDIUM','LOW','NONE'] as const).map(s=>{
-                const cnt = sevCounts.get(s)??0;
-                if (!cnt) return null;
-                return (
-                  <div key={s} className={`fpl-legend-row${colFilters.severity.includes(s)?' fpl-legend-row--active':''}`}
-                    onClick={()=>filterBySeverity(s)}>
-                    <span className="fpl-legend-dot" style={{background:SEV_COLORS[s]}}/>
-                    <span className="fpl-legend-label">{s}</span>
-                    <strong className="fpl-legend-val">{cnt}</strong>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </WidgetCard>
+      <FindingsPortfolioRollupsPanel
+        rollup={portfolioRollup}
+        error={portfolioRollupQuery.error instanceof Error ? portfolioRollupQuery.error : null}
+      />
 
-        {/* Widget 2: Findings by Status (horizontal bars) */}
-        <WidgetCard title="Findings by Status" active={colFilters.status.length>0&&colFilters.status.length<4}>
-          <HBarChart
-            activeKey={colFilters.status.length===1?colFilters.status[0]:undefined}
-            items={(['OPEN','RESOLVED','SUPPRESSED','AUTO_CLOSED'] as const).map(s=>({
-              key:s, label:s==='SUPPRESSED'?'Deferred / Suppressed':s==='AUTO_CLOSED'?'Closed':fmt(s), value:statusCounts.get(s)??0,
-              color:STATUS_COLORS[s], onClick:()=>filterByStatus(s),
-            }))}
-          />
-        </WidgetCard>
-
-        {/* Widget 3: Top Assets at Risk (horizontal bars, top 5 open) */}
-        <WidgetCard title="Top Assets at Risk" active={!!colFilters.asset}>
-          {assetCounts.length===0
-            ? <div className="fpl-widget-empty">No open findings</div>
-            : <HBarChart
-                activeKey={colFilters.asset||undefined}
-                items={assetCounts.map(([name,cnt],i)=>({
-                  key:name, label:name.length>18?name.slice(0,16)+'…':name,
-                  value:cnt, color:['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe'][i]??'#6366f1',
-                  onClick:()=>filterByAsset(name),
-                }))}
-              />
-          }
-        </WidgetCard>
-
-        {/* Widget 4: SLA & Due Date Status (horizontal bars) */}
-        <WidgetCard title="SLA & Due Date" active={!!dueDateBand}>
-          <HBarChart
-            activeKey={dueDateBand??undefined}
-            items={[
-              { key:'overdue',  label:'Overdue',       value:dueDateCounts.overdue,  color:'#ef4444', onClick:()=>filterByDueBand('overdue')  },
-              { key:'due-soon', label:'Due in 7 days', value:dueDateCounts.dueSoon,  color:'#f97316', onClick:()=>filterByDueBand('due-soon') },
-              { key:'on-track', label:'On Track',      value:dueDateCounts.onTrack,  color:'#22c55e', onClick:()=>filterByDueBand('on-track') },
-              { key:'no-sla',   label:'No SLA Set',    value:dueDateCounts.noSla,    color:'#9ca3af', onClick:()=>filterByDueBand('no-sla')   },
-            ]}
-          />
-        </WidgetCard>
-
-        {/* Widget 5: Key Indicators (big KPI numbers) */}
-        <WidgetCard title="Key Indicators">
-          <div className="fpl-kpi-grid">
-            {[
-              {
-                label:'Critical Open',
-                value: wRows.filter(r=>r.severity==='CRITICAL'&&r.status==='OPEN').length,
-                color:'#ef4444',
-                onClick:()=>{setColFilters(p=>({...p,severity:['CRITICAL'],status:['OPEN']}));setDueDateBand(null);setPage(0);}
-              },
-              {
-                label:'Unassigned',
-                value: wRows.filter(r=>r.status==='OPEN'&&!r.assignedTo).length,
-                color:'#f97316',
-                onClick:()=>{setColFilters(p=>({...p,severity:[],status:['OPEN'],assignedTo:''}));setDueDateBand('no-sla');setPage(0);}
-              },
-              {
-                label:'With Incidents',
-                value: wRows.filter(r=>!!r.incidentId).length,
-                color:'#3b82f6',
-                onClick:()=>{setColFilters(p=>({...p,severity:[],status:[]}));setDueDateBand(null);setPage(0);setColFilter('incidentId','INC');}
-              },
-              {
-                label:'Overdue',
-                value: dueDateCounts.overdue,
-                color:'#b91c1c',
-                onClick:()=>filterByDueBand('overdue'),
-              },
-            ].map(kpi=>(
-              <div key={kpi.label} className="fpl-kpi-card" onClick={kpi.onClick} style={{'--kpi-color':kpi.color} as React.CSSProperties}>
-                <div className="fpl-kpi-num">{kpi.value}</div>
-                <div className="fpl-kpi-label">{kpi.label}</div>
-              </div>
-            ))}
-          </div>
-        </WidgetCard>
-
-      </div>
+      <FindingsQueueHealthPanel
+        title={activeQueryContext.healthScopeLabel}
+        analytics={queueAnalytics}
+        trendPoints={queueTrendPoints}
+        error={
+          queueAnalyticsQuery.error instanceof Error ? queueAnalyticsQuery.error
+            : queueAnalyticsTrendQuery.error instanceof Error ? queueAnalyticsTrendQuery.error
+            : null
+        }
+      />
 
       {/* ── group breakdown ──────────────────────────────────────────────── */}
       {groupCards.length>0 && (
@@ -961,7 +1188,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <tr><td colSpan={visColDefs.length+1} className="fpl-loading-row">Loading findings…</td></tr>
               ) : rows.length===0 ? (
                 <tr><td colSpan={visColDefs.length+1} className="fpl-empty-row">
-                  {(widgetQuery.data?.totalItems ?? 0) === 0 && activeChips.length === 0 ? (
+                  {(findingsQuery.data?.totalItems ?? 0) === 0 && activeChips.length === 0 ? (
                     <div className="empty-state-inline">
                       <strong>No findings yet</strong>
                       <p>Findings are generated when ingested vulnerabilities are correlated with your software inventory.</p>
@@ -996,11 +1223,29 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           <span className="fpl-page-info">
             {totalItems===0 ? 'No results' : `Page ${page+1} of ${Math.max(1,totalPages)} · ${totalItems.toLocaleString()} findings`}
           </span>
-          <button className="btn btn-secondary btn-inline" disabled={loading||page+1>=totalPages} onClick={()=>setPage(p=>p+1)}>Next →</button>
+          <button
+            className="btn btn-secondary btn-inline"
+            disabled={loading || !nextCursor}
+            onClick={() => {
+              if (!nextCursor) return;
+              setPageCursors((prev) => {
+                if (prev[page + 1] === nextCursor) {
+                  return prev;
+                }
+                const next = prev.slice(0, page + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPage(p => p + 1);
+            }}
+          >
+            Next →
+          </button>
         </div>
       </div>
 
       {renderModal()}
+      {renderQueueDialog()}
     </div>
   );
 }

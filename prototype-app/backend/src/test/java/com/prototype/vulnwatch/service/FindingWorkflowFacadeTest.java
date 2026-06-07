@@ -343,6 +343,8 @@ class FindingWorkflowFacadeTest {
         // Justification trimmed on the way into the event
         assertEquals("needed urgently", meta.getValue().get("justification"));
         assertEquals("cpe-match", meta.getValue().get("matchedBy"));
+        assertNotNull(saved.getDisplayId());
+        assertTrue(saved.getDisplayId().startsWith("F-"));
         // analystOverride is computed via JSON round-trip; verify the source flag in evidence instead
         assertTrue(saved.getEvidence().contains("\"analystOverrideApplied\":false"));
     }
@@ -550,11 +552,22 @@ class FindingWorkflowFacadeTest {
                             && Objects.equals(finding.getVulnerability().getId(), scopedVulnerabilityId))
                     .findFirst();
         });
-        when(findingRepository.saveAndFlush(any(Finding.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(findingRepository.save(any(Finding.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(findingRepository.saveAndFlush(any(Finding.class))).thenAnswer(invocation -> persistLikeJpa(invocation.getArgument(0)));
+        when(findingRepository.save(any(Finding.class))).thenAnswer(invocation -> persistLikeJpa(invocation.getArgument(0)));
         when(riskPolicyService.getOrCreate(tenant)).thenReturn(new RiskPolicy());
         when(findingsScoreService.computeFromParts(anyString(), any(), any(), any(), any())).thenReturn(7.5);
         when(findingSlaService.deriveDueAt(any(), anyDouble(), any(), any())).thenReturn(Instant.now().plusSeconds(86400));
+    }
+
+    private Finding persistLikeJpa(Finding finding) {
+        try {
+            var method = Finding.class.getDeclaredMethod("ensureIdentifiers");
+            method.setAccessible(true);
+            method.invoke(finding);
+            return finding;
+        } catch (ReflectiveOperationException ex) {
+            throw new RuntimeException(ex);
+        }
     }
 
     private ComponentVulnerabilityState aState(

@@ -15,6 +15,16 @@ import java.util.Map;
 @Component
 public class OpenAiClient {
 
+    public record AiCallOptions(String model, double temperature, int maxTokens, boolean jsonMode) {
+        public static AiCallOptions defaults(int maxTokens) {
+            return new AiCallOptions(null, 0.3, maxTokens, false);
+        }
+
+        public static AiCallOptions json(int maxTokens) {
+            return new AiCallOptions(null, 0.3, maxTokens, true);
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(OpenAiClient.class);
 
     @Value("${app.openai.api-key:}")
@@ -46,15 +56,15 @@ public class OpenAiClient {
     }
 
     public String chatCompletion(String systemPrompt, String userPrompt, int maxTokens) {
-        return doChat(systemPrompt, userPrompt, maxTokens, false);
+        return chat(systemPrompt, userPrompt, AiCallOptions.defaults(maxTokens));
     }
 
     /** Calls the chat completions API with response_format=json_object. */
     public String chatCompletionJson(String systemPrompt, String userPrompt, int maxTokens) {
-        return doChat(systemPrompt, userPrompt, maxTokens, true);
+        return chat(systemPrompt, userPrompt, AiCallOptions.json(maxTokens));
     }
 
-    private String doChat(String systemPrompt, String userPrompt, int maxTokens, boolean jsonMode) {
+    public String chat(String systemPrompt, String userPrompt, AiCallOptions options) {
         if (!isAvailable()) return null;
         try {
             String url = baseUrl.stripTrailing() + "/chat/completions";
@@ -64,14 +74,14 @@ public class OpenAiClient {
             headers.setBearerAuth(apiKey);
 
             java.util.LinkedHashMap<String, Object> body = new java.util.LinkedHashMap<>();
-            body.put("model", model);
+            body.put("model", options.model() != null && !options.model().isBlank() ? options.model() : model);
             body.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", userPrompt)
             ));
-            body.put("max_tokens", maxTokens);
-            body.put("temperature", 0.3);
-            if (jsonMode) {
+            body.put("max_tokens", options.maxTokens());
+            body.put("temperature", options.temperature());
+            if (options.jsonMode()) {
                 body.put("response_format", Map.of("type", "json_object"));
             }
 

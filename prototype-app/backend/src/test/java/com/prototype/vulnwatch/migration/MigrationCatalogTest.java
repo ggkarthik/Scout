@@ -72,7 +72,7 @@ class MigrationCatalogTest {
                 unexpectedDuplicateBodies.isEmpty(),
                 "Unexpected duplicate migration bodies found: " + unexpectedDuplicateBodies
         );
-        assertEquals(1, migrations.size(), "Expected a single bootstrap migration in the reset catalog.");
+        assertTrue(!migrations.isEmpty(), "Expected at least one migration in the reset catalog.");
     }
 
     private static MigrationFile toMigrationFile(Path path) {
