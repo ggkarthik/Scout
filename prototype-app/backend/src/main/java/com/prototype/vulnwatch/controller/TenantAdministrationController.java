@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.TenantMembership;
+import com.prototype.vulnwatch.dto.InventoryConnectorHealthResponse;
 import com.prototype.vulnwatch.dto.TenantCreateRequest;
 import com.prototype.vulnwatch.dto.TenantMemberRequest;
 import com.prototype.vulnwatch.dto.TenantMemberResponse;
@@ -12,6 +13,7 @@ import com.prototype.vulnwatch.dto.TenantStatusRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.IdentityAdministrationService;
+import com.prototype.vulnwatch.service.PlatformInventoryConnectorHealthService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
@@ -38,19 +40,22 @@ public class TenantAdministrationController {
     private final AuditEventService auditEventService;
     private final RequestActorService requestActorService;
     private final TenantAccessControlService tenantAccessControlService;
+    private final PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService;
 
     public TenantAdministrationController(
             TenantAdministrationService tenantAdministrationService,
             IdentityAdministrationService identityAdministrationService,
             AuditEventService auditEventService,
             RequestActorService requestActorService,
-            TenantAccessControlService tenantAccessControlService
+            TenantAccessControlService tenantAccessControlService,
+            PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService
     ) {
         this.tenantAdministrationService = tenantAdministrationService;
         this.identityAdministrationService = identityAdministrationService;
         this.auditEventService = auditEventService;
         this.requestActorService = requestActorService;
         this.tenantAccessControlService = tenantAccessControlService;
+        this.platformInventoryConnectorHealthService = platformInventoryConnectorHealthService;
     }
 
     @GetMapping("/tenants")
@@ -89,6 +94,12 @@ public class TenantAdministrationController {
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public List<PlatformUserResponse> listPlatformUsers() {
         return identityAdministrationService.listPlatformUsers();
+    }
+
+    @GetMapping("/platform/inventory-connectors/health")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public List<InventoryConnectorHealthResponse> listInventoryConnectorHealth() {
+        return platformInventoryConnectorHealthService.listInventoryConnectorHealth();
     }
 
     @PostMapping("/platform/users")

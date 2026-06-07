@@ -103,13 +103,12 @@ public class ServiceNowCmdbConfigService {
 
     @Transactional(readOnly = true)
     public ServiceNowCmdbConfigResponse get(Tenant tenant) {
-        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow").orElse(null);
-        return toResponse(config);
+        return toResponse(findConfig(tenant).orElse(null));
     }
 
     @Transactional
     public ServiceNowCmdbConfigResponse save(Tenant tenant, ServiceNowCmdbConfigRequest request) {
-        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow").orElseGet(() -> {
+        ServiceNowCmdbConfig config = findConfig(tenant).orElseGet(() -> {
             tenantQuotaService.assertCanCreateConnector(tenant, "servicenow");
             ServiceNowCmdbConfig created = new ServiceNowCmdbConfig();
             created.setTenant(tenant);
@@ -142,7 +141,7 @@ public class ServiceNowCmdbConfigService {
                 ? "ServiceNow CMDB connection succeeded. Required tables are reachable."
                 : joinMessages(ciProbe, installProbe, discoveryProbe);
 
-        serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow").ifPresent(config -> {
+        findConfig(tenant).ifPresent(config -> {
             config.setLastTestStatus(success ? "SUCCESS" : "FAILED");
             config.setLastTestMessage(message);
             config.setLastTestedAt(testedAt);
@@ -162,7 +161,7 @@ public class ServiceNowCmdbConfigService {
 
     @Transactional(readOnly = true)
     public Optional<ServiceNowRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
-        Optional<ServiceNowCmdbConfig> saved = serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow");
+        Optional<ServiceNowCmdbConfig> saved = findConfig(tenant);
         if (saved.isPresent()) {
             ServiceNowCmdbConfig config = saved.get();
             return Optional.of(new ServiceNowRuntimeConfig(
@@ -203,6 +202,13 @@ public class ServiceNowCmdbConfigService {
                 false,
                 1440
         ));
+    }
+
+    Optional<ServiceNowCmdbConfig> findConfig(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return Optional.empty();
+        }
+        return serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow");
     }
 
     private void apply(ServiceNowCmdbConfig config, ServiceNowCmdbConfigRequest request) {
