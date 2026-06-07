@@ -41,6 +41,7 @@ public class AwsDiscoverySyncService {
 
     private final AwsDiscoveryConfigRepository awsDiscoveryConfigRepository;
     private final AwsDiscoveryTargetRepository awsDiscoveryTargetRepository;
+    private final AwsDiscoveryConfigService awsDiscoveryConfigService;
     private final AwsDiscoveryTargetService awsDiscoveryTargetService;
     private final AwsDiscoveryClient awsDiscoveryClient;
     private final AwsResourceIngestionService awsResourceIngestionService;
@@ -56,6 +57,7 @@ public class AwsDiscoverySyncService {
     public AwsDiscoverySyncService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
             AwsDiscoveryTargetRepository awsDiscoveryTargetRepository,
+            AwsDiscoveryConfigService awsDiscoveryConfigService,
             AwsDiscoveryTargetService awsDiscoveryTargetService,
             AwsDiscoveryClient awsDiscoveryClient,
             AwsResourceIngestionService awsResourceIngestionService,
@@ -70,6 +72,7 @@ public class AwsDiscoverySyncService {
     ) {
         this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
+        this.awsDiscoveryConfigService = awsDiscoveryConfigService;
         this.awsDiscoveryTargetService = awsDiscoveryTargetService;
         this.awsDiscoveryClient = awsDiscoveryClient;
         this.awsResourceIngestionService = awsResourceIngestionService;
@@ -84,9 +87,10 @@ public class AwsDiscoverySyncService {
     }
 
     public SyncTriggerResponse trigger() {
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun());
+        Tenant tenant = workspaceService.getWorkspace();
+        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun(tenant));
         if (!claimed.reusedActiveRun()) {
-            integrationQueueExecutor.execute(() -> executeRun(currentTenantId(), claimed.configId(), claimed.runId(), "manual", null));
+            integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual", null));
             return new SyncTriggerResponse(claimed.runId(), "queued", "AWS Cloud Discovery sync queued");
         }
         return new SyncTriggerResponse(claimed.runId(), "running", "AWS Cloud Discovery sync is already queued or running");
@@ -107,7 +111,7 @@ public class AwsDiscoverySyncService {
         List<ConfigRef> configs = new ArrayList<>();
         for (Tenant tenant : tenantService.listTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
-                awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
+                awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
                         .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
                         .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
                 return null;
@@ -132,8 +136,8 @@ public class AwsDiscoverySyncService {
 
     // ── Run claiming ───────────────────────────────────────────────────────────────────────────
 
-    private ClaimedRun claimManualRun() {
-        AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
+    private ClaimedRun claimManualRun(Tenant tenant) {
+        AwsDiscoveryConfig config = awsDiscoveryConfigService.findConfig(tenant)
                 .filter(this::isConfigured)
                 .orElseThrow(() -> new IllegalStateException("AWS Cloud Discovery connector is not configured"));
         if (!config.isEnabled()) {
@@ -249,10 +253,6 @@ public class AwsDiscoverySyncService {
             }
             return null;
         });
-    }
-
-    private UUID currentTenantId() {
-        return workspaceService.getWorkspace().getId();
     }
 
     private TargetRunResult executeTarget(

@@ -70,9 +70,10 @@ public class SccmCmdbSyncService {
     }
 
     public SyncTriggerResponse trigger() {
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun());
+        var tenant = workspaceService.getWorkspace();
+        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun(tenant));
         if (!claimed.reusedActiveRun()) {
-            integrationQueueExecutor.execute(() -> executeRun(currentTenantId(), claimed.configId(), claimed.runId(), "manual"));
+            integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual"));
             return new SyncTriggerResponse(claimed.runId(), "queued", "SCCM CMDB sync queued");
         }
         return new SyncTriggerResponse(claimed.runId(), "running", "SCCM CMDB sync is already queued or running");
@@ -83,7 +84,7 @@ public class SccmCmdbSyncService {
         List<ConfigRef> configs = new java.util.ArrayList<>();
         for (var tenant : tenantService.listTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
-                sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
+                sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
                         .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
                         .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
                 return null;
@@ -108,8 +109,8 @@ public class SccmCmdbSyncService {
 
     // ── Run claiming ───────────────────────────────────────────────────────────────────────────
 
-    private ClaimedRun claimManualRun() {
-        SccmCmdbConfig config = sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
+    private ClaimedRun claimManualRun(com.prototype.vulnwatch.domain.Tenant tenant) {
+        SccmCmdbConfig config = sccmCmdbConfigService.findConfig(tenant)
                 .filter(this::isConfigured)
                 .orElseThrow(() -> new IllegalStateException("SCCM CMDB connector is not configured"));
         if (!config.isEnabled()) {
@@ -209,10 +210,6 @@ public class SccmCmdbSyncService {
             }
             return null;
         });
-    }
-
-    private UUID currentTenantId() {
-        return workspaceService.getWorkspace().getId();
     }
 
     // ── Run lifecycle state transitions ───────────────────────────────────────────────────────

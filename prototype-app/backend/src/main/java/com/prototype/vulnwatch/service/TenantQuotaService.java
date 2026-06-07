@@ -109,10 +109,10 @@ public class TenantQuotaService {
 
     private long countConnectors(Tenant tenant) {
         return tenantSchemaExecutionService.run(tenant, () ->
-                (awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws").isPresent() ? 1L : 0L)
-                        + awsDiscoveryTargetRepository.count()
-                        + (sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm").isPresent() ? 1L : 0L)
-                        + (serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow").isPresent() ? 1L : 0L)
+                (awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws").isPresent() ? 1L : 0L)
+                        + awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())
+                        + (sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm").isPresent() ? 1L : 0L)
+                        + (serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow").isPresent() ? 1L : 0L)
         );
     }
 

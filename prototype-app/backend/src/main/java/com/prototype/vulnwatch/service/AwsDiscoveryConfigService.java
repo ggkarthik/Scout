@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -50,14 +51,12 @@ public class AwsDiscoveryConfigService {
 
     @Transactional(readOnly = true)
     public AwsDiscoveryConfigResponse get(Tenant tenant) {
-        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
-                .orElse(null);
-        return toResponse(config);
+        return toResponse(findConfig(tenant).orElse(null));
     }
 
     @Transactional
     public AwsDiscoveryConfigResponse save(Tenant tenant, AwsDiscoveryConfigRequest request) {
-        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
+        AwsDiscoveryConfig config = findConfig(tenant)
                 .orElseGet(() -> {
                     tenantQuotaService.assertCanCreateConnector(tenant, "aws");
                     AwsDiscoveryConfig c = new AwsDiscoveryConfig();
@@ -72,9 +71,7 @@ public class AwsDiscoveryConfigService {
 
     @Transactional
     public AwsConnectionTestResponse test(Tenant tenant) {
-        AwsDiscoveryConfig config = repo.findBySourceSystemIgnoreCase("aws")
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
-                        "AWS Cloud Discovery connector is not configured yet"));
+        AwsDiscoveryConfig config = requireConfig(tenant);
 
         Instant testedAt = Instant.now();
         AwsCredentialsProvider creds;
@@ -103,6 +100,18 @@ public class AwsDiscoveryConfigService {
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────────────────────
+
+    Optional<AwsDiscoveryConfig> findConfig(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return Optional.empty();
+        }
+        return repo.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws");
+    }
+
+    AwsDiscoveryConfig requireConfig(Tenant tenant) {
+        return findConfig(tenant).orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
+                "AWS Cloud Discovery connector is not configured yet"));
+    }
 
     private void apply(AwsDiscoveryConfig config, AwsDiscoveryConfigRequest request) {
         if (request.authType() != null) {
