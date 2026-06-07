@@ -38,15 +38,15 @@ public class PlatformInventoryConnectorHealthService {
         List<InventoryConnectorHealthResponse> responses = new ArrayList<>();
         for (Tenant tenant : tenantService.listTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
-                serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
+                serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
                         .ifPresent(config -> responses.add(toResponse(tenant, "servicenow", config.isEnabled(),
                                 config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
                                 config.getLastTestedAt(), config.getLastSyncAt())));
-                sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")
+                sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
                         .ifPresent(config -> responses.add(toResponse(tenant, "sccm", config.isEnabled(),
                                 config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
                                 config.getLastTestedAt(), config.getLastSyncAt())));
-                awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")
+                awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
                         .ifPresent(config -> responses.add(toResponse(tenant, "aws", config.isEnabled(),
                                 config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
                                 config.getLastTestedAt(), config.getLastSyncAt())));

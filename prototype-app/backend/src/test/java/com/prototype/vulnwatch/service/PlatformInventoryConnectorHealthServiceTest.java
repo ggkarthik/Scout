@@ -77,12 +77,18 @@ class PlatformInventoryConnectorHealthServiceTest {
         betaAws.setLastTestMessage("credential problem");
         betaAws.setLastTestedAt(Instant.parse("2026-05-19T10:15:30Z"));
 
-        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow"))
+        when(serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(beta.getId(), "servicenow"))
                 .thenReturn(Optional.empty(), Optional.of(alphaSn));
-        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm"))
+        when(sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(beta.getId(), "sccm"))
                 .thenReturn(Optional.empty(), Optional.empty());
-        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws"))
+        when(awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(beta.getId(), "aws"))
                 .thenReturn(Optional.of(betaAws), Optional.empty());
+        when(serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(alpha.getId(), "servicenow"))
+                .thenReturn(Optional.of(alphaSn));
+        when(sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(alpha.getId(), "sccm"))
+                .thenReturn(Optional.empty());
+        when(awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(alpha.getId(), "aws"))
+                .thenReturn(Optional.empty());
 
         List<InventoryConnectorHealthResponse> responses = service.listInventoryConnectorHealth();
 
@@ -99,11 +105,11 @@ class PlatformInventoryConnectorHealthServiceTest {
     void returnsEmptyListWhenNoTenantHasConnectorConfig() {
         Tenant tenant = tenant("Solo");
         when(tenantService.listTenants()).thenReturn(List.of(tenant));
-        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow"))
+        when(serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow"))
                 .thenReturn(Optional.empty());
-        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm"))
+        when(sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm"))
                 .thenReturn(Optional.empty());
-        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws"))
+        when(awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws"))
                 .thenReturn(Optional.empty());
 
         List<InventoryConnectorHealthResponse> responses = service.listInventoryConnectorHealth();

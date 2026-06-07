@@ -195,14 +195,20 @@ function TenantLifecyclePanel() {
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
   });
+  const inventoryConnectorHealthQuery = useQuery({
+    queryKey: ['platform-inventory-connector-health'],
+    queryFn: api.listInventoryConnectorHealth
+  });
   const createTenant = useMutation({
     mutationFn: api.createTenant,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
     }
   });
 
   const tenants = tenantsQuery.data ?? [];
+  const inventoryConnectorHealth = inventoryConnectorHealthQuery.data ?? [];
 
   const handleCreateTenant = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -272,6 +278,63 @@ function TenantLifecyclePanel() {
                   <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
                   <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="section-title-row" style={{ marginTop: 24 }}>
+        <h4 className="section-title">Inventory Connector Health</h4>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => void inventoryConnectorHealthQuery.refetch()}
+        >
+          Refresh
+        </button>
+      </div>
+      <p className="panel-caption">
+        Read-only oversight of tenant-managed inventory connectors across customer workspaces.
+      </p>
+      {inventoryConnectorHealthQuery.isError ? (
+        <div className="notice error" role="alert">
+          {inventoryConnectorHealthQuery.error instanceof Error
+            ? inventoryConnectorHealthQuery.error.message
+            : 'Failed to load inventory connector health'}
+        </div>
+      ) : inventoryConnectorHealthQuery.isLoading ? (
+        <div className="empty-state"><p>Loading inventory connector health...</p></div>
+      ) : inventoryConnectorHealth.length === 0 ? (
+        <div className="empty-state"><p>No tenant inventory connectors configured yet.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Connector</th>
+                <th>Health</th>
+                <th>Enabled</th>
+                <th>Auto Sync</th>
+                <th>Last Test</th>
+                <th>Last Sync</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventoryConnectorHealth.map((row) => (
+                <tr key={`${row.tenantId}-${row.connectorKey}`}>
+                  <td>{row.tenantName}</td>
+                  <td><code>{row.connectorKey}</code></td>
+                  <td>{row.healthState}</td>
+                  <td>{row.enabled ? 'Yes' : 'No'}</td>
+                  <td>{row.autoSyncEnabled ? 'Yes' : 'No'}</td>
+                  <td title={row.lastTestMessage ?? undefined}>
+                    {row.lastTestStatus ?? '-'}
+                    {row.lastTestedAt ? ` · ${new Date(row.lastTestedAt).toLocaleString()}` : ''}
+                  </td>
+                  <td>{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString() : '-'}</td>
                 </tr>
               ))}
             </tbody>

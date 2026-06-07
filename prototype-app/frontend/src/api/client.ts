@@ -81,6 +81,7 @@ import type {
   DemoRequestCreateRequest,
   DemoStatus,
   AuthTokenResponse,
+  InventoryConnectorHealth,
   PlatformUser,
   PlatformUserRequest,
   ServiceAccount,
@@ -915,6 +916,7 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   listPlatformUsers: () => request<PlatformUser[]>('/platform/users'),
+  listInventoryConnectorHealth: () => request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   upsertPlatformUser: (payload: PlatformUserRequest) =>
     request<PlatformUser>('/platform/users', {
       method: 'POST',

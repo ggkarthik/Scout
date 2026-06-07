@@ -50,16 +50,12 @@ public class SccmCmdbConfigService {
 
     @Transactional(readOnly = true)
     public SccmCmdbConfigResponse get(Tenant tenant) {
-        SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findBySourceSystemIgnoreCase("sccm")
-                .orElse(null);
-        return toResponse(config);
+        return toResponse(findConfig(tenant).orElse(null));
     }
 
     @Transactional
     public SccmCmdbConfigResponse save(Tenant tenant, SccmCmdbConfigRequest request) {
-        SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findBySourceSystemIgnoreCase("sccm")
+        SccmCmdbConfig config = findConfig(tenant)
                 .orElseGet(() -> {
                     tenantQuotaService.assertCanCreateConnector(tenant, "sccm");
                     SccmCmdbConfig created = new SccmCmdbConfig();
@@ -74,9 +70,7 @@ public class SccmCmdbConfigService {
 
     @Transactional
     public SccmConnectionTestResponse test(Tenant tenant) {
-        SccmCmdbConfig config = sccmCmdbConfigRepository
-                .findBySourceSystemIgnoreCase("sccm")
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "SCCM connector is not configured yet"));
+        SccmCmdbConfig config = requireConfig(tenant);
 
         Instant testedAt = Instant.now();
         boolean[] results = sccmQueryService.testConnection(config);
@@ -112,8 +106,7 @@ public class SccmCmdbConfigService {
 
     @Transactional(readOnly = true)
     public Optional<SccmRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
-        Optional<SccmCmdbConfig> saved = sccmCmdbConfigRepository
-                .findBySourceSystemIgnoreCase("sccm");
+        Optional<SccmCmdbConfig> saved = findConfig(tenant);
         if (saved.isPresent()) {
             SccmCmdbConfig config = saved.get();
             return Optional.of(new SccmRuntimeConfig(
@@ -149,6 +142,18 @@ public class SccmCmdbConfigService {
                 false,
                 1440
         ));
+    }
+
+    Optional<SccmCmdbConfig> findConfig(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return Optional.empty();
+        }
+        return sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm");
+    }
+
+    SccmCmdbConfig requireConfig(Tenant tenant) {
+        return findConfig(tenant)
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "SCCM connector is not configured yet"));
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────────────────────
