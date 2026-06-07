@@ -139,7 +139,7 @@ public class AwsDiscoveryTargetService {
         if (tenant == null || tenant.getId() == null || targetId == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AWS discovery target not found");
         }
-        return targetRepository.findById(targetId)
+        return targetRepository.findByIdAndTenant_Id(targetId, tenant.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AWS discovery target not found: " + targetId));
     }
 
@@ -147,7 +147,7 @@ public class AwsDiscoveryTargetService {
         if (tenant == null || tenant.getId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Workspace is not available");
         }
-        AwsDiscoveryConfig config = configRepository.findBySourceSystemIgnoreCase("aws")
+        AwsDiscoveryConfig config = configRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "AWS Cloud Discovery connector is not configured yet"));
         ensureLegacyTarget(config);
         return config;

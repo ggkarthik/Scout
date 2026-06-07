@@ -93,9 +93,10 @@ public class ServiceNowCmdbSyncService {
     }
 
     public SyncTriggerResponse trigger() {
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun());
+        var tenant = workspaceService.getWorkspace();
+        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun(tenant));
         if (!claimed.reusedActiveRun()) {
-            integrationQueueExecutor.execute(() -> executeRun(currentTenantId(), claimed.configId(), claimed.runId(), "manual"));
+            integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual"));
             return new SyncTriggerResponse(claimed.runId(), "queued", "ServiceNow CMDB sync queued");
         }
         return new SyncTriggerResponse(claimed.runId(), "running", "ServiceNow CMDB sync is already queued or running");
@@ -106,7 +107,7 @@ public class ServiceNowCmdbSyncService {
         List<ConfigRef> configs = new ArrayList<>();
         for (var tenant : tenantService.listTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
-                serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
+                serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
                         .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
                         .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
                 return null;
@@ -129,8 +130,8 @@ public class ServiceNowCmdbSyncService {
         return !syncRunRepository.findActiveRunsBySyncType(SYNC_TYPE_SERVICENOW_CMDB, List.of("queued", "running")).isEmpty();
     }
 
-    private ClaimedRun claimManualRun() {
-        ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")
+    private ClaimedRun claimManualRun(com.prototype.vulnwatch.domain.Tenant tenant) {
+        ServiceNowCmdbConfig config = serviceNowCmdbConfigService.findConfig(tenant)
                 .filter(this::isConfigured)
                 .orElseThrow(() -> new IllegalStateException("ServiceNow CMDB connector is not configured"));
         if (!config.isEnabled()) {
@@ -242,10 +243,6 @@ public class ServiceNowCmdbSyncService {
             }
             return null;
         });
-    }
-
-    private UUID currentTenantId() {
-        return workspaceService.getWorkspace().getId();
     }
 
     private void markRunRunning(UUID runId, String triggerMode) {

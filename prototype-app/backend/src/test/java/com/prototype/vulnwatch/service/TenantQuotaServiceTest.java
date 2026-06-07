@@ -65,10 +65,10 @@ class TenantQuotaServiceTest {
     @Test
     void assertCanCreateConnectorAllowsWhenBelowLimit() {
         Tenant tenant = tenant(3);
-        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
-        when(awsDiscoveryTargetRepository.count()).thenReturn(1L);
-        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")).thenReturn(java.util.Optional.empty());
-        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")).thenReturn(java.util.Optional.empty());
+        when(awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
+        when(awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
+        when(sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")).thenReturn(java.util.Optional.empty());
+        when(serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")).thenReturn(java.util.Optional.empty());
 
         assertDoesNotThrow(() -> service.assertCanCreateConnector(tenant, "aws-target"));
     }
@@ -76,10 +76,10 @@ class TenantQuotaServiceTest {
     @Test
     void assertCanCreateConnectorRejectsWhenAtLimit() {
         Tenant tenant = tenant(2);
-        when(awsDiscoveryConfigRepository.findBySourceSystemIgnoreCase("aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
-        when(awsDiscoveryTargetRepository.count()).thenReturn(1L);
-        when(sccmCmdbConfigRepository.findBySourceSystemIgnoreCase("sccm")).thenReturn(java.util.Optional.empty());
-        when(serviceNowCmdbConfigRepository.findBySourceSystemIgnoreCase("servicenow")).thenReturn(java.util.Optional.empty());
+        when(awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")).thenReturn(java.util.Optional.of(new com.prototype.vulnwatch.domain.AwsDiscoveryConfig()));
+        when(awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())).thenReturn(1L);
+        when(sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")).thenReturn(java.util.Optional.empty());
+        when(serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")).thenReturn(java.util.Optional.empty());
 
         QuotaExceededException ex = assertThrows(
                 QuotaExceededException.class,

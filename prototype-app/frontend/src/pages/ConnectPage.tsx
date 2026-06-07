@@ -12,7 +12,11 @@ import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
 import { api } from '../api/client';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
-import type { ServiceNowCmdbConfig, SccmCmdbConfig, AwsDiscoveryConfig } from '../features/connect/types';
+import {
+  useAwsDiscoveryConfigQuery,
+  useSccmCmdbConfigQuery,
+  useServiceNowCmdbConfigQuery
+} from '../features/connect/queries';
 import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole, hasRole } from '../features/auth/roles';
 import { timeAgo } from '../lib/time';
@@ -41,6 +45,13 @@ type ConnectorDefinition = {
   name: string;
   summary: string;
   icon: React.ReactNode;
+};
+
+type InventoryConnectorStatus = {
+  hasSynced: boolean;
+  isFailed: boolean;
+  demoDisabled: boolean;
+  lastSyncAt?: string;
 };
 
 /* ── Inline SVG connector icons ─────────────────────────────────────────────
@@ -454,6 +465,20 @@ function readConnectorFromSearch(searchParams: URLSearchParams): ConnectorId | n
   return null;
 }
 
+function buildInventoryConnectorStatus(config: {
+  configured?: boolean;
+  lastSyncAt?: string;
+  lastTestStatus?: string;
+} | null, demoDisabled: boolean): InventoryConnectorStatus {
+  const lastTestStatus = config?.lastTestStatus?.trim().toUpperCase();
+  return {
+    hasSynced: config?.lastSyncAt != null,
+    isFailed: lastTestStatus === 'FAILED',
+    demoDisabled,
+    lastSyncAt: config?.lastSyncAt,
+  };
+}
+
 type ConnectorDetailsProps = {
   connectorId: ConnectorId;
 };
@@ -581,18 +606,16 @@ type ConnectPageProps = {
 
 export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPageProps = {}) {
   const actor = useActor();
+  const inventoryConnectorsDisabledForDemo = actor.demoCapabilities?.liveConnectors === false;
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
-  const [snConfig, setSnConfig] = React.useState<ServiceNowCmdbConfig | null>(null);
-  const [sccmConfig, setSccmConfig] = React.useState<SccmCmdbConfig | null>(null);
-  const [awsConfig, setAwsConfig] = React.useState<AwsDiscoveryConfig | null>(null);
-
-  React.useEffect(() => {
-    api.getServiceNowCmdbConfig().then(setSnConfig).catch(() => {});
-    api.getSccmCmdbConfig().then(setSccmConfig).catch(() => {});
-    api.getAwsDiscoveryConfig().then(setAwsConfig).catch(() => {});
-  }, []);
+  const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
+  const sccmConfigQuery = useSccmCmdbConfigQuery();
+  const awsConfigQuery = useAwsDiscoveryConfigQuery();
+  const snConfig = serviceNowConfigQuery.data ?? null;
+  const sccmConfig = sccmConfigQuery.data ?? null;
+  const awsConfig = awsConfigQuery.data ?? null;
 
   React.useEffect(() => {
     setActiveView(initialView);
@@ -708,31 +731,22 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                   ) : (
                     <div className="connect-card-grid">
                       {section.connectors.map((connector) => {
-                        const lastSyncAt =
-                          connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt :
-                          connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt :
-                          connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt :
-                          undefined;
+                        const status =
+                          connector.id === 'servicenow-cmdb' ? buildInventoryConnectorStatus(snConfig, inventoryConnectorsDisabledForDemo) :
+                          connector.id === 'sccm-cmdb' ? buildInventoryConnectorStatus(sccmConfig, inventoryConnectorsDisabledForDemo) :
+                          connector.id === 'aws-discovery' ? buildInventoryConnectorStatus(awsConfig, inventoryConnectorsDisabledForDemo) :
+                          buildInventoryConnectorStatus(null, inventoryConnectorsDisabledForDemo);
+                        const lastSync = timeAgo(status.lastSyncAt);
 
-                        const lastSync = timeAgo(lastSyncAt);
-                        const isFailed = false;
-
-                        const hasSynced =
-                          connector.id === 'servicenow-cmdb' ? snConfig?.lastSyncAt != null :
-                          connector.id === 'sccm-cmdb' ? sccmConfig?.lastSyncAt != null :
-                          connector.id === 'aws-discovery' ? awsConfig?.lastSyncAt != null :
-                          false;
-
-                        const dotClass = isFailed ? 'connect-source-dot--fail' :
-                                         hasSynced ? 'connect-source-dot--ok' :
+                        const dotClass = status.isFailed ? 'connect-source-dot--fail' :
+                                         status.hasSynced ? 'connect-source-dot--ok' :
                                          'connect-source-dot--warn';
-                        const demoDisabled = false;
 
                         return (
                           <button
                             key={connector.id}
                             type="button"
-                            className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}${demoDisabled ? ' connect-source-card--disabled' : ''}`}
+                            className={`connect-source-card${activeConnector === connector.id ? ' connect-source-card--active' : ''}${status.demoDisabled ? ' connect-source-card--disabled' : ''}`}
                             onClick={() => setActiveConnector(connector.id)}
                           >
                             <div className="connect-source-icon" aria-hidden="true">{connector.icon}</div>
@@ -742,15 +756,15 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                                 <span className={`connect-source-dot ${dotClass}`} />
                               </div>
                               <div className="panel-caption">{connector.summary}</div>
-                              {demoDisabled && (
+                              {status.demoDisabled && (
                                 <div className="connect-source-lastsync">Unavailable in 7-day demo</div>
                               )}
-                              {isFailed && lastSync && (
+                              {status.isFailed && lastSync && (
                                 <div className="connect-source-lastsync connect-source-lastsync--fail">
                                   Failed · {lastSync}
                                 </div>
                               )}
-                              {!isFailed && lastSync && (
+                              {!status.isFailed && lastSync && (
                                 <div className="connect-source-lastsync">
                                   Last sync · {lastSync}
                                 </div>
