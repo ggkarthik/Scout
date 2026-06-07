@@ -106,7 +106,7 @@ export function EolSourcePanel({
                   disabled={busy !== null}
                   onClick={() => runJob(job)}
                 >
-                  {busy === job.key ? 'Running...' : 'Run now'}
+                  {busy === job.key ? 'Running...' : job.label}
                 </button>
               </div>
             ))}
