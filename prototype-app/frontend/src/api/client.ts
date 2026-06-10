@@ -12,12 +12,9 @@ import type {
   FindingDistributions,
   FindingFilterValues,
   FindingProjectionStatus,
-  FindingQueueAnalytics,
-  FindingQueueAnalyticsTrendPoint,
   FindingQueueDefinition,
   FindingQueueUpsertRequest,
   FindingPage,
-  FindingPortfolioRollup,
   FindingsFilterModel,
   FindingSummary
 } from '../features/findings/types';
@@ -450,18 +447,6 @@ export const api = {
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<FindingBacklogHealth>(`/findings/backlog-health${suffix}`);
   },
-  getFindingQueueAnalytics: (params?: FindingsFilterModel) => {
-    const searchParams = buildFindingsSearchParams(params);
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<FindingQueueAnalytics>(`/findings/queue-analytics${suffix}`);
-  },
-  getFindingQueueAnalyticsTrend: (params?: FindingsFilterModel, days = 30) => {
-    const searchParams = buildFindingsSearchParams(params);
-    searchParams.set('days', String(days));
-    const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-    return request<FindingQueueAnalyticsTrendPoint[]>(`/findings/queue-analytics/trend${suffix}`);
-  },
-  getFindingPortfolioRollups: () => request<FindingPortfolioRollup>('/findings/portfolio-rollups'),
   getFindingProjectionStatus: () => request<FindingProjectionStatus>('/findings/projection-status'),
   rebuildFindingProjection: () => request<FindingProjectionStatus>('/findings/projection-rebuild', { method: 'POST' }),
   listFindingQueues: () => request<FindingQueueDefinition[]>('/findings/queues'),

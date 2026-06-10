@@ -8,21 +8,16 @@ import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
 import com.prototype.vulnwatch.dto.FindingDistributionsResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingProjectionStatusResponse;
-import com.prototype.vulnwatch.dto.FindingQueueAnalyticsResponse;
-import com.prototype.vulnwatch.dto.FindingQueueAnalyticsTrendPointResponse;
 import com.prototype.vulnwatch.dto.FindingQueueDefinitionResponse;
 import com.prototype.vulnwatch.dto.FindingQueueUpsertRequest;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
-import com.prototype.vulnwatch.dto.FindingPortfolioRollupResponse;
 import com.prototype.vulnwatch.dto.FindingSummaryResponse;
 import com.prototype.vulnwatch.dto.FindingsFilterRequest;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.FindingAnalyticsService;
 import com.prototype.vulnwatch.service.FindingListProjectionService;
-import com.prototype.vulnwatch.service.FindingPortfolioRollupService;
 import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
-import com.prototype.vulnwatch.service.FindingQueueAnalyticsService;
 import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
@@ -48,8 +43,6 @@ public class FindingController {
     private final WorkspaceService workspaceService;
     private final FindingQueryService findingQueryService;
     private final FindingAnalyticsService findingAnalyticsService;
-    private final FindingQueueAnalyticsService findingQueueAnalyticsService;
-    private final FindingPortfolioRollupService findingPortfolioRollupService;
     private final FindingProjectionOperationsService findingProjectionOperationsService;
     private final FindingQueueService findingQueueService;
     private final FindingWorkflowService findingWorkflowService;
@@ -58,8 +51,6 @@ public class FindingController {
             WorkspaceService workspaceService,
             FindingQueryService findingQueryService,
             FindingAnalyticsService findingAnalyticsService,
-            FindingQueueAnalyticsService findingQueueAnalyticsService,
-            FindingPortfolioRollupService findingPortfolioRollupService,
             FindingProjectionOperationsService findingProjectionOperationsService,
             FindingQueueService findingQueueService,
             FindingWorkflowService findingWorkflowService
@@ -67,8 +58,6 @@ public class FindingController {
         this.workspaceService = workspaceService;
         this.findingQueryService = findingQueryService;
         this.findingAnalyticsService = findingAnalyticsService;
-        this.findingQueueAnalyticsService = findingQueueAnalyticsService;
-        this.findingPortfolioRollupService = findingPortfolioRollupService;
         this.findingProjectionOperationsService = findingProjectionOperationsService;
         this.findingQueueService = findingQueueService;
         this.findingWorkflowService = findingWorkflowService;
@@ -111,34 +100,6 @@ public class FindingController {
     public FindingBacklogHealthResponse backlogHealth(FindingsFilterRequest filterRequest) {
         Tenant tenant = workspaceService.getWorkspace();
         return findingAnalyticsService.getBacklogHealth(tenant, findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()));
-    }
-
-    @GetMapping("/queue-analytics")
-    public FindingQueueAnalyticsResponse queueAnalytics(FindingsFilterRequest filterRequest) {
-        Tenant tenant = workspaceService.getWorkspace();
-        return findingQueueAnalyticsService.getQueueAnalytics(
-                tenant,
-                findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter())
-        );
-    }
-
-    @GetMapping("/queue-analytics/trend")
-    public List<FindingQueueAnalyticsTrendPointResponse> queueAnalyticsTrend(
-            @RequestParam(defaultValue = "30") int days,
-            FindingsFilterRequest filterRequest
-    ) {
-        Tenant tenant = workspaceService.getWorkspace();
-        return findingQueueAnalyticsService.getQueueAnalyticsTrend(
-                tenant,
-                findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()),
-                days
-        );
-    }
-
-    @GetMapping("/portfolio-rollups")
-    public FindingPortfolioRollupResponse portfolioRollups() {
-        Tenant tenant = workspaceService.getWorkspace();
-        return findingPortfolioRollupService.getPortfolioRollup(tenant);
     }
 
     @GetMapping("/projection-status")

@@ -40,27 +40,6 @@ export function useFindingBacklogHealthQuery(params: FindingsFilterModel) {
   });
 }
 
-export function useFindingQueueAnalyticsQuery(params: FindingsFilterModel) {
-  return useQuery({
-    queryKey: ['findings-queue-analytics', params],
-    queryFn: () => api.getFindingQueueAnalytics(params)
-  });
-}
-
-export function useFindingQueueAnalyticsTrendQuery(params: FindingsFilterModel, days = 30) {
-  return useQuery({
-    queryKey: ['findings-queue-analytics-trend', params, days],
-    queryFn: () => api.getFindingQueueAnalyticsTrend(params, days)
-  });
-}
-
-export function useFindingPortfolioRollupQuery() {
-  return useQuery({
-    queryKey: ['findings-portfolio-rollups'],
-    queryFn: api.getFindingPortfolioRollups
-  });
-}
-
 export function useFindingProjectionStatusQuery() {
   return useQuery({
     queryKey: ['findings-projection-status'],
@@ -86,9 +65,6 @@ export function useRebuildFindingProjectionMutation() {
         ['findings-summary'],
         ['findings-distributions'],
         ['findings-backlog-health'],
-        ['findings-queue-analytics'],
-        ['findings-queue-analytics-trend'],
-        ['findings-portfolio-rollups'],
       ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
     }
   });
