@@ -136,7 +136,7 @@ public class EuvdSyncService {
                 }
             }
 
-            effectsService.enqueueCveMetadataDeltas(changedVulnerabilityIds);
+            effectsService.recomputeCveDeltas(changedVulnerabilityIds);
             syncRunService.completeRun(run, "completed", fetched, inserted, updated, 0, null);
             return new IngestionResult("ok", fetched, inserted, updated, "EUVD sync complete");
         } catch (Exception e) {

@@ -6,6 +6,8 @@ spring:
 app:
   security:
     allow-api-key-auth: true
+    jwt:
+      hmac-secret: local-dev-secret-key-change-in-production-use-only
   tenancy:
     allow-header-tenant-selection: true
     require-tenant-context: false

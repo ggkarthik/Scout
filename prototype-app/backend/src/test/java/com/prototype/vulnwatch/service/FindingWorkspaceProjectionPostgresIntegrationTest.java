@@ -64,12 +64,6 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
     private FindingAnalyticsService findingAnalyticsService;
 
     @Autowired
-    private FindingQueueAnalyticsService findingQueueAnalyticsService;
-
-    @Autowired
-    private FindingPortfolioRollupService findingPortfolioRollupService;
-
-    @Autowired
     private NamedParameterJdbcTemplate jdbcTemplate;
 
     private Tenant tenant;
@@ -136,19 +130,11 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
         );
 
         var summary = findingAnalyticsService.getSummary(tenant, criticalOpen);
-        var queueAnalytics = findingQueueAnalyticsService.getQueueAnalytics(tenant, criticalOpen);
-        var portfolio = findingPortfolioRollupService.getPortfolioRollup(tenant);
-
         assertEquals(90, summary.openCount());
-        assertEquals(90, queueAnalytics.assignedOpenCount() + queueAnalytics.unassignedOpenCount());
-        assertTrue(portfolio.queueRollups().stream()
-                .anyMatch(queue -> "critical-open".equals(queue.queueKey()) && queue.openCount() == 90));
 
         var routingSummary = findingAnalyticsService.getSummary(tenant, unassignedCritical);
-        var routingAnalytics = findingQueueAnalyticsService.getQueueAnalytics(tenant, unassignedCritical);
         assertEquals(40, routingSummary.openCount());
         assertEquals(40, routingSummary.unassignedOpenCount());
-        assertEquals(40, routingAnalytics.unassignedOpenCount());
     }
 
     @Test

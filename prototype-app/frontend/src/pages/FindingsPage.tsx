@@ -16,10 +16,7 @@ import {
   useFindingBacklogHealthQuery,
   useFindingDistributionsQuery,
   useFindingFiltersQuery,
-  useFindingPortfolioRollupQuery,
   useFindingProjectionStatusQuery,
-  useFindingQueueAnalyticsQuery,
-  useFindingQueueAnalyticsTrendQuery,
   useFindingQueuesQuery,
   useFindingsQuery,
   useFindingSummaryQuery
@@ -27,8 +24,6 @@ import {
 import { useFindingsCursorPaging, useFindingsQueryContext } from '../features/findings/hooks';
 import { FindingsWorkspaceHeader } from '../features/findings/components/FindingsWorkspaceHeader';
 import { FindingsSummaryWidgets } from '../features/findings/components/FindingsSummaryWidgets';
-import { FindingsPortfolioRollupsPanel } from '../features/findings/components/FindingsPortfolioRollupsPanel';
-import { FindingsQueueHealthPanel } from '../features/findings/components/FindingsQueueHealthPanel';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { useActor } from '../features/auth/context';
 import { canRunSecurityWorkflow } from '../features/auth/roles';
@@ -301,9 +296,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const summaryQuery = useFindingSummaryQuery(effectiveServerFilterModel);
   const distributionsQuery = useFindingDistributionsQuery(effectiveServerFilterModel);
   const backlogHealthQuery = useFindingBacklogHealthQuery(effectiveServerFilterModel);
-  const queueAnalyticsQuery = useFindingQueueAnalyticsQuery(effectiveServerFilterModel);
-  const queueAnalyticsTrendQuery = useFindingQueueAnalyticsTrendQuery(effectiveServerFilterModel, 30);
-  const portfolioRollupQuery = useFindingPortfolioRollupQuery();
   const projectionStatusQuery = useFindingProjectionStatusQuery();
 
   const allRows  = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data]);
@@ -349,9 +341,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   );
 
   const dueDateCounts = backlogHealthQuery.data ?? { overdue: 0, dueSoon: 0, onTrack: 0, noSla: 0 };
-  const queueAnalytics = queueAnalyticsQuery.data;
-  const queueTrendPoints = queueAnalyticsTrendQuery.data ?? [];
-  const portfolioRollup = portfolioRollupQuery.data;
 
   // ── outside click ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -479,9 +468,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         summaryQuery.refetch(),
         distributionsQuery.refetch(),
         backlogHealthQuery.refetch(),
-        queueAnalyticsQuery.refetch(),
-        queueAnalyticsTrendQuery.refetch(),
-        portfolioRollupQuery.refetch(),
       ]);
   }
 
@@ -674,9 +660,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       summaryQuery.refetch(),
       distributionsQuery.refetch(),
       backlogHealthQuery.refetch(),
-      queueAnalyticsQuery.refetch(),
-      queueAnalyticsTrendQuery.refetch(),
-      portfolioRollupQuery.refetch(),
     ]);
     setSelectedIds(new Set());
   }
@@ -693,9 +676,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       void summaryQuery.refetch();
       void distributionsQuery.refetch();
       void backlogHealthQuery.refetch();
-      void queueAnalyticsQuery.refetch();
-      void queueAnalyticsTrendQuery.refetch();
-      void portfolioRollupQuery.refetch();
       setSelectedIds(new Set());
       closeModal();
     } catch(e) { setActionError(String(e)); } finally { setActionLoading(false); }
@@ -1068,22 +1048,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         onCriticalOpenClick={() => { setColFilters((p) => ({ ...p, severity: ['CRITICAL'], status: ['OPEN'] })); setDueDateBand(null); setPage(0); }}
         onUnassignedClick={() => { setColFilters((p) => ({ ...p, severity: [], status: ['OPEN'], assignedTo: '' })); setDueDateBand('no-sla'); setPage(0); }}
         onWithIncidentsClick={() => { setColFilters((p) => ({ ...p, severity: [], status: [] })); setDueDateBand(null); setPage(0); setColFilter('incidentId', 'INC'); }}
-      />
-
-      <FindingsPortfolioRollupsPanel
-        rollup={portfolioRollup}
-        error={portfolioRollupQuery.error instanceof Error ? portfolioRollupQuery.error : null}
-      />
-
-      <FindingsQueueHealthPanel
-        title={activeQueryContext.healthScopeLabel}
-        analytics={queueAnalytics}
-        trendPoints={queueTrendPoints}
-        error={
-          queueAnalyticsQuery.error instanceof Error ? queueAnalyticsQuery.error
-            : queueAnalyticsTrendQuery.error instanceof Error ? queueAnalyticsTrendQuery.error
-            : null
-        }
       />
 
       {/* ── group breakdown ──────────────────────────────────────────────── */}
