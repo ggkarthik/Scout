@@ -155,57 +155,6 @@ export type FindingBacklogHealth = {
   noSla: number;
 };
 
-export type FindingQueueAgingBucket = {
-  key: string;
-  count: number;
-};
-
-export type FindingQueueWorkloadBreakdown = {
-  label: string;
-  count: number;
-};
-
-export type FindingQueueAnalytics = {
-  agingBuckets: FindingQueueAgingBucket[];
-  reopenRatePercent: number;
-  reopenedCountLast30Days: number;
-  assignedOpenCount: number;
-  unassignedOpenCount: number;
-  withIncidentCount: number;
-  withoutIncidentCount: number;
-  oldestOpenAgeDays: number;
-  medianOpenAgeDays: number;
-  topOwners: FindingQueueWorkloadBreakdown[];
-  topSupportGroups: FindingQueueWorkloadBreakdown[];
-};
-
-export type FindingQueueAnalyticsTrendPoint = {
-  date: string;
-  openedCount: number;
-  resolvedCount: number;
-  reopenedCount: number;
-};
-
-export type FindingPortfolioQueueRollup = {
-  queueKey: string;
-  title: string;
-  matchingCount: number;
-  openCount: number;
-  criticalOpenCount: number;
-  overdueOpenCount: number;
-  unassignedOpenCount: number;
-  withIncidentCount: number;
-};
-
-export type FindingPortfolioRollup = {
-  totalOpenCount: number;
-  totalCriticalOpenCount: number;
-  totalOverdueOpenCount: number;
-  queueRollups: FindingPortfolioQueueRollup[];
-  topOwnerGroups: FindingQueueWorkloadBreakdown[];
-  topSupportGroups: FindingQueueWorkloadBreakdown[];
-};
-
 export type FindingProjectionStatus = {
   lastComputedAt?: string;
   findingCount: number;

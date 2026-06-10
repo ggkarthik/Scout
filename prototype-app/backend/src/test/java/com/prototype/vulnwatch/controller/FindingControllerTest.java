@@ -23,30 +23,21 @@ import com.prototype.vulnwatch.dto.FindingBulkWorkflowResponse;
 import com.prototype.vulnwatch.dto.FindingCountBucketResponse;
 import com.prototype.vulnwatch.dto.FindingDistributionsResponse;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
-import com.prototype.vulnwatch.dto.FindingQueueAgingBucketResponse;
-import com.prototype.vulnwatch.dto.FindingQueueAnalyticsResponse;
-import com.prototype.vulnwatch.dto.FindingQueueAnalyticsTrendPointResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
-import com.prototype.vulnwatch.dto.FindingPortfolioQueueRollupResponse;
-import com.prototype.vulnwatch.dto.FindingPortfolioRollupResponse;
 import com.prototype.vulnwatch.dto.FindingQueueDefinitionResponse;
 import com.prototype.vulnwatch.dto.FindingQueueUpsertRequest;
-import com.prototype.vulnwatch.dto.FindingQueueWorkloadBreakdownResponse;
 import com.prototype.vulnwatch.dto.FindingSummaryResponse;
 import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
 import com.prototype.vulnwatch.service.FindingAnalyticsService;
 import com.prototype.vulnwatch.service.FindingListProjectionService;
-import com.prototype.vulnwatch.service.FindingPortfolioRollupService;
 import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
-import com.prototype.vulnwatch.service.FindingQueueAnalyticsService;
 import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
-import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,8 +54,6 @@ class FindingControllerTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private FindingQueryService findingQueryService;
     @Mock private FindingAnalyticsService findingAnalyticsService;
-    @Mock private FindingQueueAnalyticsService findingQueueAnalyticsService;
-    @Mock private FindingPortfolioRollupService findingPortfolioRollupService;
     @Mock private FindingProjectionOperationsService findingProjectionOperationsService;
     @Mock private FindingQueueService findingQueueService;
     @Mock private FindingWorkflowService findingWorkflowService;
@@ -79,8 +68,6 @@ class FindingControllerTest {
                 workspaceService,
                 findingQueryService,
                 findingAnalyticsService,
-                findingQueueAnalyticsService,
-                findingPortfolioRollupService,
                 findingProjectionOperationsService,
                 findingQueueService,
                 findingWorkflowService
@@ -288,79 +275,6 @@ class FindingControllerTest {
                 .andExpect(jsonPath("$.noSla").value(1));
 
         verify(findingAnalyticsService).getBacklogHealth(eq(tenant), any());
-    }
-
-    @Test
-    void queueAnalyticsDelegatesToQueueAnalyticsService() throws Exception {
-        when(workspaceService.getWorkspace()).thenReturn(tenant);
-        when(findingQueueAnalyticsService.getQueueAnalytics(eq(tenant), any()))
-                .thenReturn(new FindingQueueAnalyticsResponse(
-                        List.of(new FindingQueueAgingBucketResponse("0-7d", 2)),
-                        12.5,
-                        3,
-                        6,
-                        1,
-                        4,
-                        3,
-                        42,
-                        9,
-                        List.of(),
-                        List.of()
-                ));
-
-        mockMvc.perform(get("/api/findings/queue-analytics").param("queueKey", "critical-open"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reopenRatePercent").value(12.5))
-                .andExpect(jsonPath("$.agingBuckets[0].key").value("0-7d"));
-
-        verify(findingQueueService).resolveEffectiveFilter(eq("critical-open"), any());
-        verify(findingQueueAnalyticsService).getQueueAnalytics(eq(tenant), any());
-    }
-
-    @Test
-    void portfolioRollupsDelegateToPortfolioService() throws Exception {
-        when(workspaceService.getWorkspace()).thenReturn(tenant);
-        when(findingPortfolioRollupService.getPortfolioRollup(eq(tenant)))
-                .thenReturn(new FindingPortfolioRollupResponse(
-                        14,
-                        3,
-                        2,
-                        List.of(new FindingPortfolioQueueRollupResponse("all-findings", "All Findings", 14, 14, 3, 2, 4, 5)),
-                        List.of(new FindingQueueWorkloadBreakdownResponse("Platform", 5)),
-                        List.of(new FindingQueueWorkloadBreakdownResponse("Ops", 6))
-                ));
-
-        mockMvc.perform(get("/api/findings/portfolio-rollups"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalOpenCount").value(14))
-                .andExpect(jsonPath("$.queueRollups[0].queueKey").value("all-findings"))
-                .andExpect(jsonPath("$.topSupportGroups[0].label").value("Ops"));
-
-        verify(findingPortfolioRollupService).getPortfolioRollup(eq(tenant));
-    }
-
-    @Test
-    void queueAnalyticsTrendDelegatesToQueueAnalyticsService() throws Exception {
-        when(workspaceService.getWorkspace()).thenReturn(tenant);
-        when(findingQueueAnalyticsService.getQueueAnalyticsTrend(eq(tenant), any(), eq(14)))
-                .thenReturn(List.of(new FindingQueueAnalyticsTrendPointResponse(
-                        LocalDate.of(2026, 6, 1),
-                        2,
-                        1,
-                        1
-                )));
-
-        mockMvc.perform(get("/api/findings/queue-analytics/trend")
-                        .param("queueKey", "critical-open")
-                        .param("days", "14"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].date[0]").value(2026))
-                .andExpect(jsonPath("$[0].date[1]").value(6))
-                .andExpect(jsonPath("$[0].date[2]").value(1))
-                .andExpect(jsonPath("$[0].openedCount").value(2));
-
-        verify(findingQueueService).resolveEffectiveFilter(eq("critical-open"), any());
-        verify(findingQueueAnalyticsService).getQueueAnalyticsTrend(eq(tenant), any(), eq(14));
     }
 
     @Test

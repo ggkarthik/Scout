@@ -7,11 +7,8 @@ import type {
   FindingDistributions,
   FindingFilterValues,
   FindingProjectionStatus,
-  FindingQueueAnalytics,
-  FindingQueueAnalyticsTrendPoint,
   FindingQueueDefinition,
   FindingPage,
-  FindingPortfolioRollup,
   FindingSummary
 } from '../features/findings/types';
 import type { RiskPolicy } from '../features/configurations/types';
@@ -99,61 +96,6 @@ const FINDING_BACKLOG_HEALTH: FindingBacklogHealth = {
   noSla: 0,
 };
 
-const FINDING_QUEUE_ANALYTICS: FindingQueueAnalytics = {
-  agingBuckets: [
-    { key: '0-7d', count: 1 },
-    { key: '8-30d', count: 0 },
-    { key: '31-90d', count: 0 },
-    { key: '90d+', count: 0 },
-  ],
-  reopenRatePercent: 12.5,
-  reopenedCountLast30Days: 1,
-  assignedOpenCount: 1,
-  unassignedOpenCount: 0,
-  withIncidentCount: 0,
-  withoutIncidentCount: 1,
-  oldestOpenAgeDays: 24,
-  medianOpenAgeDays: 24,
-  topOwners: [{ label: 'analyst@example.com', count: 1 }],
-  topSupportGroups: [{ label: 'Platform Ops', count: 1 }],
-};
-
-const FINDING_QUEUE_TREND: FindingQueueAnalyticsTrendPoint[] = [
-  { date: '2026-05-29', openedCount: 1, resolvedCount: 0, reopenedCount: 0 },
-  { date: '2026-05-30', openedCount: 0, resolvedCount: 1, reopenedCount: 0 },
-  { date: '2026-05-31', openedCount: 0, resolvedCount: 0, reopenedCount: 1 },
-];
-
-const FINDING_PORTFOLIO_ROLLUP: FindingPortfolioRollup = {
-  totalOpenCount: 12,
-  totalCriticalOpenCount: 3,
-  totalOverdueOpenCount: 2,
-  queueRollups: [
-    {
-      queueKey: 'all-findings',
-      title: 'All Findings',
-      matchingCount: 12,
-      openCount: 12,
-      criticalOpenCount: 3,
-      overdueOpenCount: 2,
-      unassignedOpenCount: 1,
-      withIncidentCount: 4,
-    },
-    {
-      queueKey: 'critical-open',
-      title: 'Critical Open',
-      matchingCount: 3,
-      openCount: 3,
-      criticalOpenCount: 3,
-      overdueOpenCount: 1,
-      unassignedOpenCount: 0,
-      withIncidentCount: 1,
-    },
-  ],
-  topOwnerGroups: [{ label: 'Platform', count: 5 }],
-  topSupportGroups: [{ label: 'Ops', count: 6 }],
-};
-
 const FINDING_PROJECTION_STATUS: FindingProjectionStatus = {
   lastComputedAt: '2026-06-05T10:15:30Z',
   findingCount: 12,
@@ -216,9 +158,6 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue(FINDING_QUEUE_ANALYTICS);
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
@@ -240,9 +179,6 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue({ ...FINDING_SUMMARY, openCount: 0, criticalOpenCount: 0, overdueOpenCount: 0 });
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue({ severityCounts: [], statusCounts: [], topAssets: [] });
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue({ overdue: 0, dueSoon: 0, onTrack: 0, noSla: 0 });
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue({ ...FINDING_QUEUE_ANALYTICS, agingBuckets: [], topOwners: [], topSupportGroups: [] });
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue([]);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue({ ...FINDING_PORTFOLIO_ROLLUP, queueRollups: [], topOwnerGroups: [], topSupportGroups: [] });
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
@@ -261,9 +197,6 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue(FINDING_QUEUE_ANALYTICS);
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
@@ -282,9 +215,6 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    const queueAnalyticsSpy = vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue(FINDING_QUEUE_ANALYTICS);
-    const queueTrendSpy = vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
@@ -297,8 +227,6 @@ describe('FindingsPage', () => {
 
     await waitFor(() => {
       expect(listFindingsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ queueKey: 'critical-open' }));
-      expect(queueAnalyticsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ queueKey: 'critical-open' }));
-      expect(queueTrendSpy).toHaveBeenLastCalledWith(expect.objectContaining({ queueKey: 'critical-open' }), 30);
     });
   });
 
@@ -307,9 +235,6 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue(FINDING_QUEUE_ANALYTICS);
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
@@ -328,47 +253,4 @@ describe('FindingsPage', () => {
     });
   });
 
-  it('shows a local queue analytics error without breaking the findings grid', async () => {
-    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
-    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
-    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
-    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockRejectedValue(new Error('Queue analytics unavailable'));
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
-    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
-    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
-    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
-    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
-
-    renderWithProviders(<FindingsPage />);
-
-    await screen.findByText('F-001');
-    await waitFor(() => {
-      expect(screen.getByText(/Queue analytics unavailable/i)).toBeInTheDocument();
-    });
-    expect(screen.getByText('CVE-2026-1234')).toBeInTheDocument();
-  });
-
-  it('renders tenant-wide portfolio rollups alongside the queue workspace', async () => {
-    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
-    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
-    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
-    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
-    vi.spyOn(api, 'getFindingQueueAnalytics').mockResolvedValue(FINDING_QUEUE_ANALYTICS);
-    vi.spyOn(api, 'getFindingQueueAnalyticsTrend').mockResolvedValue(FINDING_QUEUE_TREND);
-    vi.spyOn(api, 'getFindingPortfolioRollups').mockResolvedValue(FINDING_PORTFOLIO_ROLLUP);
-    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
-    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
-    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
-    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
-
-    renderWithProviders(<FindingsPage />);
-
-    await screen.findByText('Portfolio Rollups');
-    await screen.findByText('Queue Portfolio Snapshot');
-    expect(screen.getByText('Total Open')).toBeInTheDocument();
-    expect(screen.getByText('Platform')).toBeInTheDocument();
-    expect(screen.getByText('Ops')).toBeInTheDocument();
-  });
 });
