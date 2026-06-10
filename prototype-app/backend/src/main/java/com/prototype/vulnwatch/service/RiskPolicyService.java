@@ -179,12 +179,9 @@ public class RiskPolicyService {
         }
         List<UUID> componentIds = tenantSchemaExecutionService.run(
                 tenant,
-                () -> inventoryComponentRepository.findByComponentStatusOrderByLastObservedAtDesc(
-                        InventoryComponentStatus.ACTIVE
-                )
+                () -> inventoryComponentRepository.findIdsByComponentStatus(InventoryComponentStatus.ACTIVE)
         )
                 .stream()
-                .map(component -> component.getId())
                 .filter(id -> id != null)
                 .toList();
         if (componentIds.isEmpty()) {
