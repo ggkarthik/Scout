@@ -16,9 +16,6 @@ public record RiskPolicyResponse(
         int autoCloseAfterDays,
         String findingGenerationMode,
         String findingsScoreConfig,
-        boolean copilotEnabled,
-        boolean copilotShadowMode,
-        boolean copilotAutoRun,
         double agentAutoThreshold,
         double agentReviewThreshold,
         int agentMaxConcurrent

@@ -94,15 +94,6 @@ public class RiskPolicyService {
         if (req.findingsScoreConfig() != null) {
             policy.setFindingsScoreConfig(req.findingsScoreConfig());
         }
-        if (req.copilotEnabled() != null) {
-            policy.setCopilotEnabled(req.copilotEnabled());
-        }
-        if (req.copilotShadowMode() != null) {
-            policy.setCopilotShadowMode(req.copilotShadowMode());
-        }
-        if (req.copilotAutoRun() != null) {
-            policy.setCopilotAutoRun(req.copilotAutoRun());
-        }
         if (req.agentAutoThreshold() != null) {
             policy.setAgentAutoThreshold(Math.max(0.0, Math.min(1.0, req.agentAutoThreshold())));
         }
@@ -147,9 +138,6 @@ public class RiskPolicyService {
                 policy.getAutoCloseAfterDays(),
                 policy.getFindingGenerationMode().name(),
                 policy.getFindingsScoreConfig(),
-                policy.isCopilotEnabled(),
-                policy.isCopilotShadowMode(),
-                policy.isCopilotAutoRun(),
                 policy.getAgentAutoThreshold(),
                 policy.getAgentReviewThreshold(),
                 policy.getAgentMaxConcurrent());
