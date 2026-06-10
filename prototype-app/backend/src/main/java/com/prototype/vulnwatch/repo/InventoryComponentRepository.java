@@ -66,6 +66,9 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
     List<InventoryComponent> findByComponentStatus(InventoryComponentStatus status);
     List<InventoryComponent> findByComponentStatusOrderByLastObservedAtDesc(InventoryComponentStatus status);
     long countByComponentStatus(InventoryComponentStatus status);
+
+    @Query("select c.id from InventoryComponent c where c.componentStatus = :status")
+    List<UUID> findIdsByComponentStatus(@Param("status") InventoryComponentStatus status);
     List<InventoryComponent> findByAsset(Asset asset);
     List<InventoryComponent> findByAsset_IdIn(Collection<UUID> assetIds);
     List<InventoryComponent> findByAssetAndComponentStatus(Asset asset, InventoryComponentStatus status);
