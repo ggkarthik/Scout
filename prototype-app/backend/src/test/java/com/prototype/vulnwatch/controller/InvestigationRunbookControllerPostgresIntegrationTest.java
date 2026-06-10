@@ -109,7 +109,7 @@ class InvestigationRunbookControllerPostgresIntegrationTest {
     void appendAgentLogEntryRendersAsAgentType() throws Exception {
         String logBody = """
                 {"type": "AGENT", "message": "Inventory resolved: 3 assets matched.",
-                 "actor": "agent:copilot", "producedBy": "AGENT"}
+                 "actor": "agent:system", "producedBy": "AGENT"}
                 """;
 
         mockMvc.perform(authedPost("/api/cve-detail/CVE-2024-44444/investigation/log")

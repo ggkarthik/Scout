@@ -175,7 +175,7 @@ public class InvestigationAgentService {
     }
 
     // -------------------------------------------------------------------------
-    // Algorithmic fallbacks (mirror copilot-runner.ts logic)
+    // Algorithmic fallbacks
     // -------------------------------------------------------------------------
 
     static AgentTaskMetaDto algorithmicInventoryMeta(InventoryResolutionResponse resp) {
