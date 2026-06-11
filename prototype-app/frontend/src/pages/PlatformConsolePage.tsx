@@ -191,6 +191,13 @@ function PlatformUsersPanel() {
 
 function TenantLifecyclePanel() {
   const queryClient = useQueryClient();
+  const [tenantPendingDelete, setTenantPendingDelete] = React.useState<{
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    demoExpiresAt?: string | null;
+  } | null>(null);
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
@@ -202,6 +209,14 @@ function TenantLifecyclePanel() {
   const createTenant = useMutation({
     mutationFn: api.createTenant,
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
+    }
+  });
+  const deleteTenant = useMutation({
+    mutationFn: api.deleteTenant,
+    onSuccess: async () => {
+      setTenantPendingDelete(null);
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
     }
@@ -265,6 +280,7 @@ function TenantLifecyclePanel() {
                 <th>Daily Exposure Refreshes</th>
                 <th>Demo Expires</th>
                 <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -278,12 +294,61 @@ function TenantLifecyclePanel() {
                   <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
                   <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
+                  <td>
+                    {tenant.slug === 'default-workspace' ? (
+                      '-'
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={deleteTenant.isPending || tenant.status.toUpperCase() === 'PURGING' || tenant.status.toUpperCase() === 'DELETED'}
+                        onClick={() => setTenantPendingDelete({
+                          id: tenant.id,
+                          name: tenant.name,
+                          slug: tenant.slug,
+                          status: tenant.status,
+                          demoExpiresAt: tenant.demoExpiresAt ?? null
+                        })}
+                        title="Delete the tenant and purge its tenant schema"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {deleteTenant.isError && (
+        <div className="notice error" role="alert">
+          {deleteTenant.error instanceof Error ? deleteTenant.error.message : 'Failed to delete tenant'}
+        </div>
+      )}
+      <ConfirmDialog
+        isOpen={tenantPendingDelete != null}
+        title="Delete tenant?"
+        message={
+          tenantPendingDelete == null
+            ? ''
+            : tenantPendingDelete.demoExpiresAt
+              ? `Delete ${tenantPendingDelete.name} and purge all tenant-scoped tables now? This will immediately remove tenant access, clear memberships, and reset the tenant schema.`
+              : `Delete ${tenantPendingDelete.name} and purge all tenant-scoped tables now? This action is irreversible for this tenant workspace.`
+        }
+        confirmLabel={deleteTenant.isPending ? 'Deleting...' : 'Delete Tenant'}
+        cancelLabel="Cancel"
+        onCancel={() => {
+          if (!deleteTenant.isPending) {
+            setTenantPendingDelete(null);
+          }
+        }}
+        onConfirm={() => {
+          if (tenantPendingDelete != null && !deleteTenant.isPending) {
+            deleteTenant.mutate(tenantPendingDelete.id);
+          }
+        }}
+      />
 
       <div className="section-title-row" style={{ marginTop: 24 }}>
         <h4 className="section-title">Inventory Connector Health</h4>

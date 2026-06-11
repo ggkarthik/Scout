@@ -10,6 +10,7 @@ public record AuthenticatedTenantActor(
         String displayName,
         UUID tenantId,
         String tenantName,
+        String tenantSchemaName,
         Set<String> roles
 ) {
 }

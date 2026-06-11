@@ -46,6 +46,11 @@ export type Tenant = {
   maxDailySbomUploads: number | null;
   maxExportRows: number | null;
   maxDailyExposureRefreshes: number | null;
+  expiredAt?: string | null;
+  purgeStartedAt?: string | null;
+  purgedAt?: string | null;
+  purgeStatus?: string | null;
+  purgeError?: string | null;
   demoExpiresAt?: string | null;
   demoCreatedBy?: string | null;
   demoSource?: string | null;

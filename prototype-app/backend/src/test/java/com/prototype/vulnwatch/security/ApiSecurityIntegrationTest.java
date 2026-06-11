@@ -200,6 +200,7 @@ class ApiSecurityIntegrationTest {
                 "Analyst User",
                 tenantId,
                 "Acme Security",
+                null,
                 Set.of("SECURITY_ANALYST", "TENANT_ADMIN")));
 
         mockMvc.perform(get("/api/auth/context").header("Authorization", "Bearer test.jwt"))
@@ -239,6 +240,7 @@ class ApiSecurityIntegrationTest {
                 "Tenant Admin",
                 tenantId,
                 "Acme Security",
+                null,
                 Set.of("TENANT_ADMIN")));
 
         mockMvc.perform(get("/api/operations/quality/summary").header("Authorization", "Bearer quality.jwt"))

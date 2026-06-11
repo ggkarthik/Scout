@@ -106,6 +106,12 @@ public class LocalCredentialAuthService {
             return loginPlatformOwner(normalizedEmail, "Platform Owner");
         }
 
+        AppUser user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
+        if (user != null && hasText(user.getPasswordHash())) {
+            verifyPassword(rawPassword, user.getPasswordHash());
+            return loginTenantScopedUser(user);
+        }
+
         if (matchesSharedLocalhostPlatformOwner(normalizedEmail)) {
             verifyPassword(rawPassword, sharedLocalhostPlatformOwnerPasswordHash);
             return loginPlatformOwner(normalizedEmail, "Local Platform Owner");
@@ -116,12 +122,17 @@ public class LocalCredentialAuthService {
             return loginSharedLocalhostTenantAdmin(normalizedEmail);
         }
 
-        AppUser user = userRepository.findByEmailIgnoreCase(normalizedEmail)
-                .orElseThrow(() -> invalidCredentials());
-        if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
+        if (user == null) {
+            throw invalidCredentials();
+        }
+        if (!hasText(user.getPasswordHash())) {
             throw invalidCredentials();
         }
         verifyPassword(rawPassword, user.getPasswordHash());
+        return loginTenantScopedUser(user);
+    }
+
+    private AuthTokenResponse loginTenantScopedUser(AppUser user) {
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
         if (memberships.size() != 1) {
@@ -315,6 +326,10 @@ public class LocalCredentialAuthService {
 
     private String defaultIfBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String normalizeRole(String role) {
