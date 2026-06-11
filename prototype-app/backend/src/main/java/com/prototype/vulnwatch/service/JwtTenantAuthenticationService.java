@@ -122,6 +122,7 @@ public class JwtTenantAuthenticationService {
                 user.getDisplayName(),
                 tenant == null ? null : tenant.getId(),
                 tenant == null ? null : tenant.getName(),
+                tenant == null ? null : tenant.getSchemaName(),
                 Set.copyOf(roles));
     }
 

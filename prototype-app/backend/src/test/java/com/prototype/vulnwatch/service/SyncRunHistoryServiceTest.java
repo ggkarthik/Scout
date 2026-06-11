@@ -100,8 +100,8 @@ class SyncRunHistoryServiceTest {
 
         assertEquals(1, backfillService.backfillMissingRuns());
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
-        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(savedRuns.get());
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(savedRuns.get());
 
         SyncRunHistoryService historyService = newHistoryService(tenant);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
@@ -160,8 +160,8 @@ class SyncRunHistoryServiceTest {
         verify(syncRunRepository, never()).saveAll(any());
 
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
-        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(persistedRun));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(persistedRun));
         SyncRunHistoryService historyService = newHistoryService(tenant);
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
@@ -237,8 +237,8 @@ class SyncRunHistoryServiceTest {
         SyncRun processingRun = syncRun("VEX_ROLLOUT_BACKFILL", "running", Instant.parse("2026-03-15T12:17:00Z"));
 
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-admin", false, tenant.getId(), tenant.getName(), java.util.Set.of("TENANT_ADMIN")));
-        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(processingRun, vulnIntelRun, inventoryRun));
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of(processingRun));
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(processingRun, vulnIntelRun, inventoryRun));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of(processingRun));
 
         SyncRunHistoryService service = newHistoryService(tenant);
 
@@ -255,6 +255,29 @@ class SyncRunHistoryServiceTest {
         assertTrue(processingRuns.isEmpty());
         assertFalse(allRuns.stream().anyMatch(run -> "GHSA".equals(run.syncType())));
         assertFalse(allRuns.stream().anyMatch(run -> "VEX_ROLLOUT_BACKFILL".equals(run.syncType())));
+    }
+
+    @Test
+    void tenantScopedActorsDoNotSeeOtherTenantInventoryRunsInHistoryOrSummary() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Acme");
+
+        SyncRun ownInventoryRun = syncRun("SERVICENOW_CMDB", "completed", Instant.parse("2026-03-15T12:15:00Z"));
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-admin", false, tenant.getId(), tenant.getName(), java.util.Set.of("TENANT_ADMIN")));
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(ownInventoryRun));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
+        SyncRunHistoryService service = newHistoryService(tenant);
+
+        List<SyncRunResponse> inventoryRuns = service.list("inventory", 20);
+        var summary = service.sourcesSummary();
+
+        assertEquals(1, inventoryRuns.size());
+        assertEquals("SERVICENOW_CMDB", inventoryRuns.get(0).syncType());
+        assertEquals("never", summary.sources().get("GHSA").status());
+        verify(syncRunRepository, never()).findAllByOrderByStartedAtDesc();
+        verify(syncRunRepository, never()).findQueueByStatuses(List.of("queued", "running"));
+        verify(syncRunRepository, never()).findTopBySyncTypeIgnoreCaseOrderByStartedAtDesc("SERVICENOW_CMDB");
     }
 
     @Test
@@ -279,9 +302,8 @@ class SyncRunHistoryServiceTest {
                 .thenReturn(List.of(platformProcessingRun, platformFeedRun));
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt")))
                 .thenReturn(List.of(platformProcessingRun));
-        when(syncRunRepository.findAllByOrderByStartedAtDesc()).thenReturn(List.of(tenantInventoryRun));
-        when(syncRunRepository.findQueueByStatuses(List.of("queued", "running"))).thenReturn(List.of());
-
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(tenantInventoryRun));
+        when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
         SyncRunHistoryService service = newHistoryService(tenant);
 
         List<SyncRunResponse> vulnerabilityRuns = service.list("vuln-intel", 20);

@@ -20,6 +20,7 @@ import com.prototype.vulnwatch.service.TenantAdministrationService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -88,6 +89,18 @@ public class TenantAdministrationController {
         auditEventService.record("tenant.status.updated", "tenant", tenant.getId().toString(),
                 "{\"status\":\"" + tenant.getStatus() + "\"}");
         return toTenantResponse(tenant);
+    }
+
+    @DeleteMapping("/platform/tenants/{tenantId}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public ResponseEntity<Void> deleteTenant(@PathVariable UUID tenantId) {
+        tenantAdministrationService.deleteTenant(tenantId);
+        auditEventService.record(
+                "tenant.delete.requested",
+                "tenant",
+                tenantId.toString(),
+                "{\"actor\":\"" + requestActorService.currentActor().userId() + "\"}");
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/platform/users")

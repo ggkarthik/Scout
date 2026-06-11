@@ -42,7 +42,13 @@ public class TenantStatusFilter extends OncePerRequestFilter {
         UUID tenantId = TenantContext.getCurrentTenantId();
         if (tenantId != null) {
             Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-            if (tenant != null && isBlocked(tenant)) {
+            if (tenant == null) {
+                response.setStatus(HttpServletResponse.SC_GONE);
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"code\":\"TENANT_DELETED\",\"error\":\"Tenant no longer exists\"}");
+                return;
+            }
+            if (isBlocked(tenant)) {
                 response.setStatus(HTTP_LOCKED);
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                 response.getWriter().write("{\"code\":\"TENANT_SUSPENDED\",\"error\":\"Tenant is not active\"}");

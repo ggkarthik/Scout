@@ -159,6 +159,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                     Set.copyOf(actor.roles())));
             SecurityContextHolder.getContext().setAuthentication(authentication);
             TenantContext.setCurrentTenantId(actor.tenantId());
+            TenantContext.setCurrentSchemaName(actor.tenantSchemaName());
             MDC.put(RequestCorrelationFilter.ACTOR_ID_MDC_KEY, actor.subject());
             MDC.put(RequestCorrelationFilter.TENANT_ID_MDC_KEY, actor.tenantId() == null ? "" : actor.tenantId().toString());
             MDC.put(RequestCorrelationFilter.ACTOR_ROLES_MDC_KEY, String.join(",", actor.roles()));

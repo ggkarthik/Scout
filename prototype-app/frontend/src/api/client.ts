@@ -900,6 +900,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  deleteTenant: (tenantId: string) =>
+    request<void>(`/platform/tenants/${encodeURIComponent(tenantId)}`, {
+      method: 'DELETE'
+    }),
   listPlatformUsers: () => request<PlatformUser[]>('/platform/users'),
   listInventoryConnectorHealth: () => request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   upsertPlatformUser: (payload: PlatformUserRequest) =>

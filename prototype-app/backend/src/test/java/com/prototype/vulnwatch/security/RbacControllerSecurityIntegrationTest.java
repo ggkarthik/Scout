@@ -143,6 +143,7 @@ class RbacControllerSecurityIntegrationTest {
                 null,
                 tenantId,
                 "Customer A",
+                null,
                 Set.of(role)));
     }
 }
