@@ -51,6 +51,22 @@ class TenantStatusFilterTest {
     }
 
     @Test
+    void blocksRequestsWhenTenantRecordNoLongerExists() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+        TenantContext.setCurrentTenantId(tenantId);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/dashboard");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        new TenantStatusFilter(tenantRepository).doFilter(request, response, chain);
+
+        assertEquals(410, response.getStatus());
+        assertEquals("{\"code\":\"TENANT_DELETED\",\"error\":\"Tenant no longer exists\"}", response.getContentAsString());
+    }
+
+    @Test
     void allowsPlatformRoutesForSuspendedTenants() throws Exception {
         UUID tenantId = UUID.randomUUID();
         TenantContext.setCurrentTenantId(tenantId);

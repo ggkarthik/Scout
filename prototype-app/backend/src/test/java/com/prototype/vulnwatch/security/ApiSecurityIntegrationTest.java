@@ -32,6 +32,7 @@ import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.Set;
 import java.util.List;
@@ -200,6 +201,7 @@ class ApiSecurityIntegrationTest {
                 "Analyst User",
                 tenantId,
                 "Acme Security",
+                null,
                 Set.of("SECURITY_ANALYST", "TENANT_ADMIN")));
 
         mockMvc.perform(get("/api/auth/context").header("Authorization", "Bearer test.jwt"))
@@ -216,7 +218,9 @@ class ApiSecurityIntegrationTest {
         Tenant tenant = new Tenant();
         tenant.setId(42L);
         tenant.setName("Acme Security");
+        tenant.setStatus("ACTIVE");
         when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(operationalQualityReadService.getSummary(tenant)).thenReturn(new OperationalQualitySummaryResponse(
                 Instant.EPOCH,
                 0,
@@ -239,6 +243,7 @@ class ApiSecurityIntegrationTest {
                 "Tenant Admin",
                 tenantId,
                 "Acme Security",
+                null,
                 Set.of("TENANT_ADMIN")));
 
         mockMvc.perform(get("/api/operations/quality/summary").header("Authorization", "Bearer quality.jwt"))
