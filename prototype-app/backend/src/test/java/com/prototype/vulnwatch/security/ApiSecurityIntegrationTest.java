@@ -32,6 +32,7 @@ import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.Set;
 import java.util.List;
@@ -217,7 +218,9 @@ class ApiSecurityIntegrationTest {
         Tenant tenant = new Tenant();
         tenant.setId(42L);
         tenant.setName("Acme Security");
+        tenant.setStatus("ACTIVE");
         when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(operationalQualityReadService.getSummary(tenant)).thenReturn(new OperationalQualitySummaryResponse(
                 Instant.EPOCH,
                 0,
