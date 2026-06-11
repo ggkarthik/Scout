@@ -8,40 +8,35 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 public class DemoTenantPurgeService {
 
     private final TenantRepository tenantRepository;
     private final JdbcTemplate resetJdbcTemplate;
-    private final JdbcTemplate tenantJdbcTemplate;
     private final AuditEventService auditEventService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final TenantSchemaService tenantSchemaService;
-    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public DemoTenantPurgeService(
             TenantRepository tenantRepository,
             @Qualifier("prototypeResetJdbcTemplate")
             JdbcTemplate resetJdbcTemplate,
-            JdbcTemplate tenantJdbcTemplate,
             AuditEventService auditEventService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
-            TenantSchemaService tenantSchemaService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaService tenantSchemaService
     ) {
         this.tenantRepository = tenantRepository;
         this.resetJdbcTemplate = resetJdbcTemplate;
-        this.tenantJdbcTemplate = tenantJdbcTemplate;
         this.auditEventService = auditEventService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.tenantSchemaService = tenantSchemaService;
-        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processExpiredTenant(UUID tenantId, Instant now) {
         Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
         if (tenant == null || tenant.getPurgedAt() != null || !tenantLifecycleGuardService.isDemoTenant(tenant)) {
@@ -58,10 +53,32 @@ public class DemoTenantPurgeService {
             return;
         }
 
+        purgeTenantInternal(tenant, now, "EXPIRED", "demo.tenant.purged", "demo.tenant.purge_failed");
+    }
+
+    public void deleteTenant(UUID tenantId, Instant now) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Unknown tenant: " + tenantId));
+        if (TenantService.DEFAULT_TENANT_NAME.equalsIgnoreCase(tenant.getName())) {
+            throw new ResponseStatusException(BAD_REQUEST, "Default workspace cannot be deleted");
+        }
+        if (tenant.getPurgedAt() != null || "DELETED".equalsIgnoreCase(tenant.getStatus())) {
+            return;
+        }
+        purgeTenantInternal(tenant, now, normalizedFailureStatus(tenant), "tenant.deleted", "tenant.delete_failed");
+    }
+
+    private void purgeTenantInternal(
+            Tenant tenant,
+            Instant now,
+            String failureStatus,
+            String successAuditAction,
+            String failureAuditAction
+    ) {
         List<UUID> memberUserIds = resetJdbcTemplate.query(
                 "select distinct user_id from platform.tenant_memberships where tenant_id = ?",
                 (rs, rowNum) -> UUID.fromString(rs.getString(1)),
-                tenantId);
+                tenant.getId());
 
         tenant.setStatus("PURGING");
         tenant.setPurgeStatus("IN_PROGRESS");
@@ -71,27 +88,21 @@ public class DemoTenantPurgeService {
         tenantRepository.save(tenant);
 
         try {
-            purgeTenantRows(tenant, now);
+            purgeTenantRows(tenant);
             scrubDemoUserCredentials(memberUserIds, now);
-            tenant.setStatus("DELETED");
-            tenant.setDeletedAt(now);
-            tenant.setPurgedAt(now);
-            tenant.setPurgeStatus("COMPLETED");
-            tenant.setPurgeError(null);
-            tenant.setUpdatedAt(now);
-            tenantRepository.save(tenant);
-            auditEventService.record("demo.tenant.purged", "tenant", tenantId.toString(), null);
+            auditEventService.record(successAuditAction, "tenant", tenant.getId().toString(), null);
         } catch (RuntimeException ex) {
-            tenant.setStatus("EXPIRED");
+            tenant.setStatus(failureStatus);
             tenant.setPurgeStatus("FAILED");
             tenant.setPurgeError(truncate(ex.getMessage(), 2000));
             tenant.setUpdatedAt(Instant.now());
             tenantRepository.save(tenant);
             auditEventService.record(
-                    "demo.tenant.purge_failed",
+                    failureAuditAction,
                     "tenant",
-                    tenantId.toString(),
+                    tenant.getId().toString(),
                     "{\"error\":\"" + escapeJson(truncate(ex.getMessage(), 512)) + "\"}");
+            throw new ResponseStatusException(BAD_REQUEST, "Tenant delete failed: " + truncate(ex.getMessage(), 500), ex);
         }
     }
 
@@ -110,33 +121,52 @@ public class DemoTenantPurgeService {
         auditEventService.record("demo.tenant.expired", "tenant", tenant.getId().toString(), null);
     }
 
-    private void purgeTenantRows(Tenant tenant, Instant now) {
+    private void purgeTenantRows(Tenant tenant) {
         UUID tenantId = tenant.getId();
-        tenantSchemaExecutionService.run(tenant, () -> {
-            tenantJdbcTemplate.update(
-                    "update demo_invites set status = ?, expires_at = least(expires_at, ?::timestamptz) where tenant_id = ? and upper(status) <> 'ACCEPTED'",
-                    "TENANT_EXPIRED",
-                    now,
-                    tenantId);
-        });
-
         tenantSchemaService.resetTenantSchema(tenant.getSchemaName());
+        purgeSharedTenantRows(tenantId);
+        resetJdbcTemplate.update(
+                "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",
+                tenantId);
+        resetJdbcTemplate.update("delete from platform.tenants where id = ?", tenantId);
+    }
 
-        resetJdbcTemplate.update("delete from platform.tenant_support_grants where tenant_id = ?", tenantId);
-        resetJdbcTemplate.update("delete from platform.tenant_memberships where tenant_id = ?", tenantId);
+    private void purgeSharedTenantRows(UUID tenantId) {
+        List<String> tableNames = resetJdbcTemplate.queryForList("""
+                select distinct concat(kcu.table_schema, '.', kcu.table_name)
+                from information_schema.table_constraints tc
+                join information_schema.key_column_usage kcu
+                  on tc.constraint_name = kcu.constraint_name
+                 and tc.table_schema = kcu.table_schema
+                join information_schema.constraint_column_usage ccu
+                  on ccu.constraint_name = tc.constraint_name
+                 and ccu.constraint_schema = tc.constraint_schema
+                where tc.constraint_type = 'FOREIGN KEY'
+                  and ccu.table_schema = 'platform'
+                  and ccu.table_name = 'tenants'
+                  and ccu.column_name = 'id'
+                  and kcu.column_name = 'tenant_id'
+                order by 1 desc
+                """, String.class);
+        for (String tableName : tableNames) {
+            if (!hasText(tableName) || "platform.tenants".equalsIgnoreCase(tableName)) {
+                continue;
+            }
+            resetJdbcTemplate.update("delete from " + tableName + " where tenant_id = ?", tenantId);
+        }
     }
 
     private void scrubDemoUserCredentials(List<UUID> userIds, Instant now) {
         for (UUID userId : userIds) {
             resetJdbcTemplate.update("""
-                    update app_users u
+                    update platform.app_users u
                     set password_hash = null,
                         password_set_at = null,
                         password_setup_token_hash = null,
                         password_setup_token_expires_at = null,
                         status = case
                             when u.platform_owner = false
-                                 and not exists (select 1 from tenant_memberships tm where tm.user_id = u.id)
+                                 and not exists (select 1 from platform.tenant_memberships tm where tm.user_id = u.id)
                             then 'INACTIVE'
                             else u.status
                         end,
@@ -157,4 +187,16 @@ public class DemoTenantPurgeService {
     private String escapeJson(String value) {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
+
+    private String normalizedFailureStatus(Tenant tenant) {
+        if (tenant == null || tenant.getStatus() == null || tenant.getStatus().isBlank()) {
+            return "ACTIVE";
+        }
+        return tenant.getStatus().trim().toUpperCase();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
 }

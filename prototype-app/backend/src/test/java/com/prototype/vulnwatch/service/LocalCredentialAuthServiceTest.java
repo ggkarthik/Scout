@@ -226,6 +226,7 @@ class LocalCredentialAuthServiceTest {
         user.setEmail("tenant.admin@localhost");
 
         when(tenantRepository.findByNameIgnoreCase("Default Workspace")).thenReturn(Optional.of(tenant));
+        when(userRepository.findByEmailIgnoreCase("tenant.admin@localhost")).thenReturn(Optional.empty());
         when(userRepository.findByExternalSubject("tenant.admin@localhost")).thenReturn(Optional.of(user));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
@@ -262,6 +263,47 @@ class LocalCredentialAuthServiceTest {
         assertEquals("TENANT_ADMIN", jwt.getClaimAsStringList("roles").get(0));
         assertTrue(BCrypt.checkpw("LocalDevTenant123!", user.getPasswordHash()));
         verify(membershipRepository).save(any(TenantMembership.class));
+    }
+
+    @Test
+    void realTenantAdminLoginWinsOverSharedLocalhostFallback() {
+        AppUser user = new AppUser();
+        user.setExternalSubject("tenant.admin@localhost");
+        user.setEmail("tenant.admin@localhost");
+        user.setPasswordHash(BCrypt.hashpw("gm-test-password", BCrypt.gensalt(10)));
+
+        Tenant tenant = tenant("GM Test");
+        TenantMembership membership = membership(user, tenant, "TENANT_ADMIN");
+
+        when(userRepository.findByEmailIgnoreCase("tenant.admin@localhost")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc("tenant.admin@localhost", "ACTIVE"))
+                .thenReturn(List.of(membership));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                false,
+                "",
+                "",
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.login("tenant.admin@localhost", "gm-test-password");
+        Jwt jwt = decode(response.token());
+
+        assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
+        verifyNoInteractions(tenantRepository);
     }
 
     private AuthTokenService authTokenService() {
