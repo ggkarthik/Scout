@@ -34,3 +34,6 @@ CREATE TABLE IF NOT EXISTS platform.finding_queue_preferences (
     CONSTRAINT fk_finding_queue_preferences_owner FOREIGN KEY (owner_user_id) REFERENCES platform.app_users (id),
     CONSTRAINT uk_finding_queue_preferences_owner UNIQUE (tenant_id, owner_user_id)
 );
+
+COMMENT ON TABLE platform.personal_finding_queues IS 'Personal finding queue definitions per tenant user';
+COMMENT ON TABLE platform.finding_queue_preferences IS 'Per-user default finding queue selection';
