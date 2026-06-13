@@ -984,6 +984,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   return (
     <div className="fpl-root">
       <FindingsWorkspaceHeader
+        builtInQueues={availableQueues.filter((queue) => queue.kind === 'BUILT_IN')}
         personalQueues={personalQueues}
         activeQueueKey={activeQueryContext.queueKey}
         projectionStatus={projectionStatusQuery.data}
