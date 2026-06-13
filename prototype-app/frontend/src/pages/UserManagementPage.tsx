@@ -6,23 +6,31 @@ import {
   pathForAdminView,
 } from '../app/routes';
 import {
-  useAddTenantMemberMutation,
   useAuditEventsQuery,
+  useCancelTenantInviteMutation,
+  useCreateTenantBulkInvitesMutation,
+  useCreateTenantInviteMutation,
   useAuthContextQuery,
   useCreateServiceAccountMutation,
+  useDeactivateServiceAccountMutation,
+  useDeleteServiceAccountMutation,
+  useDeleteTenantMemberMutation,
+  useResendTenantInviteMutation,
   useServiceAccountsQuery,
+  useTenantInvitesQuery,
   useTenantMembersQuery,
+  useUpdateTenantMemberMutation,
 } from '../features/admin/queries';
 import { api } from '../api/client';
-import type { AuditEvent, ServiceAccount, TenantMember } from '../features/admin/types';
+import { parseTenantInviteCsv, type ParsedBulkInviteRow } from '../features/admin/csv';
+import type { AuditEvent, ServiceAccount, TenantBulkInviteResponse, TenantInvite, TenantMember } from '../features/admin/types';
 import { canExportAudit, canManageServiceAccounts, canManageTenant, canManageUsers } from '../features/auth/roles';
 
-type RoleKey = 'Owner' | 'Admin' | 'Security Lead' | 'Analyst' | 'Viewer';
+type RoleKey = 'Admin' | 'Security Lead' | 'Analyst' | 'Viewer';
 
-const ROLE_KEYS: RoleKey[] = ['Owner', 'Admin', 'Security Lead', 'Analyst', 'Viewer'];
+const ROLE_KEYS: RoleKey[] = ['Admin', 'Security Lead', 'Analyst', 'Viewer'];
 
 const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
-  Owner: 'Tenant lifecycle, billing controls, identity policy, and emergency access.',
   Admin: 'Operational administration across users, integrations, inventory, and findings.',
   'Security Lead': 'Triage ownership, risk acceptance, VEX decisions, and remediation governance.',
   Analyst: 'Investigation workflow, comments, evidence review, and finding disposition.',
@@ -30,16 +38,16 @@ const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
 };
 
 const ROLE_MATRIX = [
-  { capability: 'Invite and remove users', owner: true, admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Change roles and scopes', owner: true, admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Approve VEX and risk acceptance', owner: true, admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'Manage service accounts', owner: true, admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Suppress findings / risk acceptance', owner: true, admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'Edit risk policy and SLA', owner: true, admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Trigger ingestion and connectors', owner: true, admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Investigate findings', owner: true, admin: true, lead: true, analyst: true, viewer: false },
-  { capability: 'Export audit log', owner: true, admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'View dashboards and reports', owner: true, admin: true, lead: true, analyst: true, viewer: true },
+  { capability: 'Invite and remove users', admin: true, lead: false, analyst: false, viewer: false },
+  { capability: 'Change roles and scopes', admin: true, lead: false, analyst: false, viewer: false },
+  { capability: 'Approve VEX and risk acceptance', admin: true, lead: true, analyst: false, viewer: false },
+  { capability: 'Manage service accounts', admin: true, lead: false, analyst: false, viewer: false },
+  { capability: 'Suppress findings / risk acceptance', admin: true, lead: true, analyst: false, viewer: false },
+  { capability: 'Edit risk policy and SLA', admin: true, lead: false, analyst: false, viewer: false },
+  { capability: 'Trigger ingestion and connectors', admin: true, lead: false, analyst: false, viewer: false },
+  { capability: 'Investigate findings', admin: true, lead: true, analyst: true, viewer: false },
+  { capability: 'Export audit log', admin: true, lead: true, analyst: false, viewer: false },
+  { capability: 'View dashboards and reports', admin: true, lead: true, analyst: true, viewer: true },
 ];
 
 const ADMIN_TABS: Array<{ key: AdminRouteView; label: string; helper: string }> = [
@@ -81,7 +89,6 @@ function roleBucket(role: string | null | undefined): RoleKey {
   if (ROLE_KEYS.includes(normalized as RoleKey)) {
     return normalized as RoleKey;
   }
-  if (normalized === 'Platform Owner') return 'Owner';
   if (normalized === 'Tenant Admin') return 'Admin';
   if (normalized === 'Inventory Admin') return 'Admin';
   if (normalized === 'Creator') return 'Admin';
@@ -90,7 +97,7 @@ function roleBucket(role: string | null | undefined): RoleKey {
 
 function privilegedRoleBucket(role: string | null | undefined): boolean {
   const bucket = roleBucket(role);
-  return bucket === 'Owner' || bucket === 'Admin' || bucket === 'Security Lead';
+  return bucket === 'Admin' || bucket === 'Security Lead';
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -138,6 +145,46 @@ function memberSearchHaystack(member: TenantMember): string {
     .join(' ');
 }
 
+function memberMatchesStructuredFilters(
+  member: TenantMember,
+  query: string,
+  roleFilter: string,
+  statusFilter: string
+): boolean {
+  if (!matchesQuery(memberSearchHaystack(member), query)) return false;
+  if (roleFilter !== 'ALL' && member.role !== roleFilter) return false;
+  if (statusFilter !== 'ALL' && member.status !== statusFilter) return false;
+  return true;
+}
+
+function backendRoleForRoleKey(roleKey: RoleKey): string {
+  return roleKey === 'Admin'
+    ? 'TENANT_ADMIN'
+    : roleKey === 'Security Lead' || roleKey === 'Analyst'
+      ? 'SECURITY_ANALYST'
+      : 'READ_ONLY_AUDITOR';
+}
+
+function roleKeyForBackendRole(role: string | null | undefined): RoleKey {
+  if (role === 'TENANT_ADMIN' || role === 'INVENTORY_ADMIN') return 'Admin';
+  if (role === 'SECURITY_ANALYST') return 'Security Lead';
+  return 'Viewer';
+}
+
+function inviteSearchHaystack(invite: TenantInvite): string {
+  return [
+    invite.displayName,
+    invite.email,
+    invite.subject,
+    invite.role,
+    invite.status,
+    invite.invitedByDisplayName,
+    invite.invitedBySubject,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 function serviceSearchHaystack(account: ServiceAccount): string {
   return [account.name, account.role, account.status, account.keyId].filter(Boolean).join(' ');
 }
@@ -163,6 +210,13 @@ function deriveAuditRisk(event: AuditEvent): 'Low' | 'Medium' | 'High' {
   return 'Low';
 }
 
+function formatAuditAction(action: string): string {
+  return action
+    .split('.')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 const AUDIT_RISK_PILL: Record<'Low' | 'Medium' | 'High', string> = {
   Low: 'severity-pill severity-low',
   Medium: 'severity-pill severity-medium',
@@ -177,7 +231,7 @@ function CheckMark({ enabled }: { enabled: boolean }) {
   );
 }
 
-type IconName = 'plus' | 'mail' | 'key' | 'clock' | 'search' | 'more' | 'close' | 'rotate' | 'play' | 'pause' | 'download';
+type IconName = 'plus' | 'mail' | 'key' | 'clock' | 'search' | 'close' | 'download' | 'upload';
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -186,25 +240,15 @@ function Icon({ name }: { name: IconName }) {
     key: <path d="M14.5 9.5a4 4 0 1 1-2.1 3.5L21 4.5M18 7.5l2 2" />,
     clock: <path d="M12 6v6l4 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
     search: <path d="m21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" />,
-    more: <path d="M5 12h.01M12 12h.01M19 12h.01" />,
     close: <path d="M6 6l12 12M6 18 18 6" />,
-    rotate: <path d="M4 12a8 8 0 0 1 14-5.3M20 4v4h-4M20 12a8 8 0 0 1-14 5.3M4 20v-4h4" />,
-    play: <path d="M7 5v14l12-7z" />,
-    pause: <path d="M8 5v14M16 5v14" />,
     download: <path d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16" />,
+    upload: <path d="M12 20V8m0 0-4 4m4-4 4 4M4 4h16" />,
   };
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="um-icon">
       {paths[name]}
     </svg>
   );
-}
-
-function subjectFromEmail(email: string): string {
-  const trimmed = email.trim().toLowerCase();
-  if (!trimmed) return '';
-  const [local] = trimmed.split('@');
-  return (local || trimmed).replace(/[^a-z0-9._-]+/g, '-');
 }
 
 export function UserManagementPage() {
@@ -221,28 +265,46 @@ export function UserManagementPage() {
   const mayExportAudit = canExportAudit(actor);
 
   const membersQuery = useTenantMembersQuery(tenantId);
+  const invitesQuery = useTenantInvitesQuery(tenantId);
   const serviceAccountsQuery = useServiceAccountsQuery();
   const auditEventsQuery = useAuditEventsQuery();
-  const addMember = useAddTenantMemberMutation(tenantId);
+  const createInvite = useCreateTenantInviteMutation(tenantId);
+  const createBulkInvites = useCreateTenantBulkInvitesMutation(tenantId);
+  const resendInvite = useResendTenantInviteMutation(tenantId);
+  const cancelInvite = useCancelTenantInviteMutation(tenantId);
+  const updateMember = useUpdateTenantMemberMutation(tenantId);
+  const deleteMember = useDeleteTenantMemberMutation(tenantId);
   const createServiceAccount = useCreateServiceAccountMutation();
+  const deactivateServiceAccount = useDeactivateServiceAccountMutation();
+  const deleteServiceAccount = useDeleteServiceAccountMutation();
 
   const members = React.useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+  const invites = React.useMemo(() => invitesQuery.data ?? [], [invitesQuery.data]);
   const serviceAccounts = React.useMemo(() => serviceAccountsQuery.data ?? [], [serviceAccountsQuery.data]);
   const auditEvents = React.useMemo(() => auditEventsQuery.data ?? [], [auditEventsQuery.data]);
 
-  const [selectedRole, setSelectedRole] = React.useState<RoleKey>('Security Lead');
+  const [selectedRole, setSelectedRole] = React.useState<RoleKey>('Admin');
   const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [bulkInviteOpen, setBulkInviteOpen] = React.useState(false);
   const [serviceOpen, setServiceOpen] = React.useState(false);
   const [memberQuery, setMemberQuery] = React.useState('');
+  const [memberRoleFilter, setMemberRoleFilter] = React.useState('ALL');
+  const [memberStatusFilter, setMemberStatusFilter] = React.useState('ALL');
   const [inviteQuery, setInviteQuery] = React.useState('');
   const [serviceQuery, setServiceQuery] = React.useState('');
   const [auditQuery, setAuditQuery] = React.useState('');
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [isExporting, setIsExporting] = React.useState(false);
+  const [selectedMemberId, setSelectedMemberId] = React.useState<string | null>(null);
+  const [bulkInviteRows, setBulkInviteRows] = React.useState<ParsedBulkInviteRow[]>([]);
+  const [bulkInviteErrors, setBulkInviteErrors] = React.useState<string[]>([]);
+  const [bulkInviteFileName, setBulkInviteFileName] = React.useState<string>('');
+  const [bulkInviteSummary, setBulkInviteSummary] = React.useState<TenantBulkInviteResponse | null>(null);
 
   const inviteEmailRef = React.useRef<HTMLInputElement | null>(null);
-  const inviteRoleRef = React.useRef<HTMLSelectElement | null>(null);
   const inviteOpenerRef = React.useRef<HTMLButtonElement | null>(null);
+  const bulkInviteFileRef = React.useRef<HTMLInputElement | null>(null);
+  const bulkInviteOpenerRef = React.useRef<HTMLButtonElement | null>(null);
 
   const serviceNameRef = React.useRef<HTMLInputElement | null>(null);
   const serviceOpenerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -256,43 +318,56 @@ export function UserManagementPage() {
     [activeView, navigate]
   );
 
-  const activeMembers = React.useMemo(
-    () => members.filter((m) => m.status.toUpperCase() !== 'INVITED'),
-    [members]
-  );
-  const invitedMembers = React.useMemo(
-    () => members.filter((m) => m.status.toUpperCase() === 'INVITED'),
-    [members]
-  );
-
-  const visibleMembers = activeMembers.filter((m) => matchesQuery(memberSearchHaystack(m), memberQuery));
-  const visibleInvites = invitedMembers.filter((m) => matchesQuery(memberSearchHaystack(m), inviteQuery));
+  const visibleMembers = members.filter((m) => memberMatchesStructuredFilters(m, memberQuery, memberRoleFilter, memberStatusFilter));
+  const visibleInvites = invites.filter((invite) => matchesQuery(inviteSearchHaystack(invite), inviteQuery));
   const visibleServiceAccounts = serviceAccounts.filter((a) => matchesQuery(serviceSearchHaystack(a), serviceQuery));
   const visibleAuditEvents = auditEvents.filter((e) => matchesQuery(auditSearchHaystack(e), auditQuery));
+  const visibleIdentityAuditEvents = visibleAuditEvents.filter((event) =>
+    /(member|invite|service_account|tenant_membership|audit_events)/i.test(event.action)
+    || /(tenant_member|tenant_user_invite|service_account)/i.test(event.targetType ?? '')
+  );
 
   const memberCountByRole = React.useMemo(() => {
-    const counts: Record<RoleKey, number> = { Owner: 0, Admin: 0, 'Security Lead': 0, Analyst: 0, Viewer: 0 };
+    const counts: Record<RoleKey, number> = { Admin: 0, 'Security Lead': 0, Analyst: 0, Viewer: 0 };
     members.forEach((m) => { counts[roleBucket(m.role)] += 1; });
     return counts;
   }, [members]);
 
   const privilegedCount = members.filter((m) => privilegedRoleBucket(m.role)).length;
   const tenantName = authQuery.data?.tenantName ?? '—';
+  const memberRoleOptions = React.useMemo(() => Array.from(new Set(members.map((member) => member.role))).sort(), [members]);
+  const memberStatusOptions = React.useMemo(() => Array.from(new Set(members.map((member) => member.status))).sort(), [members]);
+  const selectedMember = React.useMemo(
+    () => visibleMembers.find((member) => member.id === selectedMemberId) ?? visibleMembers[0] ?? null,
+    [selectedMemberId, visibleMembers]
+  );
 
   const captionParts: string[] = [];
   if (authQuery.data?.tenantName) captionParts.push(authQuery.data.tenantName);
   captionParts.push(`${members.length} member${members.length === 1 ? '' : 's'}`);
+  captionParts.push(`${invites.length} invite${invites.length === 1 ? '' : 's'}`);
   captionParts.push(`${privilegedCount} privileged`);
   captionParts.push(`${serviceAccounts.length} service account${serviceAccounts.length === 1 ? '' : 's'}`);
   captionParts.push(`${auditEvents.length} event${auditEvents.length === 1 ? '' : 's'}`);
 
   const openInvite = React.useCallback(() => {
     if (!mayManageUsers) return;
-    addMember.reset();
+    createInvite.reset();
     setInviteOpen(true);
-  }, [addMember, mayManageUsers]);
+  }, [createInvite, mayManageUsers]);
   const closeInvite = React.useCallback(() => {
     setInviteOpen(false);
+  }, []);
+  const openBulkInvite = React.useCallback(() => {
+    if (!mayManageUsers) return;
+    createBulkInvites.reset();
+    setBulkInviteErrors([]);
+    setBulkInviteRows([]);
+    setBulkInviteFileName('');
+    setBulkInviteOpen(true);
+  }, [createBulkInvites, mayManageUsers]);
+  const closeBulkInvite = React.useCallback(() => {
+    setBulkInviteOpen(false);
   }, []);
   const openService = React.useCallback(() => {
     if (!mayManageServiceAccounts) return;
@@ -320,6 +395,22 @@ export function UserManagementPage() {
   }, [inviteOpen, closeInvite]);
 
   React.useEffect(() => {
+    if (!bulkInviteOpen) {
+      bulkInviteOpenerRef.current?.focus();
+      return;
+    }
+    bulkInviteFileRef.current?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        closeBulkInvite();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [bulkInviteOpen, closeBulkInvite]);
+
+  React.useEffect(() => {
     if (!serviceOpen) {
       serviceOpenerRef.current?.focus();
       return;
@@ -335,6 +426,16 @@ export function UserManagementPage() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [serviceOpen, closeService]);
 
+  React.useEffect(() => {
+    if (!selectedMemberId && visibleMembers.length > 0) {
+      setSelectedMemberId(visibleMembers[0].id);
+      return;
+    }
+    if (selectedMemberId && !visibleMembers.some((member) => member.id === selectedMemberId)) {
+      setSelectedMemberId(visibleMembers[0]?.id ?? null);
+    }
+  }, [selectedMemberId, visibleMembers]);
+
   if (!authQuery.isLoading && !mayAccessTenantAdministration) {
     return <Navigate to="/exposure" replace />;
   }
@@ -346,13 +447,41 @@ export function UserManagementPage() {
     const email = String(formData.get('email') ?? '').trim();
     const role = String(formData.get('role') ?? '').trim();
     const displayName = String(formData.get('displayName') ?? '').trim() || email;
-    const subject = subjectFromEmail(email);
-    if (!email || !role || !subject) return;
-    addMember.mutate(
-      { subject, email, displayName, role },
+    if (!email || !role) return;
+    createInvite.mutate(
+      { email, displayName, role },
       {
         onSuccess: () => {
           closeInvite();
+        },
+      }
+    );
+  };
+
+  const handleBulkInviteFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setBulkInviteRows([]);
+      setBulkInviteErrors([]);
+      setBulkInviteFileName('');
+      return;
+    }
+    const text = await file.text();
+    const parsed = parseTenantInviteCsv(text);
+    setBulkInviteFileName(file.name);
+    setBulkInviteRows(parsed.rows);
+    setBulkInviteErrors(parsed.errors);
+  };
+
+  const handleBulkInviteSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!mayManageUsers || bulkInviteRows.length === 0) return;
+    createBulkInvites.mutate(
+      { invites: bulkInviteRows.map(({ rowNumber: _rowNumber, ...invite }) => invite) },
+      {
+        onSuccess: (response) => {
+          setBulkInviteSummary(response);
+          closeBulkInvite();
         },
       }
     );
@@ -399,6 +528,7 @@ export function UserManagementPage() {
   };
 
   const membersLoading = membersQuery.isLoading || (!membersQuery.data && membersQuery.isFetching);
+  const invitesLoading = invitesQuery.isLoading || (!invitesQuery.data && invitesQuery.isFetching);
   const serviceAccountsLoading = serviceAccountsQuery.isLoading || (!serviceAccountsQuery.data && serviceAccountsQuery.isFetching);
   const auditLoading = auditEventsQuery.isLoading || (!auditEventsQuery.data && auditEventsQuery.isFetching);
 
@@ -473,9 +603,27 @@ export function UserManagementPage() {
                       <input
                         value={memberQuery}
                         onChange={(event) => setMemberQuery(event.target.value)}
-                        placeholder="Search users"
+                        placeholder="Search name, email, or subject"
                         aria-label="Search users"
                       />
+                    </label>
+                    <label className="um-inline-filter">
+                      <span>Role</span>
+                      <select value={memberRoleFilter} onChange={(event) => setMemberRoleFilter(event.target.value)} aria-label="Filter members by role">
+                        <option value="ALL">All roles</option>
+                        {memberRoleOptions.map((role) => (
+                          <option key={role} value={role}>{formatRole(role)}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="um-inline-filter">
+                      <span>Status</span>
+                      <select value={memberStatusFilter} onChange={(event) => setMemberStatusFilter(event.target.value)} aria-label="Filter members by status">
+                        <option value="ALL">All statuses</option>
+                        {memberStatusOptions.map((status) => (
+                          <option key={status} value={status}>{formatStatus(status)}</option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                 </div>
@@ -485,32 +633,37 @@ export function UserManagementPage() {
                     <strong>Failed to load members.</strong> {membersQuery.error instanceof Error ? membersQuery.error.message : 'Unknown error'}
                   </div>
                 ) : (
-                  <div className="um-table-scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Status</th>
-                          <th>Role</th>
-                          <th>Subject</th>
-                          <th>Member since</th>
-                          <th aria-label="Actions" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {membersLoading ? (
-                          <tr><td colSpan={6} className="um-empty-cell">Loading members…</td></tr>
-                        ) : visibleMembers.length === 0 ? (
+                  <div className="um-members-layout">
+                    <div className="um-table-scroll">
+                      <table className="data-table">
+                        <thead>
                           <tr>
-                            <td colSpan={6} className="um-empty-cell">
-                              {memberQuery
-                                ? <>No members match &ldquo;{memberQuery}&rdquo;.</>
-                                : 'No active members yet. Invite a user to get started.'}
-                            </td>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Role</th>
+                            <th>Subject</th>
+                            <th>Member since</th>
+                            <th aria-label="Actions" />
                           </tr>
-                        ) : (
-                          visibleMembers.map((member) => (
-                            <tr key={member.id}>
+                        </thead>
+                        <tbody>
+                          {membersLoading ? (
+                            <tr><td colSpan={6} className="um-empty-cell">Loading members…</td></tr>
+                          ) : visibleMembers.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="um-empty-cell">
+                                {memberQuery || memberRoleFilter !== 'ALL' || memberStatusFilter !== 'ALL'
+                                  ? 'No members match the current filters.'
+                                  : 'No active members yet. Invite a user to get started.'}
+                              </td>
+                            </tr>
+                          ) : (
+                            visibleMembers.map((member) => (
+                              <tr
+                                key={member.id}
+                                className={selectedMember?.id === member.id ? 'um-member-row-active' : undefined}
+                                onClick={() => setSelectedMemberId(member.id)}
+                              >
                               <td>
                                 <div className="um-person">
                                   <span className="um-avatar" aria-hidden="true">{avatarInitials(member)}</span>
@@ -538,22 +691,141 @@ export function UserManagementPage() {
                               </td>
                               <td><code>{member.subject}</code></td>
                               <td>{formatTimestamp(member.createdAt)}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="um-icon-button"
-                                  aria-label={`More actions for ${memberDisplayName(member)}`}
-                                  disabled
-                                  title="Member mutations land in a follow-up"
-                                >
-                                  <Icon name="more" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                                <td>
+                                  <div className="um-card-actions" style={{ justifyContent: 'flex-end' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedMemberId(member.id);
+                                      }}
+                                    >
+                                      Details
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      disabled={!mayManageUsers || updateMember.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        updateMember.mutate({
+                                          memberId: member.id,
+                                          payload: { role: member.role === 'READ_ONLY_AUDITOR' ? 'SECURITY_ANALYST' : 'READ_ONLY_AUDITOR' }
+                                        });
+                                      }}
+                                    >
+                                      {member.role === 'READ_ONLY_AUDITOR' ? 'Promote' : 'Set Viewer'}
+                                    </button>
+                                    {member.status.toUpperCase() === 'SUSPENDED' ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        disabled={!mayManageUsers || updateMember.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          updateMember.mutate({ memberId: member.id, payload: { status: 'ACTIVE' } });
+                                        }}
+                                      >
+                                        Reactivate
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        disabled={!mayManageUsers || updateMember.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          updateMember.mutate({ memberId: member.id, payload: { status: 'SUSPENDED' } });
+                                        }}
+                                      >
+                                        Suspend
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      disabled={!mayManageUsers || deleteMember.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        deleteMember.mutate(member.id);
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    {selectedMember && (
+                      <aside className="um-member-detail">
+                        <div className="um-member-detail-head">
+                          <div className="um-person">
+                            <span className="um-avatar" aria-hidden="true">{avatarInitials(selectedMember)}</span>
+                            <div className="um-person-text">
+                              <strong>{memberDisplayName(selectedMember)}</strong>
+                              <small>{selectedMember.email ?? '—'}</small>
+                            </div>
+                          </div>
+                          <span className={statusPillClass(selectedMember.status)}>{formatStatus(selectedMember.status)}</span>
+                        </div>
+                        <div className="um-member-detail-grid">
+                          <div className="um-detail-full"><span>Subject</span><strong><code>{selectedMember.subject}</code></strong></div>
+                          <div><span>Status</span><strong>{formatStatus(selectedMember.status)}</strong></div>
+                          <div><span>Member since</span><strong>{formatTimestamp(selectedMember.createdAt)}</strong></div>
+                        </div>
+                        <div className="um-member-detail-controls">
+                          <label>
+                            Role
+                            <select
+                              value={backendRoleForRoleKey(roleKeyForBackendRole(selectedMember.role))}
+                              disabled={!mayManageUsers || updateMember.isPending}
+                              onChange={(event) => updateMember.mutate({
+                                memberId: selectedMember.id,
+                                payload: { role: event.target.value }
+                              })}
+                            >
+                              {ROLE_KEYS.map((roleKey) => (
+                                <option key={roleKey} value={backendRoleForRoleKey(roleKey)}>{roleKey}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="um-member-detail-actions">
+                            {selectedMember.status.toUpperCase() === 'SUSPENDED' ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                disabled={!mayManageUsers || updateMember.isPending}
+                                onClick={() => updateMember.mutate({ memberId: selectedMember.id, payload: { status: 'ACTIVE' } })}
+                              >
+                                Reactivate member
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                disabled={!mayManageUsers || updateMember.isPending}
+                                onClick={() => updateMember.mutate({ memberId: selectedMember.id, payload: { status: 'SUSPENDED' } })}
+                              >
+                                Suspend member
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              disabled={!mayManageUsers || deleteMember.isPending}
+                              onClick={() => deleteMember.mutate(selectedMember.id)}
+                            >
+                              Remove access
+                            </button>
+                          </div>
+                        </div>
+                      </aside>
+                    )}
                   </div>
                 )}
               </>
@@ -564,7 +836,7 @@ export function UserManagementPage() {
                 <div className="um-section-head">
                   <div>
                     <h3>Pending Invitations</h3>
-                    <p>Memberships in <code>INVITED</code> state awaiting first sign-in.</p>
+                    <p>Email invitations awaiting acceptance and password setup.</p>
                   </div>
                   <div className="um-section-head-actions">
                     <label className="um-search">
@@ -580,23 +852,41 @@ export function UserManagementPage() {
                       <Icon name="mail" />
                       New invite
                     </button>
+                    <button
+                      ref={bulkInviteOpenerRef}
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={openBulkInvite}
+                      disabled={!tenantId || !mayManageUsers}
+                      hidden={!mayManageUsers}
+                    >
+                      <Icon name="upload" />
+                      Import CSV
+                    </button>
                     {!mayManageUsers && (
                       <span className="panel-caption">Invitations are read-only for your role.</span>
                     )}
                   </div>
                 </div>
 
-                {membersQuery.isError ? (
-                  <div className="notice error" role="alert">
-                    <strong>Failed to load invites.</strong> {membersQuery.error instanceof Error ? membersQuery.error.message : 'Unknown error'}
+                {bulkInviteSummary && (
+                  <div className={bulkInviteSummary.failedCount > 0 ? 'notice' : 'notice success'} role="status">
+                    <strong>Bulk import complete.</strong> {bulkInviteSummary.invitedCount} of {bulkInviteSummary.requestedCount} invites sent.
+                    {bulkInviteSummary.failedCount > 0 && ` ${bulkInviteSummary.failedCount} row${bulkInviteSummary.failedCount === 1 ? '' : 's'} need attention.`}
                   </div>
-                ) : membersLoading ? (
+                )}
+
+                {invitesQuery.isError ? (
+                  <div className="notice error" role="alert">
+                    <strong>Failed to load invites.</strong> {invitesQuery.error instanceof Error ? invitesQuery.error.message : 'Unknown error'}
+                  </div>
+                ) : invitesLoading ? (
                   <div className="um-empty-block">Loading invites…</div>
                 ) : visibleInvites.length === 0 ? (
                   <div className="um-empty-block">
                     {inviteQuery
                       ? <>No invites match &ldquo;{inviteQuery}&rdquo;.</>
-                      : 'No pending invitations. New invites appear here until the user signs in.'}
+                      : 'No pending invitations. New invites appear here until the user accepts and sets a password.'}
                   </div>
                 ) : (
                   <div className="um-card-grid">
@@ -605,8 +895,8 @@ export function UserManagementPage() {
                         <div className="um-card-title">
                           <span className="um-card-icon"><Icon name="mail" /></span>
                           <div style={{ minWidth: 0 }}>
-                            <h4>{invite.email ?? memberDisplayName(invite)}</h4>
-                            <p><code>{invite.subject}</code></p>
+                            <h4>{invite.displayName || invite.email}</h4>
+                            <p>{invite.email}</p>
                           </div>
                         </div>
                         <div className="um-card-row"><span>Role</span><strong>{formatRole(invite.role)}</strong></div>
@@ -615,12 +905,56 @@ export function UserManagementPage() {
                           <strong><span className={statusPillClass(invite.status)}>{formatStatus(invite.status)}</span></strong>
                         </div>
                         <div className="um-card-row"><span>Invited</span><strong>{formatRelative(invite.createdAt)}</strong></div>
+                        <div className="um-card-row"><span>Expires</span><strong>{formatTimestamp(invite.expiresAt)}</strong></div>
+                        <div className="um-card-row"><span>Invited by</span><strong>{invite.invitedByDisplayName || invite.invitedBySubject || '—'}</strong></div>
+                        {invite.deliveryDetail ? (
+                          <div className="um-card-row"><span>Delivery</span><strong>{invite.deliveryDetail}</strong></div>
+                        ) : null}
                         <div className="um-card-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" disabled title="Resend lands in a follow-up">Resend</button>
-                          <button type="button" className="btn btn-ghost btn-sm" disabled title="Revoke lands in a follow-up">Revoke</button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={!mayManageUsers || resendInvite.isPending}
+                            onClick={() => resendInvite.mutate(invite.id)}
+                          >
+                            Resend
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={!mayManageUsers || cancelInvite.isPending}
+                            onClick={() => cancelInvite.mutate(invite.id)}
+                          >
+                            Cancel
+                          </button>
                         </div>
                       </article>
                     ))}
+                  </div>
+                )}
+
+                {bulkInviteSummary && bulkInviteSummary.results.length > 0 && (
+                  <div className="um-table-scroll" style={{ marginTop: '1rem' }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Email</th>
+                          <th>Role</th>
+                          <th>Status</th>
+                          <th>Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkInviteSummary.results.map((result) => (
+                          <tr key={`${result.email}-${result.status}`}>
+                            <td>{result.email}</td>
+                            <td>{formatRole(result.role ?? '')}</td>
+                            <td><span className={statusPillClass(result.status)}>{formatStatus(result.status)}</span></td>
+                            <td>{result.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </>
@@ -636,10 +970,10 @@ export function UserManagementPage() {
                 </div>
 
                 <div className="notice" role="note">
-                  <strong>Illustrative.</strong> The capability matrix is a design draft, not the authoritative permission spec.
-                  Final mapping will follow the backend role authorities (<code>ROLE_PLATFORM_OWNER</code>,
-                  <code>ROLE_TENANT_ADMIN</code>, <code>ROLE_INVENTORY_ADMIN</code>,
-                  <code>ROLE_SECURITY_ANALYST</code>, <code>ROLE_READ_ONLY_AUDITOR</code>).
+                  <strong>Illustrative.</strong> This tenant-facing matrix is simplified for V1 customer validation.
+                  The current implementation maps to existing backend authorities such as
+                  <code>ROLE_TENANT_ADMIN</code>, <code>ROLE_SECURITY_ANALYST</code>, and
+                  <code>ROLE_READ_ONLY_AUDITOR</code>. Founder-only platform roles stay out of this workspace.
                 </div>
 
                 <div className="um-role-grid">
@@ -663,7 +997,6 @@ export function UserManagementPage() {
                     <thead>
                       <tr>
                         <th>Capability</th>
-                        <th>Owner</th>
                         <th>Admin</th>
                         <th>Security Lead</th>
                         <th>Analyst</th>
@@ -674,7 +1007,6 @@ export function UserManagementPage() {
                       {ROLE_MATRIX.map((row) => (
                         <tr key={row.capability}>
                           <td>{row.capability}</td>
-                          <td><CheckMark enabled={row.owner} /></td>
                           <td><CheckMark enabled={row.admin} /></td>
                           <td><CheckMark enabled={row.lead} /></td>
                           <td><CheckMark enabled={row.analyst} /></td>
@@ -746,21 +1078,24 @@ export function UserManagementPage() {
                         <div className="um-card-row"><span>Created</span><strong>{formatRelative(account.createdAt)}</strong></div>
                         <div className="um-card-row"><span>Last used</span><strong>{account.lastUsedAt ? formatRelative(account.lastUsedAt) : 'Never'}</strong></div>
                         <div className="um-card-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" disabled title="Token rotation lands in a follow-up">
-                            <Icon name="rotate" />
-                            Rotate
-                          </button>
-                          {account.status.toUpperCase() === 'PAUSED' ? (
-                            <button type="button" className="btn btn-ghost btn-sm" disabled title="Resume lands in a follow-up">
-                              <Icon name="play" />
-                              Resume
-                            </button>
-                          ) : (
-                            <button type="button" className="btn btn-ghost btn-sm" disabled title="Pause lands in a follow-up">
-                              <Icon name="pause" />
-                              Pause
+                          {account.status.toUpperCase() === 'ACTIVE' && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={!mayManageServiceAccounts || deactivateServiceAccount.isPending}
+                              onClick={() => deactivateServiceAccount.mutate(account.id)}
+                            >
+                              Deactivate
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={!mayManageServiceAccounts || deleteServiceAccount.isPending}
+                            onClick={() => deleteServiceAccount.mutate(account.id)}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </article>
                     ))}
@@ -805,21 +1140,21 @@ export function UserManagementPage() {
                   </div>
                 ) : auditLoading ? (
                   <div className="um-empty-block">Loading events…</div>
-                ) : visibleAuditEvents.length === 0 ? (
+                ) : visibleIdentityAuditEvents.length === 0 ? (
                   <div className="um-empty-block">
                     {auditQuery
                       ? <>No events match &ldquo;{auditQuery}&rdquo;.</>
-                      : 'No audit events recorded yet.'}
+                      : 'No identity audit events recorded yet.'}
                   </div>
                 ) : (
                   <div className="um-timeline">
-                    {visibleAuditEvents.map((event) => {
+                    {visibleIdentityAuditEvents.map((event) => {
                       const risk = deriveAuditRisk(event);
                       return (
                         <article key={event.id} className="um-audit-row">
                           <span className={AUDIT_RISK_PILL[risk]}>{risk}</span>
                           <div className="um-audit-meta">
-                            <strong>{event.action}</strong>
+                            <strong>{formatAuditAction(event.action)}</strong>
                             <span>
                               {event.actorSubject ?? 'system'}
                               {event.targetType && ` · ${event.targetType}${event.targetId ? `:${event.targetId.slice(0, 8)}` : ''}`}
@@ -851,7 +1186,7 @@ export function UserManagementPage() {
               <div className="um-modal-head">
                 <div>
                   <h3 id="invite-user-title">Invite User</h3>
-                  <p>Creates a tenant membership for the resolved subject. The user appears under Members with role and status.</p>
+                  <p>Sends a time-bound email invite. After acceptance, the user sets a password and becomes an active tenant member.</p>
                 </div>
                 <button
                   type="button"
@@ -862,9 +1197,9 @@ export function UserManagementPage() {
                   <Icon name="close" />
                 </button>
               </div>
-              {addMember.isError && (
+              {createInvite.isError && (
                 <div className="notice error" role="alert">
-                  <strong>Could not add member.</strong> {addMember.error instanceof Error ? addMember.error.message : 'Unknown error'}
+                  <strong>Could not send invite.</strong> {createInvite.error instanceof Error ? createInvite.error.message : 'Unknown error'}
                 </div>
               )}
               <div className="um-form-grid">
@@ -890,9 +1225,12 @@ export function UserManagementPage() {
                 </label>
                 <label>
                   Role
-                  <select ref={inviteRoleRef} name="role" defaultValue="ANALYST" required>
+                  <select name="role" defaultValue="SECURITY_ANALYST" required>
                     {ROLE_KEYS.map((roleKey) => (
-                      <option key={roleKey} value={roleKey.toUpperCase().replace(/\s+/g, '_')}>
+                      <option
+                        key={roleKey}
+                        value={backendRoleForRoleKey(roleKey)}
+                      >
                         {roleKey}
                       </option>
                     ))}
@@ -905,8 +1243,109 @@ export function UserManagementPage() {
               </div>
               <div className="um-modal-actions">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={closeInvite}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={addMember.isPending || !tenantId}>
-                  {addMember.isPending ? 'Sending…' : 'Send invite'}
+                <button type="submit" className="btn btn-primary btn-sm" disabled={createInvite.isPending || !tenantId}>
+                  {createInvite.isPending ? 'Sending…' : 'Send invite'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {bulkInviteOpen && (
+        <div className="um-modal-backdrop" role="presentation" onClick={closeBulkInvite}>
+          <section
+            className="um-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-invite-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <form onSubmit={handleBulkInviteSubmit} style={{ display: 'contents' }}>
+              <div className="um-modal-head">
+                <div>
+                  <h3 id="bulk-invite-title">Import Users from CSV</h3>
+                  <p>Upload a CSV with <code>email</code>, optional <code>displayName</code>, and optional <code>role</code>. Supported role labels: Admin, Security Lead, Analyst, Viewer.</p>
+                </div>
+                <button
+                  type="button"
+                  className="um-icon-button"
+                  aria-label="Close bulk invite dialog"
+                  onClick={closeBulkInvite}
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+              {createBulkInvites.isError && (
+                <div className="notice error" role="alert">
+                  <strong>Could not import users.</strong> {createBulkInvites.error instanceof Error ? createBulkInvites.error.message : 'Unknown error'}
+                </div>
+              )}
+              <div className="um-form-grid">
+                <label className="um-detail-full">
+                  CSV file
+                  <input
+                    ref={bulkInviteFileRef}
+                    name="bulkInviteFile"
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={handleBulkInviteFileChange}
+                  />
+                </label>
+                <label>
+                  Template columns
+                  <input value="email,displayName,role" disabled readOnly />
+                </label>
+                <label>
+                  Tenant
+                  <input value={tenantName} disabled readOnly />
+                </label>
+              </div>
+              {bulkInviteFileName && (
+                <div className="notice" role="status">
+                  <strong>{bulkInviteFileName}</strong> parsed with {bulkInviteRows.length} valid row{bulkInviteRows.length === 1 ? '' : 's'}.
+                </div>
+              )}
+              {bulkInviteErrors.length > 0 && (
+                <div className="notice error" role="alert">
+                  <strong>CSV validation issues.</strong> {bulkInviteErrors.join(' ')}
+                </div>
+              )}
+              {bulkInviteRows.length > 0 && (
+                <div className="um-table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Row</th>
+                        <th>Email</th>
+                        <th>Display name</th>
+                        <th>Role</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkInviteRows.slice(0, 25).map((row) => (
+                        <tr key={`${row.rowNumber}-${row.email}`}>
+                          <td>{row.rowNumber}</td>
+                          <td>{row.email}</td>
+                          <td>{row.displayName}</td>
+                          <td>{formatRole(row.role)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bulkInviteRows.length > 25 && (
+                    <p className="panel-caption">Showing first 25 rows of {bulkInviteRows.length} parsed invites.</p>
+                  )}
+                </div>
+              )}
+              <div className="um-modal-actions">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={closeBulkInvite}>Cancel</button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={createBulkInvites.isPending || !tenantId || bulkInviteRows.length === 0 || bulkInviteErrors.length > 0}
+                >
+                  {createBulkInvites.isPending ? 'Importing…' : `Send ${bulkInviteRows.length || ''} invite${bulkInviteRows.length === 1 ? '' : 's'}`.trim()}
                 </button>
               </div>
             </form>

@@ -134,4 +134,16 @@ describe('App test persona switcher', () => {
     fireEvent.click(screen.getByLabelText('Open settings menu'));
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
   });
+
+  it('shows tenant administration navigation for tenant admins', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/' });
+
+    expect(await screen.findByText('Exposure Dashboard')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Administration' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'End-of-Life' })).not.toBeInTheDocument();
+  });
 });

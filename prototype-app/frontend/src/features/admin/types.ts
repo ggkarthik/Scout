@@ -9,6 +9,67 @@ export type TenantMember = {
   createdAt: string;
 };
 
+export type TenantMemberUpdateRequest = {
+  role?: string;
+  status?: string;
+};
+
+export type TenantInvite = {
+  id: string;
+  tenantId: string;
+  email: string;
+  displayName: string | null;
+  subject: string;
+  role: string;
+  status: string;
+  createdAt: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  lastSentAt: string | null;
+  invitedBySubject: string | null;
+  invitedByDisplayName: string | null;
+  deliveryDetail: string | null;
+};
+
+export type TenantInviteRequest = {
+  email: string;
+  displayName: string;
+  role: string;
+};
+
+export type TenantBulkInviteRequest = {
+  invites: TenantInviteRequest[];
+};
+
+export type TenantBulkInviteItemResult = {
+  email: string;
+  displayName: string | null;
+  role: string | null;
+  status: string;
+  message: string;
+  invite: TenantInvite | null;
+};
+
+export type TenantBulkInviteResponse = {
+  requestedCount: number;
+  invitedCount: number;
+  failedCount: number;
+  results: TenantBulkInviteItemResult[];
+};
+
+export type TenantInviteValidationResponse = {
+  valid: boolean;
+  status: string;
+  email: string;
+  tenantId: string;
+  tenantName: string;
+  inviteeName: string | null;
+  role: string;
+  inviteExpiresAt: string;
+  message: string;
+  setupToken?: string | null;
+};
+
 export type PlatformUser = {
   userId: string;
   externalSubject: string;

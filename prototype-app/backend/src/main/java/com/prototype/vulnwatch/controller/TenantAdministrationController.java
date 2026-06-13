@@ -2,10 +2,17 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.TenantMembership;
+import com.prototype.vulnwatch.domain.TenantUserInvite;
 import com.prototype.vulnwatch.dto.InventoryConnectorHealthResponse;
+import com.prototype.vulnwatch.dto.TenantBulkInviteItemResponse;
+import com.prototype.vulnwatch.dto.TenantBulkInviteRequest;
+import com.prototype.vulnwatch.dto.TenantBulkInviteResponse;
 import com.prototype.vulnwatch.dto.TenantCreateRequest;
+import com.prototype.vulnwatch.dto.TenantInviteRequest;
+import com.prototype.vulnwatch.dto.TenantInviteResponse;
 import com.prototype.vulnwatch.dto.TenantMemberRequest;
 import com.prototype.vulnwatch.dto.TenantMemberResponse;
+import com.prototype.vulnwatch.dto.TenantMemberUpdateRequest;
 import com.prototype.vulnwatch.dto.PlatformUserRequest;
 import com.prototype.vulnwatch.dto.PlatformUserResponse;
 import com.prototype.vulnwatch.dto.TenantResponse;
@@ -17,6 +24,7 @@ import com.prototype.vulnwatch.service.PlatformInventoryConnectorHealthService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
+import com.prototype.vulnwatch.service.TenantUserInviteService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -42,6 +50,7 @@ public class TenantAdministrationController {
     private final RequestActorService requestActorService;
     private final TenantAccessControlService tenantAccessControlService;
     private final PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService;
+    private final TenantUserInviteService tenantUserInviteService;
 
     public TenantAdministrationController(
             TenantAdministrationService tenantAdministrationService,
@@ -49,7 +58,8 @@ public class TenantAdministrationController {
             AuditEventService auditEventService,
             RequestActorService requestActorService,
             TenantAccessControlService tenantAccessControlService,
-            PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService
+            PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService,
+            TenantUserInviteService tenantUserInviteService
     ) {
         this.tenantAdministrationService = tenantAdministrationService;
         this.identityAdministrationService = identityAdministrationService;
@@ -57,6 +67,7 @@ public class TenantAdministrationController {
         this.requestActorService = requestActorService;
         this.tenantAccessControlService = tenantAccessControlService;
         this.platformInventoryConnectorHealthService = platformInventoryConnectorHealthService;
+        this.tenantUserInviteService = tenantUserInviteService;
     }
 
     @GetMapping("/tenants")
@@ -170,6 +181,128 @@ public class TenantAdministrationController {
         return toMemberResponse(membership);
     }
 
+    @PatchMapping("/tenants/{tenantId}/members/{memberId}")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.updated")
+    public TenantMemberResponse updateMember(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID memberId,
+            @RequestBody TenantMemberUpdateRequest request
+    ) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        TenantMembership previous = identityAdministrationService.findMember(tenantId, memberId);
+        String previousRole = previous.getRole();
+        String previousStatus = previous.getStatus();
+        TenantMembership membership = identityAdministrationService.updateMember(tenantId, memberId, request.role(), request.status());
+        if (!java.util.Objects.equals(previousRole, membership.getRole())) {
+            auditEventService.record("member.role.changed", "tenant_membership", memberId.toString(),
+                    "{\"tenantId\":\"" + tenantId + "\",\"before\":\"" + previousRole + "\",\"after\":\"" + membership.getRole() + "\"}");
+        }
+        if (!java.util.Objects.equals(previousStatus, membership.getStatus())) {
+            String action = switch (membership.getStatus()) {
+                case "SUSPENDED" -> "member.suspended";
+                case "ACTIVE" -> "member.reactivated";
+                default -> "member.status.changed";
+            };
+            auditEventService.record(action, "tenant_membership", memberId.toString(),
+                    "{\"tenantId\":\"" + tenantId + "\",\"before\":\"" + previousStatus + "\",\"after\":\"" + membership.getStatus() + "\"}");
+        }
+        return toMemberResponse(membership);
+    }
+
+    @DeleteMapping("/tenants/{tenantId}/members/{memberId}")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.removed")
+    public void removeMember(@PathVariable UUID tenantId, @PathVariable UUID memberId) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        identityAdministrationService.removeMember(tenantId, memberId);
+        auditEventService.record("member.removed", "tenant_membership", memberId.toString(),
+                "{\"tenantId\":\"" + tenantId + "\"}");
+    }
+
+    @GetMapping("/tenants/{tenantId}/invites")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    public List<TenantInviteResponse> listInvites(@PathVariable UUID tenantId) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        return tenantUserInviteService.listInvites(tenantId).stream()
+                .map(this::toInviteResponse)
+                .toList();
+    }
+
+    @PostMapping("/tenants/{tenantId}/invites")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.invited")
+    public TenantInviteResponse createInvite(@PathVariable UUID tenantId, @RequestBody TenantInviteRequest request) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        TenantUserInvite invite = tenantUserInviteService.createInvite(
+                tenantId,
+                request.email(),
+                request.displayName(),
+                request.role(),
+                requestActorService.currentActor().userId()
+        );
+        return toInviteResponse(invite);
+    }
+
+    @PostMapping("/tenants/{tenantId}/invites/bulk")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.invited")
+    public TenantBulkInviteResponse createBulkInvites(
+            @PathVariable UUID tenantId,
+            @RequestBody TenantBulkInviteRequest request
+    ) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        List<TenantInviteRequest> rows = request.invites() == null ? List.of() : request.invites();
+        List<TenantBulkInviteItemResponse> results = rows.stream()
+                .map(row -> {
+                    try {
+                        TenantUserInvite invite = tenantUserInviteService.createInvite(
+                                tenantId,
+                                row.email(),
+                                row.displayName(),
+                                row.role(),
+                                requestActorService.currentActor().userId()
+                        );
+                        return new TenantBulkInviteItemResponse(
+                                row.email(),
+                                row.displayName(),
+                                row.role(),
+                                "INVITED",
+                                "Invite sent",
+                                toInviteResponse(invite)
+                        );
+                    } catch (ResponseStatusException | IllegalArgumentException exception) {
+                        return new TenantBulkInviteItemResponse(
+                                row.email(),
+                                row.displayName(),
+                                row.role(),
+                                "FAILED",
+                                normalizeBulkInviteError(exception),
+                                null
+                        );
+                    }
+                })
+                .toList();
+        int invitedCount = (int) results.stream().filter(result -> "INVITED".equals(result.status())).count();
+        return new TenantBulkInviteResponse(rows.size(), invitedCount, rows.size() - invitedCount, results);
+    }
+
+    @PostMapping("/tenants/{tenantId}/invites/{inviteId}/resend")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.invite.resent")
+    public TenantInviteResponse resendInvite(@PathVariable UUID tenantId, @PathVariable UUID inviteId) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        return toInviteResponse(tenantUserInviteService.resendInvite(tenantId, inviteId));
+    }
+
+    @DeleteMapping("/tenants/{tenantId}/invites/{inviteId}")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("member.invite.cancelled")
+    public void cancelInvite(@PathVariable UUID tenantId, @PathVariable UUID inviteId) {
+        assertSameTenantOrPlatformOwner(tenantId);
+        tenantUserInviteService.cancelInvite(tenantId, inviteId);
+    }
+
     private void assertSameTenantOrPlatformOwner(UUID tenantId) {
         tenantAccessControlService.assertTenantAccess(requestActorService.currentActor(), tenantId);
     }
@@ -210,5 +343,37 @@ public class TenantAdministrationController {
                 membership.getRole(),
                 membership.getStatus(),
                 membership.getCreatedAt());
+    }
+
+    private TenantInviteResponse toInviteResponse(TenantUserInvite invite) {
+        return new TenantInviteResponse(
+                invite.getId(),
+                invite.getTenant().getId(),
+                invite.getEmail(),
+                invite.getDisplayName(),
+                invite.getExternalSubject(),
+                invite.getRole(),
+                invite.getStatus(),
+                invite.getCreatedAt(),
+                invite.getExpiresAt(),
+                invite.getAcceptedAt(),
+                invite.getLastSentAt(),
+                invite.getInvitedBy() == null ? null : invite.getInvitedBy().getExternalSubject(),
+                invite.getInvitedBy() == null ? null : invite.getInvitedBy().getDisplayName(),
+                invite.getDeliveryDetail()
+        );
+    }
+
+    private String normalizeBulkInviteError(Exception exception) {
+        if (exception instanceof ResponseStatusException responseStatusException
+                && responseStatusException.getReason() != null
+                && !responseStatusException.getReason().isBlank()) {
+            return responseStatusException.getReason();
+        }
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "Invite failed";
+        }
+        return message.trim().replace('_', ' ');
     }
 }
