@@ -13,6 +13,8 @@ public class GithubTokenProvider {
     private static final String DEFAULT_LOCAL_TOKEN_PATH = "./secrets/github-api-token";
     private static final String DEFAULT_LOCAL_TOKEN_DISPLAY = "backend/secrets/github-api-token";
 
+    private static final ThreadLocal<String> OVERRIDE_TOKEN = new ThreadLocal<>();
+
     private final Path localTokenPath;
 
     @Value("${app.github.api-token:}")
@@ -37,7 +39,23 @@ public class GithubTokenProvider {
         readRequiredSecret(Path.of(apiTokenFile.trim()), "GitHub API token file");
     }
 
+    public void setOverrideToken(String token) {
+        if (token != null && !token.isBlank()) {
+            OVERRIDE_TOKEN.set(token.trim());
+        } else {
+            OVERRIDE_TOKEN.remove();
+        }
+    }
+
+    public void clearOverrideToken() {
+        OVERRIDE_TOKEN.remove();
+    }
+
     public String currentToken() {
+        String override = OVERRIDE_TOKEN.get();
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
         if (apiTokenFile != null && !apiTokenFile.isBlank()) {
             return readRequiredSecret(Path.of(apiTokenFile.trim()), "GitHub API token file");
         }

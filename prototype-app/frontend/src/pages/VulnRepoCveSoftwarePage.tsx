@@ -14,22 +14,31 @@ type SoftwareRow = {
   software: string;
   vendor: string;
   version: string;
+  evidenceSource: string;
 };
 
 const SOFTWARE_COLUMNS: DataTableColumn[] = [
   { id: 'software', label: 'Software', header: 'Software', initialSize: 260 },
   { id: 'vendor', label: 'Vendor', header: 'Vendor', initialSize: 180 },
   { id: 'version', label: 'Version', header: 'Version', initialSize: 220 },
+  { id: 'evidence', label: 'Evidence', header: 'Evidence', initialSize: 180 },
 ];
 
 function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[], persistedRows: Array<{ software: string; vendor: string; version: string; assetCount: number }> = []): SoftwareRow[] {
   const vendorByPackage = new Map<string, string>();
+  const evidenceByPackageVersion = new Map<string, Set<string>>();
   matchedSoftware.forEach((software) => {
     const pkgKey = software.packageName?.trim().toLowerCase();
     const vendor = software.vexSource?.trim() || software.ecosystem?.trim();
     if (pkgKey && vendor && !vendorByPackage.has(pkgKey)) {
       vendorByPackage.set(pkgKey, vendor);
     }
+    const packageName = software.packageName?.trim() || 'Unknown';
+    const version = software.version?.trim() || '-';
+    const key = `${packageName.toLowerCase()}|${version.toLowerCase()}`;
+    const sources = evidenceByPackageVersion.get(key) ?? new Set<string>();
+    sources.add(software.matchedBy === 'BOM_CORRELATION' ? 'BOM evidence' : 'Inventory correlation');
+    evidenceByPackageVersion.set(key, sources);
   });
 
   const unique = new Map<string, SoftwareRow>();
@@ -47,6 +56,7 @@ function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[], persistedRows:
         software: packageName,
         vendor,
         version,
+        evidenceSource: Array.from(evidenceByPackageVersion.get(key) ?? ['Inventory correlation']).join(', '),
       });
     }
   });
@@ -59,6 +69,9 @@ function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[], persistedRows:
     const existing = unique.get(key);
     if (existing) {
       existing.vendor = existing.vendor === 'Unknown' ? vendor : existing.vendor;
+      if (!existing.evidenceSource.includes('Inventory correlation')) {
+        existing.evidenceSource = `${existing.evidenceSource}, Inventory correlation`;
+      }
       return;
     }
     unique.set(key, {
@@ -66,6 +79,7 @@ function buildSoftwareRows(matchedSoftware: CveMatchedSoftware[], persistedRows:
       software: packageName,
       vendor,
       version,
+      evidenceSource: 'Inventory correlation',
     });
   });
 
@@ -97,6 +111,25 @@ export function VulnRepoCveSoftwarePage() {
         software: { content: <span className="mono">{software.software}</span> },
         vendor: { content: software.vendor },
         version: { content: <span className="mono">{software.version}</span> },
+        evidence: {
+          content: (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 600,
+                background: software.evidenceSource.includes('BOM') ? 'rgba(59, 130, 246, 0.12)' : 'rgba(107, 114, 128, 0.12)',
+                color: software.evidenceSource.includes('BOM') ? '#2563eb' : 'var(--muted)',
+                border: software.evidenceSource.includes('BOM') ? '1px solid rgba(59, 130, 246, 0.24)' : '1px solid var(--border)',
+              }}
+            >
+              {software.evidenceSource}
+            </span>
+          ),
+        },
       },
     }))
   ), [softwareRows]);

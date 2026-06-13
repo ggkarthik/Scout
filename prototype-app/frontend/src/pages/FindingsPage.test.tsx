@@ -1,6 +1,9 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
+import { ActorContextState } from '../features/auth/context';
+import type { ActorContext } from '../features/auth/types';
+import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type {
   Finding,
   FindingBacklogHealth,
@@ -14,6 +17,15 @@ import type {
 import type { RiskPolicy } from '../features/configurations/types';
 import { renderWithProviders } from '../test/test-utils';
 import { FindingsPage } from './FindingsPage';
+
+const ACTOR: ActorContext = {
+  creator: false,
+  principal: 'analyst@example.com',
+  userId: 'user-1',
+  tenantId: 'tenant-1',
+  tenantName: 'Acme Security',
+  roles: ['ROLE_SECURITY_ANALYST'],
+};
 
 function buildFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -163,7 +175,11 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
 
-    renderWithProviders(<FindingsPage />);
+    renderWithProviders(
+      <ActorContextState.Provider value={ACTOR}>
+        <FindingsPage />
+      </ActorContextState.Provider>
+    );
 
     await screen.findByText('F-001');
     expect(screen.getByText('CVE-2026-1234')).toBeInTheDocument();
@@ -184,7 +200,11 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
 
-    renderWithProviders(<FindingsPage />);
+    renderWithProviders(
+      <ActorContextState.Provider value={ACTOR}>
+        <FindingsPage />
+      </ActorContextState.Provider>
+    );
 
     // No findings and no active chips → "No findings yet" onboarding state.
     await waitFor(() => {
@@ -202,7 +222,11 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
 
-    renderWithProviders(<FindingsPage />);
+    renderWithProviders(
+      <ActorContextState.Provider value={ACTOR}>
+        <FindingsPage />
+      </ActorContextState.Provider>
+    );
 
     await screen.findByText('F-001');
     expect(screen.getByText('Exposure by Severity')).toBeInTheDocument();
@@ -250,6 +274,194 @@ describe('FindingsPage', () => {
 
     await waitFor(() => {
       expect(createQueueSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Ops Queue' }));
+    });
+  });
+
+  it('edits an existing personal queue', async () => {
+    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+    const updateQueueSpy = vi.spyOn(api, 'updateFindingQueue').mockResolvedValue({
+      ...FINDING_QUEUES[2]!,
+      title: 'Ops Escalations',
+      description: 'Updated queue scope',
+      isDefault: false,
+    });
+
+    renderWithProviders(<FindingsPage />);
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('button', { name: /Edit Queue/i }));
+    fireEvent.change(screen.getByPlaceholderText(/Queue title/i), { target: { value: 'Ops Escalations' } });
+    fireEvent.change(screen.getByPlaceholderText(/Optional description/i), { target: { value: 'Updated queue scope' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Set as my default queue/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+    await waitFor(() => {
+      expect(updateQueueSpy).toHaveBeenCalledWith('personal:queue-1', expect.objectContaining({
+        title: 'Ops Escalations',
+        description: 'Updated queue scope',
+        setAsDefault: false,
+      }));
+    });
+  });
+
+  it('duplicates and sets a personal queue as default from the workspace header', async () => {
+    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+    const duplicateQueueSpy = vi.spyOn(api, 'duplicateFindingQueue').mockResolvedValue({
+      ...FINDING_QUEUES[2]!,
+      id: 'queue-2',
+      key: 'personal:queue-2',
+      title: 'My Queue Copy',
+      isDefault: false,
+    });
+    const setDefaultQueueSpy = vi.spyOn(api, 'setDefaultFindingQueue').mockResolvedValue();
+
+    renderWithProviders(<FindingsPage />);
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('button', { name: /Duplicate Queue/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Set Default/i }));
+
+    await waitFor(() => {
+      expect(duplicateQueueSpy).toHaveBeenCalledWith('personal:queue-1');
+      expect(setDefaultQueueSpy).toHaveBeenCalledWith('personal:queue-1');
+    });
+  });
+
+  it('deletes an existing personal queue after confirmation', async () => {
+    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const deleteQueueSpy = vi.spyOn(api, 'deleteFindingQueue').mockResolvedValue();
+
+    renderWithProviders(<FindingsPage />);
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('button', { name: /Delete Queue/i }));
+
+    await waitFor(() => {
+      expect(deleteQueueSpy).toHaveBeenCalledWith('personal:queue-1');
+    });
+  });
+
+  it('defers and deletes selected findings through the bulk action flows', async () => {
+    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+    const bulkUpdateSpy = vi.spyOn(api, 'bulkUpdateFindingWorkflow').mockResolvedValue({
+      targeted: 1,
+      updated: 1,
+      failed: 0,
+      message: 'Updated 1 finding',
+    });
+    const bulkDeleteSpy = vi.spyOn(api, 'bulkDeleteFindings').mockResolvedValue({
+      deleted: 1,
+      message: 'Deleted 1 finding',
+    });
+
+    renderWithProviders(
+      <ActorContextState.Provider value={ACTOR}>
+        <FindingsPage />
+      </ActorContextState.Provider>
+    );
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select row/i }));
+    fireEvent.click(screen.getByTitle(/More actions/i));
+    fireEvent.click(screen.getByRole('button', { name: /Defer/i }));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'PENDING_PATCH' } });
+    fireEvent.change(document.querySelector('.fd3-modal input[type="date"]') as HTMLInputElement, { target: { value: '2026-06-30' } });
+    fireEvent.click(document.querySelector('.fd3-modal .btn-primary') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(bulkUpdateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+        findingIds: ['finding-1'],
+        workflowStatus: 'SUPPRESSED',
+        suppressionReason: 'PENDING_PATCH',
+        suppressedUntil: '2026-06-30T00:00:00.000Z',
+        actor: 'local-analyst',
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select row/i }));
+    fireEvent.click(screen.getByTitle(/More actions/i));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
+    fireEvent.click(document.querySelector('.fd3-modal .btn-danger') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(bulkDeleteSpy).toHaveBeenCalledWith(['finding-1']);
+    });
+  });
+
+  it('creates a ServiceNow incident for the selected finding', async () => {
+    vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+    vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+    vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+    vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+    vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+    vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+    const createIncidentSpy = vi.spyOn(cveWorkbenchApi, 'createServiceNowIncident').mockResolvedValue([{
+      incidentNumber: 'INC000200',
+      sysId: 'sys-200',
+      url: 'https://example.service-now.com/nav_to.do?uri=incident.do?sys_id=sys-200',
+      status: 'created',
+      message: 'Incident created successfully',
+    }]);
+
+    renderWithProviders(
+      <ActorContextState.Provider value={ACTOR}>
+        <FindingsPage />
+      </ActorContextState.Provider>
+    );
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select row/i }));
+    fireEvent.click(screen.getByTitle(/More actions/i));
+    fireEvent.click(screen.getByRole('button', { name: /\+ Create Incident/i }));
+    fireEvent.change(screen.getByPlaceholderText(/username or email/i), { target: { value: 'resolver@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText(/Security Operations/i), { target: { value: 'Security Operations' } });
+    fireEvent.change(screen.getByPlaceholderText(/Remediation context/i), { target: { value: 'Escalate to resolver team.' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Incident/i }));
+
+    await waitFor(() => {
+      expect(createIncidentSpy).toHaveBeenCalledWith('CVE-2026-1234', expect.objectContaining({
+        findingTitle: 'CVE-2026-1234 — Vulnerability Remediation',
+        severity: 'CRITICAL',
+        priority: '3',
+        assignedTo: 'resolver@example.com',
+        notes: 'Escalate to resolver team.',
+        affectedAssets: [expect.objectContaining({
+          assetName: 'web-prod-01',
+          assetIdentifier: 'web-prod-01.example.com',
+          assignmentGroup: 'Security Operations',
+        })],
+      }));
     });
   });
 

@@ -80,6 +80,13 @@ export type SoftwareIdentityAsset = {
   lastObservedAt?: string;
 };
 
+export type {
+  BomEvidenceDocument,
+  BomEvidenceComponent,
+  BomEvidenceSummary,
+} from '../inventory/api-types';
+import type { BomEvidenceSummary } from '../inventory/api-types';
+
 export type SoftwareIdentityDetail = {
   id: string;
   displayName: string;
@@ -104,6 +111,7 @@ export type SoftwareIdentityDetail = {
   openFindingCount: number;
   openVulnerabilityCount: number;
   lastObservedAt?: string;
+  bomEvidence: BomEvidenceSummary;
   versions: SoftwareIdentityVersion[];
   assets: SoftwareIdentityAsset[];
 };

@@ -16,6 +16,7 @@ public record GithubSbomSourceRequest(
         String assetIdentifier,
         GithubIngestionFrequency frequency,
         @Min(5) @Max(1440) Integer intervalMinutes,
-        Boolean enabled
+        Boolean enabled,
+        String githubToken
 ) {
 }

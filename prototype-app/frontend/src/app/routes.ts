@@ -16,7 +16,7 @@ export type AppTab =
   | 'configurations';
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
-export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'end-of-life' | 'org-cves';
+export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
 export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests';
@@ -56,7 +56,9 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
   'software-identities',
   'hosts',
   'container-images',
-  'sbom'
+  'sbom',
+  'bom-components',
+  'bom-inventory'
 ]);
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
@@ -242,10 +244,17 @@ export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: s
   if (view === 'vulnerabilities') {
     return '/vuln-repo/vulnerabilities';
   }
+  if (view === 'campaigns') {
+    return '/vuln-repo/campaigns';
+  }
   if (view === 'end-of-life') {
     return '/end-of-life';
   }
   return cveId ? `/vuln-repo/org-cves/${encodeURIComponent(cveId)}` : '/vuln-repo/org-cves';
+}
+
+export function pathForPlatformVulnIntelDetail(externalId: string): string {
+  return `/vuln-repo/intel/${encodeURIComponent(externalId)}`;
 }
 
 export function pathForVulnRepoCveAssets(cveId: string): string {
@@ -379,6 +388,8 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   } else if (tab === 'vuln-repo') {
     const normalizedView = vulnRepoView === 'vulnerabilities'
       ? 'vulnerabilities'
+      : vulnRepoView === 'campaigns'
+        ? 'campaigns'
       : vulnRepoView === 'end-of-life' || vulnRepoView === 'eol'
         ? 'end-of-life'
       : vulnRepoView === 'org-cves'

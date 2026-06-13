@@ -3,11 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { pathForInventoryView, pathForVulnRepoHostAsset, pathForVulnRepoSoftwareAssets, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole } from '../features/auth/roles';
-import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
+import { usePlatformVulnSourceStatsQuery, useVulnIntelSourcesSummaryQuery, useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import type {
+  PlatformVulnSourceStat,
   VulnRepoDashboardCriticalUnresolvedItem,
+  VulnRepoDashboardRecentAdvisoryItem,
   VulnRepoDashboardSeverityBreakdownItem,
 } from '../features/vuln-repo-dashboard/types';
+import type { VulnIntelSourceStatus } from '../api/client';
 
 function formatNumber(value: number): string {
   return value.toLocaleString();
@@ -151,12 +154,218 @@ function vulnRepoTrackedVulnerabilityPath(filters?: Record<string, string | numb
   return vulnRepoVulnerabilityPath({ includeAll: true, ...(filters ?? {}) });
 }
 
-export function VulnRepoDashboardPage() {
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  nvd: 'NVD',
+  'cisa-kev': 'CISA KEV',
+  kev: 'CISA KEV',
+  ghsa: 'GHSA',
+  euvd: 'EUVD',
+  'japan-vulndb': 'JVN / JVNDB',
+  'microsoft-csaf': 'Microsoft CSAF',
+  'redhat-csaf': 'Red Hat CSAF',
+  advisory: 'Advisory Feed',
+};
+
+function sourceDisplayName(key: string): string {
+  return SOURCE_DISPLAY_NAMES[key] ?? key;
+}
+
+function sourceStatusLabel(status: VulnIntelSourceStatus['status']): string {
+  switch (status) {
+    case 'completed': return 'OK';
+    case 'failed': return 'Failed';
+    case 'running': return 'Running';
+    case 'never': return 'Never run';
+  }
+}
+
+function sourceStatusClass(status: VulnIntelSourceStatus['status']): string {
+  switch (status) {
+    case 'completed': return 'status-pill status-resolved';
+    case 'failed': return 'status-pill status-open';
+    case 'running': return 'status-pill status-in-progress';
+    case 'never': return 'status-pill status-unknown';
+  }
+}
+
+function intelPath(source: string, severity?: string): string {
+  const params = new URLSearchParams();
+  params.set('source', source);
+  if (severity) params.set('severity', severity);
+  return `${pathForVulnRepoView('vulnerabilities')}?${params.toString()}`;
+}
+
+function PlatformSourceStatsCard({ sourceKey, stat }: { sourceKey: string; stat: PlatformVulnSourceStat }) {
+  const navigate = useNavigate();
+  const total = stat.total;
+  return (
+    <div className="stat-card" style={{ minWidth: 200 }}>
+      <div className="stat-title-row">
+        <div className="stat-title">{sourceDisplayName(sourceKey)}</div>
+      </div>
+      <button
+        type="button"
+        className="btn-link"
+        style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1, textAlign: 'left', color: 'inherit' }}
+        onClick={() => navigate(intelPath(sourceKey))}
+      >
+        {total.toLocaleString()}
+      </button>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        {stat.critical > 0 && (
+          <button type="button" className="severity-pill severity-critical" style={{ cursor: 'pointer' }} onClick={() => navigate(intelPath(sourceKey, 'CRITICAL'))}>
+            {stat.critical.toLocaleString()} Critical
+          </button>
+        )}
+        {stat.high > 0 && (
+          <button type="button" className="severity-pill severity-high" style={{ cursor: 'pointer' }} onClick={() => navigate(intelPath(sourceKey, 'HIGH'))}>
+            {stat.high.toLocaleString()} High
+          </button>
+        )}
+        {stat.medium > 0 && (
+          <button type="button" className="severity-pill severity-medium" style={{ cursor: 'pointer' }} onClick={() => navigate(intelPath(sourceKey, 'MEDIUM'))}>
+            {stat.medium.toLocaleString()} Medium
+          </button>
+        )}
+        {stat.low > 0 && (
+          <button type="button" className="severity-pill severity-low" style={{ cursor: 'pointer' }} onClick={() => navigate(intelPath(sourceKey, 'LOW'))}>
+            {stat.low.toLocaleString()} Low
+          </button>
+        )}
+        {stat.unknown > 0 && (
+          <button type="button" className="severity-pill" style={{ cursor: 'pointer' }} onClick={() => navigate(intelPath(sourceKey, 'UNKNOWN'))}>
+            {stat.unknown.toLocaleString()} Unknown
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlatformIntegrationRunCard({ sourceKey, status }: { sourceKey: string; status: VulnIntelSourceStatus }) {
+  return (
+    <div className="panel" style={{ padding: '12px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <strong>{sourceDisplayName(sourceKey)}</strong>
+        <span className={sourceStatusClass(status.status)}>{sourceStatusLabel(status.status)}</span>
+      </div>
+      {status.completedAt ? (
+        <div className="panel-caption" style={{ marginTop: 4 }}>
+          Last run: {new Date(status.completedAt).toLocaleString()}
+        </div>
+      ) : null}
+      <div className="panel-caption" style={{ marginTop: 4 }}>
+        {status.recordsFetched > 0 && <span>Fetched: {status.recordsFetched.toLocaleString()} </span>}
+        {status.recordsInserted > 0 && <span>· Inserted: {status.recordsInserted.toLocaleString()} </span>}
+        {status.recordsUpdated > 0 && <span>· Updated: {status.recordsUpdated.toLocaleString()}</span>}
+      </div>
+      {status.errorMessage ? (
+        <div className="notice error" style={{ marginTop: 6, fontSize: 12 }}>{status.errorMessage}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function PlatformDashboard() {
+  const navigate = useNavigate();
+  const sourceStatsQuery = usePlatformVulnSourceStatsQuery();
+  const sourcesSummaryQuery = useVulnIntelSourcesSummaryQuery();
+  const dashboardQuery = useVulnRepoDashboardQuery(true);
+
+  const sourceStats = sourceStatsQuery.data?.sources ?? {};
+  const sourcesSummary = sourcesSummaryQuery.data?.sources ?? {};
+  const recentAdvisories: VulnRepoDashboardRecentAdvisoryItem[] = dashboardQuery.data?.recentAdvisories ?? [];
+
+  return (
+    <div className="page-grid vuln-repo-dashboard-page">
+      <section className="panel vuln-repo-dashboard-panel">
+        <div className="panel-header">
+          <div className="vuln-repo-dashboard-section-copy">
+            <h3>Vulnerability Counts by Source</h3>
+            <div className="panel-caption">Total vulnerabilities ingested per intelligence source, grouped by severity</div>
+          </div>
+        </div>
+        {sourceStatsQuery.isPending ? (
+          <div className="panel-caption">Loading source stats...</div>
+        ) : sourceStatsQuery.error ? (
+          <div className="notice error">Failed to load source stats</div>
+        ) : Object.keys(sourceStats).length === 0 ? (
+          <div className="empty-state">No source data available yet.</div>
+        ) : (
+          <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+            {Object.entries(sourceStats).map(([key, stat]) => (
+              <PlatformSourceStatsCard key={key} sourceKey={key} stat={stat} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel vuln-repo-dashboard-panel">
+        <div className="panel-header">
+          <div className="vuln-repo-dashboard-section-copy">
+            <h3>Integration Run Status</h3>
+            <div className="panel-caption">Last run status for each vulnerability intelligence source</div>
+          </div>
+        </div>
+        {sourcesSummaryQuery.isPending ? (
+          <div className="panel-caption">Loading run status...</div>
+        ) : sourcesSummaryQuery.error ? (
+          <div className="notice error">Failed to load integration run status</div>
+        ) : Object.keys(sourcesSummary).length === 0 ? (
+          <div className="empty-state">No integration runs recorded yet.</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {Object.entries(sourcesSummary).map(([key, status]) => (
+              <PlatformIntegrationRunCard key={key} sourceKey={key} status={status} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel vuln-repo-dashboard-panel">
+        <div className="panel-header">
+          <div className="vuln-repo-dashboard-section-copy">
+            <h3>Recent advisories</h3>
+            <div className="panel-caption">CISA KEV, NVD, and vendor updates</div>
+          </div>
+          <button type="button" className="btn-link" onClick={() => navigate(pathForVulnRepoView('vulnerabilities'))}>View all</button>
+        </div>
+        {dashboardQuery.isPending ? (
+          <div className="panel-caption">Loading advisories...</div>
+        ) : (
+          <div className="vuln-repo-dashboard-advisory-list">
+            {recentAdvisories.length === 0 ? (
+              <div className="empty-state">No recent advisories are available right now.</div>
+            ) : (
+              recentAdvisories.map((item) => (
+                <button
+                  key={`${item.externalId}-${item.lastModifiedAt ?? item.publishedAt ?? ''}`}
+                  type="button"
+                  className="vuln-repo-dashboard-advisory-item"
+                  onClick={() => navigate(`/vuln-repo/intel/${encodeURIComponent(item.externalId)}`)}
+                >
+                  <div className="vuln-repo-dashboard-advisory-copy">
+                    <strong>{item.externalId}</strong>
+                    <p>{item.descriptionSnippet}</p>
+                    <div className="vuln-repo-dashboard-item-tags">
+                      <span className={severityClassName(item.severity)}>{formatSeverity(item.severity)}</span>
+                      <span className="panel-caption">{item.source} · {advisoryRelativeTimeLabel(item.lastModifiedAt ?? item.publishedAt)}</span>
+                    </div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function TenantDashboard() {
   const location = useLocation();
   const navigate = useNavigate();
-  const actor = useActor();
-  const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
-  const dashboardQuery = useVulnRepoDashboardQuery(platformScope);
+  const dashboardQuery = useVulnRepoDashboardQuery(false);
 
   const dashboard = dashboardQuery.data;
   const loading = dashboardQuery.isPending && !dashboard;
@@ -241,7 +450,7 @@ export function VulnRepoDashboardPage() {
             <button
               type="button"
               className="vuln-repo-dashboard-stat-button"
-              onClick={() => navigate(vulnRepoVulnerabilityPath(platformScope ? { createdSinceDays: 7 } : { applicable: true, createdSinceDays: 7 }))}
+              onClick={() => navigate(vulnRepoVulnerabilityPath({ applicable: true, createdSinceDays: 7 }))}
             >
               <div className="stat-card stat-neutral">
                 <div className="stat-title-row">
@@ -249,23 +458,19 @@ export function VulnRepoDashboardPage() {
                 </div>
                 <div className="stat-value">{formatNumber(dashboard.summaryCards.trackedAddedLastWeek)}</div>
                 <div className="stat-caption">
-                  {platformScope ? (
-                    <div>{formatNumber(dashboard.summaryCards.trackedAddedLastWeek)} ingested into the global repository</div>
-                  ) : (
-                    <>
-                      <div>{formatNumber(dashboard.summaryCards.applicableAddedLastWeek)} applicable</div>
-                      <button
-                        type="button"
-                        className="btn-link stat-caption-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(vulnRepoVulnerabilityPath({ impactedOnly: true, createdSinceDays: 7 }));
-                        }}
-                      >
-                        {formatNumber(dashboard.summaryCards.impactedAddedLastWeek)} impacted after investigation
-                      </button>
-                    </>
-                  )}
+                  <>
+                    <div>{formatNumber(dashboard.summaryCards.applicableAddedLastWeek)} applicable</div>
+                    <button
+                      type="button"
+                      className="btn-link stat-caption-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(vulnRepoVulnerabilityPath({ impactedOnly: true, createdSinceDays: 7 }));
+                      }}
+                    >
+                      {formatNumber(dashboard.summaryCards.impactedAddedLastWeek)} impacted after investigation
+                    </button>
+                  </>
                   <button
                     type="button"
                     className="btn-link stat-caption-link stat-caption-link--kev"
@@ -371,9 +576,7 @@ export function VulnRepoDashboardPage() {
                   <h3>Critical unresolved</h3>
                   <div className="panel-caption">Requires immediate attention</div>
                 </div>
-                {!platformScope ? (
-                  <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
-                ) : null}
+                <button type="button" className="btn-link" onClick={() => navigate(findingsPath({ status: 'OPEN' }))}>View all</button>
               </div>
               <div className="vuln-repo-dashboard-unresolved-list">
                 {dashboard.criticalUnresolved.length === 0 ? (
@@ -544,4 +747,10 @@ export function VulnRepoDashboardPage() {
       ) : null}
     </div>
   );
+}
+
+export function VulnRepoDashboardPage() {
+  const actor = useActor();
+  const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
+  return platformScope ? <PlatformDashboard /> : <TenantDashboard />;
 }

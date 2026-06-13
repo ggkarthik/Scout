@@ -28,6 +28,7 @@ public record SoftwareIdentityDetailResponse(
         long openFindingCount,
         long openVulnerabilityCount,
         Instant lastObservedAt,
+        BomEvidenceSummaryResponse bomEvidence,
         List<SoftwareIdentityVersionResponse> versions,
         List<SoftwareIdentityAssetResponse> assets
 ) {

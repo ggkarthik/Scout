@@ -81,3 +81,54 @@ export type VulnRepoDashboard = {
   recentAdvisories: VulnRepoDashboardRecentAdvisoryItem[];
   impactedAssets: VulnRepoDashboardImpactedAssetItem[];
 };
+
+export type PlatformVulnSourceStat = {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  unknown: number;
+};
+
+export type PlatformVulnSourceStats = {
+  sources: Record<string, PlatformVulnSourceStat>;
+};
+
+export type PlatformVulnIntelSourceObservation = {
+  sourceSystem: string;
+  sourceRecordId: string;
+  sourceUrl?: string;
+  title?: string;
+  description?: string;
+  severity?: string;
+  cvssScore?: number;
+  cvssVector?: string;
+  publishedAt?: string;
+  lastModifiedAt?: string;
+};
+
+export type PlatformVulnIntelDetail = {
+  externalId: string;
+  title: string;
+  description?: string;
+  fullDescription?: string;
+  severity: string;
+  cvssScore?: number;
+  cvssVector?: string;
+  epssScore?: number;
+  cweIds?: string;
+  vulnStatus?: string;
+  publishedAt?: string;
+  modifiedAt?: string;
+  inKev: boolean;
+  kevDateAdded?: string;
+  kevDueDate?: string;
+  kevRequiredAction?: string;
+  sources: string[];
+  euvdId?: string;
+  jvndbId?: string;
+  cpes: string[];
+  references: string[];
+  observations: PlatformVulnIntelSourceObservation[];
+};

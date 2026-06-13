@@ -1013,7 +1013,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         <div className="fpl-toolbar-left">
           <MultiGroupBy options={GROUP_OPTIONS} value={groupBy} onChange={setGroupBy}
             label="GROUP BY" placeholder="None" allowEmptyPrimary emptyPrimaryLabel="None" showSelectorsByDefault={false}/>
-          <button className="btn btn-secondary" onClick={openCreateQueueDialog}>Save Current View</button>
 
           {/* active filter chips */}
           {activeChips.length>0 && (

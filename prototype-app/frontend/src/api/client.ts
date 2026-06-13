@@ -67,7 +67,7 @@ import type {
   InventoryComponentFilterValues,
   InventoryComponentPage
 } from '../features/inventory/api-types';
-import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
+import type { PlatformVulnIntelDetail, PlatformVulnSourceStats, VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
 import type {
   AuditEvent,
   AuthContext,
@@ -88,6 +88,242 @@ import type {
   TenantMember,
   TenantMemberRequest
 } from '../features/admin/types';
+
+export type BomType = 'SBOM' | 'AI_BOM' | 'CBOM' | 'VENDOR';
+
+export type BomFetchPayload = {
+  bomType: BomType;
+  assetType: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
+  assetName: string;
+  assetIdentifier: string;
+  sourceUrl: string;
+  sourceLabel?: string;
+  supplier?: string;
+  authorizationHeader?: string;
+};
+
+export type BomIngestionResult = {
+  bomId: string;
+  assetId: string;
+  bomType: string;
+  format: string;
+  formatVersion: string;
+  specFamily: string;
+  documentFormat: string;
+  supportLevel: string;
+  supported: boolean;
+  warnings: string[];
+  componentCount: number;
+  findingsGenerated: number;
+  status: string;
+  action: string;
+};
+
+export type BomComponentSummaryItem = {
+  componentId: string;
+  packageName: string;
+  version: string | null;
+  purl: string | null;
+  ecosystem: string | null;
+  license: string | null;
+  assetId: string;
+  assetName: string;
+  bomTypes: string[];
+  isEol: boolean;
+  eolDate: string | null;
+  criticalCveCount: number;
+  highCveCount: number;
+  mediumCveCount: number;
+  lowCveCount: number;
+  totalCveCount: number;
+  correlationState: 'APPLICABLE' | 'NOT_APPLICABLE' | 'UNKNOWN' | 'UNCHECKED';
+  riskLevel: string;
+};
+
+export type ApplicationCveItem = {
+  vulnerabilityId: string;
+  componentId: string;
+  externalId: string;
+  severity: string | null;
+  cvssScore: number | null;
+  epssScore: number | null;
+  packageName: string;
+  version: string | null;
+  lastEvaluatedAt: string | null;
+};
+
+export type BomComponentCveSummary = {
+  cveId: string;
+  externalId: string;
+  severity: string | null;
+  title: string | null;
+  applicabilityState: string;
+  epssScore: number | null;
+  cvssScore: number | null;
+};
+
+export type EolReleaseSummary = {
+  cycle: string;
+  releaseDate: string | null;
+  eolDate: string | null;
+  supportEndDate: string | null;
+  latestVersion: string | null;
+  latestReleaseDate: string | null;
+  isEol: boolean;
+  isLts: boolean;
+};
+
+export type BomComponentDetail = BomComponentSummaryItem & {
+  packageGroup: string | null;
+  scope: string | null;
+  normalizedName: string | null;
+  eolSlug: string | null;
+  eolCycle: string | null;
+  eolSupportEndDate: string | null;
+  supportPhase: string | null;
+  eolCheckedAt: string | null;
+  ingestedAt: string;
+  lastObservedAt: string;
+  assetIdentifier: string;
+  assetType: string | null;
+  cves: BomComponentCveSummary[];
+  eolReleases: EolReleaseSummary[];
+};
+
+export type ApplicationRiskSummary = {
+  assetId: string;
+  assetName: string;
+  assetIdentifier: string;
+  businessCriticality: string;
+  bomTypes: string[];
+  totalComponents: number;
+  vulnerableComponents: number;
+  eolComponents: number;
+  criticalCveCount: number;
+  highCveCount: number;
+  mediumCveCount: number;
+  lowCveCount: number;
+  totalCveCount: number;
+  riskScore: number;
+  riskLevel: string;
+  lastIngestedAt: string | null;
+};
+
+export type BomInventoryItem = {
+  id: string;
+  assetId: string;
+  bomType: string;
+  format: string;
+  formatVersion: string;
+  specFamily: string;
+  documentFormat: string;
+  serialNumber: string;
+  supplier: string;
+  sourceMethod: string;
+  sourceType: string;
+  sourceSystem: string;
+  sourceUrl: string;
+  supportLevel: string;
+  supported: boolean;
+  componentCount: number;
+  evidenceCount: number;
+  vulnerabilityLinkCount: number;
+  correlatedComponentCount: number;
+  status: string;
+  ingestedAt: string;
+  ingestedBy: string;
+};
+
+export type BomComponent = {
+  id: string;
+  name: string;
+  version: string;
+  purl: string;
+  cpe: string;
+  license: string;
+  supplier: string;
+  componentType: string;
+  category: string;
+  workflowStatus: string;
+  vulnerabilityCount: number;
+  evidenceCount: number;
+  active: boolean;
+};
+
+export type BomWorkflowSummary = {
+  workflowStatus: string;
+  componentCount: number;
+};
+
+export type BomInspection = {
+  format: string;
+  formatVersion: string;
+  specFamily: string;
+  documentFormat: string;
+  supportLevel: string;
+  supported: boolean;
+  warnings: string[];
+};
+
+export type BomSupportEntry = {
+  specFamily: string;
+  documentFormat: string;
+  version: string;
+  supportLevel: string;
+  supported: boolean;
+  notes: string;
+};
+
+export type BomSupportMatrix = {
+  entries: BomSupportEntry[];
+};
+
+export type BomDashboardBreakdownItem = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type BomDashboard = {
+  documentCount: number;
+  componentCount: number;
+  evidenceCount: number;
+  vulnerabilityLinkCount: number;
+  correlatedComponentCount: number;
+  activeWorkflowCount: number;
+  openRemediationCount: number;
+  sourceSystemCount: number;
+  bomTypes: BomDashboardBreakdownItem[];
+  specFamilies: BomDashboardBreakdownItem[];
+  sourceSystems: BomDashboardBreakdownItem[];
+  workflowStatuses: BomDashboardBreakdownItem[];
+};
+
+export type BomLineageItem = {
+  id: string;
+  previousBomId: string | null;
+  supersededBy: string | null;
+  bomType: string;
+  status: string;
+  format: string;
+  formatVersion: string;
+  specFamily: string;
+  documentFormat: string;
+  sourceType: string;
+  sourceSystem: string;
+  sourceReference: string;
+  checksumSha256: string;
+  componentCount: number;
+  ingestedAt: string;
+};
+
+export type BomDetail = BomInventoryItem & {
+  sourceReference: string;
+  checksumSha256: string;
+  inspection: BomInspection;
+  workflowSummary: BomWorkflowSummary[];
+  components: BomComponent[];
+};
 
 export type VulnIntelSourceStatus = {
   status: 'completed' | 'failed' | 'running' | 'never';
@@ -119,6 +355,18 @@ import type {
   SoftwareIdentityPage,
   VulnRepoSoftwareAssetsDetail
 } from '../features/software-identities/types';
+import type {
+  CampaignCreateRequest,
+  CampaignDetail,
+  CampaignException,
+  CampaignExceptionRequest,
+  CampaignExceptionStatus,
+  CampaignNote,
+  CampaignNotifyGroupRequest,
+  CampaignStatus,
+  CampaignSummary,
+  CampaignWatchlistEntryUpdateRequest,
+} from '../features/campaigns/types';
 import { resolveApiBase } from './base';
 
 const API_BASE = resolveApiBase();
@@ -152,6 +400,38 @@ type ApiErrorPayload = {
   fields?: Record<string, string>;
 };
 
+function isJwtAuthFailure(status: number, payload?: ApiErrorPayload, fallbackText?: string): boolean {
+  if (status !== 401 && status !== 403) {
+    return false;
+  }
+  const combined = [
+    payload?.code,
+    payload?.error,
+    payload?.message,
+    fallbackText,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return combined.includes('invalid jwt')
+    || combined.includes('jwt')
+    || combined.includes('token expired')
+    || combined.includes('unauthorized')
+    || combined.includes('forbidden');
+}
+
+function handleJwtAuthFailure(): void {
+  clearStoredAuthToken();
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const isLoginPage = window.location.pathname === '/login';
+  if (!isLoginPage) {
+    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+  }
+}
+
 function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   const baseMessage = payload.error || payload.message || fallback;
   const codePrefix = payload.code ? `[${payload.code}] ` : '';
@@ -170,6 +450,9 @@ async function parseApiError(response: Response): Promise<Error> {
   if (contentType.includes('application/json')) {
     try {
       const payload = await response.json() as ApiErrorPayload;
+      if (isJwtAuthFailure(response.status, payload)) {
+        handleJwtAuthFailure();
+      }
       return new Error(formatApiError(payload, fallback));
     } catch {
       return new Error(fallback);
@@ -177,6 +460,9 @@ async function parseApiError(response: Response): Promise<Error> {
   }
 
   const text = (await response.text()).trim();
+  if (isJwtAuthFailure(response.status, undefined, text)) {
+    handleJwtAuthFailure();
+  }
   return new Error(text || fallback);
 }
 
@@ -412,6 +698,8 @@ export const api = {
   getDashboard: () => request<Dashboard>('/dashboard'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   getPlatformVulnRepoDashboard: () => request<VulnRepoDashboard>('/platform/vuln-repo/dashboard'),
+  getPlatformVulnSourceStats: () => request<PlatformVulnSourceStats>('/platform/vuln-repo/source-stats'),
+  getPlatformVulnIntelDetail: (externalId: string) => request<PlatformVulnIntelDetail>(`/platform/vuln-repo/intel/${encodeURIComponent(externalId)}`),
   listApplicableSoftware: (params?: { page?: number; size?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.page != null) searchParams.set('page', String(params.page));
@@ -701,9 +989,29 @@ export const api = {
       frequency?: 'ONCE' | 'INTERVAL';
       intervalMinutes?: number;
       enabled?: boolean;
+      githubToken?: string;
     }
   ) => request<GithubSbomSource>('/github-sbom-sources', {
     method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateGithubSbomSource: (
+    sourceId: string,
+    payload: {
+      name: string;
+      owner: string;
+      repo: string;
+      path?: string;
+      assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
+      assetName?: string;
+      assetIdentifier?: string;
+      frequency?: 'ONCE' | 'INTERVAL';
+      intervalMinutes?: number;
+      enabled?: boolean;
+      githubToken?: string;
+    }
+  ) => request<GithubSbomSource>(`/github-sbom-sources/${sourceId}`, {
+    method: 'PUT',
     body: JSON.stringify(payload)
   }),
   deleteGithubSbomSource: (sourceId: string) => request<void>(`/github-sbom-sources/${sourceId}`, { method: 'DELETE' }),
@@ -734,6 +1042,45 @@ export const api = {
     method: 'POST'
   }),
   listOwnershipRules: () => request<OwnershipRuleResponse[]>('/ownership-rules'),
+  listCampaigns: (status?: CampaignStatus) =>
+    request<CampaignSummary[]>(status ? `/campaigns?status=${encodeURIComponent(status)}` : '/campaigns'),
+  getCampaign: (campaignId: string) =>
+    request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}`),
+  createCampaign: (payload: CampaignCreateRequest) =>
+    request<CampaignDetail>('/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCampaignStatus: (campaignId: string, status: CampaignStatus, note?: string) =>
+    request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, note }),
+    }),
+  addCampaignNote: (campaignId: string, body: string) =>
+    request<CampaignNote>(`/campaigns/${encodeURIComponent(campaignId)}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    }),
+  addCampaignException: (campaignId: string, payload: CampaignExceptionRequest) =>
+    request<CampaignException>(`/campaigns/${encodeURIComponent(campaignId)}/exceptions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCampaignExceptionStatus: (campaignId: string, exceptionId: string, status: CampaignExceptionStatus) =>
+    request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}/exceptions/${encodeURIComponent(exceptionId)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  updateCampaignNotifyGroup: (campaignId: string, notifyGroupId: string, payload: CampaignNotifyGroupRequest) =>
+    request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}/notify-groups/${encodeURIComponent(notifyGroupId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCampaignWatchlistEntry: (campaignId: string, watchlistEntryId: string, payload: CampaignWatchlistEntryUpdateRequest) =>
+    request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}/watchlist/${encodeURIComponent(watchlistEntryId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   createOwnershipRule: (payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>('/ownership-rules', {
     method: 'POST',
     body: JSON.stringify(payload)
@@ -939,5 +1286,36 @@ export const api = {
     const match = /filename="?([^";]+)"?/i.exec(disposition);
     const filename = match?.[1] ?? 'vulnwatch-audit-events.csv';
     return { filename, csv: await response.text() };
-  }
+  },
+  bomFetch: (payload: BomFetchPayload) =>
+    request<BomIngestionResult>('/bom/fetch', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  bomUpload: async (formData: FormData): Promise<BomIngestionResult> => {
+    const headers = buildApiHeaders(undefined, false);
+    const response = await fetch(`${API_BASE}/bom/upload`, { method: 'POST', body: formData, headers });
+    if (!response.ok) throw await parseApiError(response);
+    return response.json() as Promise<BomIngestionResult>;
+  },
+  getApplicationRisk: () =>
+    request<ApplicationRiskSummary[]>('/bom/application-risk'),
+  listBomComponents: (page = 0, size = 2000) =>
+    request<BomComponentSummaryItem[]>(`/bom/components?page=${page}&size=${size}`),
+  getBomComponentDetail: (componentId: string) =>
+    request<BomComponentDetail>(`/bom/components/${encodeURIComponent(componentId)}`),
+  getApplicationCves: (assetId: string) =>
+    request<ApplicationCveItem[]>(`/bom/assets/${encodeURIComponent(assetId)}/cves`),
+  listBomInventory: (page = 0, size = 50) =>
+    request<BomInventoryItem[]>(`/bom/inventory?page=${page}&size=${size}`),
+  getBomDashboard: () =>
+    request<BomDashboard>('/bom/dashboard'),
+  getBomSupportMatrix: () =>
+    request<BomSupportMatrix>('/bom/support'),
+  getBomDetail: (bomId: string) =>
+    request<BomDetail>(`/bom/inventory/${encodeURIComponent(bomId)}`),
+  getBomLineage: (bomId: string) =>
+    request<BomLineageItem[]>(`/bom/inventory/${encodeURIComponent(bomId)}/lineage`),
+  deleteBom: (bomId: string) =>
+    request<void>(`/bom/inventory/${encodeURIComponent(bomId)}`, { method: 'DELETE' }),
 };

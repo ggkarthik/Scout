@@ -29,8 +29,10 @@ public class LocalCredentialAuthService {
 
     private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_EMAIL = "platform.owner@localhost";
     private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_PASSWORD_HASH = "$2a$10$awIpunHkac/hB/2JPslHL.KAAtdZ5.rmmkqVjxlHkmaPHXJ1OCKPO";
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "tenant.admin@localhost";
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$6cfZYpOkQxrSl3.YCGYTPutGAORvx.ywRJmp7EkD9SYO5LLvqrhaO";
+    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "admin";
+    private static final String LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL = "tenant.admin@localhost";
+    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$LSEEjYNaUt8ozIDh1DHRiO2syFb/bSAlCtQbe3gN3lYJMCjgOpJje";
+    private static final String LEGACY_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$6cfZYpOkQxrSl3.YCGYTPutGAORvx.ywRJmp7EkD9SYO5LLvqrhaO";
 
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
@@ -118,8 +120,9 @@ public class LocalCredentialAuthService {
         }
 
         if (matchesSharedLocalhostTenantAdmin(normalizedEmail)) {
-            verifyPassword(rawPassword, sharedLocalhostTenantAdminPasswordHash);
-            return loginSharedLocalhostTenantAdmin(normalizedEmail);
+            String passwordHash = resolveSharedLocalhostTenantAdminPasswordHash(normalizedEmail);
+            verifyPassword(rawPassword, passwordHash);
+            return loginSharedLocalhostTenantAdmin(normalizedEmail, passwordHash);
         }
 
         if (user == null) {
@@ -161,7 +164,7 @@ public class LocalCredentialAuthService {
         return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
     }
 
-    private AuthTokenResponse loginSharedLocalhostTenantAdmin(String normalizedEmail) {
+    private AuthTokenResponse loginSharedLocalhostTenantAdmin(String normalizedEmail, String passwordHash) {
         Tenant tenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Default workspace is not bootstrapped"));
         tenantLifecycleGuardService.assertTenantAccessible(tenant);
@@ -172,7 +175,7 @@ public class LocalCredentialAuthService {
         user.setEmail(normalizedEmail);
         user.setDisplayName(user.getDisplayName() == null || user.getDisplayName().isBlank() ? "Local Tenant Admin" : user.getDisplayName());
         user.setStatus("ACTIVE");
-        user.setPasswordHash(sharedLocalhostTenantAdminPasswordHash);
+        user.setPasswordHash(passwordHash);
         user.setPasswordSetAt(user.getPasswordSetAt() == null ? Instant.now() : user.getPasswordSetAt());
         user.setLastSeenAt(Instant.now());
         user.setUpdatedAt(Instant.now());
@@ -275,7 +278,15 @@ public class LocalCredentialAuthService {
 
     private boolean matchesSharedLocalhostTenantAdmin(String email) {
         return sharedLocalhostEnvironment
-                && sharedLocalhostTenantAdminEmail.equalsIgnoreCase(email);
+                && (sharedLocalhostTenantAdminEmail.equalsIgnoreCase(email)
+                || LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL.equalsIgnoreCase(email));
+    }
+
+    private String resolveSharedLocalhostTenantAdminPasswordHash(String email) {
+        if (LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL.equalsIgnoreCase(email)) {
+            return LEGACY_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH;
+        }
+        return sharedLocalhostTenantAdminPasswordHash;
     }
 
     private boolean detectSharedLocalhostEnvironment(String corsAllowedOrigins) {
