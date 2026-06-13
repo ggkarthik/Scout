@@ -10,4 +10,5 @@ public interface TenantMembershipRepository extends JpaRepository<TenantMembersh
     List<TenantMembership> findByTenantIdOrderByCreatedAtAsc(UUID tenantId);
     List<TenantMembership> findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(String externalSubject, String status);
     Optional<TenantMembership> findFirstByUserExternalSubjectAndTenantIdAndStatus(String externalSubject, UUID tenantId, String status);
+    Optional<TenantMembership> findFirstByUserExternalSubjectAndTenantId(String externalSubject, UUID tenantId);
 }

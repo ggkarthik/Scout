@@ -2,7 +2,6 @@ import React from 'react';
 import type { FindingProjectionStatus, FindingQueueDefinition } from '../types';
 
 type Props = {
-  builtInQueues: FindingQueueDefinition[];
   personalQueues: FindingQueueDefinition[];
   activeQueueKey: string;
   projectionStatus?: FindingProjectionStatus;
@@ -20,7 +19,6 @@ type Props = {
 };
 
 export function FindingsWorkspaceHeader({
-  builtInQueues,
   personalQueues,
   activeQueueKey,
   projectionStatus,
@@ -43,18 +41,6 @@ export function FindingsWorkspaceHeader({
           <h1 style={{ margin: 0 }}>Findings</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <span className="panel-caption" style={{ marginBottom: 0 }}>Built-in</span>
-          {builtInQueues.map((queue) => (
-            <button
-              key={queue.key}
-              className={`btn ${queue.key === activeQueueKey ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => onSelectQueue(queue.key)}
-              style={{ padding: '6px 10px' }}
-              title={queue.description ?? undefined}
-            >
-              {queue.title} ({queue.matchingCount})
-            </button>
-          ))}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="panel-caption" style={{ marginBottom: 0 }}>My Queues</span>
             {personalQueues.map((queue) => (
