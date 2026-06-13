@@ -339,9 +339,9 @@ describe('CampaignsPage', () => {
       .mockResolvedValueOnce(detailWithPendingException)
       .mockResolvedValueOnce(detailWithNewException)
       .mockResolvedValueOnce(detailWithNote);
-    const addExceptionSpy = vi.spyOn(api, 'addCampaignException').mockResolvedValue();
+    const addExceptionSpy = vi.spyOn(api, 'addCampaignException').mockResolvedValue(detailWithNewException.exceptions[1]!);
     const updateExceptionSpy = vi.spyOn(api, 'updateCampaignExceptionStatus').mockResolvedValue(detailWithApprovedException);
-    const addNoteSpy = vi.spyOn(api, 'addCampaignNote').mockResolvedValue();
+    const addNoteSpy = vi.spyOn(api, 'addCampaignNote').mockResolvedValue(detailWithNote.notes[0]!);
 
     renderCampaignDetailPage();
 
