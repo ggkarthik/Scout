@@ -34,6 +34,8 @@ import com.prototype.vulnwatch.service.FindingListProjectionService;
 import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
 import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
+import com.prototype.vulnwatch.service.RequestActor;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
@@ -52,6 +54,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class FindingControllerTest {
 
     @Mock private WorkspaceService workspaceService;
+    @Mock private RequestActorService requestActorService;
     @Mock private FindingQueryService findingQueryService;
     @Mock private FindingAnalyticsService findingAnalyticsService;
     @Mock private FindingProjectionOperationsService findingProjectionOperationsService;
@@ -66,6 +69,7 @@ class FindingControllerTest {
     void setUp() {
         FindingController controller = new FindingController(
                 workspaceService,
+                requestActorService,
                 findingQueryService,
                 findingAnalyticsService,
                 findingProjectionOperationsService,
@@ -153,7 +157,8 @@ class FindingControllerTest {
 
     @Test
     void projectionStatusReturnsDriftMetadata() throws Exception {
-        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("platform-owner", false, null, null, java.util.Set.of("PLATFORM_OWNER")));
+        when(workspaceService.getDefaultWorkspace()).thenReturn(tenant);
         when(findingProjectionOperationsService.inspectStatus(tenant))
                 .thenReturn(new FindingListProjectionService.ProjectionStatus(
                         java.time.Instant.parse("2026-06-05T10:15:30Z"),
@@ -175,7 +180,8 @@ class FindingControllerTest {
 
     @Test
     void rebuildProjectionRefreshesTenantAndReturnsUpdatedStatus() throws Exception {
-        when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(requestActorService.currentActor()).thenReturn(new RequestActor("platform-owner", false, null, null, java.util.Set.of("PLATFORM_OWNER")));
+        when(workspaceService.getDefaultWorkspace()).thenReturn(tenant);
         when(findingProjectionOperationsService.rebuild(tenant))
                 .thenReturn(new FindingListProjectionService.ProjectionStatus(
                         java.time.Instant.parse("2026-06-05T10:16:00Z"),

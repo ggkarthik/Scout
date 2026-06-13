@@ -18,6 +18,8 @@ import com.prototype.vulnwatch.dto.OperationalQualityIssuePageResponse;
 import com.prototype.vulnwatch.dto.OperationalQualitySummaryResponse;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.RequestActor;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
@@ -33,15 +35,18 @@ public class OperationalDashboardController {
 
     private final OperationalDashboardService operationalDashboardService;
     private final WorkspaceService workspaceService;
+    private final RequestActorService requestActorService;
     private final OperationalQualityReadService operationalQualityReadService;
 
     public OperationalDashboardController(
             OperationalDashboardService operationalDashboardService,
             WorkspaceService workspaceService,
+            RequestActorService requestActorService,
             OperationalQualityReadService operationalQualityReadService
     ) {
         this.operationalDashboardService = operationalDashboardService;
         this.workspaceService = workspaceService;
+        this.requestActorService = requestActorService;
         this.operationalQualityReadService = operationalQualityReadService;
     }
 
@@ -134,6 +139,10 @@ public class OperationalDashboardController {
     }
 
     private Tenant workspace() {
+        RequestActor actor = requestActorService.currentActor();
+        if (actor != null && actor.hasRole("PLATFORM_OWNER")) {
+            return workspaceService.getDefaultWorkspace();
+        }
         return workspaceService.getWorkspace();
     }
 }
