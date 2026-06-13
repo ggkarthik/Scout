@@ -21,6 +21,7 @@ public class DemoTenantPurgeService {
     private final AuditEventService auditEventService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final TenantSchemaService tenantSchemaService;
+    private final DemoTenantPurgePlanner demoTenantPurgePlanner;
 
     public DemoTenantPurgeService(
             TenantRepository tenantRepository,
@@ -28,21 +29,20 @@ public class DemoTenantPurgeService {
             JdbcTemplate resetJdbcTemplate,
             AuditEventService auditEventService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
-            TenantSchemaService tenantSchemaService
+            TenantSchemaService tenantSchemaService,
+            DemoTenantPurgePlanner demoTenantPurgePlanner
     ) {
         this.tenantRepository = tenantRepository;
         this.resetJdbcTemplate = resetJdbcTemplate;
         this.auditEventService = auditEventService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.tenantSchemaService = tenantSchemaService;
+        this.demoTenantPurgePlanner = demoTenantPurgePlanner;
     }
 
     public void processExpiredTenant(UUID tenantId, Instant now) {
         Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-        if (tenant == null || tenant.getPurgedAt() != null || !tenantLifecycleGuardService.isDemoTenant(tenant)) {
-            return;
-        }
-        if (tenant.getDemoExpiresAt() == null || tenant.getDemoExpiresAt().isAfter(now)) {
+        if (!demoTenantPurgePlanner.isEligibleForAutomaticPurge(tenant, now)) {
             return;
         }
 
@@ -123,7 +123,7 @@ public class DemoTenantPurgeService {
 
     private void purgeTenantRows(Tenant tenant) {
         UUID tenantId = tenant.getId();
-        tenantSchemaService.resetTenantSchema(tenant.getSchemaName());
+        tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
         purgeSharedTenantRows(tenantId);
         resetJdbcTemplate.update(
                 "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",
