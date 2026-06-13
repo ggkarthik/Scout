@@ -138,7 +138,7 @@ describe('Demo public pages', () => {
       { queryClient, route: '/login' }
     );
 
-    fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Email or username/i), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
@@ -173,7 +173,7 @@ describe('Demo public pages', () => {
       { route: '/login' }
     );
 
-    fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'owner@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Email or username/i), { target: { value: 'owner@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
@@ -286,7 +286,7 @@ describe('Demo public pages', () => {
       { route: '/login' }
     );
 
-    fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Email or username/i), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
@@ -309,6 +309,6 @@ describe('Demo public pages', () => {
     await waitFor(() => {
       expect(getStoredAuthToken()).toBe('');
     });
-    expect(screen.getByRole('heading', { name: /Log in to Scout.ai/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Log in to securityGrid/i })).toBeInTheDocument();
   });
 });

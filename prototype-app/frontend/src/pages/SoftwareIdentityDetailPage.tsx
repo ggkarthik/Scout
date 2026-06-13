@@ -85,6 +85,11 @@ function lifecycleLabel(eolCount: number, nearEolCount: number, unknownCount: nu
   return 'Supported';
 }
 
+function formatBomLabel(value?: string): string {
+  if (!value) return '-';
+  return value.replace(/_/g, ' ');
+}
+
 function _lifecycleClassName(detail: SoftwareIdentityDetail): string {
   if (detail.eolComponentCount > 0) return 'status-pill status-failure';
   if (detail.nearEolComponentCount > 0) return 'status-pill status-warning';
@@ -576,6 +581,7 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
 
   const criticalAssets = detail.assets.filter(isCriticalAsset);
   const eolVersionCount = detail.versions.filter((version) => version.isEol || (version.eolDaysRemaining != null && version.eolDaysRemaining <= 90)).length;
+  const bomEvidence = detail.bomEvidence;
 
   return (
     <section className="inventory-page-shell software-detail-page">
@@ -663,6 +669,68 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
             </div>
           </div>
         </div>
+
+        {bomEvidence.documentCount > 0 ? (
+          <div className="sdi-section">
+            <div className="sdi-section-heading">
+              <span className="sdi-section-title">BOM evidence</span>
+              <span className="sdi-section-meta">
+                {bomEvidence.documentCount.toLocaleString()} documents · {bomEvidence.componentCount.toLocaleString()} matched components
+              </span>
+            </div>
+            <div className="sdi-table">
+              <div className="sdi-table-group">SUMMARY <span className="sdi-table-group-meta">SOURCE BOM CORRELATION</span></div>
+              <div className="sdi-table-group-rows">
+                <div className="sdi-table-row">
+                  <div className="sdi-table-label">BOM DOCUMENTS</div>
+                  <div className="sdi-table-value">{bomEvidence.documentCount.toLocaleString()}</div>
+                </div>
+                <div className="sdi-table-row">
+                  <div className="sdi-table-label">MATCHED COMPONENTS</div>
+                  <div className="sdi-table-value">{bomEvidence.componentCount.toLocaleString()}</div>
+                </div>
+                <div className="sdi-table-row">
+                  <div className="sdi-table-label">VULNERABILITY LINKS</div>
+                  <div className={`sdi-table-value${bomEvidence.vulnerabilityLinkCount > 0 ? ' text-critical' : ''}`}>{bomEvidence.vulnerabilityLinkCount.toLocaleString()}</div>
+                </div>
+                <div className="sdi-table-row">
+                  <div className="sdi-table-label">ACTIVE WORKFLOWS</div>
+                  <div className={`sdi-table-value${bomEvidence.componentsInWorkflow > 0 ? ' text-warning' : ''}`}>{bomEvidence.componentsInWorkflow.toLocaleString()}</div>
+                </div>
+              </div>
+              <div className="sdi-table-group">LATEST DOCUMENTS <span className="sdi-table-group-meta">UP TO 3</span></div>
+              <div className="sdi-table-group-rows">
+                {bomEvidence.documents.slice(0, 3).map((document) => (
+                  <div key={document.bomId} className="sdi-table-row">
+                    <div className="sdi-table-label">
+                      {document.documentName || document.sourceLabel || document.sourceReference || document.bomId.slice(0, 8)}
+                    </div>
+                    <div className="sdi-table-value">
+                      {formatBomLabel(document.specFamily)} · {formatBomLabel(document.documentFormat)} · {formatBomLabel(document.sourceSystem || document.sourceType)}
+                      <div className="panel-caption">
+                        {document.componentCount.toLocaleString()} components · {document.vulnerabilityLinkCount.toLocaleString()} vuln links · {formatDateTime(document.ingestedAt)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="sdi-table-group">MATCHED COMPONENTS <span className="sdi-table-group-meta">TOP 5</span></div>
+              <div className="sdi-table-group-rows">
+                {bomEvidence.components.slice(0, 5).map((component) => (
+                  <div key={component.componentId} className="sdi-table-row">
+                    <div className="sdi-table-label">{component.name}{component.version ? ` ${component.version}` : ''}</div>
+                    <div className="sdi-table-value">
+                      {component.vulnerabilityCount.toLocaleString()} vuln links · {component.evidenceCount.toLocaleString()} evidence rows
+                      <div className="panel-caption">
+                        {formatBomLabel(component.workflowStatus)}{component.sourceSystem ? ` · ${formatBomLabel(component.sourceSystem)}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Section 01 — Entity detail */}
         <div className="sdi-section">

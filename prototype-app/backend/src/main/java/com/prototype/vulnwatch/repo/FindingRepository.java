@@ -38,6 +38,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     java.util.Optional<Finding> findFirstByComponent_IdAndVulnerability_Id(UUID componentId, UUID vulnerabilityId);
     List<Finding> findByVulnerability_Id(UUID vulnerabilityId);
     List<Finding> findByTenant_IdAndVulnerability_Id(UUID tenantId, UUID vulnerabilityId);
+    List<Finding> findByTenant_IdAndVulnerability_IdIn(UUID tenantId, Collection<UUID> vulnerabilityIds);
     @Query("""
             select distinct f.tenant.id
             from Finding f

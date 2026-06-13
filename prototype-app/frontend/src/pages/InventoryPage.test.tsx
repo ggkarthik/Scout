@@ -4,6 +4,16 @@ import { api } from '../api/client';
 import { renderWithProviders } from '../test/test-utils';
 import { InventoryPage } from './InventoryPage';
 
+const EMPTY_BOM_EVIDENCE = {
+  documentCount: 0,
+  componentCount: 0,
+  evidenceCount: 0,
+  vulnerabilityLinkCount: 0,
+  componentsInWorkflow: 0,
+  documents: [],
+  components: [],
+};
+
 function buildAsset(overrides = {}) {
   return {
     id: 'asset-1',
@@ -34,6 +44,7 @@ function buildHostDetail() {
     software: [],
     findings: [],
     applicableCves: [],
+    bomEvidence: EMPTY_BOM_EVIDENCE,
   };
 }
 

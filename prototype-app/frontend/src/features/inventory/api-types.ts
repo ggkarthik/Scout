@@ -106,8 +106,53 @@ export type HostApplicableCveRecord = {
   lastEvaluatedAt?: string;
 };
 
+export type BomEvidenceDocument = {
+  bomId: string;
+  assetId?: string;
+  bomType?: string;
+  specFamily?: string;
+  documentFormat?: string;
+  sourceType?: string;
+  sourceSystem?: string;
+  sourceReference?: string;
+  sourceLabel?: string;
+  documentName?: string;
+  checksumSha256?: string;
+  componentCount: number;
+  evidenceCount: number;
+  vulnerabilityLinkCount: number;
+  ingestedAt?: string;
+};
+
+export type BomEvidenceComponent = {
+  componentId: string;
+  bomId: string;
+  name: string;
+  version?: string;
+  supplier?: string;
+  purl?: string;
+  cpe?: string;
+  license?: string;
+  workflowStatus?: string;
+  evidenceCount: number;
+  vulnerabilityCount: number;
+  sourceSystem?: string;
+  sourceReference?: string;
+};
+
+export type BomEvidenceSummary = {
+  documentCount: number;
+  componentCount: number;
+  evidenceCount: number;
+  vulnerabilityLinkCount: number;
+  componentsInWorkflow: number;
+  documents: BomEvidenceDocument[];
+  components: BomEvidenceComponent[];
+};
+
 export type HostAssetDetail = {
   host: HostAssetSummary;
+  bomEvidence: BomEvidenceSummary;
   aliases: HostAliasRecord[];
   software: HostSoftwareInstanceRecord[];
   findings: HostFindingRecord[];
@@ -123,12 +168,18 @@ export type InventoryComponentRecord = {
   componentStatus: 'ACTIVE' | 'RETIRED';
   ecosystem: string;
   packageName: string;
+  packageGroup?: string;
+  license?: string;
+  scope?: string;
   version?: string;
   normalizedName?: string;
   normalizedVersion?: string;
   purl: string;
   componentDigest?: string;
   softwareIdentity?: string;
+  cveCount: number;
+  impactedCveCount: number;
+  cveIds: string[];
   sourceSystem?: string;
   sourceType?: string;
   sourceReference?: string;

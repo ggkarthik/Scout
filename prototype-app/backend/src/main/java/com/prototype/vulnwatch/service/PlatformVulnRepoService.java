@@ -3,7 +3,9 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureRecordResponse;
+import com.prototype.vulnwatch.dto.PlatformVulnIntelDetailResponse;
 import com.prototype.vulnwatch.dto.PlatformVulnRepoPageResponse;
+import com.prototype.vulnwatch.dto.PlatformVulnSourceStatsResponse;
 import com.prototype.vulnwatch.dto.VulnRepoDashboardResponse;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
@@ -362,6 +364,166 @@ public class PlatformVulnRepoService {
                         rs.getTimestamp("last_modified_at") == null ? null : rs.getTimestamp("last_modified_at").toInstant()
                 )
         );
+    }
+
+    @Transactional(readOnly = true)
+    public PlatformVulnSourceStatsResponse getSourceStats() {
+        Map<String, Map<String, Long>> bySourceSeverity = new LinkedHashMap<>();
+        jdbcTemplate.query(
+                """
+                select s.source_system,
+                       upper(coalesce(v.severity, 'UNKNOWN')) as severity,
+                       count(*) as total
+                from vulnerability_intel_summary_sources s
+                join vulnerabilities v on v.id = s.vulnerability_id
+                where v.external_id like :prefix
+                group by s.source_system, upper(coalesce(v.severity, 'UNKNOWN'))
+                order by s.source_system, severity
+                """,
+                new MapSqlParameterSource().addValue("prefix", EXTERNAL_ID_PREFIX + "%"),
+                (RowCallbackHandler) rs -> {
+                    String src = rs.getString("source_system");
+                    String sev = rs.getString("severity");
+                    long total = rs.getLong("total");
+                    bySourceSeverity.computeIfAbsent(src, k -> new java.util.HashMap<>()).put(sev, total);
+                }
+        );
+        Map<String, PlatformVulnSourceStatsResponse.SourceStat> sources = new LinkedHashMap<>();
+        bySourceSeverity.forEach((src, sevCounts) -> {
+            long critical = sevCounts.getOrDefault("CRITICAL", 0L);
+            long high     = sevCounts.getOrDefault("HIGH",     0L);
+            long medium   = sevCounts.getOrDefault("MEDIUM",   0L);
+            long low      = sevCounts.getOrDefault("LOW",      0L);
+            long unknown  = sevCounts.getOrDefault("UNKNOWN",  0L);
+            sources.put(src, new PlatformVulnSourceStatsResponse.SourceStat(
+                    critical + high + medium + low + unknown, critical, high, medium, low, unknown));
+        });
+        return new PlatformVulnSourceStatsResponse(sources);
+    }
+
+    @Transactional(readOnly = true)
+    public PlatformVulnIntelDetailResponse getIntelDetail(String externalId) {
+        Vulnerability v = vulnerabilityRepository.findByExternalId(externalId.trim().toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Vulnerability not found: " + externalId));
+
+        // Sources
+        List<String> sourceList = new ArrayList<>();
+        vulnerabilityIntelSummarySourceRepository.findByVulnerabilityIdIn(List.of(v.getId()))
+                .forEach(row -> sourceList.add(row.getSourceSystem()));
+        if (v.isInKev() && sourceList.stream().noneMatch(s -> s.equalsIgnoreCase("kev"))) {
+            sourceList.add("kev");
+        }
+
+        // EUVD / JVNDB IDs
+        String euvdId = vulnerabilityIntelObservationRepository
+                .findFirstSourceRecordIdByVulnerabilityIds(List.of(v.getId()), "euvd")
+                .stream().findFirst().map(r -> r.getSourceRecordId()).orElse(null);
+        String jvndbId = vulnerabilityIntelObservationRepository
+                .findFirstSourceRecordIdByVulnerabilityIds(List.of(v.getId()), "japan-vulndb")
+                .stream().findFirst().map(r -> r.getSourceRecordId()).orElse(null);
+
+        // Per-source observations
+        List<com.prototype.vulnwatch.domain.VulnerabilityIntelObservation> obsEntities =
+                vulnerabilityIntelObservationRepository.findByVulnerabilityOrderByLastSeenAtDesc(v);
+        String fullDescription = pickBestDescription(obsEntities);
+        List<PlatformVulnIntelDetailResponse.SourceObservation> observations = obsEntities.stream()
+                .map(o -> new PlatformVulnIntelDetailResponse.SourceObservation(
+                        o.getSourceSystem(),
+                        o.getSourceRecordId(),
+                        o.getSourceUrl(),
+                        o.getTitle(),
+                        o.getDescription(),
+                        normalizeSeverity(o.getSeverity()),
+                        o.getCvssScore(),
+                        o.getCvssVector(),
+                        o.getPublishedAt() != null ? o.getPublishedAt().toString() : null,
+                        o.getLastModifiedAt() != null ? o.getLastModifiedAt().toString() : null
+                ))
+                .toList();
+
+        // CPEs from vulnerability_targets
+        List<String> cpes = loadDistinctCpes(v.getId());
+
+        // References from referencesJson
+        List<String> references = parseReferences(v.getReferencesJson());
+
+        return new PlatformVulnIntelDetailResponse(
+                v.getExternalId(),
+                firstNonBlank(v.getTitle(), v.getExternalId()),
+                v.getDescription(),
+                fullDescription,
+                normalizeSeverity(v.getSeverity()),
+                v.getCvssScore(),
+                v.getCvssVector(),
+                v.getEpssScore(),
+                v.getCweIds(),
+                v.getVulnStatus(),
+                v.getPublishedAt() != null ? v.getPublishedAt().toString() : null,
+                v.getLastModifiedAt() != null ? v.getLastModifiedAt().toString() : null,
+                v.isInKev(),
+                v.getKevDateAdded() != null ? v.getKevDateAdded().toString() : null,
+                v.getKevDueDate() != null ? v.getKevDueDate().toString() : null,
+                v.getKevRequiredAction(),
+                sourceList,
+                euvdId,
+                jvndbId,
+                cpes,
+                references,
+                observations
+        );
+    }
+
+    private String pickBestDescription(List<com.prototype.vulnwatch.domain.VulnerabilityIntelObservation> observations) {
+        // Priority: nvd > euvd > ghsa > longest available
+        List<String> preferred = List.of("nvd", "euvd", "ghsa");
+        for (String src : preferred) {
+            String desc = observations.stream()
+                    .filter(o -> src.equalsIgnoreCase(o.getSourceSystem()) && hasText(o.getDescription()))
+                    .map(com.prototype.vulnwatch.domain.VulnerabilityIntelObservation::getDescription)
+                    .findFirst().orElse(null);
+            if (desc != null) return desc;
+        }
+        return observations.stream()
+                .filter(o -> hasText(o.getDescription()))
+                .map(com.prototype.vulnwatch.domain.VulnerabilityIntelObservation::getDescription)
+                .max(java.util.Comparator.comparingInt(String::length))
+                .orElse(null);
+    }
+
+    private List<String> loadDistinctCpes(UUID vulnerabilityId) {
+        return jdbcTemplate.queryForList(
+                """
+                select distinct cpe
+                from vulnerability_targets
+                where vulnerability_id = :vulnerabilityId
+                  and cpe is not null
+                  and trim(cpe) <> ''
+                order by cpe
+                """,
+                new MapSqlParameterSource().addValue("vulnerabilityId", vulnerabilityId),
+                String.class
+        );
+    }
+
+    private List<String> parseReferences(String referencesJson) {
+        if (!hasText(referencesJson)) return List.of();
+        List<String> urls = new ArrayList<>();
+        try {
+            // Simple extraction: find all "url":"..." patterns
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\"url\"\\s*:\\s*\"([^\"]+)\"");
+            java.util.regex.Matcher matcher = pattern.matcher(referencesJson);
+            while (matcher.find()) {
+                String url = matcher.group(1);
+                if (hasText(url)) urls.add(url);
+            }
+            if (!urls.isEmpty()) return urls;
+            // Fallback: it might be a plain string array
+            java.util.regex.Pattern plain = java.util.regex.Pattern.compile("\"(https?://[^\"]+)\"");
+            java.util.regex.Matcher pm = plain.matcher(referencesJson);
+            while (pm.find()) urls.add(pm.group(1));
+        } catch (Exception ignored) {}
+        return urls;
     }
 
     private List<String> normalizeSources(List<String> sources, boolean inKev) {
