@@ -73,6 +73,9 @@ public class GithubSbomSource {
     @Column(length = 2000)
     private String lastError;
 
+    @Column(columnDefinition = "TEXT")
+    private String githubToken;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -193,6 +196,18 @@ public class GithubSbomSource {
 
     public void setLastError(String lastError) {
         this.lastError = lastError;
+    }
+
+    public String getGithubToken() {
+        return githubToken;
+    }
+
+    public void setGithubToken(String githubToken) {
+        this.githubToken = (githubToken == null || githubToken.isBlank()) ? null : githubToken.trim();
+    }
+
+    public boolean hasGithubToken() {
+        return githubToken != null && !githubToken.isBlank();
     }
 
     public Instant getCreatedAt() {

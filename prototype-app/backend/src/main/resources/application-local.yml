@@ -7,7 +7,13 @@ app:
   security:
     allow-api-key-auth: true
     jwt:
-      hmac-secret: local-dev-secret-key-change-in-production-use-only
+      hmac-secret: 'XOLA8EpjJ0LVmR6lwxn2U3XPVb4AcWVLs6lmT81+Kf0='
+    local-auth:
+      shared-localhost-tenant-admin-email: admin
+      shared-localhost-tenant-admin-password-hash: '$2a$10$LSEEjYNaUt8ozIDh1DHRiO2syFb/bSAlCtQbe3gN3lYJMCjgOpJje'
+  sbom-fetch:
+    allowed-hosts: localhost,127.0.0.1
+    allow-user-auth-header: true
   tenancy:
     allow-header-tenant-selection: true
     require-tenant-context: false

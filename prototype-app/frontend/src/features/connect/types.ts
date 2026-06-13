@@ -363,4 +363,5 @@ export type GithubSbomSource = {
   lastRunAt?: string;
   lastRunStatus?: string;
   lastError?: string;
+  hasToken: boolean;
 };

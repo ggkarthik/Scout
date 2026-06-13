@@ -2,17 +2,29 @@ package com.prototype.vulnwatch.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.dto.BomInspectionResponse;
+import com.prototype.vulnwatch.dto.BomSupportEntryResponse;
+import com.prototype.vulnwatch.dto.BomSupportMatrixResponse;
 import com.prototype.vulnwatch.domain.SbomFormat;
 import com.prototype.vulnwatch.dto.ParsedComponent;
 import com.prototype.vulnwatch.util.CpeUtil;
 import com.prototype.vulnwatch.util.PurlUtil;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import org.springframework.stereotype.Service;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 @Service
 public class SbomParserService {
@@ -24,6 +36,9 @@ public class SbomParserService {
     }
 
     public SbomFormat detectFormat(byte[] content) throws IOException {
+        if (isXmlBytes(content)) {
+            return detectFormatFromXml(content);
+        }
         JsonNode root = normalizeRoot(objectMapper.readTree(content));
         if (root.has("bomFormat") || root.has("components")) {
             return SbomFormat.CYCLONEDX;
@@ -35,6 +50,9 @@ public class SbomParserService {
     }
 
     public List<ParsedComponent> parse(byte[] content) throws IOException {
+        if (isXmlBytes(content)) {
+            return parseXmlContent(content);
+        }
         JsonNode root = normalizeRoot(objectMapper.readTree(content));
         if (root.has("components")) {
             return parseCycloneDx(root);
@@ -43,6 +61,265 @@ public class SbomParserService {
             return parseSpdx(root);
         }
         return List.of();
+    }
+
+    public BomInspectionResponse inspect(byte[] content) throws IOException {
+        SbomFormat format = detectFormat(content);
+        String formatVersion = null;
+        String specFamily;
+        String documentFormat = isXmlBytes(content) ? "XML" : "JSON";
+        if (isXmlBytes(content)) {
+            String[] xmlMeta = extractXmlVersion(content);
+            formatVersion = xmlMeta[1];
+        } else {
+            JsonNode root = normalizeRoot(objectMapper.readTree(content));
+            formatVersion = extractFormatVersion(root, format);
+        }
+        specFamily = switch (format) {
+            case CYCLONEDX -> "CYCLONEDX";
+            case SPDX -> "SPDX";
+            default -> "UNKNOWN";
+        };
+        return inspectResolved(format.name(), formatVersion, specFamily, documentFormat);
+    }
+
+    public BomInspectionResponse inspectResolved(
+            String format,
+            String formatVersion,
+            String specFamily,
+            String documentFormat
+    ) {
+        String normalizedSpec = specFamily == null ? "UNKNOWN" : specFamily.toUpperCase(Locale.ROOT);
+        String normalizedFormat = documentFormat == null ? "UNKNOWN" : documentFormat.toUpperCase(Locale.ROOT);
+        List<String> warnings = new ArrayList<>();
+        String supportLevel = "UNKNOWN";
+        boolean supported = false;
+        if ("CYCLONEDX".equals(normalizedSpec)) {
+            supportLevel = evaluateSupportLevel(formatVersion, List.of("1.6"), List.of("1.5"), List.of("1.4"));
+            supported = !"UNKNOWN".equals(supportLevel);
+        } else if ("SPDX".equals(normalizedSpec)) {
+            supportLevel = evaluateSupportLevel(formatVersion, List.of("2.3"), List.of("2.2"), List.of("2.1"));
+            supported = !"UNKNOWN".equals(supportLevel);
+        } else if ("VENDOR".equals(normalizedSpec)) {
+            supportLevel = "VENDOR_DEFINED";
+            supported = true;
+        }
+        if (!supported) {
+            warnings.add("This BOM spec/version is not in the supported matrix.");
+        } else if ("LEGACY".equals(supportLevel)) {
+            warnings.add("This BOM uses a legacy spec version. Validate parser output before relying on downstream automation.");
+        }
+        if (!"JSON".equals(normalizedFormat) && !"XML".equals(normalizedFormat) && !"UNKNOWN".equals(normalizedFormat)) {
+            warnings.add("This document format is not currently validated by the parser support matrix.");
+        }
+        return new BomInspectionResponse(format, formatVersion, normalizedSpec, normalizedFormat, supportLevel, supported, warnings);
+    }
+
+    public BomSupportMatrixResponse supportMatrix() {
+        return new BomSupportMatrixResponse(List.of(
+                new BomSupportEntryResponse("CYCLONEDX", "JSON", "1.6", "CURRENT", true, "Preferred CycloneDX JSON support"),
+                new BomSupportEntryResponse("CYCLONEDX", "XML", "1.6", "CURRENT", true, "Preferred CycloneDX XML support"),
+                new BomSupportEntryResponse("CYCLONEDX", "JSON", "1.5", "PREVIOUS", true, "Supported previous version"),
+                new BomSupportEntryResponse("CYCLONEDX", "XML", "1.5", "PREVIOUS", true, "Supported previous version"),
+                new BomSupportEntryResponse("CYCLONEDX", "JSON", "1.4", "LEGACY", true, "Legacy support; validate correlations"),
+                new BomSupportEntryResponse("CYCLONEDX", "XML", "1.4", "LEGACY", true, "Legacy support; validate correlations"),
+                new BomSupportEntryResponse("SPDX", "JSON", "2.3", "CURRENT", true, "Preferred SPDX JSON support"),
+                new BomSupportEntryResponse("SPDX", "JSON", "2.2", "PREVIOUS", true, "Supported previous version"),
+                new BomSupportEntryResponse("SPDX", "JSON", "2.1", "LEGACY", true, "Legacy support; validate correlations"),
+                new BomSupportEntryResponse("VENDOR", "JSON", "custom", "VENDOR_DEFINED", true, "Vendor-defined BOMs are accepted and normalized best-effort"),
+                new BomSupportEntryResponse("VENDOR", "XML", "custom", "VENDOR_DEFINED", true, "Vendor-defined BOMs are accepted and normalized best-effort")
+        ));
+    }
+
+    // ── XML support ──────────────────────────────────────────────────────────
+
+    private boolean isXmlBytes(byte[] content) {
+        if (content == null || content.length == 0) return false;
+        int i = 0;
+        while (i < content.length && (content[i] == 0x20 || content[i] == 0x09 || content[i] == 0x0A || content[i] == 0x0D)) {
+            i++;
+        }
+        return i < content.length && content[i] == '<';
+    }
+
+    private SbomFormat detectFormatFromXml(byte[] content) {
+        try {
+            Document doc = buildXmlDocument(content);
+            Element root = doc.getDocumentElement();
+            String ns = root.getNamespaceURI();
+            if ("bom".equals(root.getLocalName()) && ns != null && ns.startsWith("http://cyclonedx.org/schema/bom/")) {
+                return SbomFormat.CYCLONEDX;
+            }
+        } catch (Exception e) {
+            // fall through
+        }
+        return SbomFormat.UNKNOWN;
+    }
+
+    private String[] extractXmlVersion(byte[] content) {
+        try {
+            Document doc = buildXmlDocument(content);
+            Element root = doc.getDocumentElement();
+            String serial = blankToNull(root.getAttribute("serialNumber"));
+            String version = blankToNull(root.getAttribute("version"));
+            return new String[] { serial, version };
+        } catch (Exception ignored) {
+            return new String[] { null, null };
+        }
+    }
+
+    List<ParsedComponent> parseXmlContent(byte[] content) {
+        List<ParsedComponent> result = new ArrayList<>();
+        try {
+            Document doc = buildXmlDocument(content);
+            Element bom = doc.getDocumentElement();
+            Element componentsEl = xmlFindElement(bom, "components");
+            if (componentsEl == null) {
+                return result;
+            }
+            NodeList children = componentsEl.getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                Node node = children.item(i);
+                if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+                if (!xmlLocalNameMatches((Element) node, "component")) continue;
+                ParsedComponent parsed = parseXmlComponent((Element) node);
+                if (parsed != null) {
+                    result.add(parsed);
+                }
+            }
+        } catch (Exception e) {
+            // return whatever was collected
+        }
+        return result;
+    }
+
+    private ParsedComponent parseXmlComponent(Element comp) {
+        String name = xmlChildText(comp, "name");
+        if (name == null || name.isBlank()) return null;
+
+        String version = nullIfBlank(xmlChildText(comp, "version"));
+        String purl = nullIfBlank(xmlChildText(comp, "purl"));
+        String group = nullIfBlank(xmlChildText(comp, "group"));
+        String scope = nullIfBlank(xmlChildText(comp, "scope"));
+
+        // License
+        String license = null;
+        Element licensesEl = xmlFindElement(comp, "licenses");
+        if (licensesEl != null) {
+            Element licenseEl = xmlFindElement(licensesEl, "license");
+            if (licenseEl != null) {
+                license = nullIfBlank(xmlChildText(licenseEl, "id"));
+                if (license == null) license = nullIfBlank(xmlChildText(licenseEl, "name"));
+            }
+        }
+
+        // CPE
+        String cpeRaw = nullIfBlank(xmlChildText(comp, "cpe"));
+        List<String> cpes = new ArrayList<>();
+        if (cpeRaw != null) {
+            String normalized = CpeUtil.normalizeCpe23(cpeRaw);
+            if (normalized != null) cpes.add(normalized);
+        }
+
+        // Hash (SHA-256 only)
+        String digest = null;
+        Element hashesEl = xmlFindElement(comp, "hashes");
+        if (hashesEl != null) {
+            NodeList hashNodes = hashesEl.getChildNodes();
+            for (int i = 0; i < hashNodes.getLength() && digest == null; i++) {
+                Node n = hashNodes.item(i);
+                if (n.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element hashEl = (Element) n;
+                if (!xmlLocalNameMatches(hashEl, "hash")) continue;
+                digest = normalizeDigest(hashEl.getAttribute("alg"), hashEl.getTextContent());
+            }
+        }
+
+        String effectivePurl = purl != null ? purl : "";
+        String effectiveName = name.trim().toLowerCase(Locale.ROOT);
+        String effectiveVersion = version != null ? version : "0";
+
+        PurlUtil.ParsedPurl parsed = PurlUtil.parse(effectivePurl);
+        String ecosystem = "unknown".equals(parsed.ecosystem()) ? "generic" : parsed.ecosystem();
+        String packageName = "unknown".equals(parsed.packageName()) ? effectiveName : parsed.packageName();
+        String resolvedVersion = (parsed.version() == null || "0".equals(parsed.version())) ? effectiveVersion : parsed.version();
+        String resolvedPurl = effectivePurl.isBlank()
+                ? "pkg:" + ecosystem + "/" + packageName + "@" + resolvedVersion
+                : effectivePurl;
+
+        cpes = augmentCpesWithPurlDerivation(cpes, resolvedPurl, packageName);
+
+        return new ParsedComponent(ecosystem, packageName, resolvedVersion, resolvedPurl, digest, cpes, group, license, scope);
+    }
+
+    Document buildXmlDocument(byte[] content) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        // Best-effort: disable external entity features for security (some parsers may not support all)
+        try { factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true); } catch (Exception ignored) { }
+        try { factory.setFeature("http://xml.org/sax/features/external-general-entities", false); } catch (Exception ignored) { }
+        try { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false); } catch (Exception ignored) { }
+        try { factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false); } catch (Exception ignored) { }
+        factory.setExpandEntityReferences(false);
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        // Suppress SAX error output for schema validation errors
+        builder.setErrorHandler(null);
+        return builder.parse(new ByteArrayInputStream(content));
+    }
+
+    /** Returns true if the element's local name matches (handles both namespace-aware and unaware). */
+    private boolean xmlLocalNameMatches(Element el, String localName) {
+        String local = el.getLocalName();
+        if (local != null) return localName.equals(local);
+        // Fallback for non-namespace-aware parsers: strip prefix from node name
+        String nodeName = el.getNodeName();
+        int colon = nodeName.lastIndexOf(':');
+        return localName.equals(colon >= 0 ? nodeName.substring(colon + 1) : nodeName);
+    }
+
+    /** Returns the first direct child element with the given local name. */
+    Element xmlFirstChild(Element parent, String localName) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node n = children.item(i);
+            if (n.getNodeType() == Node.ELEMENT_NODE && xmlLocalNameMatches((Element) n, localName)) {
+                return (Element) n;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds a descendant element by local name — tries direct child first, then
+     * {@code getElementsByTagNameNS("*", ...)} as fallback for unusual namespace configs.
+     */
+    private Element xmlFindElement(Element parent, String localName) {
+        Element direct = xmlFirstChild(parent, localName);
+        if (direct != null) return direct;
+        // Fallback: namespace-wildcard recursive search
+        NodeList nl = parent.getElementsByTagNameNS("*", localName);
+        if (nl.getLength() > 0) return (Element) nl.item(0);
+        // Final fallback: no-namespace search
+        NodeList nl2 = parent.getElementsByTagName(localName);
+        if (nl2.getLength() > 0) return (Element) nl2.item(0);
+        return null;
+    }
+
+    /** Returns text content of the first child element with the given local name, or null. */
+    String xmlChildText(Element parent, String localName) {
+        Element child = xmlFirstChild(parent, localName);
+        if (child == null) {
+            // Fallback: try namespace-wildcard search within direct subtree
+            NodeList nl = parent.getElementsByTagNameNS("*", localName);
+            if (nl.getLength() > 0) child = (Element) nl.item(0);
+            else {
+                NodeList nl2 = parent.getElementsByTagName(localName);
+                if (nl2.getLength() > 0) child = (Element) nl2.item(0);
+            }
+        }
+        if (child == null) return null;
+        String text = child.getTextContent();
+        return (text == null || text.isBlank()) ? null : text.trim();
     }
 
     private List<ParsedComponent> parseCycloneDx(JsonNode root) {
@@ -54,7 +331,7 @@ public class SbomParserService {
             PurlUtil.ParsedPurl parsed = PurlUtil.parse(purl);
             String ecosystem = parsed.ecosystem();
             String packageName = parsed.packageName();
-            String resolvedVersion = parsed.version().equals("0") ? version : parsed.version();
+            String resolvedVersion = parsed.version() == null || parsed.version().equals("0") ? version : parsed.version();
             if (packageName.equals("unknown")) {
                 packageName = name.toLowerCase();
             }
@@ -74,13 +351,19 @@ public class SbomParserService {
                     resolvedPurl,
                     packageName
             );
+            String group = nullIfBlank(component.path("group").asText(null));
+            String license = extractLicenseFromCycloneDx(component);
+            String scope = nullIfBlank(component.path("scope").asText(null));
             components.add(new ParsedComponent(
                     ecosystem,
                     packageName,
                     resolvedVersion,
                     resolvedPurl,
                     digest,
-                    cpes
+                    cpes,
+                    group,
+                    license,
+                    scope
             ));
         }
         return components;
@@ -113,16 +396,55 @@ public class SbomParserService {
                     resolvedPurl,
                     packageName
             );
+            String spdxLicense = nullIfBlank(pkg.path("licenseDeclared").asText(null));
             components.add(new ParsedComponent(
                     ecosystem,
                     packageName,
                     version,
                     resolvedPurl,
                     digest,
-                    cpes
+                    cpes,
+                    null,
+                    spdxLicense,
+                    null
             ));
         }
         return components;
+    }
+
+    private String extractFormatVersion(JsonNode root, SbomFormat format) {
+        if (format == SbomFormat.CYCLONEDX) {
+            return blankToNull(root.path("specVersion").asText(null));
+        }
+        if (format == SbomFormat.SPDX) {
+            String value = root.path("spdxVersion").asText(null);
+            return value == null ? null : blankToNull(value.replace("SPDX-", "").trim());
+        }
+        return null;
+    }
+
+    private String evaluateSupportLevel(String version, List<String> current, List<String> previous, List<String> legacy) {
+        String normalized = blankToNull(version);
+        if (normalized == null) {
+            return "UNKNOWN";
+        }
+        if (current.contains(normalized)) {
+            return "CURRENT";
+        }
+        if (previous.contains(normalized)) {
+            return "PREVIOUS";
+        }
+        if (legacy.contains(normalized)) {
+            return "LEGACY";
+        }
+        return "UNKNOWN";
+    }
+
+    private String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private List<String> augmentCpesWithPurlDerivation(List<String> explicitCpes, String purl, String fallbackPackageName) {
@@ -364,5 +686,24 @@ public class SbomParserService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String nullIfBlank(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    private String extractLicenseFromCycloneDx(JsonNode component) {
+        JsonNode licenses = component.path("licenses");
+        if (!licenses.isArray() || licenses.isEmpty()) {
+            return null;
+        }
+        List<String> ids = new ArrayList<>();
+        for (JsonNode entry : licenses) {
+            JsonNode lic = entry.path("license");
+            String id = nullIfBlank(lic.path("id").asText(null));
+            if (id == null) id = nullIfBlank(lic.path("name").asText(null));
+            if (id != null) ids.add(id);
+        }
+        return ids.isEmpty() ? null : String.join(" | ", ids);
     }
 }

@@ -36,19 +36,22 @@ public class HostInventoryReadService {
     private final SoftwareInstanceRepository softwareInstanceRepository;
     private final FindingRepository findingRepository;
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
+    private final BomEvidenceReadService bomEvidenceReadService;
 
     public HostInventoryReadService(
             CiRepository ciRepository,
             CiAliasRepository ciAliasRepository,
             SoftwareInstanceRepository softwareInstanceRepository,
             FindingRepository findingRepository,
-            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository
+            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
+            BomEvidenceReadService bomEvidenceReadService
     ) {
         this.ciRepository = ciRepository;
         this.ciAliasRepository = ciAliasRepository;
         this.softwareInstanceRepository = softwareInstanceRepository;
         this.findingRepository = findingRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
+        this.bomEvidenceReadService = bomEvidenceReadService;
     }
 
     @Transactional(readOnly = true)
@@ -94,9 +97,11 @@ public class HostInventoryReadService {
         if (summary == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Host asset not found: " + assetId);
         }
+        var bomEvidence = bomEvidenceReadService.summarizeForHost(tenant, assetId);
 
         return new HostAssetDetailResponse(
                 summary,
+                bomEvidence,
                 aliases.stream().map(this::toAliasResponse).toList(),
                 software.stream().map(this::toSoftwareResponse).toList(),
                 findings.stream().map(this::toFindingResponse).toList(),

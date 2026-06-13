@@ -80,6 +80,11 @@ function formatCount(value?: number): string {
   return (value ?? 0).toLocaleString();
 }
 
+function formatBomLabel(value?: string): string {
+  if (!value) return '-';
+  return value.replace(/_/g, ' ');
+}
+
 function statusClass(value?: string): string {
   return `status-pill status-${(value ?? 'unknown').toLowerCase().replace(/_/g, '-')}`;
 }
@@ -624,6 +629,33 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
         </div>
       )}
 
+      {hostDetail.bomEvidence.documentCount > 0 && (
+        <div className="host-ownership-bar">
+          <span className="host-ownership-bar-title">BOM Evidence</span>
+          <div className="host-ownership-bar-fields">
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Documents</span>
+              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.documentCount)}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Matched Components</span>
+              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.componentCount)}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Vulnerability Links</span>
+              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.vulnerabilityLinkCount)}</span>
+            </div>
+            <div className="host-ownership-bar-divider" />
+            <div className="host-ownership-bar-field">
+              <span className="host-ownership-bar-label">Workflows</span>
+              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.componentsInWorkflow)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="host-detail-tabs" role="tablist" aria-label="Host detail sections">
         <button
           type="button"
@@ -663,6 +695,38 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
       </div>
 
       <div className="host-detail-surface">
+        {hostDetail.bomEvidence.documentCount > 0 ? (
+          <div className="inventory-section-card" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <div className="panel-label">Latest BOM Documents</div>
+                <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {hostDetail.bomEvidence.documents.slice(0, 3).map((document) => (
+                    <div key={document.bomId} style={{ display: 'grid', gap: '0.15rem' }}>
+                      <strong>{document.documentName || document.sourceLabel || document.sourceReference || document.bomId.slice(0, 8)}</strong>
+                      <span className="panel-caption">
+                        {formatBomLabel(document.specFamily)} · {formatBomLabel(document.documentFormat)} · {formatBomLabel(document.sourceSystem || document.sourceType)} · {formatCount(document.componentCount)} components
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="panel-label">Matched BOM Components</div>
+                <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {hostDetail.bomEvidence.components.slice(0, 5).map((component) => (
+                    <div key={component.componentId} style={{ display: 'grid', gap: '0.15rem' }}>
+                      <strong>{component.name}{component.version ? ` ${component.version}` : ''}</strong>
+                      <span className="panel-caption">
+                        {formatCount(component.vulnerabilityCount)} vuln links · {formatCount(component.evidenceCount)} evidence rows · {formatBomLabel(component.workflowStatus)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {activeTab === 'software' ? (
           <>

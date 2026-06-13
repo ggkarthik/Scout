@@ -17,6 +17,7 @@ public record GithubSbomSourceResponse(
         boolean enabled,
         Instant lastRunAt,
         String lastRunStatus,
-        String lastError
+        String lastError,
+        boolean hasToken
 ) {
 }

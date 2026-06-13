@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../components/CVEInvestigationSummary';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
-import { pathForVulnRepoView } from '../app/routes';
+import { pathForPlatformVulnIntelDetail, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole } from '../features/auth/roles';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
@@ -240,12 +240,13 @@ export function VulnRepoVulnerabilitiesPage() {
   const initialApplicable = React.useMemo(() => searchParams.get('applicable') === 'true', [searchParams]);
   const initialImpactedOnly = React.useMemo(() => searchParams.get('impactedOnly') === 'true', [searchParams]);
   const initialHasFindings = React.useMemo(() => searchParams.get('hasFindings') === 'true', [searchParams]);
+  const initialSource = React.useMemo(() => searchParams.get('source')?.trim() ?? '', [searchParams]);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState(initialQuery);
   const [query, setQuery] = React.useState(initialQuery);
   const [severityFilters, setSeverityFilters] = React.useState<string[]>(parseCsvParam(initialSeverity));
   const [statusFilters, setStatusFilters] = React.useState<string[]>(initialStatuses);
-  const [sourceFilter, setSourceFilter] = React.useState<string>('');
+  const [sourceFilter, setSourceFilter] = React.useState<string>(initialSource);
   const [correlationFilter, setCorrelationFilter] = React.useState<CorrelationFilter>('all');
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
@@ -301,8 +302,9 @@ export function VulnRepoVulnerabilitiesPage() {
     setQuery(initialQuery);
     setSeverityFilters(parseCsvParam(initialSeverity));
     setStatusFilters(initialStatuses);
+    setSourceFilter(initialSource);
     setPage(0);
-  }, [initialApplicable, initialImpactedOnly, initialInKev, initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses]);
+  }, [initialApplicable, initialImpactedOnly, initialInKev, initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses, initialSource]);
 
   // Reset to page 0 when applicable column filter changes (server query changes)
   React.useEffect(() => {
@@ -514,27 +516,31 @@ export function VulnRepoVulnerabilitiesPage() {
           cve: {
             content: (
               platformScope ? (
-                <div className="vuln-repo-cve-link">
+                <button
+                  type="button"
+                  className="btn-link vuln-repo-cve-link"
+                  onClick={() => navigate(pathForPlatformVulnIntelDetail(item.externalId))}
+                >
                   {sourceFilter === 'euvd' && item.euvdId ? (
-                  <span className="mono">{item.euvdId}</span>
-                ) : sourceFilter === 'japan-vulndb' && item.jvndbId ? (
-                  <span className="mono">{item.jvndbId}</span>
-                ) : (
-                  <>
-                    <span className="mono">{item.externalId}</span>
-                    {item.euvdId && (
-                      <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
-                        {item.euvdId}
-                      </span>
-                    )}
-                    {item.jvndbId && (
-                      <span className="mono euvd-id-badge" title={`JVNDB ID: ${item.jvndbId}`}>
-                        {item.jvndbId}
-                      </span>
-                    )}
-                  </>
-                )}
-                </div>
+                    <span className="mono">{item.euvdId}</span>
+                  ) : sourceFilter === 'japan-vulndb' && item.jvndbId ? (
+                    <span className="mono">{item.jvndbId}</span>
+                  ) : (
+                    <>
+                      <span className="mono">{item.externalId}</span>
+                      {item.euvdId && (
+                        <span className="mono euvd-id-badge" title={`EUVD ID: ${item.euvdId}`}>
+                          {item.euvdId}
+                        </span>
+                      )}
+                      {item.jvndbId && (
+                        <span className="mono euvd-id-badge" title={`JVNDB ID: ${item.jvndbId}`}>
+                          {item.jvndbId}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
               ) : (
                 <button
                   type="button"
@@ -840,21 +846,23 @@ export function VulnRepoVulnerabilitiesPage() {
       );
     };
     const relStyle: React.CSSProperties = { position: 'relative' };
+    const cveCol = { id: 'cve', label: 'Vulnerability ID', initialSize: 200, headerProps: { style: relStyle }, header: filterable('cve', 'Vulnerability ID') };
+    const titleCol = { id: 'title', label: 'Description', header: 'Description', initialSize: 360 };
+    const severityCol = { id: 'severity', label: 'Severity', initialSize: 120, headerProps: { style: relStyle }, header: filterable('severity', 'Severity') };
+    const cvssCol = { id: 'cvss', label: 'CVSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('cvss', 'CVSS') };
+    const epssCol = { id: 'epss', label: 'EPSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('epss', 'EPSS') };
+    const sourcesCol = { id: 'sources', label: 'Source', header: 'Source', initialSize: 160 };
+    if (platformScope) {
+      return [cveCol, titleCol, severityCol, cvssCol, epssCol, sourcesCol];
+    }
     const baseColumns: DataTableColumn[] = [
-      { id: 'cve', label: 'Vulnerability ID', initialSize: 200, headerProps: { style: relStyle }, header: filterable('cve', 'Vulnerability ID') },
-      { id: 'title', label: 'Description', header: 'Description', initialSize: 360 },
-      { id: 'severity', label: 'Severity', initialSize: 120, headerProps: { style: relStyle }, header: filterable('severity', 'Severity') },
-      { id: 'cvss', label: 'CVSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('cvss', 'CVSS') },
-      { id: 'epss', label: 'EPSS', initialSize: 90, headerProps: { style: relStyle }, header: filterable('epss', 'EPSS') },
+      cveCol, titleCol, severityCol, cvssCol, epssCol,
       { id: 'cveRisk', label: 'S.AI Risk', initialSize: 100, headerProps: { style: relStyle }, header: filterable('cveRisk', 'S.AI Risk') },
       { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 110 },
-      { id: 'sources', label: 'Source', header: 'Source', initialSize: 160 },
+      sourcesCol,
       { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
       { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 },
     ];
-    if (platformScope) {
-      return baseColumns;
-    }
     return [
       ...baseColumns.slice(0, 7),
       { id: 'applicable', label: 'Applicable', initialSize: 110, headerProps: { style: relStyle }, header: filterable('applicable', 'Applicable') },

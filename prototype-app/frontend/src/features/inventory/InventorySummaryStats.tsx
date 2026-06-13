@@ -4,40 +4,48 @@ import type { InventoryViewKey } from './types';
 type Props = {
   selectedView: InventoryViewKey;
   componentTotalItems: number;
-  activeCount: number;
   retiredCount: number;
   assetCount: number;
   needsReviewCount: number;
+  onRetiredClick: () => void;
 };
-
-function StatWidget({ title, value, caption = 'Current tenant' }: { title: string; value: number; caption?: string }) {
-  return (
-    <div className="fpl-widget">
-      <div className="fpl-widget-title">{title}</div>
-      <div className="fpl-widget-body">
-        <div className="fpl-stat-num">{value.toLocaleString()}</div>
-        <div className="fpl-stat-caption">{caption}</div>
-      </div>
-    </div>
-  );
-}
 
 export function InventorySummaryStats({
   selectedView,
   componentTotalItems,
-  activeCount,
   retiredCount,
   assetCount,
-  needsReviewCount
+  needsReviewCount,
+  onRetiredClick
 }: Props) {
   return (
     <div className="fpl-widgets">
-      <StatWidget title="Inventory Records" value={componentTotalItems} />
-      <StatWidget title="Active Components" value={activeCount} />
-      <StatWidget title="Retired Components" value={retiredCount} />
-      <StatWidget title="Assets Represented" value={assetCount} />
+      <div className="fpl-widget">
+        <div className="fpl-widget-title">Inventory Records</div>
+        <div className="fpl-widget-body">
+          <div className="fpl-stat-num">{componentTotalItems.toLocaleString()}</div>
+          {retiredCount > 0 && (
+            <button type="button" className="btn-link fpl-stat-subcount" onClick={onRetiredClick}>
+              {retiredCount.toLocaleString()} retired
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="fpl-widget">
+        <div className="fpl-widget-title">Assets Represented</div>
+        <div className="fpl-widget-body">
+          <div className="fpl-stat-num">{assetCount.toLocaleString()}</div>
+        </div>
+      </div>
+
       {selectedView === 'hosts' && (
-        <StatWidget title="Rows Needing Review" value={needsReviewCount} />
+        <div className="fpl-widget">
+          <div className="fpl-widget-title">Rows Needing Review</div>
+          <div className="fpl-widget-body">
+            <div className="fpl-stat-num">{needsReviewCount.toLocaleString()}</div>
+          </div>
+        </div>
       )}
     </div>
   );

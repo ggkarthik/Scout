@@ -21,6 +21,7 @@ describe('routes', () => {
     expect(pathForTab('platform')).toBe('/platform/tenants');
     expect(pathForConnectView('run-history')).toBe('/connect/run-history');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
+    expect(pathForVulnRepoView('campaigns')).toBe('/vuln-repo/campaigns');
     expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
   });
 
@@ -63,6 +64,7 @@ describe('routes', () => {
       '/vuln-repo/org-cves/CVE-2026-1234'
     );
     expect(buildLegacyCompatiblePath('?tab=vulnerability-intelligence')).toBe('/vuln-repo/vulnerabilities');
+    expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=campaigns')).toBe('/vuln-repo/campaigns');
     expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=end-of-life')).toBe('/end-of-life');
     expect(buildLegacyCompatiblePath('?tab=end-of-life')).toBe('/end-of-life');
   });

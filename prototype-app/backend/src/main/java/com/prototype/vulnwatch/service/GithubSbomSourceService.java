@@ -167,11 +167,14 @@ public class GithubSbomSourceService {
 
     public void executeSource(UUID tenantId, UUID sourceId, UUID runId) {
         tenantSchemaExecutionService.run(tenantId, () -> {
+            GithubSbomSourceExecution snapshot = markSourceRunRunning(tenantId, sourceId, runId);
+            if (snapshot == null) {
+                return null;
+            }
+            if (snapshot.githubToken() != null) {
+                githubTokenProvider.setOverrideToken(snapshot.githubToken());
+            }
             try {
-                GithubSbomSourceExecution snapshot = markSourceRunRunning(tenantId, sourceId, runId);
-                if (snapshot == null) {
-                    return null;
-                }
                 Tenant tenant = workspaceService.getWorkspace();
                 if (isGhcrSourcePath(snapshot.path())) {
                     SbomIngestionService.GithubGhcrIngestionSummary summary =
@@ -190,6 +193,8 @@ public class GithubSbomSourceService {
                 }
             } catch (Exception e) {
                 failSourceRun(sourceId, runId, e.getMessage());
+            } finally {
+                githubTokenProvider.clearOverrideToken();
             }
             return null;
         });
@@ -276,6 +281,9 @@ public class GithubSbomSourceService {
         source.setFrequency(request.frequency() == null ? GithubIngestionFrequency.ONCE : request.frequency());
         source.setIntervalMinutes(request.intervalMinutes() == null ? 60 : Math.max(5, request.intervalMinutes()));
         source.setEnabled(request.enabled() == null || request.enabled());
+        if (request.githubToken() != null) {
+            source.setGithubToken(request.githubToken());
+        }
     }
 
     private String normalizeSourcePath(String path) {
@@ -381,7 +389,8 @@ public class GithubSbomSourceService {
                     source.getPath(),
                     assetTypeForPath(source.getPath()),
                     source.getAssetName(),
-                    source.getAssetIdentifier()
+                    source.getAssetIdentifier(),
+                    source.getGithubToken()
             );
         });
     }
@@ -659,7 +668,8 @@ public class GithubSbomSourceService {
                 source.isEnabled(),
                 source.getLastRunAt(),
                 source.getLastRunStatus(),
-                source.getLastError()
+                source.getLastError(),
+                source.hasGithubToken()
         );
     }
 
@@ -676,7 +686,8 @@ public class GithubSbomSourceService {
             String path,
             AssetType assetType,
             String assetName,
-            String assetIdentifier
+            String assetIdentifier,
+            String githubToken
     ) {
     }
 }
