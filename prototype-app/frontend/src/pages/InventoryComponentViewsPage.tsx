@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import type { InventoryViewKey } from '../features/inventory/types';
 import {
   defaultAssetTypeForView,
-  formatAssetType,
   formatInventoryLabel
 } from '../features/inventory/helpers';
 import { InventoryResultsPanel } from '../features/inventory/InventoryResultsPanel';

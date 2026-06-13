@@ -1,5 +1,4 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { api, type BomFetchPayload, type BomIngestionResult, type BomType } from '../api/client';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 
@@ -201,11 +200,6 @@ export function BomManagementPage({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [result, setResult] = React.useState<BomIngestionResult | null>(null);
-  const supportMatrixQuery = useQuery({
-    queryKey: ['bom-support-matrix'],
-    queryFn: () => api.getBomSupportMatrix(),
-  });
-
   function applyMeta(meta: ExtractedMeta, sourceName: string) {
     if (meta.assetType) setAssetType(meta.assetType);
     if (meta.assetName) setAssetName(meta.assetName);
