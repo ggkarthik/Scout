@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public record InventoryComponentResponse(
@@ -13,12 +14,18 @@ public record InventoryComponentResponse(
         String componentStatus,
         String ecosystem,
         String packageName,
+        String packageGroup,
+        String license,
+        String scope,
         String version,
         String normalizedName,
         String normalizedVersion,
         String purl,
         String componentDigest,
         String softwareIdentity,
+        int cveCount,
+        int impactedCveCount,
+        List<String> cveIds,
         String sourceSystem,
         String sourceType,
         String sourceReference,

@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -69,9 +70,46 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
 
     @Query("select c.id from InventoryComponent c where c.componentStatus = :status")
     List<UUID> findIdsByComponentStatus(@Param("status") InventoryComponentStatus status);
+    @Query("""
+            select c from InventoryComponent c
+            join fetch c.asset a
+            where c.tenant.id = :tenantId
+              and c.componentStatus = :status
+              and a.type = com.prototype.vulnwatch.domain.AssetType.APPLICATION
+            order by a.name asc, c.packageName asc
+            """)
+    List<InventoryComponent> findActiveApplicationComponentsWithAsset(
+            @Param("tenantId") UUID tenantId,
+            @Param("status") InventoryComponentStatus status,
+            Pageable pageable
+    );
+
     List<InventoryComponent> findByAsset(Asset asset);
     List<InventoryComponent> findByAsset_IdIn(Collection<UUID> assetIds);
     List<InventoryComponent> findByAssetAndComponentStatus(Asset asset, InventoryComponentStatus status);
+    @Query("""
+            select c
+            from InventoryComponent c
+            where c.tenant.id = :tenantId
+              and c.asset.id = :assetId
+              and c.componentStatus = :status
+              and (
+                lower(coalesce(c.normalizedName, c.packageName)) = lower(:componentName)
+                or lower(coalesce(c.packageName, '')) = lower(:componentName)
+              )
+              and (
+                :componentVersion is null
+                or lower(coalesce(c.normalizedVersion, c.version, '')) = lower(:componentVersion)
+                or lower(coalesce(c.version, '')) = lower(:componentVersion)
+              )
+            """)
+    List<InventoryComponent> findActiveByTenantAssetAndComponentNameVersion(
+            @Param("tenantId") UUID tenantId,
+            @Param("assetId") UUID assetId,
+            @Param("status") InventoryComponentStatus status,
+            @Param("componentName") String componentName,
+            @Param("componentVersion") String componentVersion
+    );
     @Query("""
             select c
             from InventoryComponent c

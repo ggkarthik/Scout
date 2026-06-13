@@ -25,6 +25,9 @@ function buildComponentRecord(overrides = {}) {
     packageName: 'lodash',
     version: '4.17.15',
     purl: 'pkg:npm/lodash@4.17.15',
+    cveCount: 0,
+    impactedCveCount: 0,
+    cveIds: [],
     lastObservedAt: '2026-01-01T00:00:00Z',
     needsReview: false,
     reviewItemCount: 0,
@@ -88,12 +91,18 @@ describe('InventoryComponentViewsPage', () => {
     expect(screen.getByText('lodash')).toBeInTheDocument();
   });
 
-  it('shows the Group Breakdown section heading', async () => {
-    vi.spyOn(api, 'listInventoryComponents').mockResolvedValue(EMPTY_PAGE);
+  it('renders summary stats when data is present', async () => {
+    vi.spyOn(api, 'listInventoryComponents').mockResolvedValue({
+      items: [buildComponentRecord()],
+      page: 0,
+      size: 25,
+      totalItems: 1,
+      totalPages: 1,
+    });
     vi.spyOn(api, 'listInventoryComponentFilters').mockResolvedValue(EMPTY_FILTER_VALUES);
     renderWithProviders(<InventoryComponentViewsPage selectedView="hosts" />);
     await waitFor(() =>
-      expect(screen.getByText('Group Breakdown')).toBeInTheDocument()
+      expect(screen.getByText('web-prod-01')).toBeInTheDocument()
     );
   });
 

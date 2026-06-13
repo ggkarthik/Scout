@@ -29,6 +29,16 @@ const EMPTY_METADATA = {
   recommendation: '',
 };
 
+const EMPTY_BOM_EVIDENCE = {
+  documentCount: 0,
+  componentCount: 0,
+  evidenceCount: 0,
+  vulnerabilityLinkCount: 0,
+  componentsInWorkflow: 0,
+  documents: [],
+  components: [],
+};
+
 function buildDetail(overrides = {}) {
   return {
     id: 'si-1',
@@ -48,6 +58,7 @@ function buildDetail(overrides = {}) {
     unknownEolComponentCount: 0,
     openFindingCount: 0,
     openVulnerabilityCount: 0,
+    bomEvidence: EMPTY_BOM_EVIDENCE,
     versions: [],
     assets: [],
     ...overrides,

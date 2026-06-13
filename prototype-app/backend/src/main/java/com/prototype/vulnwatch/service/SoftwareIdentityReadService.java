@@ -36,15 +36,18 @@ public class SoftwareIdentityReadService {
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final SoftwareIdentitySummaryProjectionService projectionService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final BomEvidenceReadService bomEvidenceReadService;
 
     public SoftwareIdentityReadService(
             NamedParameterJdbcTemplate jdbcTemplate,
             SoftwareIdentitySummaryProjectionService projectionService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            BomEvidenceReadService bomEvidenceReadService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.projectionService = projectionService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.bomEvidenceReadService = bomEvidenceReadService;
     }
 
     public SoftwareIdentityPageResponse listPage(
@@ -240,6 +243,7 @@ public class SoftwareIdentityReadService {
                             getInstant(rs, "last_observed_at")
                     )
             );
+            var bomEvidence = bomEvidenceReadService.summarizeForSoftware(tenant, softwareIdentityId, assets);
 
             return new SoftwareIdentityDetailResponse(
                     summary.id(),
@@ -265,6 +269,7 @@ public class SoftwareIdentityReadService {
                     counts.openFindingCount(),
                     counts.openVulnerabilityCount(),
                     summary.lastObservedAt(),
+                    bomEvidence,
                     versions,
                     assets
             );
