@@ -372,8 +372,16 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
-    const bulkUpdateSpy = vi.spyOn(api, 'bulkUpdateFindingWorkflow').mockResolvedValue();
-    const bulkDeleteSpy = vi.spyOn(api, 'bulkDeleteFindings').mockResolvedValue();
+    const bulkUpdateSpy = vi.spyOn(api, 'bulkUpdateFindingWorkflow').mockResolvedValue({
+      targeted: 1,
+      updated: 1,
+      failed: 0,
+      message: 'Updated 1 finding',
+    });
+    const bulkDeleteSpy = vi.spyOn(api, 'bulkDeleteFindings').mockResolvedValue({
+      deleted: 1,
+      message: 'Deleted 1 finding',
+    });
 
     renderWithProviders(
       <ActorContextState.Provider value={ACTOR}>
@@ -418,13 +426,13 @@ describe('FindingsPage', () => {
     vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
-    const createIncidentSpy = vi.spyOn(cveWorkbenchApi, 'createServiceNowIncident').mockResolvedValue({
-      incidentId: 'INC-200',
+    const createIncidentSpy = vi.spyOn(cveWorkbenchApi, 'createServiceNowIncident').mockResolvedValue([{
       incidentNumber: 'INC000200',
-      findingCount: 1,
-      sharedWithCount: 0,
-      createdAt: '2026-06-12T00:00:00Z',
-    });
+      sysId: 'sys-200',
+      url: 'https://example.service-now.com/nav_to.do?uri=incident.do?sys_id=sys-200',
+      status: 'created',
+      message: 'Incident created successfully',
+    }]);
 
     renderWithProviders(
       <ActorContextState.Provider value={ACTOR}>
