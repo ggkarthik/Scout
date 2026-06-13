@@ -19,7 +19,9 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -50,6 +52,10 @@ class TenantSchemaResetPostgresIntegrationTest {
 
     @Autowired
     private FixRecordRepository fixRecordRepository;
+
+    @Autowired
+    @Qualifier("platformJdbcTemplate")
+    private JdbcTemplate platformJdbcTemplate;
 
     @MockBean
     private FindingDeltaQueueService findingDeltaQueueService;
@@ -84,6 +90,17 @@ class TenantSchemaResetPostgresIntegrationTest {
         assertEquals(1L, afterReuse);
     }
 
+    @Test
+    void dropTenantSchemaRemovesTenantSchemaPermanently() {
+        Tenant tenant = tenantService.createTenant("Drop Customer", "drop-customer", "pilot", null);
+
+        assertSchemaExists(tenant.getSchemaName());
+
+        tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
+
+        assertSchemaMissing(tenant.getSchemaName());
+    }
+
     private FixRecord buildFixRecord(Tenant tenant, String cveId, String softwareName) {
         FixRecord fixRecord = new FixRecord();
         fixRecord.setTenant(tenant);
@@ -97,5 +114,23 @@ class TenantSchemaResetPostgresIntegrationTest {
         fixRecord.setSourceUrlsJson("[\"https://vendor.example/advisory\"]");
         fixRecord.setGeneratedAt(Instant.now());
         return fixRecord;
+    }
+
+    private void assertSchemaExists(String schemaName) {
+        Integer count = platformJdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.schemata
+                where schema_name = ?
+                """, Integer.class, schemaName);
+        assertEquals(1, count);
+    }
+
+    private void assertSchemaMissing(String schemaName) {
+        Integer count = platformJdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.schemata
+                where schema_name = ?
+                """, Integer.class, schemaName);
+        assertEquals(0, count);
     }
 }
