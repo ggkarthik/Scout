@@ -272,8 +272,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const {
     activeQueueKey,
     setActiveQueueKey,
-    builtInQueues,
-    personalQueues,
     defaultQueue,
     activeQueryContext,
   } = useFindingsQueryContext({
@@ -405,7 +403,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     };
   }
 
-  function applyQueueSelection(nextQueueKey: string) {
+  function _applyQueueSelection(nextQueueKey: string) {
     const nextQueue = availableQueues.find((queue) => queue.key === nextQueueKey);
     const queueFilter = nextQueue?.filter ?? {};
     if (queueFilter.severity && queueFilter.severity.length > 0) {
@@ -428,7 +426,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setSelectedIds(new Set());
   }
 
-  function openCreateQueueDialog() {
+  function _openCreateQueueDialog() {
     setQueueDialogMode('create');
     setQueueDialogTarget(null);
     setQueueTitle(activeQueryContext.title === 'All Findings' ? 'My Queue' : activeQueryContext.title);
@@ -437,7 +435,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     setQueueActionError('');
   }
 
-  function openEditQueueDialog(queue: FindingQueueDefinition) {
+  function _openEditQueueDialog(queue: FindingQueueDefinition) {
     setQueueDialogMode('edit');
     setQueueDialogTarget(queue);
     setQueueTitle(queue.title);
@@ -497,7 +495,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     }
   }
 
-  async function duplicateQueue(queue: FindingQueueDefinition) {
+  async function _duplicateQueue(queue: FindingQueueDefinition) {
     setQueueActionLoading(true);
     setQueueActionError('');
     try {
@@ -510,7 +508,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     }
   }
 
-  async function setDefaultQueue(queue: FindingQueueDefinition) {
+  async function _setDefaultQueue(queue: FindingQueueDefinition) {
     setQueueActionLoading(true);
     setQueueActionError('');
     try {
@@ -523,7 +521,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     }
   }
 
-  async function deleteQueue(queue: FindingQueueDefinition) {
+  async function _deleteQueue(queue: FindingQueueDefinition) {
     if (!window.confirm(`Delete saved queue "${queue.title}"?`)) return;
     setQueueActionLoading(true);
     setQueueActionError('');
@@ -985,11 +983,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   return (
     <div className="fpl-root">
       <FindingsWorkspaceHeader
-        builtInQueues={builtInQueues}
-        personalQueues={personalQueues}
-        activeQueueKey={activeQueryContext.queueKey}
         projectionStatus={projectionStatusQuery.data}
-        queueLoading={queuesQuery.isLoading}
         queueActionError={queueActionError}
         projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
         workspaceError={
@@ -999,12 +993,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
             : null
         }
-        onSelectQueue={applyQueueSelection}
-        onOpenCreateQueue={openCreateQueueDialog}
-        onOpenEditQueue={openEditQueueDialog}
-        onDuplicateQueue={(queue) => void duplicateQueue(queue)}
-        onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
-        onDeleteQueue={(queue) => void deleteQueue(queue)}
         workspaceTitle={activeQueryContext.title}
       />
 
