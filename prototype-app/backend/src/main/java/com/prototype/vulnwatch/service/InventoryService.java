@@ -1,8 +1,10 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.Ci;
 import com.prototype.vulnwatch.domain.CiAlias;
+import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
@@ -12,6 +14,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.InventoryComponentFilterValuesResponse;
 import com.prototype.vulnwatch.dto.InventoryComponentPageResponse;
 import com.prototype.vulnwatch.dto.InventoryComponentResponse;
+import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.CiAliasRepository;
 import com.prototype.vulnwatch.repo.CiRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
@@ -46,17 +49,20 @@ public class InventoryService {
     private final SoftwareInstanceRepository softwareInstanceRepository;
     private final CiRepository ciRepository;
     private final CiAliasRepository ciAliasRepository;
+    private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
 
     public InventoryService(
             InventoryComponentRepository inventoryComponentRepository,
             SoftwareInstanceRepository softwareInstanceRepository,
             CiRepository ciRepository,
-            CiAliasRepository ciAliasRepository
+            CiAliasRepository ciAliasRepository,
+            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository
     ) {
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.softwareInstanceRepository = softwareInstanceRepository;
         this.ciRepository = ciRepository;
         this.ciAliasRepository = ciAliasRepository;
+        this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
     }
 
     @Transactional(readOnly = true)
@@ -102,11 +108,14 @@ public class InventoryService {
                 normalizedQueryPattern,
                 pageable
         );
+        Map<UUID, ComponentVulnerabilitySummary> vulnerabilitySummaryByComponentId =
+                buildComponentVulnerabilitySummaries(tenant, componentPage.getContent());
         Map<UUID, HostReviewSignals> hostReviewSignalsByComponentId = buildHostReviewSignals(tenant, componentPage.getContent());
         List<InventoryComponentResponse> items = componentPage.getContent().stream()
                 .map(component -> toInventoryComponentResponse(
                         component,
-                        hostReviewSignalsByComponentId.getOrDefault(component.getId(), HostReviewSignals.NONE)
+                        hostReviewSignalsByComponentId.getOrDefault(component.getId(), HostReviewSignals.NONE),
+                        vulnerabilitySummaryByComponentId.getOrDefault(component.getId(), ComponentVulnerabilitySummary.NONE)
                 ))
                 .toList();
         return new InventoryComponentPageResponse(
@@ -161,7 +170,11 @@ public class InventoryService {
         );
     }
 
-    private InventoryComponentResponse toInventoryComponentResponse(InventoryComponent component, HostReviewSignals reviewSignals) {
+    private InventoryComponentResponse toInventoryComponentResponse(
+            InventoryComponent component,
+            HostReviewSignals reviewSignals,
+            ComponentVulnerabilitySummary vulnerabilitySummary
+    ) {
         SbomUpload upload = component.getSbomUpload();
         SoftwareIdentity identity = component.getSoftwareIdentity();
         return new InventoryComponentResponse(
@@ -173,12 +186,18 @@ public class InventoryService {
                 component.getComponentStatus().name(),
                 component.getEcosystem(),
                 component.getPackageName(),
+                component.getPackageGroup(),
+                component.getLicense(),
+                component.getScope(),
                 component.getVersion(),
                 component.getNormalizedName(),
                 component.getNormalizedVersion(),
                 component.getPurl(),
                 component.getComponentDigest(),
                 identity == null ? null : identity.getDisplayName(),
+                vulnerabilitySummary.cveCount(),
+                vulnerabilitySummary.impactedCveCount(),
+                vulnerabilitySummary.cveIds(),
                 upload == null ? null : upload.getIngestionSourceSystem(),
                 upload == null ? null : upload.getIngestionSourceType(),
                 upload == null ? null : upload.getSourceReference(),
@@ -199,6 +218,62 @@ public class InventoryService {
                         ? (int) java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), component.getEolDate())
                         : null
         );
+    }
+
+    private Map<UUID, ComponentVulnerabilitySummary> buildComponentVulnerabilitySummaries(
+            Tenant tenant,
+            List<InventoryComponent> components
+    ) {
+        if (tenant == null || tenant.getId() == null || components == null || components.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> componentIds = components.stream()
+                .map(InventoryComponent::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (componentIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, LinkedHashSet<String>> cveIdsByComponentId = new LinkedHashMap<>();
+        Map<UUID, Set<UUID>> vulnerabilityIdsByComponentId = new LinkedHashMap<>();
+        Map<UUID, Set<UUID>> impactedVulnerabilityIdsByComponentId = new LinkedHashMap<>();
+
+        for (ComponentVulnerabilityStateRepository.ComponentVulnerabilitySummaryRow row
+                : componentVulnerabilityStateRepository.findSummariesByTenantIdAndComponentIds(tenant.getId(), componentIds)) {
+            if (row.getComponentId() == null || row.getVulnerabilityId() == null) {
+                continue;
+            }
+            if (row.getApplicabilityState() != ApplicabilityState.APPLICABLE) {
+                continue;
+            }
+            vulnerabilityIdsByComponentId
+                    .computeIfAbsent(row.getComponentId(), ignored -> new LinkedHashSet<>())
+                    .add(row.getVulnerabilityId());
+            if (hasText(row.getExternalId())) {
+                LinkedHashSet<String> cveIds = cveIdsByComponentId.computeIfAbsent(row.getComponentId(), ignored -> new LinkedHashSet<>());
+                if (cveIds.size() < 3) {
+                    cveIds.add(row.getExternalId());
+                }
+            }
+            if (row.getImpactState() == ImpactState.IMPACTED || row.getImpactState() == ImpactState.NO_PATCH) {
+                impactedVulnerabilityIdsByComponentId
+                        .computeIfAbsent(row.getComponentId(), ignored -> new LinkedHashSet<>())
+                        .add(row.getVulnerabilityId());
+            }
+        }
+
+        Map<UUID, ComponentVulnerabilitySummary> summaryByComponentId = new LinkedHashMap<>();
+        for (UUID componentId : componentIds) {
+            Set<UUID> vulnerabilityIds = vulnerabilityIdsByComponentId.getOrDefault(componentId, Set.of());
+            Set<UUID> impactedIds = impactedVulnerabilityIdsByComponentId.getOrDefault(componentId, Set.of());
+            List<String> cveIds = new ArrayList<>(cveIdsByComponentId.getOrDefault(componentId, new LinkedHashSet<>()));
+            summaryByComponentId.put(
+                    componentId,
+                    new ComponentVulnerabilitySummary(vulnerabilityIds.size(), impactedIds.size(), cveIds)
+            );
+        }
+        return summaryByComponentId;
     }
 
     private Map<UUID, HostReviewSignals> buildHostReviewSignals(Tenant tenant, List<InventoryComponent> components) {
@@ -406,5 +481,13 @@ public class InventoryService {
             boolean discoveryModelReview
     ) {
         private static final HostReviewSignals NONE = new HostReviewSignals(false, 0, false, false, false, false);
+    }
+
+    private record ComponentVulnerabilitySummary(
+            int cveCount,
+            int impactedCveCount,
+            List<String> cveIds
+    ) {
+        private static final ComponentVulnerabilitySummary NONE = new ComponentVulnerabilitySummary(0, 0, List.of());
     }
 }

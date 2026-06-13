@@ -4,6 +4,16 @@ import { api } from '../api/client';
 import { renderWithProviders } from '../test/test-utils';
 import { HostAssetDetailPage } from './HostAssetDetailPage';
 
+const EMPTY_BOM_EVIDENCE = {
+  documentCount: 0,
+  componentCount: 0,
+  evidenceCount: 0,
+  vulnerabilityLinkCount: 0,
+  componentsInWorkflow: 0,
+  documents: [],
+  components: [],
+};
+
 function buildHostDetail(overrides = {}) {
   return {
     host: {
@@ -23,6 +33,7 @@ function buildHostDetail(overrides = {}) {
     software: [],
     findings: [],
     applicableCves: [],
+    bomEvidence: EMPTY_BOM_EVIDENCE,
   };
 }
 

@@ -4,6 +4,7 @@ import java.util.List;
 
 public record HostAssetDetailResponse(
         HostAssetSummaryResponse host,
+        BomEvidenceSummaryResponse bomEvidence,
         List<HostAliasResponse> aliases,
         List<HostSoftwareInstanceResponse> software,
         List<HostFindingResponse> findings,

@@ -8,6 +8,9 @@ public record ParsedComponent(
         String version,
         String purl,
         String digest,
-        List<String> cpes
+        List<String> cpes,
+        String packageGroup,
+        String license,
+        String scope
 ) {
 }

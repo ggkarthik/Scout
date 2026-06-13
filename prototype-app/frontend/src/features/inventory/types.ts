@@ -1,9 +1,30 @@
+export interface ApplicationRiskSummary {
+  assetId: string;
+  assetName: string;
+  assetIdentifier: string;
+  businessCriticality: string;
+  bomTypes: string[];
+  totalComponents: number;
+  vulnerableComponents: number;
+  eolComponents: number;
+  criticalCveCount: number;
+  highCveCount: number;
+  mediumCveCount: number;
+  lowCveCount: number;
+  totalCveCount: number;
+  riskScore: number;
+  riskLevel: string;
+  lastIngestedAt: string | null;
+}
+
 export type InventoryViewKey =
   | 'overview'
   | 'software-identities'
   | 'hosts'
   | 'container-images'
-  | 'sbom';
+  | 'sbom'
+  | 'bom-components'
+  | 'bom-inventory';
 
 export type InventoryScopedAssetType = 'ALL' | 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
 export type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'reviewCategory' | 'query';

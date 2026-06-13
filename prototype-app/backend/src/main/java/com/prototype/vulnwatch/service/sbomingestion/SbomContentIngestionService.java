@@ -173,6 +173,9 @@ public class SbomContentIngestionService {
                 component.setSbomUpload(upload);
                 component.setEcosystem(parsed.ecosystem().toLowerCase(Locale.ROOT));
                 component.setPackageName(parsed.packageName().toLowerCase(Locale.ROOT));
+                component.setPackageGroup(parsed.packageGroup());
+                component.setLicense(parsed.license());
+                component.setScope(parsed.scope());
                 component.setVersion(parsed.version());
                 component.setPurl(parsed.purl());
                 component.setComponentDigest(parsed.digest());

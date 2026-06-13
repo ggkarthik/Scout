@@ -446,3 +446,260 @@
 .connect-source-card--disabled .connect-source-dot {
   background: var(--border-strong);
 }
+
+/* ── BOM Management form ── */
+
+.ingestion-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+  max-width: 720px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--title);
+}
+
+.form-input,
+.form-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  width: 100%;
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.form-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.form-error {
+  color: var(--critical);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.form-actions {
+  padding-top: 4px;
+}
+
+/* Mode pills + immediate input on the same row */
+.bom-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ingestion-mode-tabs {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* File picker inline */
+.bom-inline-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.file-upload-name {
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* URL input inline */
+.bom-inline-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.bom-inline-url .form-input {
+  flex: 1;
+}
+
+/* Ingestion result */
+.ingestion-result {
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ingestion-result p {
+  margin: 0;
+}
+
+.ingestion-result--success {
+  border: 1px solid var(--success, #22c55e);
+  background: color-mix(in srgb, var(--success, #22c55e) 8%, transparent);
+  color: var(--text);
+}
+
+/* BOM type selection cards */
+.bom-type-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .bom-type-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+.bom-type-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--surface);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+  width: 100%;
+}
+
+.bom-type-card:hover {
+  border-color: var(--accent);
+}
+
+.bom-type-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.bom-type-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.bom-type-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--title);
+}
+
+.bom-type-desc {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+/* Form sections with dividers */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-section + .form-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  margin-top: 4px;
+}
+
+.form-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+
+/* 2-col layout for asset fields */
+.form-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .form-row-2col { grid-template-columns: 1fr; }
+}
+
+/* Action bar */
+.form-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* Result card — metric numbers */
+.ingestion-result-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.result-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result-metric-value {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--title);
+  line-height: 1;
+}
+
+.result-metric-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--success, #22c55e) 20%, transparent);
+}

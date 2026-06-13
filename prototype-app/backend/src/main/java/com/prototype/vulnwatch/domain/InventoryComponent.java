@@ -58,6 +58,15 @@ public class InventoryComponent {
     @Column(nullable = false)
     private String packageName;
 
+    @Column(name = "package_group", length = 255)
+    private String packageGroup;
+
+    @Column
+    private String license;
+
+    @Column(length = 30)
+    private String scope;
+
     @Column
     private String version;
 
@@ -164,6 +173,15 @@ public class InventoryComponent {
     public void setPackageName(String packageName) {
         this.packageName = packageName;
     }
+
+    public String getPackageGroup() { return packageGroup; }
+    public void setPackageGroup(String packageGroup) { this.packageGroup = packageGroup; }
+
+    public String getLicense() { return license; }
+    public void setLicense(String license) { this.license = license; }
+
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
 
     public String getVersion() {
         return version;

@@ -29,8 +29,8 @@ public class LocalCredentialAuthService {
 
     private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_EMAIL = "platform.owner@localhost";
     private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_PASSWORD_HASH = "$2a$10$awIpunHkac/hB/2JPslHL.KAAtdZ5.rmmkqVjxlHkmaPHXJ1OCKPO";
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "tenant.admin@localhost";
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$6cfZYpOkQxrSl3.YCGYTPutGAORvx.ywRJmp7EkD9SYO5LLvqrhaO";
+    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "admin";
+    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$LSEEjYNaUt8ozIDh1DHRiO2syFb/bSAlCtQbe3gN3lYJMCjgOpJje";
 
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
