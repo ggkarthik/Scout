@@ -6,7 +6,6 @@ import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
-import { GithubPipelineManager } from '../components/GithubPipelineManager';
 import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
@@ -21,10 +20,12 @@ import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole, hasRole } from '../features/auth/roles';
 import { timeAgo } from '../lib/time';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
+import { BomManagementPage } from './BomManagementPage';
 
 type ConnectorId =
   | 'sbom-endpoint'
   | 'sbom-github'
+  | 'bom-management'
   | 'servicenow-cmdb'
   | 'sccm-cmdb'
   | 'aws-discovery'
@@ -180,6 +181,20 @@ const CONNECTORS: ConnectorDefinition[] = [
     icon: IconGitHub
   },
   {
+    id: 'bom-management',
+    name: 'BOM Management',
+    summary: 'Ingest and manage SBOM, AI BOM, CBOM, and Vendor BOM files via URL fetch or file upload.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 3h8l4 4v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        <path d="M12 3v4h4" />
+        <path d="M7 9h6" />
+        <path d="M7 12h6" />
+        <path d="M7 15h4" />
+      </svg>
+    )
+  },
+  {
     id: 'servicenow-cmdb',
     name: 'ServiceNow CMDB',
     summary: 'Pull host inventory from ServiceNow Table APIs and review ingestion history in Connect.',
@@ -264,7 +279,7 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
 
 const CMDB_CONNECTOR_IDS: ConnectorId[] = [
   'sbom-endpoint',
-  'sbom-github',
+  'bom-management',
   'servicenow-cmdb',
   'sccm-cmdb'
 ];
@@ -496,9 +511,19 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'sbom-github') {
     return (
-      <GithubPipelineManager
-        title="GitHub SBOM Connector"
-        caption="Use GitHub as the single anchor for repository SBOM and GHCR image ingestion, reusable pipelines, and ingestion evidence."
+      <BomManagementPage
+        title="GitHub BOM Connector"
+        caption="Use GitHub repositories and GHCR attestations as BOM acquisition adapters inside the shared BOM management workflow."
+        includeGithubSources
+      />
+    );
+  }
+  if (connectorId === 'bom-management') {
+    return (
+      <BomManagementPage
+        title="BOM Management"
+        caption="Ingest SBOM, AI BOM, CBOM, and Vendor BOM files via URL fetch or file upload."
+        includeGithubSources
       />
     );
   }

@@ -23,6 +23,7 @@ const GITHUB_PIPELINE_COLUMNS: DataTableColumn[] = [
   { id: 'source', label: 'Source', header: 'Source', initialSize: 260 },
   { id: 'asset', label: 'Asset', header: 'Asset', initialSize: 220 },
   { id: 'frequency', label: 'Frequency', header: 'Frequency', initialSize: 120 },
+  { id: 'token', label: 'Token', header: 'Token', initialSize: 120 },
   { id: 'enabled', label: 'Enabled', header: 'Enabled', initialSize: 100 },
   { id: 'lastRun', label: 'Last Run', header: 'Last Run', initialSize: 180 },
   { id: 'action', label: 'Action', header: 'Action', initialSize: 220 }
@@ -100,8 +101,9 @@ export function GithubPipelineManager({
   const [sourceRepo, setSourceRepo] = React.useState('');
   const [sourcePath, setSourcePath] = React.useState<GithubSourcePath>('dependency-graph/sbom');
   const [sourceFrequency, setSourceFrequency] = React.useState<'ONCE' | 'INTERVAL'>('ONCE');
-  const [sourceIntervalMinutes, setSourceIntervalMinutes] = React.useState('60');
+  const [sourceIntervalHours, setSourceIntervalHours] = React.useState('1');
   const [sourceEnabled, setSourceEnabled] = React.useState(true);
+  const [sourceToken, setSourceToken] = React.useState('');
   const sourceAssetType: 'APPLICATION' | 'CONTAINER_IMAGE' =
     sourcePath === 'ghcr/attestations' ? 'CONTAINER_IMAGE' : 'APPLICATION';
   const githubSourcesQuery = useGithubSbomSourcesQuery();
@@ -199,8 +201,9 @@ export function GithubPipelineManager({
         path: sourcePath,
         assetType: sourceAssetType,
         frequency: sourceFrequency,
-        intervalMinutes: sourceFrequency === 'INTERVAL' ? Math.max(5, Number(sourceIntervalMinutes) || 60) : undefined,
-        enabled: sourceEnabled
+        intervalMinutes: sourceFrequency === 'INTERVAL' ? Math.max(5, (Number(sourceIntervalHours) || 1) * 60) : undefined,
+        enabled: sourceEnabled,
+        githubToken: sourceToken.trim() || undefined
       });
       setSourceMessage('GitHub pipeline created');
       await queryClient.invalidateQueries({ queryKey: ['github-sbom-sources'] });
@@ -277,7 +280,12 @@ export function GithubPipelineManager({
           source: { content: `${githubSourceTypeLabel(source.path)}: ${githubSourceTargetLabel(source)}` },
           asset: { content: `${source.assetName} (${source.assetIdentifier})` },
           frequency: {
-            content: source.frequency === 'ONCE' ? 'Once' : `Every ${source.intervalMinutes}m`
+            content: source.frequency === 'ONCE' ? 'Once' : `Every ${Math.round(source.intervalMinutes / 60)}h`
+          },
+          token: {
+            content: source.hasToken
+              ? <span className="badge badge-success" title="A per-pipeline token is configured">Token set</span>
+              : <span className="muted">Global</span>
           },
           enabled: { content: source.enabled ? 'Yes' : 'No' },
           lastRun: { content: source.lastRunAt ? new Date(source.lastRunAt).toLocaleString() : 'Never' },
@@ -341,6 +349,15 @@ export function GithubPipelineManager({
               Run Once uses only the owner. Pipeline name is only required if you want to save a reusable pipeline.
             </div>
           )}
+          <label>GitHub Token (optional)
+            <input
+              type="password"
+              value={sourceToken}
+              onChange={(e) => setSourceToken(e.target.value)}
+              placeholder="ghp_… leave blank to use the global backend token"
+              autoComplete="new-password"
+            />
+          </label>
         </div>
       </div>
 
@@ -350,17 +367,17 @@ export function GithubPipelineManager({
           <label>Frequency
             <select value={sourceFrequency} onChange={(e) => setSourceFrequency(e.target.value as 'ONCE' | 'INTERVAL')}>
               <option value="ONCE">Once</option>
-              <option value="INTERVAL">Every N minutes</option>
+              <option value="INTERVAL">Every N hours</option>
             </select>
           </label>
           {sourceFrequency === 'INTERVAL' && (
-            <label>Interval (minutes)
+            <label>Interval (hours)
               <input
                 type="number"
-                min={5}
-                max={1440}
-                value={sourceIntervalMinutes}
-                onChange={(e) => setSourceIntervalMinutes(e.target.value)}
+                min={1}
+                max={24}
+                value={sourceIntervalHours}
+                onChange={(e) => setSourceIntervalHours(e.target.value)}
               />
             </label>
           )}

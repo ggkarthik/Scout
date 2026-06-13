@@ -3,22 +3,38 @@ package com.prototype.vulnwatch.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.controller.CveDetailController;
-import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
+import com.prototype.vulnwatch.domain.Asset;
+import com.prototype.vulnwatch.domain.ApplicabilityAssessment;
+import com.prototype.vulnwatch.domain.BomComponent;
+import com.prototype.vulnwatch.domain.BomComponentVulnerabilityLink;
+import com.prototype.vulnwatch.domain.BomComponentWorkflow;
+import com.prototype.vulnwatch.domain.BomIngestionRecord;
+import com.prototype.vulnwatch.domain.BomVulnerabilityRelationType;
+import com.prototype.vulnwatch.domain.BomWorkflowStatus;
+import com.prototype.vulnwatch.domain.Ci;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.Investigation;
 import com.prototype.vulnwatch.domain.OrgCveRecord;
+import com.prototype.vulnwatch.domain.SoftwareInstance;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.VexAssertion;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.domain.VulnerabilityIntelObservation;
+import com.prototype.vulnwatch.repo.AssetRepository;
+import com.prototype.vulnwatch.repo.BomComponentRepository;
+import com.prototype.vulnwatch.repo.BomComponentVulnerabilityLinkRepository;
+import com.prototype.vulnwatch.repo.BomComponentWorkflowRepository;
+import com.prototype.vulnwatch.repo.BomIngestionRecordRepository;
+import com.prototype.vulnwatch.repo.CiRepository;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
+import com.prototype.vulnwatch.repo.SoftwareInstanceRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
 import com.prototype.vulnwatch.domain.VulnerabilityIntelRelation;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
@@ -63,6 +79,13 @@ public class CveDetailQueryFacade {
     private final VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler;
     private final VulnerabilityIntelRelationRepository relationRepository;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final BomComponentVulnerabilityLinkRepository bomComponentVulnerabilityLinkRepository;
+    private final BomComponentRepository bomComponentRepository;
+    private final BomIngestionRecordRepository bomIngestionRecordRepository;
+    private final BomComponentWorkflowRepository bomComponentWorkflowRepository;
+    private final AssetRepository assetRepository;
+    private final CiRepository ciRepository;
+    private final SoftwareInstanceRepository softwareInstanceRepository;
 
     public CveDetailQueryFacade(
             VulnerabilityRepository vulnerabilityRepository,
@@ -81,7 +104,14 @@ public class CveDetailQueryFacade {
             ObjectMapper objectMapper,
             VulnerabilityIntelDetailAssembler vulnerabilityIntelDetailAssembler,
             VulnerabilityIntelRelationRepository relationRepository,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            BomComponentVulnerabilityLinkRepository bomComponentVulnerabilityLinkRepository,
+            BomComponentRepository bomComponentRepository,
+            BomIngestionRecordRepository bomIngestionRecordRepository,
+            BomComponentWorkflowRepository bomComponentWorkflowRepository,
+            AssetRepository assetRepository,
+            CiRepository ciRepository,
+            SoftwareInstanceRepository softwareInstanceRepository
     ) {
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.orgCveRecordRepository = orgCveRecordRepository;
@@ -100,6 +130,13 @@ public class CveDetailQueryFacade {
         this.vulnerabilityIntelDetailAssembler = vulnerabilityIntelDetailAssembler;
         this.relationRepository = relationRepository;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.bomComponentVulnerabilityLinkRepository = bomComponentVulnerabilityLinkRepository;
+        this.bomComponentRepository = bomComponentRepository;
+        this.bomIngestionRecordRepository = bomIngestionRecordRepository;
+        this.bomComponentWorkflowRepository = bomComponentWorkflowRepository;
+        this.assetRepository = assetRepository;
+        this.ciRepository = ciRepository;
+        this.softwareInstanceRepository = softwareInstanceRepository;
     }
 
     public ResponseEntity<CveDetailController.CveDetailResponse> getCveDetail(String cveId) {
@@ -126,7 +163,8 @@ public class CveDetailQueryFacade {
                 .filter(state -> state.getComponent() != null)
                 .filter(state -> state.getComponent().getComponentStatus() == InventoryComponentStatus.ACTIVE)
                 .map(this::toMatchedSoftwareDto)
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
+        matchedSoftware.addAll(buildBomCorrelatedMatchedSoftware(tenant, vulnerability.getExternalId(), matchedSoftware));
 
         CveDetailController.CveDetailResponse response = new CveDetailController.CveDetailResponse();
         response.summary = buildSummary(vulnerability);
@@ -689,6 +727,349 @@ public class CveDetailQueryFacade {
         dto.supportGroup = state.getComponent().getAsset() == null ? null : state.getComponent().getAsset().getSupportGroup();
         dto.softwareIdentityId = state.getComponent().getSoftwareIdentity() == null ? null : state.getComponent().getSoftwareIdentity().getId();
         return dto;
+    }
+
+    private List<CveDetailController.MatchedSoftwareDto> buildBomCorrelatedMatchedSoftware(
+            Tenant tenant,
+            String vulnerabilityKey,
+            List<CveDetailController.MatchedSoftwareDto> existingRows
+    ) {
+        if (tenant == null || tenant.getId() == null || vulnerabilityKey == null || vulnerabilityKey.isBlank()) {
+            return List.of();
+        }
+        List<BomComponentVulnerabilityLink> links =
+                bomComponentVulnerabilityLinkRepository.findByTenant_IdAndVulnerabilityKeyAndRelationType(
+                        tenant.getId(),
+                        vulnerabilityKey,
+                        BomVulnerabilityRelationType.CVE
+                );
+        if (links.isEmpty()) {
+            return List.of();
+        }
+
+        Set<UUID> componentIds = links.stream()
+                .map(BomComponentVulnerabilityLink::getBomComponentId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (componentIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, BomComponent> componentsById = bomComponentRepository.findAllById(componentIds).stream()
+                .filter(BomComponent::isActive)
+                .collect(Collectors.toMap(BomComponent::getId, component -> component));
+        if (componentsById.isEmpty()) {
+            return List.of();
+        }
+
+        Set<UUID> bomIds = componentsById.values().stream()
+                .map(BomComponent::getBomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, BomIngestionRecord> bomRecordsById = bomIngestionRecordRepository.findAllById(bomIds).stream()
+                .collect(Collectors.toMap(BomIngestionRecord::getId, record -> record));
+
+        Map<UUID, BomWorkflowStatus> workflowStatusByComponentId =
+                bomComponentWorkflowRepository.findByBomComponentIdIn(componentIds).stream()
+                        .collect(Collectors.toMap(
+                                BomComponentWorkflow::getBomComponentId,
+                                BomComponentWorkflow::getWorkflowStatus,
+                                this::preferBomWorkflowStatus
+                        ));
+
+        Set<UUID> assetIds = bomRecordsById.values().stream()
+                .map(BomIngestionRecord::getAssetId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, Asset> assetsById = assetRepository.findAllById(assetIds).stream()
+                .collect(Collectors.toMap(Asset::getId, asset -> asset));
+        Map<UUID, Ci> ciByAssetId = assetIds.isEmpty()
+                ? Map.of()
+                : ciRepository.findByTenant_IdAndAsset_IdIn(tenant.getId(), assetIds).stream()
+                        .filter(ci -> ci.getAsset() != null && ci.getAsset().getId() != null)
+                        .collect(Collectors.toMap(
+                                ci -> ci.getAsset().getId(),
+                                ci -> ci,
+                                (left, right) -> left
+                        ));
+        Set<UUID> ciIds = ciByAssetId.values().stream()
+                .map(Ci::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, List<SoftwareInstance>> softwareInstancesByCiId = ciIds.isEmpty()
+                ? Map.of()
+                : softwareInstanceRepository.findByTenant_IdAndCi_IdIn(tenant.getId(), ciIds).stream()
+                        .filter(instance -> instance.getCi() != null && instance.getCi().getId() != null)
+                        .collect(Collectors.groupingBy(instance -> instance.getCi().getId()));
+
+        Set<String> existingKeys = existingRows.stream()
+                .map(this::matchedSoftwareDedupKey)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<CveDetailController.MatchedSoftwareDto> rows = new ArrayList<>();
+        for (BomComponentVulnerabilityLink link : links) {
+            BomComponent component = componentsById.get(link.getBomComponentId());
+            if (component == null) {
+                continue;
+            }
+            BomIngestionRecord bomRecord = bomRecordsById.get(component.getBomId());
+            Asset asset = bomRecord == null ? null : assetsById.get(bomRecord.getAssetId());
+            SoftwareInstance correlatedInstance = resolveCorrelatedSoftwareInstance(
+                    component,
+                    asset,
+                    ciByAssetId,
+                    softwareInstancesByCiId
+            );
+            CveDetailController.MatchedSoftwareDto dto = toBomMatchedSoftwareDto(
+                    component,
+                    bomRecord,
+                    asset,
+                    workflowStatusByComponentId.get(component.getId()),
+                    correlatedInstance
+            );
+            String dedupeKey = matchedSoftwareDedupKey(dto);
+            if (existingKeys.add(dedupeKey)) {
+                rows.add(dto);
+            }
+        }
+        return rows;
+    }
+
+    private CveDetailController.MatchedSoftwareDto toBomMatchedSoftwareDto(
+            BomComponent component,
+            BomIngestionRecord bomRecord,
+            Asset asset,
+            BomWorkflowStatus workflowStatus,
+            SoftwareInstance correlatedInstance
+    ) {
+        CveDetailController.MatchedSoftwareDto dto = new CveDetailController.MatchedSoftwareDto();
+        dto.componentId = correlatedInstance != null && correlatedInstance.getInventoryComponent() != null
+                ? correlatedInstance.getInventoryComponent().getId()
+                : component.getId();
+        dto.assetId = asset == null ? null : asset.getId();
+        dto.assetName = asset != null ? asset.getName() : fallbackAssetName(bomRecord);
+        dto.assetIdentifier = asset != null ? asset.getIdentifier() : fallbackAssetIdentifier(bomRecord, component);
+        dto.assetType = asset != null && asset.getType() != null
+                ? asset.getType().name()
+                : "BOM_COMPONENT";
+        dto.ecosystem = resolveBomEcosystem(component);
+        dto.packageName = component.getName();
+        dto.version = component.getVersion();
+        dto.applicabilityState = ApplicabilityState.APPLICABLE;
+        dto.applicabilityReason = "bom_correlated";
+        dto.applicabilityReasonDetail = "BOM evidence correlated this component to the CVE.";
+        dto.computedImpactState = mapBomWorkflowImpact(workflowStatus);
+        dto.computedImpactReason = "bom_correlated";
+        dto.computedImpactReasonDetail = resolveBomWorkflowDetail(workflowStatus);
+        dto.impactState = dto.computedImpactState;
+        dto.impactReason = dto.computedImpactReason;
+        dto.impactReasonDetail = dto.computedImpactReasonDetail;
+        dto.vexStatus = "UNKNOWN";
+        dto.vexProvider = bomRecord != null && bomRecord.getSourceSystem() != null ? bomRecord.getSourceSystem() : "bom";
+        dto.vexFreshness = "UNKNOWN";
+        dto.vexSource = bomRecord != null ? bomRecord.getSourceReference() : null;
+        dto.analystDisposition = null;
+        dto.analystReason = null;
+        dto.matchedBy = "BOM_CORRELATION";
+        dto.eligibleForFinding = correlatedInstance != null && correlatedInstance.getInventoryComponent() != null;
+        dto.findingEligibilityReason = dto.eligibleForFinding
+                ? "bom_inventory_correlated"
+                : "bom_requires_inventory_correlation";
+        dto.findingEligibilityDetail = dto.eligibleForFinding
+                ? "This CVE match is backed by BOM evidence and correlated to an active inventory component on the same asset."
+                : "This CVE match is backed by BOM evidence. Create findings after the BOM component is correlated to an active inventory component.";
+        dto.eolSlug = null;
+        dto.eolCycle = null;
+        dto.eolDate = null;
+        dto.isEol = null;
+        dto.eolDaysRemaining = null;
+        dto.eolSupportEndDate = null;
+        dto.supportPhase = workflowStatus == null ? null : workflowStatus.name();
+        dto.supportGroup = asset != null ? asset.getSupportGroup() : null;
+        dto.softwareIdentityId = correlatedInstance != null && correlatedInstance.getSoftwareIdentity() != null
+                ? correlatedInstance.getSoftwareIdentity().getId()
+                : null;
+        return dto;
+    }
+
+    private SoftwareInstance resolveCorrelatedSoftwareInstance(
+            BomComponent component,
+            Asset asset,
+            Map<UUID, Ci> ciByAssetId,
+            Map<UUID, List<SoftwareInstance>> softwareInstancesByCiId
+    ) {
+        if (component == null || asset == null || asset.getId() == null) {
+            return null;
+        }
+        Ci ci = ciByAssetId.get(asset.getId());
+        if (ci == null || ci.getId() == null) {
+            return null;
+        }
+        List<SoftwareInstance> softwareInstances = softwareInstancesByCiId.get(ci.getId());
+        if (softwareInstances == null || softwareInstances.isEmpty()) {
+            return null;
+        }
+
+        String bomName = InventoryResolutionService.normalize(component.getName());
+        String bomVersion = InventoryResolutionService.normalize(component.getVersion());
+        SoftwareInstance bestMatch = null;
+        int bestScore = -1;
+        for (SoftwareInstance candidate : softwareInstances) {
+            if (candidate.getInventoryComponent() == null
+                    || candidate.getInventoryComponent().getComponentStatus() != InventoryComponentStatus.ACTIVE) {
+                continue;
+            }
+            int score = bomSoftwareMatchScore(bomName, bomVersion, candidate);
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = candidate;
+            }
+        }
+        return bestScore >= 2 ? bestMatch : null;
+    }
+
+    private int bomSoftwareMatchScore(String bomName, String bomVersion, SoftwareInstance candidate) {
+        String normalizedProduct = InventoryResolutionService.normalize(candidate.getNormalizedProduct());
+        String displayName = InventoryResolutionService.normalize(candidate.getDisplayName());
+        String normalizedVersion = InventoryResolutionService.normalize(candidate.getNormalizedVersion());
+        String rawVersion = InventoryResolutionService.normalize(candidate.getVersion());
+        String versionEvidence = InventoryResolutionService.normalize(candidate.getVersionEvidence());
+
+        boolean nameMatch = !bomName.isBlank() && (
+                bomName.equals(normalizedProduct)
+                        || bomName.equals(displayName)
+                        || (!normalizedProduct.isBlank() && normalizedProduct.contains(bomName))
+                        || (!displayName.isBlank() && displayName.contains(bomName))
+        );
+        if (!nameMatch) {
+            return -1;
+        }
+
+        if (bomVersion.isBlank()) {
+            return 2;
+        }
+
+        boolean versionMatch = bomVersion.equals(normalizedVersion)
+                || bomVersion.equals(rawVersion)
+                || bomVersion.equals(versionEvidence)
+                || (!normalizedVersion.isBlank() && normalizedVersion.contains(bomVersion))
+                || (!rawVersion.isBlank() && rawVersion.contains(bomVersion))
+                || (!versionEvidence.isBlank() && versionEvidence.contains(bomVersion));
+        return versionMatch ? 3 : 1;
+    }
+
+    private BomWorkflowStatus preferBomWorkflowStatus(BomWorkflowStatus left, BomWorkflowStatus right) {
+        return bomWorkflowRank(right) >= bomWorkflowRank(left) ? right : left;
+    }
+
+    private int bomWorkflowRank(BomWorkflowStatus status) {
+        if (status == null) {
+            return 0;
+        }
+        return switch (status) {
+            case REMEDIATION_OPEN -> 6;
+            case PATCH_AVAILABLE -> 5;
+            case UNDER_INVESTIGATION -> 4;
+            case CORRELATED -> 3;
+            case ACCEPTED_RISK -> 2;
+            case FALSE_POSITIVE -> 1;
+            case RESOLVED -> 1;
+            case DISCOVERED -> 0;
+        };
+    }
+
+    private ImpactState mapBomWorkflowImpact(BomWorkflowStatus workflowStatus) {
+        if (workflowStatus == null) {
+            return ImpactState.UNDER_INVESTIGATION;
+        }
+        return switch (workflowStatus) {
+            case RESOLVED -> ImpactState.FIXED;
+            case FALSE_POSITIVE, ACCEPTED_RISK -> ImpactState.NOT_IMPACTED;
+            case REMEDIATION_OPEN, PATCH_AVAILABLE -> ImpactState.IMPACTED;
+            case UNDER_INVESTIGATION, CORRELATED, DISCOVERED -> ImpactState.UNDER_INVESTIGATION;
+        };
+    }
+
+    private String resolveBomWorkflowDetail(BomWorkflowStatus workflowStatus) {
+        if (workflowStatus == null) {
+            return "BOM correlation found matching package evidence for this CVE.";
+        }
+        return switch (workflowStatus) {
+            case REMEDIATION_OPEN -> "BOM-backed component has entered remediation workflow.";
+            case PATCH_AVAILABLE -> "BOM-backed component has a patch path identified.";
+            case RESOLVED -> "BOM-backed component has been marked resolved.";
+            case ACCEPTED_RISK -> "BOM-backed component has been accepted as risk.";
+            case FALSE_POSITIVE -> "BOM-backed correlation was marked as false positive.";
+            case UNDER_INVESTIGATION -> "BOM-backed component is under investigation.";
+            case CORRELATED -> "BOM evidence correlated this component to the CVE.";
+            case DISCOVERED -> "BOM-backed component has been discovered but not yet fully investigated.";
+        };
+    }
+
+    private String resolveBomEcosystem(BomComponent component) {
+        if (component == null) {
+            return "BOM";
+        }
+        if (component.getPurl() != null && component.getPurl().startsWith("pkg:")) {
+            int schemeIdx = component.getPurl().indexOf(':');
+            int slashIdx = component.getPurl().indexOf('/', schemeIdx + 1);
+            String type = slashIdx > schemeIdx
+                    ? component.getPurl().substring(schemeIdx + 1, slashIdx)
+                    : component.getPurl().substring(schemeIdx + 1);
+            int atIdx = type.indexOf('@');
+            if (atIdx > -1) {
+                type = type.substring(0, atIdx);
+            }
+            int qIdx = type.indexOf('?');
+            if (qIdx > -1) {
+                type = type.substring(0, qIdx);
+            }
+            return type.isBlank() ? "BOM" : type.toUpperCase();
+        }
+        if (component.getGroupName() != null && !component.getGroupName().isBlank()) {
+            return component.getGroupName();
+        }
+        if (component.getSupplier() != null && !component.getSupplier().isBlank()) {
+            return component.getSupplier();
+        }
+        return "BOM";
+    }
+
+    private String fallbackAssetName(BomIngestionRecord bomRecord) {
+        if (bomRecord == null) {
+            return "BOM-derived software";
+        }
+        if (bomRecord.getSourceLabel() != null && !bomRecord.getSourceLabel().isBlank()) {
+            return bomRecord.getSourceLabel();
+        }
+        if (bomRecord.getDocumentName() != null && !bomRecord.getDocumentName().isBlank()) {
+            return bomRecord.getDocumentName();
+        }
+        if (bomRecord.getSourceReference() != null && !bomRecord.getSourceReference().isBlank()) {
+            return bomRecord.getSourceReference();
+        }
+        return "BOM-derived software";
+    }
+
+    private String fallbackAssetIdentifier(BomIngestionRecord bomRecord, BomComponent component) {
+        if (bomRecord != null && bomRecord.getSourceReference() != null && !bomRecord.getSourceReference().isBlank()) {
+            return bomRecord.getSourceReference();
+        }
+        if (component != null && component.getBomRef() != null && !component.getBomRef().isBlank()) {
+            return component.getBomRef();
+        }
+        return component != null && component.getId() != null ? component.getId().toString() : "bom-component";
+    }
+
+    private String matchedSoftwareDedupKey(CveDetailController.MatchedSoftwareDto dto) {
+        if (dto == null) {
+            return "";
+        }
+        return String.join("|",
+                dto.assetId == null ? "" : dto.assetId.toString(),
+                dto.assetIdentifier == null ? "" : dto.assetIdentifier,
+                dto.packageName == null ? "" : dto.packageName.toLowerCase(),
+                dto.version == null ? "" : dto.version.toLowerCase());
     }
 
     private String resolveFindingEligibilityReason(ComponentVulnerabilityState state) {

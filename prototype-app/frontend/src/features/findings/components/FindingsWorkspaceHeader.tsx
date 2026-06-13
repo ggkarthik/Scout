@@ -2,6 +2,7 @@ import React from 'react';
 import type { FindingProjectionStatus, FindingQueueDefinition } from '../types';
 
 type Props = {
+  builtInQueues: FindingQueueDefinition[];
   personalQueues: FindingQueueDefinition[];
   activeQueueKey: string;
   projectionStatus?: FindingProjectionStatus;
@@ -19,6 +20,7 @@ type Props = {
 };
 
 export function FindingsWorkspaceHeader({
+  builtInQueues,
   personalQueues,
   activeQueueKey,
   projectionStatus,
@@ -34,36 +36,46 @@ export function FindingsWorkspaceHeader({
   onDeleteQueue,
   workspaceTitle,
 }: Props) {
+  const editableActiveQueue = personalQueues.find((queue) => queue.key === activeQueueKey) ?? null;
+
   return (
     <>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ margin: 0 }}>Findings</h1>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="panel-caption" style={{ marginBottom: 0 }}>My Queues</span>
-            {personalQueues.map((queue) => (
-              <div key={queue.key} style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button
-                  className={`btn ${queue.key === activeQueueKey ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => onSelectQueue(queue.key)}
-                  style={{ padding: '6px 10px' }}
-                  title={queue.description ?? undefined}
-                >
-                  {queue.title}{queue.isDefault ? ' • Default' : ''} ({queue.matchingCount})
-                </button>
-                <button className="btn btn-secondary" style={{ padding: '6px 8px' }} onClick={() => onOpenEditQueue(queue)}>Edit</button>
-                <button className="btn btn-secondary" style={{ padding: '6px 8px' }} onClick={() => onDuplicateQueue(queue)}>Copy</button>
-                {!queue.isDefault && (
-                  <button className="btn btn-secondary" style={{ padding: '6px 8px' }} onClick={() => onSetDefaultQueue(queue)}>Default</button>
-                )}
-                <button className="btn btn-secondary" style={{ padding: '6px 8px' }} onClick={() => onDeleteQueue(queue)}>Delete</button>
-              </div>
-            ))}
-            <button className="btn btn-secondary" onClick={onOpenCreateQueue}>Save current view</button>
-          </div>
-          {queueLoading && <span className="panel-caption" style={{ marginBottom: 0 }}>Loading queues...</span>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {builtInQueues.map((queue) => (
+            <button
+              key={queue.key}
+              type="button"
+              className={queue.key === activeQueueKey ? 'btn btn-primary' : 'btn btn-secondary'}
+              disabled={queueLoading}
+              onClick={() => onSelectQueue(queue.key)}
+            >
+              {queue.title}
+              {typeof queue.matchingCount === 'number' ? ` (${queue.matchingCount})` : ''}
+            </button>
+          ))}
+          <button type="button" className="btn btn-secondary" onClick={onOpenCreateQueue}>
+            Save Current View
+          </button>
+          {editableActiveQueue ? (
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => onOpenEditQueue(editableActiveQueue)}>
+                Edit Queue
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => onDuplicateQueue(editableActiveQueue)}>
+                Duplicate Queue
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => onSetDefaultQueue(editableActiveQueue)}>
+                Set Default
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => onDeleteQueue(editableActiveQueue)}>
+                Delete Queue
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 

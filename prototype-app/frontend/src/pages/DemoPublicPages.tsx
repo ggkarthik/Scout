@@ -12,36 +12,236 @@ const SHARED_LOCALHOST_LOGIN_HINTS_ENABLED = typeof window !== 'undefined'
 export function DemoLandingPage() {
   return (
     <PublicDemoShell>
-      <section className="demo-hero">
-        <div className="demo-hero-copy">
-          <span className="demo-kicker">7-day hosted validation</span>
-          <h1>Scout.ai</h1>
+      <section className="sg-hero">
+        <div className="sg-hero-copy">
+          <span className="demo-kicker">securityGrid product portfolio</span>
+          <h1>NoScan gives customers a working risk operations stack, not just another dashboard.</h1>
           <p>
-            Validate vulnerability exposure, SBOM ingestion, finding workflow, and tenant-ready reporting in a
-            dedicated demo workspace.
+            securityGrid combines infrastructure inventory, SBOM intelligence, cloud posture, vulnerability evidence,
+            and workflow-driven remediation into one operating model. The portfolio is organized into focused product
+            grids so buyers can understand where to start and how the platform expands.
           </p>
           <div className="button-row">
-            <Link className="btn btn-primary" to="/demo/request">Request demo instance</Link>
-            <Link className="btn btn-secondary" to="/login">Log in</Link>
+            <a className="btn btn-primary" href="#products">Explore products</a>
+            <Link className="btn btn-secondary" to="/demo/request">Request customer briefing</Link>
+          </div>
+          <div className="sg-hero-metrics" aria-label="Portfolio signals">
+            {[
+              ['Products', 'InfraGrid, SBOM Grid, Cloud Grid, AI Grid'],
+              ['Core workflows', 'Inventory, correlation, findings, remediation'],
+              ['Buyer outcome', 'Faster exposure triage with evidence-backed action']
+            ].map(([label, value]) => (
+              <div key={label} className="sg-hero-metric">
+                <strong>{label}</strong>
+                <span>{value}</span>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="demo-product-signal" aria-label="Product preview">
-          <div><strong>Unified Records</strong><span>Prioritized CVEs</span></div>
-          <div><strong>SBOM Upload</strong><span>Limited demo ingestion</span></div>
-          <div><strong>Findings</strong><span>Workflow-ready evidence</span></div>
+        <div className="sg-hero-visual" aria-label="NoScan product preview">
+          <article className="sg-preview-panel sg-preview-panel--primary">
+            <header>
+              <strong>NoScan Command View</strong>
+              <span>Unified vulnerability, asset, and software posture</span>
+            </header>
+            <div className="sg-preview-grid">
+              <div className="sg-preview-stat">
+                <span>Assets mapped</span>
+                <strong>1,181</strong>
+              </div>
+              <div className="sg-preview-stat">
+                <span>Applicable CVEs</span>
+                <strong>38</strong>
+              </div>
+              <div className="sg-preview-stat">
+                <span>Open findings</span>
+                <strong>9</strong>
+              </div>
+              <div className="sg-preview-stat">
+                <span>SBOM components</span>
+                <strong>8,319</strong>
+              </div>
+            </div>
+          </article>
+          <article className="sg-preview-panel">
+            <header>
+              <strong>AI Grid mock</strong>
+              <span>Analyst copilots, guided triage, and remediation drafts</span>
+            </header>
+            <ul className="sg-preview-list">
+              <li>Impact-aware CVE assessment summaries</li>
+              <li>Recommended workflow branching by evidence state</li>
+              <li>Draft remediation narratives for operations teams</li>
+            </ul>
+          </article>
+          <article className="sg-preview-panel">
+            <header>
+              <strong>Customer operating model</strong>
+              <span>Connectors, correlation, investigations, findings, reporting</span>
+            </header>
+            <div className="sg-preview-flow">
+              <span>Connect</span>
+              <span>Correlate</span>
+              <span>Investigate</span>
+              <span>Remediate</span>
+            </div>
+          </article>
         </div>
       </section>
-      <section className="demo-feature-grid" aria-label="Demo capabilities">
-        {[
-          ['Correlate', 'See vulnerable software mapped to inventory with deterministic evidence.'],
-          ['Prioritize', 'Use exploit, EOL, blast radius, and workflow signals to focus analyst time.'],
-          ['Validate', 'Upload a small SBOM and inspect how exposure records and findings respond.']
-        ].map(([title, body]) => (
-          <article key={title} className="demo-feature">
-            <h2>{title}</h2>
-            <p>{body}</p>
-          </article>
-        ))}
+
+      <section id="products" className="sg-section">
+        <div className="sg-section-heading">
+          <span className="demo-kicker">Products</span>
+          <h2>Purpose-built grids for each part of the exposure problem</h2>
+          <p>Each grid can stand on its own, but the value compounds when they share the same evidence model.</p>
+        </div>
+        <div className="sg-product-grid">
+          {[
+            {
+              name: 'InfraGrid',
+              body: 'Build a normalized host and software inventory, map vulnerabilities to deployed software, and drive evidence-backed findings from infrastructure records.',
+              bullets: ['Host inventory and ownership signals', 'Applicable CVE correlation', 'Finding workflow and SLA routing']
+            },
+            {
+              name: 'SBOM Grid',
+              body: 'Ingest application and component BOM data, correlate packages to advisories, and expose software supply chain risk at product, version, and asset levels.',
+              bullets: ['SBOM import and component normalization', 'Package-to-advisory matching', 'Application and component drilldowns']
+            },
+            {
+              name: 'Cloud Grid',
+              body: 'Connect cloud accounts and runtime inventory so cloud assets, external exposure, and software evidence are visible in the same risk model.',
+              bullets: ['Account and region onboarding', 'Runtime inventory alignment', 'Exposure-driven cloud prioritization']
+            },
+            {
+              name: 'AI Grid',
+              body: 'Mocked in this site as the orchestration layer for analyst assistance, workflow recommendations, remediation drafting, and reporting acceleration.',
+              bullets: ['Investigation copilots', 'Recommendation generation', 'Executive and operator narratives']
+            }
+          ].map((product) => (
+            <article key={product.name} className="sg-product-card">
+              <div className="sg-product-badge">{product.name}</div>
+              <p>{product.body}</p>
+              <ul>
+                {product.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="solutions" className="sg-section">
+        <div className="sg-section-heading">
+          <span className="demo-kicker">Solutions</span>
+          <h2>What customers can solve with the portfolio</h2>
+        </div>
+        <div className="sg-solution-grid">
+          {[
+            ['Exposure operations', 'Run a repeatable process from CVE intake to impacted asset evidence, ownership routing, and finding generation.'],
+            ['Application supply chain visibility', 'Correlate SBOM components with advisories, EOL signals, and software identity metadata.'],
+            ['Cloud-first remediation', 'Prioritize external-facing and internet-reachable assets with contextual software risk.'],
+            ['Executive reporting', 'Give security and IT leaders a single narrative for what is affected, what is exploitable, and what action is underway.']
+          ].map(([title, body]) => (
+            <article key={title} className="sg-solution-card">
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="use-cases" className="sg-section">
+        <div className="sg-section-heading">
+          <span className="demo-kicker">Use cases</span>
+          <h2>Concrete buyer journeys</h2>
+        </div>
+        <div className="sg-usecase-grid">
+          {[
+            ['Vulnerability management teams', 'Correlate NVD, KEV, EUVD, and vendor intelligence with real software evidence before opening tickets.'],
+            ['Infrastructure operations', 'See exactly which hosts, software versions, and owners are affected before remediation windows are committed.'],
+            ['Application security', 'Use SBOM Grid to map open source and third-party components to advisory feeds and EOL coverage gaps.'],
+            ['Cloud engineering', 'Use Cloud Grid to focus on internet-facing and high-blast-radius assets instead of flat CVE counts.']
+          ].map(([title, body]) => (
+            <article key={title} className="sg-usecase-card">
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="workflows" className="sg-section">
+        <div className="sg-section-heading">
+          <span className="demo-kicker">Workflow narratives</span>
+          <h2>How the portfolio works in practice</h2>
+        </div>
+        <div className="sg-workflow-stack">
+          {[
+            {
+              title: 'InfraGrid workflow',
+              steps: [
+                'Connect host and software inventory from existing enterprise systems.',
+                'Correlate deployed software to vulnerability intelligence and EOL signals.',
+                'Assess applicability and impact, then open findings only where evidence supports action.'
+              ]
+            },
+            {
+              title: 'SBOM Grid workflow',
+              steps: [
+                'Import BOMs for applications or products and normalize component identities.',
+                'Link packages to advisory feeds, vulnerabilities, and lifecycle coverage.',
+                'Surface risky components, missing metadata, and remediation candidates per application.'
+              ]
+            },
+            {
+              title: 'Cloud Grid workflow',
+              steps: [
+                'Onboard cloud accounts, regions, and instance-level inventory.',
+                'Identify externally exposed compute and software hotspots across runtime assets.',
+                'Push prioritized findings into remediation queues with ownership and SLA context.'
+              ]
+            },
+            {
+              title: 'AI Grid workflow mock',
+              steps: [
+                'Generate investigation summaries and remediation narratives from the same evidence model.',
+                'Recommend next workflow steps based on exploitability, impact, and asset criticality.',
+                'Draft operator-ready actions while preserving analyst approval checkpoints.'
+              ]
+            }
+          ].map((workflow) => (
+            <article key={workflow.title} className="sg-workflow-card">
+              <h3>{workflow.title}</h3>
+              <ol>
+                {workflow.steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="sg-section">
+        <div className="sg-section-heading">
+          <span className="demo-kicker">Portfolio map</span>
+          <h2>How the grids fit together</h2>
+        </div>
+        <div className="sg-portfolio-band">
+          <div className="sg-portfolio-step">
+            <strong>Connectors</strong>
+            <span>ServiceNow, SBOM uploads, cloud accounts, vulnerability feeds</span>
+          </div>
+          <div className="sg-portfolio-step">
+            <strong>Correlation</strong>
+            <span>Hosts, software identities, packages, CVEs, advisories, lifecycle data</span>
+          </div>
+          <div className="sg-portfolio-step">
+            <strong>Workflow</strong>
+            <span>Investigation, findings, ownership, SLA, reporting</span>
+          </div>
+          <div className="sg-portfolio-step">
+            <strong>AI Grid mock</strong>
+            <span>Recommendations, summaries, narratives, next-step guidance</span>
+          </div>
+        </div>
       </section>
     </PublicDemoShell>
   );
@@ -81,7 +281,7 @@ export function DemoRequestPage() {
       <section className="public-form-panel">
         <div className="panel-header">
           <div>
-            <h1>Request a demo instance</h1>
+            <h1>Request a NoScan product demo</h1>
             <div className="panel-caption">We review requests before provisioning an isolated 7-day workspace.</div>
           </div>
         </div>
@@ -132,7 +332,7 @@ export function DemoRequestSuccessPage() {
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Request received</h1>
-        <p>We’ll review the request and send an invite link after the demo workspace is provisioned.</p>
+        <p>We’ll review the request and send an invite link after the securityGrid demo workspace is provisioned.</p>
         <Link className="btn btn-secondary" to="/demo">Back to demo overview</Link>
       </section>
     </PublicDemoShell>
@@ -177,7 +377,7 @@ export function DemoInvitePage() {
             </div>
             {deliveryFailed && (
               <p>
-                The workspace was provisioned, but Scout.ai could not deliver the email automatically.
+                The workspace was provisioned, but securityGrid could not deliver the email automatically.
                 You can still accept this invite and continue with manual password setup.
               </p>
             )}
@@ -361,7 +561,7 @@ export function LoginPage() {
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
-        <h1>Log in to Scout.ai</h1>
+        <h1>Log in to securityGrid</h1>
         <p>
           {setupToken
             ? 'Set a password for your tenant workspace. After saving it, return to the login screen and sign in with your email and new password.'
@@ -374,7 +574,7 @@ export function LoginPage() {
         )}
         {!setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
-            <label>Work email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <label>Email or username<input type="text" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
             <button className="btn btn-primary" type="submit" disabled={loginMutation.isPending || !email.trim() || !password.trim()}>
               {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
@@ -385,7 +585,7 @@ export function LoginPage() {
           <div className="notice success" aria-label="Shared localhost credentials">
             Localhost shared login:
             {' '}platform owner <strong>platform.owner@localhost</strong> / <strong>LocalDevPlatform123!</strong>
-            {' '}and tenant admin <strong>tenant.admin@localhost</strong> / <strong>LocalDevTenant123!</strong>.
+            {' '}and tenant admin <strong>admin</strong> / <strong>admin</strong>.
           </div>
         )}
         {setupToken && (
@@ -461,8 +661,12 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
   return (
     <main className={compact ? 'public-demo-shell compact' : 'public-demo-shell'}>
       <nav className="public-demo-nav">
-        <Link to="/demo" className="public-demo-brand"><span className="brand-mark">SA</span><strong>Scout.ai</strong></Link>
+        <Link to="/demo" className="public-demo-brand"><span className="brand-mark">SG</span><strong>securityGrid</strong></Link>
         <div className="public-demo-links">
+          <a href="/demo#products">Products</a>
+          <a href="/demo#solutions">Solutions</a>
+          <a href="/demo#use-cases">Use cases</a>
+          <a href="/demo#workflows">Workflows</a>
           <Link to="/demo/request">Request demo</Link>
           <Link to="/login">Log in</Link>
           {hasStoredToken && (

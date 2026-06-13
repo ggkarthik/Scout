@@ -50,8 +50,17 @@ const OperationalDashboardPage = React.lazy(async () => ({
 const VulnRepoDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/VulnRepoDashboardPage')).VulnRepoDashboardPage
 }));
+const PlatformVulnIntelDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/PlatformVulnIntelDetailPage')).PlatformVulnIntelDetailPage
+}));
 const VulnRepoVulnerabilitiesPage = React.lazy(async () => ({
   default: (await import('./pages/VulnRepoVulnerabilitiesPage')).VulnRepoVulnerabilitiesPage
+}));
+const CampaignsPage = React.lazy(async () => ({
+  default: (await import('./pages/CampaignsPage')).CampaignsPage
+}));
+const CampaignDetailPage = React.lazy(async () => ({
+  default: (await import('./features/campaigns/CampaignDetailPage')).CampaignDetailPage
 }));
 const VulnRepoOrgCvePage = React.lazy(async () => ({
   default: (await import('./pages/VulnRepoOrgCvePage')).VulnRepoOrgCvePage
@@ -79,6 +88,16 @@ const InventoryOverviewPage = React.lazy(async () => ({
 }));
 const SoftwareIdentitiesPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentitiesPage')).SoftwareIdentitiesPage
+}));
+const BomInventoryPage = React.lazy(async () => ({
+  default: (await import('./pages/BomInventoryPage')).BomInventoryPage
+}));
+const ApplicationsDashboard = React.lazy(async () => ({
+  default: (await import('./features/inventory/ApplicationsDashboard')).ApplicationsDashboard
+}));
+// MOCKS — replace with real page imports when implementing
+const BomComponents = React.lazy(async () => ({
+  default: (await import('./features/inventory/BomComponents')).BomComponents
 }));
 const SoftwareIdentityDetailPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentityDetailPage')).SoftwareIdentityDetailPage
@@ -160,7 +179,9 @@ const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countK
   { key: 'hosts', label: 'Hosts', countKey: 'hosts' },
   { key: 'software-identities', label: 'Software Entities', countKey: 'software' },
   { key: 'container-images', label: 'Container Images', countKey: 'containerImages' },
-  { key: 'sbom', label: 'Applications', countKey: 'applications' }
+  { key: 'sbom', label: 'Applications', countKey: 'applications' },
+  { key: 'bom-components', label: 'BOM Components' },
+  { key: 'bom-inventory', label: 'BOM Inventory' }
 ];
 const OPERATIONS_NAV_ITEMS = [
   { key: 'pipeline', label: 'Pipeline' },
@@ -169,6 +190,7 @@ const OPERATIONS_NAV_ITEMS = [
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Intelligence' },
+  { key: 'campaigns', label: 'Campaigns' },
 ];
 
 function getInitialTheme(): Theme {
@@ -439,6 +461,15 @@ function InventoryRoute() {
   if (selectedView === 'hosts') {
     return <InventoryPage selectedView={selectedView} />;
   }
+  if (selectedView === 'sbom') {
+    return <ApplicationsDashboard />;
+  }
+  if (selectedView === 'bom-components') {
+    return <BomComponents />;
+  }
+  if (selectedView === 'bom-inventory') {
+    return <BomInventoryPage />;
+  }
   return <InventoryComponentViewsPage selectedView={selectedView} />;
 }
 
@@ -637,6 +668,8 @@ function AppShell() {
     : null;
   const activeVulnRepoView = vulnRepoSegment === 'vulnerabilities'
     ? 'vulnerabilities'
+    : vulnRepoSegment === 'campaigns'
+      ? 'campaigns'
     : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
       : 'dashboard';
@@ -1006,7 +1039,10 @@ function AppShell() {
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
               <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
               <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
+              <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
               <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
+              <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
+              <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
               <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
               <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />

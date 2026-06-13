@@ -49,9 +49,6 @@ public class SbomFetchGuardService {
             throw new IOException("Invalid source URL");
         }
 
-        if (!"https".equalsIgnoreCase(uri.getScheme())) {
-            throw new IOException("Only HTTPS source URLs are allowed");
-        }
         if (uri.getUserInfo() != null && !uri.getUserInfo().isBlank()) {
             throw new IOException("URL user info is not allowed");
         }
@@ -60,9 +57,14 @@ public class SbomFetchGuardService {
             throw new IOException("Source URL host is required");
         }
 
+        // Explicitly allowed hosts (e.g. localhost in local dev) bypass scheme and address checks
         String normalizedHost = host.trim().toLowerCase(Locale.ROOT);
         if (allowedHosts().contains(normalizedHost)) {
             return;
+        }
+
+        if (!"https".equalsIgnoreCase(uri.getScheme())) {
+            throw new IOException("Only HTTPS source URLs are allowed");
         }
 
         InetAddress[] addresses = InetAddress.getAllByName(normalizedHost);
