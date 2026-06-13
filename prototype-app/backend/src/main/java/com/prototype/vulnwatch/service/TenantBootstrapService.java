@@ -37,14 +37,19 @@ public class TenantBootstrapService {
                 });
 
         boolean changed = false;
-        if (defaultTenant.getSchemaName() == null || defaultTenant.getSchemaName().isBlank()) {
-            defaultTenant.setSchemaName(tenantSchemaService.defaultSchemaName());
+        String normalizedDefaultSchema = tenantSchemaService.defaultSchemaName();
+        if (!normalizedDefaultSchema.equals(defaultTenant.getSchemaName())) {
+            defaultTenant.setSchemaName(normalizedDefaultSchema);
+            defaultTenant.setUpdatedAt(Instant.now());
             changed = true;
         }
 
         for (Tenant tenant : tenantRepository.findAll()) {
-            if (tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()) {
-                tenant.setSchemaName(tenantSchemaService.deriveSchemaName(tenant.getSlug()));
+            String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()
+                    ? tenantSchemaService.deriveSchemaName(tenant.getSlug())
+                    : tenantSchemaService.normalizeSchemaName(tenant.getSchemaName());
+            if (!normalizedSchema.equals(tenant.getSchemaName())) {
+                tenant.setSchemaName(normalizedSchema);
                 tenant.setUpdatedAt(Instant.now());
                 tenantRepository.save(tenant);
             }
@@ -52,7 +57,6 @@ public class TenantBootstrapService {
         }
 
         if (changed) {
-            defaultTenant.setUpdatedAt(Instant.now());
             tenantRepository.save(defaultTenant);
         }
     }

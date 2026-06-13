@@ -96,6 +96,14 @@ public class TenantAwareDataSource extends DelegatingDataSource {
         if (schemaName == null || schemaName.isBlank()) {
             return defaultTenantSchema;
         }
-        return schemaName.trim();
+        String normalized = schemaName.trim();
+        int separator = normalized.indexOf(',');
+        if (separator >= 0) {
+            normalized = normalized.substring(0, separator).trim();
+        }
+        normalized = normalized.toLowerCase();
+        normalized = normalized.replaceAll("[^a-z0-9_]+", "_");
+        normalized = normalized.replaceAll("^[^a-z]+", "tenant_");
+        return normalized.isBlank() ? defaultTenantSchema : normalized;
     }
 }

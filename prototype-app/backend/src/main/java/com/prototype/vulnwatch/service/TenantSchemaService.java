@@ -32,6 +32,10 @@ public class TenantSchemaService {
         return defaultSchemaName;
     }
 
+    public String normalizeSchemaName(String schemaName) {
+        return sanitizeSchemaName(schemaName);
+    }
+
     public String schemaNameForTenant(Tenant tenant) {
         if (tenant == null || tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()) {
             return defaultSchemaName;
@@ -55,8 +59,16 @@ public class TenantSchemaService {
         if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {
             return;
         }
-        platformJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + quotedIdentifier(normalized) + " CASCADE");
+        dropTenantSchema(normalized);
         ensureSchemaExists(normalized);
+    }
+
+    public void dropTenantSchema(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {
+            return;
+        }
+        platformJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + quotedIdentifier(normalized) + " CASCADE");
     }
 
     private String sanitizeSchemaName(String schemaName) {

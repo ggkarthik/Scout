@@ -35,6 +35,8 @@ class DemoTenantPurgeServiceTest {
     private TenantLifecycleGuardService tenantLifecycleGuardService;
     @Mock
     private TenantSchemaService tenantSchemaService;
+    @Mock
+    private DemoTenantPurgePlanner demoTenantPurgePlanner;
 
     private DemoTenantPurgeService service;
 
@@ -45,12 +47,13 @@ class DemoTenantPurgeServiceTest {
                 resetJdbcTemplate,
                 auditEventService,
                 tenantLifecycleGuardService,
-                tenantSchemaService
+                tenantSchemaService,
+                demoTenantPurgePlanner
         );
     }
 
     @Test
-    void processExpiredTenantResetsTenantSchemaAndPurgesSharedRows() {
+    void processExpiredTenantDropsTenantSchemaAndPurgesSharedRows() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
         tenant.setName("Demo");
@@ -64,7 +67,7 @@ class DemoTenantPurgeServiceTest {
         UUID userId = UUID.randomUUID();
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
-        when(tenantLifecycleGuardService.isDemoTenant(tenant)).thenReturn(true);
+        when(demoTenantPurgePlanner.isEligibleForAutomaticPurge(tenant, now)).thenReturn(true);
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of(userId));
         when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))
@@ -72,7 +75,7 @@ class DemoTenantPurgeServiceTest {
 
         service.processExpiredTenant(tenant.getId(), now);
 
-        verify(tenantSchemaService).resetTenantSchema("tenant_demo");
+        verify(tenantSchemaService).dropTenantSchema("tenant_demo");
         verify(resetJdbcTemplate).update("delete from platform.tenant_support_grants where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
@@ -97,17 +100,17 @@ class DemoTenantPurgeServiceTest {
     }
 
     @Test
-    void processExpiredTenantSkipsSchemaResetForNonDemoTenant() {
+    void processExpiredTenantSkipsSchemaDropForNonDemoTenant() {
         UUID tenantId = UUID.randomUUID();
         Tenant tenant = new Tenant();
         tenant.setId(tenantId);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        when(tenantLifecycleGuardService.isDemoTenant(tenant)).thenReturn(false);
+        when(demoTenantPurgePlanner.isEligibleForAutomaticPurge(eq(tenant), any())).thenReturn(false);
 
         service.processExpiredTenant(tenantId, Instant.now());
 
-        verify(tenantSchemaService, never()).resetTenantSchema(any(String.class));
+        verify(tenantSchemaService, never()).dropTenantSchema(any(String.class));
     }
 
     @Test
@@ -131,7 +134,7 @@ class DemoTenantPurgeServiceTest {
 
         service.deleteTenant(tenant.getId(), now);
 
-        verify(tenantSchemaService).resetTenantSchema("tenant_customer_one");
+        verify(tenantSchemaService).dropTenantSchema("tenant_customer_one");
         verify(resetJdbcTemplate).update("delete from platform.tenant_support_grants where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
@@ -169,7 +172,7 @@ class DemoTenantPurgeServiceTest {
         );
 
         assertEquals(400, ex.getStatusCode().value());
-        verify(tenantSchemaService, never()).resetTenantSchema(any(String.class));
+        verify(tenantSchemaService, never()).dropTenantSchema(any(String.class));
     }
 
 }
