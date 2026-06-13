@@ -404,6 +404,70 @@ export function DemoInvitePage() {
   );
 }
 
+export function TenantInvitePage() {
+  const { token = '' } = useParams();
+  const navigate = useNavigate();
+  const inviteQuery = useQuery({
+    queryKey: ['tenant-invite', token],
+    queryFn: () => api.validateTenantInvite(token),
+    enabled: token.length > 0
+  });
+  const acceptInvite = useMutation({
+    mutationFn: () => api.acceptTenantInvite(token),
+    onSuccess: (response) => {
+      if (response.setupToken) {
+        const nextParams = new URLSearchParams({
+          setup: response.setupToken,
+          email: response.email
+        });
+        navigate(`/login?${nextParams.toString()}`);
+      }
+    }
+  });
+
+  const invite = inviteQuery.data;
+  const deliveryFailed = invite?.status === 'DELIVERY_ERROR';
+
+  return (
+    <PublicDemoShell compact>
+      <section className="public-form-panel">
+        <h1>Workspace invite</h1>
+        {inviteQuery.isLoading ? (
+          <p>Checking invite...</p>
+        ) : inviteQuery.isError ? (
+          <div className="notice error">{inviteQuery.error instanceof Error ? inviteQuery.error.message : 'Invite is invalid'}</div>
+        ) : invite ? (
+          <>
+            <div className={`notice ${deliveryFailed ? 'error' : 'success'}`}>
+              {invite.message}
+            </div>
+            {deliveryFailed ? (
+              <p>The automatic email delivery failed, but this invite link is still valid.</p>
+            ) : null}
+            <dl className="demo-invite-details">
+              <div><dt>Workspace</dt><dd>{invite.tenantName}</dd></div>
+              <div><dt>Email</dt><dd>{invite.email}</dd></div>
+              <div><dt>Role</dt><dd>{invite.role.replace(/_/g, ' ')}</dd></div>
+              <div><dt>Invite expires</dt><dd>{new Date(invite.inviteExpiresAt).toLocaleString()}</dd></div>
+            </dl>
+            <div className="button-row">
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={!invite.valid || acceptInvite.isPending}
+                onClick={() => acceptInvite.mutate()}
+              >
+                {acceptInvite.isPending ? 'Activating...' : 'Accept invite'}
+              </button>
+            </div>
+            {acceptInvite.isError ? <div className="notice error">{acceptInvite.error instanceof Error ? acceptInvite.error.message : 'Accept failed'}</div> : null}
+          </>
+        ) : null}
+      </section>
+    </PublicDemoShell>
+  );
+}
+
 export function LoginPage() {
   const [searchParams] = useSearchParams();
   const setupToken = searchParams.get('setup');

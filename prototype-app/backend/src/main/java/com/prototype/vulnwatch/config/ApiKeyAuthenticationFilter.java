@@ -57,7 +57,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 || "/api/auth/login".equals(path)
                 || "/api/auth/setup-password".equals(path)
                 || ("/api/demo-requests".equals(path) && "POST".equalsIgnoreCase(request.getMethod()))
-                || path.startsWith("/api/demo-invites/");
+                || path.startsWith("/api/demo-invites/")
+                || path.startsWith("/api/tenant-invites/");
     }
 
     @Override
