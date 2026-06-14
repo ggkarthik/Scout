@@ -404,29 +404,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     };
   }
 
-  function applyQueueSelection(nextQueueKey: string) {
-    const nextQueue = availableQueues.find((queue) => queue.key === nextQueueKey);
-    const queueFilter = nextQueue?.filter ?? {};
-    if (queueFilter.severity && queueFilter.severity.length > 0) {
-      setColFilters((prev) => ({
-        ...prev,
-        severity: prev.severity.every((value) => queueFilter.severity?.includes(value)) ? prev.severity : [],
-      }));
-    }
-    if (queueFilter.status && queueFilter.status.length > 0) {
-      setColFilters((prev) => ({
-        ...prev,
-        status: prev.status.every((value) => queueFilter.status?.includes(value)) ? prev.status : [],
-      }));
-    }
-    if (queueFilter.dueDateBand && dueDateBand && queueFilter.dueDateBand !== dueDateBand) {
-      setDueDateBand(null);
-    }
-    setActiveQueueKey(nextQueueKey);
-    setPage(0);
-    setSelectedIds(new Set());
-  }
-
   function openCreateQueueDialog() {
     setQueueDialogMode('create');
     setQueueDialogTarget(null);
@@ -984,11 +961,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   return (
     <div className="fpl-root">
       <FindingsWorkspaceHeader
-        builtInQueues={availableQueues.filter((queue) => queue.kind === 'BUILT_IN')}
         personalQueues={personalQueues}
         activeQueueKey={activeQueryContext.queueKey}
         projectionStatus={projectionStatusQuery.data}
-        queueLoading={queuesQuery.isLoading}
         queueActionError={queueActionError}
         projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
         workspaceError={
@@ -998,8 +973,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
             : null
         }
-        onSelectQueue={applyQueueSelection}
-        onOpenCreateQueue={openCreateQueueDialog}
         onOpenEditQueue={openEditQueueDialog}
         onDuplicateQueue={(queue) => void duplicateQueue(queue)}
         onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
