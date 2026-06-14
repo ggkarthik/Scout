@@ -1026,6 +1026,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             </div>
           )}
         </div>
+        <div className="fpl-toolbar-right">
+          <button type="button" className="btn btn-secondary" onClick={openCreateQueueDialog}>
+            Save Current View
+          </button>
+        </div>
       </div>
 
       <FindingsSummaryWidgets
