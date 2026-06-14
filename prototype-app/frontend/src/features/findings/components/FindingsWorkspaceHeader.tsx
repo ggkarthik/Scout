@@ -45,21 +45,6 @@ export function FindingsWorkspaceHeader({
           <h1 style={{ margin: 0 }}>Findings</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {builtInQueues.map((queue) => (
-            <button
-              key={queue.key}
-              type="button"
-              className={queue.key === activeQueueKey ? 'btn btn-primary' : 'btn btn-secondary'}
-              disabled={queueLoading}
-              onClick={() => onSelectQueue(queue.key)}
-            >
-              {queue.title}
-              {typeof queue.matchingCount === 'number' ? ` (${queue.matchingCount})` : ''}
-            </button>
-          ))}
-          <button type="button" className="btn btn-secondary" onClick={onOpenCreateQueue}>
-            Save Current View
-          </button>
           {editableActiveQueue ? (
             <>
               <button type="button" className="btn btn-secondary" onClick={() => onOpenEditQueue(editableActiveQueue)}>
