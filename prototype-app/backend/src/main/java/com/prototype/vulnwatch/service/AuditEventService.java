@@ -34,7 +34,7 @@ public class AuditEventService {
 
     @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson) {
-        record(action, targetType, targetId, detailsJson, null);
+        record(action, targetType, targetId, detailsJson, "SUCCESS");
     }
 
     @Transactional
