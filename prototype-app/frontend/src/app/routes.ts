@@ -8,6 +8,7 @@ export type AppTab =
   | 'findings'
   | 'operations'
   | 'vuln-repo'
+  | 'campaigns'
   | 'inventory'
   | 'end-of-life'
   | 'connect'
@@ -159,6 +160,8 @@ export function pathForTab(tab: AppTab): string {
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
     case 'vuln-repo':
       return '/vuln-repo';
+    case 'campaigns':
+      return '/vuln-repo/campaigns';
     case 'inventory':
       return pathForInventoryView(INVENTORY_DEFAULT_VIEW);
     case 'end-of-life':
@@ -322,6 +325,7 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
+  if (pathname.startsWith('/vuln-repo/campaigns')) return 'campaigns';
   if (pathname.startsWith('/vuln-repo')) return 'vuln-repo';
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
@@ -344,6 +348,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Operational Dashboard';
     case 'vuln-repo':
       return 'Vulnerability Repository';
+    case 'campaigns':
+      return 'Campaigns';
     case 'inventory':
       return 'Inventory';
     case 'end-of-life':

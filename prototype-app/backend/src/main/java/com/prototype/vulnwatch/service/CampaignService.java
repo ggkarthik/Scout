@@ -576,7 +576,9 @@ public class CampaignService {
                 .sorted(Comparator.comparing(Finding::getUpdatedAt).reversed())
                 .limit(100)
                 .map(finding -> new CampaignFindingRowResponse(
+                        finding.getId().toString(),
                         finding.getDisplayId(),
+                        finding.getVulnerability() == null ? null : finding.getVulnerability().getExternalId(),
                         finding.getAsset() == null ? null : finding.getAsset().getName(),
                         finding.getAsset() == null ? null : finding.getAsset().getIdentifier(),
                         finding.getComponent() == null ? null : finding.getComponent().getPackageName(),
@@ -605,6 +607,7 @@ public class CampaignService {
         }
         return byAsset.values().stream()
                 .map(accumulator -> new CampaignAssetRowResponse(
+                        accumulator.asset.getId().toString(),
                         accumulator.asset.getName(),
                         accumulator.asset.getIdentifier(),
                         accumulator.asset.getEnvironment(),
