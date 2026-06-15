@@ -2,16 +2,12 @@ import React from 'react';
 import type { FindingProjectionStatus, FindingQueueDefinition } from '../types';
 
 type Props = {
-  builtInQueues: FindingQueueDefinition[];
   personalQueues: FindingQueueDefinition[];
   activeQueueKey: string;
   projectionStatus?: FindingProjectionStatus;
-  queueLoading: boolean;
   queueActionError: string;
   projectionError?: Error | null;
   workspaceError?: Error | null;
-  onSelectQueue: (queueKey: string) => void;
-  onOpenCreateQueue: () => void;
   onOpenEditQueue: (queue: FindingQueueDefinition) => void;
   onDuplicateQueue: (queue: FindingQueueDefinition) => void;
   onSetDefaultQueue: (queue: FindingQueueDefinition) => void;
@@ -20,22 +16,20 @@ type Props = {
 };
 
 export function FindingsWorkspaceHeader({
-  builtInQueues,
   personalQueues,
   activeQueueKey,
   projectionStatus,
-  queueLoading,
   queueActionError,
   projectionError,
   workspaceError,
-  onSelectQueue,
-  onOpenCreateQueue,
   onOpenEditQueue,
   onDuplicateQueue,
   onSetDefaultQueue,
   onDeleteQueue,
   workspaceTitle,
 }: Props) {
+  const editableActiveQueue = personalQueues.find((queue) => queue.key === activeQueueKey) ?? null;
+
   return (
     <>
       {workspaceError && (

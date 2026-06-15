@@ -57,7 +57,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 || "/api/auth/login".equals(path)
                 || "/api/auth/setup-password".equals(path)
                 || ("/api/demo-requests".equals(path) && "POST".equalsIgnoreCase(request.getMethod()))
-                || path.startsWith("/api/demo-invites/");
+                || path.startsWith("/api/demo-invites/")
+                || path.startsWith("/api/tenant-invites/");
     }
 
     @Override
@@ -72,6 +73,9 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String authorization = request.getHeader("Authorization");
+        // JWT and API-key are two independent authentication paths. A Bearer token
+        // intentionally bypasses the API-key check; if JWT validation fails the
+        // request is rejected before reaching filterChain.doFilter.
         if (authorization != null && authorization.startsWith("Bearer ")) {
             if (!authenticateJwt(authorization.substring("Bearer ".length()).trim(), request, response)) {
                 return;

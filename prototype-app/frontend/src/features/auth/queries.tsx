@@ -13,6 +13,6 @@ export function useActorQuery() {
   return useQuery({
     queryKey: getAuthContextQueryKey(authToken),
     queryFn: authApi.getActorContext,
-    staleTime: 5 * 60 * 1000
+    staleTime: 60 * 1000
   });
 }

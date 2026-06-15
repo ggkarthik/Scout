@@ -85,9 +85,17 @@ import type {
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
+  TenantBulkInviteResponse,
+  TenantInvite,
+  TenantInviteRequest,
+  TenantInviteValidationResponse,
   TenantCreateRequest,
+  TenantEntitlementOverride,
+  TenantEntitlementOverrideRequest,
+  TenantEntitlementSnapshot,
   TenantMember,
-  TenantMemberRequest
+  TenantMemberRequest,
+  TenantMemberUpdateRequest
 } from '../features/admin/types';
 
 export type BomType = 'SBOM' | 'AI_BOM' | 'CBOM' | 'VENDOR';
@@ -688,6 +696,10 @@ export const api = {
   acceptDemoInvite: (token: string) => publicRequest<DemoInviteValidationResponse>(`/demo-invites/${encodeURIComponent(token)}/accept`, {
     method: 'POST'
   }),
+  validateTenantInvite: (token: string) => publicRequest<TenantInviteValidationResponse>(`/tenant-invites/${encodeURIComponent(token)}`),
+  acceptTenantInvite: (token: string) => publicRequest<TenantInviteValidationResponse>(`/tenant-invites/${encodeURIComponent(token)}/accept`, {
+    method: 'POST'
+  }),
   getDemoStatus: () => request<DemoStatus>('/demo/status'),
   listDemoRequests: () => request<DemoRequest[]>('/platform/demo-requests'),
   approveDemoRequest: (requestId: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/approve`, { method: 'POST' }),
@@ -1255,6 +1267,27 @@ export const api = {
     request<void>(`/platform/tenants/${encodeURIComponent(tenantId)}`, {
       method: 'DELETE'
     }),
+  getTenantEntitlements: (tenantId: string) =>
+    request<TenantEntitlementSnapshot>(`/platform/tenants/${encodeURIComponent(tenantId)}/entitlements`),
+  upsertTenantEntitlementOverride: (
+    tenantId: string,
+    entitlementKey: string,
+    payload: TenantEntitlementOverrideRequest
+  ) =>
+    request<TenantEntitlementOverride>(
+      `/platform/tenants/${encodeURIComponent(tenantId)}/entitlement-overrides/${encodeURIComponent(entitlementKey)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      }
+    ),
+  deleteTenantEntitlementOverride: (tenantId: string, entitlementKey: string) =>
+    request<void>(
+      `/platform/tenants/${encodeURIComponent(tenantId)}/entitlement-overrides/${encodeURIComponent(entitlementKey)}`,
+      {
+        method: 'DELETE'
+      }
+    ),
   listPlatformUsers: () => request<PlatformUser[]>('/platform/users'),
   listInventoryConnectorHealth: () => request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   upsertPlatformUser: (payload: PlatformUserRequest) =>
@@ -1273,11 +1306,48 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  updateTenantMember: (tenantId: string, memberId: string, payload: TenantMemberUpdateRequest) =>
+    request<TenantMember>(`/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+  deleteTenantMember: (tenantId: string, memberId: string) =>
+    request<void>(`/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`, {
+      method: 'DELETE'
+    }),
+  listTenantInvites: (tenantId: string) =>
+    request<TenantInvite[]>(`/tenants/${encodeURIComponent(tenantId)}/invites`),
+  createTenantInvite: (tenantId: string, payload: TenantInviteRequest) =>
+    request<TenantInvite>(`/tenants/${encodeURIComponent(tenantId)}/invites`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  createTenantBulkInvites: (tenantId: string, payload: { invites: TenantInviteRequest[] }) =>
+    request<TenantBulkInviteResponse>(`/tenants/${encodeURIComponent(tenantId)}/invites/bulk`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  resendTenantInvite: (tenantId: string, inviteId: string) =>
+    request<TenantInvite>(`/tenants/${encodeURIComponent(tenantId)}/invites/${encodeURIComponent(inviteId)}/resend`, {
+      method: 'POST'
+    }),
+  cancelTenantInvite: (tenantId: string, inviteId: string) =>
+    request<void>(`/tenants/${encodeURIComponent(tenantId)}/invites/${encodeURIComponent(inviteId)}`, {
+      method: 'DELETE'
+    }),
   listServiceAccounts: () => request<ServiceAccount[]>('/service-accounts'),
   createServiceAccount: (payload: ServiceAccountRequest) =>
     request<ServiceAccount>('/service-accounts', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  deactivateServiceAccount: (accountId: string) =>
+    request<ServiceAccount>(`/service-accounts/${encodeURIComponent(accountId)}/deactivate`, {
+      method: 'POST'
+    }),
+  deleteServiceAccount: (accountId: string) =>
+    request<void>(`/service-accounts/${encodeURIComponent(accountId)}`, {
+      method: 'DELETE'
     }),
   listAuditEvents: () => request<AuditEvent[]>('/audit-events'),
   exportAuditEventsCsv: async (): Promise<{ filename: string; csv: string }> => {

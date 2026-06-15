@@ -428,7 +428,7 @@ public class EolSlugResolverService {
             return new SlugMatch(productSlug, "MEDIUM", "NAME_SLUG");
         }
 
-        String productNoVersion = normProduct.replaceAll("\\s+\\d[\\d.]*$", "").trim();
+        String productNoVersion = normProduct.replaceAll("\\s++\\d[\\d.]*$", "").trim();
         if (!productNoVersion.equals(normProduct)) {
             String slugNoVersion = productNoVersion.replaceAll("\\s+", "-");
             if (eolProductCatalogRepository.existsBySlug(slugNoVersion)) {

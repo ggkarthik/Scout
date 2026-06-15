@@ -12,6 +12,7 @@ class PlatformAdminRequestPathsTest {
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/ingestion/nvd-sync"));
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/connectors/vulnerability-sources/nvd"));
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/platform/tenants"));
+        assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/platform/tenants/123/quotas"));
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/operations/dashboard"));
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/eol/admin/refresh/catalog"));
         assertTrue(PlatformAdminRequestPaths.isPlatformAdminPath("/api/eol/admin/refresh/full"));

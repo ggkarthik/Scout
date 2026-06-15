@@ -5,6 +5,8 @@ import type { Finding } from '../features/findings/types';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForInventoryHostAsset, pathForInventoryView, pathForVulnRepoView } from '../app/routes';
 import { api } from '../api/client';
+import { useActor } from '../features/auth/context';
+import { canUseEntitlement } from '../features/auth/entitlements';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { FixRecord, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
@@ -197,6 +199,7 @@ function buildSoftwareRecommendationPrompt(
 
 export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
   const navigate = useNavigate();
+  const actor = useActor();
   const [activeTab, setActiveTab] = React.useState<DetailTab>('versions');
   const [findingMessage, setFindingMessage] = React.useState('');
   const [metadata, setMetadata] = React.useState<SoftwareIdentityMetadata>(() => defaultMetadata(softwareIdentityId));
@@ -217,6 +220,7 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
   const [modalRecommendation, setModalRecommendation] = React.useState('');
   const [isEditingRec, setIsEditingRec] = React.useState(false);
   const [draftVendor, setDraftVendor] = React.useState('');
+  const canGenerateAiRecommendation = canUseEntitlement(actor, 'ai.solution_generation');
 
   const detailQuery = useSoftwareIdentityDetailQuery(softwareIdentityId);
   const metadataQuery = useSoftwareIdentityMetadataQuery(softwareIdentityId);
@@ -847,11 +851,15 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      disabled={generateRecommendationMutation.isPending}
+                      disabled={generateRecommendationMutation.isPending || !canGenerateAiRecommendation}
+                      title={canGenerateAiRecommendation ? 'Generate AI recommendation' : 'Enterprise only'}
                       onClick={() => generateRecommendationMutation.mutate()}
                     >
                       {generateRecommendationMutation.isPending ? 'Generating...' : 'AI Recommendation'}
                     </button>
+                    {!canGenerateAiRecommendation && (
+                      <span className="panel-caption">Enterprise only</span>
+                    )}
                     <button
                       type="button"
                       className="btn btn-secondary"

@@ -2,7 +2,6 @@ import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
-  type BomDashboard,
   type BomDetail,
   type BomInventoryItem,
   type BomLineageItem,
@@ -66,25 +65,6 @@ function WorkflowSummaryChips({ items }: { items: BomWorkflowSummary[] }) {
           {item.workflowStatus.replace(/_/g, ' ')} · {item.componentCount}
         </span>
       ))}
-    </div>
-  );
-}
-
-function BreakdownChips({ title, items }: { title: string; items: BomDashboard['bomTypes'] }) {
-  return (
-    <div>
-      <div className="panel-caption">{title}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-        {items.length === 0 ? (
-          <span className="panel-caption">No data</span>
-        ) : (
-          items.slice(0, 6).map((item) => (
-            <span key={`${title}-${item.key}`} className="tag">
-              {item.label} · {item.count}
-            </span>
-          ))
-        )}
-      </div>
     </div>
   );
 }

@@ -9,6 +9,67 @@ export type TenantMember = {
   createdAt: string;
 };
 
+export type TenantMemberUpdateRequest = {
+  role?: string;
+  status?: string;
+};
+
+export type TenantInvite = {
+  id: string;
+  tenantId: string;
+  email: string;
+  displayName: string | null;
+  subject: string;
+  role: string;
+  status: string;
+  createdAt: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  lastSentAt: string | null;
+  invitedBySubject: string | null;
+  invitedByDisplayName: string | null;
+  deliveryDetail: string | null;
+};
+
+export type TenantInviteRequest = {
+  email: string;
+  displayName: string;
+  role: string;
+};
+
+export type TenantBulkInviteRequest = {
+  invites: TenantInviteRequest[];
+};
+
+export type TenantBulkInviteItemResult = {
+  email: string;
+  displayName: string | null;
+  role: string | null;
+  status: string;
+  message: string;
+  invite: TenantInvite | null;
+};
+
+export type TenantBulkInviteResponse = {
+  requestedCount: number;
+  invitedCount: number;
+  failedCount: number;
+  results: TenantBulkInviteItemResult[];
+};
+
+export type TenantInviteValidationResponse = {
+  valid: boolean;
+  status: string;
+  email: string;
+  tenantId: string;
+  tenantName: string;
+  inviteeName: string | null;
+  role: string;
+  inviteExpiresAt: string;
+  message: string;
+  setupToken?: string | null;
+};
+
 export type PlatformUser = {
   userId: string;
   externalSubject: string;
@@ -66,6 +127,42 @@ export type TenantCreateRequest = {
   billingRef?: string;
 };
 
+export type TenantEntitlement = {
+  key: string;
+  category: string;
+  enabled: boolean;
+  source: string;
+  planCode: string | null;
+  config: Record<string, unknown> | null;
+};
+
+export type TenantEntitlementOverride = {
+  id: string;
+  tenantId: string;
+  entitlementKey: string;
+  enabled: boolean;
+  config: Record<string, unknown> | null;
+  reason: string | null;
+  expiresAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+};
+
+export type TenantEntitlementSnapshot = {
+  tenantId: string;
+  planCode: string | null;
+  entitlements: TenantEntitlement[];
+  overrides: TenantEntitlementOverride[];
+};
+
+export type TenantEntitlementOverrideRequest = {
+  enabled: boolean;
+  config?: Record<string, unknown> | null;
+  reason?: string;
+  expiresAt?: string | null;
+};
+
 export type ServiceAccount = {
   id: string;
   tenantId: string | null;
@@ -120,6 +217,8 @@ export type AuthContext = {
   supportAccessMode?: string | null;
   supportGrantExpiresAt?: string | null;
   planCode?: string | null;
+  entitlements?: Record<string, boolean> | null;
+  demo?: boolean | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;
   demoCapabilities?: Record<string, boolean> | null;

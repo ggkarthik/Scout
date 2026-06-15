@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -49,7 +48,10 @@ class GithubSbomSourceServiceTest {
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Mock
-    private TaskExecutor ingestionExecutor;
+    private IngestionJobService ingestionJobService;
+
+    @Mock
+    private RequestActorService requestActorService;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -80,8 +82,9 @@ class GithubSbomSourceServiceTest {
                 syncRunRepository,
                 sbomIngestionService,
                 workspaceService,
+                ingestionJobService,
+                requestActorService,
                 githubTokenProvider,
-                ingestionExecutor,
                 transactionTemplate,
                 new ObjectMapper(),
                 tenantService,
@@ -98,7 +101,7 @@ class GithubSbomSourceServiceTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
         assertTrue(exception.getReason().contains("read:packages"));
-        verifyNoInteractions(syncRunRepository, transactionTemplate, ingestionExecutor);
+        verifyNoInteractions(syncRunRepository, transactionTemplate, ingestionJobService);
     }
 
     @Test
@@ -117,6 +120,6 @@ class GithubSbomSourceServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
         assertTrue(exception.getReason().contains("backend/secrets/github-api-token"));
         verify(githubSbomSourceRepository).findById(sourceId);
-        verifyNoInteractions(syncRunRepository, transactionTemplate, ingestionExecutor);
+        verifyNoInteractions(syncRunRepository, transactionTemplate, ingestionJobService);
     }
 }

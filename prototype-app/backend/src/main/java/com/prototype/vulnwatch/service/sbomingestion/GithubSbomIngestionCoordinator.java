@@ -24,20 +24,17 @@ public class GithubSbomIngestionCoordinator {
     private final SbomFetchGuardService sbomFetchGuardService;
     private final SbomUploadSupportService sbomUploadSupportService;
     private final SbomContentIngestionService sbomContentIngestionService;
-    private final SbomIngestionLockService sbomIngestionLockService;
 
     public GithubSbomIngestionCoordinator(
             GithubApiClient githubApiClient,
             SbomFetchGuardService sbomFetchGuardService,
             SbomUploadSupportService sbomUploadSupportService,
-            SbomContentIngestionService sbomContentIngestionService,
-            SbomIngestionLockService sbomIngestionLockService
+            SbomContentIngestionService sbomContentIngestionService
     ) {
         this.githubApiClient = githubApiClient;
         this.sbomFetchGuardService = sbomFetchGuardService;
         this.sbomUploadSupportService = sbomUploadSupportService;
         this.sbomContentIngestionService = sbomContentIngestionService;
-        this.sbomIngestionLockService = sbomIngestionLockService;
     }
 
     public GithubSbomIngestionBatchResponse ingestFromGithub(Tenant tenant, GithubSbomIngestionRequest request) throws IOException {
@@ -339,17 +336,16 @@ public class GithubSbomIngestionCoordinator {
                 sbomUploadSupportService.toJson(evidence)
         );
 
-        return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
-                sbomContentIngestionService.ingestBytes(
-                        tenant,
-                        assetType,
-                        assetName,
-                        assetIdentifier,
-                        content,
-                        "github-generated-sbom.json",
-                        metadata,
-                        null
-                ));
+        return sbomContentIngestionService.ingestBytes(
+                tenant,
+                assetType,
+                assetName,
+                assetIdentifier,
+                content,
+                "github-generated-sbom.json",
+                metadata,
+                null
+        );
     }
 
     private SbomIngestionResponse ingestGithubAttestation(
@@ -421,22 +417,21 @@ public class GithubSbomIngestionCoordinator {
                 sbomUploadSupportService.toJson(evidence)
         );
 
-        return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
-                sbomContentIngestionService.ingestBytes(
-                        tenant,
-                        AssetType.CONTAINER_IMAGE,
-                        assetName,
-                        assetIdentifier,
-                        content,
-                        "github-attested-sbom.json",
-                        metadata,
-                        asset -> sbomUploadSupportService.applyContainerImageMetadata(
-                                asset,
-                                imageRepository,
-                                imageTag,
-                                normalizedDigest
-                        )
-                ));
+        return sbomContentIngestionService.ingestBytes(
+                tenant,
+                AssetType.CONTAINER_IMAGE,
+                assetName,
+                assetIdentifier,
+                content,
+                "github-attested-sbom.json",
+                metadata,
+                asset -> sbomUploadSupportService.applyContainerImageMetadata(
+                        asset,
+                        imageRepository,
+                        imageTag,
+                        normalizedDigest
+                )
+        );
     }
 
     private boolean shouldIncludeAllRepos(GithubSbomIngestionRequest request) {

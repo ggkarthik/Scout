@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.prototype.vulnwatch.util.LogUtil;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -90,7 +91,7 @@ public class CveAiActionsService {
             try {
                 aiSolutionPersistenceService.saveAiActions(cveId, raw);
             } catch (Exception saveError) {
-                LOG.warn("Failed to persist AI actions for {}: {}", cveId, saveError.getMessage());
+                LOG.warn("Failed to persist AI actions for {}: {}", LogUtil.safe(cveId), saveError.getMessage());
             }
             CveDetailController.AiActionsResponse response = new CveDetailController.AiActionsResponse();
             response.success = true;

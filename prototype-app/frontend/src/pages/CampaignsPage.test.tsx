@@ -1,9 +1,11 @@
 import React from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
 import { ActorContextState } from '../features/auth/context';
 import type { ActorContext } from '../features/auth/types';
+import { CampaignDetailPage } from '../features/campaigns/CampaignDetailPage';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { CampaignDetail, CampaignSummary } from '../features/campaigns/types';
 import { renderWithProviders } from '../test/test-utils';
@@ -101,9 +103,23 @@ function buildDetail(overrides: Partial<CampaignDetail> = {}): CampaignDetail {
 function renderCampaignsPage() {
   return renderWithProviders(
     <ActorContextState.Provider value={ACTOR}>
-      <CampaignsPage />
+      <Routes>
+        <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
+        <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
+      </Routes>
     </ActorContextState.Provider>,
     { route: '/vuln-repo/campaigns' }
+  );
+}
+
+function renderCampaignDetailPage(route = '/vuln-repo/campaigns/campaign-1') {
+  return renderWithProviders(
+    <ActorContextState.Provider value={ACTOR}>
+      <Routes>
+        <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
+      </Routes>
+    </ActorContextState.Provider>,
+    { route }
   );
 }
 
@@ -121,11 +137,14 @@ describe('CampaignsPage', () => {
     vi.spyOn(api, 'listCampaigns')
       .mockResolvedValueOnce([activeSummary])
       .mockResolvedValue([pausedSummary]);
-    vi.spyOn(api, 'getCampaign').mockResolvedValue(activeDetail);
+    vi.spyOn(api, 'getCampaign')
+      .mockResolvedValueOnce(activeDetail)
+      .mockResolvedValue(pausedDetail);
     vi.spyOn(api, 'updateCampaignStatus').mockResolvedValue(pausedDetail);
 
     renderCampaignsPage();
 
+    fireEvent.click(await screen.findByText('Kernel patch sprint'));
     await screen.findByRole('button', { name: 'Pause' });
     expect(screen.getAllByText('CVE-2026-1111').length).toBeGreaterThan(0);
 
@@ -249,6 +268,130 @@ describe('CampaignsPage', () => {
       }));
     });
 
+    expect(api.getCampaign).toHaveBeenCalledWith('campaign-2');
     await screen.findByRole('heading', { name: 'Resolver runway' });
+  });
+
+  it('walks the campaign detail tabs, submits an exception, approves an existing one, and adds a note', async () => {
+    const detailWithPendingException = buildDetail({
+      exceptions: [{
+        id: 'exception-1',
+        findingDisplayId: 'F-100',
+        assetName: 'web-prod-01',
+        packageName: 'openssl',
+        title: 'Existing exception',
+        reason: 'Waiting on coordinated patch window.',
+        status: 'PENDING_DECISION',
+        requestedBy: 'analyst@example.com',
+        requestedAt: '2026-06-11T00:00:00Z',
+        decisionDueAt: '2026-06-18T00:00:00Z',
+        decisionedBy: null,
+        decisionedAt: null,
+      }],
+      evidence: [{
+        cveId: 'CVE-2026-1111',
+        displayId: 'F-100',
+        assetName: 'web-prod-01',
+        assetIdentifier: 'asset-1',
+        packageName: 'openssl',
+        severity: 'HIGH',
+        ownerGroup: 'Platform Ops',
+        status: 'OPEN',
+        incidentId: 'INC-100',
+        dueAt: '2026-06-20T00:00:00Z',
+      }],
+    });
+    const detailWithApprovedException = buildDetail({
+      ...detailWithPendingException,
+      exceptions: [{ ...detailWithPendingException.exceptions[0]!, status: 'APPROVED', decisionedBy: 'lead@example.com', decisionedAt: '2026-06-12T00:00:00Z' }],
+      evidence: detailWithPendingException.evidence,
+    });
+    const detailWithNewException = buildDetail({
+      ...detailWithApprovedException,
+      exceptions: [
+        ...detailWithApprovedException.exceptions,
+        {
+          id: 'exception-2',
+          findingDisplayId: 'F-100',
+          assetName: 'web-prod-01',
+          packageName: 'openssl',
+          title: 'Temporary waiver',
+          reason: 'Awaiting change window',
+          status: 'PENDING_DECISION',
+          requestedBy: 'analyst@example.com',
+          requestedAt: '2026-06-12T00:00:00Z',
+          decisionDueAt: '2026-06-30T00:00:00Z',
+          decisionedBy: null,
+          decisionedAt: null,
+        },
+      ],
+      evidence: detailWithPendingException.evidence,
+    });
+    const detailWithNote = buildDetail({
+      ...detailWithNewException,
+      notes: [{
+        id: 'note-1',
+        author: 'analyst@example.com',
+        body: 'Need resolver confirmation.',
+        createdAt: '2026-06-12T00:00:00Z',
+      }],
+      evidence: detailWithPendingException.evidence,
+    });
+
+    vi.spyOn(api, 'getCampaign')
+      .mockResolvedValueOnce(detailWithPendingException)
+      .mockResolvedValueOnce(detailWithNewException)
+      .mockResolvedValueOnce(detailWithNote);
+    const addExceptionSpy = vi.spyOn(api, 'addCampaignException').mockResolvedValue(detailWithNewException.exceptions[1]!);
+    const updateExceptionSpy = vi.spyOn(api, 'updateCampaignExceptionStatus').mockResolvedValue(detailWithApprovedException);
+    const addNoteSpy = vi.spyOn(api, 'addCampaignNote').mockResolvedValue(detailWithNote.notes[0]!);
+
+    renderCampaignDetailPage();
+
+    await screen.findByRole('heading', { name: 'Kernel patch sprint' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Assets/i }));
+    expect(screen.getByText('Support Group')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Findings/i }));
+    expect(screen.getAllByText('F-100').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    expect(screen.getByText('INC-100')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Exceptions/i }));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'F-100' } });
+    fireEvent.change(screen.getByPlaceholderText('Exception title'), { target: { value: 'Temporary waiver' } });
+    fireEvent.change(screen.getByPlaceholderText('Reason / context'), { target: { value: 'Awaiting change window' } });
+    fireEvent.change(document.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: '2026-06-30' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Add Exception$/i })[1]!);
+
+    await waitFor(() => {
+      expect(addExceptionSpy).toHaveBeenCalledWith('campaign-1', {
+        findingDisplayId: 'F-100',
+        assetName: 'web-prod-01',
+        packageName: 'openssl',
+        title: 'Temporary waiver',
+        reason: 'Awaiting change window',
+        decisionDueAt: '2026-06-30T00:00:00.000Z',
+      });
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0]!);
+
+    await waitFor(() => {
+      expect(updateExceptionSpy).toHaveBeenCalledWith('campaign-1', 'exception-1', 'APPROVED');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Activity/i }));
+    fireEvent.change(screen.getByPlaceholderText(/Add a note for resolvers and stakeholders/i), {
+      target: { value: 'Need resolver confirmation.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Add Note/i }));
+
+    await waitFor(() => {
+      expect(addNoteSpy).toHaveBeenCalledWith('campaign-1', 'Need resolver confirmation.');
+    });
+    await screen.findByText('Need resolver confirmation.');
   });
 });

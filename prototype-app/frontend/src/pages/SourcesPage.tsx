@@ -80,7 +80,7 @@ function isNotFoundError(error: unknown): boolean {
 
 function readStoredNvdFullSyncApiKey(): string {
   try {
-    return window.localStorage.getItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY) ?? '';
+    return window.sessionStorage.getItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY) ?? '';
   } catch {
     return '';
   }
@@ -403,10 +403,10 @@ export function SourcesPage({
   React.useEffect(() => {
     try {
       if (!currentNvdFullSyncApiKey) {
-        window.localStorage.removeItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY);
+        window.sessionStorage.removeItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY);
         return;
       }
-      window.localStorage.setItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY, currentNvdFullSyncApiKey);
+      window.sessionStorage.setItem(NVD_FULL_SYNC_API_KEY_STORAGE_KEY, currentNvdFullSyncApiKey);
     } catch {
       // Browser-only persistence for the full-sync helper.
     }

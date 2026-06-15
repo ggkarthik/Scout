@@ -6,6 +6,7 @@ import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import com.prototype.vulnwatch.util.LogUtil;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -141,7 +142,7 @@ public class InvestigationService {
         investigation.addActivity(activity);
 
         Investigation saved = investigationRepository.save(investigation);
-        log.info("Created investigation {} for CVE {} by user {}", saved.getId(), cveId, createdBy);
+        log.info("Created investigation {} for CVE {} by user {}", saved.getId(), LogUtil.safe(cveId), LogUtil.safe(createdBy));
         return saved;
     }
 
@@ -259,7 +260,7 @@ public class InvestigationService {
         investigation.setModifiedBy(userId);
 
         Investigation saved = investigationRepository.save(investigation);
-        log.info("Submitted investigation {} for CVE {} by user {}", saved.getId(), cveId, userId);
+        log.info("Submitted investigation {} for CVE {} by user {}", saved.getId(), LogUtil.safe(cveId), LogUtil.safe(userId));
         return tenantSchemaExecutionService.run(tenant, () -> investigationRepository.findById(saved.getId())).orElse(saved);
     }
 

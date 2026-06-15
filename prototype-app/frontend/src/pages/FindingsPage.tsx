@@ -273,7 +273,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const {
     activeQueueKey,
     setActiveQueueKey,
-    builtInQueues,
     personalQueues,
     defaultQueue,
     activeQueryContext,
@@ -404,29 +403,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       patchAvailable: adHocFilters.patchAvailable ?? baseFilter.patchAvailable,
       suppressedUntilBand: adHocFilters.suppressedUntilBand ?? baseFilter.suppressedUntilBand,
     };
-  }
-
-  function applyQueueSelection(nextQueueKey: string) {
-    const nextQueue = availableQueues.find((queue) => queue.key === nextQueueKey);
-    const queueFilter = nextQueue?.filter ?? {};
-    if (queueFilter.severity && queueFilter.severity.length > 0) {
-      setColFilters((prev) => ({
-        ...prev,
-        severity: prev.severity.every((value) => queueFilter.severity?.includes(value)) ? prev.severity : [],
-      }));
-    }
-    if (queueFilter.status && queueFilter.status.length > 0) {
-      setColFilters((prev) => ({
-        ...prev,
-        status: prev.status.every((value) => queueFilter.status?.includes(value)) ? prev.status : [],
-      }));
-    }
-    if (queueFilter.dueDateBand && dueDateBand && queueFilter.dueDateBand !== dueDateBand) {
-      setDueDateBand(null);
-    }
-    setActiveQueueKey(nextQueueKey);
-    setPage(0);
-    setSelectedIds(new Set());
   }
 
   function openCreateQueueDialog() {
@@ -1011,11 +987,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   return (
     <div className="fpl-root">
       <FindingsWorkspaceHeader
-        builtInQueues={builtInQueues}
         personalQueues={personalQueues}
         activeQueueKey={activeQueryContext.queueKey}
         projectionStatus={projectionStatusQuery.data}
-        queueLoading={queuesQuery.isLoading}
         queueActionError={queueActionError}
         projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
         workspaceError={
@@ -1025,8 +999,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
             : null
         }
-        onSelectQueue={applyQueueSelection}
-        onOpenCreateQueue={openCreateQueueDialog}
         onOpenEditQueue={openEditQueueDialog}
         onDuplicateQueue={(queue) => void duplicateQueue(queue)}
         onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
@@ -1052,6 +1024,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
               {activeChips.length>1 && <button className="fpl-chip-clear" onClick={clearAllFilters}>Clear all</button>}
             </div>
           )}
+        </div>
+        <div className="fpl-toolbar-right">
+          <button type="button" className="btn btn-secondary" onClick={openCreateQueueDialog}>
+            Save Current View
+          </button>
         </div>
       </div>
 

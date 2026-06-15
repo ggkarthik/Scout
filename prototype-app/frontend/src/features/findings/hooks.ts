@@ -20,7 +20,6 @@ export function useFindingsQueryContext({
   const resolvedDefaultRef = React.useRef(false);
   const [activeQueueKey, setActiveQueueKey] = React.useState(initialQueueKey);
 
-  const builtInQueues = React.useMemo(() => availableQueues.filter((queue) => queue.kind === 'BUILT_IN'), [availableQueues]);
   const personalQueues = React.useMemo(() => availableQueues.filter((queue) => queue.kind === 'PERSONAL'), [availableQueues]);
   const activeQueue = React.useMemo(
     () => availableQueues.find((queue) => queue.key === activeQueueKey) ?? availableQueues[0] ?? null,
@@ -66,7 +65,6 @@ export function useFindingsQueryContext({
     explicitQueueKey,
     activeQueueKey,
     setActiveQueueKey,
-    builtInQueues,
     personalQueues,
     activeQueue,
     defaultQueue,

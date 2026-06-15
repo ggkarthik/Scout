@@ -66,6 +66,7 @@ describe('UserManagementPage', () => {
   it('renders the five admin tabs and tenant caption when authed', async () => {
     vi.spyOn(api, 'getAuthContext').mockResolvedValue(AUTH_CONTEXT);
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([buildMember()]);
+    vi.spyOn(api, 'listTenantInvites').mockResolvedValue([]);
     vi.spyOn(api, 'listServiceAccounts').mockResolvedValue([]);
     vi.spyOn(api, 'listAuditEvents').mockResolvedValue([]);
 
@@ -91,17 +92,20 @@ describe('UserManagementPage', () => {
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([
       buildMember({ displayName: 'Jane Doe', email: 'jane.doe@example.com', subject: 'jane.doe' }),
     ]);
+    vi.spyOn(api, 'listTenantInvites').mockResolvedValue([]);
     vi.spyOn(api, 'listServiceAccounts').mockResolvedValue([]);
     vi.spyOn(api, 'listAuditEvents').mockResolvedValue([]);
 
     renderWithProviders(<UserManagementPage />);
 
-    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
-    expect(screen.getByText('jane.doe@example.com')).toBeInTheDocument();
-    expect(screen.getByText('jane.doe')).toBeInTheDocument();
+    expect((await screen.findAllByText('Jane Doe')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('jane.doe@example.com').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('jane.doe').length).toBeGreaterThan(0);
     expect(screen.getByRole('columnheader', { name: 'User' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Role' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Subject' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter members by role')).toBeInTheDocument();
+    expect(screen.getByText('Suspend member')).toBeInTheDocument();
   });
 
   it('shows the workspace-unavailable notice when no tenantId is resolved', async () => {
@@ -112,6 +116,7 @@ describe('UserManagementPage', () => {
     });
     // Members query is gated by tenantId, so it shouldn't fire — but stub for safety
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([]);
+    vi.spyOn(api, 'listTenantInvites').mockResolvedValue([]);
     vi.spyOn(api, 'listServiceAccounts').mockResolvedValue([]);
     vi.spyOn(api, 'listAuditEvents').mockResolvedValue([]);
 
@@ -131,6 +136,7 @@ describe('UserManagementPage', () => {
   it('uses serviceAccounts data — switching to Service Accounts tab', async () => {
     vi.spyOn(api, 'getAuthContext').mockResolvedValue(AUTH_CONTEXT);
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([]);
+    vi.spyOn(api, 'listTenantInvites').mockResolvedValue([]);
     vi.spyOn(api, 'listServiceAccounts').mockResolvedValue([buildServiceAccount()]);
     vi.spyOn(api, 'listAuditEvents').mockResolvedValue([buildAuditEvent()]);
 

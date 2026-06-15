@@ -143,6 +143,16 @@ app:
     delta-queue-capacity: ${APP_CORRELATION_DELTA_QUEUE_CAPACITY:500}
     delta-queue-enqueue-timeout-ms: ${APP_CORRELATION_DELTA_QUEUE_ENQUEUE_TIMEOUT_MS:2000}
     delta-queue-poll-interval-ms: ${APP_CORRELATION_DELTA_QUEUE_POLL_INTERVAL_MS:2000}
+  ingestion:
+    admission:
+      rate-limit-window-seconds: ${APP_INGESTION_ADMISSION_RATE_LIMIT_WINDOW_SECONDS:300}
+      max-accepted-jobs-per-window: ${APP_INGESTION_ADMISSION_MAX_ACCEPTED_JOBS_PER_WINDOW:10}
+      max-active-jobs-per-tenant: ${APP_INGESTION_ADMISSION_MAX_ACTIVE_JOBS_PER_TENANT:1}
+    jobs:
+      poll-interval-ms: ${APP_INGESTION_JOB_POLL_INTERVAL_MS:2000}
+      poll-batch-size: ${APP_INGESTION_JOB_POLL_BATCH_SIZE:10}
+      max-concurrent-per-tenant: ${APP_INGESTION_JOB_MAX_CONCURRENT_PER_TENANT:1}
+      retry-delay-ms: ${APP_INGESTION_JOB_RETRY_DELAY_MS:5000}
   epss:
     # BLG-016: EPSS (Exploit Prediction Scoring System) integration
     base-url: ${EPSS_BASE_URL:https://api.first.org/data/v1/epss}

@@ -12,6 +12,7 @@ import {
   normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryView,
+  pathForInventoryViewWithSearch,
   pathForOperationsView,
   pathForPlatformView,
   pathForTab,
@@ -26,6 +27,8 @@ import {
   canAccessPlatformConsole,
   canManageInventorySources,
   canManageRiskPolicy,
+  canManageTenant,
+  canManageUsers,
   canRunSecurityWorkflow,
   canViewReadOnly
 } from './features/auth/roles';
@@ -125,6 +128,9 @@ const DemoRequestSuccessPage = React.lazy(async () => ({
 }));
 const DemoInvitePage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).DemoInvitePage
+}));
+const TenantInvitePage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).TenantInvitePage
 }));
 const LoginPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).LoginPage
@@ -485,6 +491,18 @@ function ConnectRoute() {
   );
 }
 
+function EndOfLifeRoute() {
+  const actor = useActor();
+  const isPlatformScope = actor?.platformScope ?? false;
+  const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
+
+  if (!platformScopeOwner && !canManageTenant(actor)) {
+    return <Navigate to={pathForInventoryViewWithSearch('software-identities', { lifecycle: 'eol' })} replace />;
+  }
+
+  return <EolPage />;
+}
+
 function PlatformRoute() {
   const actor = useActor();
   const params = useParams<{ platformView?: string }>();
@@ -529,6 +547,8 @@ function actorFromPersona(persona: TestPersona): ActorContext {
     actingAsPlatformOwner: false,
     sensitiveActionConfirmationRequired: false,
     planCode: null,
+    entitlements: {},
+    demo: false,
     demoExpiresAt: null,
     demoDaysRemaining: null,
     demoCapabilities: null,
@@ -666,7 +686,7 @@ function AppShell() {
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'connect', 'operations', 'platform'] satisfies AppTab[];
+      return ['vuln-repo', 'end-of-life', 'connect', 'operations', 'platform'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
@@ -677,6 +697,9 @@ function AppShell() {
     }
     if (canManageInventorySources(actor)) {
       tabs.push('connect');
+    }
+    if (canManageTenant(actor) || canManageUsers(actor)) {
+      tabs.push('admin');
     }
     if (canManageRiskPolicy(actor)) {
       tabs.push('configurations');
@@ -759,7 +782,7 @@ function AppShell() {
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
-  const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
+  const isDemoTenant = actor?.demo === true;
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
@@ -1037,7 +1060,7 @@ function AppShell() {
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
-              <Route path="/end-of-life" element={<EolPage />} />
+              <Route path="/end-of-life" element={<EndOfLifeRoute />} />
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />
               <Route path="/admin/:adminView?" element={<UserManagementPage />} />
               <Route path="/platform/:platformView?" element={<PlatformRoute />} />
@@ -1139,6 +1162,7 @@ export default function App() {
         <Route path="/demo/request/success" element={<DemoRequestSuccessPage />} />
         <Route path="/demo/expired" element={<DemoExpiredPage />} />
         <Route path="/invite/:token" element={<DemoInvitePage />} />
+        <Route path="/tenant-invite/:token" element={<TenantInvitePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/*" element={
           <AuthSessionBoundary>

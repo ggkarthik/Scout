@@ -21,6 +21,8 @@ import com.prototype.vulnwatch.service.FindingListProjectionService;
 import com.prototype.vulnwatch.service.FindingProjectionOperationsService;
 import com.prototype.vulnwatch.service.FindingQueueService;
 import com.prototype.vulnwatch.service.FindingQueryService;
+import com.prototype.vulnwatch.service.RequestActor;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
@@ -42,6 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class FindingController {
 
     private final WorkspaceService workspaceService;
+    private final RequestActorService requestActorService;
     private final FindingQueryService findingQueryService;
     private final FindingAnalyticsService findingAnalyticsService;
     private final FindingProjectionOperationsService findingProjectionOperationsService;
@@ -50,6 +53,7 @@ public class FindingController {
 
     public FindingController(
             WorkspaceService workspaceService,
+            RequestActorService requestActorService,
             FindingQueryService findingQueryService,
             FindingAnalyticsService findingAnalyticsService,
             FindingProjectionOperationsService findingProjectionOperationsService,
@@ -57,6 +61,7 @@ public class FindingController {
             FindingWorkflowService findingWorkflowService
     ) {
         this.workspaceService = workspaceService;
+        this.requestActorService = requestActorService;
         this.findingQueryService = findingQueryService;
         this.findingAnalyticsService = findingAnalyticsService;
         this.findingProjectionOperationsService = findingProjectionOperationsService;
@@ -106,7 +111,7 @@ public class FindingController {
     @GetMapping("/projection-status")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     public FindingProjectionStatusResponse projectionStatus() {
-        Tenant tenant = workspaceService.getWorkspace();
+        Tenant tenant = projectionWorkspace();
         return toProjectionStatusResponse(findingProjectionOperationsService.inspectStatus(tenant));
     }
 
@@ -114,7 +119,7 @@ public class FindingController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
     @SensitiveTenantAction("finding.projection.rebuilt")
     public FindingProjectionStatusResponse rebuildProjection() {
-        Tenant tenant = workspaceService.getWorkspace();
+        Tenant tenant = projectionWorkspace();
         return toProjectionStatusResponse(findingProjectionOperationsService.rebuild(tenant));
     }
 
@@ -248,5 +253,13 @@ public class FindingController {
                 status.driftCount(),
                 status.lastRebuildDurationMs()
         );
+    }
+
+    private Tenant projectionWorkspace() {
+        RequestActor actor = requestActorService.currentActor();
+        if (actor != null && actor.hasRole("PLATFORM_OWNER")) {
+            return workspaceService.getDefaultWorkspace();
+        }
+        return workspaceService.getWorkspace();
     }
 }

@@ -4,8 +4,6 @@ import { api, type ApplicationRiskSummary } from '../../api/client';
 import { timeAgo } from '../../lib/time';
 import { ApplicationDetailPanel } from './ApplicationDetailPanel';
 
-type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
-
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 function bomLabel(type: string): string {
