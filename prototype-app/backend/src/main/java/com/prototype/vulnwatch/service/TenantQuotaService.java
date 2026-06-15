@@ -4,12 +4,14 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.AuditEventRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryTargetRepository;
+import com.prototype.vulnwatch.repo.IngestionJobRepository;
 import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
 import com.prototype.vulnwatch.repo.ServiceAccountRepository;
 import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
@@ -24,8 +26,14 @@ public class TenantQuotaService {
     private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
     private final ServiceAccountRepository serviceAccountRepository;
     private final AuditEventRepository auditEventRepository;
+    private final IngestionJobRepository ingestionJobRepository;
     private final TenantRepository tenantRepository;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final AuditEventService auditEventService;
+    private final IngestionJobMetricsService ingestionJobMetricsService;
+    private final int sbomRateLimitWindowSeconds;
+    private final int sbomRateLimitMaxAcceptedJobs;
+    private final int sbomAdmissionMaxActiveJobs;
 
     public TenantQuotaService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
@@ -34,8 +42,14 @@ public class TenantQuotaService {
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
             ServiceAccountRepository serviceAccountRepository,
             AuditEventRepository auditEventRepository,
+            IngestionJobRepository ingestionJobRepository,
             TenantRepository tenantRepository,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            AuditEventService auditEventService,
+            IngestionJobMetricsService ingestionJobMetricsService,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.admission.rate-limit-window-seconds:300}") int sbomRateLimitWindowSeconds,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.admission.max-accepted-jobs-per-window:10}") int sbomRateLimitMaxAcceptedJobs,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.admission.max-active-jobs-per-tenant:1}") int sbomAdmissionMaxActiveJobs
     ) {
         this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
@@ -43,8 +57,14 @@ public class TenantQuotaService {
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
         this.serviceAccountRepository = serviceAccountRepository;
         this.auditEventRepository = auditEventRepository;
+        this.ingestionJobRepository = ingestionJobRepository;
         this.tenantRepository = tenantRepository;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.auditEventService = auditEventService;
+        this.ingestionJobMetricsService = ingestionJobMetricsService;
+        this.sbomRateLimitWindowSeconds = Math.max(1, sbomRateLimitWindowSeconds);
+        this.sbomRateLimitMaxAcceptedJobs = Math.max(1, sbomRateLimitMaxAcceptedJobs);
+        this.sbomAdmissionMaxActiveJobs = Math.max(1, sbomAdmissionMaxActiveJobs);
     }
 
     @Transactional(readOnly = true)
@@ -90,6 +110,66 @@ public class TenantQuotaService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public void assertCanCreateSbomIngestionJob(Tenant tenant, String sourceType) {
+        int max = safeLimit(tenant.getMaxDailySbomUploads());
+        int rateLimitWindowSeconds = effectiveTenantLimit(tenant.getSbomRateLimitWindowSeconds(), sbomRateLimitWindowSeconds);
+        int maxAcceptedJobsPerWindow = effectiveTenantLimit(tenant.getMaxSbomJobsPerRateLimitWindow(), sbomRateLimitMaxAcceptedJobs);
+        int maxActiveSbomJobs = effectiveTenantLimit(tenant.getMaxActiveSbomJobs(), sbomAdmissionMaxActiveJobs);
+        Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
+        long current = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.countAcceptedSince(since));
+        if (current >= max) {
+            recordSbomAdmissionFailure(
+                    "ingestion.job.quota_denied",
+                    sourceType,
+                    "{\"reason\":\"daily_quota\",\"acceptedInLast24Hours\":" + current + ",\"limit\":" + max + "}"
+            );
+            ingestionJobMetricsService.recordQuotaRejected(sourceType);
+            throw new QuotaExceededException(
+                    "TENANT_SBOM_DAILY_LIMIT_EXCEEDED",
+                    "Tenant SBOM ingestion daily limit exceeded (" + current + "/" + max + ")",
+                    3600
+            );
+        }
+
+        Instant burstSince = Instant.now().minus(rateLimitWindowSeconds, ChronoUnit.SECONDS);
+        long acceptedInWindow = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.countAcceptedSince(burstSince));
+        if (acceptedInWindow >= maxAcceptedJobsPerWindow) {
+            recordSbomAdmissionFailure(
+                    "ingestion.job.rate_limited",
+                    sourceType,
+                    "{\"reason\":\"rate_limit\",\"acceptedInWindow\":" + acceptedInWindow
+                            + ",\"windowSeconds\":" + rateLimitWindowSeconds
+                            + ",\"limit\":" + maxAcceptedJobsPerWindow + "}"
+            );
+            ingestionJobMetricsService.recordRateLimited(sourceType);
+            throw new QuotaExceededException(
+                    "TENANT_SBOM_RATE_LIMIT_EXCEEDED",
+                    "Tenant SBOM ingestion rate limit exceeded (" + acceptedInWindow + "/" + maxAcceptedJobsPerWindow
+                            + " in " + rateLimitWindowSeconds + "s)",
+                    rateLimitWindowSeconds
+            );
+        }
+
+        long activeJobs = tenantSchemaExecutionService.run(
+                tenant,
+                () -> ingestionJobRepository.countByStatusIn(List.of("QUEUED", "RUNNING"))
+        );
+        if (activeJobs >= maxActiveSbomJobs) {
+            recordSbomAdmissionFailure(
+                    "ingestion.job.admission_denied",
+                    sourceType,
+                    "{\"reason\":\"active_job_limit\",\"activeJobs\":" + activeJobs + ",\"limit\":" + maxActiveSbomJobs + "}"
+            );
+            ingestionJobMetricsService.recordAdmissionRejected(sourceType);
+            throw new QuotaExceededException(
+                    "TENANT_SBOM_ACTIVE_JOB_LIMIT_EXCEEDED",
+                    "Tenant SBOM ingestion backlog is full (" + activeJobs + "/" + maxActiveSbomJobs + ")",
+                    60
+            );
+        }
+    }
+
     public void assertCanExportRows(Tenant tenant, long requestedRows) {
         int max = safeLimit(tenant.getMaxExportRows());
         if (requestedRows > max) {
@@ -120,6 +200,10 @@ public class TenantQuotaService {
         return value == null ? 0 : Math.max(0, value);
     }
 
+    private int effectiveTenantLimit(Integer tenantValue, int fallbackValue) {
+        return tenantValue == null ? fallbackValue : Math.max(0, tenantValue);
+    }
+
     /**
      * Temporary policy: a connector limit of zero means "unlimited" rather than
      * "none allowed", so older demo tenants and any manually provisioned tenant
@@ -127,5 +211,22 @@ public class TenantQuotaService {
      */
     private boolean isUnlimitedConnectorMode(Tenant tenant) {
         return tenant != null && safeLimit(tenant.getMaxConnectorCount()) == 0;
+    }
+
+    private void recordSbomAdmissionFailure(String action, String sourceType, String detailsJson) {
+        String details = detailsJson == null
+                ? null
+                : detailsJson.substring(0, detailsJson.length() - 1)
+                + ",\"sourceType\":\"" + escapeJson(sourceType) + "\"}";
+        auditEventService.record(action, "tenant", null, details);
+    }
+
+    private String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 }

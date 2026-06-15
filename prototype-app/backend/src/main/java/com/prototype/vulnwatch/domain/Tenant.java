@@ -30,7 +30,7 @@ public class Tenant {
     private String status = "ACTIVE";
 
     @Column(nullable = false, length = 64)
-    private String planCode = "pilot";
+    private String planCode = "PRO";
 
     @Column(length = 255)
     private String billingRef;
@@ -82,6 +82,12 @@ public class Tenant {
 
     @Column(nullable = false)
     private Integer maxDailyExposureRefreshes = 25;
+
+    private Integer sbomRateLimitWindowSeconds;
+
+    private Integer maxSbomJobsPerRateLimitWindow;
+
+    private Integer maxActiveSbomJobs;
 
     public UUID getId() {
         return id;
@@ -289,5 +295,29 @@ public class Tenant {
 
     public void setMaxDailyExposureRefreshes(Integer maxDailyExposureRefreshes) {
         this.maxDailyExposureRefreshes = maxDailyExposureRefreshes;
+    }
+
+    public Integer getSbomRateLimitWindowSeconds() {
+        return sbomRateLimitWindowSeconds;
+    }
+
+    public void setSbomRateLimitWindowSeconds(Integer sbomRateLimitWindowSeconds) {
+        this.sbomRateLimitWindowSeconds = sbomRateLimitWindowSeconds;
+    }
+
+    public Integer getMaxSbomJobsPerRateLimitWindow() {
+        return maxSbomJobsPerRateLimitWindow;
+    }
+
+    public void setMaxSbomJobsPerRateLimitWindow(Integer maxSbomJobsPerRateLimitWindow) {
+        this.maxSbomJobsPerRateLimitWindow = maxSbomJobsPerRateLimitWindow;
+    }
+
+    public Integer getMaxActiveSbomJobs() {
+        return maxActiveSbomJobs;
+    }
+
+    public void setMaxActiveSbomJobs(Integer maxActiveSbomJobs) {
+        this.maxActiveSbomJobs = maxActiveSbomJobs;
     }
 }

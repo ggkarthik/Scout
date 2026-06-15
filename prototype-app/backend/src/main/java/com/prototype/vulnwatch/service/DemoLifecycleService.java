@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DemoLifecycleService {
     public static final String DEMO_PLAN_CODE = "DEMO";
+    private static final String DEMO_SOURCE_REQUEST_REVIEW = "REQUEST_REVIEW";
     private static final List<String> ACTIVE_REQUEST_STATUSES = List.of("PENDING", "SENT", "ERROR");
 
     private final DemoRequestRepository demoRequestRepository;
@@ -258,7 +259,7 @@ public class DemoLifecycleService {
                 Map.of(
                         "sbomUpload", demo,
                         "liveConnectors", true,
-                        "aiActions", !demo,
+                        "aiActions", true,
                         "exports", true
                 ),
                 Map.of(
@@ -275,9 +276,7 @@ public class DemoLifecycleService {
     }
 
     public void assertDemoAllowsAiAction(Tenant tenant) {
-        if (isDemoTenant(tenant)) {
-            throw new DemoAccessException("DEMO_CONNECTOR_DISABLED", "AI actions are disabled for free demo tenants", HttpStatus.FORBIDDEN);
-        }
+        // Demo tenants now provision with Enterprise-equivalent access by default.
     }
 
     @Transactional(readOnly = true)
@@ -296,13 +295,16 @@ public class DemoLifecycleService {
     }
 
     public boolean isDemoTenant(Tenant tenant) {
-        return tenant != null && DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode());
+        return tenant != null
+                && ((tenant.getDemoExpiresAt() != null)
+                || (tenant.getDemoSource() != null && !tenant.getDemoSource().isBlank())
+                || DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode()));
     }
 
     @Scheduled(cron = "${app.demo.expiration-cron:0 10 * * * *}")
     public void expireDemoTenants() {
         Instant now = Instant.now();
-        for (Tenant tenant : tenantRepository.findByPlanCodeIgnoreCaseAndDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(DEMO_PLAN_CODE, now)) {
+        for (Tenant tenant : tenantRepository.findByDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(now)) {
             demoTenantPurgeService.processExpiredTenant(tenant.getId(), now);
         }
     }
@@ -321,11 +323,15 @@ public class DemoLifecycleService {
         while (tenantRepository.existsBySlugIgnoreCase(candidate)) {
             candidate = slug + "-" + suffix++;
         }
-        Tenant tenant = tenantService.createTenant(nameCandidate, candidate, DEMO_PLAN_CODE, "demo-request:" + request.getId());
+        Tenant tenant = tenantService.createTenant(
+                nameCandidate,
+                candidate,
+                TenantEntitlementService.PLAN_ENTERPRISE,
+                "demo-request:" + request.getId());
         Instant expiresAt = Instant.now().plus(7, ChronoUnit.DAYS);
         tenant.setDemoExpiresAt(expiresAt);
         tenant.setDemoCreatedBy(trimToNull(actor));
-        tenant.setDemoSource("REQUEST_REVIEW");
+        tenant.setDemoSource(DEMO_SOURCE_REQUEST_REVIEW);
         tenant.setDemoOwnerEmail(request.getEmail());
         tenant.setMaxConnectorCount(25);
         tenant.setMaxServiceAccountCount(0);

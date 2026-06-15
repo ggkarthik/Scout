@@ -540,6 +540,8 @@ function actorFromPersona(persona: TestPersona): ActorContext {
     actingAsPlatformOwner: false,
     sensitiveActionConfirmationRequired: false,
     planCode: null,
+    entitlements: {},
+    demo: false,
     demoExpiresAt: null,
     demoDaysRemaining: null,
     demoCapabilities: null,
@@ -773,7 +775,7 @@ function AppShell() {
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
-  const isDemoTenant = actor?.planCode?.toUpperCase() === 'DEMO';
+  const isDemoTenant = actor?.demo === true;
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;

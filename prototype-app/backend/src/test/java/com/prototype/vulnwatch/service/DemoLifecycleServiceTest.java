@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -71,7 +72,7 @@ class DemoLifecycleServiceTest {
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
         when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
-        when(tenantService.createTenant("Example Co", "example-co", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -95,6 +96,7 @@ class DemoLifecycleServiceTest {
         assertNotNull(response.tenantId());
         assertEquals("SENT", response.latestInvite().status());
         assertNotNull(response.latestInvite().lastSentAt());
+        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, tenant.getPlanCode());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
     }
 
@@ -111,7 +113,7 @@ class DemoLifecycleServiceTest {
         when(tenantRepository.existsByNameIgnoreCase("Example Co (2)")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(true);
         when(tenantRepository.existsBySlugIgnoreCase("example-co-2")).thenReturn(false);
-        when(tenantService.createTenant("Example Co (2)", "example-co-2", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co (2)", "example-co-2", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -144,7 +146,7 @@ class DemoLifecycleServiceTest {
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
         when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
-        when(tenantService.createTenant("Example Co", "example-co", DemoLifecycleService.DEMO_PLAN_CODE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -168,6 +170,34 @@ class DemoLifecycleServiceTest {
         assertEquals("ERROR", response.latestInvite().status());
         assertNull(response.latestInvite().lastSentAt());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
+    }
+
+    @Test
+    void statusForTenantKeepsDemoLifecycleButAllowsAiActions() {
+        Tenant tenant = provisionedTenant();
+        tenant.setDemoExpiresAt(java.time.Instant.now().plusSeconds(86400));
+        tenant.setDemoSource("REQUEST_REVIEW");
+
+        when(sbomUploadRepository.countByUploadedAtGreaterThanEqual(any())).thenReturn(2L);
+
+        DemoLifecycleService service = service();
+        var response = service.statusForTenant(tenant);
+
+        assertTrue(response.demo());
+        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.planCode());
+        assertEquals(Boolean.TRUE, response.demoCapabilities().get("aiActions"));
+    }
+
+    @Test
+    void enterpriseDemoTenantIsRecognizedAsDemoByLifecycleFields() {
+        Tenant tenant = provisionedTenant();
+        tenant.setDemoExpiresAt(java.time.Instant.now().plusSeconds(86400));
+        tenant.setDemoSource("REQUEST_REVIEW");
+
+        DemoLifecycleService service = service();
+
+        assertTrue(service.isDemoTenant(tenant));
+        assertDoesNotThrow(() -> service.assertDemoAllowsAiAction(tenant));
     }
 
     @Test
@@ -383,6 +413,7 @@ class DemoLifecycleServiceTest {
         tenant.setId(UUID.randomUUID());
         tenant.setName("Example Co");
         tenant.setSlug("example-co");
+        tenant.setPlanCode(TenantEntitlementService.PLAN_ENTERPRISE);
         return tenant;
     }
 

@@ -121,7 +121,8 @@ describe('Demo public pages', () => {
       userId: 'alex@example.com',
       tenantId: 'tenant-1',
       tenantName: 'Example Co',
-      planCode: 'DEMO',
+      planCode: 'ENTERPRISE',
+      demo: true,
       roles: ['TENANT_ADMIN'],
       platformScope: false
     };
@@ -253,7 +254,8 @@ describe('Demo public pages', () => {
       userId: 'alex@example.com',
       tenantId: 'tenant-1',
       tenantName: 'Example Co',
-      planCode: 'DEMO',
+      planCode: 'ENTERPRISE',
+      demo: true,
       roles: ['TENANT_ADMIN'],
       platformScope: false
     });

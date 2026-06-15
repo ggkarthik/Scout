@@ -20,6 +20,7 @@ import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.Investigation;
 import com.prototype.vulnwatch.domain.OrgCveRecord;
+import com.prototype.vulnwatch.domain.OrgCveAiArtifact;
 import com.prototype.vulnwatch.domain.SbomFormat;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -35,6 +36,7 @@ import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.InvestigationRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
+import com.prototype.vulnwatch.repo.OrgCveAiArtifactRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VexAssertionRepository;
@@ -110,6 +112,9 @@ class CveDetailControllerPostgresIntegrationTest {
     private OrgCveRecordRepository orgCveRecordRepository;
 
     @Autowired
+    private OrgCveAiArtifactRepository orgCveAiArtifactRepository;
+
+    @Autowired
     private VulnerabilityTargetRepository vulnerabilityTargetRepository;
 
     @Autowired
@@ -117,6 +122,113 @@ class CveDetailControllerPostgresIntegrationTest {
 
     @Autowired
     private TenantRepository tenantRepository;
+
+    @Test
+    void proTenantIsDeniedWhenGeneratingAiSolution() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+        String cveId = "CVE-2099-9910";
+        createVulnerability(cveId);
+
+        mockMvc.perform(post("/api/cve-detail/{cveId}/ai-solution", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"severity":"HIGH","affected_entities":[]}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
+                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
+                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+    }
+
+    @Test
+    void enterpriseTenantCanReachAiSolutionEndpoint() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        tenant.setPlanCode("ENTERPRISE");
+        tenantRepository.save(tenant);
+        String cveId = "CVE-2099-9911";
+        createVulnerability(cveId);
+
+        mockMvc.perform(post("/api/cve-detail/{cveId}/ai-solution", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"severity":"HIGH","affected_entities":[]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").exists());
+    }
+
+    @Test
+    void proTenantIsDeniedWhenReadingSavedAiSolution() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9912";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, true, false, false);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-solution", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
+                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
+                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+    }
+
+    @Test
+    void proTenantIsDeniedWhenReadingSavedAiActions() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9913";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, false, true, false);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-actions", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
+                .andExpect(jsonPath("$.entitlementKey").value("ai.required_actions"))
+                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+    }
+
+    @Test
+    void proTenantIsDeniedWhenReadingSavedAiInvestigationSummary() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9914";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, false, false, true);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/saved-investigation-summary", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
+                .andExpect(jsonPath("$.entitlementKey").value("ai.investigation_summary"))
+                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+    }
 
     @Test
     void submitEndpointsUseRealTenantAndPersistWorkflowOnPostgres() throws Exception {
@@ -509,5 +621,49 @@ class CveDetailControllerPostgresIntegrationTest {
         finding.setLastObservedAt(Instant.now());
         finding.touch();
         findingRepository.save(finding);
+    }
+
+    private void createSavedAiArtifacts(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            boolean includeAiSolution,
+            boolean includeAiActions,
+            boolean includeAiSummary
+    ) {
+        OrgCveRecord record = new OrgCveRecord();
+        record.setTenant(tenant);
+        record.setVulnerability(vulnerability);
+        record.setExternalId(vulnerability.getExternalId());
+        record.setSeverity(vulnerability.getSeverity());
+        record.setCvssScore(vulnerability.getCvssScore());
+        record.setLastEvaluatedAt(Instant.now());
+        record = orgCveRecordRepository.save(record);
+
+        OrgCveAiArtifact artifact = new OrgCveAiArtifact();
+        artifact.setOrgCveRecord(record);
+        if (includeAiSolution) {
+            artifact.setAiSolutionJson("""
+                    {"recommendation":"Apply vendor patch"}
+                    """);
+            artifact.setAiSolutionGeneratedAt(Instant.now());
+        }
+        if (includeAiActions) {
+            artifact.setAiActionsJson("""
+                    {"actions":[{"priority":1,"title":"Patch the fleet"}]}
+                    """);
+            artifact.setAiActionsGeneratedAt(Instant.now());
+        }
+        if (includeAiSummary) {
+            artifact.setInvestigationSummaryInputJson("""
+                    {"summary":{"cveId":"%s"}}
+                    """.formatted(vulnerability.getExternalId()));
+            artifact.setInvestigationSummaryOutputJson("""
+                    {"generatedAt":"2099-01-01T00:00:00Z","executiveSummary":"AI summary","riskAnalysis":[],"impactAnalysis":[],"remediationPlan":[],"keyFindings":[],"metrics":[],"markdown":"AI summary"}
+                    """);
+            artifact.setInvestigationSummaryMode("ai");
+            artifact.setInvestigationSummaryGeneratedAt(Instant.now());
+        }
+        artifact.touch();
+        orgCveAiArtifactRepository.save(artifact);
     }
 }

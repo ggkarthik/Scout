@@ -16,5 +16,5 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     boolean existsBySchemaName(String schemaName);
     List<Tenant> findAllByOrderByCreatedAtAsc();
     List<Tenant> findByPlanCodeIgnoreCaseAndStatusIgnoreCaseAndDemoExpiresAtBefore(String planCode, String status, Instant now);
-    List<Tenant> findByPlanCodeIgnoreCaseAndDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(String planCode, Instant now);
+    List<Tenant> findByDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(Instant now);
 }
