@@ -21,6 +21,7 @@ import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantService;
+import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -69,6 +70,9 @@ class TenantAdministrationControllerSecurityIntegrationTest {
     private TenantAccessControlService tenantAccessControlService;
     @MockBean
     private TenantSupportGrantService tenantSupportGrantService;
+
+    @MockBean
+    private TenantEntitlementService tenantEntitlementService;
     @MockBean
     private OperationalMetricsService operationalMetricsService;
 
