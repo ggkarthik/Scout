@@ -81,7 +81,9 @@ export type CampaignDeliveryAttempt = {
 };
 
 export type CampaignFindingRow = {
+  findingId: string | null;
   displayId: string | null;
+  vulnerabilityId: string | null;
   assetName: string | null;
   assetIdentifier: string | null;
   packageName: string | null;
@@ -106,12 +108,21 @@ export type CampaignEvidenceRow = {
 };
 
 export type CampaignAssetRow = {
+  assetId: string | null;
   assetName: string | null;
   assetIdentifier: string | null;
   environment: string | null;
   supportGroup: string | null;
   openFindings: number;
   resolvedFindings: number;
+};
+
+export type CampaignSoftwareItem = {
+  id: string;
+  displayName: string;
+  vendor: string | null;
+  assetCount: number;
+  openFindingCount: number;
 };
 
 export type CampaignSummary = {
@@ -145,6 +156,7 @@ export type CampaignDetail = {
   findings: CampaignFindingRow[];
   assets: CampaignAssetRow[];
   evidence: CampaignEvidenceRow[];
+  softwareItems?: CampaignSoftwareItem[];
 };
 
 export type CampaignNotifyGroupRequest = {
