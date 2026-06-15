@@ -10,6 +10,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import com.prototype.vulnwatch.util.LogUtil;
 
 public class OutboundHttpClient {
 
@@ -105,7 +106,7 @@ public class OutboundHttpClient {
                         attempts,
                         describeStatus(context),
                         delayMs,
-                        endpoint
+                        LogUtil.safe(endpoint)
                 );
                 sleep(delayMs, policy.providerKey(), operationName);
             }
@@ -174,7 +175,7 @@ public class OutboundHttpClient {
                 context.attempt(),
                 context.maxAttempts(),
                 describeStatus(context),
-                context.endpoint(),
+                LogUtil.safe(context.endpoint()),
                 terminalException
         );
     }
