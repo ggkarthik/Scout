@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.prototype.vulnwatch.util.LogUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
@@ -202,7 +203,7 @@ public class CveInvestigationAiSummaryService {
         String markdown = extractMarkdownText(rawResponse);
 
         if (markdown == null || markdown.isBlank()) {
-            LOG.warn("OpenAI returned empty markdown for {}. Falling back to deterministic summary.", cveId);
+            LOG.warn("OpenAI returned empty markdown for {}. Falling back to deterministic summary.", LogUtil.safe(cveId));
             return normalizeGeneratedAt(deterministicSummary);
         }
 
