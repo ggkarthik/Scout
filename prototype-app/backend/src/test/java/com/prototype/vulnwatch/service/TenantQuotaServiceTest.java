@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.AuditEventRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryTargetRepository;
+import com.prototype.vulnwatch.repo.IngestionJobRepository;
 import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
 import com.prototype.vulnwatch.repo.ServiceAccountRepository;
 import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
@@ -41,9 +43,15 @@ class TenantQuotaServiceTest {
     @Mock
     AuditEventRepository auditEventRepository;
     @Mock
+    IngestionJobRepository ingestionJobRepository;
+    @Mock
     TenantRepository tenantRepository;
     @Mock
     TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock
+    AuditEventService auditEventService;
+    @Mock
+    IngestionJobMetricsService ingestionJobMetricsService;
 
     TenantQuotaService service;
 
@@ -56,8 +64,14 @@ class TenantQuotaServiceTest {
                 serviceNowCmdbConfigRepository,
                 serviceAccountRepository,
                 auditEventRepository,
+                ingestionJobRepository,
                 tenantRepository,
-                tenantSchemaExecutionService);
+                tenantSchemaExecutionService,
+                auditEventService,
+                ingestionJobMetricsService,
+                300,
+                10,
+                1);
         lenient().when(tenantSchemaExecutionService.run(any(Tenant.class), any(Supplier.class)))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
     }
@@ -148,6 +162,51 @@ class TenantQuotaServiceTest {
         assertEquals("TENANT_EXPORT_ROW_LIMIT_EXCEEDED", ex.getQuotaCode());
     }
 
+    @Test
+    void assertCanCreateSbomIngestionJobRejectsWhenBurstRateLimitExceeded() {
+        Tenant tenant = tenant(10);
+        when(ingestionJobRepository.countAcceptedSince(any(Instant.class))).thenReturn(2L, 10L);
+
+        QuotaExceededException ex = assertThrows(
+                QuotaExceededException.class,
+                () -> service.assertCanCreateSbomIngestionJob(tenant, "remote-endpoint"));
+
+        assertEquals("TENANT_SBOM_RATE_LIMIT_EXCEEDED", ex.getQuotaCode());
+        assertEquals(300, ex.getRetryAfterSeconds());
+        verify(ingestionJobMetricsService).recordRateLimited("remote-endpoint");
+    }
+
+    @Test
+    void assertCanCreateSbomIngestionJobRejectsWhenActiveJobBacklogIsFull() {
+        Tenant tenant = tenant(10);
+        when(ingestionJobRepository.countAcceptedSince(any(Instant.class))).thenReturn(2L, 1L);
+        when(ingestionJobRepository.countByStatusIn(any())).thenReturn(1L);
+
+        QuotaExceededException ex = assertThrows(
+                QuotaExceededException.class,
+                () -> service.assertCanCreateSbomIngestionJob(tenant, "github"));
+
+        assertEquals("TENANT_SBOM_ACTIVE_JOB_LIMIT_EXCEEDED", ex.getQuotaCode());
+        assertEquals(60, ex.getRetryAfterSeconds());
+        verify(ingestionJobMetricsService).recordAdmissionRejected("github");
+    }
+
+    @Test
+    void assertCanCreateSbomIngestionJobUsesTenantSpecificAdmissionOverrides() {
+        Tenant tenant = tenant(10);
+        tenant.setSbomRateLimitWindowSeconds(30);
+        tenant.setMaxSbomJobsPerRateLimitWindow(2);
+        tenant.setMaxActiveSbomJobs(3);
+        when(ingestionJobRepository.countAcceptedSince(any(Instant.class))).thenReturn(1L, 2L);
+
+        QuotaExceededException ex = assertThrows(
+                QuotaExceededException.class,
+                () -> service.assertCanCreateSbomIngestionJob(tenant, "remote-endpoint"));
+
+        assertEquals("TENANT_SBOM_RATE_LIMIT_EXCEEDED", ex.getQuotaCode());
+        assertEquals(30, ex.getRetryAfterSeconds());
+    }
+
     private Tenant tenant(int maxConnectorCount) {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
@@ -155,6 +214,7 @@ class TenantQuotaServiceTest {
         tenant.setSlug("acme");
         tenant.setMaxConnectorCount(maxConnectorCount);
         tenant.setMaxServiceAccountCount(25);
+        tenant.setMaxDailySbomUploads(100);
         tenant.setMaxDailyExposureRefreshes(25);
         return tenant;
     }

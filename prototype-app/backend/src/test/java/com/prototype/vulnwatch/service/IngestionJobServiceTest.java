@@ -1,0 +1,208 @@
+package com.prototype.vulnwatch.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.IngestionJob;
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
+import com.prototype.vulnwatch.dto.IngestionJobPageResponse;
+import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
+import com.prototype.vulnwatch.repo.IngestionJobRepository;
+import java.lang.reflect.Field;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+
+@ExtendWith(MockitoExtension.class)
+class IngestionJobServiceTest {
+
+    @Mock
+    private IngestionJobRepository ingestionJobRepository;
+    @Mock
+    private CredentialEncryptionService credentialEncryptionService;
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock
+    private TenantQuotaService tenantQuotaService;
+    @Mock
+    private AuditEventService auditEventService;
+    @Mock
+    private IngestionJobMetricsService ingestionJobMetricsService;
+
+    private IngestionJobService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new IngestionJobService(
+                ingestionJobRepository,
+                credentialEncryptionService,
+                tenantSchemaExecutionService,
+                tenantQuotaService,
+                auditEventService,
+                ingestionJobMetricsService,
+                new ObjectMapper()
+        );
+        lenient().when(tenantSchemaExecutionService.run(any(Tenant.class), any(Supplier.class)))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(tenantSchemaExecutionService.run(any(UUID.class), any(Supplier.class)))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+    }
+
+    @Test
+    void enqueueEndpointJobPersistsEncryptedPayloadAndEmitsCreatedEvent() throws Exception {
+        Tenant tenant = tenant();
+        SbomEndpointIngestionRequest request = new SbomEndpointIngestionRequest(
+                AssetType.CONTAINER_IMAGE,
+                "Payments API",
+                " registry.example.com/payments ",
+                "https://example.com/sbom.json",
+                "nightly",
+                "Bearer secret"
+        );
+        when(credentialEncryptionService.encrypt("Bearer secret")).thenReturn("enc-secret");
+        when(ingestionJobRepository.findActiveByDedupeKeyForUpdate(anyString())).thenReturn(Optional.empty());
+        when(ingestionJobRepository.save(any(IngestionJob.class))).thenAnswer(invocation -> {
+            IngestionJob job = invocation.getArgument(0);
+            setId(job, UUID.randomUUID());
+            return job;
+        });
+
+        IngestionJobAcceptedResponse response = service.enqueueEndpointJob(tenant, request, "architect");
+
+        assertFalse(response.existingJob());
+        assertEquals(IngestionJobService.STATUS_QUEUED, response.status());
+        ArgumentCaptor<IngestionJob> jobCaptor = ArgumentCaptor.forClass(IngestionJob.class);
+        verify(ingestionJobRepository).save(jobCaptor.capture());
+        IngestionJob saved = jobCaptor.getValue();
+        assertEquals(" registry.example.com/payments ", saved.getAssetIdentifier());
+        assertEquals("remote_endpoint:registry.example.com/payments", saved.getDedupeKey());
+        assertTrue(saved.getPayloadJson().contains("\"encryptedAuthorizationHeader\":\"enc-secret\""));
+        assertFalse(saved.getPayloadJson().contains("Bearer secret"));
+        assertNotNull(saved.getVisibleAt());
+        verify(tenantQuotaService).assertCanCreateSbomIngestionJob(tenant, "remote-endpoint");
+        verify(auditEventService).record(eq("ingestion.job.created"), eq("ingestion_job"), eq(response.jobId().toString()), eq(null));
+        verify(ingestionJobMetricsService).recordEnqueued("remote-endpoint");
+    }
+
+    @Test
+    void enqueueEndpointJobReturnsExistingActiveJobWhenDuplicateExists() throws Exception {
+        Tenant tenant = tenant();
+        SbomEndpointIngestionRequest request = new SbomEndpointIngestionRequest(
+                AssetType.CONTAINER_IMAGE,
+                "Payments API",
+                "registry.example.com/payments",
+                "https://example.com/sbom.json",
+                "nightly",
+                null
+        );
+        IngestionJob existing = new IngestionJob();
+        UUID jobId = UUID.randomUUID();
+        setId(existing, jobId);
+        existing.setStatus(IngestionJobService.STATUS_RUNNING);
+        when(credentialEncryptionService.encrypt(null)).thenReturn(null);
+        when(ingestionJobRepository.findActiveByDedupeKeyForUpdate("remote_endpoint:registry.example.com/payments"))
+                .thenReturn(Optional.of(existing));
+
+        IngestionJobAcceptedResponse response = service.enqueueEndpointJob(tenant, request, "architect");
+
+        assertTrue(response.existingJob());
+        assertEquals(jobId, response.jobId());
+        assertEquals(IngestionJobService.STATUS_RUNNING, response.status());
+        verify(ingestionJobMetricsService).recordDeduped("remote-endpoint");
+        verify(auditEventService).record("ingestion.job.deduped", "ingestion_job", jobId.toString(), null);
+    }
+
+    @Test
+    void claimPendingJobsMarksClaimedRowsRunningAndIncrementsAttemptCount() throws Exception {
+        Tenant tenant = tenant();
+        IngestionJob first = queuedJob(tenant, "asset-1");
+        IngestionJob second = queuedJob(tenant, "asset-2");
+        UUID firstId = UUID.randomUUID();
+        UUID secondId = UUID.randomUUID();
+        setId(first, firstId);
+        setId(second, secondId);
+        when(ingestionJobRepository.countByStatusValue(IngestionJobService.STATUS_RUNNING)).thenReturn(0L);
+        when(ingestionJobRepository.pollPending(2)).thenReturn(List.of(first, second));
+
+        List<IngestionJobService.ClaimedJobRef> claimed = service.claimPendingJobs(tenant, 2, 2);
+
+        assertEquals(2, claimed.size());
+        assertEquals(firstId, claimed.get(0).jobId());
+        assertEquals(secondId, claimed.get(1).jobId());
+        assertEquals(IngestionJobService.STATUS_RUNNING, first.getStatus());
+        assertEquals(IngestionJobService.STATUS_RUNNING, second.getStatus());
+        assertEquals(1, first.getAttemptCount());
+        assertEquals(1, second.getAttemptCount());
+        assertNotNull(first.getStartedAt());
+        assertNotNull(second.getStartedAt());
+        verify(ingestionJobRepository).saveAll(List.of(first, second));
+    }
+
+    @Test
+    void listJobsCapsPageSizeAndMapsPagedResponse() throws Exception {
+        Tenant tenant = tenant();
+        IngestionJob job = queuedJob(tenant, "asset-1");
+        UUID jobId = UUID.randomUUID();
+        setId(job, jobId);
+        job.setRequestedBy("architect");
+        job.setRequestedAt(Instant.parse("2026-06-14T12:00:00Z"));
+        when(ingestionJobRepository.findAllByOrderByRequestedAtDescIdDesc(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(job)));
+
+        IngestionJobPageResponse response = service.listJobs(tenant, 0, 1000);
+
+        assertEquals(1, response.items().size());
+        assertEquals(jobId, response.items().get(0).jobId());
+        assertEquals(1, response.size());
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(ingestionJobRepository).findAllByOrderByRequestedAtDescIdDesc(pageableCaptor.capture());
+        assertEquals(100, pageableCaptor.getValue().getPageSize());
+    }
+
+    private Tenant tenant() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Acme");
+        tenant.setSchemaName("tenant_acme");
+        return tenant;
+    }
+
+    private IngestionJob queuedJob(Tenant tenant, String assetIdentifier) {
+        IngestionJob job = new IngestionJob();
+        job.setTenant(tenant);
+        job.setJobType(IngestionJobService.JOB_TYPE_REMOTE_ENDPOINT);
+        job.setSourceType("remote-endpoint");
+        job.setAssetIdentifier(assetIdentifier);
+        job.setStatus(IngestionJobService.STATUS_QUEUED);
+        job.setRequestedAt(Instant.now());
+        job.setVisibleAt(Instant.now());
+        return job;
+    }
+
+    private void setId(IngestionJob job, UUID id) throws Exception {
+        Field idField = IngestionJob.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(job, id);
+    }
+}

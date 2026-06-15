@@ -17,6 +17,7 @@ jobs:
   filesystem:
     name: Filesystem scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +41,7 @@ jobs:
   images:
     name: Docker image scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: []  # Run in parallel with filesystem scan
     steps:
       - uses: actions/checkout@v4

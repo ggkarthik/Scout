@@ -9,6 +9,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import com.prototype.vulnwatch.util.LogUtil;
 
 /**
  * Fetches vendor advisory pages and extracts plain text for use as AI prompt context.
@@ -69,7 +70,7 @@ public class AdvisoryFetchService {
             String truncated = body.length() > 4000 ? body.substring(0, 4000) : body;
             return "\n--- MSRC Affected Products API (JSON) for " + cveId + " ---\n" + truncated + "\n";
         } catch (Exception e) {
-            log.debug("MSRC API query failed for {}: {}", cveId, e.getMessage());
+            log.debug("MSRC API query failed for {}: {}", LogUtil.safe(cveId), e.getMessage());
             return "";
         }
     }
@@ -82,9 +83,9 @@ public class AdvisoryFetchService {
         ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, req, String.class);
         String body = response.getBody();
         if (body == null) return null;
-        String text = body.replaceAll("(?s)<style[^>]*>.*?</style>", " ")
-                          .replaceAll("(?s)<script[^>]*>.*?</script>", " ")
-                          .replaceAll("<[^>]+>", " ")
+        String text = body.replaceAll("(?s)<style[^>]{0,500}>.*?</style>", " ")
+                          .replaceAll("(?s)<script[^>]{0,500}>.*?</script>", " ")
+                          .replaceAll("<[^>]{0,500}>", " ")
                           .replaceAll("&amp;", "&")
                           .replaceAll("&lt;", "<")
                           .replaceAll("&gt;", ">")

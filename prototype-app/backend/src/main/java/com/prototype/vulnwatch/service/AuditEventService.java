@@ -34,6 +34,11 @@ public class AuditEventService {
 
     @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson) {
+        record(action, targetType, targetId, detailsJson, "SUCCESS");
+    }
+
+    @Transactional
+    public void record(String action, String targetType, String targetId, String detailsJson, String outcome) {
         RequestActor actor = requestActorService.currentActor();
         AuditEvent event = new AuditEvent();
         if (actor.tenantId() != null) {
@@ -45,6 +50,7 @@ public class AuditEventService {
         event.setTargetType(targetType);
         event.setTargetId(targetId);
         event.setDetailsJson(detailsJson);
+        event.setOutcome(outcome);
         event.setRequestId(MDC.get("requestId"));
         auditEventRepository.save(event);
     }

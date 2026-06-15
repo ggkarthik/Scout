@@ -4,6 +4,7 @@ import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../comp
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForPlatformVulnIntelDetail, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
+import { canUseEntitlement } from '../features/auth/entitlements';
 import { canAccessPlatformConsole } from '../features/auth/roles';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 import { useCveDetailQuery, useRiskPolicyQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
@@ -218,6 +219,7 @@ function buildSoftwareDrawerRows(detail: CveDetail | null): SoftwareDrawerRow[] 
 export function VulnRepoVulnerabilitiesPage() {
   const navigate = useNavigate();
   const actor = useActor();
+  const canViewAiSolutions = canUseEntitlement(actor, 'ai.solution_generation');
   const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = React.useMemo(() => searchParams.get('query')?.trim() ?? '', [searchParams]);
@@ -714,8 +716,14 @@ export function VulnRepoVulnerabilitiesPage() {
                     type="button"
                     className="btn-link vuln-repo-ai-solution-link"
                     aria-label={`Open AI solution for ${item.externalId}`}
-                    title={`AI Remediation Solution — ${item.externalId}`}
-                    onClick={() => { setSelectedSoftwareRecord(item); setDrawerMode('ai-solution'); }}
+                    title={canViewAiSolutions ? `AI Remediation Solution — ${item.externalId}` : 'Enterprise only'}
+                    disabled={!canViewAiSolutions}
+                    onClick={() => {
+                      if (canViewAiSolutions) {
+                        setSelectedSoftwareRecord(item);
+                        setDrawerMode('ai-solution');
+                      }
+                    }}
                   >
                     {/* AI Solution: sparkle/lightning icon */}
                     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

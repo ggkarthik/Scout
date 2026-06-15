@@ -55,24 +55,35 @@ public class HttpClientConfig {
         return new OutboundHttpClient(restTemplate);
     }
 
-    @Bean(name = "ingestionExecutor")
+    @Bean(name = {"ingestionExecutor", "sbomJobExecutor"})
     public ThreadPoolTaskExecutor ingestionExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(20);
-        executor.setThreadNamePrefix("ingestion-");
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("sbom-job-");
         executor.initialize();
         return executor;
     }
 
-    @Bean(name = "integrationQueueExecutor")
+    @Bean(name = {"integrationQueueExecutor", "feedSyncExecutor"})
     public ThreadPoolTaskExecutor integrationQueueExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(1);
         executor.setMaxPoolSize(1);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("integration-queue-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "connectorSyncExecutor")
+    public ThreadPoolTaskExecutor connectorSyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("connector-sync-");
         executor.initialize();
         return executor;
     }

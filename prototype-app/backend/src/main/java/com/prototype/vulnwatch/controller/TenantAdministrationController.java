@@ -15,6 +15,11 @@ import com.prototype.vulnwatch.dto.TenantMemberResponse;
 import com.prototype.vulnwatch.dto.TenantMemberUpdateRequest;
 import com.prototype.vulnwatch.dto.PlatformUserRequest;
 import com.prototype.vulnwatch.dto.PlatformUserResponse;
+import com.prototype.vulnwatch.dto.TenantEntitlementOverrideRequest;
+import com.prototype.vulnwatch.dto.TenantEntitlementOverrideResponse;
+import com.prototype.vulnwatch.dto.TenantEntitlementResponse;
+import com.prototype.vulnwatch.dto.TenantEntitlementSnapshotResponse;
+import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.dto.TenantResponse;
 import com.prototype.vulnwatch.dto.TenantStatusRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
@@ -24,6 +29,7 @@ import com.prototype.vulnwatch.service.PlatformInventoryConnectorHealthService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
+import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
 import java.util.List;
 import java.util.UUID;
@@ -51,6 +57,7 @@ public class TenantAdministrationController {
     private final TenantAccessControlService tenantAccessControlService;
     private final PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService;
     private final TenantUserInviteService tenantUserInviteService;
+    private final TenantEntitlementService tenantEntitlementService;
 
     public TenantAdministrationController(
             TenantAdministrationService tenantAdministrationService,
@@ -59,7 +66,8 @@ public class TenantAdministrationController {
             RequestActorService requestActorService,
             TenantAccessControlService tenantAccessControlService,
             PlatformInventoryConnectorHealthService platformInventoryConnectorHealthService,
-            TenantUserInviteService tenantUserInviteService
+            TenantUserInviteService tenantUserInviteService,
+            TenantEntitlementService tenantEntitlementService
     ) {
         this.tenantAdministrationService = tenantAdministrationService;
         this.identityAdministrationService = identityAdministrationService;
@@ -68,6 +76,7 @@ public class TenantAdministrationController {
         this.tenantAccessControlService = tenantAccessControlService;
         this.platformInventoryConnectorHealthService = platformInventoryConnectorHealthService;
         this.tenantUserInviteService = tenantUserInviteService;
+        this.tenantEntitlementService = tenantEntitlementService;
     }
 
     @GetMapping("/tenants")
@@ -93,12 +102,97 @@ public class TenantAdministrationController {
         return toTenantResponse(tenant);
     }
 
+    @GetMapping("/platform/tenants/{tenantId}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantResponse getTenant(@PathVariable UUID tenantId) {
+        return toTenantResponse(tenantAdministrationService.getTenant(tenantId));
+    }
+
+    @GetMapping("/platform/tenants/{tenantId}/entitlements")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantEntitlementSnapshotResponse getTenantEntitlements(@PathVariable UUID tenantId) {
+        Tenant tenant = tenantAdministrationService.getTenant(tenantId);
+        return new TenantEntitlementSnapshotResponse(
+                tenant.getId(),
+                tenant.getPlanCode(),
+                tenantEntitlementService.resolveAll(tenant).stream()
+                        .map(entitlement -> new TenantEntitlementResponse(
+                                entitlement.key(),
+                                entitlement.category(),
+                                entitlement.enabled(),
+                                entitlement.source(),
+                                entitlement.planCode(),
+                                entitlement.config()))
+                        .toList(),
+                tenantEntitlementService.listOverrides(tenantId).stream()
+                        .map(this::toOverrideResponse)
+                        .toList()
+        );
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/platform/tenants/{tenantId}/entitlement-overrides/{entitlementKey}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantEntitlementOverrideResponse upsertTenantEntitlementOverride(
+            @PathVariable UUID tenantId,
+            @PathVariable String entitlementKey,
+            @RequestBody TenantEntitlementOverrideRequest request
+    ) {
+        tenantAdministrationService.getTenant(tenantId);
+        var savedOverride = tenantEntitlementService.upsertOverride(
+                tenantId,
+                entitlementKey,
+                request.enabled(),
+                request.config(),
+                request.reason(),
+                request.expiresAt(),
+                null
+        );
+        auditEventService.record(
+                "tenant.entitlement.override.upserted",
+                "tenant",
+                tenantId.toString(),
+                "{\"entitlementKey\":\"" + entitlementKey + "\",\"enabled\":" + request.enabled() + "}"
+        );
+        return toOverrideResponse(savedOverride);
+    }
+
+    @DeleteMapping("/platform/tenants/{tenantId}/entitlement-overrides/{entitlementKey}")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public ResponseEntity<Void> deleteTenantEntitlementOverride(
+            @PathVariable UUID tenantId,
+            @PathVariable String entitlementKey
+    ) {
+        tenantAdministrationService.getTenant(tenantId);
+        tenantEntitlementService.deleteOverride(tenantId, entitlementKey);
+        auditEventService.record(
+                "tenant.entitlement.override.deleted",
+                "tenant",
+                tenantId.toString(),
+                "{\"entitlementKey\":\"" + entitlementKey + "\"}"
+        );
+        return ResponseEntity.noContent().build();
+    }
+
     @PatchMapping("/platform/tenants/{tenantId}/status")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public TenantResponse updateTenantStatus(@PathVariable UUID tenantId, @RequestBody TenantStatusRequest request) {
         Tenant tenant = tenantAdministrationService.updateStatus(tenantId, request.status());
         auditEventService.record("tenant.status.updated", "tenant", tenant.getId().toString(),
                 "{\"status\":\"" + tenant.getStatus() + "\"}");
+        return toTenantResponse(tenant);
+    }
+
+    @PatchMapping("/platform/tenants/{tenantId}/quotas")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantResponse updateTenantQuotas(@PathVariable UUID tenantId, @RequestBody TenantQuotaUpdateRequest request) {
+        Tenant tenant = tenantAdministrationService.updateQuotas(tenantId, request);
+        auditEventService.record("tenant.quotas.updated", "tenant", tenant.getId().toString(),
+                "{"
+                        + "\"maxDailySbomUploads\":" + tenant.getMaxDailySbomUploads() + ","
+                        + "\"sbomRateLimitWindowSeconds\":" + number(tenant.getSbomRateLimitWindowSeconds()) + ","
+                        + "\"maxSbomJobsPerRateLimitWindow\":" + number(tenant.getMaxSbomJobsPerRateLimitWindow()) + ","
+                        + "\"maxActiveSbomJobs\":" + number(tenant.getMaxActiveSbomJobs())
+                        + "}");
         return toTenantResponse(tenant);
     }
 
@@ -320,6 +414,9 @@ public class TenantAdministrationController {
                 tenant.getMaxDailySbomUploads(),
                 tenant.getMaxExportRows(),
                 tenant.getMaxDailyExposureRefreshes(),
+                tenant.getSbomRateLimitWindowSeconds(),
+                tenant.getMaxSbomJobsPerRateLimitWindow(),
+                tenant.getMaxActiveSbomJobs(),
                 tenant.getDemoExpiresAt(),
                 tenant.getExpiredAt(),
                 tenant.getPurgeStartedAt(),
@@ -375,5 +472,24 @@ public class TenantAdministrationController {
             return "Invite failed";
         }
         return message.trim().replace('_', ' ');
+    }
+
+    private String number(Number value) {
+        return value == null ? "null" : value.toString();
+    }
+
+    private TenantEntitlementOverrideResponse toOverrideResponse(TenantEntitlementService.TenantEntitlementOverrideRecord override) {
+        return new TenantEntitlementOverrideResponse(
+                override.id(),
+                override.tenantId(),
+                override.entitlementKey(),
+                override.enabled(),
+                override.config(),
+                override.reason(),
+                override.expiresAt(),
+                override.createdBy(),
+                override.createdAt(),
+                override.updatedAt()
+        );
     }
 }

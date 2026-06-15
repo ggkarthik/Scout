@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.service.QuotaExceededException;
 import com.prototype.vulnwatch.service.DemoAccessException;
+import com.prototype.vulnwatch.service.EntitlementDeniedException;
 import jakarta.persistence.EntityNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
@@ -115,8 +116,11 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
     public Map<String, Object> handleQuotaExceeded(QuotaExceededException ex) {
         log.warn("Tenant quota exceeded while handling API request: {}", ex.getMessage());
-        Map<String, Object> payload = error("QUOTA_EXCEEDED", ex.getMessage());
+        Map<String, Object> payload = error(ex.getQuotaCode(), ex.getMessage());
         payload.put("quotaCode", ex.getQuotaCode());
+        if (ex.getRetryAfterSeconds() != null) {
+            payload.put("retryAfterSeconds", ex.getRetryAfterSeconds());
+        }
         return payload;
     }
 
@@ -124,6 +128,15 @@ public class ApiExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleDemoAccess(DemoAccessException ex) {
         log.warn("Demo access boundary rejected API request: {}", ex.getMessage());
         return ResponseEntity.status(ex.getStatus()).body(error(ex.getCode(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(EntitlementDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleEntitlementDenied(EntitlementDeniedException ex) {
+        log.warn("Tenant entitlement denied API request: {}", ex.getMessage());
+        Map<String, Object> payload = error(ex.getCode(), ex.getMessage());
+        payload.put("entitlementKey", ex.getEntitlementKey());
+        payload.put("currentPlan", ex.getCurrentPlan());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(payload);
     }
 
     @ExceptionHandler(Exception.class)
