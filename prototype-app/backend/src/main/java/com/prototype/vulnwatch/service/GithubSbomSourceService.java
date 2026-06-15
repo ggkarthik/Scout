@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,8 +43,9 @@ public class GithubSbomSourceService {
     private final SyncRunRepository syncRunRepository;
     private final SbomIngestionService sbomIngestionService;
     private final WorkspaceService workspaceService;
+    private final IngestionJobService ingestionJobService;
+    private final RequestActorService requestActorService;
     private final GithubTokenProvider githubTokenProvider;
-    private final TaskExecutor ingestionExecutor;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
     private final TenantService tenantService;
@@ -57,8 +56,9 @@ public class GithubSbomSourceService {
             SyncRunRepository syncRunRepository,
             SbomIngestionService sbomIngestionService,
             WorkspaceService workspaceService,
+            IngestionJobService ingestionJobService,
+            RequestActorService requestActorService,
             GithubTokenProvider githubTokenProvider,
-            TaskExecutor ingestionExecutor,
             TransactionTemplate transactionTemplate,
             ObjectMapper objectMapper,
             TenantService tenantService,
@@ -68,8 +68,9 @@ public class GithubSbomSourceService {
         this.syncRunRepository = syncRunRepository;
         this.sbomIngestionService = sbomIngestionService;
         this.workspaceService = workspaceService;
+        this.ingestionJobService = ingestionJobService;
+        this.requestActorService = requestActorService;
         this.githubTokenProvider = githubTokenProvider;
-        this.ingestionExecutor = ingestionExecutor;
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
         this.tenantService = tenantService;
@@ -115,7 +116,7 @@ public class GithubSbomSourceService {
         ensureGhcrTokenConfiguredIfNeeded(id);
         Tenant tenant = currentTenant();
         ClaimedGithubSourceRun claimed = claimSourceRun(tenant, id, false, true);
-        ingestionExecutor.execute(() -> executeSource(claimed.tenantId(), claimed.sourceId(), claimed.runId()));
+        enqueueClaimedSourceJob(tenant, claimed);
         return new SyncTriggerResponse(claimed.runId(), "queued", "GitHub ingestion queued");
     }
 
@@ -127,7 +128,13 @@ public class GithubSbomSourceService {
             throw new IllegalArgumentException("GitHub owner is required");
         }
         SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_GHCR_SBOM, tenant));
-        ingestionExecutor.execute(() -> executeGhcrRunOnce(tenant.getId(), run.getId(), normalizedOwner));
+        ingestionJobService.enqueueGithubGhcrJob(
+                tenant,
+                normalizedOwner,
+                run.getId(),
+                null,
+                requestActorService.currentActor().userId()
+        );
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub GHCR ingestion queued");
     }
 
@@ -139,7 +146,13 @@ public class GithubSbomSourceService {
             throw new IllegalArgumentException("GitHub owner is required");
         }
         SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM, tenant));
-        ingestionExecutor.execute(() -> executeRepositoryRunOnce(tenant.getId(), run.getId(), normalizedRequest));
+        ingestionJobService.enqueueGithubRepositoryJob(
+                tenant,
+                normalizedRequest,
+                run.getId(),
+                null,
+                requestActorService.currentActor().userId()
+        );
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "GitHub repository ingestion queued");
     }
 
@@ -161,8 +174,56 @@ public class GithubSbomSourceService {
             if (claimed == null) {
                 continue;
             }
-            ingestionExecutor.execute(() -> executeSource(claimed.tenantId(), claimed.sourceId(), claimed.runId()));
+            enqueueClaimedSourceJob(tenantService.resolveTenantUuid(claimed.tenantId()), claimed);
         }
+    }
+
+    private void enqueueClaimedSourceJob(Tenant tenant, ClaimedGithubSourceRun claimed) {
+        tenantSchemaExecutionService.run(tenant, () -> {
+            GithubSbomSource source = githubSbomSourceRepository.findById(claimed.sourceId())
+                    .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + claimed.sourceId()));
+            if (isGhcrSourcePath(source.getPath())) {
+                ingestionJobService.enqueueGithubGhcrJob(
+                        tenant,
+                        source.getOwner(),
+                        claimed.runId(),
+                        source.getId(),
+                        requestActorService.currentActor().userId()
+                );
+            } else {
+                ingestionJobService.enqueueGithubRepositoryJob(
+                        tenant,
+                        new GithubSbomIngestionRequest(
+                                source.getOwner(),
+                                source.getRepo(),
+                                false,
+                                AssetType.APPLICATION,
+                                source.getAssetName(),
+                                source.getAssetIdentifier()
+                        ),
+                        claimed.runId(),
+                        source.getId(),
+                        requestActorService.currentActor().userId()
+                );
+            }
+            return null;
+        });
+    }
+
+    public void processRepositoryJob(Tenant tenant, UUID runId, UUID sourceId, GithubSbomIngestionRequest request) {
+        if (sourceId != null) {
+            executeSource(tenant.getId(), sourceId, runId);
+            return;
+        }
+        executeRepositoryRunOnce(tenant.getId(), runId, request);
+    }
+
+    public void processGhcrJob(Tenant tenant, UUID runId, UUID sourceId, String owner) {
+        if (sourceId != null) {
+            executeSource(tenant.getId(), sourceId, runId);
+            return;
+        }
+        executeGhcrRunOnce(tenant.getId(), runId, owner);
     }
 
     public void executeSource(UUID tenantId, UUID sourceId, UUID runId) {

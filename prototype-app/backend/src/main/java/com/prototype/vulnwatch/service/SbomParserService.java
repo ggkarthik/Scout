@@ -259,12 +259,15 @@ public class SbomParserService {
     Document buildXmlDocument(byte[] content) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
-        // Best-effort hardening: some parser implementations do not support every feature.
+        // Disable external entity expansion to prevent XXE attacks.
         setFeatureIfSupported(factory, XMLConstants.FEATURE_SECURE_PROCESSING, true);
         setFeatureIfSupported(factory, "http://xml.org/sax/features/external-general-entities", false);
         setFeatureIfSupported(factory, "http://xml.org/sax/features/external-parameter-entities", false);
         setFeatureIfSupported(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
         factory.setExpandEntityReferences(false);
+        // Restrict external DTD/schema access (JAXP 1.5+, defense-in-depth).
+        setAttributeIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        setAttributeIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
         DocumentBuilder builder = factory.newDocumentBuilder();
         // Suppress SAX error output for schema validation errors
         builder.setErrorHandler(null);
@@ -276,6 +279,14 @@ public class SbomParserService {
             factory.setFeature(feature, enabled);
         } catch (ParserConfigurationException | IllegalArgumentException ex) {
             log.debug("XML parser does not support feature {}={} for SBOM parsing", feature, enabled, ex);
+        }
+    }
+
+    private void setAttributeIfSupported(DocumentBuilderFactory factory, String attribute, String value) {
+        try {
+            factory.setAttribute(attribute, value);
+        } catch (IllegalArgumentException ex) {
+            log.debug("XML parser does not support attribute {}={} for SBOM parsing", attribute, value, ex);
         }
     }
 
