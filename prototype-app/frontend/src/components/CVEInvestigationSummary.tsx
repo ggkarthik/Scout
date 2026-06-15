@@ -1,4 +1,6 @@
 import React from 'react';
+import { useActor } from '../features/auth/context';
+import { canUseEntitlement } from '../features/auth/entitlements';
 import type { InvestigationSummaryResponse } from '../features/cve-workbench/types';
 import {
   Document,
@@ -561,6 +563,8 @@ export function CVEInvestigationSummary({
   autoGenerate = true,
   readOnly = false,
 }: Props) {
+  const actor = useActor();
+  const canUseAiSummary = canUseEntitlement(actor, 'ai.investigation_summary');
   const [deterministicSummary, setDeterministicSummary] = React.useState<InvestigationSummaryResponse | null>(null);
   const [aiSummary, setAiSummary] = React.useState<InvestigationSummaryResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -846,10 +850,13 @@ export function CVEInvestigationSummary({
                   <button
                     type="button"
                     className={summaryMode === 'ai' ? 'btn btn-primary btn-inline' : 'btn btn-secondary btn-inline'}
+                    disabled={!canUseAiSummary}
+                    title={canUseAiSummary ? 'Show AI summary' : 'Enterprise only'}
                     onClick={() => void handleAiSummaryClick()}
                   >
                     AI Summary
                   </button>
+                  {!canUseAiSummary && <span className="panel-caption">Enterprise only</span>}
                 </>
               ) : null}
               <button type="button" className="btn btn-secondary btn-inline" onClick={() => void exportWordDocument(input, summary, summaryMode)}>Export Word Doc</button>

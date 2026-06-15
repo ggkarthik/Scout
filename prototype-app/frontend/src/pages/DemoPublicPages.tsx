@@ -282,7 +282,7 @@ export function DemoRequestPage() {
         <div className="panel-header">
           <div>
             <h1>Request a NoScan product demo</h1>
-            <div className="panel-caption">We review requests before provisioning an isolated 7-day workspace.</div>
+            <div className="panel-caption">We review requests before provisioning an isolated 7-day workspace with the full guided product experience.</div>
           </div>
         </div>
         <form className="demo-request-form" onSubmit={submit}>
@@ -311,7 +311,7 @@ export function DemoRequestPage() {
           <label className="full-width">Notes<textarea name="notes" rows={4} maxLength={2000} /></label>
           <label className="demo-terms full-width">
             <input name="acceptedTerms" type="checkbox" />
-            <span>I understand the demo allows sample data and limited SBOM upload; live connectors are disabled.</span>
+            <span>I understand the demo is time-boxed, uses isolated sample-friendly workflows, and may include demo-specific usage limits.</span>
           </label>
           {(formError || requestDemo.isError) && (
             <div className="notice error full-width" role="alert">
@@ -332,7 +332,7 @@ export function DemoRequestSuccessPage() {
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Request received</h1>
-        <p>We’ll review the request and send an invite link after the securityGrid demo workspace is provisioned.</p>
+        <p>We’ll review the request and send an invite link after the securityGrid demo workspace is provisioned with the full guided experience.</p>
         <Link className="btn btn-secondary" to="/demo">Back to demo overview</Link>
       </section>
     </PublicDemoShell>
@@ -489,7 +489,7 @@ export function LoginPage() {
       navigate('/platform/tenants', { replace: true });
       return;
     }
-    if ((actor.planCode ?? '').toUpperCase() === 'DEMO') {
+    if (actor.demo === true) {
       navigate(pathForConnectView('sources'), { replace: true });
       return;
     }

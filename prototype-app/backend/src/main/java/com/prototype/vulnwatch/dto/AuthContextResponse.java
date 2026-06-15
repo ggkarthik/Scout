@@ -19,6 +19,8 @@ public record AuthContextResponse(
         String supportAccessMode,
         Instant supportGrantExpiresAt,
         String planCode,
+        Map<String, Boolean> entitlements,
+        Boolean demo,
         Instant demoExpiresAt,
         Long demoDaysRemaining,
         Map<String, Boolean> demoCapabilities,

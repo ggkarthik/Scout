@@ -4,7 +4,9 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
+import com.prototype.vulnwatch.dto.SbomUploadEvidencePageResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
+import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.service.sbomingestion.GithubSbomIngestionCoordinator;
 import com.prototype.vulnwatch.service.sbomingestion.SbomContentIngestionService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomEndpointFetchResult;
@@ -24,19 +26,22 @@ public class SbomIngestionService {
     private final GithubSbomIngestionCoordinator githubSbomIngestionCoordinator;
     private final SbomIngestionLockService sbomIngestionLockService;
     private final SbomUploadSupportService sbomUploadSupportService;
+    private final SbomUploadRepository sbomUploadRepository;
 
     public SbomIngestionService(
             SbomEndpointFetchService sbomEndpointFetchService,
             SbomContentIngestionService sbomContentIngestionService,
             GithubSbomIngestionCoordinator githubSbomIngestionCoordinator,
             SbomIngestionLockService sbomIngestionLockService,
-            SbomUploadSupportService sbomUploadSupportService
+            SbomUploadSupportService sbomUploadSupportService,
+            SbomUploadRepository sbomUploadRepository
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
         this.githubSbomIngestionCoordinator = githubSbomIngestionCoordinator;
         this.sbomIngestionLockService = sbomIngestionLockService;
         this.sbomUploadSupportService = sbomUploadSupportService;
+        this.sbomUploadRepository = sbomUploadRepository;
     }
 
     @Transactional
@@ -69,6 +74,32 @@ public class SbomIngestionService {
     @Transactional(readOnly = true)
     public List<SbomUploadEvidenceResponse> listUploads(Tenant tenant, String sourceSystem) {
         return sbomUploadSupportService.listUploads(tenant, sourceSystem);
+    }
+
+    @Transactional(readOnly = true)
+    public SbomUploadEvidencePageResponse listUploadsPage(Tenant tenant, String sourceSystem, int page, int size) {
+        return sbomUploadSupportService.listUploadsPage(tenant, sourceSystem, page, size);
+    }
+
+    @Transactional
+    public SbomIngestionResponse executeEndpointJob(Tenant tenant, SbomEndpointIngestionRequest request) throws IOException {
+        SbomEndpointFetchResult fetchResult = sbomEndpointFetchService.fetch(request);
+        return sbomContentIngestionService.ingestBytes(
+                tenant,
+                request.assetType(),
+                request.assetName(),
+                request.assetIdentifier(),
+                fetchResult.content(),
+                "endpoint-sbom.json",
+                fetchResult.metadata(),
+                null
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public com.prototype.vulnwatch.domain.SbomUpload getSbomUpload(Tenant tenant, java.util.UUID sbomUploadId) {
+        return sbomUploadSupportService.withTenant(tenant, () -> sbomUploadRepository.findById(sbomUploadId)
+                .orElseThrow(() -> new IllegalArgumentException("SBOM upload not found: " + sbomUploadId)));
     }
 
     public record GithubGhcrIngestionSummary(

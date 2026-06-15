@@ -10,7 +10,10 @@ import org.springframework.web.server.ResponseStatusException;
 public class TenantLifecycleGuardService {
 
     public boolean isDemoTenant(Tenant tenant) {
-        return tenant != null && DemoLifecycleService.DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode());
+        return tenant != null
+                && ((tenant.getDemoExpiresAt() != null)
+                || (tenant.getDemoSource() != null && !tenant.getDemoSource().isBlank())
+                || DemoLifecycleService.DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode()));
     }
 
     public boolean isExpiredDemoTenant(Tenant tenant) {

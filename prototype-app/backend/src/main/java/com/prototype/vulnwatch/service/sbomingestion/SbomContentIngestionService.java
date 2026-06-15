@@ -15,7 +15,6 @@ import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.service.AssetLifecycleService;
 import com.prototype.vulnwatch.service.FindingDeltaQueueService;
-import com.prototype.vulnwatch.service.FindingRecomputeService;
 import com.prototype.vulnwatch.service.IdentityGraphService;
 import com.prototype.vulnwatch.service.InventoryComponentCpeMappingService;
 import com.prototype.vulnwatch.service.SbomParserService;
@@ -49,7 +48,6 @@ public class SbomContentIngestionService {
     private final InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
     private final SoftwareInventorySyncService softwareInventorySyncService;
     private final FindingDeltaQueueService findingDeltaQueueService;
-    private final FindingRecomputeService findingRecomputeService;
     private final AssetLifecycleService assetLifecycleService;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final SbomUploadSupportService sbomUploadSupportService;
@@ -65,7 +63,6 @@ public class SbomContentIngestionService {
             InventoryComponentCpeMappingService inventoryComponentCpeMappingService,
             SoftwareInventorySyncService softwareInventorySyncService,
             FindingDeltaQueueService findingDeltaQueueService,
-            FindingRecomputeService findingRecomputeService,
             AssetLifecycleService assetLifecycleService,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
             SbomUploadSupportService sbomUploadSupportService
@@ -77,7 +74,6 @@ public class SbomContentIngestionService {
         this.inventoryComponentCpeMappingService = inventoryComponentCpeMappingService;
         this.softwareInventorySyncService = softwareInventorySyncService;
         this.findingDeltaQueueService = findingDeltaQueueService;
-        this.findingRecomputeService = findingRecomputeService;
         this.assetLifecycleService = assetLifecycleService;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.sbomUploadSupportService = sbomUploadSupportService;
@@ -232,17 +228,13 @@ public class SbomContentIngestionService {
                     recomputedComponentIds,
                     "sbom-ingestion"
             );
-            int findingsGenerated = findingRecomputeService.recomputeOnSoftwareDeltaBatch(
-                    tenant.getId(),
-                    recomputedComponentIds
-            );
             softwareIdentitySummaryProjectionService.refreshTenant(tenant);
             upload.setFormat(format);
             upload.setComponentCount(components.size());
-            upload.setFindingsGenerated(findingsGenerated);
+            upload.setFindingsGenerated(0);
             upload.setStatus(SbomIngestionStatus.SUCCESS);
             sbomUploadRepository.save(upload);
-            return new SbomIngestionResponse(asset.getId(), upload.getId(), components.size(), findingsGenerated);
+            return new SbomIngestionResponse(asset.getId(), upload.getId(), components.size(), 0);
         } catch (IOException ioException) {
             sbomUploadSupportService.markUploadFailed(upload, ioException.getMessage());
             throw ioException;

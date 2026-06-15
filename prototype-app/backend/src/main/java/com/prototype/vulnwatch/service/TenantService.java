@@ -1,14 +1,16 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.repo.TenantRepository;
-import static org.springframework.http.HttpStatus.NOT_FOUND;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 public class TenantService {
@@ -64,7 +66,7 @@ public class TenantService {
         tenant.setName(requireText(name, "name"));
         tenant.setSlug(normalizeSlug(slug == null || slug.isBlank() ? name : slug));
         tenant.setSchemaName(tenantSchemaService.deriveSchemaName(tenant.getSlug()));
-        tenant.setPlanCode(planCode == null || planCode.isBlank() ? "pilot" : planCode.trim());
+        tenant.setPlanCode(normalizePlanCode(planCode));
         tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
         Tenant saved = tenantRepository.save(tenant);
         tenantSchemaService.ensureSchemaExists(saved.getSchemaName());
@@ -79,6 +81,22 @@ public class TenantService {
         tenant.setStatus(normalizedStatus);
         tenant.setUpdatedAt(Instant.now());
         tenant.setSuspendedAt("SUSPENDED".equals(normalizedStatus) ? Instant.now() : null);
+        return tenantRepository.save(tenant);
+    }
+
+    @Transactional
+    public Tenant updateQuotas(UUID tenantId, TenantQuotaUpdateRequest request) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        tenant.setMaxConnectorCount(nonNegative(request.maxConnectorCount(), "maxConnectorCount"));
+        tenant.setMaxServiceAccountCount(nonNegative(request.maxServiceAccountCount(), "maxServiceAccountCount"));
+        tenant.setMaxDailySbomUploads(nonNegative(request.maxDailySbomUploads(), "maxDailySbomUploads"));
+        tenant.setMaxExportRows(nonNegative(request.maxExportRows(), "maxExportRows"));
+        tenant.setMaxDailyExposureRefreshes(nonNegative(request.maxDailyExposureRefreshes(), "maxDailyExposureRefreshes"));
+        tenant.setSbomRateLimitWindowSeconds(nullableNonNegative(request.sbomRateLimitWindowSeconds(), "sbomRateLimitWindowSeconds"));
+        tenant.setMaxSbomJobsPerRateLimitWindow(nullableNonNegative(request.maxSbomJobsPerRateLimitWindow(), "maxSbomJobsPerRateLimitWindow"));
+        tenant.setMaxActiveSbomJobs(nullableNonNegative(request.maxActiveSbomJobs(), "maxActiveSbomJobs"));
+        tenant.setUpdatedAt(Instant.now());
         return tenantRepository.save(tenant);
     }
     private String requireText(String value, String field) {
@@ -97,5 +115,32 @@ public class TenantService {
             throw new IllegalArgumentException("slug must contain at least one letter or digit");
         }
         return slug;
+    }
+
+    private Integer nonNegative(Integer value, String field) {
+        if (value == null) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        if (value < 0) {
+            throw new IllegalArgumentException(field + " must be >= 0");
+        }
+        return value;
+    }
+
+    private Integer nullableNonNegative(Integer value, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value < 0) {
+            throw new IllegalArgumentException(field + " must be >= 0");
+        }
+        return value;
+    }
+
+    private String normalizePlanCode(String planCode) {
+        if (planCode == null || planCode.isBlank()) {
+            return TenantEntitlementService.PLAN_PRO;
+        }
+        return planCode.trim().toUpperCase();
     }
 }

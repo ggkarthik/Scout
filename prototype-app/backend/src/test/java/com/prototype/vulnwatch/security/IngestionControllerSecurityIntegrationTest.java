@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.dto.VexAssertionRepairSummaryResponse;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.AuditEventService;
+import com.prototype.vulnwatch.service.IngestionJobService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import com.prototype.vulnwatch.service.TenantService;
@@ -66,6 +67,9 @@ class IngestionControllerSecurityIntegrationTest {
 
     @MockBean
     private VulnerabilityIngestionService vulnerabilityIngestionService;
+
+    @MockBean
+    private IngestionJobService ingestionJobService;
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;
