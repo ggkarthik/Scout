@@ -14,6 +14,7 @@ import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
+import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.service.sbomingestion.GithubSbomIngestionCoordinator;
 import com.prototype.vulnwatch.service.sbomingestion.SbomContentIngestionService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomEndpointFetchResult;
@@ -38,6 +39,7 @@ class SbomIngestionServiceTest {
     @Mock private GithubSbomIngestionCoordinator githubSbomIngestionCoordinator;
     @Mock private SbomIngestionLockService sbomIngestionLockService;
     @Mock private SbomUploadSupportService sbomUploadSupportService;
+    @Mock private SbomUploadRepository sbomUploadRepository;
 
     private SbomIngestionService service;
     private Tenant tenant;
@@ -49,7 +51,8 @@ class SbomIngestionServiceTest {
                 sbomContentIngestionService,
                 githubSbomIngestionCoordinator,
                 sbomIngestionLockService,
-                sbomUploadSupportService
+                sbomUploadSupportService,
+                sbomUploadRepository
         );
         tenant = new Tenant();
         tenant.setId(UUID.fromString("00000000-0000-0000-0000-000000000001"));

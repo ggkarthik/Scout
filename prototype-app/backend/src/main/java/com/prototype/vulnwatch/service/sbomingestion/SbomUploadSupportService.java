@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.domain.SbomFormat;
 import com.prototype.vulnwatch.domain.SbomIngestionStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.SbomUploadEvidencePageResponse;
 import com.prototype.vulnwatch.dto.SbomUploadEvidenceResponse;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
@@ -16,11 +17,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 @Service
 public class SbomUploadSupportService {
+    private static final int DEFAULT_UPLOAD_HISTORY_LIMIT = 100;
 
     private final AssetRepository assetRepository;
     private final SbomUploadRepository sbomUploadRepository;
@@ -40,11 +46,12 @@ public class SbomUploadSupportService {
     }
 
     public List<SbomUploadEvidenceResponse> listUploads(Tenant tenant, String sourceSystem) {
-        List<SbomUpload> uploads = tenantSchemaExecutionService.run(tenant, () ->
+        Pageable pageable = PageRequest.of(0, DEFAULT_UPLOAD_HISTORY_LIMIT);
+        Page<SbomUpload> uploads = tenantSchemaExecutionService.run(tenant, () ->
                 sourceSystem == null || sourceSystem.isBlank()
-                        ? sbomUploadRepository.findAllByOrderByUploadedAtDesc()
-                        : sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(sourceSystem.trim()));
-        return uploads.stream()
+                        ? sbomUploadRepository.findAllByOrderByUploadedAtDesc(pageable)
+                        : sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(sourceSystem.trim(), pageable));
+        return uploads.getContent().stream()
                 .map(upload -> new SbomUploadEvidenceResponse(
                         upload.getId(),
                         upload.getAsset().getId(),
@@ -69,6 +76,44 @@ public class SbomUploadSupportService {
                 .toList();
     }
 
+    public SbomUploadEvidencePageResponse listUploadsPage(Tenant tenant, String sourceSystem, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(100, size));
+        Pageable pageable = PageRequest.of(safePage, safeSize);
+        Page<SbomUpload> uploads = tenantSchemaExecutionService.run(tenant, () ->
+                sourceSystem == null || sourceSystem.isBlank()
+                        ? sbomUploadRepository.findAllByOrderByUploadedAtDesc(pageable)
+                        : sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc(sourceSystem.trim(), pageable));
+        return new SbomUploadEvidencePageResponse(
+                uploads.getContent().stream().map(upload -> new SbomUploadEvidenceResponse(
+                        upload.getId(),
+                        upload.getAsset().getId(),
+                        upload.getAsset().getName(),
+                        upload.getAsset().getIdentifier(),
+                        upload.getAsset().getType().name(),
+                        upload.getStatus().name(),
+                        upload.getFormat().name(),
+                        upload.getUploadedAt(),
+                        upload.getOriginalFilename(),
+                        upload.getIngestionSourceType(),
+                        upload.getIngestionSourceSystem(),
+                        upload.getSourceReference(),
+                        upload.getSourceEndpoint(),
+                        upload.getFetchStatusCode(),
+                        upload.getContentType(),
+                        upload.getContentLengthBytes(),
+                        upload.getContentSha256(),
+                        upload.getComponentCount(),
+                        upload.getFindingsGenerated(),
+                        upload.getEvidenceJson()
+                )).toList(),
+                uploads.getNumber(),
+                uploads.getSize(),
+                uploads.getTotalElements(),
+                uploads.getTotalPages()
+        );
+    }
+
     public Asset resolveAsset(Tenant tenant, AssetType assetType, String assetName, String assetIdentifier) {
         return tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByIdentifier(assetIdentifier)
                 .orElseGet(() -> {
@@ -88,6 +133,10 @@ public class SbomUploadSupportService {
 
     public Asset saveAsset(Asset asset) {
         return assetRepository.save(asset);
+    }
+
+    public <T> T withTenant(Tenant tenant, Supplier<T> supplier) {
+        return tenantSchemaExecutionService.run(tenant, supplier);
     }
 
     public void markUploadFailed(SbomUpload upload, String message) {

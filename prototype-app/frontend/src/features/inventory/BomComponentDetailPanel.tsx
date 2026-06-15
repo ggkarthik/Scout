@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type ApplicationRiskSummary, type BomComponentCveSummary, type BomComponentDetail, type BomComponentSummaryItem } from '../../api/client';
+import { api, type ApplicationRiskSummary, type BomComponentDetail, type BomComponentSummaryItem } from '../../api/client';
 import { cveWorkbenchApi } from '../cve-workbench/api';
 import type { Finding } from '../findings/types';
 import { timeAgo } from '../../lib/time';

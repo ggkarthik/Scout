@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import com.prototype.vulnwatch.util.LogUtil;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -322,7 +323,7 @@ public class FixRecordService {
                     .limit(10)
                     .toList();
         } catch (Exception e) {
-            log.warn("Related CVE lookup failed for {}: {}", cveId, e.getMessage());
+            log.warn("Related CVE lookup failed for {}: {}", LogUtil.safe(cveId), e.getMessage());
             return List.of();
         }
     }
@@ -345,14 +346,14 @@ public class FixRecordService {
             try {
                 advisoryContent = advisoryFetchService.fetchAdvisoryContent(referenceUrls);
             } catch (Exception e) {
-                log.warn("Advisory fetch failed for {}: {}", cveId, e.getMessage());
+                log.warn("Advisory fetch failed for {}: {}", LogUtil.safe(cveId), e.getMessage());
             }
         }
         try {
             String msrc = advisoryFetchService.fetchMsrcPatchInfo(cveId);
             if (!msrc.isBlank()) advisoryContent = (advisoryContent + "\n" + msrc).trim();
         } catch (Exception e) {
-            log.warn("MSRC fetch failed for {}: {}", cveId, e.getMessage());
+            log.warn("MSRC fetch failed for {}: {}", LogUtil.safe(cveId), e.getMessage());
         }
 
         if (!openAiClient.isAvailable()) {
@@ -444,7 +445,7 @@ public class FixRecordService {
         try {
             raw = openAiClient.chatCompletionJson(systemPrompt, userPrompt, 3000);
         } catch (Exception e) {
-            log.warn("OpenAI call failed for fix generation on {}: {}", cveId, e.getMessage());
+            log.warn("OpenAI call failed for fix generation on {}: {}", LogUtil.safe(cveId), e.getMessage());
         }
 
         if (raw == null || raw.isBlank()) {
@@ -479,7 +480,7 @@ public class FixRecordService {
             r.setGeneratedAt(Instant.now());
             return r;
         } catch (Exception e) {
-            log.warn("Failed to parse AI fix record for {}: {}", cveId, e.getMessage());
+            log.warn("Failed to parse AI fix record for {}: {}", LogUtil.safe(cveId), e.getMessage());
             FixRecord r = new FixRecord();
             r.setTenant(tenant);
             r.setCveId(cveId);

@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.prototype.vulnwatch.util.LogUtil;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
@@ -192,10 +193,10 @@ public class CsafSyncService {
                     LOG.warn(
                             "Failed to fetch {} advisory {} category={} attempts={} message={}",
                             provider.providerKey(),
-                            document.url(),
+                            LogUtil.safe(document.url()),
                             fetchResult.failureCategory(),
                             fetchResult.attempts(),
-                            fetchResult.failureMessage());
+                            LogUtil.safe(fetchResult.failureMessage()));
                     run.setRecordsFetched(fetched);
                     run.setRecordsInserted(inserted);
                     run.setRecordsUpdated(updated);
@@ -234,7 +235,7 @@ public class CsafSyncService {
                     LOG.warn(
                             "Failed to ingest {} advisory {} category={} attempts={}",
                             provider.providerKey(),
-                            document.url(),
+                            LogUtil.safe(document.url()),
                             category,
                             fetchResult.attempts(),
                             advisoryError);

@@ -11,6 +11,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import com.prototype.vulnwatch.util.LogUtil;
 
 @Service
 public class CveAiSolutionService {
@@ -167,7 +168,7 @@ public class CveAiSolutionService {
             try {
                 aiSolutionPersistenceService.saveAiSolution(cveId, raw);
             } catch (Exception saveError) {
-                LOG.warn("Failed to persist AI solution for {}: {}", cveId, saveError.getMessage());
+                LOG.warn("Failed to persist AI solution for {}: {}", LogUtil.safe(cveId), saveError.getMessage());
             }
             CveDetailController.AiSolutionResponse response = new CveDetailController.AiSolutionResponse();
             response.success = true;

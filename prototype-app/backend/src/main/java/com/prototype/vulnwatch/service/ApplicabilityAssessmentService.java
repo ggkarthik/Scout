@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import com.prototype.vulnwatch.util.LogUtil;
 
 @Service
 @RequiredArgsConstructor
@@ -145,7 +146,7 @@ public class ApplicabilityAssessmentService {
         assessment.setAssessedBy(assessedBy);
 
         ApplicabilityAssessment saved = assessmentRepository.save(assessment);
-        log.info("Created assessment {} for CVE {} by user {}", saved.getId(), cveId, assessedBy);
+        log.info("Created assessment {} for CVE {} by user {}", saved.getId(), LogUtil.safe(cveId), LogUtil.safe(assessedBy));
         return saved;
     }
 
@@ -262,7 +263,7 @@ public class ApplicabilityAssessmentService {
         assessment.setCompletedAt(Instant.now());
 
         ApplicabilityAssessment saved = assessmentRepository.save(assessment);
-        log.info("Submitted assessment {} for CVE {} with result {}", saved.getId(), cveId, request.getFinalResult());
+        log.info("Submitted assessment {} for CVE {} with result {}", saved.getId(), LogUtil.safe(cveId), request.getFinalResult());
 
         Map<String, String> analystDispositions = request.getComponentAnalystDispositions();
         if ((analystDispositions == null || analystDispositions.isEmpty())
@@ -303,7 +304,7 @@ public class ApplicabilityAssessmentService {
             }
             if (anyChanged) {
                 componentVulnerabilityStateRepository.saveAll(states);
-                log.info("Updated analyst component dispositions for CVE {}", cveId);
+                log.info("Updated analyst component dispositions for CVE {}", LogUtil.safe(cveId));
             }
         }
 

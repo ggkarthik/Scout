@@ -10,6 +10,8 @@ import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -62,6 +64,29 @@ public class ServiceAccountController {
                 request.role());
         auditEventService.record("service_account.created", "service_account", account.getId().toString(),
                 "{\"tenantId\":\"" + tenantId + "\",\"role\":\"" + account.getRole() + "\"}");
+        return toResponse(account);
+    }
+
+    @DeleteMapping("/{accountId}")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("service_account.deleted")
+    public void delete(@PathVariable UUID accountId) {
+        var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
+        identityAdministrationService.deleteServiceAccount(actor.tenantId(), accountId);
+        auditEventService.record("service_account.deleted", "service_account", accountId.toString(),
+                "{\"tenantId\":\"" + actor.tenantId() + "\"}");
+    }
+
+    @PostMapping("/{accountId}/deactivate")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("service_account.deactivated")
+    public ServiceAccountResponse deactivate(@PathVariable UUID accountId) {
+        var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
+        ServiceAccount account = identityAdministrationService.deactivateServiceAccount(actor.tenantId(), accountId);
+        auditEventService.record("service_account.deactivated", "service_account", accountId.toString(),
+                "{\"tenantId\":\"" + actor.tenantId() + "\",\"status\":\"" + account.getStatus() + "\"}");
         return toResponse(account);
     }
 
