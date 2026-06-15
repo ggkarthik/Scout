@@ -153,17 +153,18 @@ public class EolService {
         return new PageImpl<>(items, PageRequest.of(page, size), total);
     }
 
+    private static final Map<String, String> FILTER_CLAUSE_WHITELIST = Map.of(
+            "eol",      " AND ic.is_eol = true",
+            "near-eol", " AND ic.is_eol = false AND ic.eol_date IS NOT NULL AND (ic.eol_date - CURRENT_DATE) <= " + NEAR_EOL_THRESHOLD_DAYS,
+            "ok",       " AND ic.is_eol = false AND (ic.eol_date IS NULL OR (ic.eol_date - CURRENT_DATE) > " + NEAR_EOL_THRESHOLD_DAYS + ")",
+            "unknown",  " AND ic.eol_slug IS NULL AND (ic.ecosystem IS NULL OR lower(ic.ecosystem) NOT IN (" + LIBRARY_ECOSYSTEMS_SQL + "))"
+    );
+
     private String buildComponentFilterClause(String filter) {
         if (filter == null || filter.isBlank()) {
             return "";
         }
-        return switch (filter.toLowerCase()) {
-            case "eol"      -> " AND ic.is_eol = true";
-            case "near-eol" -> " AND ic.is_eol = false AND ic.eol_date IS NOT NULL AND (ic.eol_date - CURRENT_DATE) <= " + NEAR_EOL_THRESHOLD_DAYS;
-            case "ok"       -> " AND ic.is_eol = false AND (ic.eol_date IS NULL OR (ic.eol_date - CURRENT_DATE) > " + NEAR_EOL_THRESHOLD_DAYS + ")";
-            case "unknown"  -> " AND ic.eol_slug IS NULL AND (ic.ecosystem IS NULL OR lower(ic.ecosystem) NOT IN (" + LIBRARY_ECOSYSTEMS_SQL + "))";
-            default         -> "";
-        };
+        return FILTER_CLAUSE_WHITELIST.getOrDefault(filter.toLowerCase(), "");
     }
 
     // -------------------------------------------------------------------------

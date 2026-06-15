@@ -57,6 +57,9 @@ public class CredentialEncryptionService {
         }
         try {
             byte[] envelope = Base64.getDecoder().decode(storedValue.substring(PREFIX.length()));
+            if (envelope.length <= IV_BYTES) {
+                throw new IllegalStateException("Failed to decrypt credential");
+            }
             ByteBuffer buffer = ByteBuffer.wrap(envelope);
             byte[] iv = new byte[IV_BYTES];
             buffer.get(iv);

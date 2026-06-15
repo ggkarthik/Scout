@@ -126,7 +126,12 @@ public class OutboundHttpClient {
             long waitMs = waitTimeMs(state.hasCompletedRequest, state.lastRequestCompletedAtMs, policy.minRequestIntervalMs());
             sleep(waitMs, policy.providerKey(), "request pacing");
             try {
-                return restTemplate.exchange(URI.create(endpoint), method, requestEntity, responseType);
+                URI uri = URI.create(endpoint);
+                String scheme = uri.getScheme();
+                if (scheme == null || (!scheme.equalsIgnoreCase("https") && !scheme.equalsIgnoreCase("http"))) {
+                    throw new IllegalArgumentException("Outbound requests must use http or https: " + endpoint);
+                }
+                return restTemplate.exchange(uri, method, requestEntity, responseType);
             } finally {
                 state.lastRequestCompletedAtMs = currentTimeMillis.getAsLong();
                 state.hasCompletedRequest = true;
