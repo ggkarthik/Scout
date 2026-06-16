@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.dto.FindingProjectionStatusResponse;
 import com.prototype.vulnwatch.dto.FindingQueueDefinitionResponse;
 import com.prototype.vulnwatch.dto.FindingQueueUpsertRequest;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
+import com.prototype.vulnwatch.dto.FindingResponse;
 import com.prototype.vulnwatch.dto.FindingSummaryResponse;
 import com.prototype.vulnwatch.dto.FindingsFilterRequest;
 import com.prototype.vulnwatch.dto.FindingWorkflowUpdateRequest;
@@ -183,6 +184,16 @@ public class FindingController {
     public FindingFilterValuesResponse filters() {
         Tenant tenant = workspaceService.getWorkspace();
         return findingQueryService.listAvailableFilters(tenant);
+    }
+
+    @GetMapping("/{findingId}")
+    public ResponseEntity<FindingResponse> getById(@PathVariable UUID findingId) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return findingQueryService.listEntitiesByTenantAndIds(tenant, List.of(findingId))
+                .stream()
+                .findFirst()
+                .map(f -> ResponseEntity.ok(findingQueryService.toResponse(f)))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/{findingId}/workflow")

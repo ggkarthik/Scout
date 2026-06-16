@@ -190,7 +190,6 @@ const OPERATIONS_NAV_ITEMS = [
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Intelligence' },
-  { key: 'campaigns', label: 'Campaigns' },
 ];
 
 function getInitialTheme(): Theme {
@@ -228,6 +227,14 @@ function TabIcon({ tab }: { tab: AppTab }) {
         <path d="M6 4.5h9.8L19.5 8v11.5H6z" />
         <path d="M15.8 4.5V8h3.7" />
         <path d="M9 12h7M9 15.5h7" />
+      </svg>
+    );
+  }
+  if (tab === 'campaigns') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16M4 12h10M4 18h7" strokeLinecap="round" />
+        <path d="M17 14l3-2-3-2v4z" />
       </svg>
     );
   }
@@ -683,7 +690,7 @@ function AppShell() {
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
-      tabs.push('findings', 'vuln-repo', 'inventory');
+      tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory', 'end-of-life');
     }
     if (canAccessPlatformConsole(actor)) {
       tabs.push('operations');

@@ -74,7 +74,9 @@ function buildDetail(overrides: Partial<CampaignDetail> = {}): CampaignDetail {
     }],
     deliveryAttempts: [],
     findings: [{
+      findingId: 'uuid-f-100',
       displayId: 'F-100',
+      vulnerabilityId: null,
       assetName: 'web-prod-01',
       assetIdentifier: 'asset-1',
       packageName: 'openssl',
@@ -85,6 +87,7 @@ function buildDetail(overrides: Partial<CampaignDetail> = {}): CampaignDetail {
       incidentId: 'INC-100',
     }],
     assets: [{
+      assetId: 'uuid-asset-1',
       assetName: 'web-prod-01',
       assetIdentifier: 'asset-1',
       environment: 'prod',
