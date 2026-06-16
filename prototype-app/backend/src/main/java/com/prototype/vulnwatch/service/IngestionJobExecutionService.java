@@ -3,6 +3,9 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.BomType;
+import com.prototype.vulnwatch.dto.BomFetchRequest;
+import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
@@ -14,16 +17,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class IngestionJobExecutionService {
 
-    private final SbomIngestionService sbomIngestionService;
+    private final BomIngestionOrchestrator bomIngestionOrchestrator;
     private final GithubSbomSourceService githubSbomSourceService;
     private final IngestionJobService ingestionJobService;
 
     public IngestionJobExecutionService(
-            SbomIngestionService sbomIngestionService,
+            BomIngestionOrchestrator bomIngestionOrchestrator,
             GithubSbomSourceService githubSbomSourceService,
             IngestionJobService ingestionJobService
     ) {
-        this.sbomIngestionService = sbomIngestionService;
+        this.bomIngestionOrchestrator = bomIngestionOrchestrator;
         this.githubSbomSourceService = githubSbomSourceService;
         this.ingestionJobService = ingestionJobService;
     }
@@ -42,22 +45,35 @@ public class IngestionJobExecutionService {
                 job,
                 IngestionJobPayloads.EndpointIngestionPayload.class
         );
-        SbomEndpointIngestionRequest request = new SbomEndpointIngestionRequest(
-                payload.assetType(),
-                payload.assetName(),
-                payload.assetIdentifier(),
-                payload.sourceUrl(),
-                payload.sourceLabel(),
-                ingestionJobService.decrypt(payload.encryptedAuthorizationHeader())
+        BomIngestionResultResponse response = bomIngestionOrchestrator.ingestFromUrl(
+                tenant,
+                new BomFetchRequest(
+                        payload.bomType() == null ? BomType.SBOM : payload.bomType(),
+                        payload.assetType(),
+                        payload.assetName(),
+                        payload.assetIdentifier(),
+                        payload.sourceUrl(),
+                        payload.sourceLabel(),
+                        payload.supplier(),
+                        ingestionJobService.decrypt(payload.encryptedAuthorizationHeader())
+                )
         );
-        SbomIngestionResponse response = sbomIngestionService.executeEndpointJob(tenant, request);
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("bomId", response.bomId());
         result.put("assetId", response.assetId());
-        result.put("sbomUploadId", response.sbomUploadId());
-        result.put("componentsIngested", response.componentsIngested());
+        result.put("componentsIngested", response.componentCount());
         result.put("findingsGenerated", response.findingsGenerated());
-        SbomUpload sbomUpload = sbomIngestionService.getSbomUpload(tenant, response.sbomUploadId());
-        return new ExecutionOutcome(sbomUpload, ingestionJobService.toJson(result));
+        result.put("bomType", response.bomType());
+        result.put("format", response.format());
+        result.put("formatVersion", response.formatVersion());
+        result.put("specFamily", response.specFamily());
+        result.put("documentFormat", response.documentFormat());
+        result.put("supportLevel", response.supportLevel());
+        result.put("supported", response.supported());
+        result.put("warnings", response.warnings());
+        result.put("action", response.action());
+        result.put("status", response.status());
+        return new ExecutionOutcome(null, ingestionJobService.toJson(result));
     }
 
     private ExecutionOutcome executeGithubRepositoryJob(Tenant tenant, IngestionJob job) throws IOException {

@@ -175,7 +175,7 @@ describe('CampaignsPage', () => {
     vi.spyOn(api, 'listCampaigns')
       .mockResolvedValueOnce([])
       .mockResolvedValue([createdSummary]);
-    vi.spyOn(api, 'getCampaign').mockResolvedValue(createdDetail);
+    vi.spyOn(api, 'getCampaign').mockResolvedValueOnce(createdDetail);
     vi.spyOn(api, 'listAssignmentGroups').mockResolvedValue(['Platform Ops', 'Server Team']);
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([{
       id: 'member-1',
@@ -268,7 +268,9 @@ describe('CampaignsPage', () => {
       }));
     });
 
-    expect(api.getCampaign).toHaveBeenCalledWith('campaign-2');
+    await waitFor(() => {
+      expect(api.getCampaign).toHaveBeenCalledWith('campaign-2');
+    });
     await screen.findByRole('heading', { name: 'Resolver runway' });
   });
 

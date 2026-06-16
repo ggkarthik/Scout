@@ -128,6 +128,31 @@ export type BomIngestionResult = {
   action: string;
 };
 
+export type IngestionJobAccepted = {
+  jobId: string;
+  status: string;
+  message: string;
+  existingJob: boolean;
+  retryAfterSeconds: number | null;
+};
+
+export type IngestionJob = {
+  jobId: string;
+  jobType: string;
+  sourceType: string;
+  assetIdentifier: string;
+  status: string;
+  requestedBy: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  attemptCount: number;
+  failureCode: string | null;
+  failureMessage: string | null;
+  sbomUploadId: string | null;
+  resultJson: string | null;
+};
+
 export type BomComponentSummaryItem = {
   componentId: string;
   packageName: string;
@@ -1362,10 +1387,12 @@ export const api = {
     return { filename, csv: await response.text() };
   },
   bomFetch: (payload: BomFetchPayload) =>
-    request<BomIngestionResult>('/bom/fetch', {
+    request<IngestionJobAccepted>('/bom/fetch', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  getIngestionJob: (jobId: string) =>
+    request<IngestionJob>(`/ingestion-jobs/${encodeURIComponent(jobId)}`),
   bomUpload: async (formData: FormData): Promise<BomIngestionResult> => {
     const headers = buildApiHeaders(undefined, false);
     const response = await fetch(`${API_BASE}/bom/upload`, { method: 'POST', body: formData, headers });

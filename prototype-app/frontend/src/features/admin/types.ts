@@ -265,6 +265,7 @@ export type DemoRequest = {
   decidedBy: string | null;
   rejectionReason: string | null;
   tenantId: string | null;
+  provisionedPlanCode: string | null;
   latestInvite: DemoInvite | null;
 };
 

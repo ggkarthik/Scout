@@ -682,7 +682,7 @@ public class GithubSbomSourceService {
     private void ensureGhcrTokenConfiguredIfNeeded(UUID sourceId) {
         GithubSbomSource source = githubSbomSourceRepository.findById(sourceId)
                 .orElseThrow(() -> new EntityNotFoundException("GitHub SBOM source not found: " + sourceId));
-        if (isGhcrSourcePath(source.getPath())) {
+        if (isGhcrSourcePath(source.getPath()) && !source.hasGithubToken()) {
             ensureGhcrTokenConfigured();
         }
     }

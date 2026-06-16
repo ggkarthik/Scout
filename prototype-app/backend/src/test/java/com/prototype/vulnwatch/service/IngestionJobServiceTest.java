@@ -13,8 +13,10 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.dto.IngestionJobPageResponse;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
@@ -44,6 +46,8 @@ class IngestionJobServiceTest {
     @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
     @Mock
+    private TenantService tenantService;
+    @Mock
     private TenantQuotaService tenantQuotaService;
     @Mock
     private AuditEventService auditEventService;
@@ -58,6 +62,7 @@ class IngestionJobServiceTest {
                 ingestionJobRepository,
                 credentialEncryptionService,
                 tenantSchemaExecutionService,
+                tenantService,
                 tenantQuotaService,
                 auditEventService,
                 ingestionJobMetricsService,
@@ -134,6 +139,34 @@ class IngestionJobServiceTest {
     }
 
     @Test
+    void enqueueBomFetchJobUsesBomFetchQuotaSource() throws Exception {
+        Tenant tenant = tenant();
+        BomFetchRequest request = new BomFetchRequest(
+                BomType.SBOM,
+                AssetType.APPLICATION,
+                "Payments API",
+                "payments-api",
+                "https://example.com/sbom.json",
+                "nightly",
+                "Acme",
+                "Bearer secret"
+        );
+        when(credentialEncryptionService.encrypt("Bearer secret")).thenReturn("enc-secret");
+        when(ingestionJobRepository.findActiveByDedupeKeyForUpdate(anyString())).thenReturn(Optional.empty());
+        when(ingestionJobRepository.save(any(IngestionJob.class))).thenAnswer(invocation -> {
+            IngestionJob job = invocation.getArgument(0);
+            setId(job, UUID.randomUUID());
+            return job;
+        });
+
+        IngestionJobAcceptedResponse response = service.enqueueBomFetchJob(tenant, request, "architect");
+
+        assertFalse(response.existingJob());
+        verify(tenantQuotaService).assertCanCreateSbomIngestionJob(tenant, "bom-fetch");
+        verify(ingestionJobMetricsService).recordEnqueued("bom-fetch");
+    }
+
+    @Test
     void claimPendingJobsMarksClaimedRowsRunningAndIncrementsAttemptCount() throws Exception {
         Tenant tenant = tenant();
         IngestionJob first = queuedJob(tenant, "asset-1");
@@ -157,6 +190,29 @@ class IngestionJobServiceTest {
         assertNotNull(first.getStartedAt());
         assertNotNull(second.getStartedAt());
         verify(ingestionJobRepository).saveAll(List.of(first, second));
+    }
+
+    @Test
+    void recoverInterruptedRunningJobsMarksRunningRowsFailedAcrossTenants() throws Exception {
+        Tenant tenant = tenant();
+        IngestionJob running = queuedJob(tenant, "asset-1");
+        UUID jobId = UUID.randomUUID();
+        setId(running, jobId);
+        running.setStatus(IngestionJobService.STATUS_RUNNING);
+        running.setStartedAt(Instant.parse("2026-06-15T10:00:00Z"));
+        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(ingestionJobRepository.findByStatus(IngestionJobService.STATUS_RUNNING)).thenReturn(List.of(running));
+
+        int recovered = service.recoverInterruptedRunningJobs();
+
+        assertEquals(1, recovered);
+        assertEquals(IngestionJobService.STATUS_FAILED, running.getStatus());
+        assertEquals("WORKER_INTERRUPTED", running.getFailureCode());
+        assertEquals("Ingestion job interrupted by service restart", running.getFailureMessage());
+        assertNotNull(running.getCompletedAt());
+        verify(ingestionJobRepository).saveAll(List.of(running));
+        verify(auditEventService).record("ingestion.job.failed", "ingestion_job", jobId.toString(), null);
+        verify(ingestionJobMetricsService).recordFailed("remote-endpoint");
     }
 
     @Test

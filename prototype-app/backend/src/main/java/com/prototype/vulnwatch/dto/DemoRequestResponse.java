@@ -18,6 +18,7 @@ public record DemoRequestResponse(
         String decidedBy,
         String rejectionReason,
         UUID tenantId,
+        String provisionedPlanCode,
         DemoInviteResponse latestInvite
 ) {
 }

@@ -14,14 +14,18 @@ import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.BomInventoryItemResponse;
 import com.prototype.vulnwatch.dto.BomLineageItemResponse;
 import com.prototype.vulnwatch.dto.BomSupportMatrixResponse;
+import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.service.BomIngestionOrchestrator;
 import com.prototype.vulnwatch.service.BomInventoryReadService;
+import com.prototype.vulnwatch.service.IngestionJobService;
+import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,15 +45,21 @@ public class BomController {
     private final WorkspaceService workspaceService;
     private final BomIngestionOrchestrator bomIngestionOrchestrator;
     private final BomInventoryReadService bomInventoryReadService;
+    private final IngestionJobService ingestionJobService;
+    private final RequestActorService requestActorService;
 
     public BomController(
             WorkspaceService workspaceService,
             BomIngestionOrchestrator bomIngestionOrchestrator,
-            BomInventoryReadService bomInventoryReadService
+            BomInventoryReadService bomInventoryReadService,
+            IngestionJobService ingestionJobService,
+            RequestActorService requestActorService
     ) {
         this.workspaceService = workspaceService;
         this.bomIngestionOrchestrator = bomIngestionOrchestrator;
         this.bomInventoryReadService = bomInventoryReadService;
+        this.ingestionJobService = ingestionJobService;
+        this.requestActorService = requestActorService;
     }
 
     /**
@@ -60,11 +70,16 @@ public class BomController {
      */
     @PostMapping("/fetch")
     @PreAuthorize("hasAnyRole('INVENTORY_ADMIN','TENANT_ADMIN','CREATOR')")
-    public BomIngestionResultResponse fetchBom(
+    public ResponseEntity<IngestionJobAcceptedResponse> fetchBom(
             @Valid @RequestBody BomFetchRequest request
-    ) throws IOException {
+    ) {
         Tenant tenant = workspaceService.getWorkspace();
-        return bomIngestionOrchestrator.ingestFromUrl(tenant, request);
+        IngestionJobAcceptedResponse response = ingestionJobService.enqueueBomFetchJob(
+                tenant,
+                request,
+                requestActorService.currentActor().userId()
+        );
+        return ResponseEntity.accepted().body(response);
     }
 
     /**
@@ -85,8 +100,7 @@ public class BomController {
         if (file.isEmpty()) {
             throw new IOException("BOM file is empty");
         }
-        long maxBytes = 50L * 1024 * 1024;
-        if (file.getSize() > maxBytes) {
+        if (file.getSize() > BomIngestionOrchestrator.MAX_BOM_BYTES) {
             throw new IOException("BOM file exceeds 50 MB limit");
         }
         Tenant tenant = workspaceService.getWorkspace();

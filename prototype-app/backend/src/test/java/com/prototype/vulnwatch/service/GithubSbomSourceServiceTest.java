@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
@@ -11,7 +12,9 @@ import static org.mockito.Mockito.lenient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.GithubTokenProvider;
 import com.prototype.vulnwatch.domain.GithubSbomSource;
+import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.SyncTriggerResponse;
 import com.prototype.vulnwatch.repo.GithubSbomSourceRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import java.util.Optional;
@@ -23,6 +26,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -64,8 +70,8 @@ class GithubSbomSourceServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(githubTokenProvider.hasToken()).thenReturn(false);
-        when(githubTokenProvider.configurationHint()).thenReturn(
+        lenient().when(githubTokenProvider.hasToken()).thenReturn(false);
+        lenient().when(githubTokenProvider.configurationHint()).thenReturn(
                 "Configure GITHUB_API_TOKEN_FILE, backend/secrets/github-api-token, or GITHUB_API_TOKEN for the backend."
         );
         tenant = new Tenant();
@@ -77,6 +83,14 @@ class GithubSbomSourceServiceTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
         lenient().when(tenantSchemaExecutionService.run(org.mockito.ArgumentMatchers.any(UUID.class), org.mockito.ArgumentMatchers.<Supplier<?>>any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(requestActorService.currentActor()).thenReturn(
+                new RequestActor("local-analyst", false, tenant.getId(), tenant.getName())
+        );
+        lenient().when(transactionTemplate.execute(org.mockito.ArgumentMatchers.<TransactionCallback<?>>any()))
+                .thenAnswer(invocation -> {
+                    TransactionCallback<?> callback = invocation.getArgument(0);
+                    return callback.doInTransaction((TransactionStatus) null);
+                });
         githubSbomSourceService = new GithubSbomSourceService(
                 githubSbomSourceRepository,
                 syncRunRepository,
@@ -121,5 +135,40 @@ class GithubSbomSourceServiceTest {
         assertTrue(exception.getReason().contains("backend/secrets/github-api-token"));
         verify(githubSbomSourceRepository).findById(sourceId);
         verifyNoInteractions(syncRunRepository, transactionTemplate, ingestionJobService);
+    }
+
+    @Test
+    void triggerSavedGhcrSourceAllowsSourceScopedTokenWithoutBackendToken() {
+        UUID sourceId = UUID.randomUUID();
+        UUID runId = UUID.randomUUID();
+        GithubSbomSource source = new GithubSbomSource();
+        source.setTenant(tenant);
+        source.setPath(GithubSbomSourceService.PATH_GHCR_ATTESTATIONS);
+        source.setOwner("openai");
+        source.setAssetName("ghcr.io/openai");
+        source.setAssetIdentifier("ghcr:openai");
+        source.setGithubToken("ghp_source_token");
+        ReflectionTestUtils.setField(source, "id", sourceId);
+        when(githubSbomSourceRepository.findById(sourceId)).thenReturn(Optional.of(source));
+        when(githubSbomSourceRepository.findByIdForUpdate(sourceId)).thenReturn(Optional.of(source));
+        when(githubSbomSourceRepository.save(source)).thenReturn(source);
+        when(syncRunRepository.save(org.mockito.ArgumentMatchers.any(SyncRun.class))).thenAnswer(invocation -> {
+            SyncRun run = invocation.getArgument(0);
+            ReflectionTestUtils.setField(run, "id", runId);
+            return run;
+        });
+
+        SyncTriggerResponse response = githubSbomSourceService.trigger(sourceId);
+
+        assertNotNull(response);
+        assertEquals(runId, response.runId());
+        assertEquals("queued", response.status());
+        verify(ingestionJobService).enqueueGithubGhcrJob(
+                tenant,
+                "openai",
+                runId,
+                sourceId,
+                "local-analyst"
+        );
     }
 }

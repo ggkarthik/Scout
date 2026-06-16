@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.service;
 
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.AssetType;
 import java.util.UUID;
 
@@ -9,11 +10,13 @@ final class IngestionJobPayloads {
     }
 
     record EndpointIngestionPayload(
+            BomType bomType,
             AssetType assetType,
             String assetName,
             String assetIdentifier,
             String sourceUrl,
             String sourceLabel,
+            String supplier,
             String encryptedAuthorizationHeader
     ) {
     }
