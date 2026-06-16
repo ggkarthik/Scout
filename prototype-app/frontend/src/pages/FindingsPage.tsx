@@ -241,6 +241,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [incidentAssignedTo, setIncidentAssignedTo] = React.useState('');
   const [incidentAssignmentGroup, setIncidentAssignmentGroup] = React.useState('');
   const [incidentDueDate, setIncidentDueDate] = React.useState('');
+  const [assignGroupTarget, setAssignGroupTarget] = React.useState('');
   const [queueDialogMode, setQueueDialogMode] = React.useState<'create' | 'edit' | null>(null);
   const [queueDialogTarget, setQueueDialogTarget] = React.useState<FindingQueueDefinition | null>(null);
   const [queueTitle, setQueueTitle] = React.useState('');
@@ -613,13 +614,14 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const allSelected = rows.length>0 && selectedIds.size===rows.length;
 
   // ── actions ────────────────────────────────────────────────────────────────
-  type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate'|'delete';
+  type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate'|'delete'|'assign';
   function openAction(t: ActionType) { if (!hasSelection) return; setShowMoreActions(false); setActionError(''); setActionModal(t); }
   function closeModal() {
     setActionModal(null); setActionError('');
     setDeferReason(''); setDeferExpiry(''); setFpJustification(''); setDuplicateOf('');
     setIncidentNotes(''); setIncidentPriority('3'); setIncidentAssignedTo('');
     setIncidentAssignmentGroup(''); setIncidentDueDate('');
+    setAssignGroupTarget('');
   }
   async function execAll(payload: Record<string,unknown>) {
     await api.bulkUpdateFindingWorkflow({
@@ -644,6 +646,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   async function handleDefer()       { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:deferReason||'DEFERRED',suppressedUntil:deferExpiry?new Date(deferExpiry).toISOString():undefined,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleFalsePos()    { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`FALSE_POSITIVE${fpJustification?': '+fpJustification:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleDuplicate()   { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`DUPLICATE${duplicateOf?': '+duplicateOf:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleAssign()      { setActionLoading(true); try { await execAll({assignedTo:assignGroupTarget,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleDelete() {
     setActionLoading(true);
     try {
@@ -828,6 +831,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       'create-incident':'Create ServiceNow Incident','defer':'Defer Findings',
       'resolve':`Resolve ${n} Finding${n!==1?'s':''}`,
       'false-positive':'Mark as False Positive',
+      'assign':`Assign ${n} Finding${n!==1?'s':''} to Group`,
       'duplicate':'Mark as Duplicate',
       'delete':`Delete ${n} Finding${n!==1?'s':''}`,
     };
@@ -883,6 +887,27 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <div className="fpl-form-row"><label>Duplicate Of</label><input className="fpl-form-input mono" value={duplicateOf} onChange={e=>setDuplicateOf(e.target.value)} placeholder="Finding ID or Incident ID"/></div>
               </div>
             )}
+            {actionModal==='assign' && (() => {
+              const groups = Array.from(new Set(selectedFindings.map(f=>f.ownerGroup).filter(Boolean))) as string[];
+              return (
+                <div className="fpl-form">
+                  <p className="fpl-form-desc">Assign <strong>{n}</strong> finding{n!==1?'s':''} to an assignment group.</p>
+                  <div className="fpl-form-row">
+                    <label>Assignment Group</label>
+                    {groups.length > 0
+                      ? <select className="fpl-form-select" value={assignGroupTarget} onChange={e=>setAssignGroupTarget(e.target.value)}>
+                          <option value="">— select group —</option>
+                          {groups.map(g=><option key={g} value={g}>{g}</option>)}
+                          <option value="__custom__">Other…</option>
+                        </select>
+                      : null}
+                    {(groups.length === 0 || assignGroupTarget === '__custom__') &&
+                      <input className="fpl-form-input" value={assignGroupTarget==='__custom__'?'':assignGroupTarget}
+                        onChange={e=>setAssignGroupTarget(e.target.value)} placeholder="Enter group name"/>}
+                  </div>
+                </div>
+              );
+            })()}
             {actionModal==='delete' && (
               <div className="fpl-form">
                 <p className="fpl-form-desc" style={{color:'var(--danger,#ef4444)'}}>
@@ -906,8 +931,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                     else if (actionModal==='resolve') void handleResolve();
                     else if (actionModal==='false-positive') void handleFalsePos();
                     else if (actionModal==='duplicate') void handleDuplicate();
+                    else if (actionModal==='assign') void handleAssign();
                   }}>
-                  {actionLoading ? 'Working…' : actionModal==='create-incident' ? 'Create Incident' : actionModal==='defer' ? 'Defer' : actionModal==='resolve' ? 'Resolve' : actionModal==='false-positive' ? 'Mark False Positive' : 'Mark Duplicate'}
+                  {actionLoading ? 'Working…' : actionModal==='create-incident' ? 'Create Incident' : actionModal==='defer' ? 'Defer' : actionModal==='resolve' ? 'Resolve' : actionModal==='false-positive' ? 'Mark False Positive' : actionModal==='assign' ? 'Assign' : 'Mark Duplicate'}
                 </button>
             }
           </div>
@@ -1059,6 +1085,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
                 <button className="fpl-more-item" onClick={()=>openAction('defer')} disabled={!hasSelection || !canMutateFindings}>Defer</button>
                 <button className="fpl-more-item" onClick={()=>openAction('false-positive')} disabled={!hasSelection || !canMutateFindings}>False Positive</button>
                 <button className="fpl-more-item" onClick={()=>openAction('duplicate')} disabled={!hasSelection || !canMutateFindings}>Duplicate</button>
+                <button className="fpl-more-item" onClick={()=>openAction('assign')} disabled={!hasSelection || !canMutateFindings}>Assign to…</button>
                 <div className="fpl-more-sep"/>
                 <button className="fpl-more-item" onClick={()=>void handleReopen()} disabled={!hasSelection || !canMutateFindings}>Re-open</button>
                 <div className="fpl-more-sep"/>
