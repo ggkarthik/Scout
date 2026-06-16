@@ -222,7 +222,7 @@ export function BomManagementPage({
     setQueueMessage('');
   }
 
-  function parseJobResult(job: IngestionJob): BomIngestionResult | null {
+  const parseJobResult = React.useCallback((job: IngestionJob): BomIngestionResult | null => {
     if (!job.resultJson) return null;
     try {
       const payload = JSON.parse(job.resultJson) as Record<string, unknown>;
@@ -252,7 +252,7 @@ export function BomManagementPage({
     } catch {
       return null;
     }
-  }
+  }, [bomType]);
 
   React.useEffect(() => {
     if (!queuedJobId) return;
@@ -289,7 +289,7 @@ export function BomManagementPage({
     return () => {
       cancelled = true;
     };
-  }, [queuedJobId, bomType]);
+  }, [parseJobResult, queuedJobId]);
 
   // ── File selected: parse + auto-fill ──
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
