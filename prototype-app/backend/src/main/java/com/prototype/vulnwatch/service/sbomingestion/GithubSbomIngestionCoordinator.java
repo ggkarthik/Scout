@@ -4,9 +4,11 @@ import com.prototype.vulnwatch.client.GithubApiClient;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.GithubRepoIngestionResult;
+import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionBatchResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
+import com.prototype.vulnwatch.service.BomIngestionOrchestrator;
 import com.prototype.vulnwatch.service.SbomIngestionService;
 import java.io.IOException;
 import java.time.Instant;
@@ -23,18 +25,18 @@ public class GithubSbomIngestionCoordinator {
     private final GithubApiClient githubApiClient;
     private final SbomFetchGuardService sbomFetchGuardService;
     private final SbomUploadSupportService sbomUploadSupportService;
-    private final SbomContentIngestionService sbomContentIngestionService;
+    private final BomIngestionOrchestrator bomIngestionOrchestrator;
 
     public GithubSbomIngestionCoordinator(
             GithubApiClient githubApiClient,
             SbomFetchGuardService sbomFetchGuardService,
             SbomUploadSupportService sbomUploadSupportService,
-            SbomContentIngestionService sbomContentIngestionService
+            BomIngestionOrchestrator bomIngestionOrchestrator
     ) {
         this.githubApiClient = githubApiClient;
         this.sbomFetchGuardService = sbomFetchGuardService;
         this.sbomUploadSupportService = sbomUploadSupportService;
-        this.sbomContentIngestionService = sbomContentIngestionService;
+        this.bomIngestionOrchestrator = bomIngestionOrchestrator;
     }
 
     public GithubSbomIngestionBatchResponse ingestFromGithub(Tenant tenant, GithubSbomIngestionRequest request) throws IOException {
@@ -88,7 +90,7 @@ public class GithubSbomIngestionCoordinator {
                     : resolveSingleGithubAssetIdentifier(repoOwner, repoName, request.assetIdentifier());
 
             try {
-                SbomIngestionResponse response = ingestFromGithubRepository(
+                BomIngestionResultResponse response = ingestFromGithubRepository(
                         tenant,
                         repoOwner,
                         repoName,
@@ -96,7 +98,7 @@ public class GithubSbomIngestionCoordinator {
                         assetName,
                         assetIdentifier
                 );
-                componentsIngested += response.componentsIngested();
+                componentsIngested += response.componentCount();
                 findingsGenerated += response.findingsGenerated();
                 repositoriesSucceeded++;
                 results.add(new GithubRepoIngestionResult(
@@ -104,7 +106,7 @@ public class GithubSbomIngestionCoordinator {
                         repoName,
                         assetIdentifier,
                         "SUCCESS",
-                        response.componentsIngested(),
+                        response.componentCount(),
                         response.findingsGenerated(),
                         "Ingested successfully"
                 ));
@@ -209,7 +211,7 @@ public class GithubSbomIngestionCoordinator {
             String assetIdentifier = image.imageRepository() + "@" + image.digest();
             try {
                 GithubApiClient.GithubAttestedSbomResponse attestedSbom = bulkAttestationsByAssetIdentifier.get(assetIdentifier);
-                SbomIngestionResponse response = attestedSbom == null
+                BomIngestionResultResponse response = attestedSbom == null
                         ? ingestGithubAttestation(
                                 tenant,
                                 normalizedOwner,
@@ -231,14 +233,14 @@ public class GithubSbomIngestionCoordinator {
                                 assetIdentifier,
                                 attestedSbom
                         );
-                componentsIngested += response.componentsIngested();
+                componentsIngested += response.componentCount();
                 findingsGenerated += response.findingsGenerated();
                 imagesSucceeded++;
                 results.add(new SbomIngestionService.GithubGhcrImageIngestionResult(
                         image.imageRepository(),
                         assetIdentifier,
                         "SUCCESS",
-                        response.componentsIngested(),
+                        response.componentCount(),
                         response.findingsGenerated(),
                         "Ingested successfully"
                 ));
@@ -287,7 +289,7 @@ public class GithubSbomIngestionCoordinator {
         );
     }
 
-    private SbomIngestionResponse ingestFromGithubRepository(
+    private BomIngestionResultResponse ingestFromGithubRepository(
             Tenant tenant,
             String owner,
             String repo,
@@ -336,19 +338,15 @@ public class GithubSbomIngestionCoordinator {
                 sbomUploadSupportService.toJson(evidence)
         );
 
-        return sbomContentIngestionService.ingestBytes(
+        return bomIngestionOrchestrator.ingestGithubRepository(
                 tenant,
-                assetType,
-                assetName,
-                assetIdentifier,
+                new GithubSbomIngestionRequest(owner, repo, false, assetType, assetName, assetIdentifier),
                 content,
-                "github-generated-sbom.json",
-                metadata,
-                null
+                metadata
         );
     }
 
-    private SbomIngestionResponse ingestGithubAttestation(
+    private BomIngestionResultResponse ingestGithubAttestation(
             Tenant tenant,
             String owner,
             String repo,
@@ -374,7 +372,7 @@ public class GithubSbomIngestionCoordinator {
         );
     }
 
-    private SbomIngestionResponse ingestGithubAttestedSbom(
+    private BomIngestionResultResponse ingestGithubAttestedSbom(
             Tenant tenant,
             String owner,
             String repo,
@@ -417,13 +415,11 @@ public class GithubSbomIngestionCoordinator {
                 sbomUploadSupportService.toJson(evidence)
         );
 
-        return sbomContentIngestionService.ingestBytes(
+        return bomIngestionOrchestrator.ingestGithubContainerImage(
                 tenant,
-                AssetType.CONTAINER_IMAGE,
                 assetName,
                 assetIdentifier,
                 content,
-                "github-attested-sbom.json",
                 metadata,
                 asset -> sbomUploadSupportService.applyContainerImageMetadata(
                         asset,

@@ -15,8 +15,9 @@ describe('routes', () => {
   it('maps top-level tabs to canonical paths', () => {
     expect(pathForTab('dashboard')).toBe('/');
     expect(pathForTab('operations')).toBe('/operations/pipeline');
+    expect(pathForTab('campaigns')).toBe('/vuln-repo/campaigns');
     expect(pathForTab('inventory')).toBe('/inventory');
-    expect(pathForTab('end-of-life')).toBe('/end-of-life');
+    expect(pathForTab('end-of-life')).toBe('/platform/eol');
     expect(pathForTab('admin')).toBe('/admin/users');
     expect(pathForTab('platform')).toBe('/platform/tenants');
     expect(pathForConnectView('run-history')).toBe('/connect/run-history');
@@ -44,7 +45,9 @@ describe('routes', () => {
     expect(activeTabForPath('/')).toBe('dashboard');
     expect(activeTabForPath('/findings')).toBe('findings');
     expect(activeTabForPath('/operations/platform-health')).toBe('operations');
+    expect(activeTabForPath('/vuln-repo/campaigns')).toBe('campaigns');
     expect(activeTabForPath('/inventory/hosts')).toBe('inventory');
+    expect(activeTabForPath('/platform/eol')).toBe('end-of-life');
     expect(activeTabForPath('/connect/sources')).toBe('connect');
     expect(activeTabForPath('/admin/users')).toBe('admin');
     expect(activeTabForPath('/platform/feeds')).toBe('platform');
@@ -92,7 +95,7 @@ describe('routes', () => {
     expect(normalizePlatformRouteView('connectors')).toBe('tenants');
   });
 
-  it('accepts the platform eol route view', () => {
+  it('normalizes the platform EOL view', () => {
     expect(normalizePlatformRouteView('eol')).toBe('eol');
   });
 });

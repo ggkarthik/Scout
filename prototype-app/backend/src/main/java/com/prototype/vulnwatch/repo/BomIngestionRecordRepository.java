@@ -31,14 +31,15 @@ public interface BomIngestionRecordRepository extends JpaRepository<BomIngestion
         WHERE r.tenant.id = :tenantId
           AND r.bomType = :bomType
           AND r.status = 'ACTIVE'
-          AND ((:assetId IS NULL AND r.assetId IS NULL) OR r.assetId = :assetId)
-          AND r.supplier IS NULL
+          AND r.assetId = :assetId
+          AND ((:supplier IS NULL AND r.supplier IS NULL) OR r.supplier = :supplier)
         ORDER BY r.ingestedAt DESC
         """)
-    Optional<BomIngestionRecord> findActiveDuplicateWithoutSupplier(
+    Optional<BomIngestionRecord> findActiveForAsset(
             @Param("tenantId") UUID tenantId,
             @Param("bomType") BomType bomType,
-            @Param("assetId") UUID assetId
+            @Param("assetId") UUID assetId,
+            @Param("supplier") String supplier
     );
 
     @Query("""
@@ -46,15 +47,22 @@ public interface BomIngestionRecordRepository extends JpaRepository<BomIngestion
         WHERE r.tenant.id = :tenantId
           AND r.bomType = :bomType
           AND r.status = 'ACTIVE'
-          AND ((:assetId IS NULL AND r.assetId IS NULL) OR r.assetId = :assetId)
-          AND r.supplier = :supplier
+          AND r.assetId IS NULL
+          AND ((:supplier IS NULL AND r.supplier IS NULL) OR r.supplier = :supplier)
+          AND ((:sourceReference IS NULL AND r.sourceReference IS NULL) OR r.sourceReference = :sourceReference)
         ORDER BY r.ingestedAt DESC
         """)
-    Optional<BomIngestionRecord> findActiveDuplicateWithSupplier(
+    Optional<BomIngestionRecord> findActiveWithoutAsset(
             @Param("tenantId") UUID tenantId,
             @Param("bomType") BomType bomType,
-            @Param("assetId") UUID assetId,
-            @Param("supplier") String supplier
+            @Param("supplier") String supplier,
+            @Param("sourceReference") String sourceReference
+    );
+
+    List<BomIngestionRecord> findByTenant_IdAndAssetIdAndStatusOrderByIngestedAtDesc(
+            UUID tenantId,
+            UUID assetId,
+            BomStatus status
     );
 
     long countByTenant_IdAndStatus(UUID tenantId, BomStatus status);

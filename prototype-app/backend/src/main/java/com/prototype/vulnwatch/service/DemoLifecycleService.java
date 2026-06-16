@@ -434,6 +434,11 @@ public class DemoLifecycleService {
     }
 
     private DemoRequestResponse toRequestResponse(DemoRequest request) {
+        String provisionedPlanCode = request.getTenantId() == null
+                ? TenantEntitlementService.PLAN_ENTERPRISE
+                : tenantRepository.findById(request.getTenantId())
+                .map(Tenant::getPlanCode)
+                .orElse(TenantEntitlementService.PLAN_ENTERPRISE);
         return new DemoRequestResponse(
                 request.getId(),
                 request.getEmail(),
@@ -449,6 +454,7 @@ public class DemoLifecycleService {
                 request.getDecidedBy(),
                 request.getRejectionReason(),
                 request.getTenantId(),
+                provisionedPlanCode,
                 latestInviteResponse(request.getId())
         );
     }

@@ -1029,7 +1029,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           {formatProjectionStatus(projectionStatusQuery.data)}
         </div>
       ) : null}
-
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div className="fpl-toolbar">
         <div className="fpl-toolbar-left">

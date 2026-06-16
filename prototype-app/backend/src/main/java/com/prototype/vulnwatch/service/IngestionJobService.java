@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.dto.IngestionJobPageResponse;
@@ -37,6 +38,7 @@ public class IngestionJobService {
     private final IngestionJobRepository ingestionJobRepository;
     private final CredentialEncryptionService credentialEncryptionService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TenantService tenantService;
     private final TenantQuotaService tenantQuotaService;
     private final AuditEventService auditEventService;
     private final IngestionJobMetricsService ingestionJobMetricsService;
@@ -46,6 +48,7 @@ public class IngestionJobService {
             IngestionJobRepository ingestionJobRepository,
             CredentialEncryptionService credentialEncryptionService,
             TenantSchemaExecutionService tenantSchemaExecutionService,
+            TenantService tenantService,
             TenantQuotaService tenantQuotaService,
             AuditEventService auditEventService,
             IngestionJobMetricsService ingestionJobMetricsService,
@@ -54,6 +57,7 @@ public class IngestionJobService {
         this.ingestionJobRepository = ingestionJobRepository;
         this.credentialEncryptionService = credentialEncryptionService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.tenantService = tenantService;
         this.tenantQuotaService = tenantQuotaService;
         this.auditEventService = auditEventService;
         this.ingestionJobMetricsService = ingestionJobMetricsService;
@@ -62,19 +66,40 @@ public class IngestionJobService {
 
     @Transactional
     public IngestionJobAcceptedResponse enqueueEndpointJob(Tenant tenant, SbomEndpointIngestionRequest request, String requestedBy) {
-        tenantQuotaService.assertCanCreateSbomIngestionJob(tenant, "remote-endpoint");
-        IngestionJobPayloads.EndpointIngestionPayload payload = new IngestionJobPayloads.EndpointIngestionPayload(
+        BomFetchRequest bomRequest = new BomFetchRequest(
+                com.prototype.vulnwatch.domain.BomType.SBOM,
                 request.assetType(),
                 request.assetName(),
                 request.assetIdentifier(),
                 request.sourceUrl(),
                 request.sourceLabel(),
+                null,
+                request.authorizationHeader()
+        );
+        return enqueueBomFetchJob(tenant, bomRequest, requestedBy, "remote-endpoint");
+    }
+
+    @Transactional
+    public IngestionJobAcceptedResponse enqueueBomFetchJob(Tenant tenant, BomFetchRequest request, String requestedBy) {
+        return enqueueBomFetchJob(tenant, request, requestedBy, "bom-fetch");
+    }
+
+    private IngestionJobAcceptedResponse enqueueBomFetchJob(Tenant tenant, BomFetchRequest request, String requestedBy, String quotaSource) {
+        tenantQuotaService.assertCanCreateSbomIngestionJob(tenant, quotaSource);
+        IngestionJobPayloads.EndpointIngestionPayload payload = new IngestionJobPayloads.EndpointIngestionPayload(
+                request.bomType(),
+                request.assetType(),
+                request.assetName(),
+                request.assetIdentifier(),
+                request.sourceUrl(),
+                request.sourceLabel(),
+                request.supplier(),
                 credentialEncryptionService.encrypt(request.authorizationHeader())
         );
         return enqueueJob(
                 tenant,
                 JOB_TYPE_REMOTE_ENDPOINT,
-                "remote-endpoint",
+                quotaSource,
                 request.assetIdentifier(),
                 requestedBy,
                 payload
@@ -233,6 +258,34 @@ public class IngestionJobService {
             ingestionJobRepository.save(job);
             return null;
         });
+    }
+
+    @Transactional
+    public int recoverInterruptedRunningJobs() {
+        Instant now = Instant.now();
+        int recovered = 0;
+        for (Tenant tenant : tenantService.listTenants()) {
+            List<IngestionJob> stale = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
+            if (stale.isEmpty()) {
+                continue;
+            }
+            for (IngestionJob job : stale) {
+                job.setStatus(STATUS_FAILED);
+                job.setFailureCode("WORKER_INTERRUPTED");
+                if (job.getFailureMessage() == null || job.getFailureMessage().isBlank()) {
+                    job.setFailureMessage("Ingestion job interrupted by service restart");
+                }
+                if (job.getCompletedAt() == null) {
+                    job.setCompletedAt(now);
+                }
+            }
+            tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.saveAll(stale));
+            recovered += stale.size();
+            for (IngestionJob job : stale) {
+                recordFailed(job);
+            }
+        }
+        return recovered;
     }
 
     public <T> T readPayload(IngestionJob job, Class<T> payloadType) {

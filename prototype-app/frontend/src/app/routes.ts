@@ -165,7 +165,7 @@ export function pathForTab(tab: AppTab): string {
     case 'inventory':
       return pathForInventoryView(INVENTORY_DEFAULT_VIEW);
     case 'end-of-life':
-      return '/end-of-life';
+      return pathForPlatformView('eol');
     case 'connect':
       return `/connect/${CONNECT_DEFAULT_VIEW}`;
     case 'admin':
@@ -331,6 +331,7 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
   if (pathname.startsWith('/connect')) return 'connect';
   if (pathname.startsWith('/admin')) return 'admin';
+  if (pathname.startsWith('/platform/eol')) return 'end-of-life';
   if (pathname.startsWith('/platform')) return 'platform';
   if (pathname.startsWith('/configurations')) return 'configurations';
   return 'dashboard';

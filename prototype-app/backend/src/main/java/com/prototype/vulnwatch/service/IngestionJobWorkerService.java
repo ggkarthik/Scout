@@ -2,10 +2,13 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.Tenant;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,6 +17,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class IngestionJobWorkerService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IngestionJobWorkerService.class);
 
     private final IngestionJobService ingestionJobService;
     private final IngestionJobExecutionService executionService;
@@ -50,26 +55,38 @@ public class IngestionJobWorkerService {
         this.retryDelayMs = retryDelayMs;
     }
 
+    @PostConstruct
+    public void recoverInterruptedJobs() {
+        int recovered = ingestionJobService.recoverInterruptedRunningJobs();
+        if (recovered > 0) {
+            LOG.warn("Recovered {} interrupted ingestion jobs left RUNNING during the previous process lifetime", recovered);
+        }
+    }
+
     @Scheduled(fixedDelayString = "${app.ingestion.jobs.poll-interval-ms:2000}")
     public void pollJobs() {
         for (Tenant tenant : tenantService.listTenants()) {
-            List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
-                    tenant,
-                    pollBatchSize,
-                    maxConcurrentPerTenant
-            );
-            for (IngestionJobService.ClaimedJobRef ref : claimed) {
-                try {
-                    sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
-                } catch (RejectedExecutionException ex) {
-                    ingestionJobService.markQueuedForRetry(
-                            ref.tenantId(),
-                            ref.jobId(),
-                            "EXECUTOR_BUSY",
-                            "SBOM job executor is at capacity",
-                            Instant.now().plusMillis(retryDelayMs)
-                    );
+            try {
+                List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
+                        tenant,
+                        pollBatchSize,
+                        maxConcurrentPerTenant
+                );
+                for (IngestionJobService.ClaimedJobRef ref : claimed) {
+                    try {
+                        sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
+                    } catch (RejectedExecutionException ex) {
+                        ingestionJobService.markQueuedForRetry(
+                                ref.tenantId(),
+                                ref.jobId(),
+                                "EXECUTOR_BUSY",
+                                "SBOM job executor is at capacity",
+                                Instant.now().plusMillis(retryDelayMs)
+                        );
+                    }
                 }
+            } catch (Exception ex) {
+                LOG.warn("Failed polling ingestion jobs for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
             }
         }
     }
