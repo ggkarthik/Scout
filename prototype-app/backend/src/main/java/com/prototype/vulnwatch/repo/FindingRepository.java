@@ -290,4 +290,42 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             @Param("componentIds") Collection<UUID> componentIds,
             @Param("cveId") String cveId
     );
+
+    /** Count open findings grouped by component ID for a set of component IDs. */
+    @Query("""
+            select f.component.id, count(f)
+            from Finding f
+            where f.component.id in :componentIds
+              and f.status = com.prototype.vulnwatch.domain.FindingStatus.OPEN
+            group by f.component.id
+            """)
+    List<Object[]> countOpenByComponentIds(@Param("componentIds") Collection<UUID> componentIds);
+
+    /** Count open findings grouped by asset ID for a set of asset IDs.
+     *  Covers both direct asset findings (f.asset_id) and component-scoped findings
+     *  (f.component_id → inventory_components.asset_id). */
+    @Query(value = """
+            SELECT COALESCE(f.asset_id, ic.asset_id) AS resolved_asset_id, count(f.id)
+            FROM findings f
+            LEFT JOIN inventory_components ic ON ic.id = f.component_id
+            WHERE f.tenant_id = :tenantId
+              AND f.status = 'OPEN'
+              AND (f.asset_id IN :assetIds OR ic.asset_id IN :assetIds)
+            GROUP BY COALESCE(f.asset_id, ic.asset_id)
+            """, nativeQuery = true)
+    List<Object[]> countOpenFindingsByAssetIds(
+            @Param("tenantId") UUID tenantId,
+            @Param("assetIds") Collection<UUID> assetIds
+    );
+
+    /** Count open findings grouped by ecosystem and packageName for a tenant. */
+    @Query(value = """
+            SELECT lower(ic.ecosystem), lower(ic.package_name), count(f.id)
+            FROM findings f
+            JOIN inventory_components ic ON ic.id = f.component_id
+            WHERE f.tenant_id = :tenantId
+              AND f.status = 'OPEN'
+            GROUP BY lower(ic.ecosystem), lower(ic.package_name)
+            """, nativeQuery = true)
+    List<Object[]> countOpenByEcosystemPackageForTenant(@Param("tenantId") UUID tenantId);
 }

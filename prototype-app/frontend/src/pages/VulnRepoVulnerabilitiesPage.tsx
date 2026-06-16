@@ -748,7 +748,7 @@ export function VulnRepoVulnerabilitiesPage() {
         },
       };
     })
-  ), [filteredItems, navigate, policyQuery.data, platformScope, sourceFilter]);
+  ), [canViewAiSolutions, filteredItems, navigate, policyQuery.data, platformScope, sourceFilter]);
 
   const activeChips = React.useMemo<Array<{ label: string; onRemove: () => void }>>(() => {
     const chips: Array<{ label: string; onRemove: () => void }> = [];
