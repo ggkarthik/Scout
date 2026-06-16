@@ -145,7 +145,9 @@ public final class CampaignDtos {
     }
 
     public record CampaignFindingRowResponse(
+            String findingId,
             String displayId,
+            String vulnerabilityId,
             String assetName,
             String assetIdentifier,
             String packageName,
@@ -172,6 +174,7 @@ public final class CampaignDtos {
     }
 
     public record CampaignAssetRowResponse(
+            String assetId,
             String assetName,
             String assetIdentifier,
             String environment,

@@ -12,7 +12,6 @@ import {
   normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryView,
-  pathForInventoryViewWithSearch,
   pathForOperationsView,
   pathForPlatformView,
   pathForTab,
@@ -101,9 +100,6 @@ const BomComponents = React.lazy(async () => ({
 }));
 const SoftwareIdentityDetailPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentityDetailPage')).SoftwareIdentityDetailPage
-}));
-const EolPage = React.lazy(async () => ({
-  default: (await import('./pages/EolPage')).EolPage
 }));
 const ConnectPage = React.lazy(async () => ({
   default: (await import('./pages/ConnectPage')).ConnectPage
@@ -233,10 +229,8 @@ function TabIcon({ tab }: { tab: AppTab }) {
   if (tab === 'campaigns') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M6 4.5h9l3 3v12H6z" />
-        <path d="M15 4.5v3h3" />
-        <path d="M9 11.5h6M9 15h4" />
-        <circle cx="16.5" cy="15.5" r="2.5" />
+        <path d="M4 6h16M4 12h10M4 18h7" strokeLinecap="round" />
+        <path d="M17 14l3-2-3-2v4z" />
       </svg>
     );
   }
@@ -502,21 +496,7 @@ function EndOfLifeRoute() {
     return <Navigate to={pathForPlatformView('eol')} replace />;
   }
 
-  if (actor && !isPlatformScope) {
-    return <Navigate to="/exposure" replace />;
-  }
-
-  if (!canAccessPlatformConsole(actor)) {
-    return (
-      <section className="panel">
-        <div className="notice error" role="alert">
-          Platform console access requires the Platform Owner role.
-        </div>
-      </section>
-    );
-  }
-
-  return <Navigate to={pathForPlatformView('eol')} replace />;
+  return <Navigate to={pathForTab('exposure')} replace />;
 }
 
 function PlatformRoute() {
@@ -531,11 +511,7 @@ function PlatformRoute() {
       </section>
     );
   }
-  const selectedView = normalizePlatformRouteView(params.platformView);
-  if (selectedView === 'eol') {
-    return <EolPage />;
-  }
-  return <PlatformConsolePage selectedView={selectedView} />;
+  return <PlatformConsolePage selectedView={normalizePlatformRouteView(params.platformView)} />;
 }
 
 function routeLoadingFallback() {
@@ -710,7 +686,7 @@ function AppShell() {
   );
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'connect', 'operations', 'end-of-life', 'platform'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'operations', 'platform'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {

@@ -18,5 +18,6 @@ public record ApplicationRiskResponse(
         int totalCveCount,
         double riskScore,
         String riskLevel,
-        String lastIngestedAt
+        String lastIngestedAt,
+        int findingCount
 ) {}

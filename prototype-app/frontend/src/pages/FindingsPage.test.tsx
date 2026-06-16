@@ -310,13 +310,17 @@ describe('FindingsPage', () => {
     });
   });
 
-  it('duplicates and sets a personal queue as default from the workspace header', async () => {
+  it('duplicates and sets a personal queue as default from the findings toolbar', async () => {
     vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
     vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
     vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
     vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
     vi.spyOn(api, 'getFindingProjectionStatus').mockResolvedValue(FINDING_PROJECTION_STATUS);
-    vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+    vi.spyOn(api, 'listFindingQueues').mockResolvedValue([
+      FINDING_QUEUES[0]!,
+      FINDING_QUEUES[1]!,
+      { ...FINDING_QUEUES[2]!, isDefault: false },
+    ]);
     vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
     const duplicateQueueSpy = vi.spyOn(api, 'duplicateFindingQueue').mockResolvedValue({
