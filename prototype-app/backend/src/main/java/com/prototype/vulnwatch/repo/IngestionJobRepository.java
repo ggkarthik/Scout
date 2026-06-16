@@ -40,6 +40,8 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
     @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status IN :statuses")
     long countByStatusIn(@Param("statuses") Collection<String> statuses);
 
+    List<IngestionJob> findByStatus(String status);
+
     @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.requestedAt >= :since")
     long countAcceptedSince(@Param("since") Instant since);
 

@@ -700,6 +700,7 @@ function DemoRequestsPanel() {
               <tr>
                 <th>Requester</th>
                 <th>Company</th>
+                <th>Provisioned Plan</th>
                 <th>Use Case</th>
                 <th>Status</th>
                 <th>Invite</th>
@@ -715,6 +716,7 @@ function DemoRequestsPanel() {
                     <div className="muted-small">{request.email}</div>
                   </td>
                   <td>{request.company}</td>
+                  <td>{request.provisionedPlanCode ?? 'ENTERPRISE'}</td>
                   <td>{request.useCase ?? '-'}</td>
                   <td>{request.status}</td>
                   <td>

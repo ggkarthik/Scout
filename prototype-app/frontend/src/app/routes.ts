@@ -8,6 +8,7 @@ export type AppTab =
   | 'findings'
   | 'operations'
   | 'vuln-repo'
+  | 'campaigns'
   | 'inventory'
   | 'end-of-life'
   | 'connect'
@@ -19,7 +20,7 @@ export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests';
+export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests' | 'eol';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -75,7 +76,7 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests']);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests', 'eol']);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {
@@ -159,10 +160,12 @@ export function pathForTab(tab: AppTab): string {
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
     case 'vuln-repo':
       return '/vuln-repo';
+    case 'campaigns':
+      return '/vuln-repo/campaigns';
     case 'inventory':
       return pathForInventoryView(INVENTORY_DEFAULT_VIEW);
     case 'end-of-life':
-      return '/end-of-life';
+      return pathForPlatformView('eol');
     case 'connect':
       return `/connect/${CONNECT_DEFAULT_VIEW}`;
     case 'admin':
@@ -248,7 +251,7 @@ export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: s
     return '/vuln-repo/campaigns';
   }
   if (view === 'end-of-life') {
-    return '/end-of-life';
+    return pathForPlatformView('eol');
   }
   return cveId ? `/vuln-repo/org-cves/${encodeURIComponent(cveId)}` : '/vuln-repo/org-cves';
 }
@@ -322,11 +325,13 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/findings')) return 'findings';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
+  if (pathname.startsWith('/vuln-repo/campaigns')) return 'campaigns';
   if (pathname.startsWith('/vuln-repo')) return 'vuln-repo';
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
   if (pathname.startsWith('/connect')) return 'connect';
   if (pathname.startsWith('/admin')) return 'admin';
+  if (pathname.startsWith('/platform/eol')) return 'end-of-life';
   if (pathname.startsWith('/platform')) return 'platform';
   if (pathname.startsWith('/configurations')) return 'configurations';
   return 'dashboard';
@@ -344,6 +349,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Operational Dashboard';
     case 'vuln-repo':
       return 'Vulnerability Repository';
+    case 'campaigns':
+      return 'Campaigns';
     case 'inventory':
       return 'Inventory';
     case 'end-of-life':
@@ -407,7 +414,7 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   } else if (tab === 'configurations') {
     nextPath = '/configurations';
   } else if (tab === 'end-of-life') {
-    nextPath = pathForVulnRepoView('end-of-life');
+    nextPath = pathForPlatformView('eol');
   }
 
   ['tab', 'inventoryView', 'operationsView', 'vulnIntelView', 'vulnRepoView', 'connectView', 'cveId'].forEach((key) => params.delete(key));

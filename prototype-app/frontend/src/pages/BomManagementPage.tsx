@@ -1,5 +1,5 @@
 import React from 'react';
-import { api, type BomFetchPayload, type BomIngestionResult, type BomType } from '../api/client';
+import { api, type BomFetchPayload, type BomIngestionResult, type BomType, type IngestionJob } from '../api/client';
 import { GithubPipelineManager } from '../components/GithubPipelineManager';
 
 type AssetType = 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
@@ -198,6 +198,8 @@ export function BomManagementPage({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = React.useState(false);
+  const [queuedJobId, setQueuedJobId] = React.useState<string | null>(null);
+  const [queueMessage, setQueueMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [result, setResult] = React.useState<BomIngestionResult | null>(null);
   function applyMeta(meta: ExtractedMeta, sourceName: string) {
@@ -216,7 +218,78 @@ export function BomManagementPage({
   function resetResult() {
     setError('');
     setResult(null);
+    setQueuedJobId(null);
+    setQueueMessage('');
   }
+
+  function parseJobResult(job: IngestionJob): BomIngestionResult | null {
+    if (!job.resultJson) return null;
+    try {
+      const payload = JSON.parse(job.resultJson) as Record<string, unknown>;
+      const bomId = payload['bomId'];
+      const assetId = payload['assetId'];
+      if (typeof bomId !== 'string' || typeof assetId !== 'string') {
+        return null;
+      }
+      return {
+        bomId,
+        assetId,
+        bomType: typeof payload['bomType'] === 'string' ? payload['bomType'] : bomType,
+        format: typeof payload['format'] === 'string' ? payload['format'] : 'UNKNOWN',
+        formatVersion: typeof payload['formatVersion'] === 'string' ? payload['formatVersion'] : '',
+        specFamily: typeof payload['specFamily'] === 'string' ? payload['specFamily'] : 'UNKNOWN',
+        documentFormat: typeof payload['documentFormat'] === 'string' ? payload['documentFormat'] : 'UNKNOWN',
+        supportLevel: typeof payload['supportLevel'] === 'string' ? payload['supportLevel'] : 'UNKNOWN',
+        supported: typeof payload['supported'] === 'boolean' ? payload['supported'] : false,
+        warnings: Array.isArray(payload['warnings']) ? payload['warnings'].filter((value): value is string => typeof value === 'string') : [],
+        componentCount: typeof payload['componentsIngested'] === 'number'
+          ? payload['componentsIngested']
+          : (typeof payload['componentCount'] === 'number' ? payload['componentCount'] : 0),
+        findingsGenerated: typeof payload['findingsGenerated'] === 'number' ? payload['findingsGenerated'] : 0,
+        status: typeof payload['status'] === 'string' ? payload['status'] : job.status,
+        action: typeof payload['action'] === 'string' ? payload['action'] : 'CREATED',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  React.useEffect(() => {
+    if (!queuedJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await api.getIngestionJob(queuedJobId);
+        if (cancelled) return;
+        if (job.status === 'SUCCEEDED') {
+          const parsed = parseJobResult(job);
+          if (parsed) {
+            setResult(parsed);
+            setQueueMessage('Queued BOM fetch completed successfully.');
+            setQueuedJobId(null);
+            return;
+          }
+          setError('Queued BOM fetch completed, but the result payload could not be read.');
+          setQueuedJobId(null);
+          return;
+        }
+        if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+          setError(job.failureMessage || 'Queued BOM fetch failed.');
+          setQueuedJobId(null);
+          return;
+        }
+        window.setTimeout(poll, 1500);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to refresh ingestion job status.');
+        setQueuedJobId(null);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [queuedJobId, bomType]);
 
   // ── File selected: parse + auto-fill ──
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -293,7 +366,11 @@ export function BomManagementPage({
           supplier: supplier.trim() || undefined,
           authorizationHeader: showAuthHeader && authorizationHeader.trim() ? authorizationHeader.trim() : undefined,
         };
-        setResult(await api.bomFetch(payload));
+        const accepted = await api.bomFetch(payload);
+        setQueuedJobId(accepted.jobId);
+        setQueueMessage(accepted.existingJob
+          ? `Using existing ingestion job ${accepted.jobId}.`
+          : `Queued ingestion job ${accepted.jobId}.`);
       } else {
         const formData = new FormData();
         formData.append('file', file!);
@@ -507,10 +584,17 @@ export function BomManagementPage({
               disabled={loading || !canIngest}
               onClick={() => void submit()}
             >
-              {loading ? 'Ingesting…' : 'Ingest'}
+              {loading ? 'Submitting…' : 'Ingest'}
             </button>
             {error && <p className="form-error" style={{ margin: 0 }}>{error}</p>}
           </div>
+
+          {queueMessage && (
+            <div className="notice">
+              {queueMessage}
+              {queuedJobId && <span> Waiting for job <code>{queuedJobId}</code>…</span>}
+            </div>
+          )}
 
           {/* ── Result ── */}
           {result && (

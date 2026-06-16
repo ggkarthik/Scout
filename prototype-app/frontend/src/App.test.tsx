@@ -135,6 +135,27 @@ describe('App test persona switcher', () => {
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
   });
 
+  it('redirects platform-scope owners from the legacy EOL URL to platform EOL', async () => {
+    const auth = await import('./features/auth/api');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      platformScope: true
+    };
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(platformOwner);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/end-of-life' });
+
+    expect(await screen.findByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'End-of-Life', level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText('Platform Console')).not.toBeInTheDocument();
+  });
+
   it('shows tenant administration navigation for tenant admins', async () => {
     const auth = await import('./features/auth/api');
     vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
@@ -143,7 +164,19 @@ describe('App test persona switcher', () => {
     renderWithProviders(<App />, { route: '/' });
 
     expect(await screen.findByText('Exposure Dashboard')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Campaigns' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Administration' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End-of-Life' })).not.toBeInTheDocument();
+  });
+
+  it('redirects tenant-scoped users away from the legacy EOL URL', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/end-of-life' });
+
+    expect(await screen.findByText('Exposure Dashboard')).toBeInTheDocument();
+    expect(screen.queryByText('End-of-Life')).not.toBeInTheDocument();
   });
 });

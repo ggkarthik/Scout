@@ -16,6 +16,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class TenantService {
 
     public static final String DEFAULT_TENANT_NAME = "Default Workspace";
+    public static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
 
     private final TenantRepository tenantRepository;
     private final TenantSchemaService tenantSchemaService;
@@ -28,6 +29,10 @@ public class TenantService {
     @Transactional
     public Tenant getDefaultTenant() {
         return tenantRepository.findByNameIgnoreCase(DEFAULT_TENANT_NAME)
+                .or(() -> tenantRepository.findBySchemaName(DEFAULT_TENANT_SCHEMA))
+                .or(() -> tenantRepository.findAllByOrderByCreatedAtAsc().stream()
+                        .filter(this::isUsableDefaultTenantCandidate)
+                        .findFirst())
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Default workspace not found"));
     }
 
@@ -142,5 +147,11 @@ public class TenantService {
             return TenantEntitlementService.PLAN_PRO;
         }
         return planCode.trim().toUpperCase();
+    }
+
+    private boolean isUsableDefaultTenantCandidate(Tenant tenant) {
+        return tenant.getDeletedAt() == null
+                && tenant.getPurgedAt() == null
+                && "ACTIVE".equalsIgnoreCase(tenant.getStatus());
     }
 }

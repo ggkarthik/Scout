@@ -24,6 +24,7 @@ import com.prototype.vulnwatch.domain.SbomFormat;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.VulnerabilityTarget;
 import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
+import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.BomInspectionResponse;
 import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
@@ -42,6 +43,7 @@ import com.prototype.vulnwatch.service.sbomingestion.SbomEndpointFetchService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomIngestionLockService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomIngestionSourceMetadata;
 import com.prototype.vulnwatch.service.sbomingestion.SbomContentIngestionService;
+import com.prototype.vulnwatch.service.sbomingestion.SbomUploadSupportService;
 import com.prototype.vulnwatch.util.IdentityUtil;
 import com.prototype.vulnwatch.util.PurlUtil;
 import java.io.IOException;
@@ -58,6 +60,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -69,10 +72,12 @@ import org.w3c.dom.NodeList;
 public class BomIngestionOrchestrator {
 
     private static final int MAX_COMPONENTS = 100_000;
+    public static final long MAX_BOM_BYTES = 50L * 1024 * 1024;
 
     private final SbomEndpointFetchService sbomEndpointFetchService;
     private final SbomContentIngestionService sbomContentIngestionService;
     private final SbomIngestionLockService sbomIngestionLockService;
+    private final SbomUploadSupportService sbomUploadSupportService;
     private final SbomParserService sbomParserService;
     private final BomComponentCategorizationService categorizationService;
     private final BomIngestionRecordRepository bomRecordRepository;
@@ -90,6 +95,7 @@ public class BomIngestionOrchestrator {
             SbomEndpointFetchService sbomEndpointFetchService,
             SbomContentIngestionService sbomContentIngestionService,
             SbomIngestionLockService sbomIngestionLockService,
+            SbomUploadSupportService sbomUploadSupportService,
             SbomParserService sbomParserService,
             BomComponentCategorizationService categorizationService,
             BomIngestionRecordRepository bomRecordRepository,
@@ -106,6 +112,7 @@ public class BomIngestionOrchestrator {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
         this.sbomIngestionLockService = sbomIngestionLockService;
+        this.sbomUploadSupportService = sbomUploadSupportService;
         this.sbomParserService = sbomParserService;
         this.categorizationService = categorizationService;
         this.bomRecordRepository = bomRecordRepository;
@@ -140,7 +147,8 @@ public class BomIngestionOrchestrator {
                         "URL",
                         fetchResult.content(),
                         legacyRequest,
-                        fetchResult.metadata()
+                        fetchResult.metadata(),
+                        null
                 )
         );
     }
@@ -164,7 +172,83 @@ public class BomIngestionOrchestrator {
                 (long) content.length, null
         );
         return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
-                ingestBytes(tenant, bomType, supplier, null, "UPLOAD", content, legacyRequest, metadata)
+                ingestBytes(tenant, bomType, supplier, null, "UPLOAD", content, legacyRequest, metadata, null)
+        );
+    }
+
+    @Transactional
+    public BomIngestionResultResponse ingestFetchedContent(
+            Tenant tenant,
+            BomType bomType,
+            com.prototype.vulnwatch.domain.AssetType assetType,
+            String assetName,
+            String assetIdentifier,
+            String supplier,
+            String sourceUrl,
+            String sourceMethod,
+            byte[] content,
+            String originalFilename,
+            SbomIngestionSourceMetadata metadata,
+            Consumer<Asset> assetCustomizer
+    ) throws IOException {
+        SbomEndpointIngestionRequest legacyRequest = new SbomEndpointIngestionRequest(
+                assetType,
+                assetName,
+                assetIdentifier,
+                sourceUrl == null ? originalFilename : sourceUrl,
+                originalFilename,
+                null
+        );
+        return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
+                ingestBytes(tenant, bomType, supplier, sourceUrl, sourceMethod, content, legacyRequest, metadata, assetCustomizer)
+        );
+    }
+
+    @Transactional
+    public BomIngestionResultResponse ingestGithubRepository(
+            Tenant tenant,
+            GithubSbomIngestionRequest request,
+            byte[] content,
+            SbomIngestionSourceMetadata metadata
+    ) throws IOException {
+        return ingestFetchedContent(
+                tenant,
+                BomType.SBOM,
+                request.assetType() == null ? com.prototype.vulnwatch.domain.AssetType.APPLICATION : request.assetType(),
+                request.assetName(),
+                request.assetIdentifier(),
+                null,
+                metadata.sourceEndpoint(),
+                "GITHUB_REPOSITORY",
+                content,
+                "github-generated-sbom.json",
+                metadata,
+                null
+        );
+    }
+
+    @Transactional
+    public BomIngestionResultResponse ingestGithubContainerImage(
+            Tenant tenant,
+            String assetName,
+            String assetIdentifier,
+            byte[] content,
+            SbomIngestionSourceMetadata metadata,
+            Consumer<Asset> assetCustomizer
+    ) throws IOException {
+        return ingestFetchedContent(
+                tenant,
+                BomType.SBOM,
+                com.prototype.vulnwatch.domain.AssetType.CONTAINER_IMAGE,
+                assetName,
+                assetIdentifier,
+                null,
+                metadata.sourceEndpoint(),
+                "GITHUB_GHCR",
+                content,
+                "github-attested-sbom.json",
+                metadata,
+                assetCustomizer
         );
     }
 
@@ -176,19 +260,28 @@ public class BomIngestionOrchestrator {
             String sourceMethod,
             byte[] content,
             SbomEndpointIngestionRequest legacyRequest,
-            SbomIngestionSourceMetadata metadata
+            SbomIngestionSourceMetadata metadata,
+            Consumer<Asset> assetCustomizer
     ) throws IOException {
-        if (content.length > MAX_COMPONENTS * 1024L) {
+        if (content.length > MAX_BOM_BYTES) {
             throw new IOException("BOM payload is too large (max 50 MB)");
         }
 
+        Asset resolvedAsset = sbomUploadSupportService.resolveAsset(
+                tenant,
+                legacyRequest.assetType(),
+                legacyRequest.assetName(),
+                legacyRequest.assetIdentifier()
+        );
+        if (assetCustomizer != null) {
+            assetCustomizer.accept(resolvedAsset);
+            sbomUploadSupportService.saveAsset(resolvedAsset);
+        }
+
         boolean isXml = isXmlContent(content);
-        SbomFormat format;
-        try {
-            format = sbomParserService.detectFormat(content);
-        } catch (IOException e) {
-            // XML or unrecognised format — fall back without propagating
-            format = isXml ? SbomFormat.CYCLONEDX : SbomFormat.UNKNOWN;
+        SbomFormat format = sbomParserService.detectFormat(content);
+        if (format == SbomFormat.UNKNOWN) {
+            throw new IOException("Unsupported or unrecognized BOM format");
         }
         String serialNumber;
         String formatVersion;
@@ -204,15 +297,17 @@ public class BomIngestionOrchestrator {
             formatVersion = extractFormatVersion(root, format);
         }
 
-        // Deduplication check
         String supplierKey = supplier == null ? null : supplier.trim().toLowerCase(Locale.ROOT);
-        Optional<BomIngestionRecord> existingOpt = supplierKey == null || supplierKey.isBlank()
-                ? bomRecordRepository.findActiveDuplicateWithoutSupplier(tenant.getId(), bomType, null)
-                : bomRecordRepository.findActiveDuplicateWithSupplier(tenant.getId(), bomType, null, supplierKey);
+        String sourceIdentity = normalizeSourceIdentity(metadata);
+        Optional<BomIngestionRecord> existingOpt = resolvedAsset.getId() != null
+                ? bomRecordRepository.findActiveForAsset(tenant.getId(), bomType, resolvedAsset.getId(), supplierKey)
+                : bomRecordRepository.findActiveWithoutAsset(tenant.getId(), bomType, supplierKey, sourceIdentity);
+        String contentChecksum = sha256(content);
 
         if (existingOpt.isPresent()) {
             BomIngestionRecord existing = existingOpt.get();
-            if (serialNumber != null && serialNumber.equals(existing.getSerialNumber())) {
+            if ((serialNumber != null && serialNumber.equals(existing.getSerialNumber()))
+                    || (contentChecksum.equals(existing.getChecksumSha256()) && contentChecksum != null && !contentChecksum.isBlank())) {
                 throw new IOException("This BOM serial number has already been ingested");
             }
         }
@@ -228,7 +323,7 @@ public class BomIngestionOrchestrator {
                 content,
                 originalFilename,
                 metadata,
-                null
+                assetCustomizer
         );
 
         UUID previousBomId = null;
@@ -263,7 +358,7 @@ public class BomIngestionOrchestrator {
         record.setDocumentName(metadata.sourceReference() != null ? metadata.sourceReference() : originalFilenameFor(sourceMethod));
         record.setContentType(metadata.contentType());
         record.setContentLengthBytes(metadata.contentLengthBytes());
-        record.setChecksumSha256(sha256(content));
+        record.setChecksumSha256(contentChecksum);
         record.setPreviousBomId(previousBomId);
         record.setStatus(BomStatus.ACTIVE);
         record.setIngestedAt(Instant.now());
@@ -280,6 +375,11 @@ public class BomIngestionOrchestrator {
         List<BomComponent> components = isXml
                 ? extractAndCategorizeXmlComponents(content, record, tenant, bomType, supplier)
                 : extractAndCategorizeComponents(root, record, tenant, bomType, supplier);
+        if (components.isEmpty()) {
+            record.setStatus(BomStatus.FAILED);
+            bomRecordRepository.save(record);
+            throw new IOException("No BOM components could be extracted from the submitted document");
+        }
         persistEvidenceAndCorrelations(record, tenant, components);
         record.setComponentCount(components.size());
         bomRecordRepository.save(record);
@@ -307,6 +407,14 @@ public class BomIngestionOrchestrator {
                 record.getStatus().name(),
                 action
         );
+    }
+
+    private String normalizeSourceIdentity(SbomIngestionSourceMetadata metadata) {
+        if (metadata == null || metadata.sourceReference() == null) {
+            return null;
+        }
+        String normalized = metadata.sourceReference().trim();
+        return normalized.isBlank() ? null : normalized;
     }
 
     private BomSourceType resolveSourceType(SbomIngestionSourceMetadata metadata) {
@@ -416,7 +524,7 @@ public class BomIngestionOrchestrator {
 
     private List<BomComponent> extractAndCategorizeXmlComponents(
             byte[] content, BomIngestionRecord record, Tenant tenant, BomType bomType, String supplierOverride
-    ) {
+    ) throws IOException {
         List<BomComponent> result = new ArrayList<>();
         try {
             Document doc = sbomParserService.buildXmlDocument(content);
@@ -487,7 +595,7 @@ public class BomIngestionOrchestrator {
                 result.add(bomComp);
             }
         } catch (Exception e) {
-            // Return whatever was collected before the error
+            throw new IOException("Failed to parse XML BOM components", e);
         }
         bomComponentRepository.saveAll(result);
         return result;
@@ -1083,7 +1191,7 @@ public class BomIngestionOrchestrator {
      * Returns [serialNumber, specVersion] from a CycloneDX XML {@code <bom>} root element.
      * Both values may be null if not present.
      */
-    private String[] extractXmlBomAttributes(byte[] content) {
+    private String[] extractXmlBomAttributes(byte[] content) throws IOException {
         try {
             Document doc = sbomParserService.buildXmlDocument(content);
             Element bom = doc.getDocumentElement();
@@ -1098,7 +1206,7 @@ public class BomIngestionOrchestrator {
             }
             return new String[]{serial, spec};
         } catch (Exception e) {
-            return new String[]{null, null};
+            throw new IOException("Failed to inspect XML BOM metadata", e);
         }
     }
 

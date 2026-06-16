@@ -8,12 +8,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.IngestionJob;
-import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
-import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
-import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import java.io.IOException;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -25,49 +24,60 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class IngestionJobExecutionServiceTest {
 
     @Mock
-    private SbomIngestionService sbomIngestionService;
+    private BomIngestionOrchestrator bomIngestionOrchestrator;
     @Mock
     private GithubSbomSourceService githubSbomSourceService;
     @Mock
     private IngestionJobService ingestionJobService;
 
     @Test
-    void executeEndpointJobRehydratesPayloadAndReturnsSbomUploadResult() throws Exception {
+    void executeEndpointJobRehydratesPayloadAndReturnsCanonicalBomResult() throws Exception {
         Tenant tenant = tenant();
         IngestionJob job = job(IngestionJobService.JOB_TYPE_REMOTE_ENDPOINT);
         IngestionJobPayloads.EndpointIngestionPayload payload = new IngestionJobPayloads.EndpointIngestionPayload(
+                BomType.SBOM,
                 AssetType.CONTAINER_IMAGE,
                 "Payments API",
                 "asset-1",
                 "https://example.com/sbom.json",
                 "nightly",
+                null,
                 "enc-token"
         );
         UUID assetId = UUID.randomUUID();
-        UUID sbomUploadId = UUID.randomUUID();
-        SbomUpload sbomUpload = new SbomUpload();
-        setId(sbomUpload, sbomUploadId);
+        UUID bomId = UUID.randomUUID();
         when(ingestionJobService.readPayload(job, IngestionJobPayloads.EndpointIngestionPayload.class)).thenReturn(payload);
         when(ingestionJobService.decrypt("enc-token")).thenReturn("Bearer token");
-        when(sbomIngestionService.executeEndpointJob(any(Tenant.class), any(SbomEndpointIngestionRequest.class)))
-                .thenReturn(new SbomIngestionResponse(assetId, sbomUploadId, 42, 0));
-        when(sbomIngestionService.getSbomUpload(tenant, sbomUploadId)).thenReturn(sbomUpload);
+        when(bomIngestionOrchestrator.ingestFromUrl(any(Tenant.class), any()))
+                .thenReturn(new BomIngestionResultResponse(
+                        bomId,
+                        assetId,
+                        "SBOM",
+                        "CYCLONEDX",
+                        "1.5",
+                        "CYCLONEDX",
+                        "JSON",
+                        "PREVIOUS",
+                        true,
+                        java.util.List.of(),
+                        42,
+                        0,
+                        "ACTIVE",
+                        "CREATED"
+                ));
         when(ingestionJobService.toJson(any())).thenAnswer(invocation -> invocation.getArgument(0).toString());
 
         IngestionJobExecutionService service = new IngestionJobExecutionService(
-                sbomIngestionService,
+                bomIngestionOrchestrator,
                 githubSbomSourceService,
                 ingestionJobService
         );
 
         IngestionJobExecutionService.ExecutionOutcome outcome = service.execute(tenant, job);
 
-        assertEquals(sbomUpload, outcome.sbomUpload());
+        assertEquals(null, outcome.sbomUpload());
         assertNotNull(outcome.resultJson());
-        verify(sbomIngestionService).executeEndpointJob(
-                any(Tenant.class),
-                any(SbomEndpointIngestionRequest.class)
-        );
+        verify(bomIngestionOrchestrator).ingestFromUrl(any(Tenant.class), any());
     }
 
     @Test
@@ -90,7 +100,7 @@ class IngestionJobExecutionServiceTest {
         when(ingestionJobService.toJson(any())).thenAnswer(invocation -> invocation.getArgument(0).toString());
 
         IngestionJobExecutionService service = new IngestionJobExecutionService(
-                sbomIngestionService,
+                bomIngestionOrchestrator,
                 githubSbomSourceService,
                 ingestionJobService
         );
@@ -111,7 +121,7 @@ class IngestionJobExecutionServiceTest {
         Tenant tenant = tenant();
         IngestionJob job = job("LEGACY_SYNC");
         IngestionJobExecutionService service = new IngestionJobExecutionService(
-                sbomIngestionService,
+                bomIngestionOrchestrator,
                 githubSbomSourceService,
                 ingestionJobService
         );
@@ -134,11 +144,5 @@ class IngestionJobExecutionServiceTest {
         job.setSourceType("github");
         job.setAssetIdentifier("asset-1");
         return job;
-    }
-
-    private void setId(SbomUpload sbomUpload, UUID id) throws Exception {
-        java.lang.reflect.Field idField = SbomUpload.class.getDeclaredField("id");
-        idField.setAccessible(true);
-        idField.set(sbomUpload, id);
     }
 }

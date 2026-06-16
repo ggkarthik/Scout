@@ -174,14 +174,14 @@ const EMPTY_TEST_PERSONA_CONTROLS: TestPersonaControls = {
 };
 const TestPersonaControlsState = React.createContext<TestPersonaControls>(EMPTY_TEST_PERSONA_CONTROLS);
 const BOTTOM_NAV_TABS: AppTab[] = [];
-const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countKey?: 'hosts' | 'software' | 'containerImages' | 'applications' }> = [
+const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countKey?: 'hosts' | 'software' | 'containerImages' | 'applications' | 'bomInventory' }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'hosts', label: 'Hosts', countKey: 'hosts' },
   { key: 'software-identities', label: 'Software Entities', countKey: 'software' },
   { key: 'container-images', label: 'Container Images', countKey: 'containerImages' },
   { key: 'sbom', label: 'Applications', countKey: 'applications' },
-  { key: 'bom-components', label: 'BOM Components' },
-  { key: 'bom-inventory', label: 'BOM Inventory' }
+  { key: 'bom-components', label: 'BOM Components', countKey: 'bomInventory' },
+  { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' }
 ];
 const OPERATIONS_NAV_ITEMS = [
   { key: 'pipeline', label: 'Pipeline' },
@@ -190,7 +190,6 @@ const OPERATIONS_NAV_ITEMS = [
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Intelligence' },
-  { key: 'campaigns', label: 'Campaigns' },
 ];
 
 function getInitialTheme(): Theme {
@@ -228,6 +227,16 @@ function TabIcon({ tab }: { tab: AppTab }) {
         <path d="M6 4.5h9.8L19.5 8v11.5H6z" />
         <path d="M15.8 4.5V8h3.7" />
         <path d="M9 12h7M9 15.5h7" />
+      </svg>
+    );
+  }
+  if (tab === 'campaigns') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 4.5h9l3 3v12H6z" />
+        <path d="M15 4.5v3h3" />
+        <path d="M9 11.5h6M9 15h4" />
+        <circle cx="16.5" cy="15.5" r="2.5" />
       </svg>
     );
   }
@@ -489,11 +498,25 @@ function EndOfLifeRoute() {
   const isPlatformScope = actor?.platformScope ?? false;
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
 
-  if (!platformScopeOwner && !canManageTenant(actor)) {
-    return <Navigate to={pathForInventoryViewWithSearch('software-identities', { lifecycle: 'eol' })} replace />;
+  if (platformScopeOwner) {
+    return <Navigate to={pathForPlatformView('eol')} replace />;
   }
 
-  return <EolPage />;
+  if (actor && !isPlatformScope) {
+    return <Navigate to="/exposure" replace />;
+  }
+
+  if (!canAccessPlatformConsole(actor)) {
+    return (
+      <section className="panel">
+        <div className="notice error" role="alert">
+          Platform console access requires the Platform Owner role.
+        </div>
+      </section>
+    );
+  }
+
+  return <Navigate to={pathForPlatformView('eol')} replace />;
 }
 
 function PlatformRoute() {
@@ -508,7 +531,11 @@ function PlatformRoute() {
       </section>
     );
   }
-  return <PlatformConsolePage selectedView={normalizePlatformRouteView(params.platformView)} />;
+  const selectedView = normalizePlatformRouteView(params.platformView);
+  if (selectedView === 'eol') {
+    return <EolPage />;
+  }
+  return <PlatformConsolePage selectedView={selectedView} />;
 }
 
 function routeLoadingFallback() {
@@ -677,13 +704,17 @@ function AppShell() {
       : 'dashboard';
   const isPlatformScope = actor?.platformScope ?? false;
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
+  const visibleVulnRepoNavItems = React.useMemo(
+    () => VULN_REPO_NAV_ITEMS,
+    []
+  );
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'end-of-life', 'connect', 'operations', 'platform'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'operations', 'end-of-life', 'platform'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
-      tabs.push('findings', 'vuln-repo', 'inventory');
+      tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory');
     }
     if (canAccessPlatformConsole(actor)) {
       tabs.push('operations');
@@ -709,15 +740,21 @@ function AppShell() {
     queryFn: () => api.listSoftwareIdentities({ page: 0, size: 1 }),
     enabled: activeTab === 'inventory' && !platformScopeOwner
   });
+  const inventoryBomQuery = useQuery({
+    queryKey: ['inventory-nav-bom-inventory'],
+    queryFn: () => api.listBomInventory(0, 1),
+    enabled: activeTab === 'inventory' && !platformScopeOwner
+  });
   const inventoryPillCounts = React.useMemo(() => {
     const assets = inventoryAssetsQuery.data ?? [];
     return {
       hosts: assets.filter((asset) => asset.type.toUpperCase() === 'HOST').length,
       applications: assets.filter((asset) => asset.type.toUpperCase() === 'APPLICATION').length,
       containerImages: assets.filter((asset) => asset.type.toUpperCase() === 'CONTAINER_IMAGE').length,
-      software: inventorySoftwareQuery.data?.totalElements ?? 0
+      software: inventorySoftwareQuery.data?.totalElements ?? 0,
+      bomInventory: inventoryBomQuery.data?.length ?? 0
     };
-  }, [inventoryAssetsQuery.data, inventorySoftwareQuery.data?.totalElements]);
+  }, [inventoryAssetsQuery.data, inventoryBomQuery.data?.length, inventorySoftwareQuery.data?.totalElements]);
   const visibleInventoryPills = React.useMemo(
     () => INVENTORY_PILL_ORDER.filter((item) => !item.countKey || inventoryPillCounts[item.countKey] > 0),
     [inventoryPillCounts]
@@ -815,8 +852,11 @@ function AppShell() {
     return titleForTab(activeTab);
   }, [activeTab]);
 
-  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'inventory', 'end-of-life', 'admin', 'configurations']);
+  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'inventory', 'admin', 'configurations']);
   if (actor && isPlatformScope && tenantScopedTabs.has(activeTab)) {
+    return <Navigate to={pathForPlatformView('tenants')} replace state={{ platformMessage: 'Select a tenant to continue.' }} />;
+  }
+  if (actor && isPlatformScope && location.pathname.startsWith('/vuln-repo/campaigns')) {
     return <Navigate to={pathForPlatformView('tenants')} replace state={{ platformMessage: 'Select a tenant to continue.' }} />;
   }
   if (
@@ -1002,7 +1042,7 @@ function AppShell() {
 
           {activeTab === 'vuln-repo' && (
             <div className="section-tab-row">
-              {VULN_REPO_NAV_ITEMS.map((item) => (
+              {visibleVulnRepoNavItems.map((item) => (
                 <button
                   key={item.key}
                   type="button"
