@@ -1,5 +1,4 @@
 import type { TopFindingMetric } from '../dashboard/types';
-import type { FindingProjectionStatus } from '../findings/types';
 
 export type OperationalEndpointMetric = {
   key: string;
@@ -78,11 +77,6 @@ export type OperationalApiReadPath = {
   canonicalCveCount: number;
   summaryCveCount: number;
   summaryCoveragePercent: number;
-  noiseProjectionReady?: boolean;
-  noiseProjectionLastComputedAt?: string;
-  noiseProjectionAgeSeconds?: number;
-  noiseProjectionRefreshP95Ms?: number;
-  noiseProjectionRefreshFailures?: number;
   filterCacheActive: boolean;
   filterCacheExpiresAt?: string;
   filterCacheHits: number;
@@ -90,8 +84,6 @@ export type OperationalApiReadPath = {
   filterCacheHitRatioPercent: number;
   endpointMetrics: OperationalEndpointMetric[];
 };
-
-export type FindingsProjectionHealth = FindingProjectionStatus;
 
 export type OperationalSourceFreshness = {
   source: string;
