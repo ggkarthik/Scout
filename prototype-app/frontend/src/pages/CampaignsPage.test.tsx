@@ -175,7 +175,7 @@ describe('CampaignsPage', () => {
     vi.spyOn(api, 'listCampaigns')
       .mockResolvedValueOnce([])
       .mockResolvedValue([createdSummary]);
-    vi.spyOn(api, 'getCampaign').mockResolvedValue(createdDetail);
+    vi.spyOn(api, 'getCampaign').mockResolvedValueOnce(createdDetail);
     vi.spyOn(api, 'listAssignmentGroups').mockResolvedValue(['Platform Ops', 'Server Team']);
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([{
       id: 'member-1',
