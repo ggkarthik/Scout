@@ -268,7 +268,9 @@ describe('CampaignsPage', () => {
       }));
     });
 
-    expect(api.getCampaign).toHaveBeenCalledWith('campaign-2');
+    await waitFor(() => {
+      expect(api.getCampaign).toHaveBeenCalledWith('campaign-2');
+    });
     await screen.findByRole('heading', { name: 'Resolver runway' });
   });
 
