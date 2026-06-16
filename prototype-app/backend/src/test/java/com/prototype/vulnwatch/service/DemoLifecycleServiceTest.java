@@ -94,6 +94,7 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertNotNull(response.tenantId());
+        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
         assertEquals("SENT", response.latestInvite().status());
         assertNotNull(response.latestInvite().lastSentAt());
         assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, tenant.getPlanCode());
@@ -135,6 +136,7 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertEquals("Example Co (2)", response.latestInvite().tenantName());
+        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
     }
 
     @Test
@@ -167,6 +169,7 @@ class DemoLifecycleServiceTest {
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
         assertEquals("ERROR", response.status());
+        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
         assertEquals("ERROR", response.latestInvite().status());
         assertNull(response.latestInvite().lastSentAt());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));

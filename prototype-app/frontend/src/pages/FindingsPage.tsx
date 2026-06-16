@@ -16,13 +16,11 @@ import {
   useFindingBacklogHealthQuery,
   useFindingDistributionsQuery,
   useFindingFiltersQuery,
-  useFindingProjectionStatusQuery,
   useFindingQueuesQuery,
   useFindingsQuery,
   useFindingSummaryQuery
 } from '../features/findings/queries';
 import { useFindingsCursorPaging, useFindingsQueryContext } from '../features/findings/hooks';
-import { FindingsWorkspaceHeader } from '../features/findings/components/FindingsWorkspaceHeader';
 import { FindingsSummaryWidgets } from '../features/findings/components/FindingsSummaryWidgets';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { useActor } from '../features/auth/context';
@@ -272,7 +270,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const {
     activeQueueKey,
     setActiveQueueKey,
-    personalQueues,
     defaultQueue,
     activeQueryContext,
   } = useFindingsQueryContext({
@@ -295,7 +292,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const summaryQuery = useFindingSummaryQuery(effectiveServerFilterModel);
   const distributionsQuery = useFindingDistributionsQuery(effectiveServerFilterModel);
   const backlogHealthQuery = useFindingBacklogHealthQuery(effectiveServerFilterModel);
-  const projectionStatusQuery = useFindingProjectionStatusQuery();
 
   const allRows  = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data]);
   const totalItems = findingsQuery.data?.totalItems ?? 0;
@@ -960,26 +956,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   return (
     <div className="fpl-root">
-      <FindingsWorkspaceHeader
-        personalQueues={personalQueues}
-        activeQueueKey={activeQueryContext.queueKey}
-        projectionStatus={projectionStatusQuery.data}
-        queueActionError={queueActionError}
-        projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
-        workspaceError={
-          findingsQuery.error instanceof Error ? findingsQuery.error
-            : summaryQuery.error instanceof Error ? summaryQuery.error
-            : distributionsQuery.error instanceof Error ? distributionsQuery.error
-            : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
-            : null
-        }
-        onOpenEditQueue={openEditQueueDialog}
-        onDuplicateQueue={(queue) => void duplicateQueue(queue)}
-        onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
-        onDeleteQueue={(queue) => void deleteQueue(queue)}
-        workspaceTitle={activeQueryContext.title}
-      />
-
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div className="fpl-toolbar">
         <div className="fpl-toolbar-left">

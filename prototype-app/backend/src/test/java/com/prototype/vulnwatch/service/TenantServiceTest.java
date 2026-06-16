@@ -3,12 +3,15 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class TenantServiceTest {
@@ -90,5 +94,55 @@ class TenantServiceTest {
         );
 
         assertEquals("sbomRateLimitWindowSeconds must be >= 0", ex.getMessage());
+    }
+
+    @Test
+    void getDefaultTenantFallsBackToSchemaName() {
+        Tenant tenant = new Tenant();
+        tenant.setName("Platform Workspace");
+        tenant.setSchemaName(TenantService.DEFAULT_TENANT_SCHEMA);
+        when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)).thenReturn(Optional.empty());
+        when(tenantRepository.findBySchemaName(TenantService.DEFAULT_TENANT_SCHEMA)).thenReturn(Optional.of(tenant));
+
+        Tenant resolved = tenantService.getDefaultTenant();
+
+        assertSame(tenant, resolved);
+    }
+
+    @Test
+    void getDefaultTenantFallsBackToFirstActiveTenant() {
+        Tenant suspended = new Tenant();
+        suspended.setName("Suspended");
+        suspended.setStatus("SUSPENDED");
+        suspended.setDeletedAt(null);
+        Tenant active = new Tenant();
+        active.setName("Customer A");
+        active.setStatus("ACTIVE");
+        when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)).thenReturn(Optional.empty());
+        when(tenantRepository.findBySchemaName(TenantService.DEFAULT_TENANT_SCHEMA)).thenReturn(Optional.empty());
+        when(tenantRepository.findAllByOrderByCreatedAtAsc()).thenReturn(List.of(suspended, active));
+
+        Tenant resolved = tenantService.getDefaultTenant();
+
+        assertSame(active, resolved);
+    }
+
+    @Test
+    void getDefaultTenantIgnoresDeletedOrPurgedTenantsWhenFallingBack() {
+        Tenant deleted = new Tenant();
+        deleted.setName("Deleted");
+        deleted.setStatus("ACTIVE");
+        deleted.setDeletedAt(Instant.now());
+        Tenant purged = new Tenant();
+        purged.setName("Purged");
+        purged.setStatus("ACTIVE");
+        purged.setPurgedAt(Instant.now());
+        when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)).thenReturn(Optional.empty());
+        when(tenantRepository.findBySchemaName(TenantService.DEFAULT_TENANT_SCHEMA)).thenReturn(Optional.empty());
+        when(tenantRepository.findAllByOrderByCreatedAtAsc()).thenReturn(List.of(deleted, purged));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, tenantService::getDefaultTenant);
+
+        assertEquals("404 NOT_FOUND \"Default workspace not found\"", ex.getMessage());
     }
 }
