@@ -146,4 +146,24 @@ describe('App test persona switcher', () => {
     expect(screen.getByRole('button', { name: 'Administration' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End-of-Life' })).not.toBeInTheDocument();
   });
+
+  it('redirects legacy end-of-life route into the platform console for platform owners', async () => {
+    const auth = await import('./features/auth/api');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      platformScope: true
+    };
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(platformOwner);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/end-of-life' });
+
+    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'EOL' })).toBeInTheDocument();
+  });
 });

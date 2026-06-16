@@ -304,6 +304,7 @@ function AllApplicationsListView({
                   <th>Criticality</th>
                   <th>Components</th>
                   <th>Vulnerable</th>
+                  <th>Findings</th>
                   <th>EOL</th>
                   <th>CVEs</th>
                   <th>Risk score</th>
@@ -330,6 +331,11 @@ function AllApplicationsListView({
                       {app.vulnerableComponents > 0
                         ? <span style={{ fontWeight: 700, color: 'var(--high)' }}>{app.vulnerableComponents}</span>
                         : <span className="panel-caption">0</span>}
+                    </td>
+                    <td>
+                      {app.findingCount > 0
+                        ? <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{app.findingCount}</span>
+                        : <span className="panel-caption">—</span>}
                     </td>
                     <td>
                       {app.eolComponents > 0

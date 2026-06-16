@@ -3,37 +3,25 @@ import { api } from '../../api/client';
 import { DASHBOARD_REFRESH_INTERVAL_MS, OPERATIONS_REFRESH_INTERVAL_MS } from '../../lib/polling';
 import type {
   ClusterImpactResult,
-  FindingsProjectionHealth,
   CorrelationOverridePayload,
   NormalizationOverridePayload,
   OperationalApiReadPath,
-  OperationalCorrelationEffectiveness,
-  OperationalExecutiveHealth,
   OperationalFreshnessDrift,
   OperationalIngestionEfficiency,
   OperationalMetricDefinition,
-  OperationalNoiseLifecycle,
-  OperationalNormalizationQuality,
   OperationalSectionResponse,
   SloStatus
 } from './types';
-import type { Dashboard } from '../dashboard/types';
 
 export type OperationsDashboardViewKey = 'quality' | 'pipeline' | 'platform-health';
 
 export type PipelinePayload = {
-  overview: OperationalSectionResponse<OperationalExecutiveHealth>;
   ingestion: OperationalSectionResponse<OperationalIngestionEfficiency>;
-  normalization: OperationalSectionResponse<OperationalNormalizationQuality>;
-  correlation: OperationalSectionResponse<OperationalCorrelationEffectiveness>;
-  lifecycle: OperationalSectionResponse<OperationalNoiseLifecycle>;
   freshness: OperationalSectionResponse<OperationalFreshnessDrift>;
-  dashboard: Dashboard | null;
 };
 
 export type PlatformHealthPayload = {
   readPath: OperationalSectionResponse<OperationalApiReadPath>;
-  findingsProjection: FindingsProjectionHealth;
   slo: SloStatus;
   catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
 };
@@ -43,35 +31,23 @@ async function loadOperationsView(selectedView: OperationsDashboardViewKey): Pro
     case 'quality':
       return null;
     case 'pipeline': {
-      const [overview, ingestion, normalization, correlation, lifecycle, freshness, dashboard] = await Promise.all([
-        api.getOperationalOverview(),
+      const [ingestion, freshness] = await Promise.all([
         api.getOperationalIngestionEfficiency(),
-        api.getOperationalNormalizationQuality(),
-        api.getOperationalCorrelationEffectiveness(),
-        api.getOperationalNoiseLifecycle(),
         api.getOperationalFreshnessDrift(),
-        api.getDashboard().catch(() => null)
       ]);
       return {
-        overview,
         ingestion,
-        normalization,
-        correlation,
-        lifecycle,
         freshness,
-        dashboard
       };
     }
     case 'platform-health': {
-      const [readPath, findingsProjection, slo, catalog] = await Promise.all([
+      const [readPath, slo, catalog] = await Promise.all([
         api.getOperationalApiReadPath(),
-        api.getFindingProjectionStatus(),
         api.getSloStatus(),
         api.getOperationalMetricCatalog()
       ]);
       return {
         readPath,
-        findingsProjection,
         slo,
         catalog
       };
@@ -169,24 +145,6 @@ export function useRevokeCorrelationOverrideMutation(issueId: string) {
     mutationFn: () => api.revokeCorrelationOverride(issueId),
     onSuccess: () => {
       qualityInvalidationKeys(issueId).forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
-    }
-  });
-}
-
-export function useRebuildFindingProjectionMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: api.rebuildFindingProjection,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['operations-view', 'platform-health'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-projection-status'] });
-      queryClient.invalidateQueries({ queryKey: ['findings'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-summary'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-distributions'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-backlog-health'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-queue-analytics'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-queue-analytics-trend'] });
-      queryClient.invalidateQueries({ queryKey: ['findings-portfolio-rollups'] });
     }
   });
 }
