@@ -292,15 +292,6 @@ export function CampaignsPage() {
     return counts;
   }, [campaigns]);
 
-  const kpis = React.useMemo(() => {
-    const total = campaigns.length;
-    const active = campaigns.filter((campaign) => campaign.status === 'ACTIVE').length;
-    const behind = campaigns.filter((campaign) => campaign.exceptionCount > 0).length;
-    const assets = campaigns.reduce((sum, campaign) => sum + campaign.assetCount, 0);
-    const findings = campaigns.reduce((sum, campaign) => sum + campaign.totalFindings, 0);
-    return { total, active, behind, assets, findings };
-  }, [campaigns]);
-
   function toggleSelection(list: string[], value: string): string[] {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
@@ -556,8 +547,9 @@ export function CampaignsPage() {
               {wizardStep === 0 && (
                 <div className="cw-basics-grid">
                   <div className="cw-field">
-                    <label className="cw-label">Campaign Name</label>
+                    <label className="cw-label" htmlFor="campaign-name">Campaign Name</label>
                     <input
+                      id="campaign-name"
                       className="cw-input"
                       placeholder="e.g. Log4Shell – Critical Systems Rollout"
                       value={wizardForm.name}
@@ -566,8 +558,9 @@ export function CampaignsPage() {
                     />
                   </div>
                   <div className="cw-field">
-                    <label className="cw-label">Target Due Date</label>
+                    <label className="cw-label" htmlFor="campaign-due-date">Target Due Date</label>
                     <input
+                      id="campaign-due-date"
                       className="cw-input"
                       type="date"
                       value={wizardForm.dueDate}
@@ -575,8 +568,9 @@ export function CampaignsPage() {
                     />
                   </div>
                   <div className="cw-field cw-field--full">
-                    <label className="cw-label">Summary</label>
+                    <label className="cw-label" htmlFor="campaign-summary">Summary</label>
                     <textarea
+                      id="campaign-summary"
                       className="cw-input cw-textarea"
                       placeholder="Brief description of the campaign goal, affected systems, and urgency…"
                       value={wizardForm.summary}
@@ -837,9 +831,13 @@ export function CampaignsPage() {
                   </div>
                   <div>
                     <h4>Watchlist Members</h4>
-                    <label className="campaign-watchlist-policy">
+                    <label className="campaign-watchlist-policy" htmlFor="campaign-trigger-policy">
                       <span>Trigger Policy</span>
-                      <select value={wizardForm.watchlistTriggerPolicy} onChange={(e) => setWizardForm((f) => ({ ...f, watchlistTriggerPolicy: e.target.value as WizardForm['watchlistTriggerPolicy'] }))}>
+                      <select
+                        id="campaign-trigger-policy"
+                        value={wizardForm.watchlistTriggerPolicy}
+                        onChange={(e) => setWizardForm((f) => ({ ...f, watchlistTriggerPolicy: e.target.value as WizardForm['watchlistTriggerPolicy'] }))}
+                      >
                         <option value="ALL_EVENTS">All events</option>
                         <option value="STATUS_CHANGES">Status changes only</option>
                         <option value="NOTES_ONLY">Notes only</option>
@@ -909,9 +907,10 @@ export function CampaignsPage() {
                       </p>
                     )}
                   </div>
-                  <label className="full">
+                  <label className="full" htmlFor="campaign-launch-note">
                     <span style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Launch Note <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>(optional)</span></span>
                     <textarea
+                      id="campaign-launch-note"
                       className="cw-input cw-textarea"
                       placeholder="Describe the urgency, context, or initial guidance for this campaign…"
                       value={wizardForm.launchNote}

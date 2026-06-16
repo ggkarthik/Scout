@@ -249,7 +249,7 @@ function ApplicationsTab({ d, relatedAssetIds, assetIdToComponentId, onSelectApp
   const allSelected = rows.length > 0 && rows.every(r => selectedAssetIds.has(r.assetId));
 
   const toggleAll = () => {
-    setSelectedAssetIds(prev => {
+    setSelectedAssetIds(() => {
       if (allSelected) return new Set();
       return new Set(rows.map(r => r.assetId));
     });

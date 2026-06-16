@@ -22,7 +22,7 @@ describe('routes', () => {
     expect(pathForConnectView('run-history')).toBe('/connect/run-history');
     expect(pathForOperationsView('platform-health')).toBe('/operations/platform-health');
     expect(pathForVulnRepoView('campaigns')).toBe('/vuln-repo/campaigns');
-    expect(pathForVulnRepoView('end-of-life')).toBe('/end-of-life');
+    expect(pathForVulnRepoView('end-of-life')).toBe('/platform/eol');
   });
 
   it('appends query-string filters for inventory drilldowns', () => {
@@ -65,8 +65,8 @@ describe('routes', () => {
     );
     expect(buildLegacyCompatiblePath('?tab=vulnerability-intelligence')).toBe('/vuln-repo/vulnerabilities');
     expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=campaigns')).toBe('/vuln-repo/campaigns');
-    expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=end-of-life')).toBe('/end-of-life');
-    expect(buildLegacyCompatiblePath('?tab=end-of-life')).toBe('/end-of-life');
+    expect(buildLegacyCompatiblePath('?tab=vuln-repo&vulnRepoView=end-of-life')).toBe('/platform/eol');
+    expect(buildLegacyCompatiblePath('?tab=end-of-life')).toBe('/platform/eol');
   });
 
   it('redirects legacy inventory and connect deep links while preserving non-routing params', () => {
@@ -90,5 +90,9 @@ describe('routes', () => {
 
   it('falls back to the default platform console view for removed platform connector routes', () => {
     expect(normalizePlatformRouteView('connectors')).toBe('tenants');
+  });
+
+  it('accepts the platform eol route view', () => {
+    expect(normalizePlatformRouteView('eol')).toBe('eol');
   });
 });

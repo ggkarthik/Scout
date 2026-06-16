@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForConnectView } from '../app/routes';
 import type {
   Finding,
+  FindingProjectionStatus,
   FindingBulkWorkflowRequest,
   FindingQueueDefinition,
   FindingQueueUpsertRequest,
@@ -22,7 +23,6 @@ import {
   useFindingSummaryQuery
 } from '../features/findings/queries';
 import { useFindingsCursorPaging, useFindingsQueryContext } from '../features/findings/hooks';
-import { FindingsWorkspaceHeader } from '../features/findings/components/FindingsWorkspaceHeader';
 import { FindingsSummaryWidgets } from '../features/findings/components/FindingsSummaryWidgets';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { useActor } from '../features/auth/context';
@@ -154,6 +154,14 @@ function ownershipDisplayName(row: Finding): string {
 
 function ownershipSupportGroup(row: Finding): string {
   return row.ownership?.supportGroup || '';
+}
+
+function formatProjectionStatus(status?: FindingProjectionStatus | null): string {
+  if (!status) {
+    return 'Projection status unavailable.';
+  }
+  const freshness = status.stale ? 'stale' : 'healthy';
+  return `Projection ${freshness} · ${status.findingCount.toLocaleString()} findings materialized`;
 }
 
 function groupValue(r: Finding, key: string): string {
@@ -341,6 +349,22 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   );
 
   const dueDateCounts = backlogHealthQuery.data ?? { overdue: 0, dueSoon: 0, onTrack: 0, noSla: 0 };
+  const editableActiveQueue = React.useMemo(
+    () => personalQueues.find((queue) => queue.key === activeQueryContext.queueKey) ?? null,
+    [activeQueryContext.queueKey, personalQueues]
+  );
+  const queueActionTarget = React.useMemo(
+    () => editableActiveQueue
+      ?? (defaultQueue?.editable ? defaultQueue : null)
+      ?? personalQueues.find((queue) => queue.editable) ?? null,
+    [defaultQueue, editableActiveQueue, personalQueues]
+  );
+  const workspaceError = findingsQuery.error instanceof Error ? findingsQuery.error
+    : summaryQuery.error instanceof Error ? summaryQuery.error
+    : distributionsQuery.error instanceof Error ? distributionsQuery.error
+    : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
+    : null;
+  const projectionError = projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null;
 
   // ── outside click ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -986,25 +1010,25 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   return (
     <div className="fpl-root">
-      <FindingsWorkspaceHeader
-        personalQueues={personalQueues}
-        activeQueueKey={activeQueryContext.queueKey}
-        projectionStatus={projectionStatusQuery.data}
-        queueActionError={queueActionError}
-        projectionError={projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null}
-        workspaceError={
-          findingsQuery.error instanceof Error ? findingsQuery.error
-            : summaryQuery.error instanceof Error ? summaryQuery.error
-            : distributionsQuery.error instanceof Error ? distributionsQuery.error
-            : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
-            : null
-        }
-        onOpenEditQueue={openEditQueueDialog}
-        onDuplicateQueue={(queue) => void duplicateQueue(queue)}
-        onSetDefaultQueue={(queue) => void setDefaultQueue(queue)}
-        onDeleteQueue={(queue) => void deleteQueue(queue)}
-        workspaceTitle={activeQueryContext.title}
-      />
+      {workspaceError && (
+        <div className="notice error" style={{ marginBottom: 12 }}>
+          {workspaceError.message}
+        </div>
+      )}
+      {queueActionError && (
+        <div className="notice error" style={{ marginBottom: 12 }}>
+          {queueActionError}
+        </div>
+      )}
+      {projectionError ? (
+        <div className="panel-caption" style={{ marginBottom: 12, color: 'var(--warning,#b45309)' }}>
+          Projection status unavailable: {projectionError.message}
+        </div>
+      ) : projectionStatusQuery.data ? (
+        <div className="panel-caption" style={{ marginBottom: 12 }}>
+          {formatProjectionStatus(projectionStatusQuery.data)}
+        </div>
+      ) : null}
 
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div className="fpl-toolbar">
@@ -1026,6 +1050,24 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           )}
         </div>
         <div className="fpl-toolbar-right">
+          {queueActionTarget && (
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => openEditQueueDialog(queueActionTarget)}>
+                Edit Queue
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => void duplicateQueue(queueActionTarget)}>
+                Duplicate Queue
+              </button>
+              {!queueActionTarget.isDefault && (
+                <button type="button" className="btn btn-secondary" onClick={() => void setDefaultQueue(queueActionTarget)}>
+                  Set Default
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => void deleteQueue(queueActionTarget)}>
+                Delete Queue
+              </button>
+            </>
+          )}
           <button type="button" className="btn btn-secondary" onClick={openCreateQueueDialog}>
             Save Current View
           </button>

@@ -241,7 +241,7 @@ describe('CampaignsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByText('CVE-2026-2222');
-    fireEvent.click(screen.getByRole('button', { name: /CVE-2026-2222/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /CVE-2026-2222/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByRole('button', { name: 'Platform Ops' });
@@ -250,7 +250,7 @@ describe('CampaignsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Jordan Resolver/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
-    fireEvent.change(screen.getByLabelText('Launch Note'), { target: { value: 'Start outreach immediately.' } });
+    fireEvent.change(screen.getByPlaceholderText(/Describe the urgency, context, or initial guidance for this campaign/i), { target: { value: 'Start outreach immediately.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Launch Campaign' }));
 
     await waitFor(() => {
@@ -272,7 +272,7 @@ describe('CampaignsPage', () => {
     await screen.findByRole('heading', { name: 'Resolver runway' });
   });
 
-  it('walks the campaign detail tabs, submits an exception, approves an existing one, and adds a note', async () => {
+  it('walks the campaign detail tabs, approves an existing exception, and adds a note', async () => {
     const detailWithPendingException = buildDetail({
       exceptions: [{
         id: 'exception-1',
@@ -306,29 +306,8 @@ describe('CampaignsPage', () => {
       exceptions: [{ ...detailWithPendingException.exceptions[0]!, status: 'APPROVED', decisionedBy: 'lead@example.com', decisionedAt: '2026-06-12T00:00:00Z' }],
       evidence: detailWithPendingException.evidence,
     });
-    const detailWithNewException = buildDetail({
-      ...detailWithApprovedException,
-      exceptions: [
-        ...detailWithApprovedException.exceptions,
-        {
-          id: 'exception-2',
-          findingDisplayId: 'F-100',
-          assetName: 'web-prod-01',
-          packageName: 'openssl',
-          title: 'Temporary waiver',
-          reason: 'Awaiting change window',
-          status: 'PENDING_DECISION',
-          requestedBy: 'analyst@example.com',
-          requestedAt: '2026-06-12T00:00:00Z',
-          decisionDueAt: '2026-06-30T00:00:00Z',
-          decisionedBy: null,
-          decisionedAt: null,
-        },
-      ],
-      evidence: detailWithPendingException.evidence,
-    });
     const detailWithNote = buildDetail({
-      ...detailWithNewException,
+      ...detailWithApprovedException,
       notes: [{
         id: 'note-1',
         author: 'analyst@example.com',
@@ -340,9 +319,7 @@ describe('CampaignsPage', () => {
 
     vi.spyOn(api, 'getCampaign')
       .mockResolvedValueOnce(detailWithPendingException)
-      .mockResolvedValueOnce(detailWithNewException)
       .mockResolvedValueOnce(detailWithNote);
-    const addExceptionSpy = vi.spyOn(api, 'addCampaignException').mockResolvedValue(detailWithNewException.exceptions[1]!);
     const updateExceptionSpy = vi.spyOn(api, 'updateCampaignExceptionStatus').mockResolvedValue(detailWithApprovedException);
     const addNoteSpy = vi.spyOn(api, 'addCampaignNote').mockResolvedValue(detailWithNote.notes[0]!);
 
@@ -350,33 +327,16 @@ describe('CampaignsPage', () => {
 
     await screen.findByRole('heading', { name: 'Kernel patch sprint' });
 
-    fireEvent.click(screen.getByRole('button', { name: /Assets/i }));
-    expect(screen.getByText('Support Group')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Assets/ }));
+    expect(screen.getByRole('columnheader', { name: /SUPPORT GROUP/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Findings/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Findings/ }));
     expect(screen.getAllByText('F-100').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
-    expect(screen.getByText('INC-100')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Vulnerabilities/ }));
+    expect(screen.getByText('CVE-2026-1111')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Exceptions/i }));
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'F-100' } });
-    fireEvent.change(screen.getByPlaceholderText('Exception title'), { target: { value: 'Temporary waiver' } });
-    fireEvent.change(screen.getByPlaceholderText('Reason / context'), { target: { value: 'Awaiting change window' } });
-    fireEvent.change(document.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: '2026-06-30' } });
-    fireEvent.click(screen.getAllByRole('button', { name: /^Add Exception$/i })[1]!);
-
-    await waitFor(() => {
-      expect(addExceptionSpy).toHaveBeenCalledWith('campaign-1', {
-        findingDisplayId: 'F-100',
-        assetName: 'web-prod-01',
-        packageName: 'openssl',
-        title: 'Temporary waiver',
-        reason: 'Awaiting change window',
-        decisionDueAt: '2026-06-30T00:00:00.000Z',
-      });
-    });
-
     fireEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0]!);
 
     await waitFor(() => {
