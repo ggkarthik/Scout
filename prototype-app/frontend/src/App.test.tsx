@@ -135,7 +135,7 @@ describe('App test persona switcher', () => {
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
   });
 
-  it('redirects platform-scope owners from the legacy EOL URL to platform EOL', async () => {
+  it('redirects legacy end-of-life route into the platform console for platform owners', async () => {
     const auth = await import('./features/auth/api');
     const platformOwner: ActorContext = {
       creator: true,
@@ -151,9 +151,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/end-of-life' });
 
-    expect(await screen.findByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'End-of-Life', level: 1 })).toBeInTheDocument();
-    expect(screen.queryByText('Platform Console')).not.toBeInTheDocument();
+    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
   });
 
   it('shows tenant administration navigation for tenant admins', async () => {

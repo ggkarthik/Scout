@@ -6,11 +6,13 @@ import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { getAuthContextQueryKey } from '../features/auth/queries';
+import { EolPage } from './EolPage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
-  { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' }
+  { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
+  { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
 ];
 
 type PlatformConsolePageProps = {
@@ -57,6 +59,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
         {selectedView === 'tenants' && <TenantLifecyclePanel />}
         {selectedView === 'users' && <PlatformUsersPanel />}
         {selectedView === 'demo-requests' && <DemoRequestsPanel />}
+        {selectedView === 'eol' && <EolPage />}
       </section>
     </div>
   );
@@ -270,7 +273,7 @@ function TenantLifecyclePanel() {
     onSuccess: refreshTenantEntitlements
   });
 
-  const tenants = tenantsQuery.data ?? [];
+  const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
   const entitlementSnapshot = entitlementSnapshotQuery.data ?? null;
   const inventoryConnectorHealth = inventoryConnectorHealthQuery.data ?? [];
 

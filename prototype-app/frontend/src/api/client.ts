@@ -6,6 +6,7 @@ import type {
   SuppressionRuleRequest,
 } from '../features/configurations/types';
 import type {
+  Finding,
   FindingBulkWorkflowRequest,
   FindingBulkWorkflowResponse,
   FindingBacklogHealth,
@@ -171,6 +172,7 @@ export type BomComponentSummaryItem = {
   totalCveCount: number;
   correlationState: 'APPLICABLE' | 'NOT_APPLICABLE' | 'UNKNOWN' | 'UNCHECKED';
   riskLevel: string;
+  findingCount: number;
 };
 
 export type ApplicationCveItem = {
@@ -240,6 +242,7 @@ export type ApplicationRiskSummary = {
   riskScore: number;
   riskLevel: string;
   lastIngestedAt: string | null;
+  findingCount: number;
 };
 
 export type BomInventoryItem = {
@@ -757,6 +760,7 @@ export const api = {
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
     return request<FindingPage>(`/findings${suffix}`);
   },
+  getFinding: (findingId: string) => request<Finding>(`/findings/${encodeURIComponent(findingId)}`),
   getFindingSummary: (params?: FindingsFilterModel) => {
     const searchParams = buildFindingsSearchParams(params);
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';

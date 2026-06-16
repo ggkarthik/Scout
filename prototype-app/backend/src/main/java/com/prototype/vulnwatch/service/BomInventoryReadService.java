@@ -1,17 +1,16 @@
 package com.prototype.vulnwatch.service;
 
+import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.Asset;
+import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.BomIngestionRecord;
 import com.prototype.vulnwatch.domain.BomStatus;
-import com.prototype.vulnwatch.domain.BomComponent;
-import com.prototype.vulnwatch.domain.BomComponentVulnerabilityLink;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.EolRelease;
-import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.ApplicationCveResponse;
 import com.prototype.vulnwatch.dto.ApplicationRiskResponse;
 import com.prototype.vulnwatch.dto.BomComponentCveSummary;
@@ -33,10 +32,10 @@ import com.prototype.vulnwatch.repo.BomComponentEvidenceRepository;
 import com.prototype.vulnwatch.repo.BomComponentVulnerabilityLinkRepository;
 import com.prototype.vulnwatch.repo.BomComponentWorkflowRepository;
 import com.prototype.vulnwatch.repo.BomIngestionRecordRepository;
+import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.EolReleaseRepository;
+import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
-import com.prototype.vulnwatch.repo.VulnerabilityRepository;
-import com.prototype.vulnwatch.util.PurlUtil;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -67,8 +66,9 @@ public class BomInventoryReadService {
     private final SbomParserService sbomParserService;
     private final AssetRepository assetRepository;
     private final InventoryComponentRepository inventoryComponentRepository;
+    private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final EolReleaseRepository eolReleaseRepository;
-    private final VulnerabilityRepository vulnerabilityRepository;
+    private final FindingRepository findingRepository;
 
     public BomInventoryReadService(
             BomIngestionRecordRepository bomRecordRepository,
@@ -79,8 +79,9 @@ public class BomInventoryReadService {
             SbomParserService sbomParserService,
             AssetRepository assetRepository,
             InventoryComponentRepository inventoryComponentRepository,
+            ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             EolReleaseRepository eolReleaseRepository,
-            VulnerabilityRepository vulnerabilityRepository
+            FindingRepository findingRepository
     ) {
         this.bomRecordRepository = bomRecordRepository;
         this.bomComponentRepository = bomComponentRepository;
@@ -90,8 +91,9 @@ public class BomInventoryReadService {
         this.sbomParserService = sbomParserService;
         this.assetRepository = assetRepository;
         this.inventoryComponentRepository = inventoryComponentRepository;
+        this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.eolReleaseRepository = eolReleaseRepository;
-        this.vulnerabilityRepository = vulnerabilityRepository;
+        this.findingRepository = findingRepository;
     }
 
     @Transactional(readOnly = true)
@@ -285,73 +287,136 @@ public class BomInventoryReadService {
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
         bomComponentRepository.softDeleteByBomId(bomId);
-        record.setStatus(BomStatus.DELETED);
+        record.setStatus(BomStatus.SUPERSEDED);
         bomRecordRepository.save(record);
     }
 
     @Transactional(readOnly = true)
     public List<BomComponentSummaryResponse> getBomComponentSummaries(Tenant tenant, int page, int size) {
-        int safePage = Math.max(0, page);
-        int safeSize = Math.max(1, Math.min(size, 2000));
-        List<BomIngestionRecord> activeBoms = bomRecordRepository.findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE)
-                .stream()
-                .filter(b -> b.getAssetId() != null)
-                .toList();
-        if (activeBoms.isEmpty()) {
-            return List.of();
-        }
-        Map<UUID, BomIngestionRecord> bomById = activeBoms.stream()
-                .collect(Collectors.toMap(BomIngestionRecord::getId, Function.identity()));
-        Map<UUID, Asset> assetById = assetRepository.findAllById(activeBoms.stream().map(BomIngestionRecord::getAssetId).toList())
-                .stream()
-                .filter(asset -> asset.getType() == AssetType.APPLICATION)
-                .collect(Collectors.toMap(Asset::getId, Function.identity()));
-        List<BomComponent> allComponents = bomComponentRepository.findByBomIdInAndActiveTrue(bomById.keySet()).stream()
-                .filter(component -> {
-                    BomIngestionRecord record = bomById.get(component.getBomId());
-                    return record != null && assetById.containsKey(record.getAssetId());
-                })
-                .sorted(Comparator
-                        .comparing((BomComponent component) -> assetById.get(bomById.get(component.getBomId()).getAssetId()).getName(), Comparator.nullsLast(String::compareToIgnoreCase))
-                        .thenComparing(BomComponent::getName, Comparator.nullsLast(String::compareToIgnoreCase)))
-                .toList();
-        if (allComponents.isEmpty()) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 2000));
+        List<InventoryComponent> components = inventoryComponentRepository
+                .findActiveApplicationComponentsWithAsset(tenant.getId(), InventoryComponentStatus.ACTIVE, pageable);
+        if (components.isEmpty()) {
             return List.of();
         }
 
-        int fromIndex = Math.min(safePage * safeSize, allComponents.size());
-        int toIndex = Math.min(fromIndex + safeSize, allComponents.size());
-        List<BomComponent> pageComponents = allComponents.subList(fromIndex, toIndex);
-        Map<UUID, List<String>> bomTypesByAsset = activeBoms.stream()
+        List<UUID> componentIds = components.stream().map(InventoryComponent::getId).toList();
+        List<UUID> assetIds = components.stream().map(c -> c.getAsset().getId()).distinct().toList();
+
+        // Fetch all active BOM records once to build two lookup maps
+        List<BomIngestionRecord> activeBomRecords = bomRecordRepository
+                .findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE);
+
+        // Primary: assetId → bomTypes (works when assetId is set on the record)
+        Map<UUID, List<String>> bomTypesByAsset = activeBomRecords.stream()
+                .filter(b -> b.getAssetId() != null && assetIds.contains(b.getAssetId()))
                 .collect(Collectors.groupingBy(
                         BomIngestionRecord::getAssetId,
-                        Collectors.mapping(record -> record.getBomType() == null ? "UNKNOWN" : record.getBomType().name(), Collectors.toList())
+                        Collectors.mapping(
+                                b -> b.getBomType() != null ? b.getBomType().name() : "UNKNOWN",
+                                Collectors.toList()
+                        )
                 ));
-        return buildComponentSummaries(tenant, pageComponents, bomById, assetById, bomTypesByAsset);
+
+        // Fallback: sbomUploadId → bomType (for records where assetId is null)
+        Map<UUID, String> bomTypeBySbomUpload = activeBomRecords.stream()
+                .filter(b -> b.getSbomUploadId() != null)
+                .collect(Collectors.toMap(
+                        BomIngestionRecord::getSbomUploadId,
+                        b -> b.getBomType() != null ? b.getBomType().name() : "UNKNOWN",
+                        (first, second) -> first
+                ));
+
+        Map<UUID, List<ComponentVulnerabilityState>> statesByComponent = new HashMap<>();
+        componentVulnerabilityStateRepository
+                .findWithVulnerabilityByTenantIdAndComponentIds(tenant.getId(), componentIds)
+                .forEach(s -> statesByComponent
+                        .computeIfAbsent(s.getComponent().getId(), k -> new ArrayList<>())
+                        .add(s));
+
+        // Count open findings by ecosystem+packageName (matches how FindingsTab queries)
+        Map<String, Long> findingCountByPackageKey = findingRepository
+                .countOpenByEcosystemPackageForTenant(tenant.getId())
+                .stream()
+                .collect(Collectors.toMap(
+                        row -> ((String) row[0]) + ":" + ((String) row[1]),
+                        row -> (Long) row[2]
+                ));
+
+        return components.stream().map(c -> {
+            List<ComponentVulnerabilityState> states = statesByComponent.getOrDefault(c.getId(), List.of());
+            List<ComponentVulnerabilityState> applicable = states.stream()
+                    .filter(s -> s.getApplicabilityState() == ApplicabilityState.APPLICABLE)
+                    .toList();
+            int critical = (int) applicable.stream()
+                    .filter(s -> "CRITICAL".equals(s.getVulnerability().getSeverity())).count();
+            int high = (int) applicable.stream()
+                    .filter(s -> "HIGH".equals(s.getVulnerability().getSeverity())).count();
+            int medium = (int) applicable.stream()
+                    .filter(s -> "MEDIUM".equals(s.getVulnerability().getSeverity())).count();
+            int low = (int) applicable.stream()
+                    .filter(s -> "LOW".equals(s.getVulnerability().getSeverity())).count();
+
+            String correlationState;
+            if (!applicable.isEmpty()) {
+                correlationState = "APPLICABLE";
+            } else if (states.stream().anyMatch(s -> s.getApplicabilityState() == ApplicabilityState.NOT_APPLICABLE)) {
+                correlationState = "NOT_APPLICABLE";
+            } else if (!states.isEmpty()) {
+                correlationState = "UNKNOWN";
+            } else {
+                correlationState = "UNCHECKED";
+            }
+
+            List<String> bomTypes = bomTypesByAsset.getOrDefault(c.getAsset().getId(), List.of());
+            if (bomTypes.isEmpty() && c.getSbomUpload() != null) {
+                String fallback = bomTypeBySbomUpload.get(c.getSbomUpload().getId());
+                if (fallback != null) {
+                    bomTypes = List.of(fallback);
+                }
+            }
+            bomTypes = bomTypes.stream().distinct().sorted().toList();
+            double score = computeApplicationRiskScore(critical, high, medium, low);
+
+            String pkgKey = (c.getEcosystem() != null ? c.getEcosystem().toLowerCase() : "") + ":" + c.getPackageName().toLowerCase();
+            int findingCount = findingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
+
+            return new BomComponentSummaryResponse(
+                    c.getId().toString(),
+                    c.getPackageName(),
+                    c.getVersion(),
+                    c.getPurl(),
+                    c.getEcosystem(),
+                    c.getLicense(),
+                    c.getAsset().getId().toString(),
+                    c.getAsset().getName(),
+                    bomTypes,
+                    Boolean.TRUE.equals(c.getIsEol()),
+                    c.getEolSupportEndDate() != null ? c.getEolSupportEndDate().toString() : null,
+                    critical, high, medium, low, applicable.size(),
+                    correlationState,
+                    toApplicationRiskLevel(score),
+                    findingCount
+            );
+        }).toList();
     }
 
     @Transactional(readOnly = true)
     public List<ApplicationRiskResponse> getApplicationRisk(Tenant tenant) {
-        List<BomIngestionRecord> activeBoms = bomRecordRepository.findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE)
-                .stream()
-                .filter(b -> b.getAssetId() != null)
-                .toList();
-        if (activeBoms.isEmpty()) {
-            return List.of();
-        }
-        Map<UUID, Asset> assetsById = assetRepository.findAllById(activeBoms.stream().map(BomIngestionRecord::getAssetId).toList())
-                .stream()
+        List<Asset> assets = assetRepository.findByTenant(tenant).stream()
                 .filter(a -> a.getType() == AssetType.APPLICATION && a.getState() == AssetState.ACTIVE)
-                .collect(Collectors.toMap(Asset::getId, Function.identity()));
-        if (assetsById.isEmpty()) {
+                .toList();
+        if (assets.isEmpty()) {
             return List.of();
         }
-        List<BomIngestionRecord> applicationBoms = activeBoms.stream()
-                .filter(b -> assetsById.containsKey(b.getAssetId()))
+        List<UUID> assetIds = assets.stream().map(Asset::getId).toList();
+
+        List<BomIngestionRecord> activeBoms = bomRecordRepository
+                .findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE)
+                .stream()
+                .filter(b -> b.getAssetId() != null && assetIds.contains(b.getAssetId()))
                 .toList();
-        Map<UUID, BomIngestionRecord> bomById = applicationBoms.stream()
-                .collect(Collectors.toMap(BomIngestionRecord::getId, Function.identity()));
-        Map<UUID, List<String>> bomTypesByAsset = applicationBoms.stream()
+        Map<UUID, List<String>> bomTypesByAsset = activeBoms.stream()
                 .collect(Collectors.groupingBy(
                         BomIngestionRecord::getAssetId,
                         Collectors.mapping(
@@ -366,47 +431,58 @@ public class BomInventoryReadService {
                         (a, b) -> a.isAfter(b) ? a : b
                 ));
 
-        Map<UUID, List<BomComponent>> componentsByAsset = bomComponentRepository.findByBomIdInAndActiveTrue(
-                        applicationBoms.stream().map(BomIngestionRecord::getId).toList())
-                .stream()
-                .collect(Collectors.groupingBy(component -> bomById.get(component.getBomId()).getAssetId()));
+        List<InventoryComponent> allComponents = inventoryComponentRepository.findByAsset_IdIn(assetIds);
+        Map<UUID, Long> totalByAsset = allComponents.stream()
+                .filter(c -> c.getComponentStatus() == InventoryComponentStatus.ACTIVE)
+                .collect(Collectors.groupingBy(c -> c.getAsset().getId(), Collectors.counting()));
+        Map<UUID, Long> eolByAsset = allComponents.stream()
+                .filter(c -> c.getComponentStatus() == InventoryComponentStatus.ACTIVE
+                        && Boolean.TRUE.equals(c.getIsEol()))
+                .collect(Collectors.groupingBy(c -> c.getAsset().getId(), Collectors.counting()));
 
-        return assetsById.values().stream().map(asset -> {
-            List<BomComponent> components = componentsByAsset.getOrDefault(asset.getId(), List.of());
-            Map<UUID, List<BomComponentVulnerabilityLink>> linksByComponent = loadLinksByComponent(components);
-            Map<String, Vulnerability> vulnerabilitiesByExternalId = loadVulnerabilitiesByExternalId(linksByComponent.values().stream().flatMap(List::stream).toList());
-            Set<String> vulnerabilityKeys = new HashSet<>();
-            int critical = 0;
-            int high = 0;
-            int medium = 0;
-            int low = 0;
-            int vulnerableComponents = 0;
-            int eolComponents = 0;
-            for (BomComponent component : components) {
-                List<BomComponentVulnerabilityLink> links = linksByComponent.getOrDefault(component.getId(), List.of());
-                if (!links.isEmpty()) {
-                    vulnerableComponents++;
-                }
-                InventoryComponent inventoryComponent = resolveProjectedInventoryComponent(tenant, asset.getId(), component);
-                if (inventoryComponent != null && Boolean.TRUE.equals(inventoryComponent.getIsEol())) {
-                    eolComponents++;
-                }
-                for (BomComponentVulnerabilityLink link : links) {
-                    if (!vulnerabilityKeys.add(link.getVulnerabilityKey())) {
-                        continue;
-                    }
-                    Vulnerability vulnerability = vulnerabilitiesByExternalId.get(link.getVulnerabilityKey());
-                    String severity = vulnerability == null || vulnerability.getSeverity() == null ? "UNKNOWN" : vulnerability.getSeverity();
-                    switch (severity) {
-                        case "CRITICAL" -> critical++;
-                        case "HIGH" -> high++;
-                        case "MEDIUM" -> medium++;
-                        case "LOW", "NONE" -> low++;
-                        default -> { }
-                    }
-                }
-            }
-            int total = vulnerabilityKeys.size();
+        List<UUID> allActiveComponentIds = allComponents.stream()
+                .filter(c -> c.getComponentStatus() == InventoryComponentStatus.ACTIVE)
+                .map(InventoryComponent::getId)
+                .toList();
+        Map<UUID, UUID> componentToAsset = allComponents.stream()
+                .filter(c -> c.getComponentStatus() == InventoryComponentStatus.ACTIVE)
+                .collect(Collectors.toMap(InventoryComponent::getId, c -> c.getAsset().getId()));
+        Set<UUID> vulnerableComponentIds = new HashSet<>();
+        if (!allActiveComponentIds.isEmpty()) {
+            componentVulnerabilityStateRepository
+                    .findSummariesByTenantIdAndComponentIds(tenant.getId(), allActiveComponentIds)
+                    .stream()
+                    .filter(s -> s.getApplicabilityState() == ApplicabilityState.APPLICABLE)
+                    .forEach(s -> vulnerableComponentIds.add(s.getComponentId()));
+        }
+        Map<UUID, Long> vulnerableByAsset = vulnerableComponentIds.stream()
+                .filter(componentToAsset::containsKey)
+                .collect(Collectors.groupingBy(componentToAsset::get, Collectors.counting()));
+
+        Map<UUID, Long> findingCountByAsset = findingRepository
+                .countOpenFindingsByAssetIds(tenant.getId(), assetIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        row -> (UUID) row[0],
+                        row -> (Long) row[1]
+                ));
+
+        return assets.stream().map(asset -> {
+            List<ComponentVulnerabilityStateRepository.HostApplicableCveRow> cves =
+                    componentVulnerabilityStateRepository
+                            .findHostApplicableCvesByTenantIdAndAssetId(tenant.getId(), asset.getId());
+            Map<UUID, String> severityByVulnId = cves.stream()
+                    .collect(Collectors.toMap(
+                            ComponentVulnerabilityStateRepository.HostApplicableCveRow::getVulnerabilityId,
+                            c -> c.getSeverity() != null ? c.getSeverity() : "UNKNOWN",
+                            (a, b) -> a
+                    ));
+            int critical = (int) severityByVulnId.values().stream().filter("CRITICAL"::equals).count();
+            int high = (int) severityByVulnId.values().stream().filter("HIGH"::equals).count();
+            int medium = (int) severityByVulnId.values().stream().filter("MEDIUM"::equals).count();
+            int low = (int) severityByVulnId.values().stream()
+                    .filter(s -> "LOW".equals(s) || "NONE".equals(s)).count();
+            int total = severityByVulnId.size();
             double riskScore = computeApplicationRiskScore(critical, high, medium, low);
             List<String> bomTypes = bomTypesByAsset.getOrDefault(asset.getId(), List.of())
                     .stream().distinct().sorted().toList();
@@ -417,13 +493,14 @@ public class BomInventoryReadService {
                     asset.getIdentifier(),
                     asset.getBusinessCriticality() != null ? asset.getBusinessCriticality().name() : "MEDIUM",
                     bomTypes,
-                    components.size(),
-                    vulnerableComponents,
-                    eolComponents,
+                    totalByAsset.getOrDefault(asset.getId(), 0L).intValue(),
+                    vulnerableByAsset.getOrDefault(asset.getId(), 0L).intValue(),
+                    eolByAsset.getOrDefault(asset.getId(), 0L).intValue(),
                     critical, high, medium, low, total,
                     riskScore,
                     toApplicationRiskLevel(riskScore),
-                    lastIngested != null ? lastIngested.toString() : null
+                    lastIngested != null ? lastIngested.toString() : null,
+                    findingCountByAsset.getOrDefault(asset.getId(), 0L).intValue()
             );
         })
         .sorted(Comparator.comparingDouble(ApplicationRiskResponse::riskScore).reversed())
@@ -432,94 +509,77 @@ public class BomInventoryReadService {
 
     @Transactional(readOnly = true)
     public List<ApplicationCveResponse> getApplicationCves(Tenant tenant, UUID assetId) {
-        List<BomIngestionRecord> activeBoms = bomRecordRepository.findByTenant_IdAndAssetIdAndStatusOrderByIngestedAtDesc(
-                tenant.getId(),
-                assetId,
-                BomStatus.ACTIVE
-        );
-        if (activeBoms.isEmpty()) {
-            return List.of();
-        }
-        List<BomComponent> components = bomComponentRepository.findByBomIdInAndActiveTrue(
-                activeBoms.stream().map(BomIngestionRecord::getId).toList()
-        );
-        Map<UUID, List<BomComponentVulnerabilityLink>> linksByComponent = loadLinksByComponent(components);
-        Map<String, Vulnerability> vulnerabilitiesByExternalId = loadVulnerabilitiesByExternalId(
-                linksByComponent.values().stream().flatMap(List::stream).toList()
-        );
-        List<ApplicationCveResponse> responses = new ArrayList<>();
-        for (BomComponent component : components) {
-            for (BomComponentVulnerabilityLink link : linksByComponent.getOrDefault(component.getId(), List.of())) {
-                Vulnerability vulnerability = vulnerabilitiesByExternalId.get(link.getVulnerabilityKey());
-                responses.add(new ApplicationCveResponse(
-                        vulnerability == null ? null : vulnerability.getId().toString(),
-                        component.getId().toString(),
-                        link.getVulnerabilityKey(),
-                        vulnerability == null ? "UNKNOWN" : vulnerability.getSeverity(),
-                        vulnerability == null ? null : vulnerability.getCvssScore(),
-                        vulnerability == null ? null : vulnerability.getEpssScore(),
-                        component.getName(),
-                        component.getVersion(),
-                        link.getUpdatedAt() != null ? link.getUpdatedAt().toString() : null
-                ));
-            }
-        }
-        return responses;
+        return componentVulnerabilityStateRepository
+                .findHostApplicableCvesByTenantIdAndAssetId(tenant.getId(), assetId)
+                .stream()
+                .map(r -> new ApplicationCveResponse(
+                        r.getVulnerabilityId().toString(),
+                        r.getComponentId().toString(),
+                        r.getExternalId(),
+                        r.getSeverity(),
+                        r.getCvssScore(),
+                        r.getEpssScore(),
+                        r.getPackageName(),
+                        r.getVersion(),
+                        r.getLastEvaluatedAt() != null ? r.getLastEvaluatedAt().toString() : null
+                ))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public BomComponentDetailResponse getComponentDetail(Tenant tenant, UUID componentId) {
-        BomComponent component = bomComponentRepository.findById(componentId)
+        InventoryComponent component = inventoryComponentRepository.findById(componentId)
                 .filter(c -> c.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Component not found"));
-        BomIngestionRecord record = bomRecordRepository.findById(component.getBomId())
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
-        Asset asset = record.getAssetId() == null ? null : assetRepository.findById(record.getAssetId()).orElse(null);
-        List<BomIngestionRecord> assetBoms = record.getAssetId() == null
-                ? List.of(record)
-                : bomRecordRepository.findByTenant_IdAndAssetIdAndStatusOrderByIngestedAtDesc(tenant.getId(), record.getAssetId(), BomStatus.ACTIVE);
+
+        List<BomIngestionRecord> assetBoms = bomRecordRepository
+                .findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE)
+                .stream()
+                .filter(b -> b.getAssetId() != null && b.getAssetId().equals(component.getAsset().getId()))
+                .toList();
         List<String> bomTypes = assetBoms.stream()
                 .map(b -> b.getBomType() != null ? b.getBomType().name() : "UNKNOWN")
                 .distinct().sorted().toList();
-        List<BomComponentVulnerabilityLink> links = bomComponentVulnerabilityLinkRepository.findByBomComponentId(componentId);
-        Map<String, Vulnerability> vulnerabilitiesByExternalId = loadVulnerabilitiesByExternalId(links);
-        int critical = 0;
-        int high = 0;
-        int medium = 0;
-        int low = 0;
-        for (BomComponentVulnerabilityLink link : links) {
-            Vulnerability vulnerability = vulnerabilitiesByExternalId.get(link.getVulnerabilityKey());
-            String severity = vulnerability == null || vulnerability.getSeverity() == null ? "UNKNOWN" : vulnerability.getSeverity();
-            switch (severity) {
-                case "CRITICAL" -> critical++;
-                case "HIGH" -> high++;
-                case "MEDIUM" -> medium++;
-                case "LOW", "NONE" -> low++;
-                default -> { }
-            }
-        }
+
+        List<ComponentVulnerabilityState> states = componentVulnerabilityStateRepository
+                .findWithVulnerabilityByTenantIdAndComponentIds(tenant.getId(), List.of(componentId));
+
+        List<ComponentVulnerabilityState> applicable = states.stream()
+                .filter(s -> s.getApplicabilityState() == ApplicabilityState.APPLICABLE)
+                .toList();
+        int critical = (int) applicable.stream().filter(s -> "CRITICAL".equals(s.getVulnerability().getSeverity())).count();
+        int high    = (int) applicable.stream().filter(s -> "HIGH".equals(s.getVulnerability().getSeverity())).count();
+        int medium  = (int) applicable.stream().filter(s -> "MEDIUM".equals(s.getVulnerability().getSeverity())).count();
+        int low     = (int) applicable.stream().filter(s -> "LOW".equals(s.getVulnerability().getSeverity())).count();
         double riskScore = computeApplicationRiskScore(critical, high, medium, low);
-        String correlationState = links.isEmpty() ? "UNCHECKED" : "APPLICABLE";
-        List<BomComponentCveSummary> cves = links.stream()
-                .map(link -> vulnerabilitiesByExternalId.get(link.getVulnerabilityKey()))
-                .filter(vulnerability -> vulnerability != null)
-                .sorted(Comparator.comparing(vulnerability -> vulnerability.getSeverity() != null ? vulnerability.getSeverity() : ""))
-                .map(vulnerability -> new BomComponentCveSummary(
-                        vulnerability.getId().toString(),
-                        vulnerability.getExternalId(),
-                        vulnerability.getSeverity(),
-                        vulnerability.getTitle(),
-                        "APPLICABLE",
-                        vulnerability.getEpssScore(),
-                        vulnerability.getCvssScore()
+
+        String correlationState;
+        if (!applicable.isEmpty()) {
+            correlationState = "APPLICABLE";
+        } else if (states.stream().anyMatch(s -> s.getApplicabilityState() == ApplicabilityState.NOT_APPLICABLE)) {
+            correlationState = "NOT_APPLICABLE";
+        } else if (!states.isEmpty()) {
+            correlationState = "UNKNOWN";
+        } else {
+            correlationState = "UNCHECKED";
+        }
+
+        List<BomComponentCveSummary> cves = states.stream()
+                .sorted(Comparator.comparing(s -> s.getVulnerability().getSeverity() != null ? s.getVulnerability().getSeverity() : ""))
+                .map(s -> new BomComponentCveSummary(
+                        s.getVulnerability().getId().toString(),
+                        s.getVulnerability().getExternalId(),
+                        s.getVulnerability().getSeverity(),
+                        s.getVulnerability().getTitle(),
+                        s.getApplicabilityState().name(),
+                        s.getVulnerability().getEpssScore(),
+                        s.getVulnerability().getCvssScore()
                 ))
                 .toList();
 
-        InventoryComponent projectedInventory = asset == null ? null : resolveProjectedInventoryComponent(tenant, asset.getId(), component);
         List<EolReleaseSummary> eolReleases = List.of();
-        if (projectedInventory != null && projectedInventory.getEolSlug() != null && !projectedInventory.getEolSlug().isBlank()) {
-            eolReleases = eolReleaseRepository.findByProductSlug(projectedInventory.getEolSlug()).stream()
+        if (component.getEolSlug() != null && !component.getEolSlug().isBlank()) {
+            eolReleases = eolReleaseRepository.findByProductSlug(component.getEolSlug()).stream()
                     .sorted(Comparator.comparing(EolRelease::getReleaseDate, Comparator.nullsLast(Comparator.reverseOrder())))
                     .map(r -> new EolReleaseSummary(
                             r.getCycle(),
@@ -533,33 +593,35 @@ public class BomInventoryReadService {
                     ))
                     .toList();
         }
+
+        Asset asset = component.getAsset();
         return new BomComponentDetailResponse(
                 component.getId().toString(),
-                component.getName(),
-                component.getGroupName(),
+                component.getPackageName(),
+                component.getPackageGroup(),
                 component.getVersion(),
                 component.getPurl(),
-                ecosystemFor(component),
+                component.getEcosystem(),
                 component.getLicense(),
                 component.getScope(),
-                normalizedNameFor(component),
-                projectedInventory == null ? null : projectedInventory.getEolSlug(),
-                projectedInventory == null ? null : projectedInventory.getEolCycle(),
-                projectedInventory != null && Boolean.TRUE.equals(projectedInventory.getIsEol()),
-                projectedInventory == null || projectedInventory.getEolDate() == null ? null : projectedInventory.getEolDate().toString(),
-                projectedInventory == null || projectedInventory.getEolSupportEndDate() == null ? null : projectedInventory.getEolSupportEndDate().toString(),
-                projectedInventory == null ? null : projectedInventory.getSupportPhase(),
-                projectedInventory == null || projectedInventory.getEolCheckedAt() == null ? null : projectedInventory.getEolCheckedAt().toString(),
-                record.getIngestedAt().toString(),
-                record.getIngestedAt().toString(),
-                asset == null ? null : asset.getId().toString(),
-                asset == null ? null : asset.getName(),
-                asset == null ? null : asset.getIdentifier(),
-                asset == null || asset.getType() == null ? null : asset.getType().name(),
+                component.getNormalizedName(),
+                component.getEolSlug(),
+                component.getEolCycle(),
+                Boolean.TRUE.equals(component.getIsEol()),
+                component.getEolDate() != null ? component.getEolDate().toString() : null,
+                component.getEolSupportEndDate() != null ? component.getEolSupportEndDate().toString() : null,
+                component.getSupportPhase(),
+                component.getEolCheckedAt() != null ? component.getEolCheckedAt().toString() : null,
+                component.getIngestedAt().toString(),
+                component.getLastObservedAt().toString(),
+                asset.getId().toString(),
+                asset.getName(),
+                asset.getIdentifier(),
+                asset.getType() != null ? asset.getType().name() : null,
                 bomTypes,
                 correlationState,
                 toApplicationRiskLevel(riskScore),
-                critical, high, medium, low, links.size(),
+                critical, high, medium, low, states.size(),
                 cves,
                 eolReleases
         );
@@ -580,110 +642,6 @@ public class BomInventoryReadService {
         if (score >= 4.0) return "MEDIUM";
         if (score > 0.0) return "LOW";
         return "NONE";
-    }
-
-    private List<BomComponentSummaryResponse> buildComponentSummaries(
-            Tenant tenant,
-            List<BomComponent> components,
-            Map<UUID, BomIngestionRecord> bomById,
-            Map<UUID, Asset> assetById,
-            Map<UUID, List<String>> bomTypesByAsset
-    ) {
-        Map<UUID, List<BomComponentVulnerabilityLink>> linksByComponent = loadLinksByComponent(components);
-        Map<String, Vulnerability> vulnerabilitiesByExternalId = loadVulnerabilitiesByExternalId(
-                linksByComponent.values().stream().flatMap(List::stream).toList()
-        );
-        return components.stream().map(component -> {
-            BomIngestionRecord record = bomById.get(component.getBomId());
-            Asset asset = record == null ? null : assetById.get(record.getAssetId());
-            Map<String, Vulnerability> componentVulnerabilities = new HashMap<>();
-            for (BomComponentVulnerabilityLink link : linksByComponent.getOrDefault(component.getId(), List.of())) {
-                Vulnerability vulnerability = vulnerabilitiesByExternalId.get(link.getVulnerabilityKey());
-                if (vulnerability != null) {
-                    componentVulnerabilities.put(vulnerability.getExternalId(), vulnerability);
-                }
-            }
-            int critical = (int) componentVulnerabilities.values().stream().filter(v -> "CRITICAL".equals(v.getSeverity())).count();
-            int high = (int) componentVulnerabilities.values().stream().filter(v -> "HIGH".equals(v.getSeverity())).count();
-            int medium = (int) componentVulnerabilities.values().stream().filter(v -> "MEDIUM".equals(v.getSeverity())).count();
-            int low = (int) componentVulnerabilities.values().stream()
-                    .filter(v -> "LOW".equals(v.getSeverity()) || "NONE".equals(v.getSeverity())).count();
-            InventoryComponent projectedInventory = asset == null ? null : resolveProjectedInventoryComponent(tenant, asset.getId(), component);
-            double score = computeApplicationRiskScore(critical, high, medium, low);
-            return new BomComponentSummaryResponse(
-                    component.getId().toString(),
-                    component.getName(),
-                    component.getVersion(),
-                    component.getPurl(),
-                    ecosystemFor(component),
-                    component.getLicense(),
-                    asset == null ? null : asset.getId().toString(),
-                    asset == null ? null : asset.getName(),
-                    asset == null ? List.of() : bomTypesByAsset.getOrDefault(asset.getId(), List.of()).stream().distinct().sorted().toList(),
-                    projectedInventory != null && Boolean.TRUE.equals(projectedInventory.getIsEol()),
-                    projectedInventory == null || projectedInventory.getEolSupportEndDate() == null ? null : projectedInventory.getEolSupportEndDate().toString(),
-                    critical,
-                    high,
-                    medium,
-                    low,
-                    componentVulnerabilities.size(),
-                    componentVulnerabilities.isEmpty() ? "UNCHECKED" : "APPLICABLE",
-                    toApplicationRiskLevel(score)
-            );
-        }).toList();
-    }
-
-    private Map<UUID, List<BomComponentVulnerabilityLink>> loadLinksByComponent(List<BomComponent> components) {
-        if (components.isEmpty()) {
-            return Map.of();
-        }
-        return bomComponentVulnerabilityLinkRepository.findByBomComponentIdIn(
-                        components.stream().map(BomComponent::getId).toList())
-                .stream()
-                .collect(Collectors.groupingBy(BomComponentVulnerabilityLink::getBomComponentId));
-    }
-
-    private Map<String, Vulnerability> loadVulnerabilitiesByExternalId(List<BomComponentVulnerabilityLink> links) {
-        if (links == null || links.isEmpty()) {
-            return Map.of();
-        }
-        return vulnerabilityRepository.findByExternalIdIn(
-                        links.stream().map(BomComponentVulnerabilityLink::getVulnerabilityKey).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(Vulnerability::getExternalId, Function.identity(), (left, right) -> left));
-    }
-
-    private InventoryComponent resolveProjectedInventoryComponent(Tenant tenant, UUID assetId, BomComponent component) {
-        if (assetId == null) {
-            return null;
-        }
-        List<InventoryComponent> matches = inventoryComponentRepository.findActiveByTenantAssetAndComponentNameVersion(
-                tenant.getId(),
-                assetId,
-                InventoryComponentStatus.ACTIVE,
-                component.getName(),
-                component.getVersion()
-        );
-        return matches.isEmpty() ? null : matches.get(0);
-    }
-
-    private String ecosystemFor(BomComponent component) {
-        PurlUtil.ParsedPurl parsedPurl = PurlUtil.parse(component.getPurl());
-        if (parsedPurl != null && parsedPurl.ecosystem() != null && !"unknown".equals(parsedPurl.ecosystem())) {
-            return parsedPurl.ecosystem();
-        }
-        return "generic";
-    }
-
-    private String normalizedNameFor(BomComponent component) {
-        PurlUtil.ParsedPurl parsedPurl = PurlUtil.parse(component.getPurl());
-        if (parsedPurl != null && parsedPurl.packageName() != null && !"unknown".equals(parsedPurl.packageName())) {
-            String namespace = parsedPurl.namespace();
-            return namespace == null || namespace.isBlank()
-                    ? parsedPurl.packageName()
-                    : namespace + "/" + parsedPurl.packageName();
-        }
-        return component.getName();
     }
 
     private BomInventoryItemResponse toInventoryItem(BomIngestionRecord r) {

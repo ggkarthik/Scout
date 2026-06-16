@@ -229,7 +229,7 @@ export function BomComponents() {
     queryFn: () => api.listBomComponents(),
   });
 
-  const items = data ?? [];
+  const items = React.useMemo(() => data ?? [], [data]);
 
   // Build application count per package name+version
   const appCountMap = React.useMemo(() => {
@@ -273,10 +273,21 @@ export function BomComponents() {
   }
 
   if (view === 'component-detail' && selectedComponent) {
+    const packageKey = `${selectedComponent.packageName}@${selectedComponent.version ?? ''}`;
+    const relatedAssetIds = [...(appCountMap.get(packageKey) ?? new Set<string>())];
+    // Build assetId → componentId map for all instances of this package across apps
+    const assetIdToComponentId: Record<string, string> = {};
+    for (const c of items) {
+      if (c.packageName === selectedComponent.packageName && c.version === selectedComponent.version) {
+        assetIdToComponentId[c.assetId] = c.componentId;
+      }
+    }
     return (
       <BomComponentDetailPanel
         componentId={selectedComponent.componentId}
         seed={selectedComponent}
+        relatedAssetIds={relatedAssetIds}
+        assetIdToComponentId={assetIdToComponentId}
         onClose={() => { setSelectedComponent(null); setView('list'); }}
         onSelectApp={(app) => { setSelectedApp(app); setView('app-detail'); }}
       />
@@ -388,6 +399,7 @@ export function BomComponents() {
                   <th>Application</th>
                   <th>Risk</th>
                   <th>CVEs</th>
+                  <th>Findings</th>
                   <th>Correlation</th>
                   <th>EOL</th>
                   <th>License</th>
@@ -422,6 +434,11 @@ export function BomComponents() {
                       <td>
                         {c.totalCveCount > 0
                           ? <span style={{ fontWeight: 600, color: c.criticalCveCount > 0 ? 'var(--critical)' : c.highCveCount > 0 ? 'var(--high)' : 'var(--title)' }}>{c.totalCveCount}</span>
+                          : <span className="panel-caption">—</span>}
+                      </td>
+                      <td>
+                        {c.findingCount > 0
+                          ? <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{c.findingCount}</span>
                           : <span className="panel-caption">—</span>}
                       </td>
                       <td><CorrelationPill state={c.correlationState} /></td>
