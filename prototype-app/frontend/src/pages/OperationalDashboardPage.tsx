@@ -38,19 +38,15 @@ class OperationsSectionErrorBoundary extends React.Component<
 }
 import {
   OperationalApiReadPath,
-  OperationalCorrelationEffectiveness,
   OperationalEndpointMetric,
   OperationalFreshnessDrift,
   OperationalIngestionEfficiency,
   OperationalIngestionSourceMetric,
   OperationalMetricDefinition,
-  OperationalNoiseLifecycle,
-  OperationalNormalizationQuality,
   OperationalSectionResponse,
   OperationalSourceFreshness,
   SloStatus
 } from '../features/operations/types';
-import type { Dashboard, TopFindingMetric } from '../features/dashboard/types';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { StatCard } from '../components/StatCard';
 import {
@@ -177,19 +173,6 @@ function formatPercent(value: number): string {
   return `${(value ?? 0).toFixed(1)}%`;
 }
 
-function formatAgeSeconds(value?: number): string {
-  if (value == null || value < 0) {
-    return '-';
-  }
-  if (value < 60) {
-    return `${Math.round(value)}s`;
-  }
-  if (value < 3600) {
-    return `${Math.round(value / 60)}m`;
-  }
-  return `${(value / 3600).toFixed(1)}h`;
-}
-
 function isCreatorAccessError(error: string): boolean {
   const normalized = error.toLowerCase();
   return normalized.includes('403') || normalized.includes('forbidden');
@@ -197,33 +180,6 @@ function isCreatorAccessError(error: string): boolean {
 
 function formatGeneratedAt(generatedAt: string): string {
   return `Last updated ${new Date(generatedAt).toLocaleString()}`;
-}
-
-function formatDurationMs(value?: number | null): string {
-  if (value == null || value < 0) {
-    return '-';
-  }
-  return `${value.toFixed(0)} ms`;
-}
-
-function MetricDistribution({ title, items = [], emptyLabel }: { title: string; items?: TopFindingMetric[]; emptyLabel: string }) {
-  return (
-    <div>
-      <div className="noise-subtitle">{title}</div>
-      {items.length === 0 ? (
-        <div className="panel-caption">{emptyLabel}</div>
-      ) : (
-        <div className="noise-category-list">
-          {items.map((entry) => (
-            <div key={`${title}-${entry.key}`} className="noise-category-row">
-              <div className="noise-category-key">{entry.key}</div>
-              <div className="noise-category-count">{entry.count.toLocaleString()}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function SummaryMetricCard({ label, value }: { label: string; value: React.ReactNode }) {
@@ -340,219 +296,6 @@ function renderIngestion(payload: OperationalSectionResponse<OperationalIngestio
           <SummaryMetricCard label="Records Updated" value={(data.recordsUpdatedLast24h ?? 0).toLocaleString()} />
         </div>
         <IngestionSourceTable rows={data.sourceBreakdown} />
-      </section>
-    </div>
-  );
-}
-
-function renderNormalization(payload: OperationalSectionResponse<OperationalNormalizationQuality>) {
-  const data = payload.data;
-  if (!data) {
-    return <div className="panel"><div className="panel-header"><h3>Normalization Quality</h3></div><div className="panel-caption">No data available.</div></div>;
-  }
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Normalization Quality</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <SummaryMetricCard label="Active Components" value={(data.activeComponents ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="Name Coverage" value={formatPercent(data.normalizedNameCoveragePercent)} />
-          <SummaryMetricCard label="Version Coverage" value={formatPercent(data.normalizedVersionCoveragePercent)} />
-          <SummaryMetricCard label="Identity Coverage" value={formatPercent(data.softwareIdentityCoveragePercent)} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function renderCorrelation(payload: OperationalSectionResponse<OperationalCorrelationEffectiveness>) {
-  const data = payload.data;
-  if (!data) {
-    return <div className="panel"><div className="panel-header"><h3>Correlation Effectiveness</h3></div><div className="panel-caption">No data available.</div></div>;
-  }
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Correlation Effectiveness</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <SummaryMetricCard label="Open Findings" value={(data.openFindings ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="High Confidence Affected" value={formatPercent(data.highConfidenceAffectedRatePercent)} />
-          <SummaryMetricCard label="Unknown Decision Rate" value={formatPercent(data.unknownDecisionRatePercent)} />
-        </div>
-        <div className="noise-panel-grid">
-          <MetricDistribution
-            title="Selected Method Distribution"
-            items={data.selectedMethodDistribution ?? []}
-            emptyLabel="No selected method samples yet."
-          />
-          <MetricDistribution
-            title="Decision State Distribution"
-            items={data.decisionStateDistribution ?? []}
-            emptyLabel="No decision states observed yet."
-          />
-          <MetricDistribution
-            title="Workflow Status Distribution"
-            items={data.workflowStatusDistribution ?? []}
-            emptyLabel="No workflow states observed yet."
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function renderCorrelationEfficiency(payload: OperationalSectionResponse<OperationalCorrelationEffectiveness>, dashboard: Dashboard | null) {
-  const data = dashboard?.correlationEfficiency;
-  if (!data) {
-    return null;
-  }
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Correlation Efficiency</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <SummaryMetricCard label="Active Components" value={data.activeComponents.toLocaleString()} />
-          <SummaryMetricCard label="CPE Coverage (Active Components)" value={formatPercent(data.cpeCoveragePercent)} />
-          <SummaryMetricCard label="CPE Eligible Components" value={data.cpeEligibleActiveComponents.toLocaleString()} />
-          <SummaryMetricCard label="CPE Ineligible Components" value={data.cpeIneligibleActiveComponents.toLocaleString()} />
-          <SummaryMetricCard label="Open Findings via CPE" value={data.openFindingsMatchedByCpe.toLocaleString()} />
-          <SummaryMetricCard
-            label="Direct vs Fallback"
-            value={`${data.openFindingsCpeDirect.toLocaleString()} / ${data.openFindingsCpeFallback.toLocaleString()}`}
-          />
-          <SummaryMetricCard label="Direct Share" value={formatPercent(data.cpeDirectSharePercent)} />
-          <SummaryMetricCard label="Fallback Share" value={formatPercent(data.cpeFallbackSharePercent)} />
-          <SummaryMetricCard label="Average Open CPE Confidence" value={`${(data.averageOpenCpeConfidenceScore * 100).toFixed(1)}%`} />
-          <SummaryMetricCard label="CPE Created (24h)" value={data.cpeFindingsCreatedLast24Hours.toLocaleString()} />
-          <SummaryMetricCard label="Other Methods Created (24h)" value={data.nonCpeFindingsCreatedLast24Hours.toLocaleString()} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function renderCsafVexAnalytics(payload: OperationalSectionResponse<OperationalIngestionEfficiency>, dashboard: Dashboard | null) {
-  const data = dashboard?.csafVexAnalytics;
-  if (!data) {
-    return null;
-  }
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>CSAF/VEX Quality Analytics</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-
-        <div className="noise-summary-grid">
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Active VEX Coverage</div>
-            <div className="noise-summary-value">{data.activeVexCoveragePercent.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">VEX Matched States</div>
-            <div className="noise-summary-value">{data.activeVexMatchedStateCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Awaiting Exact VEX</div>
-            <div className="noise-summary-value">{data.activeApplicableAwaitingVexCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Confirmed Impacted</div>
-            <div className="noise-summary-value">{data.activeVexConfirmedImpactedCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Confirmed Not Affected</div>
-            <div className="noise-summary-value">{data.activeVexConfirmedNotAffectedCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">No Patch</div>
-            <div className="noise-summary-value">{data.activeVexNoPatchCount.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Normalization Success</div>
-            <div className="noise-summary-value">{data.csafNormalizationSuccessRate.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Partial Failure</div>
-            <div className="noise-summary-value">{data.csafPartialFailureRate.toFixed(1)}%</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Suppressed by VEX</div>
-            <div className="noise-summary-value">{data.findingsSuppressedByVex.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Suppressed by Stale VEX</div>
-            <div className="noise-summary-value">{data.suppressedByStaleVex.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">Under Investigation Aging</div>
-            <div className="noise-summary-value">{data.underInvestigationAging.toLocaleString()}</div>
-          </div>
-          <div className="noise-summary-item">
-            <div className="noise-summary-label">CSAF Runs (30d)</div>
-            <div className="noise-summary-value">{data.csafRunsLast30Days.toLocaleString()}</div>
-          </div>
-        </div>
-
-        <div className="noise-panel-grid">
-          <div className="noise-categories">
-            <div className="noise-subtitle">VEX Coverage by Provider</div>
-            {data.vexCoverageByProvider.length === 0 ? (
-              <div className="panel-caption">No provider-tagged VEX evidence in current exposure set.</div>
-            ) : (
-              <div className="noise-category-list">
-                {data.vexCoverageByProvider.map((entry) => (
-                  <div key={entry.key} className="noise-category-row">
-                    <div className="noise-category-key">{entry.key}</div>
-                    <div className="noise-category-count">{entry.count.toLocaleString()}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function renderLifecycle(payload: OperationalSectionResponse<OperationalNoiseLifecycle>) {
-  const data = payload.data;
-  if (!data) {
-    return <div className="panel"><div className="panel-header"><h3>Noise and Lifecycle</h3></div><div className="panel-caption">No data available.</div></div>;
-  }
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="panel-header">
-          <h3>Noise and Lifecycle</h3>
-          <span className="panel-caption">{formatGeneratedAt(payload.generatedAt)}</span>
-        </div>
-        <div className="noise-summary-grid">
-          <SummaryMetricCard label="Filtered Not Applicable" value={(data.totalFilteredNotApplicable ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="Never Opened" value={(data.neverOpenedNotApplicable ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="Auto Resolved" value={(data.autoResolvedNotApplicable ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="Deferred" value={(data.deferredUnderInvestigation ?? 0).toLocaleString()} />
-          <SummaryMetricCard label="Filtered Rate" value={formatPercent(data.filteredPercentOfPotential)} />
-          <SummaryMetricCard label="Reopen Rate" value={formatPercent(data.reopenRatePercent)} />
-        </div>
-        <div className="noise-panel-grid">
-          <MetricDistribution
-            title="Not Applicable Categories"
-            items={data.notApplicableCategories ?? []}
-            emptyLabel="No categories observed yet."
-          />
-        </div>
       </section>
     </div>
   );

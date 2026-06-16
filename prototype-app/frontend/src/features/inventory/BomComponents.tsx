@@ -229,7 +229,7 @@ export function BomComponents() {
     queryFn: () => api.listBomComponents(),
   });
 
-  const items = data ?? [];
+  const items = React.useMemo(() => data ?? [], [data]);
 
   // Build application count per package name+version
   const appCountMap = React.useMemo(() => {

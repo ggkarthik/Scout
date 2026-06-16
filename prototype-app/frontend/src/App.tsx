@@ -12,7 +12,6 @@ import {
   normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryView,
-  pathForInventoryViewWithSearch,
   pathForOperationsView,
   pathForPlatformView,
   pathForTab,
@@ -101,9 +100,6 @@ const BomComponents = React.lazy(async () => ({
 }));
 const SoftwareIdentityDetailPage = React.lazy(async () => ({
   default: (await import('./pages/SoftwareIdentityDetailPage')).SoftwareIdentityDetailPage
-}));
-const EolPage = React.lazy(async () => ({
-  default: (await import('./pages/EolPage')).EolPage
 }));
 const ConnectPage = React.lazy(async () => ({
   default: (await import('./pages/ConnectPage')).ConnectPage
@@ -496,11 +492,11 @@ function EndOfLifeRoute() {
   const isPlatformScope = actor?.platformScope ?? false;
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
 
-  if (!platformScopeOwner && !canManageTenant(actor)) {
-    return <Navigate to={pathForInventoryViewWithSearch('software-identities', { lifecycle: 'eol' })} replace />;
+  if (platformScopeOwner) {
+    return <Navigate to={pathForPlatformView('eol')} replace />;
   }
 
-  return <EolPage />;
+  return <Navigate to={pathForTab('exposure')} replace />;
 }
 
 function PlatformRoute() {
@@ -686,11 +682,11 @@ function AppShell() {
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'end-of-life', 'connect', 'operations', 'platform'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'operations', 'platform'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
-      tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory', 'end-of-life');
+      tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory');
     }
     if (canAccessPlatformConsole(actor)) {
       tabs.push('operations');
