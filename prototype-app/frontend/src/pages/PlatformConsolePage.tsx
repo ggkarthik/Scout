@@ -25,41 +25,52 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
+  const visibleTabs = selectedView === 'eol'
+    ? PLATFORM_TABS.filter((tab) => tab.key === 'eol')
+    : PLATFORM_TABS.filter((tab) => tab.key !== 'eol');
+  const sidebarTitle = selectedView === 'eol' ? 'EOL' : 'Tenant Management';
+  const sidebarCaption = selectedView === 'eol'
+    ? 'Platform-owned end-of-life catalog and lifecycle coverage.'
+    : 'Tenant lifecycle, demo provisioning, and platform-owner access controls.';
 
   return (
     <div className="page-grid platform-console-page">
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h3>Platform Console</h3>
-            <div className="panel-caption">
-              Platform-owner controls for tenant lifecycle, demo provisioning, and platform-owned operations.
-            </div>
+      <section className="panel platform-console-shell">
+        <aside className="platform-console-sidebar" aria-label="Platform views">
+          <div className="platform-console-sidebar-header">
+            <h3>{sidebarTitle}</h3>
+            <div className="panel-caption">{sidebarCaption}</div>
           </div>
-        </div>
-        <div className="connect-filter-bar connect-filter-bar--standalone">
-          {PLATFORM_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              className={`connect-filter-btn${selectedView === tab.key ? ' active' : ''}`}
-              onClick={() => navigate(pathForPlatformView(tab.key))}
-              title={tab.helper}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        {platformMessage && (
-          <div className="notice" role="status">
-            {platformMessage}
+          <div className="platform-console-nav">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`platform-console-nav-btn${selectedView === tab.key ? ' active' : ''}`}
+                onClick={() => navigate(pathForPlatformView(tab.key))}
+                title={tab.helper}
+              >
+                <span>{tab.label}</span>
+                <small>{tab.helper}</small>
+              </button>
+            ))}
           </div>
-        )}
+        </aside>
 
-        {selectedView === 'tenants' && <TenantLifecyclePanel />}
-        {selectedView === 'users' && <PlatformUsersPanel />}
-        {selectedView === 'demo-requests' && <DemoRequestsPanel />}
-        {selectedView === 'eol' && <EolPage />}
+        <div className="platform-console-content">
+          {platformMessage && (
+            <div className="notice" role="status">
+              {platformMessage}
+            </div>
+          )}
+
+          <div className="platform-console-section">
+            {selectedView === 'tenants' && <TenantLifecyclePanel />}
+            {selectedView === 'users' && <PlatformUsersPanel />}
+            {selectedView === 'demo-requests' && <DemoRequestsPanel />}
+            {selectedView === 'eol' && <EolPage embedded mode="platform" />}
+          </div>
+        </div>
       </section>
     </div>
   );

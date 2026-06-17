@@ -141,7 +141,7 @@ public class TenantSchemaService {
                             quotedIdentifier(targetSchema),
                             quotedIdentifier(foreignKey.tableName()),
                             quotedIdentifier(foreignKey.constraintName()),
-                            foreignKey.definition()
+                            rewriteForeignKeyDefinition(targetSchema, foreignKey.definition())
                     ));
                 }
             }
@@ -252,6 +252,16 @@ public class TenantSchemaService {
 
     private String rewrittenDefaultExpression(String targetSchema, String expression) {
         return expression.replace(defaultSchemaName + ".", targetSchema + ".");
+    }
+
+    private String rewriteForeignKeyDefinition(String targetSchema, String definition) {
+        if (defaultSchemaName.equals(targetSchema)) {
+            return definition;
+        }
+        return definition
+                .replace("REFERENCES " + defaultSchemaName + ".", "REFERENCES " + targetSchema + ".")
+                .replace("REFERENCES " + quotedIdentifier(defaultSchemaName) + ".",
+                        "REFERENCES " + quotedIdentifier(targetSchema) + ".");
     }
 
     private String quotedIdentifier(String value) {
