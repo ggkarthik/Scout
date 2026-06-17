@@ -642,10 +642,12 @@ function DataFreshnessBar() {
 
 type EolPageProps = {
   embedded?: boolean;
+  mode?: 'tenant' | 'platform';
 };
 
-export function EolPage({ embedded = false }: EolPageProps = {}) {
-  const [activeTab, setActiveTab] = React.useState<EolTab>('at-risk');
+export function EolPage({ embedded = false, mode = 'tenant' }: EolPageProps = {}) {
+  const platformMode = mode === 'platform';
+  const [activeTab, setActiveTab] = React.useState<EolTab>(platformMode ? 'catalog' : 'at-risk');
   const eolMappingReviewHref = appendSearchToPath(pathForInventoryView('overview'), {
     inventoryTabs: 'quality-eol',
     inventoryActiveTab: 'quality-eol',
@@ -657,30 +659,36 @@ export function EolPage({ embedded = false }: EolPageProps = {}) {
       <div className="panel-header">
         <div>
           <h3>End-of-Life</h3>
-          <span className="panel-caption">Lifecycle risk across active inventory</span>
+          <span className="panel-caption">
+            {platformMode
+              ? 'Platform-owned end-of-life catalog and lifecycle coverage'
+              : 'Lifecycle risk across active inventory'}
+          </span>
         </div>
         <DataFreshnessBar />
       </div>
 
-      <div className="eol-page-tabs">
-        <button
-          type="button"
-          className={`eol-page-tab ${activeTab === 'at-risk' ? 'active' : ''}`}
-          onClick={() => setActiveTab('at-risk')}
-        >
-          At-Risk Components
-        </button>
-        <button
-          type="button"
-          className={`eol-page-tab ${activeTab === 'catalog' ? 'active' : ''}`}
-          onClick={() => setActiveTab('catalog')}
-        >
-          Product Catalog
-        </button>
-      </div>
+      {!platformMode && (
+        <div className="eol-page-tabs">
+          <button
+            type="button"
+            className={`eol-page-tab ${activeTab === 'at-risk' ? 'active' : ''}`}
+            onClick={() => setActiveTab('at-risk')}
+          >
+            At-Risk Components
+          </button>
+          <button
+            type="button"
+            className={`eol-page-tab ${activeTab === 'catalog' ? 'active' : ''}`}
+            onClick={() => setActiveTab('catalog')}
+          >
+            Product Catalog
+          </button>
+        </div>
+      )}
 
-      {activeTab === 'at-risk' && <AtRiskTab eolMappingReviewHref={eolMappingReviewHref} />}
-      {activeTab === 'catalog' && <CatalogTab />}
+      {!platformMode && activeTab === 'at-risk' && <AtRiskTab eolMappingReviewHref={eolMappingReviewHref} />}
+      {(platformMode || activeTab === 'catalog') && <CatalogTab />}
     </>
   );
 

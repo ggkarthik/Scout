@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.AppUser;
+import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -28,6 +30,8 @@ class DemoTenantPurgeServiceTest {
     @Mock
     private TenantRepository tenantRepository;
     @Mock
+    private AppUserRepository appUserRepository;
+    @Mock
     private JdbcTemplate resetJdbcTemplate;
     @Mock
     private AuditEventService auditEventService;
@@ -44,6 +48,7 @@ class DemoTenantPurgeServiceTest {
     void setUp() {
         service = new DemoTenantPurgeService(
                 tenantRepository,
+                appUserRepository,
                 resetJdbcTemplate,
                 auditEventService,
                 tenantLifecycleGuardService,
@@ -65,11 +70,17 @@ class DemoTenantPurgeServiceTest {
 
         Instant now = Instant.parse("2026-05-21T00:00:00Z");
         UUID userId = UUID.randomUUID();
+        AppUser user = new AppUser();
+        user.setId(userId);
+        user.setStatus("ACTIVE");
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(demoTenantPurgePlanner.isEligibleForAutomaticPurge(tenant, now)).thenReturn(true);
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of(userId));
+        when(resetJdbcTemplate.queryForObject("select count(*) from platform.tenant_memberships where user_id = ?", Integer.class, userId))
+                .thenReturn(0);
+        when(appUserRepository.findById(userId)).thenReturn(Optional.of(user));
         when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))
                 .thenReturn(java.util.List.of("platform.tenant_support_grants", "platform.tenant_memberships"));
 
@@ -80,22 +91,7 @@ class DemoTenantPurgeServiceTest {
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("""
-                    update platform.app_users u
-                    set password_hash = null,
-                        password_set_at = null,
-                        password_setup_token_hash = null,
-                        password_setup_token_expires_at = null,
-                        status = case
-                            when u.platform_owner = false
-                                 and not exists (select 1 from platform.tenant_memberships tm where tm.user_id = u.id)
-                            then 'INACTIVE'
-                            else u.status
-                        end,
-                        updated_at = ?
-                    where u.id = ?
-                      and u.platform_owner = false
-                    """, now, userId);
+        verify(appUserRepository).save(user);
         verify(auditEventService).record("demo.tenant.purged", "tenant", tenant.getId().toString(), null);
     }
 
@@ -125,10 +121,16 @@ class DemoTenantPurgeServiceTest {
 
         Instant now = Instant.parse("2026-06-11T00:00:00Z");
         UUID userId = UUID.randomUUID();
+        AppUser user = new AppUser();
+        user.setId(userId);
+        user.setStatus("ACTIVE");
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of(userId));
+        when(resetJdbcTemplate.queryForObject("select count(*) from platform.tenant_memberships where user_id = ?", Integer.class, userId))
+                .thenReturn(0);
+        when(appUserRepository.findById(userId)).thenReturn(Optional.of(user));
         when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))
                 .thenReturn(java.util.List.of("platform.tenant_support_grants", "platform.tenant_memberships"));
 
@@ -139,22 +141,7 @@ class DemoTenantPurgeServiceTest {
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("""
-                    update platform.app_users u
-                    set password_hash = null,
-                        password_set_at = null,
-                        password_setup_token_hash = null,
-                        password_setup_token_expires_at = null,
-                        status = case
-                            when u.platform_owner = false
-                                 and not exists (select 1 from platform.tenant_memberships tm where tm.user_id = u.id)
-                            then 'INACTIVE'
-                            else u.status
-                        end,
-                        updated_at = ?
-                    where u.id = ?
-                      and u.platform_owner = false
-                    """, now, userId);
+        verify(appUserRepository).save(user);
         verify(auditEventService).record("tenant.deleted", "tenant", tenant.getId().toString(), null);
     }
 

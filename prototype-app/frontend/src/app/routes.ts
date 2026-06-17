@@ -360,7 +360,7 @@ export function titleForTab(tab: AppTab): string {
     case 'admin':
       return 'Administration';
     case 'platform':
-      return 'Platform';
+      return 'Tenant Management';
     case 'configurations':
       return 'Configurations';
   }
