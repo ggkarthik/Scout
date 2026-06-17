@@ -10,9 +10,11 @@ import org.springframework.stereotype.Service;
 public class TenantSchemaExecutionService {
 
     private final TenantService tenantService;
+    private final TenantSchemaService tenantSchemaService;
 
-    public TenantSchemaExecutionService(TenantService tenantService) {
+    public TenantSchemaExecutionService(TenantService tenantService, TenantSchemaService tenantSchemaService) {
         this.tenantService = tenantService;
+        this.tenantSchemaService = tenantSchemaService;
     }
 
     public void run(Tenant tenant, Runnable runnable) {
@@ -27,11 +29,12 @@ public class TenantSchemaExecutionService {
         if (tenant == null || tenant.getId() == null) {
             return supplier.get();
         }
-        String schemaName = tenant.getSchemaName();
-        if (schemaName == null || schemaName.isBlank()) {
-            Tenant resolved = tenantService.resolveTenantUuid(tenant.getId());
-            schemaName = resolved.getSchemaName();
+        Tenant resolved = tenant;
+        if (tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()) {
+            resolved = tenantService.resolveTenantUuid(tenant.getId());
         }
+        String schemaName = tenantSchemaService.schemaNameForTenant(resolved);
+        tenantSchemaService.ensureSchemaExists(schemaName);
         return run(tenant.getId(), schemaName, supplier);
     }
 
@@ -41,7 +44,9 @@ public class TenantSchemaExecutionService {
             return supplier.get();
         }
         Tenant tenant = tenantService.resolveTenantUuid(tenantId);
-        return run(tenantId, tenant.getSchemaName(), supplier);
+        String schemaName = tenantSchemaService.schemaNameForTenant(tenant);
+        tenantSchemaService.ensureSchemaExists(schemaName);
+        return run(tenantId, schemaName, supplier);
     }
 
     private <T> T run(UUID tenantId, String schemaName, Supplier<T> supplier) {

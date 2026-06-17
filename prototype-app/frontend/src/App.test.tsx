@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ActorContext } from './features/auth/types';
@@ -108,10 +108,10 @@ describe('App test persona switcher', () => {
     await waitFor(() => {
       expect(actorSpy).toHaveBeenCalledTimes(2);
     });
-    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Tenant Management' })).toBeInTheDocument();
   });
 
-  it('keeps platform-scope owners on operations and hides tenant administration controls', async () => {
+  it('shows EOL in the platform-owner nav and hides tenant administration controls', async () => {
     const auth = await import('./features/auth/api');
     const platformOwner: ActorContext = {
       creator: true,
@@ -127,12 +127,57 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/platform/tenants' });
 
-    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tenant Management' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Tenant context switcher')).not.toBeInTheDocument();
-    expect(screen.getByText('Operations')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Open settings menu'));
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
+  });
+
+  it('redirects platform-scope owners away from operations into platform EOL', async () => {
+    const auth = await import('./features/auth/api');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      platformScope: true
+    };
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(platformOwner);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/operations/pipeline' });
+
+    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
+    expect(screen.getByText(/Operations is no longer part of the platform view/i)).toBeInTheDocument();
+  });
+
+  it('shows only EOL info in the platform subnav for the EOL view', async () => {
+    const auth = await import('./features/auth/api');
+    const platformOwner: ActorContext = {
+      creator: true,
+      principal: 'owner@example.com',
+      userId: 'owner@example.com',
+      tenantId: null,
+      tenantName: null,
+      roles: ['PLATFORM_OWNER'],
+      platformScope: true
+    };
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(platformOwner);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/platform/eol' });
+
+    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
+    const subnav = screen.getByLabelText('Platform views');
+    expect(within(subnav).getByRole('button', { name: /EOL/i })).toBeInTheDocument();
+    expect(within(subnav).queryByRole('button', { name: /Tenants/i })).not.toBeInTheDocument();
+    expect(within(subnav).queryByRole('button', { name: /Users/i })).not.toBeInTheDocument();
+    expect(within(subnav).queryByRole('button', { name: /Demo Requests/i })).not.toBeInTheDocument();
   });
 
   it('redirects legacy end-of-life route into the platform console for platform owners', async () => {
@@ -151,7 +196,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/end-of-life' });
 
-    expect(await screen.findByText('Platform Console')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
   });
 
   it('shows tenant administration navigation for tenant admins', async () => {

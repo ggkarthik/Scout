@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.util.List;
@@ -16,7 +17,11 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @Service
 public class DemoTenantPurgeService {
 
+    private static final int PURGE_ERROR_MAX_LENGTH = 2000;
+    private static final int FAILURE_AUDIT_ERROR_MAX_LENGTH = 512;
+
     private final TenantRepository tenantRepository;
+    private final AppUserRepository appUserRepository;
     private final JdbcTemplate resetJdbcTemplate;
     private final AuditEventService auditEventService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
@@ -25,6 +30,7 @@ public class DemoTenantPurgeService {
 
     public DemoTenantPurgeService(
             TenantRepository tenantRepository,
+            AppUserRepository appUserRepository,
             @Qualifier("prototypeResetJdbcTemplate")
             JdbcTemplate resetJdbcTemplate,
             AuditEventService auditEventService,
@@ -33,6 +39,7 @@ public class DemoTenantPurgeService {
             DemoTenantPurgePlanner demoTenantPurgePlanner
     ) {
         this.tenantRepository = tenantRepository;
+        this.appUserRepository = appUserRepository;
         this.resetJdbcTemplate = resetJdbcTemplate;
         this.auditEventService = auditEventService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
@@ -91,17 +98,14 @@ public class DemoTenantPurgeService {
             purgeTenantRows(tenant);
             scrubDemoUserCredentials(memberUserIds, now);
             auditEventService.record(successAuditAction, "tenant", tenant.getId().toString(), null);
+            deleteTenantRegistryRow(tenant.getId());
         } catch (RuntimeException ex) {
-            tenant.setStatus(failureStatus);
-            tenant.setPurgeStatus("FAILED");
-            tenant.setPurgeError(truncate(ex.getMessage(), 2000));
-            tenant.setUpdatedAt(Instant.now());
-            tenantRepository.save(tenant);
+            updateTenantFailureState(tenant, failureStatus, ex);
             auditEventService.record(
                     failureAuditAction,
                     "tenant",
                     tenant.getId().toString(),
-                    "{\"error\":\"" + escapeJson(truncate(ex.getMessage(), 512)) + "\"}");
+                    "{\"error\":\"" + escapeJson(truncate(ex.getMessage(), FAILURE_AUDIT_ERROR_MAX_LENGTH)) + "\"}");
             throw new ResponseStatusException(BAD_REQUEST, "Tenant delete failed: " + truncate(ex.getMessage(), 500), ex);
         }
     }
@@ -128,6 +132,9 @@ public class DemoTenantPurgeService {
         resetJdbcTemplate.update(
                 "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",
                 tenantId);
+    }
+
+    private void deleteTenantRegistryRow(UUID tenantId) {
         resetJdbcTemplate.update("delete from platform.tenants where id = ?", tenantId);
     }
 
@@ -158,22 +165,26 @@ public class DemoTenantPurgeService {
 
     private void scrubDemoUserCredentials(List<UUID> userIds, Instant now) {
         for (UUID userId : userIds) {
-            resetJdbcTemplate.update("""
-                    update platform.app_users u
-                    set password_hash = null,
-                        password_set_at = null,
-                        password_setup_token_hash = null,
-                        password_setup_token_expires_at = null,
-                        status = case
-                            when u.platform_owner = false
-                                 and not exists (select 1 from platform.tenant_memberships tm where tm.user_id = u.id)
-                            then 'INACTIVE'
-                            else u.status
-                        end,
-                        updated_at = ?
-                    where u.id = ?
-                      and u.platform_owner = false
-                    """, now, userId);
+            Integer remainingMemberships = resetJdbcTemplate.queryForObject(
+                    "select count(*) from platform.tenant_memberships where user_id = ?",
+                    Integer.class,
+                    userId
+            );
+            boolean deactivateUser = remainingMemberships != null && remainingMemberships == 0;
+            appUserRepository.findById(userId).ifPresent(user -> {
+                if (user.isPlatformOwner()) {
+                    return;
+                }
+                user.setPasswordHash(null);
+                user.setPasswordSetAt(null);
+                user.setPasswordSetupTokenHash(null);
+                user.setPasswordSetupTokenExpiresAt(null);
+                if (deactivateUser) {
+                    user.setStatus("INACTIVE");
+                }
+                user.setUpdatedAt(now);
+                appUserRepository.save(user);
+            });
         }
     }
 
@@ -185,7 +196,12 @@ public class DemoTenantPurgeService {
     }
 
     private String escapeJson(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return value == null ? ""
+                : value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     private String normalizedFailureStatus(Tenant tenant) {
@@ -193,6 +209,17 @@ public class DemoTenantPurgeService {
             return "ACTIVE";
         }
         return tenant.getStatus().trim().toUpperCase();
+    }
+
+    private void updateTenantFailureState(Tenant tenant, String failureStatus, RuntimeException ex) {
+        if (tenant == null || tenant.getId() == null || !tenantRepository.existsById(tenant.getId())) {
+            return;
+        }
+        tenant.setStatus(failureStatus);
+        tenant.setPurgeStatus("FAILED");
+        tenant.setPurgeError(truncate(ex.getMessage(), PURGE_ERROR_MAX_LENGTH));
+        tenant.setUpdatedAt(Instant.now());
+        tenantRepository.save(tenant);
     }
 
     private boolean hasText(String value) {

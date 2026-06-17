@@ -25,6 +25,8 @@ import com.prototype.vulnwatch.repo.DemoInviteRepository;
 import com.prototype.vulnwatch.repo.DemoRequestRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -99,6 +101,42 @@ class DemoLifecycleServiceTest {
         assertNotNull(response.latestInvite().lastSentAt());
         assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, tenant.getPlanCode());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
+    }
+
+    @Test
+    void approveSetsDemoTenantExpiryToSevenDaysFromProvisioning() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
+        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
+                .thenReturn(tenant);
+        when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
+            DemoInvite invite = invocation.getArgument(0);
+            if (invite.getId() == null) {
+                ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+            }
+            latestInvite.set(invite);
+            return invite;
+        });
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId()))
+                .thenAnswer(invocation -> latestInvite.get() == null ? List.of() : List.of(latestInvite.get()));
+        when(demoInviteEmailService.sendInvite(eq(request), any(DemoInvite.class)))
+                .thenReturn(ResendEmailClient.DeliveryResult.sent("email-123"));
+
+        Instant beforeApproval = Instant.now();
+        DemoLifecycleService service = service();
+        service.approve(request.getId(), "platform-owner@example.com");
+        Instant afterApproval = Instant.now();
+
+        assertNotNull(tenant.getDemoExpiresAt());
+        assertTrue(!tenant.getDemoExpiresAt().isBefore(beforeApproval.plus(7, ChronoUnit.DAYS)));
+        assertTrue(!tenant.getDemoExpiresAt().isAfter(afterApproval.plus(7, ChronoUnit.DAYS)));
     }
 
     @Test
@@ -378,6 +416,20 @@ class DemoLifecycleServiceTest {
 
         verify(demoInviteRepository).deleteByRequest_Id(request.getId());
         verify(demoRequestRepository).delete(request);
+    }
+
+    @Test
+    void expireDemoTenantsPurgesTenantsWhoseSevenDayWindowHasElapsed() {
+        Tenant expiredTenant = provisionedTenant();
+        expiredTenant.setDemoExpiresAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+
+        when(tenantRepository.findByDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(any(Instant.class)))
+                .thenReturn(List.of(expiredTenant));
+
+        DemoLifecycleService service = service();
+        service.expireDemoTenants();
+
+        verify(demoTenantPurgeService).processExpiredTenant(eq(expiredTenant.getId()), any(Instant.class));
     }
 
     private DemoLifecycleService service() {
