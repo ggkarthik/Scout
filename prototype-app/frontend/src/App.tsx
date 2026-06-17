@@ -179,10 +179,6 @@ const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countK
   { key: 'bom-components', label: 'BOM Components', countKey: 'bomInventory' },
   { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' }
 ];
-const OPERATIONS_NAV_ITEMS = [
-  { key: 'pipeline', label: 'Pipeline' },
-  { key: 'platform-health', label: 'Platform Health' }
-] as const;
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Intelligence' },
@@ -373,6 +369,20 @@ function FindingDetailRoute() {
 function OperationsRoute() {
   const params = useParams<{ operationsView?: string }>();
   const location = useLocation();
+  const actor = useActor();
+  const isPlatformScope = actor?.platformScope ?? false;
+  const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
+
+  if (platformScopeOwner) {
+    return (
+      <Navigate
+        to={pathForPlatformView('eol')}
+        replace
+        state={{ platformMessage: 'Operations is no longer part of the platform view. Use EOL from the platform console.' }}
+      />
+    );
+  }
+
   return <OperationalDashboardPage selectedView={normalizeOperationsRouteView(params.operationsView)} redirectSearch={location.search} />;
 }
 
@@ -659,15 +669,12 @@ function AppShell() {
   const navigate = useNavigate();
   const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
   const [navOpen, setNavOpen] = React.useState(false);
-  const [operationsFlyoutOpen, setOperationsFlyoutOpen] = React.useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
-  const operationsFlyoutTimer = React.useRef<number | null>(null);
 
   const activeTab = activeTabForPath(location.pathname);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
-  const activeOperationsView = normalizeOperationsRouteView(pathSegments[1]);
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
@@ -686,7 +693,7 @@ function AppShell() {
   );
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'connect', 'operations', 'platform'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'platform', 'end-of-life'] satisfies AppTab[];
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
@@ -753,36 +760,8 @@ function AppShell() {
     }
   }, [personaDialogOpen, testPersonas]);
 
-
-  React.useEffect(() => () => {
-    if (operationsFlyoutTimer.current != null) {
-      window.clearTimeout(operationsFlyoutTimer.current);
-    }
-  }, []);
-
-  const openOperationsFlyout = (): void => {
-    if (operationsFlyoutTimer.current != null) {
-      window.clearTimeout(operationsFlyoutTimer.current);
-      operationsFlyoutTimer.current = null;
-    }
-    setOperationsFlyoutOpen(true);
-  };
-
-  const closeOperationsFlyoutWithDelay = (): void => {
-    if (operationsFlyoutTimer.current != null) {
-      window.clearTimeout(operationsFlyoutTimer.current);
-    }
-    operationsFlyoutTimer.current = window.setTimeout(() => {
-      setOperationsFlyoutOpen(false);
-      operationsFlyoutTimer.current = null;
-    }, 180);
-  };
-
   const navigateToTab = (tab: AppTab): void => {
     navigate(pathForTab(tab));
-    if (tab !== 'operations') {
-      setOperationsFlyoutOpen(false);
-    }
   };
 
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
@@ -824,7 +803,7 @@ function AppShell() {
     if (activeTab === 'admin') return 'Tenant Administration';
     if (activeTab === 'connect') return 'Connectors';
     if (activeTab === 'configurations') return 'Configurations';
-    if (activeTab === 'platform') return 'Platform Console';
+    if (activeTab === 'platform') return 'Tenant Management';
     return titleForTab(activeTab);
   }, [activeTab]);
 
@@ -870,60 +849,6 @@ function AppShell() {
 
           <div className="nav-main-section">
             {visiblePrimaryNavTabs.map((tab) => {
-              if (tab === 'operations') {
-                return (
-                  <div
-                    key={tab}
-                    className="operations-nav-wrap"
-                    onMouseEnter={openOperationsFlyout}
-                    onMouseLeave={closeOperationsFlyoutWithDelay}
-                  >
-                    <button
-                      className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
-                      onClick={() => {
-                        navigate(pathForOperationsView(activeOperationsView));
-                        setOperationsFlyoutOpen((open) => !open);
-                      }}
-                    >
-                      <span className="nav-icon">
-                        <TabIcon tab="operations" />
-                      </span>
-                      <span className="nav-label">Operations</span>
-                    </button>
-
-                    {operationsFlyoutOpen && (
-                      <div
-                        className="operations-flyout"
-                        onMouseEnter={openOperationsFlyout}
-                        onMouseLeave={closeOperationsFlyoutWithDelay}
-                      >
-                        <div className="operations-flyout-header">
-                          <span>Operations</span>
-                          <span aria-hidden="true">→</span>
-                        </div>
-                        <div className="operations-flyout-items">
-                          {OPERATIONS_NAV_ITEMS.map((item) => (
-                            <button
-                              key={item.key}
-                              type="button"
-                              className={activeOperationsView === item.key ? 'operations-flyout-item active' : 'operations-flyout-item'}
-                              onClick={() => {
-                                navigate(pathForOperationsView(item.key));
-                                setOperationsFlyoutOpen(false);
-                              }}
-                            >
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              if (tab !== 'inventory') {
-                return renderNavButton(tab);
-              }
               return renderNavButton(tab);
             })}
           </div>
