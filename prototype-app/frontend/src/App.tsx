@@ -12,7 +12,6 @@ import {
   normalizePlatformRouteView,
   pathForConnectView,
   pathForInventoryView,
-  pathForOperationsView,
   pathForPlatformView,
   pathForTab,
   pathForVulnRepoView,

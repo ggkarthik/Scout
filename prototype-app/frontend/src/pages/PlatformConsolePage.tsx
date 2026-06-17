@@ -25,7 +25,6 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
-  const isEolView = selectedView === 'eol';
   const visibleTabs = selectedView === 'eol'
     ? PLATFORM_TABS.filter((tab) => tab.key === 'eol')
     : PLATFORM_TABS.filter((tab) => tab.key !== 'eol');
@@ -36,31 +35,29 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
 
   return (
     <div className="page-grid platform-console-page">
-      <section className={`panel${isEolView ? '' : ' platform-console-shell'}`}>
-        {!isEolView && (
-          <aside className="platform-console-sidebar" aria-label="Platform views">
-            <div className="platform-console-sidebar-header">
-              <h3>{sidebarTitle}</h3>
-              <div className="panel-caption">{sidebarCaption}</div>
-            </div>
-            <div className="platform-console-nav">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className={`platform-console-nav-btn${selectedView === tab.key ? ' active' : ''}`}
-                  onClick={() => navigate(pathForPlatformView(tab.key))}
-                  title={tab.helper}
-                >
-                  <span>{tab.label}</span>
-                  <small>{tab.helper}</small>
-                </button>
-              ))}
-            </div>
-          </aside>
-        )}
+      <section className="panel platform-console-shell">
+        <aside className="platform-console-sidebar" aria-label="Platform views">
+          <div className="platform-console-sidebar-header">
+            <h3>{sidebarTitle}</h3>
+            <div className="panel-caption">{sidebarCaption}</div>
+          </div>
+          <div className="platform-console-nav">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`platform-console-nav-btn${selectedView === tab.key ? ' active' : ''}`}
+                onClick={() => navigate(pathForPlatformView(tab.key))}
+                title={tab.helper}
+              >
+                <span>{tab.label}</span>
+                <small>{tab.helper}</small>
+              </button>
+            ))}
+          </div>
+        </aside>
 
-        <div className={isEolView ? '' : 'platform-console-content'}>
+        <div className="platform-console-content">
           {platformMessage && (
             <div className="notice" role="status">
               {platformMessage}
