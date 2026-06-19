@@ -1,19 +1,26 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, getStoredAuthToken } from '../api/client';
+import { api } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView } from '../app/routes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { getAuthContextQueryKey } from '../features/auth/queries';
 import { EolPage } from './EolPage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
-  { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and plan metadata' },
+  { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and workspace metadata' },
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
 ];
+
+function formatWorkspaceProfile(planCode: string | null | undefined): string {
+  const normalized = String(planCode ?? '').trim().toUpperCase();
+  if (normalized === '' || normalized === 'PRO' || normalized === 'ENTERPRISE' || normalized === 'DEMO' || normalized === 'PILOT') {
+    return 'Standard workspace';
+  }
+  return normalized;
+}
 
 type PlatformConsolePageProps = {
   selectedView: PlatformRouteView;
@@ -206,7 +213,6 @@ function PlatformUsersPanel() {
 
 function TenantLifecyclePanel() {
   const queryClient = useQueryClient();
-  const authToken = getStoredAuthToken().trim() || 'anonymous';
   const [tenantPendingDelete, setTenantPendingDelete] = React.useState<{
     id: string;
     name: string;
@@ -214,34 +220,17 @@ function TenantLifecyclePanel() {
     status: string;
     demoExpiresAt?: string | null;
   } | null>(null);
-  const [selectedTenantId, setSelectedTenantId] = React.useState('');
-  const [overrideReasonDrafts, setOverrideReasonDrafts] = React.useState<Record<string, string>>({});
-  const [overrideExpiryDrafts, setOverrideExpiryDrafts] = React.useState<Record<string, string>>({});
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
-  });
-  const entitlementSnapshotQuery = useQuery({
-    queryKey: ['platform-tenant-entitlements', selectedTenantId],
-    queryFn: () => api.getTenantEntitlements(selectedTenantId),
-    enabled: selectedTenantId.length > 0
   });
   const inventoryConnectorHealthQuery = useQuery({
     queryKey: ['platform-inventory-connector-health'],
     queryFn: api.listInventoryConnectorHealth
   });
-  const refreshTenantEntitlements = async () => {
-    if (selectedTenantId) {
-      await queryClient.invalidateQueries({ queryKey: ['platform-tenant-entitlements', selectedTenantId] });
-    }
-    await queryClient.invalidateQueries({ queryKey: getAuthContextQueryKey(authToken) });
-  };
   const createTenant = useMutation({
     mutationFn: api.createTenant,
-    onSuccess: async (tenant) => {
-      if (!selectedTenantId) {
-        setSelectedTenantId(tenant.id);
-      }
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
     }
@@ -254,61 +243,20 @@ function TenantLifecyclePanel() {
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
     }
   });
-  const upsertEntitlementOverride = useMutation({
-    mutationFn: ({
-      tenantId,
-      entitlementKey,
-      enabled,
-      reason,
-      expiresAt,
-    }: {
-      tenantId: string;
-      entitlementKey: string;
-      enabled: boolean;
-      reason?: string;
-      expiresAt?: string;
-    }) => api.upsertTenantEntitlementOverride(tenantId, entitlementKey, {
-      enabled,
-      reason: reason?.trim() || undefined,
-      expiresAt: expiresAt?.trim() ? new Date(expiresAt).toISOString() : null,
-    }),
-    onSuccess: async (_, variables) => {
-      setOverrideReasonDrafts((current) => ({ ...current, [variables.entitlementKey]: '' }));
-      setOverrideExpiryDrafts((current) => ({ ...current, [variables.entitlementKey]: '' }));
-      await refreshTenantEntitlements();
-    }
-  });
-  const deleteEntitlementOverride = useMutation({
-    mutationFn: ({ tenantId, entitlementKey }: { tenantId: string; entitlementKey: string }) =>
-      api.deleteTenantEntitlementOverride(tenantId, entitlementKey),
-    onSuccess: refreshTenantEntitlements
-  });
 
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
-  const entitlementSnapshot = entitlementSnapshotQuery.data ?? null;
   const inventoryConnectorHealth = inventoryConnectorHealthQuery.data ?? [];
-
-  React.useEffect(() => {
-    if (!selectedTenantId && tenants.length > 0) {
-      setSelectedTenantId(tenants[0].id);
-      return;
-    }
-    if (selectedTenantId && tenants.every((tenant) => tenant.id !== selectedTenantId)) {
-      setSelectedTenantId(tenants[0]?.id ?? '');
-    }
-  }, [selectedTenantId, tenants]);
 
   const handleCreateTenant = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get('name') ?? '').trim();
     const slug = String(formData.get('slug') ?? '').trim();
-    const planCode = String(formData.get('planCode') ?? '').trim();
     const billingRef = String(formData.get('billingRef') ?? '').trim();
     if (!name || !slug) {
       return;
     }
-    createTenant.mutate({ name, slug, planCode, billingRef });
+    createTenant.mutate({ name, slug, billingRef });
     event.currentTarget.reset();
   };
 
@@ -323,7 +271,6 @@ function TenantLifecyclePanel() {
       <form className="platform-create-tenant-form" onSubmit={handleCreateTenant}>
         <input name="name" placeholder="Tenant name" aria-label="Tenant name" />
         <input name="slug" placeholder="tenant-slug" aria-label="Tenant slug" />
-        <input name="planCode" placeholder="Plan code" aria-label="Plan code" />
         <input name="billingRef" placeholder="Billing reference" aria-label="Billing reference" />
         <button type="submit" className="btn btn-primary" disabled={createTenant.isPending}>
           {createTenant.isPending ? 'Creating...' : 'Create Tenant'}
@@ -349,7 +296,7 @@ function TenantLifecyclePanel() {
                 <th>Owner Email</th>
                 <th>Slug</th>
                 <th>Status</th>
-                <th>Plan</th>
+                <th>Workspace</th>
                 <th>Daily Exposure Refreshes</th>
                 <th>Demo Expires</th>
                 <th>Created</th>
@@ -363,7 +310,7 @@ function TenantLifecyclePanel() {
                   <td>{tenant.demoOwnerEmail ?? '-'}</td>
                   <td><code>{tenant.slug}</code></td>
                   <td>{tenant.status}</td>
-                  <td>{tenant.planCode ?? 'manual'}</td>
+                  <td>{formatWorkspaceProfile(tenant.planCode)}</td>
                   <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
                   <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
                   <td>{new Date(tenant.createdAt).toLocaleString()}</td>
@@ -397,163 +344,6 @@ function TenantLifecyclePanel() {
       {deleteTenant.isError && (
         <div className="notice error" role="alert">
           {deleteTenant.error instanceof Error ? deleteTenant.error.message : 'Failed to delete tenant'}
-        </div>
-      )}
-      <div className="section-title-row" style={{ marginTop: 24 }}>
-        <h4 className="section-title">Plan Entitlements</h4>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => void entitlementSnapshotQuery.refetch()}
-          disabled={!selectedTenantId}
-        >
-          Refresh
-        </button>
-      </div>
-      <p className="panel-caption">
-        Effective access comes from the commercial plan plus optional tenant overrides. Mutations here invalidate auth context so the tenant sees changes without re-login.
-      </p>
-      <div className="platform-create-tenant-form" style={{ gridTemplateColumns: 'minmax(260px, 360px)' }}>
-        <select
-          aria-label="Select tenant for entitlements"
-          value={selectedTenantId}
-          onChange={(event) => setSelectedTenantId(event.target.value)}
-        >
-          <option value="" disabled>Select tenant</option>
-          {tenants.map((tenant) => (
-            <option key={tenant.id} value={tenant.id}>
-              {tenant.name} ({tenant.planCode ?? 'manual'})
-            </option>
-          ))}
-        </select>
-      </div>
-      {entitlementSnapshotQuery.isError ? (
-        <div className="notice error" role="alert">
-          {entitlementSnapshotQuery.error instanceof Error
-            ? entitlementSnapshotQuery.error.message
-            : 'Failed to load tenant entitlements'}
-        </div>
-      ) : entitlementSnapshotQuery.isLoading ? (
-        <div className="empty-state"><p>Loading entitlements...</p></div>
-      ) : entitlementSnapshot ? (
-        <>
-          <div className="panel-caption" style={{ marginTop: 12 }}>
-            Current plan: <strong>{entitlementSnapshot.planCode ?? 'PRO'}</strong>
-          </div>
-          <div className="table-scroll" style={{ marginTop: 12 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Entitlement</th>
-                  <th>Category</th>
-                  <th>Enabled</th>
-                  <th>Source</th>
-                  <th>Override</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entitlementSnapshot.entitlements.map((entitlement) => {
-                  const override = entitlementSnapshot.overrides.find((item) => item.entitlementKey === entitlement.key) ?? null;
-                  const reasonDraft = overrideReasonDrafts[entitlement.key] ?? override?.reason ?? '';
-                  const expiryDraft = overrideExpiryDrafts[entitlement.key] ?? (override?.expiresAt ? override.expiresAt.slice(0, 10) : '');
-                  return (
-                    <tr key={entitlement.key}>
-                      <td><code>{entitlement.key}</code></td>
-                      <td>{entitlement.category}</td>
-                      <td>{entitlement.enabled ? 'Enabled' : 'Disabled'}</td>
-                      <td>{entitlement.source}</td>
-                      <td>
-                        {override ? (
-                          <div>
-                            <div>{override.enabled ? 'Forced on' : 'Forced off'}</div>
-                            <div className="muted-small">
-                              {override.reason ?? 'No reason'}
-                              {override.expiresAt ? ` · Expires ${new Date(override.expiresAt).toLocaleDateString()}` : ''}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="muted-small">No override</span>
-                        )}
-                      </td>
-                      <td>
-                        <div style={{ display: 'grid', gap: 8, minWidth: 280 }}>
-                          <input
-                            aria-label={`Reason for ${entitlement.key}`}
-                            placeholder="Override reason"
-                            value={reasonDraft}
-                            onChange={(event) => setOverrideReasonDrafts((current) => ({
-                              ...current,
-                              [entitlement.key]: event.target.value,
-                            }))}
-                          />
-                          <input
-                            aria-label={`Expiry for ${entitlement.key}`}
-                            type="date"
-                            value={expiryDraft}
-                            onChange={(event) => setOverrideExpiryDrafts((current) => ({
-                              ...current,
-                              [entitlement.key]: event.target.value,
-                            }))}
-                          />
-                          <div className="button-row compact">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={upsertEntitlementOverride.isPending || !selectedTenantId}
-                              onClick={() => upsertEntitlementOverride.mutate({
-                                tenantId: selectedTenantId,
-                                entitlementKey: entitlement.key,
-                                enabled: true,
-                                reason: reasonDraft,
-                                expiresAt: expiryDraft,
-                              })}
-                            >
-                              Force Enable
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={upsertEntitlementOverride.isPending || !selectedTenantId}
-                              onClick={() => upsertEntitlementOverride.mutate({
-                                tenantId: selectedTenantId,
-                                entitlementKey: entitlement.key,
-                                enabled: false,
-                                reason: reasonDraft,
-                                expiresAt: expiryDraft,
-                              })}
-                            >
-                              Force Disable
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={deleteEntitlementOverride.isPending || !override || !selectedTenantId}
-                              onClick={() => deleteEntitlementOverride.mutate({
-                                tenantId: selectedTenantId,
-                                entitlementKey: entitlement.key,
-                              })}
-                            >
-                              Clear Override
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : (
-        <div className="empty-state"><p>Select a tenant to inspect entitlements.</p></div>
-      )}
-      {(upsertEntitlementOverride.isError || deleteEntitlementOverride.isError) && (
-        <div className="notice error" role="alert">
-          {(upsertEntitlementOverride.error instanceof Error && upsertEntitlementOverride.error.message)
-            || (deleteEntitlementOverride.error instanceof Error && deleteEntitlementOverride.error.message)
-            || 'Failed to update entitlement override'}
         </div>
       )}
       <ConfirmDialog
@@ -699,7 +489,7 @@ function DemoRequestsPanel() {
         </button>
       </div>
       <p className="panel-caption">
-        Approved requests provision Enterprise-equivalent demo tenants by default while retaining demo expiry, invite, and quota controls.
+        Approved requests provision demo tenants with the standard access profile while retaining demo expiry, invite, and quota controls.
       </p>
       {requestsQuery.isError ? (
         <div className="notice error">{requestsQuery.error instanceof Error ? requestsQuery.error.message : 'Failed to load demo requests'}</div>
@@ -714,7 +504,7 @@ function DemoRequestsPanel() {
               <tr>
                 <th>Requester</th>
                 <th>Company</th>
-                <th>Provisioned Plan</th>
+                <th>Access Profile</th>
                 <th>Use Case</th>
                 <th>Status</th>
                 <th>Invite</th>
@@ -730,7 +520,7 @@ function DemoRequestsPanel() {
                     <div className="muted-small">{request.email}</div>
                   </td>
                   <td>{request.company}</td>
-                  <td>{request.provisionedPlanCode ?? 'ENTERPRISE'}</td>
+                  <td>{formatWorkspaceProfile(request.provisionedPlanCode)}</td>
                   <td>{request.useCase ?? '-'}</td>
                   <td>{request.status}</td>
                   <td>

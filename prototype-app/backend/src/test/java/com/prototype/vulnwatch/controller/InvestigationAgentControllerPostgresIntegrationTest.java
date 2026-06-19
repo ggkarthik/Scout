@@ -7,7 +7,6 @@ import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
@@ -110,18 +109,4 @@ class InvestigationAgentControllerPostgresIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    @Test
-    void proTenantIsDeniedFromRunningAgent() throws Exception {
-        Tenant tenant = tenantService.getDefaultTenant();
-        tenant.setPlanCode("PRO");
-        tenantRepository.save(tenant);
-
-        mockMvc.perform(authedPost("/api/cve-detail/CVE-2024-99104/investigation/run-agent")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"criteria\":[]}"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.investigation_agent"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
-    }
 }

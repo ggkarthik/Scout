@@ -17,6 +17,7 @@ public class TenantService {
 
     public static final String DEFAULT_TENANT_NAME = "Default Workspace";
     public static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
+    public static final String DEFAULT_PLAN_CODE = "ENTERPRISE";
 
     private final TenantRepository tenantRepository;
     private final TenantSchemaService tenantSchemaService;
@@ -144,7 +145,7 @@ public class TenantService {
 
     private String normalizePlanCode(String planCode) {
         if (planCode == null || planCode.isBlank()) {
-            return TenantEntitlementService.PLAN_PRO;
+            return DEFAULT_PLAN_CODE;
         }
         return planCode.trim().toUpperCase();
     }

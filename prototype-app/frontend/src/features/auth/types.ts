@@ -21,7 +21,6 @@ export type ActorContext = {
   supportAccessMode?: string | null;
   supportGrantExpiresAt?: string | null;
   planCode?: string | null;
-  entitlements?: Record<string, boolean> | null;
   demo?: boolean | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;

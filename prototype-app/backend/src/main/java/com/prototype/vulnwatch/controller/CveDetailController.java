@@ -20,9 +20,7 @@ import com.prototype.vulnwatch.service.CveInvestigationSummaryService;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryPersistenceService;
 import com.prototype.vulnwatch.service.CveWorkflowFacade;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
-import com.prototype.vulnwatch.service.EntitlementGuard;
 import com.prototype.vulnwatch.service.InvestigationService;
-import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -61,7 +59,6 @@ public class CveDetailController {
     private final CveAiActionsService aiActionsService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final WorkspaceService workspaceService;
-    private final EntitlementGuard entitlementGuard;
     private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
     private final FixRecordService fixRecordService;
     private final com.prototype.vulnwatch.service.InvestigationRunbookService investigationRunbookService;
@@ -231,8 +228,6 @@ public class CveDetailController {
             @PathVariable String cveId,
             @RequestBody Map<String, Object> request) {
         assertDemoAllowsAiAction();
-        assertEntitled(TenantEntitlementService.AI_INVESTIGATION_SUMMARY,
-                "AI investigation summaries are available on the Enterprise plan.");
         CveInvestigationSummaryResponse summary = aiSummaryService.generateAiSummary(cveId, request);
         summaryPersistenceService.saveSummary(cveId, request, summary, "ai");
         return ResponseEntity.ok(summary);
@@ -242,10 +237,6 @@ public class CveDetailController {
     public ResponseEntity<SavedCveInvestigationSummaryResponse> getSavedInvestigationSummary(
             @PathVariable String cveId) {
         SavedCveInvestigationSummaryResponse savedSummary = summaryPersistenceService.getSavedSummary(cveId);
-        if ("ai".equalsIgnoreCase(savedSummary.mode())) {
-            assertEntitled(TenantEntitlementService.AI_INVESTIGATION_SUMMARY,
-                    "AI investigation summaries are available on the Enterprise plan.");
-        }
         return ResponseEntity.ok(savedSummary);
     }
 
@@ -288,8 +279,6 @@ public class CveDetailController {
             @org.springframework.web.bind.annotation.RequestBody(required = false) GenerateFixesRequest body
     ) {
         assertDemoAllowsAiAction();
-        assertEntitled(TenantEntitlementService.AI_FIX_GENERATION,
-                "AI fix generation is available on the Enterprise plan.");
         com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
         java.util.List<GenerateFixesSoftwareEntry> extra = body != null && body.additionalSoftware() != null
                 ? body.additionalSoftware() : java.util.List.of();
@@ -322,8 +311,6 @@ public class CveDetailController {
      */
     @GetMapping("/{cveId}/ai-solution")
     public ResponseEntity<AiSolutionResponse> getSavedAiSolution(@PathVariable String cveId) {
-        assertEntitled(TenantEntitlementService.AI_SOLUTION_GENERATION,
-                "AI remediation recommendations are available on the Enterprise plan.");
         java.util.Optional<CveAiSolutionPersistenceService.SavedAiSolution> saved =
                 aiSolutionPersistenceService.getSavedAiSolution(cveId);
         if (saved.isEmpty()) return ResponseEntity.notFound().build();
@@ -350,8 +337,6 @@ public class CveDetailController {
             @PathVariable String cveId,
             @RequestBody Map<String, Object> recommendationContext) {
         assertDemoAllowsAiAction();
-        assertEntitled(TenantEntitlementService.AI_SOLUTION_GENERATION,
-                "AI remediation recommendations are available on the Enterprise plan.");
         return ResponseEntity.ok(aiSolutionService.generate(cveId, recommendationContext));
     }
 
@@ -361,8 +346,6 @@ public class CveDetailController {
      */
     @GetMapping("/{cveId}/ai-actions")
     public ResponseEntity<AiActionsResponse> getSavedAiActions(@PathVariable String cveId) {
-        assertEntitled(TenantEntitlementService.AI_REQUIRED_ACTIONS,
-                "AI required actions are available on the Enterprise plan.");
         return aiSolutionPersistenceService.getSavedAiActions(cveId)
                 .map(saved -> {
                     try {
@@ -394,8 +377,6 @@ public class CveDetailController {
             @PathVariable String cveId,
             @RequestBody Map<String, Object> context) {
         assertDemoAllowsAiAction();
-        assertEntitled(TenantEntitlementService.AI_REQUIRED_ACTIONS,
-                "AI required actions are available on the Enterprise plan.");
         return ResponseEntity.ok(aiActionsService.generate(cveId, context));
     }
 
@@ -761,12 +742,6 @@ public class CveDetailController {
             @PathVariable String cveId,
             @RequestBody com.prototype.vulnwatch.dto.AgentRunRequest request) {
         assertDemoAllowsAiAction();
-        assertEntitled(TenantEntitlementService.AI_INVESTIGATION_AGENT,
-                "AI investigation agent workflows are available on the Enterprise plan.");
         return ResponseEntity.ok(investigationAgentService.runAgent(cveId, request));
-    }
-
-    private void assertEntitled(String entitlementKey, String message) {
-        entitlementGuard.assertEnabled(workspaceService.getWorkspace(), entitlementKey, message);
     }
 }
