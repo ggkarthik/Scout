@@ -47,8 +47,7 @@ class AuthContextControllerPostgresIntegrationTest {
     void authContextWithApiKeyReturnsAnonymousActor() throws Exception {
         mockMvc.perform(authedGet("/api/auth/context"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.creator").value(false))
-                .andExpect(jsonPath("$.entitlements").isMap());
+                .andExpect(jsonPath("$.creator").value(false));
     }
 
     @Test

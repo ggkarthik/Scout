@@ -326,7 +326,7 @@ public class DemoLifecycleService {
         Tenant tenant = tenantService.createTenant(
                 nameCandidate,
                 candidate,
-                TenantEntitlementService.PLAN_ENTERPRISE,
+                TenantService.DEFAULT_PLAN_CODE,
                 "demo-request:" + request.getId());
         Instant expiresAt = Instant.now().plus(7, ChronoUnit.DAYS);
         tenant.setDemoExpiresAt(expiresAt);
@@ -435,10 +435,10 @@ public class DemoLifecycleService {
 
     private DemoRequestResponse toRequestResponse(DemoRequest request) {
         String provisionedPlanCode = request.getTenantId() == null
-                ? TenantEntitlementService.PLAN_ENTERPRISE
+                ? TenantService.DEFAULT_PLAN_CODE
                 : tenantRepository.findById(request.getTenantId())
                 .map(Tenant::getPlanCode)
-                .orElse(TenantEntitlementService.PLAN_ENTERPRISE);
+                .orElse(TenantService.DEFAULT_PLAN_CODE);
         return new DemoRequestResponse(
                 request.getId(),
                 request.getEmail(),

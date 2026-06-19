@@ -127,42 +127,6 @@ export type TenantCreateRequest = {
   billingRef?: string;
 };
 
-export type TenantEntitlement = {
-  key: string;
-  category: string;
-  enabled: boolean;
-  source: string;
-  planCode: string | null;
-  config: Record<string, unknown> | null;
-};
-
-export type TenantEntitlementOverride = {
-  id: string;
-  tenantId: string;
-  entitlementKey: string;
-  enabled: boolean;
-  config: Record<string, unknown> | null;
-  reason: string | null;
-  expiresAt: string | null;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string | null;
-};
-
-export type TenantEntitlementSnapshot = {
-  tenantId: string;
-  planCode: string | null;
-  entitlements: TenantEntitlement[];
-  overrides: TenantEntitlementOverride[];
-};
-
-export type TenantEntitlementOverrideRequest = {
-  enabled: boolean;
-  config?: Record<string, unknown> | null;
-  reason?: string;
-  expiresAt?: string | null;
-};
-
 export type ServiceAccount = {
   id: string;
   tenantId: string | null;
@@ -217,7 +181,6 @@ export type AuthContext = {
   supportAccessMode?: string | null;
   supportGrantExpiresAt?: string | null;
   planCode?: string | null;
-  entitlements?: Record<string, boolean> | null;
   demo?: boolean | null;
   demoExpiresAt?: string | null;
   demoDaysRemaining?: number | null;

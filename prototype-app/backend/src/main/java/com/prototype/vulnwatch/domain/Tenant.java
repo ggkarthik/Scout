@@ -30,7 +30,7 @@ public class Tenant {
     private String status = "ACTIVE";
 
     @Column(nullable = false, length = 64)
-    private String planCode = "PRO";
+    private String planCode = "ENTERPRISE";
 
     @Column(length = 255)
     private String billingRef;

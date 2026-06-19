@@ -2,7 +2,6 @@ package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public record AuthContextResponse(
@@ -19,11 +18,10 @@ public record AuthContextResponse(
         String supportAccessMode,
         Instant supportGrantExpiresAt,
         String planCode,
-        Map<String, Boolean> entitlements,
         Boolean demo,
         Instant demoExpiresAt,
         Long demoDaysRemaining,
-        Map<String, Boolean> demoCapabilities,
-        Map<String, Long> demoUsage
+        java.util.Map<String, Boolean> demoCapabilities,
+        java.util.Map<String, Long> demoUsage
 ) {
 }

@@ -552,7 +552,6 @@ function actorFromPersona(persona: TestPersona): ActorContext {
     actingAsPlatformOwner: false,
     sensitiveActionConfirmationRequired: false,
     planCode: null,
-    entitlements: {},
     demo: false,
     demoExpiresAt: null,
     demoDaysRemaining: null,
