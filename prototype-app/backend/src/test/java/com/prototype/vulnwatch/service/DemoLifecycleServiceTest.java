@@ -74,7 +74,7 @@ class DemoLifecycleServiceTest {
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
         when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
-        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co", "example-co", TenantService.DEFAULT_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -96,10 +96,10 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertNotNull(response.tenantId());
-        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
+        assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
         assertEquals("SENT", response.latestInvite().status());
         assertNotNull(response.latestInvite().lastSentAt());
-        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, tenant.getPlanCode());
+        assertEquals(TenantService.DEFAULT_PLAN_CODE, tenant.getPlanCode());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
     }
 
@@ -112,7 +112,7 @@ class DemoLifecycleServiceTest {
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
         when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
-        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co", "example-co", TenantService.DEFAULT_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -152,7 +152,7 @@ class DemoLifecycleServiceTest {
         when(tenantRepository.existsByNameIgnoreCase("Example Co (2)")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(true);
         when(tenantRepository.existsBySlugIgnoreCase("example-co-2")).thenReturn(false);
-        when(tenantService.createTenant("Example Co (2)", "example-co-2", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co (2)", "example-co-2", TenantService.DEFAULT_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -174,7 +174,7 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertEquals("Example Co (2)", response.latestInvite().tenantName());
-        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
+        assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
     }
 
     @Test
@@ -186,7 +186,7 @@ class DemoLifecycleServiceTest {
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
         when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
         when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
-        when(tenantService.createTenant("Example Co", "example-co", TenantEntitlementService.PLAN_ENTERPRISE, "demo-request:" + request.getId()))
+        when(tenantService.createTenant("Example Co", "example-co", TenantService.DEFAULT_PLAN_CODE, "demo-request:" + request.getId()))
                 .thenReturn(tenant);
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
@@ -207,7 +207,7 @@ class DemoLifecycleServiceTest {
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
         assertEquals("ERROR", response.status());
-        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.provisionedPlanCode());
+        assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
         assertEquals("ERROR", response.latestInvite().status());
         assertNull(response.latestInvite().lastSentAt());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
@@ -225,7 +225,7 @@ class DemoLifecycleServiceTest {
         var response = service.statusForTenant(tenant);
 
         assertTrue(response.demo());
-        assertEquals(TenantEntitlementService.PLAN_ENTERPRISE, response.planCode());
+        assertEquals(TenantService.DEFAULT_PLAN_CODE, response.planCode());
         assertEquals(Boolean.TRUE, response.demoCapabilities().get("aiActions"));
     }
 
@@ -468,7 +468,7 @@ class DemoLifecycleServiceTest {
         tenant.setId(UUID.randomUUID());
         tenant.setName("Example Co");
         tenant.setSlug("example-co");
-        tenant.setPlanCode(TenantEntitlementService.PLAN_ENTERPRISE);
+        tenant.setPlanCode(TenantService.DEFAULT_PLAN_CODE);
         return tenant;
     }
 

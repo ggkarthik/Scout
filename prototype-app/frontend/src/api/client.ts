@@ -90,9 +90,6 @@ import type {
   TenantInviteRequest,
   TenantInviteValidationResponse,
   TenantCreateRequest,
-  TenantEntitlementOverride,
-  TenantEntitlementOverrideRequest,
-  TenantEntitlementSnapshot,
   TenantMember,
   TenantMemberRequest,
   TenantMemberUpdateRequest
@@ -1292,27 +1289,6 @@ export const api = {
     request<void>(`/platform/tenants/${encodeURIComponent(tenantId)}`, {
       method: 'DELETE'
     }),
-  getTenantEntitlements: (tenantId: string) =>
-    request<TenantEntitlementSnapshot>(`/platform/tenants/${encodeURIComponent(tenantId)}/entitlements`),
-  upsertTenantEntitlementOverride: (
-    tenantId: string,
-    entitlementKey: string,
-    payload: TenantEntitlementOverrideRequest
-  ) =>
-    request<TenantEntitlementOverride>(
-      `/platform/tenants/${encodeURIComponent(tenantId)}/entitlement-overrides/${encodeURIComponent(entitlementKey)}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      }
-    ),
-  deleteTenantEntitlementOverride: (tenantId: string, entitlementKey: string) =>
-    request<void>(
-      `/platform/tenants/${encodeURIComponent(tenantId)}/entitlement-overrides/${encodeURIComponent(entitlementKey)}`,
-      {
-        method: 'DELETE'
-      }
-    ),
   listPlatformUsers: () => request<PlatformUser[]>('/platform/users'),
   listInventoryConnectorHealth: () => request<InventoryConnectorHealth[]>('/platform/inventory-connectors/health'),
   upsertPlatformUser: (payload: PlatformUserRequest) =>
