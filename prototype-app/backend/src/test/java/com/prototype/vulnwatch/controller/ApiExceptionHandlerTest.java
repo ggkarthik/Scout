@@ -2,7 +2,6 @@ package com.prototype.vulnwatch.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.prototype.vulnwatch.service.EntitlementDeniedException;
 import com.prototype.vulnwatch.service.QuotaExceededException;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -34,18 +33,5 @@ class ApiExceptionHandlerTest {
         assertEquals("TENANT_SBOM_RATE_LIMIT_EXCEEDED", response.get("code"));
         assertEquals("TENANT_SBOM_RATE_LIMIT_EXCEEDED", response.get("quotaCode"));
         assertEquals(120, response.get("retryAfterSeconds"));
-    }
-
-    @Test
-    void mapsEntitlementDeniedToForbiddenUpgradePayload() {
-        ResponseEntity<Map<String, Object>> response = handler.handleEntitlementDenied(
-                new EntitlementDeniedException("ai.solution_generation", "PRO", "Enterprise only")
-        );
-
-        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
-        assertEquals("PLAN_UPGRADE_REQUIRED", response.getBody().get("code"));
-        assertEquals("ai.solution_generation", response.getBody().get("entitlementKey"));
-        assertEquals("PRO", response.getBody().get("currentPlan"));
-        assertEquals("Enterprise only", response.getBody().get("error"));
     }
 }

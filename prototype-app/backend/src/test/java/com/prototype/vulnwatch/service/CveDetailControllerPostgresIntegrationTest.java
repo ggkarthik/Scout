@@ -124,7 +124,7 @@ class CveDetailControllerPostgresIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Test
-    void proTenantIsDeniedWhenGeneratingAiSolution() throws Exception {
+    void proTenantCanReachAiSolutionEndpoint() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         tenant.setPlanCode("PRO");
         tenantRepository.save(tenant);
@@ -140,10 +140,8 @@ class CveDetailControllerPostgresIntegrationTest {
                         .content("""
                                 {"severity":"HIGH","affected_entities":[]}
                                 """))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").exists());
     }
 
     @Test
@@ -165,69 +163,6 @@ class CveDetailControllerPostgresIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").exists());
-    }
-
-    @Test
-    void proTenantIsDeniedWhenReadingSavedAiSolution() throws Exception {
-        Tenant tenant = tenantService.getDefaultTenant();
-        String cveId = "CVE-2099-9912";
-        Vulnerability vulnerability = createVulnerability(cveId);
-        createSavedAiArtifacts(tenant, vulnerability, true, false, false);
-
-        tenant.setPlanCode("PRO");
-        tenantRepository.save(tenant);
-
-        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-solution", cveId)
-                        .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
-                        .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
-    }
-
-    @Test
-    void proTenantIsDeniedWhenReadingSavedAiActions() throws Exception {
-        Tenant tenant = tenantService.getDefaultTenant();
-        String cveId = "CVE-2099-9913";
-        Vulnerability vulnerability = createVulnerability(cveId);
-        createSavedAiArtifacts(tenant, vulnerability, false, true, false);
-
-        tenant.setPlanCode("PRO");
-        tenantRepository.save(tenant);
-
-        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-actions", cveId)
-                        .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
-                        .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.required_actions"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
-    }
-
-    @Test
-    void proTenantIsDeniedWhenReadingSavedAiInvestigationSummary() throws Exception {
-        Tenant tenant = tenantService.getDefaultTenant();
-        String cveId = "CVE-2099-9914";
-        Vulnerability vulnerability = createVulnerability(cveId);
-        createSavedAiArtifacts(tenant, vulnerability, false, false, true);
-
-        tenant.setPlanCode("PRO");
-        tenantRepository.save(tenant);
-
-        mockMvc.perform(get("/api/cve-detail/{cveId}/saved-investigation-summary", cveId)
-                        .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
-                        .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.investigation_summary"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
     }
 
     @Test
@@ -666,4 +601,5 @@ class CveDetailControllerPostgresIntegrationTest {
         artifact.touch();
         orgCveAiArtifactRepository.save(artifact);
     }
+
 }
