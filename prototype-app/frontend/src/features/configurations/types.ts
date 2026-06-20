@@ -12,6 +12,14 @@ export type RiskPolicy = {
   autoCloseEnabled: boolean;
   autoCloseAssetIdentifier?: string;
   autoCloseAfterDays: number;
+  autoCloseRequiredConsecutiveMisses: number;
+  autoCloseNotObservedEnabled: boolean;
+  autoCloseComponentRemovedEnabled: boolean;
+  autoCloseAssetRetiredEnabled: boolean;
+  autoCloseSourceDisabledEnabled: boolean;
+  autoCloseDuplicateEnabled: boolean;
+  autoCloseRunIntervalDays: number;
+  autoCloseLastRunAt?: string;
   findingGenerationMode: 'AUTO' | 'MANUAL';
   findingsScoreConfig?: string;
   // Triage urgency signal weights — control how findings/CVEs are ranked

@@ -86,6 +86,7 @@ public class FindingProjectionQueryService {
                     FROM finding_list_projection
                     WHERE 1=1
                     """ + sqlFilter.whereClause() + cursorClause + """
+                    
                     ORDER BY risk_score DESC, coalesce(due_at, :maxDueAt) ASC, updated_at DESC, finding_id ASC
                     LIMIT :limit
                     """,

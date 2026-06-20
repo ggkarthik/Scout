@@ -85,6 +85,13 @@ public class GithubApiClient {
     ) {
     }
 
+    public record GithubRepoFileRef(
+            String path,
+            String sha,
+            long size
+    ) {
+    }
+
     private final ObjectMapper objectMapper;
     private final GithubTokenProvider githubTokenProvider;
     private final OutboundHttpClient outboundHttpClient;
@@ -160,6 +167,96 @@ public class GithubApiClient {
                 contentLength,
                 endpoint
         );
+    }
+
+    public List<GithubRepoFileRef> listRepoBomFiles(String owner, String repo, com.prototype.vulnwatch.domain.BomType bomType) throws IOException {
+        String normalizedOwner = normalize(owner);
+        String normalizedRepo = normalize(repo);
+        assertAllowed(normalizedOwner, normalizedRepo);
+
+        String defaultBranch = fetchDefaultBranch(normalizedOwner, normalizedRepo);
+        String endpoint = UriComponentsBuilder.fromHttpUrl(baseUrl)
+                .pathSegment("repos", normalizedOwner, normalizedRepo, "git", "trees", defaultBranch)
+                .queryParam("recursive", "1")
+                .build()
+                .toUriString();
+
+        ResponseEntity<String> response = exchangeWithRetry(endpoint, String.class, "GitHub repo tree API");
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            throw new IOException("Failed to parse GitHub repo tree response", e);
+        }
+        JsonNode tree = root.path("tree");
+        if (!tree.isArray()) {
+            return List.of();
+        }
+
+        List<String> suffixes = bomFileSuffixes(bomType);
+        List<GithubRepoFileRef> matches = new ArrayList<>();
+        for (JsonNode entry : tree) {
+            if (!"blob".equals(entry.path("type").asText(""))) continue;
+            String filePath = entry.path("path").asText("");
+            if (filePath.isBlank()) continue;
+            String filename = filePath.contains("/") ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+            String lowerFilename = filename.toLowerCase(java.util.Locale.ROOT);
+            boolean matched = suffixes.stream().anyMatch(lowerFilename::endsWith);
+            if (matched) {
+                matches.add(new GithubRepoFileRef(filePath, entry.path("sha").asText(null), entry.path("size").asLong(0)));
+            }
+        }
+        return matches;
+    }
+
+    public byte[] fetchRepoFileContent(String owner, String repo, String filePath) throws IOException {
+        String normalizedOwner = normalize(owner);
+        String normalizedRepo = normalize(repo);
+        assertAllowed(normalizedOwner, normalizedRepo);
+
+        String endpoint = UriComponentsBuilder.fromHttpUrl(baseUrl)
+                .pathSegment("repos", normalizedOwner, normalizedRepo, "contents", filePath)
+                .build()
+                .toUriString();
+
+        ResponseEntity<String> response = exchangeWithRetry(endpoint, String.class, "GitHub file content API");
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            throw new IOException("Failed to parse GitHub file content response", e);
+        }
+        String encoding = root.path("encoding").asText("");
+        String encodedContent = root.path("content").asText("");
+        if ("base64".equals(encoding)) {
+            String cleaned = encodedContent.replaceAll("\\s+", "");
+            return Base64.getDecoder().decode(cleaned);
+        }
+        throw new IOException("Unsupported file content encoding from GitHub: " + encoding);
+    }
+
+    private String fetchDefaultBranch(String owner, String repo) throws IOException {
+        String endpoint = UriComponentsBuilder.fromHttpUrl(baseUrl)
+                .pathSegment("repos", owner, repo)
+                .build()
+                .toUriString();
+        ResponseEntity<String> response = exchangeWithRetry(endpoint, String.class, "GitHub repo metadata API");
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            return "main";
+        }
+        String branch = root.path("default_branch").asText("main");
+        return branch.isBlank() ? "main" : branch;
+    }
+
+    private List<String> bomFileSuffixes(com.prototype.vulnwatch.domain.BomType bomType) {
+        return switch (bomType) {
+            case CBOM -> List.of("cbom.json", "cbom.xml");
+            case AI_BOM -> List.of("aibom.json", "aibom.xml", "ai-bom.json", "ai-bom.xml", "ml-bom.json", "ml-bom.xml");
+            default -> List.of();
+        };
     }
 
     public List<GithubRepositoryRef> listAccountRepositories(String account) throws IOException {

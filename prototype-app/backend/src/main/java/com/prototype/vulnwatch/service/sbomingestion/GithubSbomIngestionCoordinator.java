@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service.sbomingestion;
 
 import com.prototype.vulnwatch.client.GithubApiClient;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.GithubRepoIngestionResult;
@@ -289,6 +290,100 @@ public class GithubSbomIngestionCoordinator {
         );
     }
 
+    public GithubSbomIngestionBatchResponse ingestBomFilesFromGithub(Tenant tenant, GithubSbomIngestionRequest request) throws IOException {
+        String owner = normalize(request.owner());
+        String repo = normalize(request.repo() == null ? "" : request.repo());
+        if (owner.isBlank()) {
+            throw new IOException("GitHub owner is required");
+        }
+        if (repo.isBlank()) {
+            throw new IOException("GitHub repository is required for CBOM/AIBOM file scan");
+        }
+
+        BomType bomType = bomTypeForPath(request.path());
+        AssetType assetType = request.assetType() == null ? AssetType.APPLICATION : request.assetType();
+        String assetName = resolveSingleGithubAssetName(owner, repo, request.assetName());
+        String assetIdentifier = resolveSingleGithubAssetIdentifier(owner, repo, request.assetIdentifier());
+
+        List<GithubApiClient.GithubRepoFileRef> files;
+        try {
+            files = githubApiClient.listRepoBomFiles(owner, repo, bomType);
+        } catch (IOException ex) {
+            sbomUploadSupportService.recordGithubFetchFailureEvidence(
+                    tenant, assetType, assetName, assetIdentifier, owner, repo,
+                    owner + "/" + repo + " (tree scan)", ex.getMessage());
+            throw ex;
+        }
+
+        if (files.isEmpty()) {
+            throw new IOException("No " + bomType.name() + " files found in repository: " + owner + "/" + repo);
+        }
+
+        int componentsIngested = 0;
+        int findingsGenerated = 0;
+        int filesSucceeded = 0;
+        int filesFailed = 0;
+        List<GithubRepoIngestionResult> results = new ArrayList<>();
+
+        for (GithubApiClient.GithubRepoFileRef file : files) {
+            try {
+                byte[] content = githubApiClient.fetchRepoFileContent(owner, repo, file.path());
+                sbomFetchGuardService.ensurePayloadWithinLimit(content.length);
+
+                String reference = owner + "/" + repo + "/" + file.path();
+                Map<String, Object> evidence = new LinkedHashMap<>();
+                evidence.put("ingestionMode", "github-repo-file");
+                evidence.put("owner", owner);
+                evidence.put("repo", repo);
+                evidence.put("filePath", file.path());
+                evidence.put("fileSha", file.sha());
+                evidence.put("fetchedAt", Instant.now());
+
+                SbomIngestionSourceMetadata metadata = new SbomIngestionSourceMetadata(
+                        "GITHUB_REPO_FILE",
+                        "github",
+                        reference,
+                        null,
+                        null,
+                        "application/json",
+                        (long) content.length,
+                        sbomUploadSupportService.toJson(evidence)
+                );
+
+                BomIngestionResultResponse result = bomIngestionOrchestrator.ingestGithubRepoBomFile(
+                        tenant, bomType, assetType, assetName, assetIdentifier, content, metadata);
+                componentsIngested += result.componentCount();
+                findingsGenerated += result.findingsGenerated();
+                filesSucceeded++;
+                results.add(new GithubRepoIngestionResult(owner, repo, file.path(), "SUCCESS",
+                        result.componentCount(), result.findingsGenerated(), "Ingested successfully"));
+            } catch (IOException ex) {
+                filesFailed++;
+                results.add(new GithubRepoIngestionResult(owner, repo, file.path(), "FAILURE",
+                        null, null, ex.getMessage()));
+            }
+        }
+
+        if (filesSucceeded == 0) {
+            String lastError = results.isEmpty() ? "No files could be ingested"
+                    : results.get(results.size() - 1).message();
+            throw new IOException("Failed to ingest any " + bomType.name() + " files from " + owner + "/" + repo + ". " + lastError);
+        }
+
+        return new GithubSbomIngestionBatchResponse(
+                files.size(), results.size(), filesSucceeded, filesFailed,
+                componentsIngested, findingsGenerated, results);
+    }
+
+    private BomType bomTypeForPath(String path) {
+        if (path == null) return BomType.SBOM;
+        return switch (path.trim().toLowerCase(Locale.ROOT)) {
+            case "repository/cbom" -> BomType.CBOM;
+            case "repository/aibom" -> BomType.AI_BOM;
+            default -> BomType.SBOM;
+        };
+    }
+
     private BomIngestionResultResponse ingestFromGithubRepository(
             Tenant tenant,
             String owner,
@@ -340,7 +435,7 @@ public class GithubSbomIngestionCoordinator {
 
         return bomIngestionOrchestrator.ingestGithubRepository(
                 tenant,
-                new GithubSbomIngestionRequest(owner, repo, false, assetType, assetName, assetIdentifier),
+                new GithubSbomIngestionRequest(owner, repo, false, assetType, assetName, assetIdentifier, null),
                 content,
                 metadata
         );

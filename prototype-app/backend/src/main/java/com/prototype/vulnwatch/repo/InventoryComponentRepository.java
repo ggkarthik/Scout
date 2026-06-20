@@ -99,8 +99,8 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
               )
               and (
                 :componentVersion is null
-                or lower(coalesce(c.normalizedVersion, c.version, '')) = lower(:componentVersion)
-                or lower(coalesce(c.version, '')) = lower(:componentVersion)
+                or lower(coalesce(c.normalizedVersion, c.version, '')) = lower(cast(:componentVersion as string))
+                or lower(coalesce(c.version, '')) = lower(cast(:componentVersion as string))
               )
             """)
     List<InventoryComponent> findActiveByTenantAssetAndComponentNameVersion(

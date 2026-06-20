@@ -91,7 +91,8 @@ public class IngestionJobExecutionService {
                         payload.includeAllRepos(),
                         payload.assetType(),
                         payload.assetName(),
-                        payload.assetIdentifier()
+                        payload.assetIdentifier(),
+                        payload.path()
                 )
         );
         Map<String, Object> result = new LinkedHashMap<>();

@@ -36,6 +36,10 @@ public class GithubSbomSourceService {
     public static final String PATH_GHCR_ATTESTATIONS = "ghcr/attestations";
     public static final String SYNC_TYPE_GITHUB_REPOSITORY_SBOM = "GITHUB_REPOSITORY_SBOM";
     public static final String SYNC_TYPE_GITHUB_GHCR_SBOM = "GITHUB_GHCR_SBOM";
+    public static final String PATH_REPOSITORY_CBOM = "repository/cbom";
+    public static final String PATH_REPOSITORY_AIBOM = "repository/aibom";
+    public static final String SYNC_TYPE_GITHUB_REPOSITORY_CBOM = "GITHUB_REPOSITORY_CBOM";
+    public static final String SYNC_TYPE_GITHUB_REPOSITORY_AIBOM = "GITHUB_REPOSITORY_AIBOM";
     private static final String SOURCE_STATUS_QUEUED = "QUEUED";
     private static final String SOURCE_STATUS_RUNNING = "RUNNING";
 
@@ -145,7 +149,8 @@ public class GithubSbomSourceService {
         if (normalizedOwner.isBlank()) {
             throw new IllegalArgumentException("GitHub owner is required");
         }
-        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(SYNC_TYPE_GITHUB_REPOSITORY_SBOM, tenant));
+        String syncType = isBomFileScanPath(normalizedRequest.path()) ? syncTypeForPath(normalizedRequest.path()) : SYNC_TYPE_GITHUB_REPOSITORY_SBOM;
+        SyncRun run = transactionTemplate.execute(status -> createQueuedRun(syncType, tenant));
         ingestionJobService.enqueueGithubRepositoryJob(
                 tenant,
                 normalizedRequest,
@@ -199,7 +204,8 @@ public class GithubSbomSourceService {
                                 false,
                                 AssetType.APPLICATION,
                                 source.getAssetName(),
-                                source.getAssetIdentifier()
+                                source.getAssetIdentifier(),
+                                source.getPath()
                         ),
                         claimed.runId(),
                         source.getId(),
@@ -241,6 +247,18 @@ public class GithubSbomSourceService {
                     SbomIngestionService.GithubGhcrIngestionSummary summary =
                             sbomIngestionService.ingestAllFromGithubContainerRegistry(tenant, snapshot.owner());
                     completeGhcrSourceRun(sourceId, runId, summary);
+                } else if (isBomFileScanPath(snapshot.path())) {
+                    var summary = sbomIngestionService.ingestBomFilesFromGithub(tenant,
+                            new GithubSbomIngestionRequest(
+                                    snapshot.owner(),
+                                    snapshot.repo(),
+                                    false,
+                                    AssetType.APPLICATION,
+                                    snapshot.assetName(),
+                                    snapshot.assetIdentifier(),
+                                    snapshot.path()
+                            ));
+                    completeRepositorySourceRun(sourceId, runId, summary);
                 } else {
                     var summary = sbomIngestionService.ingestFromGithub(tenant, new GithubSbomIngestionRequest(
                             snapshot.owner(),
@@ -248,7 +266,8 @@ public class GithubSbomSourceService {
                             false,
                             AssetType.APPLICATION,
                             snapshot.assetName(),
-                            snapshot.assetIdentifier()
+                            snapshot.assetIdentifier(),
+                            null
                     ));
                     completeRepositorySourceRun(sourceId, runId, summary);
                 }
@@ -281,8 +300,13 @@ public class GithubSbomSourceService {
             markStandaloneRunRunning(runId);
             try {
                 Tenant tenant = workspaceService.getWorkspace();
-                var summary = sbomIngestionService.ingestFromGithub(tenant, request);
-                completeStandaloneRepositoryRun(runId, request, summary);
+                if (isBomFileScanPath(request.path())) {
+                    var summary = sbomIngestionService.ingestBomFilesFromGithub(tenant, request);
+                    completeStandaloneRepositoryRun(runId, request, summary);
+                } else {
+                    var summary = sbomIngestionService.ingestFromGithub(tenant, request);
+                    completeStandaloneRepositoryRun(runId, request, summary);
+                }
             } catch (Exception e) {
                 failStandaloneRun(runId, e.getMessage());
             }
@@ -352,7 +376,10 @@ public class GithubSbomSourceService {
             return PATH_REPOSITORY_SBOM;
         }
         String normalized = path.trim().toLowerCase(Locale.ROOT);
-        return isGhcrSourcePath(normalized) ? PATH_GHCR_ATTESTATIONS : PATH_REPOSITORY_SBOM;
+        if (isGhcrSourcePath(normalized)) return PATH_GHCR_ATTESTATIONS;
+        if (normalized.equals(PATH_REPOSITORY_CBOM)) return PATH_REPOSITORY_CBOM;
+        if (normalized.equals(PATH_REPOSITORY_AIBOM)) return PATH_REPOSITORY_AIBOM;
+        return PATH_REPOSITORY_SBOM;
     }
 
     private boolean isGhcrSourcePath(String path) {
@@ -378,12 +405,20 @@ public class GithubSbomSourceService {
                 request.includeAllRepos(),
                 AssetType.APPLICATION,
                 request.assetName(),
-                request.assetIdentifier()
+                request.assetIdentifier(),
+                request.path()
         );
     }
 
     private String syncTypeForPath(String path) {
-        return isGhcrSourcePath(path) ? SYNC_TYPE_GITHUB_GHCR_SBOM : SYNC_TYPE_GITHUB_REPOSITORY_SBOM;
+        if (isGhcrSourcePath(path)) return SYNC_TYPE_GITHUB_GHCR_SBOM;
+        if (PATH_REPOSITORY_CBOM.equalsIgnoreCase(path)) return SYNC_TYPE_GITHUB_REPOSITORY_CBOM;
+        if (PATH_REPOSITORY_AIBOM.equalsIgnoreCase(path)) return SYNC_TYPE_GITHUB_REPOSITORY_AIBOM;
+        return SYNC_TYPE_GITHUB_REPOSITORY_SBOM;
+    }
+
+    private boolean isBomFileScanPath(String path) {
+        return PATH_REPOSITORY_CBOM.equalsIgnoreCase(path) || PATH_REPOSITORY_AIBOM.equalsIgnoreCase(path);
     }
 
     private ClaimedGithubSourceRun claimSourceRun(Tenant tenant, UUID sourceId, boolean requireDue, boolean failWhenUnavailable) {

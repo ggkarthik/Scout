@@ -164,43 +164,115 @@ function BomDetailPanel({ bomId, onClose }: { bomId: string; onClose: () => void
 
       {detail && (
         <>
-          <div className="bom-detail-meta panel">
-            <div className="panel-header">
-              <h4>BOM Details</h4>
+          {/* ── Identity header ─────────────────────────────────────────── */}
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <BomTypeTag bomType={detail.bomType} />
+                <StatusTag status={detail.status} />
+                <SupportTag supportLevel={detail.supportLevel} supported={detail.supported} />
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="panel-caption" style={{ fontSize: 12 }}>
+                  {detail.format} {detail.formatVersion} · {detail.specFamily} · {detail.documentFormat}
+                </span>
+              </div>
             </div>
-            <dl className="detail-grid">
-              <dt>BOM Type</dt><dd><BomTypeTag bomType={detail.bomType} /></dd>
-              <dt>Status</dt><dd><StatusTag status={detail.status} /></dd>
-              <dt>Format</dt><dd>{detail.format} {detail.formatVersion}</dd>
-              <dt>Spec</dt><dd>{detail.specFamily} · {detail.documentFormat}</dd>
-              <dt>Support</dt><dd><SupportTag supportLevel={detail.supportLevel} supported={detail.supported} /></dd>
-              <dt>Serial</dt><dd><code>{detail.serialNumber ?? '—'}</code></dd>
-              <dt>Supplier</dt><dd>{detail.supplier ?? '—'}</dd>
-              <dt>Source</dt><dd>{detail.sourceMethod}</dd>
-              <dt>Source Type</dt><dd>{detail.sourceType ?? '—'}</dd>
-              <dt>Source System</dt><dd>{detail.sourceSystem ?? '—'}</dd>
-              <dt>Source Ref</dt><dd className="monospace">{detail.sourceReference ?? '—'}</dd>
-              {detail.sourceUrl && <><dt>URL</dt><dd className="bom-source-url">{detail.sourceUrl}</dd></>}
-              <dt>Checksum</dt><dd className="monospace cell-truncate">{detail.checksumSha256 ?? '—'}</dd>
-              <dt>Components</dt><dd>{detail.componentCount}</dd>
-              <dt>Evidence</dt><dd>{detail.evidenceCount}</dd>
-              <dt>Vulnerability Links</dt><dd>{detail.vulnerabilityLinkCount}</dd>
-              <dt>Correlated Components</dt><dd>{detail.correlatedComponentCount}</dd>
-              <dt>Ingested</dt><dd>{timeAgo(detail.ingestedAt)}</dd>
-              <dt>By</dt><dd>{detail.ingestedBy}</dd>
-            </dl>
+
+            {detail.serialNumber && (
+              <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--panel-muted)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <span className="panel-caption" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>SERIAL NUMBER</span>
+                <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{detail.serialNumber}</code>
+              </div>
+            )}
+
+            {detail.checksumSha256 && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--panel-muted)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <span className="panel-caption" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>SHA-256 CHECKSUM</span>
+                <code style={{ fontSize: 11, wordBreak: 'break-all', color: 'var(--text-secondary)' }}>{detail.checksumSha256}</code>
+              </div>
+            )}
           </div>
 
-          <div className="panel bom-detail-meta">
-            <div className="panel-header">
-              <h4>Support Inspection</h4>
+          {/* ── Stat tiles ───────────────────────────────────────────────── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 12 }}>
+            {[
+              { label: 'Components', value: detail.componentCount },
+              { label: 'Correlated', value: detail.correlatedComponentCount },
+              { label: 'Vuln Links', value: detail.vulnerabilityLinkCount },
+              { label: 'Evidence', value: detail.evidenceCount },
+            ].map(({ label, value }) => (
+              <div key={label} className="panel" style={{ padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1 }}>{value}</div>
+                <div className="panel-caption" style={{ marginTop: 4, fontSize: 11 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Document + Source info ────────────────────────────────────── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+            <div className="panel">
+              <div className="panel-header" style={{ marginBottom: 12 }}>
+                <h4 style={{ margin: 0 }}>Document</h4>
+              </div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {[
+                  { label: 'Supplier', value: detail.supplier ?? '—' },
+                  { label: 'Ingested', value: timeAgo(detail.ingestedAt) },
+                  { label: 'Ingested by', value: detail.ingestedBy ?? '—' },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                    <span className="panel-caption" style={{ fontSize: 12, flexShrink: 0 }}>{label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, textAlign: 'right' }}>{value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <dl className="detail-grid">
-              <dt>Parser Format</dt><dd>{detail.inspection?.format ?? detail.format}</dd>
-              <dt>Spec Family</dt><dd>{detail.inspection?.specFamily ?? detail.specFamily}</dd>
-              <dt>Document Format</dt><dd>{detail.inspection?.documentFormat ?? detail.documentFormat}</dd>
-              <dt>Support Level</dt><dd><SupportTag supportLevel={detail.inspection?.supportLevel} supported={detail.inspection?.supported} /></dd>
-            </dl>
+
+            <div className="panel">
+              <div className="panel-header" style={{ marginBottom: 12 }}>
+                <h4 style={{ margin: 0 }}>Source</h4>
+              </div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {[
+                  { label: 'Method', value: detail.sourceMethod ?? '—' },
+                  { label: 'Type', value: detail.sourceType ?? '—' },
+                  { label: 'System', value: detail.sourceSystem ?? '—' },
+                  { label: 'Reference', value: detail.sourceReference ?? '—', mono: true },
+                ].map(({ label, value, mono }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                    <span className="panel-caption" style={{ fontSize: 12, flexShrink: 0 }}>{label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, textAlign: 'right', fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-all' }}>{value}</span>
+                  </div>
+                ))}
+                {detail.sourceUrl && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                    <span className="panel-caption" style={{ fontSize: 12, flexShrink: 0 }}>URL</span>
+                    <span style={{ fontSize: 12, textAlign: 'right', wordBreak: 'break-all', color: 'var(--accent)' }}>{detail.sourceUrl}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Support Inspection ────────────────────────────────────────── */}
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-header" style={{ marginBottom: 12 }}>
+              <h4 style={{ margin: 0 }}>Support Inspection</h4>
+              <SupportTag supportLevel={detail.inspection?.supportLevel} supported={detail.inspection?.supported} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+              {[
+                { label: 'Parser Format', value: detail.inspection?.format ?? detail.format },
+                { label: 'Spec Family', value: detail.inspection?.specFamily ?? detail.specFamily },
+                { label: 'Document Format', value: detail.inspection?.documentFormat ?? detail.documentFormat },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ padding: '10px 14px', background: 'var(--panel-muted)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div className="panel-caption" style={{ fontSize: 11, marginBottom: 4 }}>{label.toUpperCase()}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
+                </div>
+              ))}
+            </div>
             {detail.inspection?.warnings?.length ? (
               <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                 {detail.inspection.warnings.map((warning) => (
@@ -208,13 +280,14 @@ function BomDetailPanel({ bomId, onClose }: { bomId: string; onClose: () => void
                 ))}
               </div>
             ) : (
-              <div className="panel-caption">This BOM is within the validated parser support matrix.</div>
+              <div className="panel-caption" style={{ marginTop: 12 }}>This BOM is within the validated parser support matrix.</div>
             )}
           </div>
 
-          <div className="panel bom-detail-meta">
-            <div className="panel-header">
-              <h4>Workflow Summary</h4>
+          {/* ── Workflow Summary ─────────────────────────────────────────── */}
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-header" style={{ marginBottom: 12 }}>
+              <h4 style={{ margin: 0 }}>Workflow Summary</h4>
             </div>
             <WorkflowSummaryChips items={detail.workflowSummary} />
           </div>

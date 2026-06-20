@@ -94,7 +94,7 @@ class SbomIngestionServiceTest {
     @Test
     void ingestFromGithubDelegatesToCoordinator() throws Exception {
         GithubSbomIngestionRequest request = new GithubSbomIngestionRequest(
-                "acme-org", "api-service", false, AssetType.HOST, null, null);
+                "acme-org", "api-service", false, AssetType.HOST, null, null, "dependency-graph/sbom");
         GithubSbomIngestionBatchResponse expected = new GithubSbomIngestionBatchResponse(
                 1, 1, 1, 0, 10, 2, List.of());
         when(githubSbomIngestionCoordinator.ingestFromGithub(tenant, request)).thenReturn(expected);

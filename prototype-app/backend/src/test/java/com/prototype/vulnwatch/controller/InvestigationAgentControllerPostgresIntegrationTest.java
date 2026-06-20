@@ -111,7 +111,7 @@ class InvestigationAgentControllerPostgresIntegrationTest {
     }
 
     @Test
-    void proTenantIsDeniedFromRunningAgent() throws Exception {
+    void proTenantCanRunAgent() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         tenant.setPlanCode("PRO");
         tenantRepository.save(tenant);
@@ -119,9 +119,8 @@ class InvestigationAgentControllerPostgresIntegrationTest {
         mockMvc.perform(authedPost("/api/cve-detail/CVE-2024-99104/investigation/run-agent")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"criteria\":[]}"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.investigation_agent"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskMeta").isMap())
+                .andExpect(jsonPath("$.completedTaskIds").isArray());
     }
 }

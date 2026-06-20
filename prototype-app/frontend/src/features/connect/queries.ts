@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../../lib/polling';
-import type { SyncRun } from './types';
+import type { SyncRun, VulnerabilitySourceSystem } from './types';
 
 export type SyncRunsQueryParams = Parameters<typeof api.listSyncRuns>[0];
 type QueryPollingOption = number | false | undefined;
@@ -35,7 +35,7 @@ export function useVexAssertionRepairSummaryQuery(enabled = true, refetchInterva
   });
 }
 
-export function useSourceFilterConfigQuery(sourceSystem: 'nvd' | 'kev' | 'ghsa' | 'redhat' | null, enabled = true) {
+export function useSourceFilterConfigQuery(sourceSystem: VulnerabilitySourceSystem | null, enabled = true) {
   return useQuery({
     queryKey: ['source-filter-config', sourceSystem],
     queryFn: () => api.getVulnerabilitySourceFilterConfig(sourceSystem ?? 'nvd'),

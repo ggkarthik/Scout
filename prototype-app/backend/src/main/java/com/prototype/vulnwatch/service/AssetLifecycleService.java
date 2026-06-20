@@ -4,8 +4,9 @@ import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.BusinessCriticality;
 import com.prototype.vulnwatch.domain.Finding;
-import com.prototype.vulnwatch.domain.FindingDecisionState;
+import com.prototype.vulnwatch.domain.FindingCloseReason;
 import com.prototype.vulnwatch.domain.FindingStatus;
+import com.prototype.vulnwatch.domain.RiskPolicy;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.CmdbAssetRecordRequest;
 import com.prototype.vulnwatch.dto.CmdbAssetSyncRequest;
@@ -29,6 +30,7 @@ public class AssetLifecycleService {
     private final AssetRepository assetRepository;
     private final FindingRepository findingRepository;
     private final FindingWorkflowService findingWorkflowService;
+    private final RiskPolicyService riskPolicyService;
     private final WorkspaceService workspaceService;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
@@ -40,6 +42,7 @@ public class AssetLifecycleService {
             AssetRepository assetRepository,
             FindingRepository findingRepository,
             FindingWorkflowService findingWorkflowService,
+            RiskPolicyService riskPolicyService,
             WorkspaceService workspaceService,
             TenantService tenantService,
             TenantSchemaExecutionService tenantSchemaExecutionService
@@ -47,6 +50,7 @@ public class AssetLifecycleService {
         this.assetRepository = assetRepository;
         this.findingRepository = findingRepository;
         this.findingWorkflowService = findingWorkflowService;
+        this.riskPolicyService = riskPolicyService;
         this.workspaceService = workspaceService;
         this.tenantService = tenantService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
@@ -119,25 +123,23 @@ public class AssetLifecycleService {
         if (to == AssetState.ACTIVE) {
             return;
         }
+        RiskPolicy policy = riskPolicyService.getOrCreate(asset.getTenant());
+        if (!policy.isAutoCloseEnabled() || !policy.isAutoCloseAssetRetiredEnabled()) {
+            return;
+        }
         List<Finding> openFindings = new ArrayList<>();
         openFindings.addAll(findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN));
-        openFindings.addAll(findingRepository.findByAssetAndStatus(asset, FindingStatus.SUPPRESSED));
         for (Finding finding : openFindings) {
-            finding.setStatus(FindingStatus.RESOLVED);
-            finding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
-            finding.setSuppressionReason(null);
-            finding.setSuppressedUntil(null);
-            finding.touch();
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("assetStateFrom", from == null ? null : from.name());
             details.put("assetStateTo", to.name());
             details.put("actor", actor);
-            findingWorkflowService.appendEvent(
+            findingWorkflowService.autoCloseFinding(
                     finding,
-                    "ASSET_STATE_RESOLUTION",
-                    "system",
-                    "Finding auto-resolved due to asset state transition",
-                    details);
+                    FindingCloseReason.AUTO_ASSET_RETIRED,
+                    "Finding auto-closed due to asset state transition",
+                    details,
+                    Instant.now());
         }
         if (!openFindings.isEmpty()) {
             findingRepository.saveAll(openFindings);

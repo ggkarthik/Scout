@@ -29,7 +29,8 @@ final class IngestionJobPayloads {
             String assetName,
             String assetIdentifier,
             UUID syncRunId,
-            UUID sourceId
+            UUID sourceId,
+            String path
     ) {
     }
 

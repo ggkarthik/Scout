@@ -39,7 +39,7 @@ class UpgradeRecommendationControllerPostgresIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Test
-    void proTenantIsDeniedFromUpgradeRecommendation() throws Exception {
+    void proTenantCanRequestUpgradeRecommendation() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         tenant.setPlanCode("PRO");
         tenantRepository.save(tenant);
@@ -54,10 +54,10 @@ class UpgradeRecommendationControllerPostgresIntegrationTest {
                                   "cveIds": ["CVE-2024-0001"]
                                 }
                                 """)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.upgrade_recommendation"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recommendedVersion").isString())
+                .andExpect(jsonPath("$.upgradeNotes").isString())
+                .andExpect(jsonPath("$.urgency").isString());
     }
 
     @Test

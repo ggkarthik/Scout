@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.RiskPolicy;
+import com.prototype.vulnwatch.domain.RiskPolicyPresets;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.RiskPolicyRequest;
 import com.prototype.vulnwatch.dto.RiskPolicyResponse;
@@ -83,6 +84,7 @@ class RiskPolicyServiceTest {
         RiskPolicy result = service.getOrCreate(tenant);
 
         assertNotNull(result);
+        assertEquals(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON, result.getFindingsScoreConfig());
         verify(riskPolicyRepository).save(any(RiskPolicy.class));
     }
 
@@ -163,13 +165,13 @@ class RiskPolicyServiceTest {
     }
 
     @Test
-    void getFindingsScoreConfig_returnsEmptyArrayWhenNoPolicyExists() {
+    void getFindingsScoreConfig_returnsDefaultPresetWhenNoPolicyExists() {
         Tenant tenant = tenant();
         when(riskPolicyRepository.findTopByOrderByUpdatedAtDesc()).thenReturn(Optional.empty());
 
         String config = service.getFindingsScoreConfig(tenant);
 
-        assertEquals("[]", config);
+        assertEquals(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON, config);
     }
 
     @Test
@@ -181,6 +183,6 @@ class RiskPolicyServiceTest {
 
         String config = service.getFindingsScoreConfig(tenant);
 
-        assertEquals("[]", config);
+        assertEquals(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON, config);
     }
 }

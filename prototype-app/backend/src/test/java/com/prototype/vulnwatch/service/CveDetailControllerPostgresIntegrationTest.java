@@ -124,7 +124,7 @@ class CveDetailControllerPostgresIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Test
-    void proTenantIsDeniedWhenGeneratingAiSolution() throws Exception {
+    void proTenantCanGenerateAiSolution() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         tenant.setPlanCode("PRO");
         tenantRepository.save(tenant);
@@ -140,10 +140,8 @@ class CveDetailControllerPostgresIntegrationTest {
                         .content("""
                                 {"severity":"HIGH","affected_entities":[]}
                                 """))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").exists());
     }
 
     @Test
@@ -168,7 +166,7 @@ class CveDetailControllerPostgresIntegrationTest {
     }
 
     @Test
-    void proTenantIsDeniedWhenReadingSavedAiSolution() throws Exception {
+    void proTenantCanReadSavedAiSolution() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         String cveId = "CVE-2099-9912";
         Vulnerability vulnerability = createVulnerability(cveId);
@@ -182,14 +180,12 @@ class CveDetailControllerPostgresIntegrationTest {
                         .header("X-Creator-Key", "test-creator-key")
                         .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.solution_generation"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").exists());
     }
 
     @Test
-    void proTenantIsDeniedWhenReadingSavedAiActions() throws Exception {
+    void proTenantCanReadSavedAiActions() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         String cveId = "CVE-2099-9913";
         Vulnerability vulnerability = createVulnerability(cveId);
@@ -203,14 +199,11 @@ class CveDetailControllerPostgresIntegrationTest {
                         .header("X-Creator-Key", "test-creator-key")
                         .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.required_actions"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk());
     }
 
     @Test
-    void proTenantIsDeniedWhenReadingSavedAiInvestigationSummary() throws Exception {
+    void proTenantCanReadSavedAiInvestigationSummary() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         String cveId = "CVE-2099-9914";
         Vulnerability vulnerability = createVulnerability(cveId);
@@ -224,10 +217,7 @@ class CveDetailControllerPostgresIntegrationTest {
                         .header("X-Creator-Key", "test-creator-key")
                         .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PLAN_UPGRADE_REQUIRED"))
-                .andExpect(jsonPath("$.entitlementKey").value("ai.investigation_summary"))
-                .andExpect(jsonPath("$.currentPlan").value("PRO"));
+                .andExpect(status().isOk());
     }
 
     @Test

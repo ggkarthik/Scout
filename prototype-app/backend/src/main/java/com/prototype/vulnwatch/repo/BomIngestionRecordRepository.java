@@ -35,11 +35,12 @@ public interface BomIngestionRecordRepository extends JpaRepository<BomIngestion
           AND ((:supplier IS NULL AND r.supplier IS NULL) OR r.supplier = :supplier)
         ORDER BY r.ingestedAt DESC
         """)
-    Optional<BomIngestionRecord> findActiveForAsset(
+    List<BomIngestionRecord> findActiveForAsset(
             @Param("tenantId") UUID tenantId,
             @Param("bomType") BomType bomType,
             @Param("assetId") UUID assetId,
-            @Param("supplier") String supplier
+            @Param("supplier") String supplier,
+            Pageable pageable
     );
 
     @Query("""
@@ -52,11 +53,12 @@ public interface BomIngestionRecordRepository extends JpaRepository<BomIngestion
           AND ((:sourceReference IS NULL AND r.sourceReference IS NULL) OR r.sourceReference = :sourceReference)
         ORDER BY r.ingestedAt DESC
         """)
-    Optional<BomIngestionRecord> findActiveWithoutAsset(
+    List<BomIngestionRecord> findActiveWithoutAsset(
             @Param("tenantId") UUID tenantId,
             @Param("bomType") BomType bomType,
             @Param("supplier") String supplier,
-            @Param("sourceReference") String sourceReference
+            @Param("sourceReference") String sourceReference,
+            Pageable pageable
     );
 
     List<BomIngestionRecord> findByTenant_IdAndAssetIdAndStatusOrderByIngestedAtDesc(

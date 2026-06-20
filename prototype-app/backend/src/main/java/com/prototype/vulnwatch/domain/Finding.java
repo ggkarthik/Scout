@@ -34,7 +34,8 @@ import org.hibernate.type.SqlTypes;
                 @Index(name = "idx_findings_vulnerability_status", columnList = "vulnerability_id,status"),
                 @Index(name = "idx_findings_vex_status", columnList = "vex_status"),
                 @Index(name = "idx_findings_vex_freshness", columnList = "vex_freshness"),
-                @Index(name = "idx_findings_vex_provider", columnList = "vex_provider")
+                @Index(name = "idx_findings_vex_provider", columnList = "vex_provider"),
+                @Index(name = "idx_findings_auto_close_eligible", columnList = "tenant_id,status,auto_close_eligible_at")
         }
 )
 public class Finding {
@@ -147,6 +148,28 @@ public class Finding {
 
     @Column
     private Instant lastObservedAt = Instant.now();
+
+    @Column(name = "last_observed_run_id")
+    private UUID lastObservedRunId;
+
+    @Column(name = "consecutive_misses", nullable = false)
+    private int consecutiveMisses = 0;
+
+    @Column(name = "auto_close_eligible_at")
+    private Instant autoCloseEligibleAt;
+
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
+    @Column(name = "closed_by", length = 255)
+    private String closedBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "closed_reason", length = 80)
+    private FindingCloseReason closedReason;
+
+    @Column(name = "closed_rule_id")
+    private UUID closedRuleId;
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
@@ -352,6 +375,62 @@ public class Finding {
 
     public void setLastObservedAt(Instant lastObservedAt) {
         this.lastObservedAt = lastObservedAt;
+    }
+
+    public UUID getLastObservedRunId() {
+        return lastObservedRunId;
+    }
+
+    public void setLastObservedRunId(UUID lastObservedRunId) {
+        this.lastObservedRunId = lastObservedRunId;
+    }
+
+    public int getConsecutiveMisses() {
+        return consecutiveMisses;
+    }
+
+    public void setConsecutiveMisses(int consecutiveMisses) {
+        this.consecutiveMisses = Math.max(0, consecutiveMisses);
+    }
+
+    public Instant getAutoCloseEligibleAt() {
+        return autoCloseEligibleAt;
+    }
+
+    public void setAutoCloseEligibleAt(Instant autoCloseEligibleAt) {
+        this.autoCloseEligibleAt = autoCloseEligibleAt;
+    }
+
+    public Instant getClosedAt() {
+        return closedAt;
+    }
+
+    public void setClosedAt(Instant closedAt) {
+        this.closedAt = closedAt;
+    }
+
+    public String getClosedBy() {
+        return closedBy;
+    }
+
+    public void setClosedBy(String closedBy) {
+        this.closedBy = closedBy;
+    }
+
+    public FindingCloseReason getClosedReason() {
+        return closedReason;
+    }
+
+    public void setClosedReason(FindingCloseReason closedReason) {
+        this.closedReason = closedReason;
+    }
+
+    public UUID getClosedRuleId() {
+        return closedRuleId;
+    }
+
+    public void setClosedRuleId(UUID closedRuleId) {
+        this.closedRuleId = closedRuleId;
     }
 
     public Instant getCreatedAt() {

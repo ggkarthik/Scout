@@ -60,36 +60,23 @@ public class TenantEntitlementService {
     public ResolvedEntitlement resolve(Tenant tenant, String entitlementKey) {
         String key = normalizeKey(entitlementKey);
         String commercialPlan = commercialPlanCode(tenant);
-        String effectivePlan = effectivePlanCode(commercialPlan);
 
         EntitlementDefinition definition = loadDefinitions().stream()
                 .filter(candidate -> candidate.key().equals(key))
                 .findFirst()
                 .orElse(new EntitlementDefinition(key, "UNCATEGORIZED", "BOOLEAN", null));
 
-        PlanEntitlementRow planRow = loadPlanEntitlements(effectivePlan).get(key);
-        TenantOverrideRow overrideRow = tenant == null ? null : loadTenantOverrides(tenant.getId()).get(key);
-
-        boolean enabled = false;
-        String source = SOURCE_DEFAULT;
         Map<String, Object> config = Map.of();
-
-        if (planRow != null) {
-            enabled = planRow.enabled();
-            config = planRow.config();
-            source = SOURCE_PLAN;
-        }
-        if (overrideRow != null) {
-            enabled = overrideRow.enabled();
+        TenantOverrideRow overrideRow = tenant == null ? null : loadTenantOverrides(tenant.getId()).get(key);
+        if (overrideRow != null && overrideRow.config() != null) {
             config = overrideRow.config();
-            source = SOURCE_TENANT_OVERRIDE;
         }
 
         return new ResolvedEntitlement(
                 definition.key(),
                 definition.category(),
-                enabled,
-                source,
+                true,
+                SOURCE_DEFAULT,
                 commercialPlan,
                 config
         );
@@ -97,31 +84,19 @@ public class TenantEntitlementService {
 
     public List<ResolvedEntitlement> resolveAll(Tenant tenant) {
         String commercialPlan = commercialPlanCode(tenant);
-        String effectivePlan = effectivePlanCode(commercialPlan);
-        Map<String, PlanEntitlementRow> planRows = loadPlanEntitlements(effectivePlan);
         Map<String, TenantOverrideRow> overrideRows = tenant == null ? Map.of() : loadTenantOverrides(tenant.getId());
         List<ResolvedEntitlement> entitlements = new ArrayList<>();
         for (EntitlementDefinition definition : loadDefinitions()) {
-            PlanEntitlementRow planRow = planRows.get(definition.key());
             TenantOverrideRow overrideRow = overrideRows.get(definition.key());
-            boolean enabled = false;
-            String source = SOURCE_DEFAULT;
             Map<String, Object> config = Map.of();
-            if (planRow != null) {
-                enabled = planRow.enabled();
-                config = planRow.config();
-                source = SOURCE_PLAN;
-            }
-            if (overrideRow != null) {
-                enabled = overrideRow.enabled();
+            if (overrideRow != null && overrideRow.config() != null) {
                 config = overrideRow.config();
-                source = SOURCE_TENANT_OVERRIDE;
             }
             entitlements.add(new ResolvedEntitlement(
                     definition.key(),
                     definition.category(),
-                    enabled,
-                    source,
+                    true,
+                    SOURCE_DEFAULT,
                     commercialPlan,
                     config
             ));

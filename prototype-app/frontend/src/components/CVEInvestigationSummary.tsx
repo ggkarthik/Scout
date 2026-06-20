@@ -851,12 +851,11 @@ export function CVEInvestigationSummary({
                     type="button"
                     className={summaryMode === 'ai' ? 'btn btn-primary btn-inline' : 'btn btn-secondary btn-inline'}
                     disabled={!canUseAiSummary}
-                    title={canUseAiSummary ? 'Show AI summary' : 'Enterprise only'}
+                    title="Show AI summary"
                     onClick={() => void handleAiSummaryClick()}
                   >
                     AI Summary
                   </button>
-                  {!canUseAiSummary && <span className="panel-caption">Enterprise only</span>}
                 </>
               ) : null}
               <button type="button" className="btn btn-secondary btn-inline" onClick={() => void exportWordDocument(input, summary, summaryMode)}>Export Word Doc</button>
