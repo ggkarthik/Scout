@@ -124,7 +124,7 @@ class CveDetailControllerPostgresIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Test
-    void proTenantCanReachAiSolutionEndpoint() throws Exception {
+    void proTenantCanGenerateAiSolution() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
         tenant.setPlanCode("PRO");
         tenantRepository.save(tenant);
@@ -163,6 +163,61 @@ class CveDetailControllerPostgresIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").exists());
+    }
+
+    @Test
+    void proTenantCanReadSavedAiSolution() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9912";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, true, false, false);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-solution", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").exists());
+    }
+
+    @Test
+    void proTenantCanReadSavedAiActions() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9913";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, false, true, false);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/ai-actions", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void proTenantCanReadSavedAiInvestigationSummary() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String cveId = "CVE-2099-9914";
+        Vulnerability vulnerability = createVulnerability(cveId);
+        createSavedAiArtifacts(tenant, vulnerability, false, false, true);
+
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(get("/api/cve-detail/{cveId}/saved-investigation-summary", cveId)
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", "1")
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -601,5 +656,4 @@ class CveDetailControllerPostgresIntegrationTest {
         artifact.touch();
         orgCveAiArtifactRepository.save(artifact);
     }
-
 }

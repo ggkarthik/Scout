@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.FindingsScoreRecomputeService;
 import com.prototype.vulnwatch.service.RiskPolicyService;
+import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.Map;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,17 +25,20 @@ public class RiskPolicyController {
     private final RiskPolicyService riskPolicyService;
     private final AuditEventService auditEventService;
     private final FindingsScoreRecomputeService findingsScoreRecomputeService;
+    private final FindingWorkflowService findingWorkflowService;
 
     public RiskPolicyController(
             WorkspaceService workspaceService,
             RiskPolicyService riskPolicyService,
             AuditEventService auditEventService,
-            FindingsScoreRecomputeService findingsScoreRecomputeService
+            FindingsScoreRecomputeService findingsScoreRecomputeService,
+            FindingWorkflowService findingWorkflowService
     ) {
         this.workspaceService = workspaceService;
         this.riskPolicyService = riskPolicyService;
         this.auditEventService = auditEventService;
         this.findingsScoreRecomputeService = findingsScoreRecomputeService;
+        this.findingWorkflowService = findingWorkflowService;
     }
 
     @GetMapping
@@ -60,6 +64,16 @@ public class RiskPolicyController {
         Tenant tenant = workspaceService.getWorkspace();
         int updated = findingsScoreRecomputeService.recomputeAll(tenant);
         auditEventService.record("risk_policy.findings_score_recomputed", "risk_policy", tenant.getId().toString(), null);
+        return Map.of("updated", updated);
+    }
+
+    @PostMapping("/auto-close/execute-now")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("risk_policy.auto_close_executed")
+    public Map<String, Object> executeAutoCloseNow() {
+        Tenant tenant = workspaceService.getWorkspace();
+        int updated = findingWorkflowService.executeAutoCloseNow(tenant);
+        auditEventService.record("risk_policy.auto_close_executed", "risk_policy", tenant.getId().toString(), null);
         return Map.of("updated", updated);
     }
 }

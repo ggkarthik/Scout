@@ -67,6 +67,12 @@ public class SbomIngestionService {
     }
 
     @Transactional
+    public GithubSbomIngestionBatchResponse ingestBomFilesFromGithub(Tenant tenant, com.prototype.vulnwatch.dto.GithubSbomIngestionRequest request)
+            throws IOException {
+        return githubSbomIngestionCoordinator.ingestBomFilesFromGithub(tenant, request);
+    }
+
+    @Transactional
     public GithubGhcrIngestionSummary ingestAllFromGithubContainerRegistry(Tenant tenant, String owner) throws IOException {
         return githubSbomIngestionCoordinator.ingestAllFromGithubContainerRegistry(tenant, owner);
     }

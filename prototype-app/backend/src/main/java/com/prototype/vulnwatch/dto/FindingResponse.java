@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import com.prototype.vulnwatch.domain.FindingDecisionState;
+import com.prototype.vulnwatch.domain.FindingCloseReason;
 import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import java.time.Instant;
@@ -51,6 +52,12 @@ public record FindingResponse(
         Double findingsScore,
         UUID suppressedByRuleId,
         String suppressedByRuleName,
-        String ownerGroup
+        String ownerGroup,
+        Integer consecutiveMisses,
+        Instant autoCloseEligibleAt,
+        Instant closedAt,
+        String closedBy,
+        FindingCloseReason closedReason,
+        UUID closedRuleId
 ) {
 }

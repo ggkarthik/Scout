@@ -1,0 +1,13 @@
+package com.prototype.vulnwatch.domain;
+
+public enum FindingCloseReason {
+    MANUAL_FIXED,
+    MANUAL_FALSE_POSITIVE,
+    MANUAL_ACCEPTED_RISK,
+    AUTO_NOT_OBSERVED,
+    AUTO_COMPONENT_REMOVED,
+    AUTO_ASSET_RETIRED,
+    AUTO_DUPLICATE,
+    AUTO_SOURCE_DISABLED,
+    AUTO_SUPPRESSED_BY_RULE
+}

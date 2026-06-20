@@ -9,6 +9,7 @@ public record GithubSbomIngestionRequest(
         Boolean includeAllRepos,
         AssetType assetType,
         String assetName,
-        String assetIdentifier
+        String assetIdentifier,
+        String path
 ) {
 }

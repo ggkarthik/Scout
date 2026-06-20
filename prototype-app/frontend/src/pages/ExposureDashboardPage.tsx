@@ -28,6 +28,143 @@ function vulnPath(filters: Record<string, string | number | boolean | undefined>
   return `${pathForVulnRepoView('vulnerabilities')}${s}`;
 }
 
+function ExposureFunnelWidget({
+  tracked,
+  applicable,
+  impacted,
+  remediation,
+  addedWeek,
+  impactedWeek,
+  onNavigate,
+}: {
+  tracked: number;
+  applicable: number;
+  impacted: number;
+  remediation: number;
+  addedWeek: number;
+  impactedWeek: number;
+  onNavigate: (path: string) => void;
+}) {
+  const MIN_RATIO = 0.1;
+  const stages = [
+    {
+      label: 'Tracked',
+      value: tracked,
+      color: '#E05C5C',
+      ratio: 1.0,
+      sub: `+${fmt(addedWeek)} this week`,
+      path: vulnPath({ includeAll: true }),
+    },
+    {
+      label: 'Applicable',
+      value: applicable,
+      color: '#D4A843',
+      ratio: tracked > 0 ? Math.max(applicable / tracked, MIN_RATIO) : MIN_RATIO,
+      sub: `${pct(applicable, tracked)}% of tracked`,
+      path: vulnPath({ applicable: true, includeAll: true }),
+    },
+    {
+      label: 'Impacted',
+      value: impacted,
+      color: '#5BA0D0',
+      ratio: tracked > 0 ? Math.max(impacted / tracked, MIN_RATIO) : MIN_RATIO,
+      sub: `+${fmt(impactedWeek)} this week`,
+      path: vulnPath({ impactedOnly: true, includeAll: true }),
+    },
+    {
+      label: 'Remediation',
+      value: remediation,
+      color: '#4AAD8F',
+      ratio: tracked > 0 ? Math.max(remediation / tracked, MIN_RATIO) : MIN_RATIO,
+      sub: `${pct(remediation, Math.max(impacted, 1))}% of impacted`,
+      path: vulnPath({ applicable: true, hasFindings: true, includeAll: true }),
+    },
+  ];
+
+  const FW = 520;
+  const CX = FW / 2;
+  const SH = 62;
+  const GAP = 5;
+  const OFFSET_X = 130;
+  const VIEWW = OFFSET_X + FW + 20;
+  const TOTAL_H = stages.length * SH + (stages.length - 1) * GAP;
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h3>CVE Exposure Funnel</h3>
+        <span className="panel-caption">Volume reduction from intelligence intake to active remediation</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${VIEWW} ${TOTAL_H}`}
+        style={{ width: '100%', maxWidth: 780, height: 'auto', display: 'block', margin: '12px auto 4px' }}
+        aria-label="CVE Exposure Funnel"
+      >
+        {stages.map((stage, i) => {
+          const topRatio = i === 0 ? 1.0 : stages[i - 1].ratio;
+          const topW = topRatio * FW;
+          const botW = stage.ratio * FW;
+          const yTop = i * (SH + GAP);
+          const yBot = yTop + SH;
+          const xTopL = OFFSET_X + CX - topW / 2;
+          const xTopR = OFFSET_X + CX + topW / 2;
+          const xBotL = OFFSET_X + CX - botW / 2;
+          const xBotR = OFFSET_X + CX + botW / 2;
+          const midY = yTop + SH / 2;
+
+          return (
+            <g
+              key={stage.label}
+              style={{ cursor: 'pointer' }}
+              role="button"
+              aria-label={`${stage.label}: ${fmt(stage.value)}`}
+              onClick={() => onNavigate(stage.path)}
+            >
+              <polygon
+                points={`${xTopL},${yTop} ${xTopR},${yTop} ${xBotR},${yBot} ${xBotL},${yBot}`}
+                fill={stage.color}
+                opacity={0.9}
+              />
+              <text
+                x={OFFSET_X - 12}
+                y={midY}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fontSize={13}
+                fontWeight={600}
+                fill="var(--text-primary, #e2e8f0)"
+              >
+                {stage.label}
+              </text>
+              <text
+                x={OFFSET_X + CX}
+                y={midY - 10}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={17}
+                fontWeight={700}
+                fill="#ffffff"
+              >
+                {fmt(stage.value)}
+              </text>
+              <text
+                x={OFFSET_X + CX}
+                y={midY + 12}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={11}
+                fill="rgba(255,255,255,0.82)"
+              >
+                {stage.sub}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </section>
+  );
+}
+
 type InsightLevel = 'critical' | 'warn' | 'info';
 
 type Insight = {
@@ -231,48 +368,16 @@ export function ExposureDashboardPage() {
       {/* ── Row 2: CVE Trends + Remediation Progress ── */}
       <div className="exec-two-col">
 
-        {/* CVE Trends */}
-        <section className="panel">
-          <div className="panel-header">
-            <h3>CVE Exposure Pipeline</h3>
-            <span className="panel-caption">From intelligence intake to confirmed org impact</span>
-          </div>
-
-          <div className="exec-pipeline">
-            {[
-              { label: 'Tracked',    value: tracked,    width: 100, path: vulnPath({ includeAll: true }),                          sub: `+${fmt(addedWeek)} this week` },
-              { label: 'Applicable', value: applicable, width: pct(applicable, tracked), path: vulnPath({ applicable: true, includeAll: true }), sub: `${pct(applicable, tracked)}% of tracked` },
-              { label: 'Impacted',   value: impacted,   width: pct(impacted, tracked),   path: vulnPath({ impactedOnly: true, includeAll: true }),  sub: `+${fmt(impactedWeek)} this week` },
-              { label: 'Remediation',value: remediation,width: pct(remediation, tracked), path: vulnPath({ applicable: true, hasFindings: true, includeAll: true }), sub: `${pct(remediation, Math.max(impacted, 1))}% of impacted` },
-            ].map((stage) => (
-              <button key={stage.label} type="button" className="exec-pipeline-row" onClick={() => navigate(stage.path)}>
-                <div className="exec-pipeline-meta">
-                  <span className="exec-pipeline-label">{stage.label}</span>
-                  <span className="exec-pipeline-sub">{stage.sub}</span>
-                </div>
-                <div className="exec-pipeline-track">
-                  <div className="exec-pipeline-bar" style={{ width: `${stage.width}%` }} />
-                </div>
-                <strong className="exec-pipeline-count">{fmt(stage.value)}</strong>
-              </button>
-            ))}
-          </div>
-
-          <div className="exec-trend-row">
-            <div className="exec-trend-chip exec-trend-chip--neutral">
-              <span className="exec-trend-num">+{fmt(addedWeek)}</span>
-              <span>CVEs this week</span>
-            </div>
-            <div className={`exec-trend-chip ${impactedWeek > 0 ? 'exec-trend-chip--warn' : 'exec-trend-chip--neutral'}`}>
-              <span className="exec-trend-num">+{fmt(impactedWeek)}</span>
-              <span>new impacts</span>
-            </div>
-            <div className={`exec-trend-chip ${kevWeek > 0 ? 'exec-trend-chip--critical' : 'exec-trend-chip--neutral'}`}>
-              <span className="exec-trend-num">+{fmt(kevWeek)}</span>
-              <span>CISA KEV</span>
-            </div>
-          </div>
-        </section>
+        {/* CVE Exposure Funnel */}
+        <ExposureFunnelWidget
+          tracked={tracked}
+          applicable={applicable}
+          impacted={impacted}
+          remediation={remediation}
+          addedWeek={addedWeek}
+          impactedWeek={impactedWeek}
+          onNavigate={navigate}
+        />
 
         {/* Remediation Progress */}
         <section className="panel">

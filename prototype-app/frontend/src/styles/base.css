@@ -5644,6 +5644,28 @@ label {
   margin-bottom: var(--space-1);
 }
 
+.config-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 16px;
+}
+
+.config-checkbox-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.config-checkbox-grid input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
 /* Triage signal cards */
 .triage-signal-list {
   display: flex;
@@ -7399,7 +7421,7 @@ label {
 /* ── Campaign Wizard redesign (cw-) ──────────────────────────────────────── */
 .cw-modal {
   width: min(760px, 100%);
-  max-height: calc(100vh - 48px);
+  height: min(680px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   overflow: hidden;

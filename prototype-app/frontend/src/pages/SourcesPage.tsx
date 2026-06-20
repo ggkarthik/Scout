@@ -202,6 +202,8 @@ function defaultSourceFilterForm(sourceSystem: VulnerabilitySourceSystem): Sourc
         cvssScore: undefined,
         cvss3Score: undefined
       };
+    default:
+      return {};
   }
 }
 
@@ -235,6 +237,8 @@ function sourceFilterFormFromConfig(
         cvssScore: config.cvssScore,
         cvss3Score: config.cvss3Score
       };
+    default:
+      return {};
   }
 }
 
@@ -274,6 +278,8 @@ function normalizeSourceFilterForm(
         cvssScore: numberOrUndefined(form.cvssScore),
         cvss3Score: numberOrUndefined(form.cvss3Score)
       };
+    default:
+      return {};
   }
 }
 

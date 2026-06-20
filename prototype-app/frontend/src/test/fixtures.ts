@@ -1,5 +1,6 @@
 import type { Finding, FindingFilterValues, FindingPage } from '../features/findings/types';
 import type { RiskPolicy } from '../features/configurations/types';
+import { DEFAULT_FINDINGS_SCORE_CONFIG_JSON } from '../features/configurations/defaults';
 
 /**
  * Page-test fixture builders. Centralised so a single test doesn't have to
@@ -53,7 +54,15 @@ export function defaultRiskPolicy(overrides: Partial<RiskPolicy> = {}): RiskPoli
     assetLowSlaMultiplier: 1.25,
     autoCloseEnabled: false,
     autoCloseAfterDays: 30,
+    autoCloseRequiredConsecutiveMisses: 2,
+    autoCloseNotObservedEnabled: true,
+    autoCloseComponentRemovedEnabled: true,
+    autoCloseAssetRetiredEnabled: true,
+    autoCloseSourceDisabledEnabled: false,
+    autoCloseDuplicateEnabled: true,
+    autoCloseRunIntervalDays: 1,
     findingGenerationMode: 'AUTO',
+    findingsScoreConfig: DEFAULT_FINDINGS_SCORE_CONFIG_JSON,
     triageExploitabilityWeight: 1,
     triageBlastRadiusWeight: 1,
     triageEolRiskWeight: 1,

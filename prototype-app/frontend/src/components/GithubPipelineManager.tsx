@@ -10,7 +10,7 @@ import {
 import { useGithubSbomSourcesQuery, useSyncRunsQuery } from '../features/connect/queries';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
-type GithubSourcePath = 'dependency-graph/sbom' | 'ghcr/attestations';
+type GithubSourcePath = 'dependency-graph/sbom' | 'ghcr/attestations' | 'repository/cbom' | 'repository/aibom';
 
 type Props = {
   title?: string;
@@ -38,7 +38,10 @@ function pipelineStatusMeta(status?: string | null): { cls: string; label: strin
 }
 
 function githubSourceTypeLabel(path?: string | null): string {
-  return path === 'ghcr/attestations' ? 'GHCR Image SBOM' : 'Repository SBOM';
+  if (path === 'ghcr/attestations') return 'GHCR Image SBOM';
+  if (path === 'repository/cbom') return 'Repository CBOM';
+  if (path === 'repository/aibom') return 'Repository AI BOM';
+  return 'Repository SBOM';
 }
 
 function githubSourceTargetLabel(source: GithubSbomSource): string {
@@ -95,6 +98,7 @@ export function GithubPipelineManager({
   const [activeGithubRunLabel, setActiveGithubRunLabel] = React.useState('GitHub ingestion');
   const [sourceBusyId, setSourceBusyId] = React.useState<string | null>(null);
   const [sourceMessage, setSourceMessage] = React.useState('');
+  const [editingSourceId, setEditingSourceId] = React.useState<string | null>(null);
 
   const [sourceName, setSourceName] = React.useState('');
   const [sourceOwner, setSourceOwner] = React.useState('');
@@ -106,6 +110,7 @@ export function GithubPipelineManager({
   const [sourceToken, setSourceToken] = React.useState('');
   const sourceAssetType: 'APPLICATION' | 'CONTAINER_IMAGE' =
     sourcePath === 'ghcr/attestations' ? 'CONTAINER_IMAGE' : 'APPLICATION';
+  const isRepoFileScan = sourcePath === 'repository/cbom' || sourcePath === 'repository/aibom';
   const githubSourcesQuery = useGithubSbomSourcesQuery();
   const activeRunsQuery = useSyncRunsQuery(
     { category: 'inventory', limit: 50 },
@@ -113,6 +118,32 @@ export function GithubPipelineManager({
     RUN_QUEUE_REFRESH_INTERVAL_MS
   );
   const githubSources = React.useMemo(() => githubSourcesQuery.data ?? [], [githubSourcesQuery.data]);
+  const isEditingSource = editingSourceId != null;
+
+  const resetForm = React.useCallback(() => {
+    setEditingSourceId(null);
+    setSourceName('');
+    setSourceOwner('');
+    setSourceRepo('');
+    setSourcePath('dependency-graph/sbom');
+    setSourceFrequency('ONCE');
+    setSourceIntervalHours('1');
+    setSourceEnabled(true);
+    setSourceToken('');
+  }, []);
+
+  const loadSourceIntoForm = React.useCallback((source: GithubSbomSource) => {
+    setEditingSourceId(source.id);
+    setSourceName(source.name);
+    setSourceOwner(source.owner);
+    setSourceRepo(source.repo ?? '');
+    setSourcePath((source.path as GithubSourcePath) ?? 'dependency-graph/sbom');
+    setSourceFrequency(source.frequency);
+    setSourceIntervalHours(String(Math.max(1, Math.round((source.intervalMinutes ?? 60) / 60))));
+    setSourceEnabled(source.enabled);
+    setSourceToken('');
+    setSourceMessage(`Editing GitHub pipeline "${source.name}"`);
+  }, []);
 
   const refreshGithubView = React.useCallback(async () => {
     const result = await githubSourcesQuery.refetch();
@@ -139,6 +170,10 @@ export function GithubPipelineManager({
       setSourceMessage('GitHub owner is required');
       return;
     }
+    if (isRepoFileScan && !sourceRepo.trim()) {
+      setSourceMessage('GitHub repository is required for CBOM/AI BOM file scan');
+      return;
+    }
     if (sourcePath === 'dependency-graph/sbom' && !sourceRepo.trim()) {
       const proceed = window.confirm(
         `Repository is empty. This will ingest SBOMs for all repositories under "${sourceOwner.trim()}". Continue?`
@@ -157,6 +192,20 @@ export function GithubPipelineManager({
         setActiveGithubRunId(run.runId);
         setActiveGithubRunLabel('GHCR ingestion');
         setSourceMessage(describeQueuedRun('GHCR ingestion', pendingGithubRun(run.runId, 'GITHUB_GHCR_SBOM', run.status)));
+        await Promise.all([refreshGithubView(), activeRunsQuery.refetch()]);
+      } else if (isRepoFileScan) {
+        const bomLabel = sourcePath === 'repository/cbom' ? 'CBOM' : 'AI BOM';
+        const syncType = sourcePath === 'repository/cbom' ? 'GITHUB_REPOSITORY_CBOM' : 'GITHUB_REPOSITORY_AIBOM';
+        const run = await api.queueGithubRepositoryRun({
+          owner: sourceOwner.trim(),
+          repo: sourceRepo.trim(),
+          includeAllRepos: false,
+          assetType: sourceAssetType,
+          path: sourcePath
+        });
+        setActiveGithubRunId(run.runId);
+        setActiveGithubRunLabel(`GitHub ${bomLabel} file scan`);
+        setSourceMessage(describeQueuedRun(`GitHub ${bomLabel} file scan`, pendingGithubRun(run.runId, syncType as SyncRun['syncType'], run.status)));
         await Promise.all([refreshGithubView(), activeRunsQuery.refetch()]);
       } else {
         const run = await api.queueGithubRepositoryRun({
@@ -177,7 +226,7 @@ export function GithubPipelineManager({
     }
   };
 
-  const createGithubSource = async (): Promise<void> => {
+  const saveGithubSource = React.useCallback(async (): Promise<void> => {
     if (!sourceName.trim()) {
       setSourceMessage('Pipeline name is required');
       return;
@@ -186,34 +235,41 @@ export function GithubPipelineManager({
       setSourceMessage('GitHub owner is required');
       return;
     }
-    if (sourcePath === 'dependency-graph/sbom' && !sourceRepo.trim()) {
-      setSourceMessage('GitHub repository is required for repository SBOM pipelines');
+    if ((sourcePath === 'dependency-graph/sbom' || isRepoFileScan) && !sourceRepo.trim()) {
+      setSourceMessage('GitHub repository is required for this source type');
       return;
     }
 
     setSourceMessage('');
-    setSourceBusyId('create');
+    setSourceBusyId(isEditingSource ? `update:${editingSourceId}` : 'create');
     try {
-      await api.createGithubSbomSource({
+      const payload = {
         name: sourceName.trim(),
         owner: sourceOwner.trim(),
-        repo: sourcePath === 'dependency-graph/sbom' ? sourceRepo.trim() : '',
+        repo: sourcePath !== 'ghcr/attestations' ? sourceRepo.trim() : '',
         path: sourcePath,
         assetType: sourceAssetType,
         frequency: sourceFrequency,
         intervalMinutes: sourceFrequency === 'INTERVAL' ? Math.max(5, (Number(sourceIntervalHours) || 1) * 60) : undefined,
         enabled: sourceEnabled,
         githubToken: sourceToken.trim() || undefined
-      });
-      setSourceMessage('GitHub pipeline created');
+      };
+      if (editingSourceId) {
+        await api.updateGithubSbomSource(editingSourceId, payload);
+        setSourceMessage('GitHub pipeline updated');
+      } else {
+        await api.createGithubSbomSource(payload);
+        setSourceMessage('GitHub pipeline created');
+      }
       await queryClient.invalidateQueries({ queryKey: ['github-sbom-sources'] });
       await refreshGithubView();
+      resetForm();
     } catch (e) {
       setSourceMessage(e instanceof Error ? e.message : String(e));
     } finally {
       setSourceBusyId(null);
     }
-  };
+  }, [editingSourceId, isEditingSource, queryClient, refreshGithubView, resetForm, sourceEnabled, sourceFrequency, sourceIntervalHours, sourceName, sourceOwner, sourcePath, sourceRepo, sourceToken, sourceAssetType]);
 
   const runGithubSource = React.useCallback(async (id: string): Promise<void> => {
     setSourceBusyId(id);
@@ -229,7 +285,10 @@ export function GithubPipelineManager({
         label,
         pendingGithubRun(
           run.runId,
-          source?.path === 'ghcr/attestations' ? 'GITHUB_GHCR_SBOM' : 'GITHUB_REPOSITORY_SBOM',
+          source?.path === 'ghcr/attestations' ? 'GITHUB_GHCR_SBOM'
+            : source?.path === 'repository/cbom' ? 'GITHUB_REPOSITORY_CBOM'
+            : source?.path === 'repository/aibom' ? 'GITHUB_REPOSITORY_AIBOM'
+            : 'GITHUB_REPOSITORY_SBOM',
           run.status
         )
       ));
@@ -253,6 +312,9 @@ export function GithubPipelineManager({
     try {
       await api.deleteGithubSbomSource(id);
       setSourceMessage(`Deleted GitHub pipeline "${source?.name ?? id}"`);
+      if (editingSourceId === id) {
+        resetForm();
+      }
       await queryClient.invalidateQueries({ queryKey: ['github-sbom-sources'] });
       await refreshGithubView();
     } catch (e) {
@@ -260,7 +322,7 @@ export function GithubPipelineManager({
     } finally {
       setSourceBusyId(null);
     }
-  }, [githubSources, queryClient, refreshGithubView]);
+  }, [editingSourceId, githubSources, queryClient, refreshGithubView, resetForm]);
 
   const githubPipelineRows = React.useMemo<DataTableRow[]>(() => (
     githubSources.map((source) => {
@@ -295,6 +357,14 @@ export function GithubPipelineManager({
                 <button
                   type="button"
                   className="btn btn-secondary btn-inline"
+                  onClick={() => loadSourceIntoForm(source)}
+                  disabled={sourceBusyId != null}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-inline"
                   onClick={() => void runGithubSource(source.id)}
                   disabled={sourceBusyId != null}
                 >
@@ -314,7 +384,7 @@ export function GithubPipelineManager({
         }
       };
     })
-  ), [deleteGithubSource, githubSources, runGithubSource, sourceBusyId]);
+  ), [deleteGithubSource, githubSources, loadSourceIntoForm, runGithubSource, sourceBusyId]);
 
   return (
     <section className="panel">
@@ -333,28 +403,39 @@ export function GithubPipelineManager({
             <select value={sourcePath} onChange={(e) => setSourcePath(e.target.value as GithubSourcePath)}>
               <option value="dependency-graph/sbom">GitHub Repository SBOM</option>
               <option value="ghcr/attestations">GHCR Image SBOM (all images)</option>
+              <option value="repository/cbom">Repository CBOM (file scan)</option>
+              <option value="repository/aibom">Repository AI BOM (file scan)</option>
             </select>
           </label>
           <label>GitHub Owner
             <input value={sourceOwner} onChange={(e) => setSourceOwner(e.target.value)} placeholder="org-name" />
           </label>
-          {sourcePath === 'dependency-graph/sbom' ? (
-            <label>GitHub Repo
-              <input value={sourceRepo} onChange={(e) => setSourceRepo(e.target.value)} placeholder="service-repo" />
-            </label>
-          ) : (
+          {sourcePath === 'ghcr/attestations' ? (
             <div className="inline-note">
               GHCR mode discovers every container package and image digest under <span className="mono">ghcr.io/{sourceOwner.trim() || 'owner'}</span> and ingests each attested SBOM separately.
               It requires a backend GitHub token with <span className="mono">read:packages</span> access.
               Run Once uses only the owner. Pipeline name is only required if you want to save a reusable pipeline.
             </div>
+          ) : isRepoFileScan ? (
+            <label>GitHub Repo
+              <input value={sourceRepo} onChange={(e) => setSourceRepo(e.target.value)} placeholder="service-repo" />
+              <span className="field-hint">
+                Scans the repo file tree for <code>{sourcePath === 'repository/cbom' ? '*.cbom.json / *.cbom.xml' : '*.aibom.json / *.aibom.xml / *.ai-bom.json / *.ml-bom.json'}</code> files.
+              </span>
+            </label>
+          ) : (
+            <label>GitHub Repo
+              <input value={sourceRepo} onChange={(e) => setSourceRepo(e.target.value)} placeholder="service-repo" />
+            </label>
           )}
           <label>GitHub Token (optional)
             <input
               type="password"
               value={sourceToken}
               onChange={(e) => setSourceToken(e.target.value)}
-              placeholder="ghp_… leave blank to use the global backend token"
+              placeholder={isEditingSource
+                ? 'ghp_… leave blank to keep the current token or use the global backend token'
+                : 'ghp_… leave blank to use the global backend token'}
               autoComplete="new-password"
             />
           </label>
@@ -399,9 +480,20 @@ export function GithubPipelineManager({
         >
           {sourceBusyId === 'run-once' ? 'Running...' : 'Run Once'}
         </button>
-        <button type="button" className="btn btn-secondary" onClick={createGithubSource} disabled={sourceBusyId != null}>
-          {sourceBusyId === 'create' ? 'Saving...' : 'Save Auto Pipeline'}
+        <button type="button" className="btn btn-secondary" onClick={saveGithubSource} disabled={sourceBusyId != null}>
+          {sourceBusyId === 'create'
+            ? 'Saving...'
+            : sourceBusyId === `update:${editingSourceId}`
+              ? 'Updating...'
+              : isEditingSource
+                ? 'Update Pipeline'
+                : 'Save Auto Pipeline'}
         </button>
+        {isEditingSource && (
+          <button type="button" className="btn btn-secondary" onClick={resetForm} disabled={sourceBusyId != null}>
+            Cancel Edit
+          </button>
+        )}
         <button type="button" className="btn btn-secondary" onClick={() => void refreshGithubView()} disabled={sourceBusyId != null}>
           Refresh
         </button>

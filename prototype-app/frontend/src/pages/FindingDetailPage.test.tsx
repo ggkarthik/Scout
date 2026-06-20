@@ -95,6 +95,13 @@ describe('FindingDetailPage', () => {
       assetCriticalSlaMultiplier: 0.5, assetHighSlaMultiplier: 0.75,
       assetMediumSlaMultiplier: 1, assetLowSlaMultiplier: 1.25,
       autoCloseEnabled: false, autoCloseAfterDays: 30, findingGenerationMode: 'AUTO',
+      autoCloseRequiredConsecutiveMisses: 2,
+      autoCloseNotObservedEnabled: true,
+      autoCloseComponentRemovedEnabled: true,
+      autoCloseAssetRetiredEnabled: true,
+      autoCloseSourceDisabledEnabled: false,
+      autoCloseDuplicateEnabled: true,
+      autoCloseRunIntervalDays: 1,
       triageExploitabilityWeight: 1, triageBlastRadiusWeight: 1, triageEolRiskWeight: 1,
       triageSlaBreachWeight: 1, triageMissingOwnerBoost: 1, triagePatchGapBoost: 1,
     });

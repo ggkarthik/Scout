@@ -5,6 +5,9 @@ import static com.prototype.vulnwatch.support.AuthRequest.authedPost;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresControllerIntegrationTest;
 import com.prototype.vulnwatch.support.PostgresITSupport;
@@ -29,8 +32,40 @@ class UpgradeRecommendationControllerPostgresIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private TenantService tenantService;
+
+    @Autowired
+    private TenantRepository tenantRepository;
+
     @Test
-    void upgradeRecommendationCanBeRequested() throws Exception {
+    void proTenantCanRequestUpgradeRecommendation() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        tenant.setPlanCode("PRO");
+        tenantRepository.save(tenant);
+
+        mockMvc.perform(asAnalyst(authedPost("/api/upgrade-recommendation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "softwareName": "nginx",
+                                  "vendor": "nginx",
+                                  "currentVersion": "1.20.0",
+                                  "cveIds": ["CVE-2024-0001"]
+                                }
+                                """)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recommendedVersion").isString())
+                .andExpect(jsonPath("$.upgradeNotes").isString())
+                .andExpect(jsonPath("$.urgency").isString());
+    }
+
+    @Test
+    void enterpriseTenantCanRequestUpgradeRecommendation() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        tenant.setPlanCode("ENTERPRISE");
+        tenantRepository.save(tenant);
+
         mockMvc.perform(asAnalyst(authedPost("/api/upgrade-recommendation")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
