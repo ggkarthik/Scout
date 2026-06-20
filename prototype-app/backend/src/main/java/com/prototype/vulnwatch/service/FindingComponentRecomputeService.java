@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.ApplicabilityState;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingCloseReason;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.ImpactState;
@@ -199,7 +200,7 @@ public class FindingComponentRecomputeService {
                 || component.getAsset().getState() != AssetState.ACTIVE
                 || component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
             resolveInactiveComponentAssessments(existingStates, now);
-            resolveInactiveComponentFindings(existing, now);
+            resolveInactiveComponentFindings(existing, policy, component, now);
             return new ComponentRecomputeResult(0, touchedVulnerabilityIds);
         }
 
@@ -209,7 +210,10 @@ public class FindingComponentRecomputeService {
         List<CorrelationCandidateService.CandidateMatch> candidates = correlationCandidateService.candidatesForComponent(component, bundle);
         Map<UUID, List<PrecedenceResolverService.CandidateDecision>> decisionsByVulnerability =
                 findingCorrelationAnalysisService.buildCandidateDecisionsByVulnerability(component, candidates, policy);
+        Set<UUID> candidateVulnerabilityIdsBeforeSourceFilter = new HashSet<>(decisionsByVulnerability.keySet());
         decisionsByVulnerability = filterByEnabledSources(tenant, decisionsByVulnerability);
+        Set<UUID> sourceDisabledVulnerabilityIds = new HashSet<>(candidateVulnerabilityIdsBeforeSourceFilter);
+        sourceDisabledVulnerabilityIds.removeAll(decisionsByVulnerability.keySet());
 
         Map<UUID, Finding> existingByVulnerability = new HashMap<>();
         for (Finding finding : existing) {
@@ -320,7 +324,12 @@ public class FindingComponentRecomputeService {
                         || existingFinding.getStatus() == FindingStatus.AUTO_CLOSED;
                 boolean changed = reopened;
                 if (reopened) {
-                    existingFinding.setStatus(FindingStatus.OPEN);
+                    findingWorkflowService.reopenByObservation(existingFinding, now, null);
+                } else {
+                    if (existingFinding.getConsecutiveMisses() != 0 || existingFinding.getAutoCloseEligibleAt() != null) {
+                        changed = true;
+                    }
+                    findingWorkflowService.markObserved(existingFinding, now, null);
                 }
 
                 FindingDecisionState nextDecisionState = impactAssessment.findingDecisionState();
@@ -358,7 +367,6 @@ public class FindingComponentRecomputeService {
                 existingFinding.setConfidenceScore(selectedForUpsert.confidence());
                 findingCorrelationMutationService.setEvidenceWithVex(existingFinding, evidenceForUpsert);
                 existingFinding.setPrecedenceTrace(nextPrecedenceTrace);
-                existingFinding.setLastObservedAt(now);
                 existingFinding.touch();
                 return reopened ? FindingUpsertService.UpsertAction.REOPENED : FindingUpsertService.UpsertAction.UPDATED;
             });
@@ -376,10 +384,10 @@ public class FindingComponentRecomputeService {
                     && !activeVulnerabilityIds.contains(vulnerabilityId)
                     && finding.getStatus() != FindingStatus.RESOLVED
                     && finding.getStatus() != FindingStatus.AUTO_CLOSED) {
-                finding.setStatus(FindingStatus.RESOLVED);
-                finding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
-                finding.setSuppressionReason(null);
-                finding.setSuppressedUntil(null);
+                FindingCloseReason reason = sourceDisabledVulnerabilityIds.contains(vulnerabilityId)
+                        ? FindingCloseReason.AUTO_SOURCE_DISABLED
+                        : FindingCloseReason.AUTO_NOT_OBSERVED;
+                markMissingOrAutoClose(finding, policy, reason, now);
                 finding.touch();
                 toPersist.add(finding);
             }
@@ -442,7 +450,12 @@ public class FindingComponentRecomputeService {
         return new ComponentRecomputeResult(activeVulnerabilityIds.size(), touchedVulnerabilityIds);
     }
 
-    private int resolveInactiveComponentFindings(List<Finding> existing, Instant now) {
+    private int resolveInactiveComponentFindings(
+            List<Finding> existing,
+            RiskPolicy policy,
+            InventoryComponent component,
+            Instant now
+    ) {
         if (existing.isEmpty()) {
             return 0;
         }
@@ -451,10 +464,26 @@ public class FindingComponentRecomputeService {
             if (finding.getStatus() == FindingStatus.RESOLVED || finding.getStatus() == FindingStatus.AUTO_CLOSED) {
                 continue;
             }
-            finding.setStatus(FindingStatus.RESOLVED);
-            finding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
-            finding.setSuppressionReason(null);
-            finding.setSuppressedUntil(null);
+            FindingCloseReason reason = component.getAsset() != null && component.getAsset().getState() != AssetState.ACTIVE
+                    ? FindingCloseReason.AUTO_ASSET_RETIRED
+                    : FindingCloseReason.AUTO_COMPONENT_REMOVED;
+            boolean enabled = reason == FindingCloseReason.AUTO_ASSET_RETIRED
+                    ? isAutoCloseEnabled(policy) && policy.isAutoCloseAssetRetiredEnabled()
+                    : isAutoCloseEnabled(policy) && policy.isAutoCloseComponentRemovedEnabled();
+            if (!enabled || finding.getStatus() != FindingStatus.OPEN) {
+                continue;
+            }
+            findingWorkflowService.autoCloseFinding(
+                    finding,
+                    reason,
+                    reason == FindingCloseReason.AUTO_ASSET_RETIRED
+                            ? "Finding auto-closed because the asset is no longer active"
+                            : "Finding auto-closed because the component is no longer active",
+                    Map.of(
+                            "assetState", component.getAsset() == null ? "" : component.getAsset().getState().name(),
+                            "componentStatus", component.getComponentStatus().name()
+                    ),
+                    now);
             finding.setLastObservedAt(now);
             finding.touch();
             toPersist.add(finding);
@@ -463,6 +492,40 @@ public class FindingComponentRecomputeService {
             findingRepository.saveAll(toPersist);
         }
         return 0;
+    }
+
+    private void markMissingOrAutoClose(
+            Finding finding,
+            RiskPolicy policy,
+            FindingCloseReason reason,
+            Instant now
+    ) {
+        if (finding.getStatus() != FindingStatus.OPEN) {
+            return;
+        }
+        int consecutiveMisses = finding.getConsecutiveMisses() + 1;
+        finding.setConsecutiveMisses(consecutiveMisses);
+        if (finding.getAutoCloseEligibleAt() == null) {
+            finding.setAutoCloseEligibleAt(now.plus(java.time.Duration.ofDays(autoCloseGraceDays(policy))));
+        }
+        if (!isAutoCloseEnabled(policy)
+                || !isAutoCloseReasonEnabled(policy, reason)
+                || consecutiveMisses < policy.getAutoCloseRequiredConsecutiveMisses()
+                || finding.getAutoCloseEligibleAt().isAfter(now)) {
+            return;
+        }
+        findingWorkflowService.autoCloseFinding(
+                finding,
+                reason,
+                reason == FindingCloseReason.AUTO_SOURCE_DISABLED
+                        ? "Finding auto-closed because its vulnerability source is disabled"
+                        : "Finding auto-closed because it was not observed in recent scans",
+                Map.of(
+                        "consecutiveMisses", consecutiveMisses,
+                        "requiredConsecutiveMisses", policy.getAutoCloseRequiredConsecutiveMisses(),
+                        "autoCloseEligibleAt", finding.getAutoCloseEligibleAt()
+                ),
+                now);
     }
 
     private void resolveInactiveComponentAssessments(List<ComponentVulnerabilityState> existingStates, Instant now) {
@@ -573,5 +636,27 @@ public class FindingComponentRecomputeService {
 
     private boolean isAutomaticFindingGenerationEnabled(RiskPolicy policy) {
         return policy != null && policy.getFindingGenerationMode() == RiskPolicy.FindingGenerationMode.AUTO;
+    }
+
+    private boolean isAutoCloseEnabled(RiskPolicy policy) {
+        return policy != null && policy.isAutoCloseEnabled();
+    }
+
+    private boolean isAutoCloseReasonEnabled(RiskPolicy policy, FindingCloseReason reason) {
+        if (policy == null) {
+            return false;
+        }
+        return switch (reason) {
+            case AUTO_SOURCE_DISABLED -> policy.isAutoCloseSourceDisabledEnabled();
+            case AUTO_NOT_OBSERVED -> policy.isAutoCloseNotObservedEnabled();
+            case AUTO_COMPONENT_REMOVED -> policy.isAutoCloseComponentRemovedEnabled();
+            case AUTO_ASSET_RETIRED -> policy.isAutoCloseAssetRetiredEnabled();
+            case AUTO_DUPLICATE -> policy.isAutoCloseDuplicateEnabled();
+            default -> false;
+        };
+    }
+
+    private int autoCloseGraceDays(RiskPolicy policy) {
+        return policy == null ? 0 : Math.max(0, policy.getAutoCloseAfterDays());
     }
 }

@@ -18,6 +18,14 @@ public record RiskPolicyResponse(
         String findingsScoreConfig,
         double agentAutoThreshold,
         double agentReviewThreshold,
-        int agentMaxConcurrent
+        int agentMaxConcurrent,
+        int autoCloseRequiredConsecutiveMisses,
+        boolean autoCloseNotObservedEnabled,
+        boolean autoCloseComponentRemovedEnabled,
+        boolean autoCloseAssetRetiredEnabled,
+        boolean autoCloseSourceDisabledEnabled,
+        boolean autoCloseDuplicateEnabled,
+        int autoCloseRunIntervalDays,
+        java.time.Instant autoCloseLastRunAt
 ) {
 }

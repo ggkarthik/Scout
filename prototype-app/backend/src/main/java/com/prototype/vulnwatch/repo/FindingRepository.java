@@ -30,6 +30,18 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     Page<Finding> findAllByOrderByUpdatedAtDesc(Pageable pageable);
     List<Finding> findByStatusOrderByUpdatedAtDesc(FindingStatus status);
     List<Finding> findByStatusAndSuppressedUntilBefore(FindingStatus status, Instant before);
+    @Query("""
+            select f
+            from Finding f
+            where f.tenant = :tenant
+              and f.status = :status
+              and f.autoCloseEligibleAt < :before
+            """)
+    List<Finding> findAutoCloseCandidates(
+            @Param("tenant") Tenant tenant,
+            @Param("status") FindingStatus status,
+            @Param("before") Instant before
+    );
     List<Finding> findByAsset(Asset asset);
     List<Finding> findByAssetAndStatus(Asset asset, FindingStatus status);
     List<Finding> findByAsset_IdIn(Collection<UUID> assetIds);

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingComment;
+import com.prototype.vulnwatch.domain.FindingCloseReason;
 import com.prototype.vulnwatch.domain.FindingEvent;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.dto.FindingCommentRequest;
@@ -95,6 +96,27 @@ class FindingWorkflowServiceTest {
         assertNotNull(result);
         assertEquals(FindingStatus.RESOLVED, result.getStatus());
         verify(findingRepository).save(finding);
+    }
+
+    @Test
+    void autoCloseFindingSetsReasonAndClosureMetadata() {
+        Finding finding = new Finding();
+        finding.setStatus(FindingStatus.OPEN);
+        Instant closedAt = Instant.parse("2026-06-18T12:00:00Z");
+        when(findingEventRepository.save(any(FindingEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.autoCloseFinding(
+                finding,
+                FindingCloseReason.AUTO_NOT_OBSERVED,
+                "Finding auto-closed because it was not observed",
+                java.util.Map.of("consecutiveMisses", 2),
+                closedAt);
+
+        assertEquals(FindingStatus.AUTO_CLOSED, finding.getStatus());
+        assertEquals(FindingCloseReason.AUTO_NOT_OBSERVED, finding.getClosedReason());
+        assertEquals("system", finding.getClosedBy());
+        assertEquals(closedAt, finding.getClosedAt());
+        verify(findingEventRepository).save(any(FindingEvent.class));
     }
 
     @Test

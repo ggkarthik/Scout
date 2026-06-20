@@ -71,13 +71,37 @@ public class RiskPolicy {
     @Column(nullable = false)
     private int autoCloseAfterDays = 0;
 
+    @Column(name = "auto_close_required_consecutive_misses", nullable = false)
+    private int autoCloseRequiredConsecutiveMisses = 2;
+
+    @Column(name = "auto_close_not_observed_enabled", nullable = false)
+    private boolean autoCloseNotObservedEnabled = true;
+
+    @Column(name = "auto_close_component_removed_enabled", nullable = false)
+    private boolean autoCloseComponentRemovedEnabled = true;
+
+    @Column(name = "auto_close_asset_retired_enabled", nullable = false)
+    private boolean autoCloseAssetRetiredEnabled = true;
+
+    @Column(name = "auto_close_source_disabled_enabled", nullable = false)
+    private boolean autoCloseSourceDisabledEnabled = false;
+
+    @Column(name = "auto_close_duplicate_enabled", nullable = false)
+    private boolean autoCloseDuplicateEnabled = true;
+
+    @Column(name = "auto_close_run_interval_days", nullable = false)
+    private int autoCloseRunIntervalDays = 1;
+
+    @Column(name = "auto_close_last_run_at")
+    private Instant autoCloseLastRunAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "finding_generation_mode", nullable = false, length = 20)
     private FindingGenerationMode findingGenerationMode = FindingGenerationMode.MANUAL;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "findings_score_config", columnDefinition = "jsonb")
-    private String findingsScoreConfig = "[]";
+    private String findingsScoreConfig = RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON;
 
     @Column(name = "agent_auto_threshold", nullable = false)
     private double agentAutoThreshold = 0.85;
@@ -207,6 +231,70 @@ public class RiskPolicy {
         this.autoCloseAfterDays = autoCloseAfterDays;
     }
 
+    public int getAutoCloseRequiredConsecutiveMisses() {
+        return autoCloseRequiredConsecutiveMisses;
+    }
+
+    public void setAutoCloseRequiredConsecutiveMisses(int autoCloseRequiredConsecutiveMisses) {
+        this.autoCloseRequiredConsecutiveMisses = Math.max(1, autoCloseRequiredConsecutiveMisses);
+    }
+
+    public boolean isAutoCloseNotObservedEnabled() {
+        return autoCloseNotObservedEnabled;
+    }
+
+    public void setAutoCloseNotObservedEnabled(boolean autoCloseNotObservedEnabled) {
+        this.autoCloseNotObservedEnabled = autoCloseNotObservedEnabled;
+    }
+
+    public boolean isAutoCloseComponentRemovedEnabled() {
+        return autoCloseComponentRemovedEnabled;
+    }
+
+    public void setAutoCloseComponentRemovedEnabled(boolean autoCloseComponentRemovedEnabled) {
+        this.autoCloseComponentRemovedEnabled = autoCloseComponentRemovedEnabled;
+    }
+
+    public boolean isAutoCloseAssetRetiredEnabled() {
+        return autoCloseAssetRetiredEnabled;
+    }
+
+    public void setAutoCloseAssetRetiredEnabled(boolean autoCloseAssetRetiredEnabled) {
+        this.autoCloseAssetRetiredEnabled = autoCloseAssetRetiredEnabled;
+    }
+
+    public boolean isAutoCloseSourceDisabledEnabled() {
+        return autoCloseSourceDisabledEnabled;
+    }
+
+    public void setAutoCloseSourceDisabledEnabled(boolean autoCloseSourceDisabledEnabled) {
+        this.autoCloseSourceDisabledEnabled = autoCloseSourceDisabledEnabled;
+    }
+
+    public boolean isAutoCloseDuplicateEnabled() {
+        return autoCloseDuplicateEnabled;
+    }
+
+    public void setAutoCloseDuplicateEnabled(boolean autoCloseDuplicateEnabled) {
+        this.autoCloseDuplicateEnabled = autoCloseDuplicateEnabled;
+    }
+
+    public int getAutoCloseRunIntervalDays() {
+        return autoCloseRunIntervalDays;
+    }
+
+    public void setAutoCloseRunIntervalDays(int autoCloseRunIntervalDays) {
+        this.autoCloseRunIntervalDays = Math.max(1, autoCloseRunIntervalDays);
+    }
+
+    public Instant getAutoCloseLastRunAt() {
+        return autoCloseLastRunAt;
+    }
+
+    public void setAutoCloseLastRunAt(Instant autoCloseLastRunAt) {
+        this.autoCloseLastRunAt = autoCloseLastRunAt;
+    }
+
     public FindingGenerationMode getFindingGenerationMode() {
         return findingGenerationMode;
     }
@@ -216,11 +304,15 @@ public class RiskPolicy {
     }
 
     public String getFindingsScoreConfig() {
-        return findingsScoreConfig == null ? "[]" : findingsScoreConfig;
+        return findingsScoreConfig == null || findingsScoreConfig.isBlank()
+                ? RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON
+                : findingsScoreConfig;
     }
 
     public void setFindingsScoreConfig(String findingsScoreConfig) {
-        this.findingsScoreConfig = findingsScoreConfig == null ? "[]" : findingsScoreConfig;
+        this.findingsScoreConfig = findingsScoreConfig == null || findingsScoreConfig.isBlank()
+                ? RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON
+                : findingsScoreConfig;
     }
 
     public Instant getUpdatedAt() {

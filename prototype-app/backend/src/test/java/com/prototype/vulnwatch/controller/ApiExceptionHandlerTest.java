@@ -39,13 +39,13 @@ class ApiExceptionHandlerTest {
     @Test
     void mapsEntitlementDeniedToForbiddenUpgradePayload() {
         ResponseEntity<Map<String, Object>> response = handler.handleEntitlementDenied(
-                new EntitlementDeniedException("ai.solution_generation", "PRO", "Enterprise only")
+                new EntitlementDeniedException("ai.solution_generation", "PRO", "Feature not enabled")
         );
 
         assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
         assertEquals("PLAN_UPGRADE_REQUIRED", response.getBody().get("code"));
         assertEquals("ai.solution_generation", response.getBody().get("entitlementKey"));
         assertEquals("PRO", response.getBody().get("currentPlan"));
-        assertEquals("Enterprise only", response.getBody().get("error"));
+        assertEquals("Feature not enabled", response.getBody().get("error"));
     }
 }

@@ -132,7 +132,11 @@ function cveDisplayStatus(record: OrgSpecificCveExposureRecord): 'NOT_APPLICABLE
   if (record.openFindings === 0 && record.impactedComponentCount === 0 && record.underInvestigationComponentCount === 0) {
     return 'NO_IMPACT';
   }
-  // Reviewed: investigation workflow marked done (mirrors workbench invDone logic)
+  // Reviewed: prefer server-backed evidence that the investigation work has been completed.
+  if (record.hasInvestigationSummary || Boolean(record.investigationSummaryGeneratedAt)) {
+    return 'REVIEWED';
+  }
+  // Fall back to the browser-local runbook state for in-progress analyst sessions.
   const investigationStatus = getInvestigationStatus(record.externalId);
   if (investigationStatus === 'done') {
     return 'REVIEWED';
@@ -716,13 +720,10 @@ export function VulnRepoVulnerabilitiesPage() {
                     type="button"
                     className="btn-link vuln-repo-ai-solution-link"
                     aria-label={`Open AI solution for ${item.externalId}`}
-                    title={canViewAiSolutions ? `AI Remediation Solution — ${item.externalId}` : 'Enterprise only'}
-                    disabled={!canViewAiSolutions}
+                    title={`AI Remediation Solution — ${item.externalId}`}
                     onClick={() => {
-                      if (canViewAiSolutions) {
-                        setSelectedSoftwareRecord(item);
-                        setDrawerMode('ai-solution');
-                      }
+                      setSelectedSoftwareRecord(item);
+                      setDrawerMode('ai-solution');
                     }}
                   >
                     {/* AI Solution: sparkle/lightning icon */}

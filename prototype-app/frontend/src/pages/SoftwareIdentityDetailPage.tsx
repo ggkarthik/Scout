@@ -851,15 +851,12 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      disabled={generateRecommendationMutation.isPending || !canGenerateAiRecommendation}
-                      title={canGenerateAiRecommendation ? 'Generate AI recommendation' : 'Enterprise only'}
+                      disabled={generateRecommendationMutation.isPending}
+                      title="Generate AI recommendation"
                       onClick={() => generateRecommendationMutation.mutate()}
                     >
                       {generateRecommendationMutation.isPending ? 'Generating...' : 'AI Recommendation'}
                     </button>
-                    {!canGenerateAiRecommendation && (
-                      <span className="panel-caption">Enterprise only</span>
-                    )}
                     <button
                       type="button"
                       className="btn btn-secondary"

@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingComment;
+import com.prototype.vulnwatch.domain.FindingCloseReason;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingEvent;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.RiskPolicy;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.FindingCommentRequest;
 import com.prototype.vulnwatch.dto.FindingCommentResponse;
 import com.prototype.vulnwatch.dto.FindingEventResponse;
@@ -164,11 +166,19 @@ public class FindingWorkflowService {
             if (nextStatus == FindingStatus.SUPPRESSED) {
                 finding.setSuppressionReason(trimToNull(request.suppressionReason()));
                 finding.setSuppressedUntil(request.suppressedUntil());
+                clearClosureMetadata(finding);
             } else {
                 finding.setSuppressionReason(null);
                 finding.setSuppressedUntil(null);
                 finding.setSuppressedByRuleId(null);
                 finding.setSuppressedByRuleName(null);
+                if (nextStatus == FindingStatus.OPEN) {
+                    clearClosureMetadata(finding);
+                } else if (nextStatus == FindingStatus.RESOLVED) {
+                    applyClosureMetadata(finding, FindingCloseReason.MANUAL_FIXED, actor, null, now);
+                } else if (nextStatus == FindingStatus.AUTO_CLOSED) {
+                    applyClosureMetadata(finding, FindingCloseReason.MANUAL_ACCEPTED_RISK, actor, null, now);
+                }
             }
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("from", previousStatus.name());
@@ -255,6 +265,68 @@ public class FindingWorkflowService {
         findingEventRepository.save(event);
     }
 
+    public void markObserved(Finding finding, Instant observedAt, UUID observedRunId) {
+        if (finding == null) {
+            return;
+        }
+        finding.setLastObservedAt(observedAt);
+        finding.setLastObservedRunId(observedRunId);
+        finding.setConsecutiveMisses(0);
+        finding.setAutoCloseEligibleAt(null);
+    }
+
+    public void reopenByObservation(Finding finding, Instant observedAt, UUID observedRunId) {
+        FindingStatus previousStatus = finding.getStatus();
+        finding.setStatus(FindingStatus.OPEN);
+        finding.setDecisionState(FindingDecisionState.AFFECTED);
+        clearClosureMetadata(finding);
+        markObserved(finding, observedAt, observedRunId);
+        finding.touch();
+        appendEvent(
+                finding,
+                "REOPENED_BY_OBSERVATION",
+                "system",
+                "Finding reopened because the vulnerability was observed again",
+                Map.of(
+                        "fromStatus", previousStatus.name(),
+                        "observedAt", observedAt
+                ));
+    }
+
+    public void autoCloseFinding(
+            Finding finding,
+            FindingCloseReason reason,
+            String summary,
+            Map<String, Object> details,
+            Instant closedAt
+    ) {
+        if (finding == null || finding.getStatus() == FindingStatus.AUTO_CLOSED) {
+            return;
+        }
+        FindingStatus previousStatus = finding.getStatus();
+        finding.setStatus(FindingStatus.AUTO_CLOSED);
+        finding.setDecisionState(FindingDecisionState.NOT_AFFECTED);
+        finding.setSuppressionReason(null);
+        finding.setSuppressedUntil(null);
+        finding.setSuppressedByRuleId(null);
+        finding.setSuppressedByRuleName(null);
+        applyClosureMetadata(finding, reason, "system", null, closedAt);
+        finding.touch();
+        Map<String, Object> eventDetails = new LinkedHashMap<>();
+        eventDetails.put("fromStatus", previousStatus.name());
+        eventDetails.put("toStatus", FindingStatus.AUTO_CLOSED.name());
+        eventDetails.put("closedReason", reason.name());
+        if (details != null) {
+            eventDetails.putAll(details);
+        }
+        appendEvent(
+                finding,
+                "AUTO_CLOSED",
+                "system",
+                summary == null || summary.isBlank() ? "Finding auto-closed" : summary,
+                eventDetails);
+    }
+
     @Scheduled(cron = "0 */15 * * * *")
     @Transactional
     public void reopenExpiredSuppressions() {
@@ -286,63 +358,116 @@ public class FindingWorkflowService {
     public void autoCloseFindingsByPolicy() {
         Instant now = Instant.now();
         List<RiskPolicy> policies = riskPolicyRepository.findAll();
+        runAutoCloseForPolicies(policies, now, false);
+    }
 
+    @Transactional
+    public int executeAutoCloseNow(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return 0;
+        }
+        RiskPolicy policy = tenantSchemaExecutionService.run(
+                tenant,
+                () -> riskPolicyRepository.findTopByOrderByUpdatedAtDesc()
+        ).orElse(null);
+        if (policy == null) {
+            return 0;
+        }
+        return runAutoCloseForPolicies(List.of(policy), Instant.now(), true);
+    }
+
+    private int runAutoCloseForPolicies(List<RiskPolicy> policies, Instant now, boolean ignoreSchedule) {
+        int updated = 0;
         for (RiskPolicy policy : policies) {
-            if (!policy.isAutoCloseEnabled()) {
+            if (!policy.isAutoCloseEnabled() || !policy.isAutoCloseNotObservedEnabled()) {
                 continue;
             }
-            if (policy.getAutoCloseAfterDays() <= 0) {
+            if (!ignoreSchedule && !isAutoCloseRunDue(policy, now)) {
                 continue;
             }
             String identifier = trimToNull(policy.getAutoCloseAssetIdentifier());
+            List<Finding> findings;
             if (identifier == null) {
-                continue;
+                findings = tenantSchemaExecutionService.run(
+                        policy.getTenant(),
+                        () -> findingRepository.findAutoCloseCandidates(
+                                policy.getTenant(), FindingStatus.OPEN, now)
+                );
+            } else {
+                Asset asset = tenantSchemaExecutionService.run(
+                        policy.getTenant(),
+                        () -> assetRepository.findByIdentifier(identifier)
+                ).orElse(null);
+                if (asset == null) {
+                    continue;
+                }
+                findings = tenantSchemaExecutionService.run(
+                        policy.getTenant(),
+                        () -> findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN).stream()
+                                .filter(finding -> finding.getAutoCloseEligibleAt() != null
+                                        && !finding.getAutoCloseEligibleAt().isAfter(now))
+                                .toList()
+                );
             }
 
-            Asset asset = tenantSchemaExecutionService.run(
-                    policy.getTenant(),
-                    () -> assetRepository.findByIdentifier(identifier)
-            ).orElse(null);
-            if (asset == null) {
-                continue;
-            }
-
-            Instant cutoff = now.minus(Duration.ofDays(policy.getAutoCloseAfterDays()));
-            List<Finding> findings = findingRepository.findByAsset(asset);
             List<Finding> toPersist = new ArrayList<>();
             for (Finding finding : findings) {
-                if (finding.getStatus() == FindingStatus.AUTO_CLOSED) {
+                if (finding.getConsecutiveMisses() < policy.getAutoCloseRequiredConsecutiveMisses()) {
                     continue;
                 }
-                Instant firstObservedAt = finding.getFirstObservedAt();
-                if (firstObservedAt == null || firstObservedAt.isAfter(cutoff)) {
-                    continue;
-                }
-
-                FindingStatus previousStatus = finding.getStatus();
-                finding.setStatus(FindingStatus.AUTO_CLOSED);
-                finding.setSuppressionReason(null);
-                finding.setSuppressedUntil(null);
-                finding.touch();
-                appendEvent(
+                autoCloseFinding(
                         finding,
-                        "AUTO_CLOSED_POLICY",
-                        "system",
-                        "Finding auto-closed by asset policy",
+                        FindingCloseReason.AUTO_NOT_OBSERVED,
+                        "Finding auto-closed because it was not observed in recent scans",
                         Map.of(
-                                "assetIdentifier", identifier,
-                                "cutoffAt", cutoff,
+                                "assetIdentifier", identifier == null ? "" : identifier,
+                                "autoCloseEligibleAt", finding.getAutoCloseEligibleAt(),
+                                "consecutiveMisses", finding.getConsecutiveMisses(),
                                 "autoCloseAfterDays", policy.getAutoCloseAfterDays(),
-                                "fromStatus", previousStatus.name(),
-                                "toStatus", FindingStatus.AUTO_CLOSED.name()
-                        ));
+                                "requiredConsecutiveMisses", policy.getAutoCloseRequiredConsecutiveMisses()
+                        ),
+                        now);
                 toPersist.add(finding);
             }
             if (!toPersist.isEmpty()) {
                 findingRepository.saveAll(toPersist);
                 findingListProjectionService.refreshTenant(policy.getTenant());
+                updated += toPersist.size();
             }
+            policy.setAutoCloseLastRunAt(now);
+            riskPolicyRepository.save(policy);
         }
+        return updated;
+    }
+
+    private boolean isAutoCloseRunDue(RiskPolicy policy, Instant now) {
+        if (policy.getAutoCloseLastRunAt() == null) {
+            return true;
+        }
+        int intervalDays = Math.max(1, policy.getAutoCloseRunIntervalDays());
+        return !policy.getAutoCloseLastRunAt().plus(Duration.ofDays(intervalDays)).isAfter(now);
+    }
+
+    private void applyClosureMetadata(
+            Finding finding,
+            FindingCloseReason reason,
+            String actor,
+            UUID ruleId,
+            Instant closedAt
+    ) {
+        finding.setClosedAt(closedAt == null ? Instant.now() : closedAt);
+        finding.setClosedBy(actor(actor));
+        finding.setClosedReason(reason);
+        finding.setClosedRuleId(ruleId);
+        finding.setAutoCloseEligibleAt(null);
+    }
+
+    private void clearClosureMetadata(Finding finding) {
+        finding.setClosedAt(null);
+        finding.setClosedBy(null);
+        finding.setClosedReason(null);
+        finding.setClosedRuleId(null);
+        finding.setAutoCloseEligibleAt(null);
     }
 
     private String actor(String actor) {

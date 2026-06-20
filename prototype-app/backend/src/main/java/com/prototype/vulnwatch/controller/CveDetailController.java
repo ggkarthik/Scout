@@ -232,7 +232,7 @@ public class CveDetailController {
             @RequestBody Map<String, Object> request) {
         assertDemoAllowsAiAction();
         assertEntitled(TenantEntitlementService.AI_INVESTIGATION_SUMMARY,
-                "AI investigation summaries are available on the Enterprise plan.");
+                "AI investigation summaries are available in this workspace.");
         CveInvestigationSummaryResponse summary = aiSummaryService.generateAiSummary(cveId, request);
         summaryPersistenceService.saveSummary(cveId, request, summary, "ai");
         return ResponseEntity.ok(summary);
@@ -244,7 +244,7 @@ public class CveDetailController {
         SavedCveInvestigationSummaryResponse savedSummary = summaryPersistenceService.getSavedSummary(cveId);
         if ("ai".equalsIgnoreCase(savedSummary.mode())) {
             assertEntitled(TenantEntitlementService.AI_INVESTIGATION_SUMMARY,
-                    "AI investigation summaries are available on the Enterprise plan.");
+                    "AI investigation summaries are available in this workspace.");
         }
         return ResponseEntity.ok(savedSummary);
     }
@@ -289,7 +289,7 @@ public class CveDetailController {
     ) {
         assertDemoAllowsAiAction();
         assertEntitled(TenantEntitlementService.AI_FIX_GENERATION,
-                "AI fix generation is available on the Enterprise plan.");
+                "AI fix generation is available in this workspace.");
         com.prototype.vulnwatch.domain.Tenant tenant = workspaceService.getWorkspace();
         java.util.List<GenerateFixesSoftwareEntry> extra = body != null && body.additionalSoftware() != null
                 ? body.additionalSoftware() : java.util.List.of();
@@ -323,7 +323,7 @@ public class CveDetailController {
     @GetMapping("/{cveId}/ai-solution")
     public ResponseEntity<AiSolutionResponse> getSavedAiSolution(@PathVariable String cveId) {
         assertEntitled(TenantEntitlementService.AI_SOLUTION_GENERATION,
-                "AI remediation recommendations are available on the Enterprise plan.");
+                "AI remediation recommendations are available in this workspace.");
         java.util.Optional<CveAiSolutionPersistenceService.SavedAiSolution> saved =
                 aiSolutionPersistenceService.getSavedAiSolution(cveId);
         if (saved.isEmpty()) return ResponseEntity.notFound().build();
@@ -351,7 +351,7 @@ public class CveDetailController {
             @RequestBody Map<String, Object> recommendationContext) {
         assertDemoAllowsAiAction();
         assertEntitled(TenantEntitlementService.AI_SOLUTION_GENERATION,
-                "AI remediation recommendations are available on the Enterprise plan.");
+                "AI remediation recommendations are available in this workspace.");
         return ResponseEntity.ok(aiSolutionService.generate(cveId, recommendationContext));
     }
 
@@ -362,7 +362,7 @@ public class CveDetailController {
     @GetMapping("/{cveId}/ai-actions")
     public ResponseEntity<AiActionsResponse> getSavedAiActions(@PathVariable String cveId) {
         assertEntitled(TenantEntitlementService.AI_REQUIRED_ACTIONS,
-                "AI required actions are available on the Enterprise plan.");
+                "AI required actions are available in this workspace.");
         return aiSolutionPersistenceService.getSavedAiActions(cveId)
                 .map(saved -> {
                     try {
@@ -395,7 +395,7 @@ public class CveDetailController {
             @RequestBody Map<String, Object> context) {
         assertDemoAllowsAiAction();
         assertEntitled(TenantEntitlementService.AI_REQUIRED_ACTIONS,
-                "AI required actions are available on the Enterprise plan.");
+                "AI required actions are available in this workspace.");
         return ResponseEntity.ok(aiActionsService.generate(cveId, context));
     }
 
@@ -762,7 +762,7 @@ public class CveDetailController {
             @RequestBody com.prototype.vulnwatch.dto.AgentRunRequest request) {
         assertDemoAllowsAiAction();
         assertEntitled(TenantEntitlementService.AI_INVESTIGATION_AGENT,
-                "AI investigation agent workflows are available on the Enterprise plan.");
+                "AI investigation agent workflows are available in this workspace.");
         return ResponseEntity.ok(investigationAgentService.runAgent(cveId, request));
     }
 

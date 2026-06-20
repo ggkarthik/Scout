@@ -31,7 +31,7 @@ public class SyncRunHistoryService {
     private static final String RUN_CLASS_BACKFILL = "BACKFILL";
     private static final String RUN_CLASS_RECOMPUTE = "RECOMPUTE";
     private static final List<String> VULN_INTEL_TYPES = List.of(
-            "NVD", "KEV", "GHSA", "CSAF_MICROSOFT", "CSAF_REDHAT", "ADVISORY"
+            "NVD", "KEV", "GHSA", "CSAF_MICROSOFT", "CSAF_REDHAT", "ADVISORY", "EUVD", "JVN"
     );
     private static final Set<String> EOL_CONNECTOR_RUN_TYPES = Set.of(
             "EOL_CATALOG_REFRESH",
@@ -134,16 +134,13 @@ public class SyncRunHistoryService {
     }
 
     private java.util.Optional<SyncRun> findLatestByActor(RequestActor actor, String syncType) {
-        if (actor.hasRole("PLATFORM_OWNER")) {
+        if (!isInventoryRunType(syncType)) {
             return inPlatformWorkspace(() ->
                     syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")).stream()
                             .filter(run -> syncType.equalsIgnoreCase(run.getSyncType()))
                             .findFirst());
         }
         if (actor.tenantId() == null) {
-            return java.util.Optional.empty();
-        }
-        if (!isInventoryRunType(syncType)) {
             return java.util.Optional.empty();
         }
         return syncRunRepository.findTopBySyncTypeIgnoreCaseAndTenant_IdOrderByStartedAtDesc(syncType, actor.tenantId());

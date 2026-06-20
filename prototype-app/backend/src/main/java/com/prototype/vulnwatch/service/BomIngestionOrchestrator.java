@@ -44,6 +44,8 @@ import com.prototype.vulnwatch.service.sbomingestion.SbomIngestionLockService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomIngestionSourceMetadata;
 import com.prototype.vulnwatch.service.sbomingestion.SbomContentIngestionService;
 import com.prototype.vulnwatch.service.sbomingestion.SbomUploadSupportService;
+import com.prototype.vulnwatch.service.cbom.CbomIngestionResult;
+import com.prototype.vulnwatch.service.cbom.CbomIngestionService;
 import com.prototype.vulnwatch.util.IdentityUtil;
 import com.prototype.vulnwatch.util.PurlUtil;
 import java.io.IOException;
@@ -61,6 +63,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -89,6 +92,7 @@ public class BomIngestionOrchestrator {
     private final InventoryComponentRepository inventoryComponentRepository;
     private final FindingRepository findingRepository;
     private final CpeDimensionService cpeDimensionService;
+    private final CbomIngestionService cbomIngestionService;
     private final ObjectMapper objectMapper;
 
     public BomIngestionOrchestrator(
@@ -107,6 +111,7 @@ public class BomIngestionOrchestrator {
             InventoryComponentRepository inventoryComponentRepository,
             FindingRepository findingRepository,
             CpeDimensionService cpeDimensionService,
+            CbomIngestionService cbomIngestionService,
             ObjectMapper objectMapper
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
@@ -124,6 +129,7 @@ public class BomIngestionOrchestrator {
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.findingRepository = findingRepository;
         this.cpeDimensionService = cpeDimensionService;
+        this.cbomIngestionService = cbomIngestionService;
         this.objectMapper = objectMapper;
     }
 
@@ -252,6 +258,32 @@ public class BomIngestionOrchestrator {
         );
     }
 
+    @Transactional
+    public BomIngestionResultResponse ingestGithubRepoBomFile(
+            Tenant tenant,
+            BomType bomType,
+            com.prototype.vulnwatch.domain.AssetType assetType,
+            String assetName,
+            String assetIdentifier,
+            byte[] content,
+            SbomIngestionSourceMetadata metadata
+    ) throws IOException {
+        return ingestFetchedContent(
+                tenant,
+                bomType,
+                assetType,
+                assetName,
+                assetIdentifier,
+                null,
+                metadata.sourceEndpoint(),
+                "GITHUB_REPOSITORY",
+                content,
+                "github-bom-file.json",
+                metadata,
+                null
+        );
+    }
+
     private BomIngestionResultResponse ingestBytes(
             Tenant tenant,
             BomType bomType,
@@ -299,9 +331,10 @@ public class BomIngestionOrchestrator {
 
         String supplierKey = supplier == null ? null : supplier.trim().toLowerCase(Locale.ROOT);
         String sourceIdentity = normalizeSourceIdentity(metadata);
+        PageRequest latestOne = PageRequest.of(0, 1);
         Optional<BomIngestionRecord> existingOpt = resolvedAsset.getId() != null
-                ? bomRecordRepository.findActiveForAsset(tenant.getId(), bomType, resolvedAsset.getId(), supplierKey)
-                : bomRecordRepository.findActiveWithoutAsset(tenant.getId(), bomType, supplierKey, sourceIdentity);
+                ? bomRecordRepository.findActiveForAsset(tenant.getId(), bomType, resolvedAsset.getId(), supplierKey, latestOne).stream().findFirst()
+                : bomRecordRepository.findActiveWithoutAsset(tenant.getId(), bomType, supplierKey, sourceIdentity, latestOne).stream().findFirst();
         String contentChecksum = sha256(content);
 
         if (existingOpt.isPresent()) {
@@ -312,25 +345,35 @@ public class BomIngestionOrchestrator {
             }
         }
 
-        // Delegate inventory + CVE correlation path (JSON and CycloneDX XML both supported)
         String defaultFilename = isXml ? "bom.xml" : "bom.json";
         String originalFilename = metadata.sourceReference() != null ? metadata.sourceReference() : defaultFilename;
-        SbomIngestionResponse inventoryResult = sbomContentIngestionService.ingestBytes(
-                tenant,
-                legacyRequest.assetType(),
-                legacyRequest.assetName(),
-                legacyRequest.assetIdentifier(),
-                content,
-                originalFilename,
-                metadata,
-                assetCustomizer
-        );
+        SbomIngestionResponse inventoryResult = null;
+        if (bomType != BomType.CBOM) {
+            // Delegate software inventory + CVE correlation path for software-like BOMs only.
+            inventoryResult = sbomContentIngestionService.ingestBytes(
+                    tenant,
+                    legacyRequest.assetType(),
+                    legacyRequest.assetName(),
+                    legacyRequest.assetIdentifier(),
+                    content,
+                    originalFilename,
+                    metadata,
+                    assetCustomizer
+            );
+        } else {
+            resolvedAsset.setName(legacyRequest.assetName());
+            resolvedAsset.setType(legacyRequest.assetType());
+            resolvedAsset = sbomUploadSupportService.saveAsset(resolvedAsset);
+        }
 
         UUID previousBomId = null;
         // Supersede existing BOM record if present
         if (existingOpt.isPresent()) {
             BomIngestionRecord old = existingOpt.get();
             bomComponentRepository.softDeleteByBomId(old.getId());
+            if (bomType == BomType.CBOM) {
+                cbomIngestionService.deactivateBySourceBomId(old.getId());
+            }
             old.setStatus(BomStatus.SUPERSEDED);
             bomRecordRepository.save(old);
             previousBomId = old.getId();
@@ -339,8 +382,8 @@ public class BomIngestionOrchestrator {
         // Persist new BomIngestionRecord
         BomIngestionRecord record = new BomIngestionRecord();
         record.setTenant(tenant);
-        record.setSbomUploadId(inventoryResult.sbomUploadId());
-        record.setAssetId(inventoryResult.assetId());
+        record.setSbomUploadId(inventoryResult == null ? null : inventoryResult.sbomUploadId());
+        record.setAssetId(inventoryResult == null ? resolvedAsset.getId() : inventoryResult.assetId());
         record.setBomType(bomType);
         record.setFormat(format);
         record.setFormatVersion(formatVersion);
@@ -371,18 +414,35 @@ public class BomIngestionOrchestrator {
             bomRecordRepository.save(old);
         }
 
-        // Persist BomComponents with category
-        List<BomComponent> components = isXml
-                ? extractAndCategorizeXmlComponents(content, record, tenant, bomType, supplier)
-                : extractAndCategorizeComponents(root, record, tenant, bomType, supplier);
-        if (components.isEmpty()) {
-            record.setStatus(BomStatus.FAILED);
+        int componentCount;
+        int findingsGenerated;
+        if (bomType == BomType.CBOM) {
+            CbomIngestionResult cbomResult = cbomIngestionService.ingest(tenant, resolvedAsset, record, content);
+            if (cbomResult.componentCount() == 0) {
+                record.setStatus(BomStatus.FAILED);
+                bomRecordRepository.save(record);
+                throw new IOException("No CBOM cryptographic assets could be extracted from the submitted document");
+            }
+            componentCount = cbomResult.componentCount();
+            findingsGenerated = cbomResult.findingCount();
+            record.setComponentCount(componentCount);
             bomRecordRepository.save(record);
-            throw new IOException("No BOM components could be extracted from the submitted document");
+        } else {
+            // Persist BomComponents with category
+            List<BomComponent> components = isXml
+                    ? extractAndCategorizeXmlComponents(content, record, tenant, bomType, supplier)
+                    : extractAndCategorizeComponents(root, record, tenant, bomType, supplier);
+            if (components.isEmpty()) {
+                record.setStatus(BomStatus.FAILED);
+                bomRecordRepository.save(record);
+                throw new IOException("No BOM components could be extracted from the submitted document");
+            }
+            persistEvidenceAndCorrelations(record, tenant, components);
+            componentCount = components.size();
+            findingsGenerated = inventoryResult.findingsGenerated();
+            record.setComponentCount(componentCount);
+            bomRecordRepository.save(record);
         }
-        persistEvidenceAndCorrelations(record, tenant, components);
-        record.setComponentCount(components.size());
-        bomRecordRepository.save(record);
 
         String action = existingOpt.isPresent() ? "REPLACED" : "CREATED";
         BomInspectionResponse inspection = sbomParserService.inspectResolved(
@@ -393,7 +453,7 @@ public class BomIngestionOrchestrator {
         );
         return new BomIngestionResultResponse(
                 record.getId(),
-                inventoryResult.assetId(),
+                inventoryResult == null ? resolvedAsset.getId() : inventoryResult.assetId(),
                 bomType.name(),
                 format.name(),
                 formatVersion,
@@ -402,8 +462,8 @@ public class BomIngestionOrchestrator {
                 inspection.supportLevel(),
                 inspection.supported(),
                 inspection.warnings(),
-                components.size(),
-                inventoryResult.findingsGenerated(),
+                componentCount,
+                findingsGenerated,
                 record.getStatus().name(),
                 action
         );
@@ -1184,7 +1244,24 @@ public class BomIngestionOrchestrator {
 
     private String extractXmlExternalReferences(Element componentElement) {
         Element externalReferences = sbomParserService.xmlFirstChild(componentElement, "externalReferences");
-        return externalReferences == null ? null : blankToNull(externalReferences.getTextContent());
+        if (externalReferences == null) {
+            return null;
+        }
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        NodeList refs = externalReferences.getChildNodes();
+        for (int i = 0; i < refs.getLength(); i++) {
+            Node refNode = refs.item(i);
+            if (refNode.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element ref = (Element) refNode;
+            String type = blankToNull(ref.getAttribute("type"));
+            String url = sbomParserService.xmlChildText(ref, "url");
+            if (url == null || url.isBlank()) continue;
+            com.fasterxml.jackson.databind.node.ObjectNode entry = objectMapper.createObjectNode();
+            if (type != null) entry.put("type", type);
+            entry.put("url", url);
+            arr.add(entry);
+        }
+        return arr.isEmpty() ? null : writeJson(arr);
     }
 
     /**

@@ -12,7 +12,7 @@ function bomLabel(type: string): string {
 
 function BomTypeTag({ type }: { type: string }) {
   const colors: Record<string, string> = {
-    SBOM: '#2563eb', AI_BOM: '#0891b2', CBOM: '#7c3aed', VENDOR: '#059669',
+    SBOM: '#2563eb', AI_BOM: '#0891b2', CBOM: '#7c3aed', VENDOR: '#059669', UNMAPPED: '#d88f3d',
   };
   const color = colors[type] ?? 'var(--muted)';
   return (
@@ -22,7 +22,7 @@ function BomTypeTag({ type }: { type: string }) {
       color, background: `color-mix(in srgb, ${color} 12%, transparent)`,
       border: `1px solid ${color}40`,
     }}>
-      {bomLabel(type)}
+      {type === 'UNMAPPED' ? 'Unmapped' : bomLabel(type)}
     </span>
   );
 }
@@ -54,7 +54,7 @@ function CorrelationPill({ state }: { state: BomComponentSummaryItem['correlatio
   return <span className={map[state] ?? 'status-pill'}>{label[state] ?? state}</span>;
 }
 
-type WidgetFilter = 'all' | 'vulnerable' | 'eol' | 'ai_bom' | 'cbom';
+type WidgetFilter = 'all' | 'bom_mapped' | 'unmapped' | 'vulnerable' | 'eol' | 'ai_bom' | 'cbom';
 
 function WidgetRow({
   items,
@@ -67,22 +67,26 @@ function WidgetRow({
 }) {
   const vulnerable = items.filter((c) => c.totalCveCount > 0).length;
   const eol = items.filter((c) => c.isEol).length;
+  const bomMapped = items.filter((c) => c.bomTypes.length > 0).length;
+  const unmapped = items.length - bomMapped;
   const aiBom = items.filter((c) => c.bomTypes.includes('AI_BOM')).length;
   const cbom = items.filter((c) => c.bomTypes.includes('CBOM')).length;
   const licenses = new Set(items.map((c) => c.license).filter(Boolean)).size;
   const apps = new Set(items.map((c) => c.assetName)).size;
 
   const stats: { key: WidgetFilter; label: string; value: React.ReactNode; sub: string; color: string }[] = [
-    { key: 'all',        label: 'Total Components', value: items.length.toLocaleString(), sub: `across ${apps} applications`,                                       color: 'var(--title)' },
-    { key: 'vulnerable', label: 'Vulnerable',        value: vulnerable,                    sub: `${items.filter(c => c.criticalCveCount > 0).length} with critical CVEs`, color: 'var(--critical)' },
-    { key: 'eol',        label: 'EOL Components',    value: eol,                           sub: 'past end-of-life',                                                  color: '#d88f3d' },
-    { key: 'ai_bom',     label: 'AI/ML Libraries',   value: aiBom,                         sub: 'from AI BOMs',                                                      color: '#7c3aed' },
-    { key: 'cbom',       label: 'Crypto Libraries',  value: cbom,                          sub: 'from CBOMs',                                                        color: '#0891b2' },
-    { key: 'all',        label: 'Licenses',          value: licenses,                       sub: 'unique licenses',                                                   color: 'var(--muted)' },
+    { key: 'all',        label: 'Inventory Components', value: items.length.toLocaleString(), sub: `across ${apps} applications`,                                       color: 'var(--title)' },
+    { key: 'bom_mapped', label: 'BOM-mapped Components', value: bomMapped.toLocaleString(),   sub: 'linked to active BOM records',                                      color: '#2563eb' },
+    { key: 'unmapped',   label: 'Unmapped Inventory',    value: unmapped.toLocaleString(),     sub: 'active rows without BOM type',                                      color: '#d88f3d' },
+    { key: 'vulnerable', label: 'Vulnerable',            value: vulnerable,                    sub: `${items.filter(c => c.criticalCveCount > 0).length} with critical CVEs`, color: 'var(--critical)' },
+    { key: 'eol',        label: 'EOL Components',        value: eol,                           sub: 'past end-of-life',                                                  color: '#d88f3d' },
+    { key: 'ai_bom',     label: 'AI/ML Libraries',       value: aiBom,                         sub: 'from AI BOMs',                                                      color: '#7c3aed' },
+    { key: 'cbom',       label: 'Crypto Libraries',      value: cbom,                          sub: 'from CBOMs',                                                        color: '#0891b2' },
+    { key: 'all',        label: 'Licenses',              value: licenses,                       sub: 'unique licenses',                                                   color: 'var(--muted)' },
   ];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 20 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 20 }}>
       {stats.map(({ key, label, value, sub, color }, idx) => {
         const isActive = activeFilter === key && key !== 'all';
         return (
@@ -176,11 +180,18 @@ function BomTypeBreakdown({
       counts[t] = (counts[t] ?? 0) + 1;
     }
   }
+  const mappedCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const unmappedCount = items.filter((c) => c.bomTypes.length === 0).length;
 
   return (
     <div className="panel" style={{ padding: 16 }}>
       <div className="panel-header" style={{ marginBottom: 12 }}>
-        <h4 style={{ margin: 0 }}>BOM Type Distribution</h4>
+        <div>
+          <h4 style={{ margin: 0 }}>BOM Type Distribution</h4>
+          <span className="panel-caption">
+            {mappedCount.toLocaleString()} mapped · {unmappedCount.toLocaleString()} unmapped inventory rows
+          </span>
+        </div>
       </div>
       {bomTypeDefs.filter((t) => (counts[t.key] ?? 0) > 0).map(({ key, label, color }) => {
         const isActive = activeBomType === key;
@@ -249,6 +260,8 @@ export function BomComponents() {
     if (ecosystemFilter && (c.ecosystem ?? '').toLowerCase() !== ecosystemFilter) return false;
     if (riskFilter && c.riskLevel !== riskFilter) return false;
     if (bomTypeFilter && !c.bomTypes.includes(bomTypeFilter)) return false;
+    if (widgetFilter === 'bom_mapped' && c.bomTypes.length === 0) return false;
+    if (widgetFilter === 'unmapped' && c.bomTypes.length > 0) return false;
     if (widgetFilter === 'vulnerable' && c.totalCveCount === 0) return false;
     if (widgetFilter === 'eol' && !c.isEol) return false;
     if (widgetFilter === 'ai_bom' && !c.bomTypes.includes('AI_BOM')) return false;
@@ -426,7 +439,9 @@ export function BomComponents() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {c.bomTypes.map((t) => <BomTypeTag key={t} type={t} />)}
+                          {c.bomTypes.length > 0
+                            ? c.bomTypes.map((t) => <BomTypeTag key={t} type={t} />)
+                            : <BomTypeTag type="UNMAPPED" />}
                         </div>
                       </td>
                       <td style={{ fontWeight: 600 }}>{appCount}</td>

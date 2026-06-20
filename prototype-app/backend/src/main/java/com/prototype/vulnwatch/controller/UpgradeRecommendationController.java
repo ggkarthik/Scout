@@ -35,7 +35,7 @@ public class UpgradeRecommendationController {
         entitlementGuard.assertEnabled(
                 workspaceService.getWorkspace(),
                 TenantEntitlementService.AI_UPGRADE_RECOMMENDATION,
-                "AI upgrade recommendations are available on the Enterprise plan.");
+                "AI upgrade recommendations are available in this workspace.");
         return upgradeRecommendationService.getRecommendation(request);
     }
 }
