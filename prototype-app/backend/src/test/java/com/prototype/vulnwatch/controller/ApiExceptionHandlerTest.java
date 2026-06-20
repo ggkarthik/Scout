@@ -2,12 +2,11 @@ package com.prototype.vulnwatch.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.prototype.vulnwatch.service.EntitlementDeniedException;
 import com.prototype.vulnwatch.service.QuotaExceededException;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class ApiExceptionHandlerTest {
@@ -37,15 +36,12 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    void mapsEntitlementDeniedToForbiddenUpgradePayload() {
-        ResponseEntity<Map<String, Object>> response = handler.handleEntitlementDenied(
-                new EntitlementDeniedException("ai.solution_generation", "PRO", "Feature not enabled")
+    void mapsAccessDeniedToForbiddenPermissionPayload() {
+        Map<String, Object> response = handler.handleAccessDenied(
+                new org.springframework.security.access.AccessDeniedException("Feature not enabled")
         );
 
-        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
-        assertEquals("PLAN_UPGRADE_REQUIRED", response.getBody().get("code"));
-        assertEquals("ai.solution_generation", response.getBody().get("entitlementKey"));
-        assertEquals("PRO", response.getBody().get("currentPlan"));
-        assertEquals("Feature not enabled", response.getBody().get("error"));
+        assertEquals("PERMISSION_DENIED", response.get("code"));
+        assertEquals("Permission denied", response.get("error"));
     }
 }
