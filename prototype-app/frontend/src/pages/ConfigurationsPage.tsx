@@ -2,12 +2,32 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useActor } from '../features/auth/context';
-import { canManageRiskPolicy } from '../features/auth/roles';
+import { canManageRiskPolicy, canManageSourceFilters } from '../features/auth/roles';
 import type { OwnershipRuleResponse, RiskPolicy, SuppressionCondition, SuppressionRule, SuppressionRuleRequest } from '../features/configurations/types';
+import {
+  DEFAULT_AUTO_FINDING_RULES,
+  DEFAULT_AUTO_FINDING_RULES_STORAGE_KEY,
+  DEFAULT_FINDINGS_SCORE_CONFIG_JSON,
+} from '../features/configurations/defaults';
 import type { VulnerabilitySourceFilterConfig, VulnerabilitySourceFilterConfigRequest, VulnerabilitySourceSystem } from '../features/connect/types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
-import type { OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
+import {
+  type AgentConfidenceLevel,
+  type AssetInventoryCriterion,
+  type EolAnalysisResult,
+  type FalsePositiveResult,
+  loadPersistedInvestigationRunbookState,
+  persistInvestigationRunbookState,
+} from '../features/cve-workbench/investigation-context';
+import type {
+  AssetCriterion,
+  CveDetail,
+  OrgSpecificCveExposureRecord,
+  CreateServiceNowIncidentRequest,
+  RunbookLogEntryRecord,
+  RunbookTaskStateRecord,
+} from '../features/cve-workbench/types';
 
 type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings' | 'vulnerability-sources';
 
@@ -33,7 +53,7 @@ const CONFIG_NAV: ConfigNavItem[] = [
   {
     key: 'automation',
     label: 'Workflow Automation',
-    description: 'Auto-close and finding generation rules',
+    description: 'Auto-close stale findings',
   },
   {
     key: 'ownership',
@@ -57,10 +77,18 @@ const CONFIG_NAV: ConfigNavItem[] = [
   },
   {
     key: 'auto-findings',
-    label: 'Auto-Finding Rules',
-    description: 'Automatically create findings based on CVE, software, and asset criteria',
+    label: 'Auto Investigation & Findings',
+    description: 'Automatically investigate CVEs and optionally create findings',
   },
 ];
+
+const AUTO_INVESTIGATION_RUNBOOK_TASK_IDS = [
+  'review-asset-inventory',
+  'find-false-positive',
+  'end-of-life-analysis',
+  'solutions',
+  'installed-patch-info',
+] as const;
 
 interface TriageSignalDef {
   field: keyof Pick<
@@ -308,6 +336,8 @@ function validateRiskPolicy(policy: RiskPolicy): PolicyValidationError[] {
   chk('mediumSlaDays', policy.mediumSlaDays, 0, 365, 'Medium SLA');
   chk('lowSlaDays', policy.lowSlaDays, 0, 365, 'Low SLA');
   chk('autoCloseAfterDays', policy.autoCloseAfterDays, 0, 365, 'Auto-close days');
+  chk('autoCloseRequiredConsecutiveMisses', policy.autoCloseRequiredConsecutiveMisses, 1, 10, 'Required missed scans');
+  chk('autoCloseRunIntervalDays', policy.autoCloseRunIntervalDays, 1, 365, 'Auto-close run schedule');
   chk('triageExploitabilityWeight', policy.triageExploitabilityWeight, 0, 2, 'Exploitability weight');
   chk('triageBlastRadiusWeight', policy.triageBlastRadiusWeight, 0, 2, 'Blast radius weight');
   chk('triageEolRiskWeight', policy.triageEolRiskWeight, 0, 2, 'EOL risk weight');
@@ -334,7 +364,16 @@ const SECTION_FIELDS: Partial<Record<ConfigNavKey, ReadonlyArray<keyof RiskPolic
     'mediumSlaDays',
     'lowSlaDays',
   ],
-  automation: ['autoCloseEnabled', 'autoCloseAfterDays', 'findingGenerationMode'],
+  automation: [
+    'autoCloseEnabled',
+    'autoCloseAfterDays',
+    'autoCloseRequiredConsecutiveMisses',
+    'autoCloseRunIntervalDays',
+    'autoCloseNotObservedEnabled',
+    'autoCloseComponentRemovedEnabled',
+    'autoCloseAssetRetiredEnabled',
+    'autoCloseSourceDisabledEnabled',
+  ],
   ownership: [],
 };
 
@@ -360,6 +399,14 @@ function applyTriageDefaults(data: RiskPolicy): RiskPolicy {
     triageSlaBreachWeight: (raw.triageSlaBreachWeight as number | undefined) ?? 1.2,
     triageMissingOwnerBoost: (raw.triageMissingOwnerBoost as number | undefined) ?? 0.5,
     triagePatchGapBoost: (raw.triagePatchGapBoost as number | undefined) ?? 0.3,
+    autoCloseRequiredConsecutiveMisses: (raw.autoCloseRequiredConsecutiveMisses as number | undefined) ?? 2,
+    autoCloseNotObservedEnabled: (raw.autoCloseNotObservedEnabled as boolean | undefined) ?? true,
+    autoCloseComponentRemovedEnabled: (raw.autoCloseComponentRemovedEnabled as boolean | undefined) ?? true,
+    autoCloseAssetRetiredEnabled: (raw.autoCloseAssetRetiredEnabled as boolean | undefined) ?? true,
+    autoCloseSourceDisabledEnabled: (raw.autoCloseSourceDisabledEnabled as boolean | undefined) ?? false,
+    autoCloseDuplicateEnabled: (raw.autoCloseDuplicateEnabled as boolean | undefined) ?? true,
+    autoCloseRunIntervalDays: (raw.autoCloseRunIntervalDays as number | undefined) ?? 1,
+    findingsScoreConfig: (raw.findingsScoreConfig as string | undefined) ?? DEFAULT_FINDINGS_SCORE_CONFIG_JSON,
   };
 }
 
@@ -377,8 +424,15 @@ const DEFAULT_RISK_POLICY: RiskPolicy = applyTriageDefaults({
   autoCloseEnabled: false,
   autoCloseAssetIdentifier: '',
   autoCloseAfterDays: 0,
+  autoCloseRequiredConsecutiveMisses: 2,
+  autoCloseNotObservedEnabled: true,
+  autoCloseComponentRemovedEnabled: true,
+  autoCloseAssetRetiredEnabled: true,
+  autoCloseSourceDisabledEnabled: false,
+  autoCloseDuplicateEnabled: true,
+  autoCloseRunIntervalDays: 1,
   findingGenerationMode: 'MANUAL',
-  findingsScoreConfig: '[]',
+  findingsScoreConfig: DEFAULT_FINDINGS_SCORE_CONFIG_JSON,
   triageExploitabilityWeight: 1.0,
   triageBlastRadiusWeight: 1.0,
   triageEolRiskWeight: 0.8,
@@ -483,6 +537,7 @@ export function ConfigurationsPage() {
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
+  const [autoCloseExecuting, setAutoCloseExecuting] = React.useState(false);
   const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
   const canEditRiskPolicy = canManageRiskPolicy(actor);
   const [ownershipRules, setOwnershipRules] = React.useState<OwnershipRule[]>([]);
@@ -642,7 +697,7 @@ export function ConfigurationsPage() {
         const localFallback =
           prev?.findingsScoreConfig ??
           localStorage.getItem('findings-score-config') ??
-          '[]';
+          DEFAULT_FINDINGS_SCORE_CONFIG_JSON;
         const merged: RiskPolicy = {
           ...data,
           findingsScoreConfig: data.findingsScoreConfig ?? localFallback,
@@ -701,12 +756,12 @@ export function ConfigurationsPage() {
       // the field is stripped somewhere in the response path).
       const merged: RiskPolicy = {
         ...raw,
-        findingsScoreConfig: raw.findingsScoreConfig ?? policy.findingsScoreConfig ?? '[]',
+        findingsScoreConfig: raw.findingsScoreConfig ?? policy.findingsScoreConfig ?? DEFAULT_FINDINGS_SCORE_CONFIG_JSON,
       };
       const updated = applyTriageDefaults(merged);
       // Persist to localStorage so browser refresh survives even when the
       // backend response omits findingsScoreConfig (pre-restart scenario).
-      localStorage.setItem('findings-score-config', updated.findingsScoreConfig ?? '[]');
+      localStorage.setItem('findings-score-config', updated.findingsScoreConfig ?? DEFAULT_FINDINGS_SCORE_CONFIG_JSON);
       queryClient.setQueryData(['risk-policy'], updated);
       setPolicy(updated);
       setPolicyMessage('Configuration saved');
@@ -727,6 +782,20 @@ export function ConfigurationsPage() {
       setRecomputeMessage(e instanceof Error ? e.message : String(e));
     } finally {
       setRecomputeInProgress(false);
+    }
+  };
+
+  const executeAutoCloseNow = async (): Promise<void> => {
+    setAutoCloseExecuting(true);
+    setPolicyMessage('');
+    try {
+      const result = await api.executeAutoCloseNow();
+      setPolicyMessage(`Auto-close ran now. ${result.updated} finding${result.updated === 1 ? '' : 's'} updated.`);
+      void riskPolicyQuery.refetch();
+    } catch (e) {
+      setPolicyMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoCloseExecuting(false);
     }
   };
 
@@ -804,7 +873,7 @@ export function ConfigurationsPage() {
             {policySaving ? 'Saving…' : 'Save'}
           </button>
           {policyMessage && activeSection === sectionKey && (
-            <span className="field-hint" style={{ marginLeft: 10, color: policyMessage.includes('saved') ? 'var(--low)' : 'var(--critical)' }}>
+            <span className="field-hint" style={{ marginLeft: 10, color: /saved|updated|ran now/i.test(policyMessage) ? 'var(--low)' : 'var(--critical)' }}>
               {policyMessage}
             </span>
           )}
@@ -1166,31 +1235,19 @@ export function ConfigurationsPage() {
   // ── Automation section ─────────────────────────────────────────────────────
   const renderAutomation = () => (
     <div className="config-section-body">
-      <div style={{ marginBottom: 20 }}>
-        <div className="config-subsection-label">Org CVE Finding Generation</div>
-        <div className="form-grid ingestion-grid">
-          <label>Finding generation mode
-            <select
-              value={policy.findingGenerationMode}
-              onChange={(e) => updatePolicy('findingGenerationMode', e.target.value)}
-            >
-              <option value="AUTO">Generate findings automatically</option>
-              <option value="MANUAL">Require manual CVE review before creating findings</option>
-            </select>
-          </label>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel)', padding: '14px 16px', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Auto Close</span>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: policy.autoCloseEnabled ? 'color-mix(in srgb, var(--low) 15%, transparent)' : 'var(--surface)', color: policy.autoCloseEnabled ? 'var(--low)' : 'var(--muted)', border: `1px solid ${policy.autoCloseEnabled ? 'color-mix(in srgb, var(--low) 30%, transparent)' : 'var(--border)'}` }}>
+            {policy.autoCloseEnabled ? 'Enabled' : 'Disabled'}
+          </span>
         </div>
-        <div className="inline-note" style={{ marginTop: 8 }}>
-          <strong>AUTO</strong> creates findings automatically during recompute.{' '}
-          <strong>MANUAL</strong> computes org-level CVE exposure, but findings are not
-          auto-created until an analyst reviews and explicitly triggers creation.
-        </div>
-      </div>
 
-      <div>
-        <div className="config-subsection-label">Auto Close</div>
-        <div className="form-grid ingestion-grid">
-          <label>Enable Auto Close
+        <div className="form-grid ingestion-grid" style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Enable Auto Close
             <select
+              style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, color: 'var(--text)', background: 'var(--panel)' }}
               value={policy.autoCloseEnabled ? 'true' : 'false'}
               onChange={(e) => updatePolicy('autoCloseEnabled', e.target.value === 'true')}
             >
@@ -1198,26 +1255,90 @@ export function ConfigurationsPage() {
               <option value="true">Enabled</option>
             </select>
           </label>
-          <label>Asset Identifier
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Asset Scope (optional)
             <input
+              style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, color: 'var(--text)', background: 'var(--panel)' }}
               value={policy.autoCloseAssetIdentifier ?? ''}
               onChange={(e) => updatePolicy('autoCloseAssetIdentifier', e.target.value)}
-              placeholder="github:owner/repo or app:payments-api:prod"
+              placeholder="Blank applies to all assets"
             />
           </label>
-          <label>Auto Close After (days)
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Run Every (days)
             <input
-              type="number"
-              min={0}
-              max={365}
+              type="number" min={1} max={365}
+              style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, color: 'var(--text)', background: 'var(--panel)' }}
+              value={policy.autoCloseRunIntervalDays}
+              onChange={(e) => updatePolicy('autoCloseRunIntervalDays', Number(e.target.value))}
+            />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Grace Period (days)
+            <input
+              type="number" min={0} max={365}
+              style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, color: 'var(--text)', background: 'var(--panel)' }}
               value={policy.autoCloseAfterDays}
               onChange={(e) => updatePolicy('autoCloseAfterDays', Number(e.target.value))}
             />
           </label>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Required Missed Scans
+            <input
+              type="number" min={1} max={10}
+              style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, color: 'var(--text)', background: 'var(--panel)' }}
+              value={policy.autoCloseRequiredConsecutiveMisses}
+              onChange={(e) => updatePolicy('autoCloseRequiredConsecutiveMisses', Number(e.target.value))}
+            />
+          </label>
         </div>
-        <div className="inline-note" style={{ marginTop: 8 }}>
-          Findings matching the configured asset identifier are moved to{' '}
-          <span className="mono">AUTO_CLOSED</span> after the configured age.
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+          Lifecycle Triggers
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {([
+            { key: 'autoCloseNotObservedEnabled' as const, label: 'Not observed in latest scans', checked: policy.autoCloseNotObservedEnabled },
+            { key: 'autoCloseComponentRemovedEnabled' as const, label: 'Component removed or inactive', checked: policy.autoCloseComponentRemovedEnabled },
+            { key: 'autoCloseAssetRetiredEnabled' as const, label: 'Asset retired or inactive', checked: policy.autoCloseAssetRetiredEnabled },
+            { key: 'autoCloseSourceDisabledEnabled' as const, label: 'Source disabled', checked: policy.autoCloseSourceDisabledEnabled },
+          ]).map(({ key, label, checked }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => updatePolicy(key, !checked)}
+              disabled={!canEditRiskPolicy}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                cursor: canEditRiskPolicy ? 'pointer' : 'default',
+                border: `1px solid ${checked ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--border)'}`,
+                background: checked ? 'color-mix(in srgb, var(--accent) 10%, var(--panel))' : 'var(--panel)',
+                color: checked ? 'var(--accent)' : 'var(--muted)',
+                transition: 'border-color 0.12s, background 0.12s, color 0.12s',
+              }}
+            >
+              <span style={{ fontSize: 10, opacity: checked ? 1 : 0.5 }}>{checked ? '●' : '○'}</span>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="inline-note" style={{ marginTop: 12 }}>
+          Open findings are moved to <span className="mono">AUTO_CLOSED</span> only when an enabled lifecycle trigger matches.
+          Suppressed or manually closed findings are not auto-closed.
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ padding: '4px 12px', fontSize: 12 }}
+            onClick={() => void executeAutoCloseNow()}
+            disabled={!canEditRiskPolicy || policySaving || autoCloseExecuting}
+          >
+            {autoCloseExecuting ? 'Executing…' : 'Execute Now'}
+          </button>
         </div>
       </div>
 
@@ -1969,7 +2090,7 @@ export function ConfigurationsPage() {
     automation: {
       title: 'Workflow Automation',
       description:
-        'Control how findings are auto-generated and when stale findings are auto-closed.',
+        'Control when stale findings are automatically closed.',
     },
     ownership: {
       title: 'Ownership',
@@ -1991,8 +2112,8 @@ export function ConfigurationsPage() {
       description: 'Define rules that suppress CVE or finding records when matching conditions are met.',
     },
     'auto-findings': {
-      title: 'Auto-Finding Rules',
-      description: 'Define rules that automatically create findings when CVEs match specific software, asset, and severity criteria.',
+      title: 'Auto Investigation & Findings',
+      description: 'Define rules that run investigation first and optionally create findings after the investigation completes.',
     },
   };
 
@@ -2058,23 +2179,64 @@ export function ConfigurationsPage() {
 
 // ── SuppressionSection — standalone component (hoisted) ─────────────────────
 
-const VULNERABILITY_SOURCE_COPY: Record<VulnerabilitySourceSystem, { label: string; description: string }> = {
+const ALL_VULN_SOURCES: VulnerabilitySourceSystem[] = ['nvd', 'kev', 'ghsa', 'redhat', 'microsoft', 'euvd', 'jvn'];
+
+const VULNERABILITY_SOURCE_COPY: Record<VulnerabilitySourceSystem, { label: string; description: string; badge: string }> = {
   nvd: {
     label: 'NVD',
-    description: 'Baseline national vulnerability feed for broad CVE coverage.',
+    description: 'National Vulnerability Database — baseline national feed providing broad CVE coverage with CVSS scoring.',
+    badge: 'NIST / NVD',
   },
   kev: {
     label: 'KEV',
-    description: 'CISA Known Exploited Vulnerabilities for active exploitation context.',
+    description: 'CISA Known Exploited Vulnerabilities — active exploitation context used to prioritize critical findings.',
+    badge: 'CISA',
   },
   ghsa: {
     label: 'GHSA',
-    description: 'GitHub Security Advisories for ecosystem and package-centric coverage.',
+    description: 'GitHub Security Advisories — ecosystem and package-centric coverage with direct version applicability.',
+    badge: 'GitHub',
   },
   redhat: {
-    label: 'Red Hat',
-    description: 'Vendor advisory data for Red Hat ecosystems and packages.',
+    label: 'Red Hat CSAF',
+    description: 'Red Hat CSAF/VEX advisories — vendor advisory data for Red Hat and related ecosystems.',
+    badge: 'Red Hat',
   },
+  microsoft: {
+    label: 'Microsoft CSAF',
+    description: 'Microsoft CSAF/VEX advisories — Microsoft security updates and applicability statements.',
+    badge: 'Microsoft',
+  },
+  euvd: {
+    label: 'EUVD',
+    description: 'ENISA European Vulnerability Database — EU-curated vulnerability records with EUVD-to-CVE correlations.',
+    badge: 'ENISA',
+  },
+  jvn: {
+    label: 'JVN',
+    description: 'Japan Vulnerability Notes — Japanese vulnerability information with JVN-to-CVE cross-references.',
+    badge: 'JPCERT/CC',
+  },
+};
+
+const SOURCE_SUMMARY_KEY: Record<VulnerabilitySourceSystem, string> = {
+  nvd: 'NVD',
+  kev: 'KEV',
+  ghsa: 'GHSA',
+  redhat: 'CSAF_REDHAT',
+  microsoft: 'CSAF_MICROSOFT',
+  euvd: 'EUVD',
+  jvn: 'JVN',
+};
+
+const SOURCE_SYNC_FN: Record<VulnerabilitySourceSystem, () => Promise<unknown>> = {
+  nvd: () => api.syncNvd(),
+  kev: () => api.syncKev(),
+  ghsa: () => api.syncGhsa(),
+  redhat: () => api.syncRedhatCsaf(),
+  microsoft: () => api.syncMicrosoftCsaf(),
+  euvd: () => api.syncEuvd(),
+  jvn: () => api.syncJvn(),
 };
 
 function toSourceFilterRequest(config: VulnerabilitySourceFilterConfig): VulnerabilitySourceFilterConfigRequest {
@@ -2099,11 +2261,16 @@ function toSourceFilterRequest(config: VulnerabilitySourceFilterConfig): Vulnera
 }
 
 function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
+  const actor = useActor();
+  const canRunSync = canManageSourceFilters(actor);
   const [configs, setConfigs] = React.useState<VulnerabilitySourceFilterConfig[]>([]);
+  const [syncSummary, setSyncSummary] = React.useState<Record<string, { status: string; completedAt?: string; recordsInserted: number; recordsUpdated: number; errorMessage?: string }>>({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [savingSource, setSavingSource] = React.useState<VulnerabilitySourceSystem | null>(null);
+  const [syncingSource, setSyncingSource] = React.useState<VulnerabilitySourceSystem | null>(null);
+  const [failureDetails, setFailureDetails] = React.useState<{ label: string; error: string } | null>(null);
 
   const loadConfigs = React.useCallback(async () => {
     setLoading(true);
@@ -2116,73 +2283,221 @@ function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
     } finally {
       setLoading(false);
     }
+    // Load sync summary independently — silently ignore permission errors
+    try {
+      const summary = await api.getVulnIntelSourcesSummary();
+      setSyncSummary(summary.sources as Record<string, { status: string; completedAt?: string; recordsInserted: number; recordsUpdated: number }>);
+    } catch {
+      // not a blocking error — stats will show as unavailable
+    }
   }, []);
 
   React.useEffect(() => {
     void loadConfigs();
   }, [loadConfigs]);
 
-  const toggleSource = async (config: VulnerabilitySourceFilterConfig) => {
-    setSavingSource(config.sourceSystem);
+  const toggleSource = async (source: VulnerabilitySourceSystem, currentEnabled: boolean) => {
+    setSavingSource(source);
     setError('');
     setMessage('');
+    const existingConfig = configs.find((c) => c.sourceSystem === source);
+    const request = existingConfig ? toSourceFilterRequest(existingConfig) : { enabledForCorrelation: !currentEnabled };
     try {
-      const saved = await api.saveVulnerabilitySourceFilterConfig(config.sourceSystem, {
-        ...toSourceFilterRequest(config),
-        enabledForCorrelation: !config.enabledForCorrelation,
+      const saved = await api.saveVulnerabilitySourceFilterConfig(source, {
+        ...request,
+        enabledForCorrelation: !currentEnabled,
       });
-      setConfigs((current) => current.map((item) => item.sourceSystem === saved.sourceSystem ? saved : item));
-      setMessage(`${VULNERABILITY_SOURCE_COPY[config.sourceSystem].label} correlation setting saved.`);
+      setConfigs((current) => {
+        const exists = current.some((c) => c.sourceSystem === source);
+        return exists ? current.map((c) => c.sourceSystem === source ? saved : c) : [...current, saved];
+      });
+      setMessage(`${VULNERABILITY_SOURCE_COPY[source].label} ${!currentEnabled ? 'opted in' : 'opted out'}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save vulnerability source');
+      setError(err instanceof Error ? err.message : 'Failed to save source setting');
     } finally {
       setSavingSource(null);
     }
   };
 
+  const triggerSync = async (source: VulnerabilitySourceSystem) => {
+    setSyncingSource(source);
+    setError('');
+    setMessage('');
+    try {
+      await SOURCE_SYNC_FN[source]();
+      setMessage(`${VULNERABILITY_SOURCE_COPY[source].label} sync triggered. Stats will update automatically…`);
+      // Poll summary until source completes or fails (max 90s)
+      const summaryKey = SOURCE_SUMMARY_KEY[source];
+      let attempts = 0;
+      const poll = async () => {
+        attempts++;
+        try {
+          const summary = await api.getVulnIntelSourcesSummary();
+          setSyncSummary(summary.sources as Record<string, { status: string; completedAt?: string; recordsInserted: number; recordsUpdated: number }>);
+          const status = (summary.sources as Record<string, { status: string }>)[summaryKey]?.status;
+          if ((status === 'completed' || status === 'failed') || attempts >= 18) {
+            if (status === 'completed') setMessage(`${VULNERABILITY_SOURCE_COPY[source].label} sync complete.`);
+            return;
+          }
+        } catch { /* ignore */ }
+        setTimeout(() => void poll(), 5000);
+      };
+      setTimeout(() => void poll(), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger sync');
+    } finally {
+      setSyncingSource(null);
+    }
+  };
+
   return (
     <div className="config-section-body">
-      <div className="notice" role="note">
-        Disabled sources remain visible in Vulnerability Repository screens, but they are excluded from tenant matching,
-        org-CVE generation, and downstream exposure workflows.
-      </div>
+      {/* Failure details popup */}
+      {failureDetails && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setFailureDetails(null)}
+        >
+          <div
+            className="panel"
+            style={{ padding: 24, maxWidth: 480, width: '90%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <h4 style={{ margin: 0 }}>{failureDetails.label} — Sync Failure</h4>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFailureDetails(null)}>✕</button>
+            </div>
+            <div className="notice error" style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {failureDetails.error}
+            </div>
+          </div>
+        </div>
+      )}
+
       {message ? <div className="notice" role="status">{message}</div> : null}
       {error ? <div className="notice error" role="alert">{error}</div> : null}
       {loading ? (
         <p>Loading vulnerability sources…</p>
       ) : (
-        <div className="um-card-grid" style={{ marginTop: 16 }}>
-          {configs.map((config) => (
-            <article key={config.sourceSystem} className="um-card">
-              <div className="um-card-header">
-                <div>
-                      <h4>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].label}</h4>
-                      <p>{VULNERABILITY_SOURCE_COPY[config.sourceSystem].description}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginTop: 16 }}>
+          {ALL_VULN_SOURCES.map((source) => {
+            const config = configs.find((c) => c.sourceSystem === source);
+            const enabled = config?.enabledForCorrelation ?? true;
+            const copy = VULNERABILITY_SOURCE_COPY[source];
+            const summaryKey = SOURCE_SUMMARY_KEY[source];
+            const syncStatus = syncSummary[summaryKey];
+            const isSaving = savingSource === source;
+            const isSyncing = syncingSource === source;
+            const isFailed = syncStatus?.status === 'failed';
+
+            return (
+              <article
+                key={source}
+                className="um-card"
+                style={{ display: 'flex', flexDirection: 'column', gap: 0 }}
+              >
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <h4 style={{ margin: 0 }}>{copy.label}</h4>
+                      <span className="panel-caption" style={{ fontSize: 11, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>
+                        {copy.badge}
+                      </span>
                     </div>
-                <span className={(config.enabledForCorrelation ?? true) ? 'status-pill status-open' : 'status-pill status-warning'}>
-                  {(config.enabledForCorrelation ?? true) ? 'Included in correlation' : 'Excluded from correlation'}
-                </span>
-              </div>
-              <div className="um-card-meta" style={{ marginTop: 12 }}>
-                <span>Saved filters: {config.configured ? 'Configured' : 'Default feed settings'}</span>
-                <span>Last updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : 'Never'}</span>
-              </div>
-              <div className="button-row" style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className={(config.enabledForCorrelation ?? true) ? 'btn btn-secondary' : 'btn btn-primary'}
-                  disabled={!canEdit || savingSource === config.sourceSystem}
-                  onClick={() => void toggleSource(config)}
-                >
-                  {savingSource === config.sourceSystem
-                    ? 'Saving...'
-                    : (config.enabledForCorrelation ?? true)
-                      ? 'Exclude from Correlation'
-                      : 'Include in Correlation'}
-                </button>
-              </div>
-            </article>
-          ))}
+                    <p className="panel-caption" style={{ margin: 0, fontSize: 12, lineHeight: 1.4 }}>{copy.description}</p>
+                  </div>
+                  {/* Toggle */}
+                  <button
+                    type="button"
+                    title={enabled ? 'Disable this source' : 'Enable this source'}
+                    disabled={!canEdit || isSaving}
+                    onClick={() => void toggleSource(source, enabled)}
+                    style={{
+                      flexShrink: 0,
+                      width: 30,
+                      height: 17,
+                      borderRadius: 9,
+                      border: 'none',
+                      cursor: canEdit ? 'pointer' : 'default',
+                      background: enabled ? 'var(--accent)' : 'var(--border)',
+                      position: 'relative',
+                      transition: 'background 0.15s',
+                    }}
+                    aria-label={enabled ? `Disable ${copy.label}` : `Enable ${copy.label}`}
+                  >
+                    <span style={{
+                      position: 'absolute',
+                      top: 2,
+                      left: enabled ? 15 : 2,
+                      width: 13,
+                      height: 13,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      transition: 'left 0.15s',
+                    }} />
+                  </button>
+                </div>
+
+                {/* Sync stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12, padding: '10px 0', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                  <div>
+                    <div className="panel-caption" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>Last Imported</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>
+                      {syncStatus?.completedAt ? new Date(syncStatus.completedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      {syncStatus?.status && (
+                        <span style={{ fontSize: 10, color: isFailed ? 'var(--severity-critical, #ef4444)' : syncStatus.status === 'completed' ? '#21d07a' : 'var(--text-secondary)' }}>
+                          {syncStatus.status}
+                        </span>
+                      )}
+                      {isFailed && syncStatus?.errorMessage && (
+                        <button
+                          type="button"
+                          onClick={() => setFailureDetails({ label: copy.label, error: syncStatus.errorMessage! })}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, color: 'var(--accent)', textDecoration: 'underline' }}
+                        >
+                          Details
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="panel-caption" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>New Records</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{syncStatus ? syncStatus.recordsInserted.toLocaleString() : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="panel-caption" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>Updated</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{syncStatus ? syncStatus.recordsUpdated.toLocaleString() : '—'}</div>
+                  </div>
+                </div>
+
+                {/* Action row */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  {canRunSync ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      disabled={isSyncing}
+                      onClick={() => void triggerSync(source)}
+                    >
+                      {isSyncing ? 'Syncing…' : '↻ Update Now'}
+                    </button>
+                  ) : (
+                    <span
+                      className="btn btn-secondary"
+                      title="Platform administrator access required to trigger a sync"
+                      style={{ fontSize: 11, padding: '4px 10px', opacity: 0.5, cursor: 'not-allowed' }}
+                    >
+                      ↻ Update Now
+                    </span>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </div>
@@ -2658,6 +2973,9 @@ interface AutoFindingRule {
   id: string;
   name: string;
   enabled: boolean;
+  investigate: boolean;
+  createFindings: boolean;
+  createServiceNowIncident: boolean;
   cveConditions: CveCondition[];
   softwareScope: 'ALL' | 'SPECIFIC';
   selectedSoftware: SelectedSoftware[];
@@ -2669,13 +2987,24 @@ interface AutoFindingRule {
   lastRunCreated?: number;
   lastRunReopened?: number;
   lastRunAlreadyOpen?: number;
+  lastRunInvestigated?: number;
+  lastRunIncidents?: number;
+  lastRunSkipped?: number;
 }
+
+type AutoFindingRuleInput = Partial<Omit<AutoFindingRule, 'cveConditions' | 'selectedSoftware'>> & {
+  cveConditions?: ReadonlyArray<CveCondition>;
+  selectedSoftware?: ReadonlyArray<SelectedSoftware>;
+};
 
 function blankAutoFindingRule(): AutoFindingRule {
   return {
     id: crypto.randomUUID(),
     name: '',
     enabled: true,
+    investigate: true,
+    createFindings: true,
+    createServiceNowIncident: false,
     cveConditions: [],
     softwareScope: 'ALL',
     selectedSoftware: [],
@@ -2711,6 +3040,36 @@ const CVE_COLUMNS: CveColumnDef[] = [
   { value: 'availabilityImpact',   label: 'Availability Impact',   type: 'select', options: ['NONE', 'LOW', 'HIGH'] },
 ];
 
+function normalizeAutoFindingRule(rule: AutoFindingRuleInput): AutoFindingRule {
+  const base = blankAutoFindingRule();
+  const normalized: AutoFindingRule = {
+    ...base,
+    ...rule,
+    id: rule.id ?? base.id,
+    name: rule.name ?? base.name,
+    enabled: rule.enabled ?? base.enabled,
+    investigate: rule.investigate ?? true,
+    createFindings: rule.createFindings ?? true,
+    createServiceNowIncident: rule.createServiceNowIncident ?? false,
+    cveConditions: (rule.cveConditions ?? base.cveConditions).map((condition) => ({ ...condition })),
+    selectedSoftware: (rule.selectedSoftware ?? base.selectedSoftware).map((software) => ({ ...software })),
+    softwareScope: rule.softwareScope ?? base.softwareScope,
+    assetScope: rule.assetScope ?? base.assetScope,
+    assetTags: rule.assetTags ?? base.assetTags,
+    findingType: rule.findingType ?? base.findingType,
+    scheduleHours: rule.scheduleHours ?? base.scheduleHours,
+    lastRunAt: rule.lastRunAt,
+    lastRunCreated: rule.lastRunCreated,
+    lastRunReopened: rule.lastRunReopened,
+    lastRunAlreadyOpen: rule.lastRunAlreadyOpen,
+    lastRunInvestigated: rule.lastRunInvestigated,
+    lastRunIncidents: rule.lastRunIncidents,
+    lastRunSkipped: rule.lastRunSkipped,
+  };
+  if (normalized.createFindings) normalized.investigate = true;
+  return normalized;
+}
+
 function operatorsFor(col: CveColumnDef): Array<{ value: string; label: string }> {
   switch (col.type) {
     case 'boolean': return [{ value: 'is_true', label: 'is true' }, { value: 'is_false', label: 'is false' }];
@@ -2720,15 +3079,42 @@ function operatorsFor(col: CveColumnDef): Array<{ value: string; label: string }
   }
 }
 
+function buildCriteriaFromCveDetail(detail: CveDetail): AssetCriterion[] {
+  const seen = new Set<string>();
+  const criteria: AssetCriterion[] = [];
+  for (const matched of detail.matchedSoftware ?? []) {
+    const software = matched.packageName?.trim() || matched.assetName?.trim() || '';
+    if (!software) continue;
+    const version = matched.version?.trim?.() || '';
+    const vendor = matched.assetIdentifier?.trim?.() || matched.assetName?.trim() || '';
+    const key = `${vendor.toLowerCase()}::${software.toLowerCase()}::${version.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    criteria.push({ id: matched.componentId, software, version, vendor });
+  }
+  return criteria;
+}
+
+function priorityFromSeverity(severity: string): 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' {
+  const normalized = severity.trim().toUpperCase();
+  if (normalized === 'CRITICAL') return 'CRITICAL';
+  if (normalized === 'HIGH') return 'HIGH';
+  if (normalized === 'LOW') return 'LOW';
+  return 'MEDIUM';
+}
+
 function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
-  const STORAGE_KEY = 'auto_finding_rules_v1';
+  const STORAGE_KEY = DEFAULT_AUTO_FINDING_RULES_STORAGE_KEY;
 
   const [rules, setRules] = React.useState<AutoFindingRule[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw) as AutoFindingRule[];
+      if (raw) {
+        const parsed = JSON.parse(raw) as AutoFindingRuleInput[];
+        if (Array.isArray(parsed)) return parsed.map((rule) => normalizeAutoFindingRule(rule));
+      }
     } catch { /* ignore */ }
-    return [];
+    return DEFAULT_AUTO_FINDING_RULES.map((rule) => normalizeAutoFindingRule(rule as unknown as AutoFindingRuleInput));
   });
 
   React.useEffect(() => {
@@ -2739,14 +3125,15 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
   const [form, setForm] = React.useState<AutoFindingRule>(blankAutoFindingRule());
 
   const openCreate = () => { setForm(blankAutoFindingRule()); setEditingId(null); setShowForm(true); };
-  const openEdit   = (rule: AutoFindingRule) => { setForm({ ...rule }); setEditingId(rule.id); setShowForm(true); };
+  const openEdit   = (rule: AutoFindingRule) => { setForm(normalizeAutoFindingRule(rule)); setEditingId(rule.id); setShowForm(true); };
 
   const saveRule = () => {
     if (!form.name.trim()) return;
+    const nextRule = normalizeAutoFindingRule(form);
     if (editingId) {
-      setRules(prev => prev.map(r => r.id === editingId ? { ...form } : r));
+      setRules(prev => prev.map(r => r.id === editingId ? nextRule : r));
     } else {
-      setRules(prev => [...prev, { ...form, id: crypto.randomUUID() }]);
+      setRules(prev => [...prev, { ...nextRule, id: crypto.randomUUID() }]);
     }
     setShowForm(false); setEditingId(null);
   };
@@ -2765,6 +3152,13 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
     setExecuteError(prev => ({ ...prev, [id]: '' }));
 
     try {
+      if (!rule.investigate && !rule.createFindings && !rule.createServiceNowIncident) {
+        throw new Error('Enable investigation, findings creation, or ServiceNow incident creation before running the rule.');
+      }
+      if (!rule.investigate && rule.createFindings) {
+        throw new Error('Create findings requires investigation to be enabled.');
+      }
+
       // ── 1. Build API query params from CVE conditions ──────────────────
       const apiParams: Parameters<typeof cveWorkbenchApi.listOrgSpecificCves>[0] = {
         page: 0, size: 500, includeAll: true,
@@ -2835,58 +3229,319 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
       }
 
       // ── 4. Create findings for each matched CVE ────────────────────────
-      // Fetch CVE detail to get component IDs, then override all as
-      // APPLICABLE + IMPACTED so the backend creates findings regardless
-      // of prior analyst state.
-      const findingCreationMode = rule.findingType === 'CVE_FIX' ? 'CVE_FIX' : 'ASSET_CVE';
       let totalCreated = 0;
       let totalReopened = 0;
       let totalAlreadyOpen = 0;
+      let totalInvestigated = 0;
+      let totalIncidents = 0;
+      let totalSkipped = 0;
       const cveErrors: string[] = [];
 
-      await Promise.all(cves.map(async cve => {
+      const buildServiceNowIncidentPayload = (
+        cve: OrgSpecificCveExposureRecord,
+        detail: CveDetail,
+      ): CreateServiceNowIncidentRequest => {
+        const solutionInfo = (() => {
+          if (detail.signals.patchAvailable && detail.signals.patchVersions) {
+            return `Upgrade to version ${detail.signals.patchVersions} or later to remediate ${cve.externalId}. Validate the patch on all impacted assets after deployment.`;
+          }
+          if (detail.signals.patchAvailable) {
+            return `A vendor patch is available for ${cve.externalId}. Upgrade to the latest vendor-released version and validate the mitigation on impacted assets.`;
+          }
+          return `No vendor patch is currently available for ${cve.externalId}. Apply compensating controls (e.g. network isolation, privilege restrictions) and monitor vendor advisories for remediation guidance.`;
+        })();
+
+        return {
+          findingTitle: detail.summary.title ?? cve.externalId,
+          severity: detail.summary.severity ?? cve.severity ?? 'UNKNOWN',
+          cvssScore: detail.summary.cvssScore ?? cve.cvssScore ?? undefined,
+          epssScore: detail.summary.epssScore ?? cve.epssScore ?? undefined,
+          inKev: detail.summary.inKev ?? cve.inKev ?? false,
+          priority: priorityFromSeverity(cve.severity),
+          notes: `Auto-created by rule: ${rule.name}`,
+          solutionInfo,
+          affectedAssets: detail.matchedSoftware.map((software) => ({
+            componentId: software.componentId,
+            assetName: software.assetName,
+            assetIdentifier: software.assetIdentifier,
+            assetType: software.assetType,
+            packageName: software.packageName,
+            packageVersion: software.version ?? undefined,
+          })),
+        };
+      };
+
+      for (const cve of cves) {
         try {
-          // Fetch component IDs for this CVE
           const detail = await cveWorkbenchApi.getCveDetail(cve.externalId);
-          const componentIds = detail.matchedSoftware.map(s => s.componentId);
+          const componentIds = detail.matchedSoftware.map(s => s.componentId).filter(Boolean);
+          const hasInvestigationSummary =
+            (detail.investigations?.some((investigation) => investigation.status === 'CLOSED') ?? false) ||
+            (detail.assessments?.some((assessment) => assessment.status === 'COMPLETED') ?? false);
+          let investigationDone = hasInvestigationSummary;
+          const persistedRunbookState = loadPersistedInvestigationRunbookState(cve.externalId);
 
-          if (componentIds.length === 0) return; // no matched components, skip
+          if (rule.investigate) {
+            const criteria = buildCriteriaFromCveDetail(detail);
+            const runAgentResult = await cveWorkbenchApi.runAgent(cve.externalId, { criteria });
+            await cveWorkbenchApi.submitCveInvestigation(cve.externalId, {
+              status: 'CLOSED',
+              priority: priorityFromSeverity(cve.severity),
+              notes: `Auto investigation completed by rule: ${rule.name}`,
+            });
 
-          const componentApplicabilityDecisions: Record<string, 'APPLICABLE'> =
-            Object.fromEntries(componentIds.map(id => [id, 'APPLICABLE']));
-          const componentAnalystDispositions: Record<string, 'IMPACTED'> =
-            Object.fromEntries(componentIds.map(id => [id, 'IMPACTED']));
-
-          const result = await cveWorkbenchApi.createManualFindings(cve.externalId, {
-            justification: `Auto-created by rule: ${rule.name}`,
-            findingCreationMode,
-            componentIds,
-            componentApplicabilityDecisions,
-            componentAnalystDispositions,
-            existingFindingBehavior: 'ADD_TO_EXISTING',
-          }).catch(async () => {
-            // CVE_FIX may fail with a constraint violation when the primary component
-            // already has a non-grouped finding. Fall back to ASSET_CVE so the
-            // existing findings are at least counted/reopened correctly.
-            if (findingCreationMode === 'CVE_FIX') {
-              return cveWorkbenchApi.createManualFindings(cve.externalId, {
-                justification: `Auto-created by rule: ${rule.name}`,
-                findingCreationMode: 'ASSET_CVE',
-                componentIds,
-                componentApplicabilityDecisions,
-                componentAnalystDispositions,
-                existingFindingBehavior: 'ADD_TO_EXISTING',
-              });
+            if (runAgentResult.resolved.length > 0) {
+              const additionalSoftware = runAgentResult.resolved.map((entry) => ({
+                name: entry.software,
+                vendor: entry.vendor,
+                version: entry.version,
+                assetCount: entry.assets.length,
+              }));
+              await cveWorkbenchApi.generateFixRecords(cve.externalId, additionalSoftware).catch(() => undefined);
             }
-            throw new Error('Finding creation failed');
-          });
-          totalCreated      += result.createdCount;
-          totalReopened     += result.reopenedCount;
-          totalAlreadyOpen  += result.alreadyOpenCount ?? 0;
+
+            const nowIso = new Date().toISOString();
+            const taskMeta = runAgentResult.taskMeta ?? {};
+            const completedTaskIds = [...AUTO_INVESTIGATION_RUNBOOK_TASK_IDS];
+            const taskStates: RunbookTaskStateRecord[] = completedTaskIds.map((taskId) => ({
+              taskId,
+              state: 'DONE',
+              producedBy: 'AGENT',
+              confidence: taskMeta[taskId]?.confidence === 'HIGH'
+                || taskMeta[taskId]?.confidence === 'MEDIUM'
+                || taskMeta[taskId]?.confidence === 'LOW'
+                ? taskMeta[taskId].confidence
+                : 'HIGH',
+              completedAt: nowIso,
+            }));
+            const logEntries: RunbookLogEntryRecord[] = [
+              {
+                id: crypto.randomUUID(),
+                type: 'AGENT',
+                message: `Auto investigation completed by rule: ${rule.name}`,
+                actor: 'Automation',
+                producedBy: 'AGENT',
+                at: nowIso,
+              },
+            ];
+
+            await cveWorkbenchApi.saveRunbook(cve.externalId, {
+              taskStates,
+              logEntries,
+              leadAnalyst: 'Automation',
+              agentConfidence: Object.fromEntries(
+                completedTaskIds.map((taskId) => [
+                  taskId,
+                  taskMeta[taskId]?.confidence === 'HIGH'
+                    || taskMeta[taskId]?.confidence === 'MEDIUM'
+                    || taskMeta[taskId]?.confidence === 'LOW'
+                    ? taskMeta[taskId].confidence
+                    : 'HIGH',
+                ])
+              ),
+            });
+
+            await cveWorkbenchApi.generateInvestigationSummary(cve.externalId, {
+              summary: {
+                cveId: cve.externalId,
+                title: detail.summary.title ?? cve.externalId,
+                description: detail.summary.description ?? undefined,
+                severity: detail.summary.severity ?? cve.severity ?? 'UNKNOWN',
+                cvssScore: detail.summary.cvssScore ?? cve.cvssScore ?? undefined,
+                epssScore: detail.summary.epssScore ?? cve.epssScore ?? undefined,
+                inKev: detail.summary.inKev ?? cve.inKev ?? undefined,
+                exploitAvailable: detail.signals.exploitAvailable ?? undefined,
+                patchAvailable: detail.signals.patchAvailable ?? undefined,
+                patchVersions: detail.signals.patchVersions ?? undefined,
+              },
+              investigation: {
+                leadAnalyst: 'Automation',
+              },
+              runbookResults: taskStates.map((task) => ({
+                id: task.taskId,
+                title: task.taskId,
+                state: task.state,
+              })),
+              affectedAssets: runAgentResult.resolved.flatMap((entry) => (
+                entry.assets.map((asset) => ({
+                  id: asset.componentId,
+                  hostname: asset.assetName || asset.assetIdentifier || asset.packageName || asset.componentId,
+                  ipAddress: asset.assetIdentifier || undefined,
+                  os: asset.assetType || undefined,
+                  owner: asset.ecosystem || undefined,
+                  environment: asset.ecosystem || undefined,
+                  externalFacing: Boolean(asset.assetIdentifier),
+                  critical: (cve.severity ?? detail.summary.severity ?? 'UNKNOWN').toUpperCase() === 'CRITICAL',
+                  matchedSoftware: [{
+                    software: entry.software,
+                    version: entry.version,
+                  }],
+                }))
+              )),
+              falsePositiveRows: runAgentResult.fpResults.map((row) => ({
+                software: row.software,
+                version: row.version,
+                falsePositive: row.falsePositive,
+                assetsNotImpacted: row.notImpactedAssetCount,
+                vendorAdvisory: row.vendorAdvisory,
+                vendorGuidance: row.vendorGuidance,
+              })),
+              eolRows: runAgentResult.eolResults.map((row) => ({
+                software: row.software,
+                vendor: row.vendor,
+                version: row.version,
+                lifecycle: row.lifecycle,
+                endOfSupport: row.endOfSupport,
+                endOfLife: row.endOfLife,
+                recommendedUpgrade: row.recommendedUpgrade,
+              })),
+              solutionRows: detail.fixes?.map((fix) => ({
+                software: fix.softwareEntities[0]?.name ?? fix.summary,
+                version: fix.softwareEntities[0]?.version ?? undefined,
+                vendor: fix.softwareEntities[0]?.ecosystem ?? undefined,
+                impactedAssets: fix.softwareEntities[0]?.assetCount ?? 0,
+                solutionType: fix.fixType,
+                solutionDetail: fix.summary,
+                targetVersion: fix.softwareEntities[0]?.version ?? undefined,
+              })) ?? [],
+            });
+
+            persistInvestigationRunbookState(cve.externalId, {
+              ...(persistedRunbookState ?? {}),
+              doneTaskIds: completedTaskIds.slice(),
+              leadAnalyst: 'Automation',
+              logEntries: [
+                ...(persistedRunbookState?.logEntries ?? []),
+                {
+                  id: crypto.randomUUID(),
+                  type: 'AGENT',
+                  message: `Auto investigation completed by rule: ${rule.name}`,
+                  actor: 'Automation',
+                  at: nowIso,
+                },
+              ],
+              taskProducedBy: Object.fromEntries(completedTaskIds.map((taskId) => [taskId, 'AGENT'])) as Record<string, 'AGENT'>,
+              taskConfidence: Object.fromEntries(completedTaskIds.map((taskId) => [taskId, taskMeta[taskId]?.confidence ?? 'HIGH'])) as Record<string, AgentConfidenceLevel>,
+              assetCriteria: criteria.map((criterion): AssetInventoryCriterion => ({
+                id: criterion.id,
+                software: criterion.software,
+                version: criterion.version,
+                vendor: criterion.vendor,
+                matched: true,
+              })),
+              investigationAssetCount: runAgentResult.totalAssets,
+              investigationSoftwareCount: runAgentResult.resolved.length,
+              investigationSoftwareSummary: runAgentResult.resolved.map((entry) => ({
+                software: entry.software,
+                vendor: entry.vendor,
+                version: entry.version,
+                assetCount: entry.assets.length,
+              })),
+              falsePositiveResults: runAgentResult.fpResults.map((row): FalsePositiveResult => ({
+                id: row.id,
+                software: row.software,
+                version: row.version,
+                falsePositive: row.falsePositive,
+                notImpactedAssetCount: row.notImpactedAssetCount,
+                vendorAdvisory: row.vendorAdvisory,
+                vendorGuidance: row.vendorGuidance,
+                statusLabel: row.statusLabel,
+                statusDetail: row.statusDetail,
+                statusTone: row.statusTone as FalsePositiveResult['statusTone'],
+              })),
+              falsePositiveRan: true,
+              eolCriteria: criteria.map((criterion) => ({
+                id: criterion.id,
+                software: criterion.software,
+                version: criterion.version,
+                vendor: criterion.vendor,
+              })),
+              eolResults: runAgentResult.eolResults.map((row): EolAnalysisResult => ({
+                id: row.id,
+                software: row.software,
+                vendor: row.vendor,
+                version: row.version,
+                lifecycle: row.lifecycle,
+                endOfSupport: row.endOfSupport,
+                endOfLife: row.endOfLife,
+                recommendedUpgrade: row.recommendedUpgrade,
+              })),
+              eolAssessed: true,
+            });
+
+            investigationDone = true;
+            totalInvestigated += 1;
+          }
+
+          let result: { createdCount: number; reopenedCount: number; alreadyOpenCount?: number } | null = null;
+          if (rule.createFindings) {
+            if (!investigationDone) {
+              totalSkipped += 1;
+              continue;
+            }
+            if (componentIds.length === 0) {
+              totalSkipped += 1;
+              continue;
+            }
+
+            const componentApplicabilityDecisions: Record<string, 'APPLICABLE'> =
+              Object.fromEntries(componentIds.map(id => [id, 'APPLICABLE']));
+            const componentAnalystDispositions: Record<string, 'IMPACTED'> =
+              Object.fromEntries(componentIds.map(id => [id, 'IMPACTED']));
+            const findingCreationMode = rule.findingType === 'CVE_FIX' ? 'CVE_FIX' : 'ASSET_CVE';
+
+            result = await cveWorkbenchApi.createManualFindings(cve.externalId, {
+              justification: `Auto-created by rule: ${rule.name}`,
+              findingCreationMode,
+              componentIds,
+              componentApplicabilityDecisions,
+              componentAnalystDispositions,
+              existingFindingBehavior: 'ADD_TO_EXISTING',
+            }).catch(async () => {
+              // CVE_FIX may fail with a constraint violation when the primary component
+              // already has a non-grouped finding. Fall back to ASSET_CVE so the
+              // existing findings are at least counted/reopened correctly.
+              if (findingCreationMode === 'CVE_FIX') {
+                return cveWorkbenchApi.createManualFindings(cve.externalId, {
+                  justification: `Auto-created by rule: ${rule.name}`,
+                  findingCreationMode: 'ASSET_CVE',
+                  componentIds,
+                  componentApplicabilityDecisions,
+                  componentAnalystDispositions,
+                  existingFindingBehavior: 'ADD_TO_EXISTING',
+                });
+              }
+              throw new Error('Finding creation failed');
+            });
+            totalCreated      += result.createdCount;
+            totalReopened     += result.reopenedCount;
+            totalAlreadyOpen  += result.alreadyOpenCount ?? 0;
+          }
+
+          if (rule.createServiceNowIncident) {
+            if (detail.matchedSoftware.length === 0) {
+              totalSkipped += 1;
+              continue;
+            }
+            if (rule.createFindings && !investigationDone) {
+              totalSkipped += 1;
+              continue;
+            }
+            if (!rule.createFindings || (result != null && ((result.createdCount ?? 0) > 0 || (result.reopenedCount ?? 0) > 0))) {
+              const snowPayload = buildServiceNowIncidentPayload(cve, detail);
+              try {
+                const snowRaw = await cveWorkbenchApi.createServiceNowIncident(cve.externalId, snowPayload);
+                const snowResults = Array.isArray(snowRaw) ? snowRaw : [snowRaw];
+                totalIncidents += snowResults.filter((incident) => incident?.status === 'created').length || snowResults.length;
+              } catch (snowErr) {
+                cveErrors.push(`${cve.externalId} ServiceNow: ${snowErr instanceof Error ? snowErr.message : String(snowErr)}`);
+              }
+            }
+          }
         } catch (err) {
           cveErrors.push(`${cve.externalId}: ${err instanceof Error ? err.message : String(err)}`);
         }
-      }));
+      }
 
       const errorSummary = cveErrors.length > 0 ? ` Errors on ${cveErrors.length} CVE(s): ${cveErrors[0]}` : '';
       if (cveErrors.length > 0) {
@@ -2894,7 +3549,16 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
       }
 
       setRules(prev => prev.map(r => r.id === id
-        ? { ...r, lastRunAt: new Date().toISOString(), lastRunCreated: totalCreated, lastRunReopened: totalReopened, lastRunAlreadyOpen: totalAlreadyOpen }
+        ? {
+            ...r,
+            lastRunAt: new Date().toISOString(),
+            lastRunCreated: totalCreated,
+            lastRunReopened: totalReopened,
+            lastRunAlreadyOpen: totalAlreadyOpen,
+            lastRunInvestigated: totalInvestigated,
+            lastRunIncidents: totalIncidents,
+            lastRunSkipped: totalSkipped,
+          }
         : r
       ));
     } catch (err) {
@@ -2911,7 +3575,7 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
     <div>
       {rules.length === 0 && !showForm && (
         <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>
-          No auto-finding rules configured. Rules run automatically when new CVEs are ingested or inventory is updated.
+          No auto investigation rules configured. Rules run automatically when new CVEs are ingested or inventory is updated.
         </p>
       )}
 
@@ -2930,17 +3594,27 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
                       {rule.enabled ? 'Enabled' : 'Disabled'}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'color-mix(in srgb, var(--accent) 10%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)' }}>
-                      {rule.findingType === 'CVE_ASSET' ? 'CVE + Asset' : 'CVE + Fix'}
+                      {rule.investigate
+                        ? (rule.createFindings
+                          ? (rule.createServiceNowIncident ? 'Investigate + Findings + Incident' : 'Investigate + Findings')
+                          : (rule.createServiceNowIncident ? 'Investigate + Incident' : 'Investigate only'))
+                        : (rule.createServiceNowIncident ? 'Incident only' : 'Findings only')}
                     </span>
                     {/* Last run findings count */}
                     {hasRun && !isRunning && (() => {
                       const created = rule.lastRunCreated ?? 0;
                       const reopened = rule.lastRunReopened ?? 0;
                       const alreadyOpen = rule.lastRunAlreadyOpen ?? 0;
+                      const investigated = rule.lastRunInvestigated ?? 0;
+                      const incidents = rule.lastRunIncidents ?? 0;
+                      const skipped = rule.lastRunSkipped ?? 0;
                       const parts: string[] = [];
+                      if (investigated > 0) parts.push(`${investigated} investigated`);
                       if (created > 0) parts.push(`${created} created`);
                       if (reopened > 0) parts.push(`${reopened} reopened`);
                       if (alreadyOpen > 0) parts.push(`${alreadyOpen} already open`);
+                      if (incidents > 0) parts.push(`${incidents} incidents`);
+                      if (skipped > 0) parts.push(`${skipped} skipped`);
                       if (parts.length === 0) parts.push('0 created');
                       return (
                         <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'color-mix(in srgb, var(--low) 12%, transparent)', color: 'var(--low)', border: '1px solid color-mix(in srgb, var(--low) 28%, transparent)' }}>
@@ -3013,7 +3687,7 @@ function AutoFindingRulesSection({ canEdit }: { canEdit: boolean }) {
 
       {canEdit && !showForm && (
         <div className="button-row form-submit-row">
-          <button type="button" className="btn btn-secondary" onClick={openCreate}>+ New Auto-Finding Rule</button>
+          <button type="button" className="btn btn-secondary" onClick={openCreate}>+ New Auto Investigation Rule</button>
         </div>
       )}
     </div>
@@ -3069,6 +3743,7 @@ function AutoFindingRuleForm({
   const [softwareList, setSoftwareList] = React.useState<Array<{ id: string; vendor: string; name: string }>>([]);
   const [softwareSearch, setSoftwareSearch] = React.useState('');
   const [softwareLoading, setSoftwareLoading] = React.useState(false);
+  const canSaveRule = form.investigate || form.createFindings || form.createServiceNowIncident;
 
   React.useEffect(() => {
     if (form.softwareScope !== 'SPECIFIC') return;
@@ -3115,223 +3790,280 @@ function AutoFindingRuleForm({
   const fieldStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4 };
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel)', padding: 20, marginBottom: 16 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel)', padding: '16px 20px', marginBottom: 16 }}>
       <h4 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--title)' }}>
-        {isEdit ? 'Edit Rule' : 'New Auto-Finding Rule'}
+        {isEdit ? 'Edit Rule' : 'New Auto Investigation Rule'}
       </h4>
 
-      {/* Rule name */}
-      <div style={fieldStyle}>
-        <label style={labelStyle}>Rule Name</label>
-        <input style={{ ...inputStyle, maxWidth: 380 }} placeholder="e.g. Critical KEV findings for external assets"
-          value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
-      </div>
+      {/* ── 2-column body ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px', alignItems: 'start' }}>
 
-      {/* ── CVE Criteria ── */}
-      <p style={sectionLabelStyle}>CVE Criteria</p>
-
-      {/* Condition rows */}
-      {form.cveConditions.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
-          {form.cveConditions.map(cond => {
-            const colDef = CVE_COLUMNS.find(c => c.value === cond.column)!;
-            const ops = operatorsFor(colDef);
-            return (
-              <div key={cond.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {/* Column label */}
-                <span style={{ minWidth: 160, fontSize: 13, fontWeight: 500, color: 'var(--title)', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
-                  {colDef.label}
-                </span>
-                {/* Operator */}
-                {colDef.type !== 'boolean' && (
-                  <select style={{ ...inputStyle, width: 120 }} value={cond.operator}
-                    onChange={e => updateCondition(cond.id, { operator: e.target.value })}>
-                    {ops.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-                  </select>
-                )}
-                {/* Value */}
-                {colDef.type === 'boolean' ? (
-                  <select style={{ ...inputStyle, width: 140 }} value={cond.operator}
-                    onChange={e => updateCondition(cond.id, { operator: e.target.value })}>
-                    {ops.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-                  </select>
-                ) : colDef.type === 'select' ? (
-                  <select style={{ ...inputStyle, width: 160, flex: 'none' }} value={cond.value}
-                    onChange={e => updateCondition(cond.id, { value: e.target.value })}>
-                    {colDef.options!.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                  </select>
-                ) : (
-                  <input style={{ ...inputStyle, width: 140, flex: 'none' }}
-                    type={colDef.type === 'number' ? 'number' : 'text'}
-                    value={cond.value}
-                    onChange={e => updateCondition(cond.id, { value: e.target.value })}
-                    placeholder={colDef.type === 'number' ? '0' : 'value'} />
-                )}
-                <button type="button" onClick={() => removeCondition(cond.id)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1, padding: '4px 6px' }}>
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Add condition button + dropdown */}
-      <div style={{ position: 'relative', display: 'inline-block' }} ref={colPickerRef}>
-        <button type="button" className="btn btn-secondary"
-          style={{ fontSize: 12, padding: '5px 12px' }}
-          onClick={() => setColPickerOpen(v => !v)}>
-          + Add Condition ▾
-        </button>
-        {colPickerOpen && (
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4,
-            background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 220, maxHeight: 320, overflowY: 'auto',
-          }}>
-            {CVE_COLUMNS.map(col => {
-              const alreadyAdded = form.cveConditions.some(c => c.column === col.value);
-              return (
-                <button key={col.value} type="button"
-                  disabled={alreadyAdded}
-                  onClick={() => addCondition(col)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 14px',
-                    background: alreadyAdded ? 'var(--surface)' : 'none', border: 'none', cursor: alreadyAdded ? 'default' : 'pointer',
-                    fontSize: 13, color: alreadyAdded ? 'var(--muted)' : 'var(--text)', textAlign: 'left',
-                  }}
-                  onMouseEnter={e => { if (!alreadyAdded) (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--accent) 10%, var(--panel))'; }}
-                  onMouseLeave={e => { if (!alreadyAdded) (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
-                >
-                  {alreadyAdded && <span style={{ color: 'var(--accent)', fontSize: 12 }}>✓</span>}
-                  {col.label}
-                </button>
-              );
-            })}
+        {/* ── LEFT: Rule Name + CVE Criteria ── */}
+        <div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Rule Name</label>
+            <input style={inputStyle} placeholder="e.g. Critical KEV findings for external assets"
+              value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </div>
-        )}
-      </div>
 
-      {/* ── Software Scope ── */}
-      <p style={sectionLabelStyle}>Software Scope</p>
-      <div style={fieldStyle}>
-        <label style={labelStyle}>Scope</label>
-        <select style={{ ...inputStyle, maxWidth: 280 }} value={form.softwareScope}
-          onChange={e => setForm(p => ({ ...p, softwareScope: e.target.value as AutoFindingRule['softwareScope'], selectedSoftware: [] }))}>
-          <option value="ALL">All software</option>
-          <option value="SPECIFIC">Specific software</option>
-        </select>
-      </div>
+          <p style={sectionLabelStyle}>CVE Criteria</p>
 
-      {form.softwareScope === 'SPECIFIC' && (
-        <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)', overflow: 'hidden' }}>
-          {/* Search */}
-          <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
-            <input style={{ ...inputStyle, margin: 0 }} placeholder="Search vendors or software…"
-              value={softwareSearch} onChange={e => setSoftwareSearch(e.target.value)} />
-          </div>
-          {/* Selected chips */}
-          {form.selectedSoftware.length > 0 && (
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {form.selectedSoftware.map(s => (
-                <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 500, background: 'color-mix(in srgb, var(--accent) 12%, var(--panel))', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)' }}>
-                  {s.name}
-                  <button type="button" onClick={() => toggleSoftware(s)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
-                </span>
-              ))}
+          {form.cveConditions.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+              {form.cveConditions.map(cond => {
+                const colDef = CVE_COLUMNS.find(c => c.value === cond.column)!;
+                const ops = operatorsFor(colDef);
+                return (
+                  <div key={cond.id} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--title)', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, background: 'var(--surface)', whiteSpace: 'nowrap' }}>
+                      {colDef.label}
+                    </span>
+                    {colDef.type !== 'boolean' && (
+                      <select style={{ ...inputStyle, width: 110 }} value={cond.operator}
+                        onChange={e => updateCondition(cond.id, { operator: e.target.value })}>
+                        {ops.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+                      </select>
+                    )}
+                    {colDef.type === 'boolean' ? (
+                      <select style={{ ...inputStyle, width: 130 }} value={cond.operator}
+                        onChange={e => updateCondition(cond.id, { operator: e.target.value })}>
+                        {ops.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+                      </select>
+                    ) : colDef.type === 'select' ? (
+                      <select style={{ ...inputStyle, width: 140, flex: 'none' }} value={cond.value}
+                        onChange={e => updateCondition(cond.id, { value: e.target.value })}>
+                        {colDef.options!.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    ) : (
+                      <input style={{ ...inputStyle, width: 120, flex: 'none' }}
+                        type={colDef.type === 'number' ? 'number' : 'text'}
+                        value={cond.value}
+                        onChange={e => updateCondition(cond.id, { value: e.target.value })}
+                        placeholder={colDef.type === 'number' ? '0' : 'value'} />
+                    )}
+                    <button type="button" onClick={() => removeCondition(cond.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1, padding: '4px 4px' }}>
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
-          {/* Vendor groups */}
-          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-            {softwareLoading ? (
-              <p style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>Loading software…</p>
-            ) : Object.keys(vendorGroups).length === 0 ? (
-              <p style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>No software found.</p>
-            ) : (
-              Object.entries(vendorGroups).sort(([a], [b]) => a.localeCompare(b)).map(([vendor, items]) => (
-                <div key={vendor}>
-                  <div style={{ padding: '6px 12px 4px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
-                    {vendor}
-                  </div>
-                  {items.map(item => {
-                    const checked = form.selectedSoftware.some(s => s.id === item.id);
-                    return (
-                      <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', cursor: 'pointer', background: checked ? 'color-mix(in srgb, var(--accent) 6%, var(--panel))' : 'var(--panel)', borderBottom: '1px solid var(--border)' }}
-                        onMouseEnter={e => { if (!checked) (e.currentTarget as HTMLLabelElement).style.background = 'var(--surface)'; }}
-                        onMouseLeave={e => { if (!checked) (e.currentTarget as HTMLLabelElement).style.background = 'var(--panel)'; }}
-                      >
-                        <input type="checkbox" checked={checked} onChange={() => toggleSoftware(item)} />
-                        <span style={{ fontSize: 13, color: 'var(--text)' }}>{item.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              ))
+
+          <div style={{ position: 'relative', display: 'inline-block' }} ref={colPickerRef}>
+            <button type="button" className="btn btn-secondary"
+              style={{ fontSize: 12, padding: '5px 12px' }}
+              onClick={() => setColPickerOpen(v => !v)}>
+              + Add Condition ▾
+            </button>
+            {colPickerOpen && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4,
+                background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 220, maxHeight: 320, overflowY: 'auto',
+              }}>
+                {CVE_COLUMNS.map(col => {
+                  const alreadyAdded = form.cveConditions.some(c => c.column === col.value);
+                  return (
+                    <button key={col.value} type="button"
+                      disabled={alreadyAdded}
+                      onClick={() => addCondition(col)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 14px',
+                        background: alreadyAdded ? 'var(--surface)' : 'none', border: 'none', cursor: alreadyAdded ? 'default' : 'pointer',
+                        fontSize: 13, color: alreadyAdded ? 'var(--muted)' : 'var(--text)', textAlign: 'left',
+                      }}
+                      onMouseEnter={e => { if (!alreadyAdded) (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--accent) 10%, var(--panel))'; }}
+                      onMouseLeave={e => { if (!alreadyAdded) (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                    >
+                      {alreadyAdded && <span style={{ color: 'var(--accent)', fontSize: 12 }}>✓</span>}
+                      {col.label}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
-      )}
 
-      {/* ── Asset Scope ── */}
-      <p style={sectionLabelStyle}>Asset Scope</p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Scope</label>
-          <select style={inputStyle} value={form.assetScope}
-            onChange={e => setForm(p => ({ ...p, assetScope: e.target.value as AutoFindingRule['assetScope'] }))}>
-            <option value="ALL">All assets</option>
-            <option value="EXTERNAL_FACING">External facing assets only</option>
-            <option value="SPECIFIC">Specific asset tags</option>
-          </select>
-        </div>
-        {form.assetScope === 'SPECIFIC' && (
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Asset Tags (comma-separated)</label>
-            <input style={inputStyle} placeholder="e.g. production, payment-service"
-              value={form.assetTags} onChange={e => setForm(p => ({ ...p, assetTags: e.target.value }))} />
-          </div>
-        )}
-      </div>
-
-      {/* ── Finding Type ── */}
-      <p style={sectionLabelStyle}>Finding Type</p>
-      <div style={{ display: 'flex', gap: 12 }}>
-        {(['CVE_ASSET', 'CVE_FIX'] as const).map(type => (
-          <label key={type} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', border: `2px solid ${form.findingType === type ? 'var(--accent)' : 'var(--border)'}`, background: form.findingType === type ? 'color-mix(in srgb, var(--accent) 8%, var(--panel))' : 'var(--panel)', flex: 1 }}>
-            <input type="radio" name="findingType" value={type} checked={form.findingType === type}
-              onChange={() => setForm(p => ({ ...p, findingType: type }))} style={{ marginTop: 2 }} />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--title)' }}>{type === 'CVE_ASSET' ? 'CVE + Asset' : 'CVE + Fix'}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                {type === 'CVE_ASSET' ? 'One finding per matched asset. Tracks remediation by asset owner.' : 'One finding per available fix. Groups all affected assets under each patch.'}
+        {/* ── RIGHT: Actions + Scope + Schedule ── */}
+        <div>
+          {/* Investigation & Findings */}
+          <p style={sectionLabelStyle}>Investigation & Findings</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', padding: '4px 0' }}>
+              <input
+                type="checkbox"
+                checked={form.investigate}
+                style={{ marginTop: 2, flexShrink: 0 }}
+                onChange={() => setForm((p) => {
+                  const nextInvestigate = !p.investigate;
+                  if (!nextInvestigate && !p.createFindings) return p;
+                  return { ...p, investigate: nextInvestigate, createFindings: nextInvestigate ? p.createFindings : false };
+                })}
+              />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--title)' }}>Run investigation</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>Run assessment, false positive, EOL, and fix analysis before any findings are created.</div>
               </div>
-            </div>
-          </label>
-        ))}
+            </label>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', padding: '4px 0' }}>
+              <input
+                type="checkbox"
+                checked={form.createFindings}
+                style={{ marginTop: 2, flexShrink: 0 }}
+                onChange={() => setForm((p) => {
+                  const nextCreate = !p.createFindings;
+                  if (!nextCreate && !p.investigate) return p;
+                  return { ...p, createFindings: nextCreate, investigate: nextCreate ? true : p.investigate };
+                })}
+              />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--title)' }}>Create findings</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>Only create findings after the investigation finishes successfully.</div>
+              </div>
+            </label>
+          </div>
+
+          {/* Finding Creation */}
+          {form.createFindings && (
+            <>
+              <p style={sectionLabelStyle}>Finding Creation</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(['CVE_ASSET', 'CVE_FIX'] as const).map(type => (
+                  <label key={type} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', padding: '4px 0' }}>
+                    <input type="radio" name="findingType" value={type} checked={form.findingType === type}
+                      onChange={() => setForm(p => ({ ...p, findingType: type }))} style={{ marginTop: 2, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--title)' }}>{type === 'CVE_ASSET' ? 'CVE + Asset' : 'CVE + Fix'}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
+                        {type === 'CVE_ASSET' ? 'One finding per matched asset. Tracks remediation by asset owner.' : 'One finding per available fix. Groups all affected assets under each patch.'}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Software Scope */}
+          {form.createFindings && (
+            <>
+              <p style={sectionLabelStyle}>Software Scope</p>
+              <div style={fieldStyle}>
+                <select style={inputStyle} value={form.softwareScope}
+                  onChange={e => setForm(p => ({ ...p, softwareScope: e.target.value as AutoFindingRule['softwareScope'], selectedSoftware: [] }))}>
+                  <option value="ALL">All software</option>
+                  <option value="SPECIFIC">Specific software</option>
+                </select>
+              </div>
+              {form.softwareScope === 'SPECIFIC' && (
+                <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface)', overflow: 'hidden' }}>
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+                    <input style={{ ...inputStyle, margin: 0 }} placeholder="Search vendors or software…"
+                      value={softwareSearch} onChange={e => setSoftwareSearch(e.target.value)} />
+                  </div>
+                  {form.selectedSoftware.length > 0 && (
+                    <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {form.selectedSoftware.map(s => (
+                        <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 12, fontSize: 11, fontWeight: 500, background: 'color-mix(in srgb, var(--accent) 12%, var(--panel))', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)' }}>
+                          {s.name}
+                          <button type="button" onClick={() => toggleSoftware(s)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                    {softwareLoading ? (
+                      <p style={{ padding: '10px 14px', color: 'var(--muted)', fontSize: 13 }}>Loading software…</p>
+                    ) : Object.keys(vendorGroups).length === 0 ? (
+                      <p style={{ padding: '10px 14px', color: 'var(--muted)', fontSize: 13 }}>No software found.</p>
+                    ) : (
+                      Object.entries(vendorGroups).sort(([a], [b]) => a.localeCompare(b)).map(([vendor, items]) => (
+                        <div key={vendor}>
+                          <div style={{ padding: '5px 10px 3px', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+                            {vendor}
+                          </div>
+                          {items.map(item => {
+                            const checked = form.selectedSoftware.some(s => s.id === item.id);
+                            return (
+                              <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', cursor: 'pointer', background: checked ? 'color-mix(in srgb, var(--accent) 6%, var(--panel))' : 'var(--panel)', borderBottom: '1px solid var(--border)' }}
+                                onMouseEnter={e => { if (!checked) (e.currentTarget as HTMLLabelElement).style.background = 'var(--surface)'; }}
+                                onMouseLeave={e => { if (!checked) (e.currentTarget as HTMLLabelElement).style.background = 'var(--panel)'; }}
+                              >
+                                <input type="checkbox" checked={checked} onChange={() => toggleSoftware(item)} />
+                                <span style={{ fontSize: 13, color: 'var(--text)' }}>{item.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Asset Scope */}
+              <p style={sectionLabelStyle}>Asset Scope</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={fieldStyle}>
+                  <select style={inputStyle} value={form.assetScope}
+                    onChange={e => setForm(p => ({ ...p, assetScope: e.target.value as AutoFindingRule['assetScope'] }))}>
+                    <option value="ALL">All assets</option>
+                    <option value="EXTERNAL_FACING">External facing assets only</option>
+                    <option value="SPECIFIC">Specific asset tags</option>
+                  </select>
+                </div>
+                {form.assetScope === 'SPECIFIC' && (
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>Asset Tags (comma-separated)</label>
+                    <input style={inputStyle} placeholder="e.g. production, payment-service"
+                      value={form.assetTags} onChange={e => setForm(p => ({ ...p, assetTags: e.target.value }))} />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Schedule */}
+          <p style={sectionLabelStyle}>Schedule</p>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Run every (hours)</label>
+            <input
+              style={{ ...inputStyle, maxWidth: 160 }}
+              type="text"
+              placeholder="e.g. 24"
+              value={form.scheduleHours ?? ''}
+              onChange={e => setForm(p => ({ ...p, scheduleHours: e.target.value }))}
+            />
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Leave blank to run manually only</span>
+          </div>
+        </div>
       </div>
 
-      {/* ── Schedule ── */}
-      <p style={sectionLabelStyle}>Schedule</p>
-      <div style={fieldStyle}>
-        <label style={labelStyle}>Run every (hours)</label>
-        <input
-          style={{ ...inputStyle, maxWidth: 180 }}
-          type="text"
-          placeholder="e.g. 24"
-          value={form.scheduleHours ?? ''}
-          onChange={e => setForm(p => ({ ...p, scheduleHours: e.target.value }))}
-        />
-        <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Leave blank to run manually only</span>
-      </div>
+      {/* ── Full-width footer ── */}
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', padding: '4px 0' }}>
+          <input
+            type="checkbox"
+            checked={form.createServiceNowIncident}
+            style={{ marginTop: 2, flexShrink: 0 }}
+            onChange={() => setForm(p => ({ ...p, createServiceNowIncident: !p.createServiceNowIncident }))}
+          />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--title)' }}>Create ServiceNow incident</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>Open a ServiceNow incident when the rule matches. If findings are also enabled, incidents are created after findings are created or reopened.</div>
+          </div>
+        </label>
 
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
-        <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={onSave}>
-          {isEdit ? 'Save Changes' : 'Create Rule'}
-        </button>
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <button type="button" className="btn btn-primary" disabled={!form.name.trim() || !canSaveRule} onClick={onSave}>
+            {isEdit ? 'Save Changes' : 'Create Rule'}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        </div>
       </div>
     </div>
   );

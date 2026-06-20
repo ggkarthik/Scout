@@ -22,6 +22,7 @@ import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.RiskPolicyService;
+import com.prototype.vulnwatch.service.FindingWorkflowService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbConfigService;
 import com.prototype.vulnwatch.service.ServiceNowCmdbSyncService;
 import com.prototype.vulnwatch.service.TenantService;
@@ -69,6 +70,8 @@ class RbacControllerSecurityIntegrationTest {
     @MockBean
     private com.prototype.vulnwatch.service.FindingsScoreRecomputeService findingsScoreRecomputeService;
     @MockBean
+    private FindingWorkflowService findingWorkflowService;
+    @MockBean
     private ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     @MockBean
     private ServiceNowCmdbSyncService serviceNowCmdbSyncService;
@@ -104,7 +107,16 @@ class RbacControllerSecurityIntegrationTest {
         mockMvc.perform(post("/api/risk-policy")
                         .header("Authorization", "Bearer analyst.jwt")
                         .contentType("application/json")
-                        .content("{}"))
+                .content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void executeAutoCloseNowRequiresTenantAdmin() throws Exception {
+        authenticateJwt("analyst.jwt", "analyst-1", "SECURITY_ANALYST");
+
+        mockMvc.perform(post("/api/risk-policy/auto-close/execute-now")
+                        .header("Authorization", "Bearer analyst.jwt"))
                 .andExpect(status().isForbidden());
     }
 

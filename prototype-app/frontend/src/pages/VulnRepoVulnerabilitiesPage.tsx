@@ -4,6 +4,7 @@ import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../comp
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForPlatformVulnIntelDetail, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
+import { canUseEntitlement } from '../features/auth/entitlements';
 import { canAccessPlatformConsole } from '../features/auth/roles';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 import { useCveDetailQuery, useRiskPolicyQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
@@ -131,7 +132,11 @@ function cveDisplayStatus(record: OrgSpecificCveExposureRecord): 'NOT_APPLICABLE
   if (record.openFindings === 0 && record.impactedComponentCount === 0 && record.underInvestigationComponentCount === 0) {
     return 'NO_IMPACT';
   }
-  // Reviewed: investigation workflow marked done (mirrors workbench invDone logic)
+  // Reviewed: prefer server-backed evidence that the investigation work has been completed.
+  if (record.hasInvestigationSummary || Boolean(record.investigationSummaryGeneratedAt)) {
+    return 'REVIEWED';
+  }
+  // Fall back to the browser-local runbook state for in-progress analyst sessions.
   const investigationStatus = getInvestigationStatus(record.externalId);
   if (investigationStatus === 'done') {
     return 'REVIEWED';
@@ -218,7 +223,7 @@ function buildSoftwareDrawerRows(detail: CveDetail | null): SoftwareDrawerRow[] 
 export function VulnRepoVulnerabilitiesPage() {
   const navigate = useNavigate();
   const actor = useActor();
-  const canViewAiSolutions = true;
+  const canViewAiSolutions = canUseEntitlement(actor, 'ai.solution_generation');
   const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = React.useMemo(() => searchParams.get('query')?.trim() ?? '', [searchParams]);
@@ -715,13 +720,10 @@ export function VulnRepoVulnerabilitiesPage() {
                     type="button"
                     className="btn-link vuln-repo-ai-solution-link"
                     aria-label={`Open AI solution for ${item.externalId}`}
-                    title={canViewAiSolutions ? `AI Remediation Solution — ${item.externalId}` : 'AI remediation solution unavailable'}
-                    disabled={!canViewAiSolutions}
+                    title={`AI Remediation Solution — ${item.externalId}`}
                     onClick={() => {
-                      if (canViewAiSolutions) {
-                        setSelectedSoftwareRecord(item);
-                        setDrawerMode('ai-solution');
-                      }
+                      setSelectedSoftwareRecord(item);
+                      setDrawerMode('ai-solution');
                     }}
                   >
                     {/* AI Solution: sparkle/lightning icon */}

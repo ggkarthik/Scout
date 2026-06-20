@@ -1110,6 +1110,12 @@ CREATE TABLE IF NOT EXISTS tenant_default.findings (
     assigned_by varchar(255),
     assigned_to varchar(255),
     confidence_score double precision,
+    auto_close_eligible_at timestamptz,
+    closed_at timestamptz,
+    closed_by varchar(255),
+    closed_reason varchar(80),
+    closed_rule_id uuid,
+    consecutive_misses integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL,
     creation_source varchar(255) NOT NULL,
     decision_state varchar(255),
@@ -1120,6 +1126,7 @@ CREATE TABLE IF NOT EXISTS tenant_default.findings (
     incident_id varchar(64),
     incident_status varchar(64),
     last_observed_at timestamptz,
+    last_observed_run_id uuid,
     matched_by varchar(255) NOT NULL,
     matched_vex_assertion_id uuid,
     owner_group varchar(255),
@@ -1159,6 +1166,8 @@ CREATE INDEX IF NOT EXISTS idx_findings_vulnerability_status ON tenant_default.f
 CREATE INDEX IF NOT EXISTS idx_findings_vex_status ON tenant_default.findings (vex_status);
 CREATE INDEX IF NOT EXISTS idx_findings_vex_freshness ON tenant_default.findings (vex_freshness);
 CREATE INDEX IF NOT EXISTS idx_findings_vex_provider ON tenant_default.findings (vex_provider);
+CREATE INDEX IF NOT EXISTS idx_findings_auto_close_eligible
+    ON tenant_default.findings (tenant_id, status, auto_close_eligible_at);
 
 CREATE TABLE IF NOT EXISTS tenant_default.finding_events (
     id uuid PRIMARY KEY,
@@ -1221,7 +1230,15 @@ CREATE TABLE IF NOT EXISTS tenant_default.risk_policies (
     asset_medium_sla_multiplier double precision NOT NULL,
     auto_close_after_days integer NOT NULL,
     auto_close_asset_identifier varchar(255),
+    auto_close_asset_retired_enabled boolean NOT NULL DEFAULT true,
+    auto_close_component_removed_enabled boolean NOT NULL DEFAULT true,
+    auto_close_duplicate_enabled boolean NOT NULL DEFAULT true,
     auto_close_enabled boolean NOT NULL,
+    auto_close_not_observed_enabled boolean NOT NULL DEFAULT true,
+    auto_close_required_consecutive_misses integer NOT NULL DEFAULT 2,
+    auto_close_run_interval_days integer NOT NULL DEFAULT 1,
+    auto_close_last_run_at timestamptz,
+    auto_close_source_disabled_enabled boolean NOT NULL DEFAULT false,
     critical_sla_days integer NOT NULL,
     critical_threshold double precision NOT NULL,
     finding_generation_mode varchar(20) NOT NULL,

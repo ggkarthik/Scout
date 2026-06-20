@@ -289,7 +289,13 @@ public class FindingQueryService {
                 findingsScore,
                 finding.getSuppressedByRuleId(),
                 finding.getSuppressedByRuleName(),
-                finding.getOwnerGroup());
+                finding.getOwnerGroup(),
+                finding.getConsecutiveMisses(),
+                finding.getAutoCloseEligibleAt(),
+                finding.getClosedAt(),
+                finding.getClosedBy(),
+                finding.getClosedReason(),
+                finding.getClosedRuleId());
     }
 
     private Double safeFindingsScore(String scoreConfig, Finding finding) {

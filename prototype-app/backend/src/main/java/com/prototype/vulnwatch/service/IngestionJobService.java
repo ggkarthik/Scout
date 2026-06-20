@@ -127,7 +127,8 @@ public class IngestionJobService {
                 request.assetName(),
                 request.assetIdentifier(),
                 syncRunId,
-                sourceId
+                sourceId,
+                request.path()
         );
         return enqueueJob(
                 tenant,

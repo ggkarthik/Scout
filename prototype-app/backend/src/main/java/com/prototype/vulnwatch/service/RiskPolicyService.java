@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.RiskPolicy;
+import com.prototype.vulnwatch.domain.RiskPolicyPresets;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.dto.RiskPolicyRequest;
@@ -39,6 +40,7 @@ public class RiskPolicyService {
                 .orElseGet(() -> {
                     RiskPolicy policy = new RiskPolicy();
                     policy.setTenant(tenant);
+                    policy.setFindingsScoreConfig(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON);
                     return riskPolicyRepository.save(policy);
                 });
     }
@@ -88,6 +90,27 @@ public class RiskPolicyService {
         if (req.autoCloseAfterDays() != null) {
             policy.setAutoCloseAfterDays(Math.max(0, req.autoCloseAfterDays()));
         }
+        if (req.autoCloseRequiredConsecutiveMisses() != null) {
+            policy.setAutoCloseRequiredConsecutiveMisses(req.autoCloseRequiredConsecutiveMisses());
+        }
+        if (req.autoCloseNotObservedEnabled() != null) {
+            policy.setAutoCloseNotObservedEnabled(req.autoCloseNotObservedEnabled());
+        }
+        if (req.autoCloseComponentRemovedEnabled() != null) {
+            policy.setAutoCloseComponentRemovedEnabled(req.autoCloseComponentRemovedEnabled());
+        }
+        if (req.autoCloseAssetRetiredEnabled() != null) {
+            policy.setAutoCloseAssetRetiredEnabled(req.autoCloseAssetRetiredEnabled());
+        }
+        if (req.autoCloseSourceDisabledEnabled() != null) {
+            policy.setAutoCloseSourceDisabledEnabled(req.autoCloseSourceDisabledEnabled());
+        }
+        if (req.autoCloseDuplicateEnabled() != null) {
+            policy.setAutoCloseDuplicateEnabled(req.autoCloseDuplicateEnabled());
+        }
+        if (req.autoCloseRunIntervalDays() != null) {
+            policy.setAutoCloseRunIntervalDays(req.autoCloseRunIntervalDays());
+        }
         if (req.findingGenerationMode() != null) {
             policy.setFindingGenerationMode(parseFindingGenerationMode(req.findingGenerationMode()));
         }
@@ -117,8 +140,8 @@ public class RiskPolicyService {
     @Transactional(readOnly = true)
     public String getFindingsScoreConfig(Tenant tenant) {
         return tenantSchemaExecutionService.run(tenant, riskPolicyRepository::findTopByOrderByUpdatedAtDesc)
-                .map(RiskPolicy::getFindingsScoreConfig)
-                .orElse("[]");
+                .map(policy -> policy.getFindingsScoreConfig())
+                .orElse(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON);
     }
 
     private RiskPolicyResponse toResponse(RiskPolicy policy) {
@@ -140,7 +163,15 @@ public class RiskPolicyService {
                 policy.getFindingsScoreConfig(),
                 policy.getAgentAutoThreshold(),
                 policy.getAgentReviewThreshold(),
-                policy.getAgentMaxConcurrent());
+                policy.getAgentMaxConcurrent(),
+                policy.getAutoCloseRequiredConsecutiveMisses(),
+                policy.isAutoCloseNotObservedEnabled(),
+                policy.isAutoCloseComponentRemovedEnabled(),
+                policy.isAutoCloseAssetRetiredEnabled(),
+                policy.isAutoCloseSourceDisabledEnabled(),
+                policy.isAutoCloseDuplicateEnabled(),
+                policy.getAutoCloseRunIntervalDays(),
+                policy.getAutoCloseLastRunAt());
     }
 
     private RiskPolicy.FindingGenerationMode parseFindingGenerationMode(String value) {

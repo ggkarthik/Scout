@@ -680,6 +680,18 @@ export function FindingDetailPage() {
                 )}
                 <KVRow label="First Observed">{fmtDt(currentFinding.firstObservedAt)}</KVRow>
                 <KVRow label="Last Observed">{fmtDt(currentFinding.lastObservedAt)}</KVRow>
+                {currentFinding.consecutiveMisses != null && currentFinding.consecutiveMisses > 0 && (
+                  <KVRow label="Missed Scans">{currentFinding.consecutiveMisses}</KVRow>
+                )}
+                {currentFinding.autoCloseEligibleAt && (
+                  <KVRow label="Auto-Close Eligible">{fmtDt(currentFinding.autoCloseEligibleAt)}</KVRow>
+                )}
+                {currentFinding.closedReason && (
+                  <KVRow label="Closed Reason">{currentFinding.closedReason.replace(/_/g, ' ')}</KVRow>
+                )}
+                {currentFinding.closedAt && (
+                  <KVRow label="Closed At">{fmtDt(currentFinding.closedAt)}</KVRow>
+                )}
               </div>
 
               {/* Impacted Software */}

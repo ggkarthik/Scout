@@ -94,7 +94,8 @@ class IngestionJobExecutionServiceTest {
                 "Payments API",
                 "asset-1",
                 syncRunId,
-                sourceId
+                sourceId,
+                "dependency-graph/sbom"
         );
         when(ingestionJobService.readPayload(job, IngestionJobPayloads.GithubRepositoryIngestionPayload.class)).thenReturn(payload);
         when(ingestionJobService.toJson(any())).thenAnswer(invocation -> invocation.getArgument(0).toString());
@@ -112,7 +113,7 @@ class IngestionJobExecutionServiceTest {
                 tenant,
                 syncRunId,
                 sourceId,
-                new GithubSbomIngestionRequest("acme", "payments", false, AssetType.APPLICATION, "Payments API", "asset-1")
+                new GithubSbomIngestionRequest("acme", "payments", false, AssetType.APPLICATION, "Payments API", "asset-1", "dependency-graph/sbom")
         );
     }
 

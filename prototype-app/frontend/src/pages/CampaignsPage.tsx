@@ -19,7 +19,7 @@ type StatusTab = {
 };
 
 type ScopeMode = 'cves' | 'software' | 'assets';
-type NotifyTemplate = 'exception_followup' | 'escalation' | 'nearing_due_date';
+type NotifyTemplate = 'exception_followup' | 'escalation' | 'nearing_due_date' | 'new_security_campaign';
 
 const WIZARD_NOTIFY_TEMPLATES: Record<NotifyTemplate, { label: string; subject: string; body: string }> = {
   exception_followup: {
@@ -36,6 +36,11 @@ const WIZARD_NOTIFY_TEMPLATES: Record<NotifyTemplate, { label: string; subject: 
     label: 'Nearing Due Date',
     subject: 'Action Required: Remediation Due {{due_date}}',
     body: 'Hi {{owner_name}},\n\nThis is a reminder that the remediation deadline is approaching.\n\n• Affected assets: {{asset_count}}\n• Severity: {{severity}}\n• Due date: {{due_date}}\n\nPlease ensure all affected systems are remediated before the due date to avoid an SLA breach.\n\nIf you require additional time, please submit an exception request as soon as possible.\n\nThank you,\nSecurity Operations',
+  },
+  new_security_campaign: {
+    label: 'Attention Required: New Security Campaign',
+    subject: 'Attention Required: New Security Campaign Launched',
+    body: 'Hi {{owner_name}},\n\nA new security remediation campaign has been launched that requires your immediate attention.\n\n• Affected assets: {{asset_count}}\n• Severity: {{severity}}\n• Target due date: {{due_date}}\n\nPlease review the campaign details and begin remediation of affected systems as soon as possible.\n\nEarly action reduces risk exposure and helps your team meet the remediation SLA.\n\nThank you,\nSecurity Operations',
   },
 };
 
@@ -142,6 +147,7 @@ export function CampaignsPage() {
   const [wizardNotifySent, setWizardNotifySent] = React.useState(false);
   const wizardNotifyBodyRef = React.useRef<HTMLTextAreaElement>(null);
   const [groupOptions, setGroupOptions] = React.useState<string[]>([]);
+  const [groupSearch, setGroupSearch] = React.useState('');
   const [members, setMembers] = React.useState<TenantMember[]>([]);
 
   // ── CVE scope picker ──────────────────────────────────────────────────────
@@ -800,9 +806,36 @@ export function CampaignsPage() {
               {wizardStep === 2 && (
                 <div className="campaign-form-columns">
                   <div>
-                    <h4>Notify Groups</h4>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <h4 style={{ margin: 0 }}>Notify Groups</h4>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {wizardNotifySent && (
+                          <span style={{ fontSize: 11, color: '#21d07a' }}>✓ Sent</span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: 13, background: 'var(--accent)', color: '#fff', padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                          onClick={openWizardNotify}
+                        >
+                          ✉ Compose Notification
+                          {wizardForm.selectedGroups.length > 0 && (
+                            <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 999, padding: '1px 6px', fontSize: 11, fontWeight: 700 }}>
+                              {wizardForm.selectedGroups.length}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="search"
+                      placeholder="Search groups…"
+                      value={groupSearch}
+                      onChange={(e) => setGroupSearch(e.target.value)}
+                      style={{ width: '100%', marginBottom: 10, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--panel))', color: 'var(--text-primary)', fontSize: 13 }}
+                    />
                     <div className="campaign-chip-grid">
-                      {groupOptions.map((group) => (
+                      {groupOptions.filter((g) => g.toLowerCase().includes(groupSearch.toLowerCase())).map((group) => (
                         <button
                           key={group}
                           type="button"
@@ -814,17 +847,9 @@ export function CampaignsPage() {
                       ))}
                     </div>
                     {wizardForm.selectedGroups.length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ fontSize: 13 }}
-                          onClick={openWizardNotify}
-                        >
-                          ✉ Compose Notification
-                        </button>
-                        <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 8 }}>
-                          {wizardNotifySent ? '✓ Notification sent' : `${wizardForm.selectedGroups.length} group${wizardForm.selectedGroups.length !== 1 ? 's' : ''} selected`}
+                      <div style={{ marginTop: 8 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          {`${wizardForm.selectedGroups.length} group${wizardForm.selectedGroups.length !== 1 ? 's' : ''} selected`}
                         </span>
                       </div>
                     )}

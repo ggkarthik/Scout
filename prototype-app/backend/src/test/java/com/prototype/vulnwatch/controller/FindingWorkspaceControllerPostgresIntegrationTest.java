@@ -75,11 +75,25 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     private Tenant tenant;
+    private FindingWorkspaceSeedSupport.SeededWorkspace seedWorkspace;
 
     @BeforeEach
     void seedWorkspace() {
         tenant = tenantService.getDefaultTenant();
         ensureSeededWorkspace();
+    }
+
+    @Test
+    void cursorPaginationSupportsNamedFiltersWithoutBreakingSqlParameterParsing() throws Exception {
+        ensureSeededWorkspace();
+        findingListProjectionService.refreshTenant(tenant);
+
+        mockMvc.perform(authedGet("/api/findings?queueKey=critical-open&vulnerabilityId="
+                        + seedWorkspace.vulnerabilityId()
+                        + "&limit=25"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(90))
+                .andExpect(jsonPath("$.items.length()").value(25));
     }
 
     @Test
@@ -187,6 +201,6 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
                 findingRepository,
                 tenantSchemaExecutionService
         );
-        seedSupport.seedCriticalWorkspace(tenant, 90, 40);
+        seedWorkspace = seedSupport.seedCriticalWorkspace(tenant, 90, 40);
     }
 }

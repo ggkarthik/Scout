@@ -125,6 +125,69 @@ export type BomIngestionResult = {
   action: string;
 };
 
+export type CbomPostureSummary = {
+  id: string;
+  assetId: string;
+  assetName: string;
+  lastSourceBomId: string | null;
+  totalComponents: number;
+  criticalFindings: number;
+  highFindings: number;
+  mediumFindings: number;
+  lowFindings: number;
+  infoFindings: number;
+  acceptedFindings: number;
+  quantumVulnerable: number;
+  weakAlgorithms: number;
+  expiringCerts: number;
+  postureScore: number | null;
+  lastEvaluatedAt: string | null;
+};
+
+export type CbomComponent = {
+  id: string;
+  assetId: string;
+  sourceBomId: string;
+  bomRef: string | null;
+  name: string;
+  description: string | null;
+  assetType: string;
+  componentType: string | null;
+  primitive: string | null;
+  keySize: number | null;
+  curve: string | null;
+  padding: string | null;
+  protocolVersion: string | null;
+  state: string | null;
+  format: string | null;
+  storageLocation: string | null;
+  transmission: string | null;
+  sensitivity: string | null;
+  usedIn: string | null;
+  notAfter: string | null;
+  riskScore: number | null;
+  openFindingCount: number;
+  highFindingCount: number;
+  criticalFindingCount: number;
+};
+
+export type CbomRiskFinding = {
+  id: string;
+  componentId: string;
+  componentName: string;
+  assetId: string;
+  ruleId: string;
+  riskClass: string;
+  severity: string;
+  title: string;
+  detail: string | null;
+  evidence: string | null;
+  recommendation: string | null;
+  status: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
 export type IngestionJobAccepted = {
   jobId: string;
   status: string;
@@ -1066,6 +1129,7 @@ export const api = {
       assetType?: 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
       assetName?: string;
       assetIdentifier?: string;
+      path?: string;
     }
   ) => request<SyncTriggerResponse>('/github-sbom-sources/repository/run', {
     method: 'POST',
@@ -1075,6 +1139,9 @@ export const api = {
   updateRiskPolicy: (policy: Partial<RiskPolicy>) => request<RiskPolicy>('/risk-policy', {
     method: 'POST',
     body: JSON.stringify(policy)
+  }),
+  executeAutoCloseNow: () => request<{ updated: number }>('/risk-policy/auto-close/execute-now', {
+    method: 'POST'
   }),
   recomputeFindingsScores: () => request<{ updated: number }>('/risk-policy/recompute-findings-scores', {
     method: 'POST'
@@ -1395,4 +1462,17 @@ export const api = {
     request<BomLineageItem[]>(`/bom/inventory/${encodeURIComponent(bomId)}/lineage`),
   deleteBom: (bomId: string) =>
     request<void>(`/bom/inventory/${encodeURIComponent(bomId)}`, { method: 'DELETE' }),
+  listCbomPosture: () =>
+    request<CbomPostureSummary[]>('/bom/cbom/posture'),
+  getCbomPosture: (assetId: string) =>
+    request<CbomPostureSummary>(`/bom/cbom/posture/${encodeURIComponent(assetId)}`),
+  listCbomComponents: (assetId: string, page = 0, size = 100) =>
+    request<CbomComponent[]>(`/bom/cbom/components?assetId=${encodeURIComponent(assetId)}&page=${page}&size=${size}`),
+  listCbomFindings: (assetId: string, severity?: string) => {
+    const params = new URLSearchParams({ assetId });
+    if (severity) params.set('severity', severity);
+    return request<CbomRiskFinding[]>(`/bom/cbom/findings?${params.toString()}`);
+  },
+  acceptCbomFinding: (findingId: string) =>
+    request<CbomRiskFinding>(`/bom/cbom/findings/${encodeURIComponent(findingId)}/accept`, { method: 'POST' }),
 };
