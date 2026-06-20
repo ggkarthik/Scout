@@ -20,7 +20,6 @@ import com.prototype.vulnwatch.service.CveInvestigationSummaryService;
 import com.prototype.vulnwatch.service.CveInvestigationSummaryPersistenceService;
 import com.prototype.vulnwatch.service.CveWorkflowFacade;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
-import com.prototype.vulnwatch.service.EntitlementGuard;
 import com.prototype.vulnwatch.service.InvestigationService;
 import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -34,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,7 +61,6 @@ public class CveDetailController {
     private final CveAiActionsService aiActionsService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final WorkspaceService workspaceService;
-    private final EntitlementGuard entitlementGuard;
     private final ObjectProvider<DemoLifecycleService> demoLifecycleServiceProvider;
     private final FixRecordService fixRecordService;
     private final com.prototype.vulnwatch.service.InvestigationRunbookService investigationRunbookService;
@@ -69,6 +68,7 @@ public class CveDetailController {
     private final com.prototype.vulnwatch.service.FalsePositiveAnalysisService falsePositiveAnalysisService;
     private final com.prototype.vulnwatch.service.EolAnalysisService eolAnalysisService;
     private final com.prototype.vulnwatch.service.InvestigationAgentService investigationAgentService;
+    private final TenantEntitlementService tenantEntitlementService;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -767,6 +767,8 @@ public class CveDetailController {
     }
 
     private void assertEntitled(String entitlementKey, String message) {
-        entitlementGuard.assertEnabled(workspaceService.getWorkspace(), entitlementKey, message);
+        if (!tenantEntitlementService.isEnabled(workspaceService.getWorkspace(), entitlementKey)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, message);
+        }
     }
 }
