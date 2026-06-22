@@ -25,9 +25,14 @@ mvn -q \
   -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
   -Dflyway.user="$USER" \
   -Dflyway.password= \
+  -Dflyway.schemas=tenant_default \
   -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
   flyway:repair
 ```
+
+`-Dflyway.schemas=tenant_default` is required — the `flyway_schema_history` table lives in `tenant_default`, not the public schema. Omitting it silently repairs the wrong table and the mismatch persists.
+
+If the error is `Found more than one migration with version N` (after a migration file is renamed/replaced), run `mvn clean` first to purge stale copies from `target/classes/` before restarting.
 
 ### Frontend
 

@@ -107,6 +107,21 @@ export type OperationalMetricDefinition = {
   description: string;
 };
 
+export type TenantAttentionRow = {
+  tenantId: string;
+  tenantName: string;
+  tenantStatus: string;
+  reasons: string[];
+  affectedConnectors: string[];
+  latestRelevantSyncAt: string | null;
+};
+
+export type ConnectorIssueGroup = {
+  connectorKey: string;
+  affectedTenantCount: number;
+  affectedTenants: string[];
+};
+
 export type OperationalSectionResponse<T> = {
   generatedAt: string;
   data: T;

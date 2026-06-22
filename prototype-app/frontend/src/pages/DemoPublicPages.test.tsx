@@ -110,7 +110,7 @@ describe('Demo public pages', () => {
     expect(screen.getByRole('button', { name: /Activate your workspace/i })).toBeEnabled();
   });
 
-  it('routes demo tenant owners to inventory connectors after credential login', async () => {
+  it('routes tenant admins to configurations after credential login', async () => {
     vi.spyOn(api, 'login').mockResolvedValue({
       token: 'tenant-token',
       tokenType: 'Bearer',
@@ -134,7 +134,7 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/connect/sources" element={<ExposureActorProbe />} />
+        <Route path="/configurations" element={<ExposureActorProbe />} />
         <Route path="/platform/tenants" element={<div>Platform Tenants</div>} />
       </Routes>,
       { queryClient, route: '/login' }
@@ -269,7 +269,7 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/connect/sources" element={<div>Inventory Connectors</div>} />
+        <Route path="/configurations" element={<div>Configurations</div>} />
       </Routes>,
       { route: '/login?setup=setup-token-123&email=alex%40example.com' }
     );
@@ -284,7 +284,7 @@ describe('Demo public pages', () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/connect/sources" element={<div>Inventory Connectors</div>} />
+        <Route path="/configurations" element={<div>Configurations</div>} />
       </Routes>,
       { route: '/login' }
     );
@@ -293,7 +293,7 @@ describe('Demo public pages', () => {
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
 
-    await screen.findByText('Inventory Connectors');
+    await screen.findByText('Configurations');
     expect(loginSpy).toHaveBeenCalledWith('alex@example.com', 'password-123');
   });
 

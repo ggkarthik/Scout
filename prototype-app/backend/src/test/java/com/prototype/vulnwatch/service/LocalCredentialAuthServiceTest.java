@@ -219,6 +219,76 @@ class LocalCredentialAuthServiceTest {
     }
 
     @Test
+    void switchTenantContextRequiresActiveGrantAndIssuesTenantBoundToken() {
+        AppUser platformOwner = new AppUser();
+        platformOwner.setExternalSubject("owner@example.com");
+        platformOwner.setEmail("owner@example.com");
+        Tenant tenant = tenant("Customer A");
+
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                false,
+                "owner@example.com",
+                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.switchTenantContext("owner@example.com", tenant.getId());
+        Jwt jwt = decode(response.token());
+
+        verify(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenant.getId());
+        assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
+        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+    }
+
+    @Test
+    void clearTenantContextIssuesFreshPlatformScopeToken() {
+        AppUser platformOwner = new AppUser();
+        platformOwner.setExternalSubject("owner@example.com");
+        platformOwner.setEmail("owner@example.com");
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                false,
+                "owner@example.com",
+                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.clearTenantContext("owner@example.com");
+        Jwt jwt = decode(response.token());
+
+        assertNull(jwt.getClaimAsString("active_tenant_id"));
+        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+    }
+
+    @Test
     void localhostSharedTenantAdminLoginBootstrapsDefaultWorkspaceMembership() {
         Tenant tenant = tenant("Default Workspace");
         AppUser user = new AppUser();
