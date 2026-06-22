@@ -26,10 +26,12 @@ mvn test -Dtest=MyServiceTest
 mvn -Ppostgres-it verify -Dit.test=MyServicePostgresIntegrationTest
 
 # Repair Flyway history after schema drift
+# -Dflyway.schemas=tenant_default is required — flyway_schema_history lives there, not public
 mvn -q \
   -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
   -Dflyway.user="$USER" \
   -Dflyway.password= \
+  -Dflyway.schemas=tenant_default \
   -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
   flyway:repair
 ```

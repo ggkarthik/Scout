@@ -20,6 +20,7 @@ import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
@@ -58,6 +59,9 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @MockBean
     private OperationalQualityReadService operationalQualityReadService;
+
+    @MockBean
+    private PlatformTenantAttentionService platformTenantAttentionService;
 
     @MockBean
     private TenantService tenantService;
@@ -104,6 +108,13 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     @Test
     void operationsDashboardAllowsApiKeyWhenCreatorKeyIsNotConfigured() throws Exception {
         mockMvc.perform(get("/api/operations/dashboard").header("X-API-Key", "test-api-key"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void connectorIssuesAllowApiKeyWhenCreatorKeyIsNotConfigured() throws Exception {
+        when(platformTenantAttentionService.listConnectorIssues()).thenReturn(List.of());
+        mockMvc.perform(get("/api/operations/connector-issues").header("X-API-Key", "test-api-key"))
                 .andExpect(status().isOk());
     }
 

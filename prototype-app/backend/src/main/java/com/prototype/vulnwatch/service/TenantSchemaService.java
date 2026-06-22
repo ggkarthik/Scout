@@ -4,6 +4,8 @@ import com.prototype.vulnwatch.domain.Tenant;
 import java.sql.ResultSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +21,8 @@ public class TenantSchemaService {
 
     private final JdbcTemplate platformJdbcTemplate;
     private final String defaultSchemaName;
+    private final ConcurrentMap<String, Object> schemaProvisionLocks = new ConcurrentHashMap<>();
+    private final Set<String> provisionedSchemas = ConcurrentHashMap.newKeySet();
 
     public TenantSchemaService(
             @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate,
@@ -50,8 +54,18 @@ public class TenantSchemaService {
 
     public void ensureSchemaExists(String schemaName) {
         String normalized = sanitizeSchemaName(schemaName);
-        platformJdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS " + quotedIdentifier(normalized));
-        provisionTenantSchema(normalized);
+        if (provisionedSchemas.contains(normalized)) {
+            return;
+        }
+        Object lock = schemaProvisionLocks.computeIfAbsent(normalized, ignored -> new Object());
+        synchronized (lock) {
+            if (provisionedSchemas.contains(normalized)) {
+                return;
+            }
+            platformJdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS " + quotedIdentifier(normalized));
+            provisionTenantSchema(normalized);
+            provisionedSchemas.add(normalized);
+        }
     }
 
     public void resetTenantSchema(String schemaName) {
@@ -69,6 +83,7 @@ public class TenantSchemaService {
             return;
         }
         platformJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + quotedIdentifier(normalized) + " CASCADE");
+        provisionedSchemas.remove(normalized);
     }
 
     private String sanitizeSchemaName(String schemaName) {

@@ -16,6 +16,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class WorkspaceService {
 
+    public enum PlatformWorkspaceUseCase {
+        PLATFORM_VULNERABILITY_RUN_HISTORY
+    }
+
     private final TenantService tenantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AtomicReference<Tenant> cachedWorkspace = new AtomicReference<>();
@@ -71,11 +75,10 @@ public class WorkspaceService {
         return workspace == null ? null : workspace.getId();
     }
 
-    /**
-     * Returns the default tenant without requiring the caller to have an active tenant session.
-     * Use this for platform-owner-only endpoints that are not tenant-scoped (e.g. Operations dashboard).
-     */
-    public Tenant getDefaultWorkspace() {
+    public Tenant getPlatformWorkspace(PlatformWorkspaceUseCase useCase) {
+        if (useCase == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Platform workspace use case is required");
+        }
         Tenant workspace = tenantService.getDefaultTenant();
         tenantLifecycleGuardService.assertTenantAccessible(workspace);
         return workspace;
