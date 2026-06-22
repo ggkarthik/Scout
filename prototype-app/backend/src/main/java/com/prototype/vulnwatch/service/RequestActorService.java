@@ -32,8 +32,8 @@ public class RequestActorService {
                 return new RequestActor(
                         details.userId(),
                         platformOwner || details.roles().contains("CREATOR"),
-                        platformOwner ? null : details.tenantId(),
-                        platformOwner ? null : details.tenantName(),
+                        details.tenantId(),
+                        details.tenantName(),
                         details.roles());
             }
             return new RequestActor(
@@ -60,7 +60,7 @@ public class RequestActorService {
         Tenant tenant = workspaceService.getWorkspace();
         return new RequestActor(
                 principal,
-                creator,
+                creator || platformOwner,
                 tenant.getId(),
                 tenant.getName(),
                 roles

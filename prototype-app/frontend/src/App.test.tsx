@@ -111,7 +111,7 @@ describe('App test persona switcher', () => {
     expect(await screen.findByRole('heading', { name: 'Tenant Management' })).toBeInTheDocument();
   });
 
-  it('shows EOL in the platform-owner nav and hides tenant administration controls', async () => {
+  it('shows EOL in the platform-owner nav, keeps operations out of the global nav, and groups it in the platform sidebar', async () => {
     const auth = await import('./features/auth/api');
     const platformOwner: ActorContext = {
       creator: true,
@@ -130,7 +130,10 @@ describe('App test persona switcher', () => {
     expect(await screen.findByRole('button', { name: 'Tenant Management' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Tenant context switcher')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
+    const platformViews = await screen.findByLabelText('Platform views');
+    expect(within(platformViews).getByLabelText('Tenant Management')).toBeInTheDocument();
+    expect(within(platformViews).queryByLabelText('Operations')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Operations' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Open settings menu'));
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
@@ -152,7 +155,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/operations/pipeline' });
 
-    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'End-of-Life' })).length).toBeGreaterThan(0);
     expect(screen.getByText(/Operations is no longer part of the platform view/i)).toBeInTheDocument();
   });
 
@@ -172,12 +175,9 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/platform/eol' });
 
-    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
-    const subnav = screen.getByLabelText('Platform views');
-    expect(within(subnav).getByRole('button', { name: /EOL/i })).toBeInTheDocument();
-    expect(within(subnav).queryByRole('button', { name: /Tenants/i })).not.toBeInTheDocument();
-    expect(within(subnav).queryByRole('button', { name: /Users/i })).not.toBeInTheDocument();
-    expect(within(subnav).queryByRole('button', { name: /Demo Requests/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'End-of-Life' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Platform views')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
   });
 
   it('redirects legacy end-of-life route into the platform console for platform owners', async () => {
@@ -196,7 +196,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/end-of-life' });
 
-    expect(await screen.findByRole('heading', { name: 'EOL' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'End-of-Life' })).toBeInTheDocument();
   });
 
   it('shows tenant administration navigation for tenant admins', async () => {
@@ -206,9 +206,15 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/' });
 
-    expect(await screen.findByText('Exposure Dashboard')).toBeInTheDocument();
+    expect(await screen.findByText('Configurations')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exposure' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Findings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Vulnerability Repository' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Campaigns' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Inventory' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connectors' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Administration' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Configurations' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End-of-Life' })).not.toBeInTheDocument();
   });
 

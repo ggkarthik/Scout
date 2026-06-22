@@ -20,7 +20,7 @@ export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests' | 'eol';
+export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests' | 'operations' | 'eol';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -76,7 +76,7 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests', 'eol']);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests', 'operations', 'eol']);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {

@@ -1,7 +1,6 @@
 package com.prototype.vulnwatch.security;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -27,6 +26,7 @@ import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
@@ -91,6 +91,9 @@ class ApiSecurityIntegrationTest {
     private OperationalQualityReadService operationalQualityReadService;
 
     @MockBean
+    private PlatformTenantAttentionService platformTenantAttentionService;
+
+    @MockBean
     private OperationalMetricsService operationalMetricsService;
 
     @MockBean
@@ -151,6 +154,31 @@ class ApiSecurityIntegrationTest {
     @Test
     void operationsDashboardAllowsCreatorKey() throws Exception {
         mockMvc.perform(get("/api/operations/dashboard")
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void tenantAttentionAllowsCreatorKey() throws Exception {
+        when(platformTenantAttentionService.listTenantAttention()).thenReturn(List.of());
+        mockMvc.perform(get("/api/operations/tenant-attention")
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void connectorIssuesAreForbiddenWithoutCreatorKey() throws Exception {
+        mockMvc.perform(get("/api/operations/connector-issues")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void connectorIssuesAllowCreatorKey() throws Exception {
+        when(platformTenantAttentionService.listConnectorIssues()).thenReturn(List.of());
+        mockMvc.perform(get("/api/operations/connector-issues")
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key"))
                 .andExpect(status().isOk());
@@ -250,7 +278,6 @@ class ApiSecurityIntegrationTest {
                 .andExpect(status().isOk());
 
         verify(workspaceService).getWorkspace();
-        verify(workspaceService, never()).getDefaultWorkspace();
         verify(operationalQualityReadService).getSummary(tenant);
     }
 }

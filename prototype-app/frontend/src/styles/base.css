@@ -719,6 +719,13 @@ body {
   display: none;
 }
 
+.nav-ops-section {
+  padding-top: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--sidebar-border) 90%, transparent);
+  display: grid;
+  gap: 6px;
+}
+
 .nav-bottom-section {
   margin-top: auto;
   padding-top: var(--space-2);
