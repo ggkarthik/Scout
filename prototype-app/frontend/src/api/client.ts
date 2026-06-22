@@ -27,6 +27,7 @@ import type {
 } from '../features/dashboard/types';
 import type {
   ClusterImpactResult,
+  ConnectorIssueGroup,
   CorrelationOverridePayload,
   NormalizationOverridePayload,
   OperationalDashboard,
@@ -36,6 +37,7 @@ import type {
   OperationalQualitySummary,
   OperationalSectionResponse,
   SloStatus,
+  TenantAttentionRow,
   SoftwareIdentitySearchResult
 } from '../features/operations/types';
 import type {
@@ -873,6 +875,8 @@ export const api = {
   getOperationalApiReadPath: () => request<OperationalSectionResponse<OperationalDashboard['apiReadPath']>>('/operations/api-read-path'),
   getOperationalFreshnessDrift: () => request<OperationalSectionResponse<OperationalDashboard['freshnessDrift']>>('/operations/freshness-drift'),
   getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
+  getOperationalTenantAttention: () => request<TenantAttentionRow[]>('/operations/tenant-attention'),
+  getOperationalConnectorIssues: () => request<ConnectorIssueGroup[]>('/operations/connector-issues'),
   getOperationalQualitySummary: () => request<OperationalQualitySummary>('/operations/quality/summary'),
   listOperationalQualityIssues: (
     params?: {
@@ -1336,6 +1340,13 @@ export const api = {
   login: (email: string, password: string) => publicRequest<AuthTokenResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password })
+  }),
+  selectTenantContext: (tenantId: string) => request<AuthTokenResponse>('/auth/tenant-context', {
+    method: 'POST',
+    body: JSON.stringify({ tenantId })
+  }),
+  clearTenantContext: () => request<AuthTokenResponse>('/auth/tenant-context', {
+    method: 'DELETE'
   }),
   setupPassword: (setupToken: string, password: string) => publicRequest<AuthTokenResponse>('/auth/setup-password', {
     method: 'POST',

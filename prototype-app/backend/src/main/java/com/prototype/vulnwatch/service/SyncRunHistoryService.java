@@ -222,7 +222,9 @@ public class SyncRunHistoryService {
     }
 
     private <T> T inPlatformWorkspace(java.util.function.Supplier<T> supplier) {
-        return tenantSchemaExecutionService.run(workspaceService.getDefaultWorkspace(), supplier);
+        return tenantSchemaExecutionService.run(
+                workspaceService.getPlatformWorkspace(WorkspaceService.PlatformWorkspaceUseCase.PLATFORM_VULNERABILITY_RUN_HISTORY),
+                supplier);
     }
 
     private SyncRunClassification classifyRunType(String syncType) {

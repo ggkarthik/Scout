@@ -368,7 +368,9 @@ class SyncRunHistoryServiceTest {
     }
 
     private SyncRunHistoryService newHistoryService(Tenant defaultWorkspace) {
-        org.mockito.Mockito.lenient().when(workspaceService.getDefaultWorkspace()).thenReturn(defaultWorkspace);
+        org.mockito.Mockito.lenient()
+                .when(workspaceService.getPlatformWorkspace(WorkspaceService.PlatformWorkspaceUseCase.PLATFORM_VULNERABILITY_RUN_HISTORY))
+                .thenReturn(defaultWorkspace);
         org.mockito.Mockito.lenient().doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));

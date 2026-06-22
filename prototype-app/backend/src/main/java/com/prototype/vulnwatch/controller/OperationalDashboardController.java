@@ -10,6 +10,8 @@ import com.prototype.vulnwatch.dto.OperationalIngestionEfficiencyResponse;
 import com.prototype.vulnwatch.dto.OperationalMetricDefinitionResponse;
 import com.prototype.vulnwatch.dto.OperationalNoiseLifecycleResponse;
 import com.prototype.vulnwatch.dto.OperationalNormalizationQualityResponse;
+import com.prototype.vulnwatch.dto.OperationalConnectorIssueGroupResponse;
+import com.prototype.vulnwatch.dto.OperationalTenantAttentionResponse;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.OperationalQualityFilterValuesResponse;
@@ -18,8 +20,7 @@ import com.prototype.vulnwatch.dto.OperationalQualityIssuePageResponse;
 import com.prototype.vulnwatch.dto.OperationalQualitySummaryResponse;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
-import com.prototype.vulnwatch.service.RequestActor;
-import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.UUID;
@@ -35,19 +36,19 @@ public class OperationalDashboardController {
 
     private final OperationalDashboardService operationalDashboardService;
     private final WorkspaceService workspaceService;
-    private final RequestActorService requestActorService;
     private final OperationalQualityReadService operationalQualityReadService;
+    private final PlatformTenantAttentionService platformTenantAttentionService;
 
     public OperationalDashboardController(
             OperationalDashboardService operationalDashboardService,
             WorkspaceService workspaceService,
-            RequestActorService requestActorService,
-            OperationalQualityReadService operationalQualityReadService
+            OperationalQualityReadService operationalQualityReadService,
+            PlatformTenantAttentionService platformTenantAttentionService
     ) {
         this.operationalDashboardService = operationalDashboardService;
         this.workspaceService = workspaceService;
-        this.requestActorService = requestActorService;
         this.operationalQualityReadService = operationalQualityReadService;
+        this.platformTenantAttentionService = platformTenantAttentionService;
     }
 
     @GetMapping("/dashboard")
@@ -95,6 +96,16 @@ public class OperationalDashboardController {
         return operationalDashboardService.getMetricCatalog();
     }
 
+    @GetMapping("/tenant-attention")
+    public List<OperationalTenantAttentionResponse> getTenantAttention() {
+        return platformTenantAttentionService.listTenantAttention();
+    }
+
+    @GetMapping("/connector-issues")
+    public List<OperationalConnectorIssueGroupResponse> getConnectorIssues() {
+        return platformTenantAttentionService.listConnectorIssues();
+    }
+
     @GetMapping("/quality/summary")
     public OperationalQualitySummaryResponse getQualitySummary() {
         return operationalQualityReadService.getSummary(workspace());
@@ -139,10 +150,6 @@ public class OperationalDashboardController {
     }
 
     private Tenant workspace() {
-        RequestActor actor = requestActorService.currentActor();
-        if (actor != null && actor.hasRole("PLATFORM_OWNER")) {
-            return workspaceService.getDefaultWorkspace();
-        }
         return workspaceService.getWorkspace();
     }
 }

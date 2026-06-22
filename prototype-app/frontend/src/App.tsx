@@ -342,6 +342,24 @@ function LegacyQueryRedirect() {
   return null;
 }
 
+function defaultPathForActor(actor: ActorContext | null): string {
+  if (!actor) {
+    return '/exposure';
+  }
+  if (actor.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER') && actor.platformScope) {
+    return '/platform/tenants';
+  }
+  if (canManageRiskPolicy(actor)) {
+    return '/configurations';
+  }
+  return '/exposure';
+}
+
+function HomeRoute() {
+  const actor = useActor();
+  return <Navigate to={defaultPathForActor(actor)} replace />;
+}
+
 function ExposureDashboardRoute() {
   return <ExposureDashboardPage />;
 }
@@ -693,6 +711,9 @@ function AppShell() {
     if (platformScopeOwner) {
       return ['vuln-repo', 'connect', 'platform', 'end-of-life'] satisfies AppTab[];
     }
+    if (canManageTenant(actor)) {
+      return ['exposure', 'findings', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'] satisfies AppTab[];
+    }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory');
@@ -851,6 +872,20 @@ function AppShell() {
             })}
           </div>
 
+          {platformScopeOwner && (
+            <div className="nav-ops-section">
+              <button
+                className={location.pathname.startsWith('/platform/operations') ? 'nav-btn active' : 'nav-btn'}
+                onClick={() => navigate(pathForPlatformView('operations'))}
+              >
+                <span className="nav-icon">
+                  <TabIcon tab="operations" />
+                </span>
+                <span className="nav-label">Operations</span>
+              </button>
+            </div>
+          )}
+
           <div className="nav-bottom-section">
             {BOTTOM_NAV_TABS.map((tab) => renderNavButton(tab))}
           </div>
@@ -972,7 +1007,7 @@ function AppShell() {
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
-              <Route path="/" element={<Navigate to="/exposure" replace />} />
+              <Route path="/" element={<HomeRoute />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />

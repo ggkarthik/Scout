@@ -84,6 +84,31 @@ class RequestActorServiceTest {
         org.mockito.Mockito.verifyNoInteractions(workspaceService);
     }
 
+    @Test
+    void platformOwnerInTenantContextKeepsSelectedTenantInActorState() {
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                "owner@example.com",
+                "n/a",
+                List.of(new SimpleGrantedAuthority("ROLE_PLATFORM_OWNER"))
+        );
+        authentication.setDetails(new com.prototype.vulnwatch.config.TenantAuthenticationDetails(
+                UUID.fromString("00000000-0000-0000-0000-000000000123"),
+                "Customer A",
+                "owner@example.com",
+                "owner@example.com",
+                "Platform Owner",
+                java.util.Set.of("PLATFORM_OWNER")
+        ));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        RequestActorService requestActorService = new RequestActorService(workspaceService, "fallback-user");
+        RequestActor actor = requestActorService.currentActor();
+
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000123"), actor.tenantId());
+        assertEquals("Customer A", actor.tenantName());
+        assertTrue(actor.actingAsPlatformOwner());
+    }
+
     private Tenant tenant(String name) {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
