@@ -328,15 +328,14 @@ function PlatformOperationsOwnerspace({
   });
 
   const overview = overviewQuery.data?.data;
-  const ingestion = ingestionQuery.data?.data;
   const freshness = freshnessQuery.data?.data;
   const quality = qualityQuery.data;
   const readPath = readPathQuery.data?.data;
   const slo = sloQuery.data;
-  const tenants = tenantsQuery.data ?? [];
-  const connectorHealth = connectorHealthQuery.data ?? [];
+  const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
+  const connectorHealth = React.useMemo(() => connectorHealthQuery.data ?? [], [connectorHealthQuery.data]);
   const tenantAttentionRows = tenantAttentionQuery.data ?? [];
-  const connectorIssueGroups = connectorIssuesQuery.data ?? [];
+  const connectorIssueGroups = React.useMemo(() => connectorIssuesQuery.data ?? [], [connectorIssuesQuery.data]);
 
   const tenantStats = React.useMemo(() => {
     const active = tenants.filter((tenant) => tenant.status === 'ACTIVE').length;
