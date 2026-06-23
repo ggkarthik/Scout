@@ -22,6 +22,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class IngestionJobService {
@@ -43,6 +44,7 @@ public class IngestionJobService {
     private final AuditEventService auditEventService;
     private final IngestionJobMetricsService ingestionJobMetricsService;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
     public IngestionJobService(
             IngestionJobRepository ingestionJobRepository,
@@ -52,7 +54,8 @@ public class IngestionJobService {
             TenantQuotaService tenantQuotaService,
             AuditEventService auditEventService,
             IngestionJobMetricsService ingestionJobMetricsService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TransactionTemplate transactionTemplate
     ) {
         this.ingestionJobRepository = ingestionJobRepository;
         this.credentialEncryptionService = credentialEncryptionService;
@@ -62,6 +65,7 @@ public class IngestionJobService {
         this.auditEventService = auditEventService;
         this.ingestionJobMetricsService = ingestionJobMetricsService;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Transactional
@@ -164,14 +168,12 @@ public class IngestionJobService {
         );
     }
 
-    @Transactional(readOnly = true)
     public IngestionJobResponse getJob(Tenant tenant, UUID jobId) {
         IngestionJob job = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findById(jobId)
                 .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId)));
         return toResponse(job);
     }
 
-    @Transactional(readOnly = true)
     public IngestionJobPageResponse listJobs(Tenant tenant, int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
@@ -186,9 +188,14 @@ public class IngestionJobService {
         );
     }
 
-    @Transactional
+    // NOTE: do NOT annotate these worker-invoked methods with @Transactional. The tenant schema MUST be
+    // selected before the transaction begins — TenantAwareDataSource pins a connection's search_path when
+    // the connection is acquired, and a transaction binds that connection at its start. Opening the
+    // transaction first (method-level @Transactional) pins the *default* schema, so the query silently
+    // runs against the wrong tenant. Setting context via tenantSchemaExecutionService.run() and only then
+    // opening a TransactionTemplate keeps the ordering correct for every tenant.
     public List<ClaimedJobRef> claimPendingJobs(Tenant tenant, int limit, int maxConcurrentPerTenant) {
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> transactionTemplate.execute(status -> {
             long running = ingestionJobRepository.countByStatusValue(STATUS_RUNNING);
             if (running >= maxConcurrentPerTenant) {
                 return List.of();
@@ -208,18 +215,16 @@ public class IngestionJobService {
             return jobs.stream()
                     .map(job -> new ClaimedJobRef(tenant.getId(), job.getId()))
                     .toList();
-        });
+        }));
     }
 
-    @Transactional(readOnly = true)
     public IngestionJob loadJob(UUID tenantId, UUID jobId) {
         return tenantSchemaExecutionService.run(tenantId, () -> ingestionJobRepository.findById(jobId)
                 .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId)));
     }
 
-    @Transactional
     public void markQueuedForRetry(UUID tenantId, UUID jobId, String failureCode, String failureMessage, Instant visibleAt) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> transactionTemplate.execute(status -> {
             IngestionJob job = ingestionJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId));
             job.setStatus(STATUS_QUEUED);
@@ -228,12 +233,11 @@ public class IngestionJobService {
             job.setVisibleAt(visibleAt);
             ingestionJobRepository.save(job);
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public void markFailed(UUID tenantId, UUID jobId, String failureCode, String failureMessage) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> transactionTemplate.execute(status -> {
             IngestionJob job = ingestionJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId));
             job.setStatus(STATUS_FAILED);
@@ -242,12 +246,11 @@ public class IngestionJobService {
             job.setCompletedAt(Instant.now());
             ingestionJobRepository.save(job);
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public void markSucceeded(UUID tenantId, UUID jobId, SbomUpload sbomUpload, String resultJson) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> transactionTemplate.execute(status -> {
             IngestionJob job = ingestionJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId));
             job.setStatus(STATUS_SUCCEEDED);
@@ -258,10 +261,9 @@ public class IngestionJobService {
             job.setResultJson(resultJson);
             ingestionJobRepository.save(job);
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public int recoverInterruptedRunningJobs() {
         Instant now = Instant.now();
         int recovered = 0;

@@ -65,29 +65,38 @@ public class IngestionJobWorkerService {
 
     @Scheduled(fixedDelayString = "${app.ingestion.jobs.poll-interval-ms:2000}")
     public void pollJobs() {
-        for (Tenant tenant : tenantService.listTenants()) {
-            try {
-                List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
-                        tenant,
-                        pollBatchSize,
-                        maxConcurrentPerTenant
-                );
-                for (IngestionJobService.ClaimedJobRef ref : claimed) {
-                    try {
-                        sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
-                    } catch (RejectedExecutionException ex) {
-                        ingestionJobService.markQueuedForRetry(
-                                ref.tenantId(),
-                                ref.jobId(),
-                                "EXECUTOR_BUSY",
-                                "SBOM job executor is at capacity",
-                                Instant.now().plusMillis(retryDelayMs)
-                        );
+        // This method MUST NOT let any exception escape. A periodic @Scheduled task that throws is
+        // not rescheduled by Spring's ReschedulingRunnable, so a single transient failure (e.g. a DB
+        // connection error after a host sleep/clock-leap exhausts the pool) would silently kill the
+        // poller for the rest of the JVM's life and leave every ingestion job stuck in QUEUED. The
+        // listTenants() call below touches the database, so it has to be inside the guard too.
+        try {
+            for (Tenant tenant : tenantService.listTenants()) {
+                try {
+                    List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
+                            tenant,
+                            pollBatchSize,
+                            maxConcurrentPerTenant
+                    );
+                    for (IngestionJobService.ClaimedJobRef ref : claimed) {
+                        try {
+                            sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
+                        } catch (RejectedExecutionException ex) {
+                            ingestionJobService.markQueuedForRetry(
+                                    ref.tenantId(),
+                                    ref.jobId(),
+                                    "EXECUTOR_BUSY",
+                                    "SBOM job executor is at capacity",
+                                    Instant.now().plusMillis(retryDelayMs)
+                            );
+                        }
                     }
+                } catch (Exception ex) {
+                    LOG.warn("Failed polling ingestion jobs for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
                 }
-            } catch (Exception ex) {
-                LOG.warn("Failed polling ingestion jobs for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
             }
+        } catch (Exception ex) {
+            LOG.warn("Ingestion job poll cycle failed before tenant iteration: {}", ex.getMessage(), ex);
         }
     }
 
@@ -95,39 +104,52 @@ public class IngestionJobWorkerService {
         Tenant tenant = tenantService.resolveTenantUuid(tenantId);
         IngestionJob job = ingestionJobService.loadJob(tenantId, jobId);
         try {
-            transactionTemplate.executeWithoutResult(status -> tenantSchemaExecutionService.run(tenant, () -> {
-                IngestionJob activeJob = ingestionJobService.loadJob(tenantId, jobId);
-                long lockKey = ingestionJobLockService.assetLockKey(tenantId, activeJob.getAssetIdentifier());
-                boolean acquired = ingestionJobLockService.tryAcquireTransactionLock(lockKey);
-                if (!acquired) {
-                    ingestionJobService.recordLockRetry(activeJob);
-                    ingestionJobService.markQueuedForRetry(
-                            tenantId,
-                            jobId,
-                            "ASSET_LOCK_BUSY",
-                            "Another ingestion is in progress for this asset",
-                            Instant.now().plusMillis(retryDelayMs)
-                    );
-                    return null;
-                }
+            // Tenant context first, transaction second: TenantAwareDataSource pins the connection's
+            // search_path when the connection is acquired, so the transaction must begin *after* the
+            // tenant schema is selected. Opening the transaction first would bind the default schema and
+            // run the lock + ingestion against the wrong tenant.
+            tenantSchemaExecutionService.run(tenant, () -> {
+                transactionTemplate.executeWithoutResult(status -> {
+                    IngestionJob activeJob = ingestionJobService.loadJob(tenantId, jobId);
+                    long lockKey = ingestionJobLockService.assetLockKey(tenantId, activeJob.getAssetIdentifier());
+                    boolean acquired = ingestionJobLockService.tryAcquireTransactionLock(lockKey);
+                    if (!acquired) {
+                        ingestionJobService.recordLockRetry(activeJob);
+                        ingestionJobService.markQueuedForRetry(
+                                tenantId,
+                                jobId,
+                                "ASSET_LOCK_BUSY",
+                                "Another ingestion is in progress for this asset",
+                                Instant.now().plusMillis(retryDelayMs)
+                        );
+                        return;
+                    }
 
-                ingestionJobService.recordStarted(activeJob);
-                IngestionJobExecutionService.ExecutionOutcome outcome;
-                try {
-                    outcome = executionService.execute(tenant, activeJob);
-                } catch (IOException ex) {
-                    throw new IllegalStateException(ex.getMessage(), ex);
-                }
-                ingestionJobService.markSucceeded(tenantId, jobId, outcome.sbomUpload(), outcome.resultJson());
+                    ingestionJobService.recordStarted(activeJob);
+                    IngestionJobExecutionService.ExecutionOutcome outcome;
+                    try {
+                        outcome = executionService.execute(tenant, activeJob);
+                    } catch (IOException ex) {
+                        throw new IllegalStateException(ex.getMessage(), ex);
+                    }
+                    ingestionJobService.markSucceeded(tenantId, jobId, outcome.sbomUpload(), outcome.resultJson());
+                });
                 return null;
-            }));
-            IngestionJob completed = ingestionJobService.loadJob(tenantId, jobId);
-            ingestionJobService.recordCompleted(completed);
+            });
+            // Audit/metrics recording resolves the workspace from TenantContext, so it must run inside
+            // the tenant scope too — otherwise it throws "Tenant context is required" on the worker thread
+            // and a successful job is wrongly flipped to FAILED.
+            tenantSchemaExecutionService.run(tenant, () -> {
+                ingestionJobService.recordCompleted(ingestionJobService.loadJob(tenantId, jobId));
+                return null;
+            });
         } catch (Exception ex) {
-            IngestionJob failedJob = ingestionJobService.loadJob(tenantId, jobId);
             String message = ex.getMessage() == null ? "Failed to execute ingestion job" : ex.getMessage();
-            ingestionJobService.markFailed(tenantId, jobId, failureCode(ex), message);
-            ingestionJobService.recordFailed(ingestionJobService.loadJob(tenantId, jobId));
+            tenantSchemaExecutionService.run(tenant, () -> {
+                ingestionJobService.markFailed(tenantId, jobId, failureCode(ex), message);
+                ingestionJobService.recordFailed(ingestionJobService.loadJob(tenantId, jobId));
+                return null;
+            });
         }
     }
 
