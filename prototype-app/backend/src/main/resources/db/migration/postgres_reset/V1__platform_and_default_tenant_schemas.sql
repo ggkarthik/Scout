@@ -102,6 +102,45 @@ CREATE INDEX IF NOT EXISTS idx_tenant_support_grants_subject_status_expires
 CREATE INDEX IF NOT EXISTS idx_tenant_support_grants_tenant_requested
     ON platform.tenant_support_grants (tenant_id, requested_at);
 
+-- Plan + entitlement platform tables. These were originally created pre-baseline and were missing
+-- from the migration set, so a freshly provisioned database (CI / integration tests) failed at
+-- V24__enable_investigation_agent_all_plans.sql ("relation platform.plan_entitlements does not
+-- exist"). They are created here, in foreign-key dependency order, before V18 (which also creates
+-- and seeds plan_definitions) and V24. All use IF NOT EXISTS so existing databases are unaffected.
+-- Seed rows are restored idempotently by V27__restore_entitlement_seed_data.sql (after V18 seeds the
+-- plan_definitions rows that plan_entitlements references).
+CREATE TABLE IF NOT EXISTS platform.plan_definitions (
+    code varchar(64) PRIMARY KEY,
+    display_name varchar(120) NOT NULL,
+    status varchar(32) NOT NULL,
+    description varchar(500),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS platform.entitlement_definitions (
+    key varchar(128) PRIMARY KEY,
+    category varchar(64) NOT NULL,
+    value_type varchar(32) NOT NULL,
+    description varchar(500),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS platform.plan_entitlements (
+    plan_code varchar(64) NOT NULL,
+    entitlement_key varchar(128) NOT NULL,
+    enabled boolean NOT NULL,
+    config_json jsonb,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT pk_plan_entitlements PRIMARY KEY (plan_code, entitlement_key),
+    CONSTRAINT fk_plan_entitlements_plan_code
+        FOREIGN KEY (plan_code) REFERENCES platform.plan_definitions (code),
+    CONSTRAINT fk_plan_entitlements_entitlement_key
+        FOREIGN KEY (entitlement_key) REFERENCES platform.entitlement_definitions (key)
+);
+
 CREATE TABLE IF NOT EXISTS platform.vulnerabilities (
     id uuid PRIMARY KEY,
     external_id varchar(50) NOT NULL,
