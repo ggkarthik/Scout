@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.FindingDeltaQueueEntry;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingDeltaQueueEntryRepository;
 import java.time.Instant;
@@ -50,19 +51,22 @@ public class FindingDeltaQueueService {
     private final FindingRecomputeService findingRecomputeService;
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final TenantService tenantService;
+    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public FindingDeltaQueueService(
             FindingDeltaQueueEntryRepository repository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             FindingRecomputeService findingRecomputeService,
             DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService,
-            TenantService tenantService
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
         this.repository = repository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.findingRecomputeService = findingRecomputeService;
         this.dashboardNoiseReductionProjectionService = dashboardNoiseReductionProjectionService;
         this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     // -------------------------------------------------------------------------
@@ -172,12 +176,29 @@ public class FindingDeltaQueueService {
 
     @Scheduled(fixedDelayString = "${app.correlation.delta-queue-poll-interval-ms:2000}")
     public void processPendingDeltas() {
-        List<FindingDeltaQueueEntry> claimed = claimBatch();
-        if (claimed.isEmpty()) {
-            return;
+        // finding_delta_queue is per-tenant. The scheduler thread carries no tenant context, so the
+        // queue claim + status updates land in the default schema — without iterating tenants this only
+        // ever drained tenant_default and left every other tenant's deltas PENDING forever (so their
+        // findings/projections never recomputed). Drain each tenant's queue inside its own schema
+        // context. Never let an exception escape: a @Scheduled task that throws is not rescheduled.
+        try {
+            for (Tenant tenant : tenantService.listTenants()) {
+                try {
+                    tenantSchemaExecutionService.run(tenant, () -> {
+                        List<FindingDeltaQueueEntry> claimed = claimBatch();
+                        if (!claimed.isEmpty()) {
+                            LOG.debug("Delta queue: claimed {} entries for tenant {}", claimed.size(), tenant.getId());
+                            processClaimedBatch(claimed);
+                        }
+                        return null;
+                    });
+                } catch (Exception ex) {
+                    LOG.warn("Delta queue processing failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+                }
+            }
+        } catch (Exception ex) {
+            LOG.warn("Delta queue poll cycle failed before tenant iteration: {}", ex.getMessage(), ex);
         }
-        LOG.debug("Delta queue: claimed {} entries for processing", claimed.size());
-        processClaimedBatch(claimed);
     }
 
     // -------------------------------------------------------------------------

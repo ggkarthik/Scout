@@ -35,6 +35,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(MockitoExtension.class)
 class IngestionJobServiceTest {
@@ -53,6 +55,8 @@ class IngestionJobServiceTest {
     private AuditEventService auditEventService;
     @Mock
     private IngestionJobMetricsService ingestionJobMetricsService;
+    @Mock
+    private TransactionTemplate transactionTemplate;
 
     private IngestionJobService service;
 
@@ -66,12 +70,15 @@ class IngestionJobServiceTest {
                 tenantQuotaService,
                 auditEventService,
                 ingestionJobMetricsService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                transactionTemplate
         );
         lenient().when(tenantSchemaExecutionService.run(any(Tenant.class), any(Supplier.class)))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
         lenient().when(tenantSchemaExecutionService.run(any(UUID.class), any(Supplier.class)))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(transactionTemplate.execute(any()))
+                .thenAnswer(invocation -> ((TransactionCallback<?>) invocation.getArgument(0)).doInTransaction(null));
     }
 
     @Test

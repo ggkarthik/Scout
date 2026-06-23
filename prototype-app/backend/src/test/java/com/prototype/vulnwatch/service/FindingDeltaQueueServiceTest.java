@@ -53,6 +53,9 @@ class FindingDeltaQueueServiceTest {
     @Mock
     private TenantService tenantService;
 
+    @Mock
+    private TenantSchemaExecutionService tenantSchemaExecutionService;
+
     private FindingDeltaQueueService service;
 
     @BeforeEach
@@ -62,7 +65,8 @@ class FindingDeltaQueueServiceTest {
                 componentVulnerabilityStateRepository,
                 findingRecomputeService,
                 dashboardNoiseReductionProjectionService,
-                tenantService
+                tenantService,
+                tenantSchemaExecutionService
         );
         lenient().when(tenantService.resolveTenantUuid(any())).thenAnswer(invocation -> {
             Tenant tenant = new Tenant();
@@ -70,6 +74,13 @@ class FindingDeltaQueueServiceTest {
             tenant.setSchemaName("tenant_test");
             return tenant;
         });
+    }
+
+    private static Tenant tenantWithSchema(UUID id) {
+        Tenant tenant = new Tenant();
+        tenant.setId(id);
+        tenant.setSchemaName("tenant_" + id.toString().substring(0, 8));
+        return tenant;
     }
 
     // ----------------------------------------------------------------
@@ -319,11 +330,32 @@ class FindingDeltaQueueServiceTest {
 
     @Test
     void processPendingDeltas_noClaimedEntries_isNoOp() {
+        Tenant tenant = tenantWithSchema(UUID.randomUUID());
+        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantSchemaExecutionService.run(eq(tenant), any(java.util.function.Supplier.class)))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
         when(repository.pollPending(anyInt())).thenReturn(List.of());
 
         service.processPendingDeltas();
 
         verifyNoInteractions(findingRecomputeService);
+    }
+
+    @Test
+    void processPendingDeltas_drainsEveryTenantNotJustDefault() {
+        // Regression: the poller used to drain only the ambient (default) schema, leaving non-default
+        // tenants' deltas PENDING forever. It must claim within each tenant's schema context.
+        Tenant tenantA = tenantWithSchema(UUID.randomUUID());
+        Tenant tenantB = tenantWithSchema(UUID.randomUUID());
+        when(tenantService.listTenants()).thenReturn(List.of(tenantA, tenantB));
+        when(tenantSchemaExecutionService.run(any(Tenant.class), any(java.util.function.Supplier.class)))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
+        when(repository.pollPending(anyInt())).thenReturn(List.of());
+
+        service.processPendingDeltas();
+
+        verify(tenantSchemaExecutionService).run(eq(tenantA), any(java.util.function.Supplier.class));
+        verify(tenantSchemaExecutionService).run(eq(tenantB), any(java.util.function.Supplier.class));
     }
 
     // ----------------------------------------------------------------
