@@ -69,6 +69,40 @@ On connection close it resets both. This means all JPA queries automatically hit
 
 `APP_ALLOW_HEADER_TENANT_SELECTION=true` (local profile default) lets clients override the tenant via `X-Tenant-ID` header. Must be disabled in production.
 
+### Tenant context must be set BEFORE the transaction begins (critical invariant)
+
+`TenantAwareDataSource` pins a connection's `search_path` (and `app.current_tenant_id`) **at the moment the connection is acquired**, from whatever `TenantContext` holds then — it does not re-read on later queries. A Spring transaction binds its connection at the start of the transaction. Therefore the tenant must be selected *before* the transaction opens.
+
+This is fine for HTTP-invoked code: the auth filter sets `TenantContext` before any `@Transactional` controller/service method runs, so the bound connection already points at the right schema.
+
+It is a trap for **background code** (scheduled jobs, async workers, `@PostConstruct`). A method shaped like this:
+
+```java
+@Transactional                                   // transaction (and connection) bound FIRST...
+public X doWork(Tenant tenant) {
+    return tenantSchemaExecutionService.run(tenant, () -> { ... });  // ...context switched too LATE
+}
+```
+
+silently runs against `tenant_default` for **every** tenant when called from a thread with no pre-set context — the `search_path` was pinned (to the default schema) before `run()` switched `TenantContext`. No error; it just queries the wrong schema. This caused the async ingestion worker and the finding-delta drain to process only the default tenant.
+
+Correct pattern — context first, transaction inside:
+
+```java
+public X doWork(Tenant tenant) {                 // no method-level @Transactional
+    return tenantSchemaExecutionService.run(tenant, () ->
+        transactionTemplate.execute(status -> { ... }));   // tx opens with context already set
+}
+```
+
+Equivalently, wrap the call at the background call site in `tenantSchemaExecutionService.run(tenant, () -> service.theTransactionalMethod(...))`. Audit any `@Transactional` method that calls `tenantSchemaExecutionService.run(...)` internally and is reachable from a scheduled/async path.
+
+A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding_delta_queue`, etc.) must iterate `tenantService.listTenants()` and run each tenant's claim+process inside `run(tenant, …)` — the scheduler thread carries no context, so a bare drain only ever touches `tenant_default`.
+
+### Scheduled tasks
+
+`SchedulingConfig` provides the `TaskScheduler` (multi-thread pool + log-and-continue error handler). Spring's default would otherwise (a) run all `@Scheduled` methods on one thread and (b) **permanently unschedule** a periodic task that throws. Still, every `@Scheduled fixedDelay` method should guard its entire body in try/catch so a transient failure can never silently kill the task.
+
 ## Database migrations
 
 Migration SQL lives in `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`).

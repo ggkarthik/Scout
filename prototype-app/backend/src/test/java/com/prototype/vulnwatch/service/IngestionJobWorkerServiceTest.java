@@ -72,6 +72,20 @@ class IngestionJobWorkerServiceTest {
     }
 
     @Test
+    void pollJobsDoesNotThrowWhenListTenantsFails() {
+        // Regression: listTenants() used to be called outside the try/catch. When it threw (e.g. a
+        // transient DB error after a host sleep), the exception escaped pollJobs and Spring stopped
+        // rescheduling the poller, leaving every ingestion job stuck in QUEUED. pollJobs must swallow
+        // it so the periodic task keeps running.
+        when(tenantService.listTenants()).thenThrow(new IllegalStateException("connection pool exhausted"));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.pollJobs())
+                .doesNotThrowAnyException();
+
+        verify(sbomJobExecutor, never()).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
+    }
+
+    @Test
     void recoverInterruptedJobsDelegatesToService() {
         when(ingestionJobService.recoverInterruptedRunningJobs()).thenReturn(2);
 
