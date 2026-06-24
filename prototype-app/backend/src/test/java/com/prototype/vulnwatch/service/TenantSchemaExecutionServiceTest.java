@@ -83,6 +83,29 @@ class TenantSchemaExecutionServiceTest {
     }
 
     @Test
+    void runRestoresOuterPlatformContext() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setSchemaName("tenant_acme");
+
+        when(tenantSchemaService.schemaNameForTenant(tenant)).thenReturn("tenant_acme");
+
+        TenantContext.runAsPlatform(() -> {
+            assertThat(TenantContext.isPlatformContext()).isTrue();
+            service.run(tenant, () -> {
+                assertThat(TenantContext.getCurrentTenantId()).isEqualTo(tenantId);
+                assertThat(TenantContext.isPlatformContext()).isFalse();
+            });
+            assertThat(TenantContext.getCurrentTenantId()).isNull();
+            assertThat(TenantContext.getCurrentSchemaName()).isNull();
+            assertThat(TenantContext.isPlatformContext()).isTrue();
+        });
+
+        assertThat(TenantContext.isPlatformContext()).isFalse();
+    }
+
+    @Test
     void guardAllowsSameTenantInsideActiveTransaction() {
         UUID tenantId = UUID.randomUUID();
         Tenant tenant = new Tenant();

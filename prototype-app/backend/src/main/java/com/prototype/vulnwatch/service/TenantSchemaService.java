@@ -17,8 +17,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantSchemaService {
 
-    private static final String FLYWAY_HISTORY_TABLE = "flyway_schema_history";
-
     private final JdbcTemplate platformJdbcTemplate;
     private final String defaultSchemaName;
     private final ConcurrentMap<String, Object> schemaProvisionLocks = new ConcurrentHashMap<>();
@@ -198,9 +196,9 @@ public class TenantSchemaService {
                 SELECT tablename
                 FROM pg_tables
                 WHERE schemaname = ?
-                  AND tablename <> ?
+                  AND tablename NOT IN ('flyway_schema_history', 'sync_runs')
                 ORDER BY tablename
-                """, String.class, schemaName, FLYWAY_HISTORY_TABLE);
+                """, String.class, schemaName);
     }
 
     private List<SequenceDefinition> tenantSequenceDefinitions(String schemaName) {
@@ -226,9 +224,9 @@ public class TenantSchemaService {
                 FROM information_schema.columns
                 WHERE table_schema = ?
                   AND column_default IS NOT NULL
-                  AND table_name <> ?
+                  AND table_name NOT IN ('flyway_schema_history', 'sync_runs')
                 ORDER BY table_name, ordinal_position
-                """, columnDefaultMapper(), schemaName, FLYWAY_HISTORY_TABLE);
+                """, columnDefaultMapper(), schemaName);
     }
 
     private List<ForeignKeyDefinition> foreignKeys(String schemaName) {

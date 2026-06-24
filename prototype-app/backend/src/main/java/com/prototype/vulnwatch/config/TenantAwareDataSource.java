@@ -73,17 +73,19 @@ public class TenantAwareDataSource extends DelegatingDataSource {
 
     private void applyTenantContext(Connection conn) throws SQLException {
         UUID tenantId = TenantContext.getCurrentTenantId();
-        String schemaName = normalizeSchemaName(TenantContext.getCurrentSchemaName());
+        boolean platformContext = TenantContext.isPlatformContext();
+        String schemaName = platformContext ? "platform" : normalizeSchemaName(TenantContext.getCurrentSchemaName());
         recordTenantContextState(tenantId);
-        String value = tenantId != null ? tenantId.toString() : requireTenantContext ? NO_TENANT_SENTINEL : "";
+        String value = tenantId != null ? tenantId.toString() : requireTenantContext && !platformContext ? NO_TENANT_SENTINEL : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
             ps.setString(1, value);
             ps.execute();
         }
+        String searchPath = platformContext ? "platform,public" : schemaName + ",platform";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('search_path', ?, FALSE)")) {
-            ps.setString(1, schemaName + ",platform");
+            ps.setString(1, searchPath);
             ps.execute();
         }
     }

@@ -28,7 +28,7 @@ class TenantSchemaServiceTest {
 
     @Test
     void ensureSchemaExistsProvisionsEachSchemaOnlyOncePerProcess() {
-        when(platformJdbcTemplate.queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString(), anyString()))
+        when(platformJdbcTemplate.queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString()))
                 .thenReturn(List.of());
 
         service.ensureSchemaExists("tenant_acme");
@@ -36,6 +36,6 @@ class TenantSchemaServiceTest {
 
         verify(platformJdbcTemplate, times(1)).execute("CREATE SCHEMA IF NOT EXISTS \"tenant_acme\"");
         verify(platformJdbcTemplate, times(1))
-                .queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString(), anyString());
+                .queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString());
     }
 }

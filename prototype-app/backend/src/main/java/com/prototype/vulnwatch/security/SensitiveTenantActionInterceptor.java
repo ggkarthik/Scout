@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.security;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
-import com.prototype.vulnwatch.web.PlatformAdminRequestPaths;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
@@ -33,11 +32,6 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         }
         RequestActor actor = requestActorService.currentActor();
         if (!actor.actingAsPlatformOwner()) {
-            return true;
-        }
-        // Platform and operations endpoints are platform-administration actions gated by ROLE_PLATFORM_OWNER;
-        // they are not tenant-data operations so the support-grant check does not apply.
-        if (PlatformAdminRequestPaths.isPlatformAdminPath(request.getRequestURI())) {
             return true;
         }
         if (actor.tenantId() == null) {

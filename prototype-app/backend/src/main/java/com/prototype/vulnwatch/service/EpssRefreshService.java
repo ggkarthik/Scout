@@ -86,6 +86,10 @@ public class EpssRefreshService {
      */
     @Scheduled(cron = "${app.epss.refresh-cron:0 15 3 * * *}")
     public void refreshAll() {
+        TenantContext.runAsPlatform(this::refreshAllInPlatformContext);
+    }
+
+    private void refreshAllInPlatformContext() {
         if (!enabled) {
             LOG.debug("EPSS refresh is disabled; skipping");
             return;

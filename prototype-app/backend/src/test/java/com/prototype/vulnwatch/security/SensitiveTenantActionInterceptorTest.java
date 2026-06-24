@@ -107,7 +107,7 @@ class SensitiveTenantActionInterceptorTest {
     }
 
     @Test
-    void platformOwnedIngestionPathsBypassTenantSupportChecks() throws Exception {
+    void sensitivePlatformOwnedPathsStillRequireTenantSupportChecks() throws Exception {
         UUID tenantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
                 "platform-owner",
@@ -125,6 +125,21 @@ class SensitiveTenantActionInterceptorTest {
         request.setRequestURI("/api/ingestion/nvd-sync");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), sensitiveMethod()));
+        verify(tenantSupportGrantService).requireActiveGrantForWrite("platform-owner", tenantId);
+    }
+
+    @Test
+    void unannotatedPlatformOwnedIngestionPathsBypassTenantSupportChecks() throws Exception {
+        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
+                requestActorService,
+                tenantSupportGrantService
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/ingestion/nvd-sync");
+        request.setRequestURI("/api/ingestion/nvd-sync");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), unannotatedMethod()));
+        verifyNoInteractions(requestActorService, tenantSupportGrantService);
     }
 
     private MockHttpServletRequest request() {
@@ -138,9 +153,17 @@ class SensitiveTenantActionInterceptorTest {
         return new HandlerMethod(new TestController(), method);
     }
 
+    private HandlerMethod unannotatedMethod() throws NoSuchMethodException {
+        Method method = TestController.class.getDeclaredMethod("unannotated");
+        return new HandlerMethod(new TestController(), method);
+    }
+
     private static final class TestController {
         @SensitiveTenantAction
         public void sensitive() {
+        }
+
+        public void unannotated() {
         }
     }
 }
