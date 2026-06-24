@@ -14,7 +14,7 @@ BEGIN
             SELECT tablename
             FROM pg_tables
             WHERE schemaname = 'tenant_default'
-              AND tablename <> 'flyway_schema_history'
+              AND tablename NOT IN ('flyway_schema_history', 'sync_runs')
             ORDER BY tablename
         LOOP
             EXECUTE format(
@@ -41,7 +41,7 @@ BEGIN
              AND t.table_name = c.table_name
             WHERE c.table_schema = 'tenant_default'
               AND t.table_type = 'BASE TABLE'
-              AND c.table_name <> 'flyway_schema_history'
+              AND c.table_name NOT IN ('flyway_schema_history', 'sync_runs')
               AND NOT EXISTS (
                     SELECT 1
                     FROM information_schema.columns existing

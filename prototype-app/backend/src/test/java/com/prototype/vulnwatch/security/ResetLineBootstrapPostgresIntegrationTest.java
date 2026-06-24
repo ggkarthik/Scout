@@ -69,6 +69,7 @@ class ResetLineBootstrapPostgresIntegrationTest {
                 "software_eol_mapping",
                 "eol_product_catalog",
                 "eol_release",
+                "sync_runs",
                 "vulnerabilities");
 
         assertTablesExist("tenant_default",
@@ -99,7 +100,6 @@ class ResetLineBootstrapPostgresIntegrationTest {
                 "ownership_rules",
                 "fix_records",
                 "sbom_uploads",
-                "sync_runs",
                 "service_accounts",
                 "github_sbom_sources",
                 "aws_discovery_configs",
@@ -120,6 +120,8 @@ class ResetLineBootstrapPostgresIntegrationTest {
         assertIndexExists("platform", "uk_identity_links_pair_type_source");
         assertIndexExists("platform", "uk_vuln_intel_relations_pair_type_source");
         assertIndexExists("platform", "idx_vulnerabilities_external_cvss_lastmod_updated");
+        assertIndexExists("platform", "idx_sync_runs_run_scope_started");
+        assertIndexExists("platform", "idx_sync_runs_tenant_started");
     }
 
     private void assertSchemaExists(String schemaName) {

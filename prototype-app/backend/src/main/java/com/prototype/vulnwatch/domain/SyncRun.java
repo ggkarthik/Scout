@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "sync_runs")
+@Table(schema = "platform", name = "sync_runs")
 public class SyncRun {
 
     @Id

@@ -68,20 +68,13 @@ public class TenantSchemaExecutionService {
     }
 
     private <T> T run(UUID tenantId, String schemaName, Supplier<T> supplier) {
-        UUID previousTenantId = TenantContext.getCurrentTenantId();
-        String previousSchema = TenantContext.getCurrentSchemaName();
-        guardTenantSwitchInsideActiveTransaction(tenantId, schemaName, previousTenantId, previousSchema);
+        TenantContext.Snapshot previous = TenantContext.capture();
+        guardTenantSwitchInsideActiveTransaction(tenantId, schemaName, previous.tenantId(), previous.schemaName());
         try {
-            TenantContext.setCurrentTenantId(tenantId);
-            TenantContext.setCurrentSchemaName(schemaName);
+            TenantContext.restore(new TenantContext.Snapshot(tenantId, schemaName, false));
             return supplier.get();
         } finally {
-            if (previousTenantId == null) {
-                TenantContext.clear();
-            } else {
-                TenantContext.setCurrentTenantId(previousTenantId);
-                TenantContext.setCurrentSchemaName(previousSchema);
-            }
+            TenantContext.restore(previous);
         }
     }
 
