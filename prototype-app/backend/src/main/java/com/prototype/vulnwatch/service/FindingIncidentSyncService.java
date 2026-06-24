@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Daily job that polls ServiceNow for the current status of every incident
@@ -26,18 +25,18 @@ public class FindingIncidentSyncService {
     private final FindingRepository findingRepository;
     private final ServiceNowIncidentService serviceNowIncidentService;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
-    private final TenantService tenantService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public FindingIncidentSyncService(
             FindingRepository findingRepository,
             ServiceNowIncidentService serviceNowIncidentService,
             ServiceNowCmdbConfigService serviceNowCmdbConfigService,
-            TenantService tenantService
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.findingRepository = findingRepository;
         this.serviceNowIncidentService = serviceNowIncidentService;
         this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
-        this.tenantService = tenantService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     /** Scheduled daily at 07:00 to sync ServiceNow incident statuses back to findings. */
@@ -52,8 +51,16 @@ public class FindingIncidentSyncService {
     }
 
     /** Can also be invoked on-demand (e.g. from an admin endpoint). */
-    @Transactional
     public SyncResult syncAll() {
+        SyncAccumulator accumulator = new SyncAccumulator();
+        tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(syncCurrentTenant()));
+        SyncResult result = accumulator.toResult();
+        log.info("ServiceNow incident status sync complete — updated={}, unchanged={}, failed={}",
+                result.updated(), result.unchanged(), result.failed());
+        return result;
+    }
+
+    private SyncResult syncCurrentTenant() {
         List<Finding> findingsWithIncident = findingRepository.findAllWithIncidentId();
         if (findingsWithIncident.isEmpty()) {
             log.info("No findings with linked ServiceNow incidents — nothing to sync");
@@ -108,10 +115,24 @@ public class FindingIncidentSyncService {
             }
         }
 
-        log.info("ServiceNow incident status sync complete — updated={}, unchanged={}, failed={}",
-                synced, unchanged, failed);
         return new SyncResult(synced, unchanged, failed);
     }
 
     public record SyncResult(int updated, int unchanged, int failed) {}
+
+    private static final class SyncAccumulator {
+        private int updated;
+        private int unchanged;
+        private int failed;
+
+        void add(SyncResult result) {
+            updated += result.updated();
+            unchanged += result.unchanged();
+            failed += result.failed();
+        }
+
+        SyncResult toResult() {
+            return new SyncResult(updated, unchanged, failed);
+        }
+    }
 }

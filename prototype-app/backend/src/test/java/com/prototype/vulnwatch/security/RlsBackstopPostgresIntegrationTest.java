@@ -42,6 +42,7 @@ class RlsBackstopPostgresIntegrationTest {
     void nonSuperuserRuntimeRoleCannotBypassTenantRls() throws Exception {
         Tenant defaultTenant = tenantService.getDefaultTenant();
         Tenant otherTenant = tenantService.createTenant("RLS Other", "rls-other", "enterprise", null);
+        enableRlsForAssets();
         prepareRuntimeRole();
 
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
@@ -64,6 +65,17 @@ class RlsBackstopPostgresIntegrationTest {
             );
             assertEquals("42501", missingContext.getSQLState());
         }
+    }
+
+    private void enableRlsForAssets() {
+        platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets ENABLE ROW LEVEL SECURITY");
+        platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets FORCE ROW LEVEL SECURITY");
+        platformJdbcTemplate.execute("DROP POLICY IF EXISTS tenant_isolation ON tenant_default.assets");
+        platformJdbcTemplate.execute("""
+                CREATE POLICY tenant_isolation ON tenant_default.assets
+                USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+                WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+                """);
     }
 
     private void prepareRuntimeRole() {

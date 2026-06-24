@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 
 import com.prototype.vulnwatch.service.RequestActor;
@@ -89,6 +90,20 @@ class SensitiveTenantActionInterceptorTest {
 
         assertTrue(interceptor.preHandle(request(), new MockHttpServletResponse(), sensitiveMethod()));
         verify(tenantSupportGrantService).requireActiveGrantForWrite("platform-owner", tenantId);
+    }
+
+    @Test
+    void sensitiveGetDoesNotRequireWriteGrant() throws Exception {
+        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
+                requestActorService,
+                tenantSupportGrantService
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/test/sensitive");
+        request.setRequestURI("/api/test/sensitive");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), sensitiveMethod()));
+        verifyNoInteractions(requestActorService, tenantSupportGrantService);
     }
 
     @Test

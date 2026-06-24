@@ -22,6 +22,7 @@ public class ProductionSafetyValidator {
     private final String corsAllowedOrigins;
     private final boolean testPersonasEnabled;
     private final JdbcTemplate platformJdbcTemplate;
+    private final boolean validateRlsRuntimeRole;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -35,6 +36,7 @@ public class ProductionSafetyValidator {
             @Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins,
             @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled,
+            @Value("${app.security.validate-rls-runtime-role:false}") boolean validateRlsRuntimeRole,
             @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
     ) {
         this.requireProductionSecrets = requireProductionSecrets;
@@ -49,6 +51,7 @@ public class ProductionSafetyValidator {
         this.corsAllowedOrigins = corsAllowedOrigins;
         this.testPersonasEnabled = testPersonasEnabled;
         this.platformJdbcTemplate = platformJdbcTemplate;
+        this.validateRlsRuntimeRole = validateRlsRuntimeRole;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -81,7 +84,9 @@ public class ProductionSafetyValidator {
         if (testPersonasEnabled) {
             throw new IllegalStateException("APP_TEST_PERSONAS_ENABLED must be false for production startup.");
         }
-        validateRuntimeRoleCannotBypassRls();
+        if (validateRlsRuntimeRole) {
+            validateRuntimeRoleCannotBypassRls();
+        }
     }
 
     private void validateRuntimeRoleCannotBypassRls() {

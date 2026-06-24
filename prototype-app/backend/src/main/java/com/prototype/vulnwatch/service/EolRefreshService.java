@@ -85,6 +85,7 @@ public class EolRefreshService {
     private final TenantRepository tenantRepository;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final QualityIssueProjectionService qualityIssueProjectionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public EolRefreshService(
             EolApiClient eolApiClient,
@@ -100,7 +101,8 @@ public class EolRefreshService {
             OrgCveRecordService orgCveRecordService,
             TenantRepository tenantRepository,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
-            QualityIssueProjectionService qualityIssueProjectionService) {
+            QualityIssueProjectionService qualityIssueProjectionService,
+            TenantWorkRunner tenantWorkRunner) {
         this.eolApiClient = eolApiClient;
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
@@ -115,6 +117,7 @@ public class EolRefreshService {
         this.tenantRepository = tenantRepository;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.qualityIssueProjectionService = qualityIssueProjectionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     // -------------------------------------------------------------------------
@@ -392,8 +395,9 @@ public class EolRefreshService {
     public void denormalizeEolStatus() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping denormalization"); return; }
         try {
-            int count = runDenormalize();
-            LOG.info("EOL denormalization complete — {} rows updated", count);
+            DenormalizeAccumulator accumulator = new DenormalizeAccumulator();
+            tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(runDenormalize()));
+            LOG.info("EOL denormalization complete — {} rows updated", accumulator.count());
         } catch (Exception e) {
             LOG.error("EOL denormalization failed", e);
         }
@@ -408,6 +412,18 @@ public class EolRefreshService {
         enqueueLifecycleDeltasForTrackedComponents("eol-denormalize");
         softwareIdentitySummaryProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
+    }
+
+    private static final class DenormalizeAccumulator {
+        private int count;
+
+        void add(int value) {
+            count += value;
+        }
+
+        int count() {
+            return count;
+        }
     }
 
     public int refreshConfirmedMapping(String normalizedKey) {
