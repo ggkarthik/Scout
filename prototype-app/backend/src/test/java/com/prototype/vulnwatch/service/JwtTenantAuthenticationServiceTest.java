@@ -296,4 +296,54 @@ class JwtTenantAuthenticationServiceTest {
 
         assertThrows(ResponseStatusException.class, () -> service.authenticate(jwt));
     }
+
+    @Test
+    void nonPlatformTenantIdClaimRequiresActiveMembership() {
+        AppUser user = new AppUser();
+        user.setId(UUID.randomUUID());
+        user.setExternalSubject("analyst@example.com");
+        UUID tenantId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Gamma");
+        tenant.setSchemaName("tenant_gamma");
+
+        when(userRepository.findByExternalSubject("analyst@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of());
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "analyst@example.com",
+                tenantId,
+                "ACTIVE"
+        )).thenReturn(Optional.empty());
+
+        JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                tenantSupportGrantService,
+                "sub",
+                "tenant_id",
+                "active_tenant_id",
+                "tenant_slug",
+                "email",
+                "name",
+                "roles",
+                "scout-ui");
+
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "HS256")
+                .subject("analyst@example.com")
+                .claim("email", "analyst@example.com")
+                .claim("roles", List.of("SECURITY_ANALYST"))
+                .claim("tenant_id", tenantId.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        assertThrows(ResponseStatusException.class, () -> service.authenticate(jwt));
+    }
 }

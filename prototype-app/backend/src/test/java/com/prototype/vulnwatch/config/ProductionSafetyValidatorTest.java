@@ -118,6 +118,7 @@ class ProductionSafetyValidatorTest {
                 true,
                 "https://app.example.com",
                 false,
+                true,
                 jdbcTemplate);
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -138,6 +139,7 @@ class ProductionSafetyValidatorTest {
                 true,
                 "https://app.example.com",
                 false,
+                true,
                 jdbcTemplate);
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -188,6 +190,7 @@ class ProductionSafetyValidatorTest {
                 requireTenantContext,
                 corsAllowedOrigins,
                 testPersonasEnabled,
+                false,
                 safeRoleJdbcTemplate());
     }
 
@@ -203,6 +206,33 @@ class ProductionSafetyValidatorTest {
             boolean testPersonasEnabled,
             JdbcTemplate jdbcTemplate
     ) {
+        return validator(
+                creatorKey,
+                allowApiKeyAuth,
+                jwtIssuerUri,
+                jwtJwkSetUri,
+                credentialEncryptionKey,
+                allowHeaderTenantSelection,
+                requireTenantContext,
+                corsAllowedOrigins,
+                testPersonasEnabled,
+                false,
+                jdbcTemplate);
+    }
+
+    private ProductionSafetyValidator validator(
+            String creatorKey,
+            boolean allowApiKeyAuth,
+            String jwtIssuerUri,
+            String jwtJwkSetUri,
+            String credentialEncryptionKey,
+            boolean allowHeaderTenantSelection,
+            boolean requireTenantContext,
+            String corsAllowedOrigins,
+            boolean testPersonasEnabled,
+            boolean validateRlsRuntimeRole,
+            JdbcTemplate jdbcTemplate
+    ) {
         return new ProductionSafetyValidator(
                 true,
                 "",
@@ -215,6 +245,7 @@ class ProductionSafetyValidatorTest {
                 requireTenantContext,
                 corsAllowedOrigins,
                 testPersonasEnabled,
+                validateRlsRuntimeRole,
                 jdbcTemplate);
     }
 

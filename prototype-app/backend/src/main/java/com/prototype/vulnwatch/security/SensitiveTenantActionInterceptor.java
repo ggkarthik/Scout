@@ -48,7 +48,17 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
     }
 
     private boolean requiresConfirmation(HandlerMethod handlerMethod, String method) {
+        if (!isWriteMethod(method)) {
+            return false;
+        }
         return handlerMethod.hasMethodAnnotation(SensitiveTenantAction.class)
                 || handlerMethod.getBeanType().isAnnotationPresent(SensitiveTenantAction.class);
+    }
+
+    private boolean isWriteMethod(String method) {
+        return "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
     }
 }

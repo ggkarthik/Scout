@@ -106,9 +106,6 @@ public class JwtTenantAuthenticationService {
             TenantMembership membership = membershipRepository
                     .findFirstByUserExternalSubjectAndTenantIdAndStatus(subject, tenant.getId(), "ACTIVE")
                     .orElse(null);
-            if (membership == null && !roles.contains("PLATFORM_OWNER")) {
-                throw new ResponseStatusException(FORBIDDEN, "User is not an active member of the selected tenant");
-            }
             if (membership != null) {
                 roles.add(membership.getRole());
             }
@@ -173,7 +170,11 @@ public class JwtTenantAuthenticationService {
         tenantLifecycleGuardService.assertTenantAccessible(tenant);
         if (roles.contains("PLATFORM_OWNER")) {
             tenantSupportGrantService.requireActiveGrant(subject, tenant.getId());
+            return tenant;
         }
+        TenantMembership membership = membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(subject, tenant.getId(), "ACTIVE")
+                .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "User is not an active member of the selected tenant"));
+        roles.add(membership.getRole());
         return tenant;
     }
 
