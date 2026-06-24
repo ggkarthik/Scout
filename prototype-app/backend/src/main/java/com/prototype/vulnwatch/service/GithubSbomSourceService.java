@@ -164,7 +164,7 @@ public class GithubSbomSourceService {
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSources() {
         List<ClaimedGithubSourceRun> scheduledSources = new ArrayList<>();
-        for (Tenant tenant : tenantService.listTenants()) {
+        for (Tenant tenant : tenantService.listActiveTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
                 scheduledSources.addAll(githubSbomSourceRepository.findByEnabledTrueOrderByCreatedAtAsc()
                         .stream()

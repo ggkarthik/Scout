@@ -207,7 +207,7 @@ class IngestionJobServiceTest {
         setId(running, jobId);
         running.setStatus(IngestionJobService.STATUS_RUNNING);
         running.setStartedAt(Instant.parse("2026-06-15T10:00:00Z"));
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         when(ingestionJobRepository.findByStatus(IngestionJobService.STATUS_RUNNING)).thenReturn(List.of(running));
 
         int recovered = service.recoverInterruptedRunningJobs();

@@ -2,8 +2,13 @@ package com.prototype.vulnwatch.config;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class ProductionSafetyValidatorTest {
 
@@ -98,6 +103,46 @@ class ProductionSafetyValidatorTest {
         assertThrows(IllegalStateException.class, validator::validate);
     }
 
+    @Test
+    void validateRejectsSuperuserRuntimeRole() {
+        JdbcTemplate jdbcTemplate = safeRoleJdbcTemplate();
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class)))
+                .thenReturn(true, false, false);
+        ProductionSafetyValidator validator = validator(
+                "",
+                false,
+                "https://issuer.example.com",
+                "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                false,
+                true,
+                "https://app.example.com",
+                false,
+                jdbcTemplate);
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
+
+    @Test
+    void validateRejectsBypassRlsRuntimeRole() {
+        JdbcTemplate jdbcTemplate = safeRoleJdbcTemplate();
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class)))
+                .thenReturn(false, true, false);
+        ProductionSafetyValidator validator = validator(
+                "",
+                false,
+                "https://issuer.example.com",
+                "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                false,
+                true,
+                "https://app.example.com",
+                false,
+                jdbcTemplate);
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
+
     private ProductionSafetyValidator validator(
             String creatorKey,
             boolean allowApiKeyAuth,
@@ -142,6 +187,42 @@ class ProductionSafetyValidatorTest {
                 allowHeaderTenantSelection,
                 requireTenantContext,
                 corsAllowedOrigins,
-                testPersonasEnabled);
+                testPersonasEnabled,
+                safeRoleJdbcTemplate());
+    }
+
+    private ProductionSafetyValidator validator(
+            String creatorKey,
+            boolean allowApiKeyAuth,
+            String jwtIssuerUri,
+            String jwtJwkSetUri,
+            String credentialEncryptionKey,
+            boolean allowHeaderTenantSelection,
+            boolean requireTenantContext,
+            String corsAllowedOrigins,
+            boolean testPersonasEnabled,
+            JdbcTemplate jdbcTemplate
+    ) {
+        return new ProductionSafetyValidator(
+                true,
+                "",
+                creatorKey,
+                allowApiKeyAuth,
+                jwtIssuerUri,
+                jwtJwkSetUri,
+                credentialEncryptionKey,
+                allowHeaderTenantSelection,
+                requireTenantContext,
+                corsAllowedOrigins,
+                testPersonasEnabled,
+                jdbcTemplate);
+    }
+
+    private JdbcTemplate safeRoleJdbcTemplate() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class)))
+                .thenReturn(false, false, false);
+        when(jdbcTemplate.queryForObject(anyString(), eq(String.class))).thenReturn("off");
+        return jdbcTemplate;
     }
 }

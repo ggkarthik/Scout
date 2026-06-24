@@ -109,7 +109,7 @@ public class AwsDiscoverySyncService {
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
         List<ConfigRef> configs = new ArrayList<>();
-        for (Tenant tenant : tenantService.listTenants()) {
+        for (Tenant tenant : tenantService.listActiveTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
                 awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
                         .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())

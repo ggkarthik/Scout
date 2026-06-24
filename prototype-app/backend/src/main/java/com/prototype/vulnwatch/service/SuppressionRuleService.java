@@ -11,7 +11,6 @@ import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.SuppressionRuleRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,9 +29,9 @@ public class SuppressionRuleService {
     private final OrgCveRecordRepository orgCveRecordRepository;
     private final ComponentVulnerabilityStateRepository cvsRepository;
     private final VulnerabilityTargetRepository vulnTargetRepository;
-    private final TenantRepository tenantRepository;
     private final FindingsScoreService findingsScoreService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public SuppressionRuleService(
             SuppressionRuleRepository repo,
@@ -40,18 +39,18 @@ public class SuppressionRuleService {
             OrgCveRecordRepository orgCveRecordRepository,
             ComponentVulnerabilityStateRepository cvsRepository,
             VulnerabilityTargetRepository vulnTargetRepository,
-            TenantRepository tenantRepository,
             FindingsScoreService findingsScoreService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.repo = repo;
         this.findingRepository = findingRepository;
         this.orgCveRecordRepository = orgCveRecordRepository;
         this.cvsRepository = cvsRepository;
         this.vulnTargetRepository = vulnTargetRepository;
-        this.tenantRepository = tenantRepository;
         this.findingsScoreService = findingsScoreService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     public List<SuppressionRuleResponse> list(Tenant tenant) {
@@ -172,10 +171,9 @@ public class SuppressionRuleService {
 
     /** Nightly job — runs all APPROVED rules for every tenant at midnight. */
     @Scheduled(cron = "0 0 0 * * *")
-    @Transactional
     public void runAllApprovedRulesNightly() {
-        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
-            for (SuppressionRule rule : tenantSchemaExecutionService.run(tenant, repo::findAllByOrderByCreatedAtAsc)) {
+        tenantWorkRunner.forEachActiveTenant(tenant -> {
+            for (SuppressionRule rule : repo.findAllByOrderByCreatedAtAsc()) {
                 if (rule.getState() == SuppressionRule.State.APPROVED) {
                     if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
                         executeCveRule(rule, tenant);
@@ -184,7 +182,7 @@ public class SuppressionRuleService {
                     }
                 }
             }
-        }
+        });
     }
 
     // ── private helpers ──────────────────────────────────────────────────────

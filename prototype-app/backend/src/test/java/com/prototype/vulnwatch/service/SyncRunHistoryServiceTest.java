@@ -58,7 +58,7 @@ class SyncRunHistoryServiceTest {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
         tenant.setName("Default Workspace");
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));
@@ -132,7 +132,7 @@ class SyncRunHistoryServiceTest {
         persistedRun.setStartedAt(Instant.parse("2026-03-08T12:15:40Z"));
         persistedRun.setCompletedAt(Instant.parse("2026-03-08T12:16:30Z"));
 
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));

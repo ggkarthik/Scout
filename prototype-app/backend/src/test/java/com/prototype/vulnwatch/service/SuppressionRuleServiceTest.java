@@ -18,7 +18,6 @@ import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import com.prototype.vulnwatch.repo.SuppressionRuleRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -40,9 +39,9 @@ class SuppressionRuleServiceTest {
     @Mock private OrgCveRecordRepository orgCveRecordRepository;
     @Mock private ComponentVulnerabilityStateRepository cvsRepository;
     @Mock private VulnerabilityTargetRepository vulnTargetRepository;
-    @Mock private TenantRepository tenantRepository;
     @Mock private FindingsScoreService findingsScoreService;
     @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock private TenantWorkRunner tenantWorkRunner;
 
     private SuppressionRuleService service;
 
@@ -64,9 +63,9 @@ class SuppressionRuleServiceTest {
                 orgCveRecordRepository,
                 cvsRepository,
                 vulnTargetRepository,
-                tenantRepository,
                 findingsScoreService,
-                tenantSchemaExecutionService
+                tenantSchemaExecutionService,
+                tenantWorkRunner
         );
     }
 

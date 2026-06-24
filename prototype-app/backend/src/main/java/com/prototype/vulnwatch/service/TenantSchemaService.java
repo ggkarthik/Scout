@@ -159,9 +159,38 @@ public class TenantSchemaService {
                             rewriteForeignKeyDefinition(targetSchema, foreignKey.definition())
                     ));
                 }
+
+                for (String tableName : rlsProtectedTenantTableNames(defaultSchemaName)) {
+                    statement.execute("""
+                            ALTER TABLE %s.%s ENABLE ROW LEVEL SECURITY
+                            """.formatted(quotedIdentifier(targetSchema), quotedIdentifier(tableName)));
+                    statement.execute("""
+                            ALTER TABLE %s.%s FORCE ROW LEVEL SECURITY
+                            """.formatted(quotedIdentifier(targetSchema), quotedIdentifier(tableName)));
+                    statement.execute("""
+                            DROP POLICY IF EXISTS tenant_isolation ON %s.%s
+                            """.formatted(quotedIdentifier(targetSchema), quotedIdentifier(tableName)));
+                    statement.execute("""
+                            CREATE POLICY tenant_isolation ON %s.%s
+                            USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+                            WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+                            """.formatted(quotedIdentifier(targetSchema), quotedIdentifier(tableName)));
+                }
             }
             return null;
         });
+    }
+
+    private List<String> rlsProtectedTenantTableNames(String schemaName) {
+        return platformJdbcTemplate.queryForList("""
+                SELECT c.relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = ?
+                  AND c.relkind IN ('r', 'p')
+                  AND c.relrowsecurity
+                ORDER BY c.relname
+                """, String.class, schemaName);
     }
 
     private List<String> tenantTableNames(String schemaName) {
