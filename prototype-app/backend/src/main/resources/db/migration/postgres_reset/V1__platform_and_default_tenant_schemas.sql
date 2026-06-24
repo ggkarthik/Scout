@@ -1314,7 +1314,7 @@ CREATE TABLE IF NOT EXISTS tenant_default.fix_records (
 CREATE INDEX IF NOT EXISTS idx_fix_records_tenant_cve
     ON tenant_default.fix_records (tenant_id, cve_id);
 
-CREATE TABLE IF NOT EXISTS tenant_default.sync_runs (
+CREATE TABLE IF NOT EXISTS platform.sync_runs (
     id uuid PRIMARY KEY,
     completed_at timestamptz,
     error_message varchar(2000),
@@ -1330,6 +1330,15 @@ CREATE TABLE IF NOT EXISTS tenant_default.sync_runs (
     tenant_id uuid,
     CONSTRAINT fk_sync_runs_tenant FOREIGN KEY (tenant_id) REFERENCES platform.tenants (id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_run_scope_started
+    ON platform.sync_runs (run_scope, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_tenant_started
+    ON platform.sync_runs (tenant_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_sync_type_status
+    ON platform.sync_runs (lower(sync_type), lower(status), started_at DESC);
 
 CREATE TABLE IF NOT EXISTS tenant_default.service_accounts (
     id uuid PRIMARY KEY,

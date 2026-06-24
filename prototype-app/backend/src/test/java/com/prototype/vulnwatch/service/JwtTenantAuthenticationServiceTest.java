@@ -2,7 +2,9 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class JwtTenantAuthenticationServiceTest {
@@ -38,6 +41,8 @@ class JwtTenantAuthenticationServiceTest {
     TenantLifecycleGuardService tenantLifecycleGuardService;
     @Mock
     AppUserGlobalRoleService appUserGlobalRoleService;
+    @Mock
+    TenantSupportGrantService tenantSupportGrantService;
 
     @Test
     void platformOwnerJwtWithoutExplicitTenantStaysTenantless() {
@@ -55,6 +60,7 @@ class JwtTenantAuthenticationServiceTest {
                 membershipRepository,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                tenantSupportGrantService,
                 "sub",
                 "tenant_id",
                 "active_tenant_id",
@@ -95,6 +101,7 @@ class JwtTenantAuthenticationServiceTest {
                 membershipRepository,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                tenantSupportGrantService,
                 "sub",
                 "tenant_id",
                 "active_tenant_id",
@@ -133,6 +140,7 @@ class JwtTenantAuthenticationServiceTest {
                 membershipRepository,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                tenantSupportGrantService,
                 "sub",
                 "tenant_id",
                 "active_tenant_id",
@@ -170,6 +178,7 @@ class JwtTenantAuthenticationServiceTest {
                 membershipRepository,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                tenantSupportGrantService,
                 "email",
                 "tenant_id",
                 "active_tenant_id",
@@ -194,14 +203,20 @@ class JwtTenantAuthenticationServiceTest {
     }
 
     @Test
-    void platformOwnerIgnoresActiveTenantContextClaims() {
+    void platformOwnerActiveTenantContextRequiresGrantAndSwitchesTenant() {
         AppUser user = new AppUser();
         user.setId(UUID.randomUUID());
         user.setExternalSubject("owner@example.com");
+        UUID tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Acme");
+        tenant.setSchemaName("tenant_acme");
 
         when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(user));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of("PLATFORM_OWNER"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
 
         JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
                 userRepository,
@@ -209,6 +224,7 @@ class JwtTenantAuthenticationServiceTest {
                 membershipRepository,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                tenantSupportGrantService,
                 "sub",
                 "tenant_id",
                 "active_tenant_id",
@@ -223,13 +239,111 @@ class JwtTenantAuthenticationServiceTest {
                         .subject("owner@example.com")
                         .claim("email", "owner@example.com")
                         .claim("roles", List.of("PLATFORM_OWNER"))
-                        .claim("active_tenant_id", UUID.fromString("11111111-1111-1111-1111-111111111111").toString())
+                        .claim("active_tenant_id", tenantId.toString())
                         .issuedAt(Instant.now())
                         .expiresAt(Instant.now().plusSeconds(3600))
                         .build(),
                 "/api/ingestion/nvd-sync");
 
-        assertNull(actor.tenantId());
-        assertNull(actor.tenantName());
+        assertEquals(tenantId, actor.tenantId());
+        assertEquals("Acme", actor.tenantName());
+        verify(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenantId);
+    }
+
+    @Test
+    void platformOwnerTenantIdClaimWithoutGrantIsDenied() {
+        AppUser user = new AppUser();
+        user.setId(UUID.randomUUID());
+        user.setExternalSubject("owner@example.com");
+        UUID tenantId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Beta");
+        tenant.setSchemaName("tenant_beta");
+
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of("PLATFORM_OWNER"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "no grant"))
+                .when(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenantId);
+
+        JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                tenantSupportGrantService,
+                "sub",
+                "tenant_id",
+                "active_tenant_id",
+                "tenant_slug",
+                "email",
+                "name",
+                "roles",
+                "scout-ui");
+
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "HS256")
+                .subject("owner@example.com")
+                .claim("email", "owner@example.com")
+                .claim("roles", List.of("PLATFORM_OWNER"))
+                .claim("tenant_id", tenantId.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        assertThrows(ResponseStatusException.class, () -> service.authenticate(jwt));
+    }
+
+    @Test
+    void nonPlatformTenantIdClaimRequiresActiveMembership() {
+        AppUser user = new AppUser();
+        user.setId(UUID.randomUUID());
+        user.setExternalSubject("analyst@example.com");
+        UUID tenantId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Gamma");
+        tenant.setSchemaName("tenant_gamma");
+
+        when(userRepository.findByExternalSubject("analyst@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of());
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "analyst@example.com",
+                tenantId,
+                "ACTIVE"
+        )).thenReturn(Optional.empty());
+
+        JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                tenantSupportGrantService,
+                "sub",
+                "tenant_id",
+                "active_tenant_id",
+                "tenant_slug",
+                "email",
+                "name",
+                "roles",
+                "scout-ui");
+
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "HS256")
+                .subject("analyst@example.com")
+                .claim("email", "analyst@example.com")
+                .claim("roles", List.of("SECURITY_ANALYST"))
+                .claim("tenant_id", tenantId.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        assertThrows(ResponseStatusException.class, () -> service.authenticate(jwt));
     }
 }

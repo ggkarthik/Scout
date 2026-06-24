@@ -31,6 +31,7 @@ public class JwtTenantAuthenticationService {
     private final TenantMembershipRepository membershipRepository;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
+    private final TenantSupportGrantService tenantSupportGrantService;
     private final String subjectClaim;
     private final String tenantIdClaim;
     private final String activeTenantIdClaim;
@@ -46,6 +47,7 @@ public class JwtTenantAuthenticationService {
             TenantMembershipRepository membershipRepository,
             TenantLifecycleGuardService tenantLifecycleGuardService,
             AppUserGlobalRoleService appUserGlobalRoleService,
+            TenantSupportGrantService tenantSupportGrantService,
             @Value("${app.security.jwt.subject-claim:sub}") String subjectClaim,
             @Value("${app.security.jwt.tenant-id-claim:tenant_id}") String tenantIdClaim,
             @Value("${app.security.jwt.active-tenant-id-claim:active_tenant_id}") String activeTenantIdClaim,
@@ -60,6 +62,7 @@ public class JwtTenantAuthenticationService {
         this.membershipRepository = membershipRepository;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this.tenantSupportGrantService = tenantSupportGrantService;
         this.subjectClaim = subjectClaim;
         this.tenantIdClaim = tenantIdClaim;
         this.activeTenantIdClaim = activeTenantIdClaim;
@@ -103,9 +106,6 @@ public class JwtTenantAuthenticationService {
             TenantMembership membership = membershipRepository
                     .findFirstByUserExternalSubjectAndTenantIdAndStatus(subject, tenant.getId(), "ACTIVE")
                     .orElse(null);
-            if (membership == null && !roles.contains("PLATFORM_OWNER")) {
-                throw new ResponseStatusException(FORBIDDEN, "User is not an active member of the selected tenant");
-            }
             if (membership != null) {
                 roles.add(membership.getRole());
             }
@@ -129,30 +129,24 @@ public class JwtTenantAuthenticationService {
     private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles, String requestUri) {
         String activeTenantId = claimAsString(jwt, activeTenantIdClaim);
         if (activeTenantId != null) {
-            if (roles.contains("PLATFORM_OWNER")) {
-                return null;
-            }
             UUID tenantId = parseUuid(activeTenantId);
             Tenant tenant = tenantRepository.findById(tenantId)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT active_tenant_id is not registered"));
-            tenantLifecycleGuardService.assertTenantAccessible(tenant);
-            return tenant;
+            return requireSelectedTenantAccess(tenant, subject, roles);
         }
 
         String tenantId = claimAsString(jwt, tenantIdClaim);
         if (tenantId != null) {
             Tenant tenant = tenantRepository.findById(parseUuid(tenantId))
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_id is not registered"));
-            tenantLifecycleGuardService.assertTenantAccessible(tenant);
-            return tenant;
+            return requireSelectedTenantAccess(tenant, subject, roles);
         }
 
         String tenantSlug = claimAsString(jwt, tenantSlugClaim);
         if (tenantSlug != null) {
             Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_slug is not registered"));
-            tenantLifecycleGuardService.assertTenantAccessible(tenant);
-            return tenant;
+            return requireSelectedTenantAccess(tenant, subject, roles);
         }
 
         if (roles.contains("PLATFORM_OWNER")) {
@@ -170,6 +164,18 @@ public class JwtTenantAuthenticationService {
             throw new ResponseStatusException(FORBIDDEN, "JWT user has multiple active tenant memberships");
         }
         throw new ResponseStatusException(FORBIDDEN, "JWT user does not have an active tenant membership");
+    }
+
+    private Tenant requireSelectedTenantAccess(Tenant tenant, String subject, Set<String> roles) {
+        tenantLifecycleGuardService.assertTenantAccessible(tenant);
+        if (roles.contains("PLATFORM_OWNER")) {
+            tenantSupportGrantService.requireActiveGrant(subject, tenant.getId());
+            return tenant;
+        }
+        TenantMembership membership = membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(subject, tenant.getId(), "ACTIVE")
+                .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "User is not an active member of the selected tenant"));
+        roles.add(membership.getRole());
+        return tenant;
     }
 
     private AppUser createUser(String subject) {

@@ -7,6 +7,9 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
 
 /**
@@ -25,47 +28,64 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
  */
 public class TenantAwareDataSource extends DelegatingDataSource {
 
+    private static final Logger LOG = LoggerFactory.getLogger(TenantAwareDataSource.class);
     private static final String NO_TENANT_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
     private final boolean requireTenantContext;
     private final String defaultTenantSchema;
+    private final MeterRegistry meterRegistry;
 
     public TenantAwareDataSource(
             javax.sql.DataSource targetDataSource,
             boolean requireTenantContext,
-            String defaultTenantSchema
+            String defaultTenantSchema,
+            MeterRegistry meterRegistry
     ) {
         super(targetDataSource);
         this.requireTenantContext = requireTenantContext;
         this.defaultTenantSchema = defaultTenantSchema;
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
     public Connection getConnection() throws SQLException {
         Connection conn = super.getConnection();
-        applyTenantContext(conn);
-        return wrapWithReset(conn);
+        try {
+            applyTenantContext(conn);
+            return wrapWithReset(conn);
+        } catch (SQLException | RuntimeException ex) {
+            closeAfterContextFailure(conn, ex);
+            throw ex;
+        }
     }
 
     @Override
     public Connection getConnection(String username, String password) throws SQLException {
         Connection conn = super.getConnection(username, password);
-        applyTenantContext(conn);
-        return wrapWithReset(conn);
+        try {
+            applyTenantContext(conn);
+            return wrapWithReset(conn);
+        } catch (SQLException | RuntimeException ex) {
+            closeAfterContextFailure(conn, ex);
+            throw ex;
+        }
     }
 
     private void applyTenantContext(Connection conn) throws SQLException {
         UUID tenantId = TenantContext.getCurrentTenantId();
-        String schemaName = normalizeSchemaName(TenantContext.getCurrentSchemaName());
-        String value = tenantId != null ? tenantId.toString() : requireTenantContext ? NO_TENANT_SENTINEL : "";
+        boolean platformContext = TenantContext.isPlatformContext();
+        String schemaName = platformContext ? "platform" : normalizeSchemaName(TenantContext.getCurrentSchemaName());
+        recordTenantContextState(tenantId);
+        String value = tenantId != null ? tenantId.toString() : requireTenantContext && !platformContext ? NO_TENANT_SENTINEL : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
             ps.setString(1, value);
             ps.execute();
         }
+        String searchPath = platformContext ? "platform,public" : schemaName + ",platform";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('search_path', ?, FALSE)")) {
-            ps.setString(1, schemaName + ",platform");
+            ps.setString(1, searchPath);
             ps.execute();
         }
     }
@@ -105,5 +125,28 @@ public class TenantAwareDataSource extends DelegatingDataSource {
         normalized = normalized.replaceAll("[^a-z0-9_]+", "_");
         normalized = normalized.replaceAll("^[^a-z]+", "tenant_");
         return normalized.isBlank() ? defaultTenantSchema : normalized;
+    }
+
+    private void recordTenantContextState(UUID tenantId) {
+        String classification;
+        if (tenantId != null) {
+            classification = "tenant";
+        } else if (TenantContext.isPlatformContext()) {
+            classification = "platform";
+        } else {
+            classification = "missing_unclassified";
+            LOG.warn("Tenant-aware connection acquired without tenant or platform context");
+        }
+        if (meterRegistry != null) {
+            meterRegistry.counter("tenant.context.missing", "classification", classification).increment();
+        }
+    }
+
+    private void closeAfterContextFailure(Connection conn, Exception original) throws SQLException {
+        try {
+            conn.close();
+        } catch (SQLException closeFailure) {
+            original.addSuppressed(closeFailure);
+        }
     }
 }

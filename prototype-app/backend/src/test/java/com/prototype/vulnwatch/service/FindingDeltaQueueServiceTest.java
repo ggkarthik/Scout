@@ -331,7 +331,7 @@ class FindingDeltaQueueServiceTest {
     @Test
     void processPendingDeltas_noClaimedEntries_isNoOp() {
         Tenant tenant = tenantWithSchema(UUID.randomUUID());
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         when(tenantSchemaExecutionService.run(eq(tenant), any(java.util.function.Supplier.class)))
                 .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
         when(repository.pollPending(anyInt())).thenReturn(List.of());
@@ -347,7 +347,7 @@ class FindingDeltaQueueServiceTest {
         // tenants' deltas PENDING forever. It must claim within each tenant's schema context.
         Tenant tenantA = tenantWithSchema(UUID.randomUUID());
         Tenant tenantB = tenantWithSchema(UUID.randomUUID());
-        when(tenantService.listTenants()).thenReturn(List.of(tenantA, tenantB));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenantA, tenantB));
         when(tenantSchemaExecutionService.run(any(Tenant.class), any(java.util.function.Supplier.class)))
                 .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
         when(repository.pollPending(anyInt())).thenReturn(List.of());

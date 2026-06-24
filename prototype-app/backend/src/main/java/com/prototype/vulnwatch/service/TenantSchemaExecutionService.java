@@ -4,17 +4,35 @@ import com.prototype.vulnwatch.domain.Tenant;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class TenantSchemaExecutionService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(TenantSchemaExecutionService.class);
+
     private final TenantService tenantService;
     private final TenantSchemaService tenantSchemaService;
+    private final TenantSwitchGuardMode tenantSwitchGuardMode;
 
-    public TenantSchemaExecutionService(TenantService tenantService, TenantSchemaService tenantSchemaService) {
+    @Autowired
+    public TenantSchemaExecutionService(
+            TenantService tenantService,
+            TenantSchemaService tenantSchemaService,
+            @Value("${app.tenancy.tenant-switch-guard-mode:WARN}") String tenantSwitchGuardMode
+    ) {
         this.tenantService = tenantService;
         this.tenantSchemaService = tenantSchemaService;
+        this.tenantSwitchGuardMode = TenantSwitchGuardMode.from(tenantSwitchGuardMode);
+    }
+
+    TenantSchemaExecutionService(TenantService tenantService, TenantSchemaService tenantSchemaService) {
+        this(tenantService, tenantSchemaService, "WARN");
     }
 
     public void run(Tenant tenant, Runnable runnable) {
@@ -50,18 +68,54 @@ public class TenantSchemaExecutionService {
     }
 
     private <T> T run(UUID tenantId, String schemaName, Supplier<T> supplier) {
-        UUID previousTenantId = TenantContext.getCurrentTenantId();
-        String previousSchema = TenantContext.getCurrentSchemaName();
+        TenantContext.Snapshot previous = TenantContext.capture();
+        guardTenantSwitchInsideActiveTransaction(tenantId, schemaName, previous.tenantId(), previous.schemaName());
         try {
-            TenantContext.setCurrentTenantId(tenantId);
-            TenantContext.setCurrentSchemaName(schemaName);
+            TenantContext.restore(new TenantContext.Snapshot(tenantId, schemaName, false));
             return supplier.get();
         } finally {
-            if (previousTenantId == null) {
-                TenantContext.clear();
-            } else {
-                TenantContext.setCurrentTenantId(previousTenantId);
-                TenantContext.setCurrentSchemaName(previousSchema);
+            TenantContext.restore(previous);
+        }
+    }
+
+    private void guardTenantSwitchInsideActiveTransaction(
+            UUID requestedTenantId,
+            String requestedSchema,
+            UUID previousTenantId,
+            String previousSchema
+    ) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            return;
+        }
+        boolean sameTenant = Objects.equals(requestedTenantId, previousTenantId);
+        boolean sameSchema = Objects.equals(normalizeBlank(requestedSchema), normalizeBlank(previousSchema));
+        if (sameTenant && sameSchema) {
+            return;
+        }
+        String message = "Tenant context switch requested inside an active transaction: currentTenant=%s currentSchema=%s requestedTenant=%s requestedSchema=%s"
+                .formatted(previousTenantId, previousSchema, requestedTenantId, requestedSchema);
+        if (tenantSwitchGuardMode == TenantSwitchGuardMode.FAIL) {
+            throw new IllegalStateException(message);
+        }
+        LOG.warn(message);
+    }
+
+    private String normalizeBlank(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    enum TenantSwitchGuardMode {
+        WARN,
+        FAIL;
+
+        static TenantSwitchGuardMode from(String value) {
+            if (value == null || value.isBlank()) {
+                return WARN;
+            }
+            try {
+                return TenantSwitchGuardMode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                return WARN;
             }
         }
     }

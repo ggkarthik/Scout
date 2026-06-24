@@ -16,6 +16,7 @@ import com.prototype.vulnwatch.service.EolSlugResolverService;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -116,6 +117,7 @@ public class EolController {
      * Manually confirm or override an EOL slug mapping for a normalized product key.
      */
     @PostMapping("/mappings/confirm")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public Map<String, String> confirmMapping(@RequestBody EolMappingConfirmRequest request) {
         eolService.confirmMapping(request);
         return Map.of("status", "confirmed");
@@ -126,26 +128,31 @@ public class EolController {
     // -------------------------------------------------------------------------
 
     @PostMapping("/admin/refresh/catalog")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse triggerCatalogRefresh() {
         return eolRefreshService.triggerCatalogRefresh();
     }
 
     @PostMapping("/admin/refresh/releases")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse triggerReleaseRefresh() {
         return eolRefreshService.triggerReleaseRefresh();
     }
 
     @PostMapping("/admin/refresh/mappings")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse triggerMappingResolve() {
         return eolRefreshService.triggerMappingResolve();
     }
 
     @PostMapping("/admin/refresh/denormalize")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse triggerDenormalize() {
         return eolRefreshService.triggerDenormalize();
     }
 
     @PostMapping("/admin/refresh/full")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public SyncTriggerResponse triggerFullRefresh() {
         return eolRefreshService.triggerFullRefresh();
     }

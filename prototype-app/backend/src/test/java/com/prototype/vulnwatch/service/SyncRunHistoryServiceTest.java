@@ -48,9 +48,6 @@ class SyncRunHistoryServiceTest {
     private RequestActorService requestActorService;
 
     @Mock
-    private WorkspaceService workspaceService;
-
-    @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Test
@@ -58,7 +55,7 @@ class SyncRunHistoryServiceTest {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
         tenant.setName("Default Workspace");
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));
@@ -103,7 +100,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(savedRuns.get());
 
-        SyncRunHistoryService historyService = newHistoryService(tenant);
+        SyncRunHistoryService historyService = newHistoryService();
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -132,7 +129,7 @@ class SyncRunHistoryServiceTest {
         persistedRun.setStartedAt(Instant.parse("2026-03-08T12:15:40Z"));
         persistedRun.setCompletedAt(Instant.parse("2026-03-08T12:16:30Z"));
 
-        when(tenantService.listTenants()).thenReturn(List.of(tenant));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
         doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));
@@ -162,7 +159,7 @@ class SyncRunHistoryServiceTest {
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-user", false, tenant.getId(), tenant.getName()));
         when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
         when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(persistedRun));
-        SyncRunHistoryService historyService = newHistoryService(tenant);
+        SyncRunHistoryService historyService = newHistoryService();
         List<SyncRunResponse> runs = historyService.list("inventory", 20);
 
         assertEquals(1, runs.size());
@@ -181,7 +178,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.ASC, "startedAt"))).thenReturn(List.of(processingRun));
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt"))).thenReturn(List.of(processingRun, feedRun));
 
-        SyncRunHistoryService service = newHistoryService(defaultWorkspace());
+        SyncRunHistoryService service = newHistoryService();
 
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
         List<SyncRunResponse> feedRuns = service.list("vuln-intel", 20);
@@ -211,7 +208,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findByRunScope("PLATFORM_VULNERABILITY", Sort.by(Sort.Direction.DESC, "startedAt")))
                 .thenReturn(List.of(eolConnectorRun, eolDateSweepRun));
 
-        SyncRunHistoryService service = newHistoryService(defaultWorkspace());
+        SyncRunHistoryService service = newHistoryService();
 
         List<SyncRunResponse> vulnIntelRuns = service.list("vuln-intel", 20);
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
@@ -240,7 +237,7 @@ class SyncRunHistoryServiceTest {
         when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(processingRun, vulnIntelRun, inventoryRun));
         when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of(processingRun));
 
-        SyncRunHistoryService service = newHistoryService(tenant);
+        SyncRunHistoryService service = newHistoryService();
 
         List<SyncRunResponse> allRuns = service.list("all", 20);
         List<SyncRunResponse> inventoryRuns = service.list("inventory", 20);
@@ -267,7 +264,7 @@ class SyncRunHistoryServiceTest {
         when(requestActorService.currentActor()).thenReturn(new RequestActor("tenant-admin", false, tenant.getId(), tenant.getName(), java.util.Set.of("TENANT_ADMIN")));
         when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(ownInventoryRun));
         when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
-        SyncRunHistoryService service = newHistoryService(tenant);
+        SyncRunHistoryService service = newHistoryService();
 
         List<SyncRunResponse> inventoryRuns = service.list("inventory", 20);
         var summary = service.sourcesSummary();
@@ -304,7 +301,7 @@ class SyncRunHistoryServiceTest {
                 .thenReturn(List.of(platformProcessingRun));
         when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId())).thenReturn(List.of(tenantInventoryRun));
         when(syncRunRepository.findQueueByTenantAndStatuses(tenant.getId(), List.of("queued", "running"))).thenReturn(List.of());
-        SyncRunHistoryService service = newHistoryService(tenant);
+        SyncRunHistoryService service = newHistoryService();
 
         List<SyncRunResponse> vulnerabilityRuns = service.list("vuln-intel", 20);
         List<SyncRunResponse> processingRuns = service.list("processing", 20);
@@ -367,20 +364,11 @@ class SyncRunHistoryServiceTest {
         return run;
     }
 
-    private SyncRunHistoryService newHistoryService(Tenant defaultWorkspace) {
-        org.mockito.Mockito.lenient()
-                .when(workspaceService.getPlatformWorkspace(WorkspaceService.PlatformWorkspaceUseCase.PLATFORM_VULNERABILITY_RUN_HISTORY))
-                .thenReturn(defaultWorkspace);
+    private SyncRunHistoryService newHistoryService() {
         org.mockito.Mockito.lenient().doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
                 .when(tenantSchemaExecutionService)
                 .run(any(Tenant.class), any(java.util.function.Supplier.class));
-        return new SyncRunHistoryService(syncRunRepository, requestActorService, workspaceService, tenantSchemaExecutionService);
+        return new SyncRunHistoryService(syncRunRepository, requestActorService);
     }
 
-    private Tenant defaultWorkspace() {
-        Tenant tenant = new Tenant();
-        tenant.setId(UUID.randomUUID());
-        tenant.setName("Default Workspace");
-        return tenant;
-    }
 }

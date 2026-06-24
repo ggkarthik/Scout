@@ -16,10 +16,6 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class WorkspaceService {
 
-    public enum PlatformWorkspaceUseCase {
-        PLATFORM_VULNERABILITY_RUN_HISTORY
-    }
-
     private final TenantService tenantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AtomicReference<Tenant> cachedWorkspace = new AtomicReference<>();
@@ -73,15 +69,6 @@ public class WorkspaceService {
     public UUID getWorkspaceId() {
         Tenant workspace = getWorkspace();
         return workspace == null ? null : workspace.getId();
-    }
-
-    public Tenant getPlatformWorkspace(PlatformWorkspaceUseCase useCase) {
-        if (useCase == null) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Platform workspace use case is required");
-        }
-        Tenant workspace = tenantService.getDefaultTenant();
-        tenantLifecycleGuardService.assertTenantAccessible(workspace);
-        return workspace;
     }
 
     public Tenant refreshWorkspace() {

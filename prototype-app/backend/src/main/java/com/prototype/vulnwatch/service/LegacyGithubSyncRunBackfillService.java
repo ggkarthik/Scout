@@ -69,7 +69,7 @@ public class LegacyGithubSyncRunBackfillService {
     public int backfillMissingRuns() {
         List<SyncRun> backfilledRuns = new ArrayList<>();
         List<SyncRun> persistedRuns = new ArrayList<>(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt")));
-        for (Tenant tenant : tenantService.listTenants()) {
+        for (Tenant tenant : tenantService.listActiveTenants()) {
             List<SbomUpload> uploads = tenantSchemaExecutionService.run(
                     tenant,
                     () -> sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github")

@@ -69,9 +69,9 @@ public class IngestionJobWorkerService {
         // not rescheduled by Spring's ReschedulingRunnable, so a single transient failure (e.g. a DB
         // connection error after a host sleep/clock-leap exhausts the pool) would silently kill the
         // poller for the rest of the JVM's life and leave every ingestion job stuck in QUEUED. The
-        // listTenants() call below touches the database, so it has to be inside the guard too.
+        // listActiveTenants() call below touches the database, so it has to be inside the guard too.
         try {
-            for (Tenant tenant : tenantService.listTenants()) {
+            for (Tenant tenant : tenantService.listActiveTenants()) {
                 try {
                     List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
                             tenant,

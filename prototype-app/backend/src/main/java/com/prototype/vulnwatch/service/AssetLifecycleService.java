@@ -32,8 +32,8 @@ public class AssetLifecycleService {
     private final FindingWorkflowService findingWorkflowService;
     private final RiskPolicyService riskPolicyService;
     private final WorkspaceService workspaceService;
-    private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     @Value("${app.assets.stale-days-to-inactive:30}")
     private int staleDaysToInactive;
@@ -44,16 +44,16 @@ public class AssetLifecycleService {
             FindingWorkflowService findingWorkflowService,
             RiskPolicyService riskPolicyService,
             WorkspaceService workspaceService,
-            TenantService tenantService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.assetRepository = assetRepository;
         this.findingRepository = findingRepository;
         this.findingWorkflowService = findingWorkflowService;
         this.riskPolicyService = riskPolicyService;
         this.workspaceService = workspaceService;
-        this.tenantService = tenantService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     @Transactional
@@ -147,20 +147,17 @@ public class AssetLifecycleService {
     }
 
     @Scheduled(cron = "0 5 2 * * *")
-    @Transactional
     public void markStaleAssetsInactive() {
         Instant cutoff = Instant.now().minus(Math.max(1, staleDaysToInactive), ChronoUnit.DAYS);
-        for (Tenant tenant : tenantService.listTenants()) {
-            tenantSchemaExecutionService.run(tenant, () -> {
-                List<Asset> stale = assetRepository.findActiveAssetsWithInventoryBefore(cutoff);
-                for (Asset asset : stale) {
-                    AssetState previousState = asset.getState();
-                    asset.setState(AssetState.INACTIVE);
-                    assetRepository.save(asset);
-                    handleStateTransition(asset, previousState, AssetState.INACTIVE, "stale-inventory");
-                }
-            });
-        }
+        tenantWorkRunner.forEachActiveTenant(tenant -> {
+            List<Asset> stale = assetRepository.findActiveAssetsWithInventoryBefore(cutoff);
+            for (Asset asset : stale) {
+                AssetState previousState = asset.getState();
+                asset.setState(AssetState.INACTIVE);
+                assetRepository.save(asset);
+                handleStateTransition(asset, previousState, AssetState.INACTIVE, "stale-inventory");
+            }
+        });
     }
 
     private String trimToNull(String value) {
