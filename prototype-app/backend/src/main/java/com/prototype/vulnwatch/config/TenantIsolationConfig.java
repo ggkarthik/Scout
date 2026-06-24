@@ -6,6 +6,8 @@ import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.Filter;
 import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -52,9 +54,15 @@ public class TenantIsolationConfig {
     public DataSource dataSource(
             HikariDataSource hikariDataSource,
             @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
-            @org.springframework.beans.factory.annotation.Value("${app.tenancy.default-schema:tenant_default}") String defaultSchemaName
+            @org.springframework.beans.factory.annotation.Value("${app.tenancy.default-schema:tenant_default}") String defaultSchemaName,
+            ObjectProvider<MeterRegistry> meterRegistryProvider
     ) {
-        return new TenantAwareDataSource(hikariDataSource, requireTenantContext, defaultSchemaName);
+        return new TenantAwareDataSource(
+                hikariDataSource,
+                requireTenantContext,
+                defaultSchemaName,
+                meterRegistryProvider.getIfAvailable()
+        );
     }
 
     /**

@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.security;
 
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.web.PlatformAdminRequestPaths;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,11 +16,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
 
     private final RequestActorService requestActorService;
+    private final TenantSupportGrantService tenantSupportGrantService;
 
     public SensitiveTenantActionInterceptor(
-            RequestActorService requestActorService
+            RequestActorService requestActorService,
+            TenantSupportGrantService tenantSupportGrantService
     ) {
         this.requestActorService = requestActorService;
+        this.tenantSupportGrantService = tenantSupportGrantService;
     }
 
     @Override
@@ -36,7 +40,11 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         if (PlatformAdminRequestPaths.isPlatformAdminPath(request.getRequestURI())) {
             return true;
         }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owners cannot perform tenant-scoped actions");
+        if (actor.tenantId() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owner tenant context is required");
+        }
+        tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());
+        return true;
     }
 
     private boolean requiresConfirmation(HandlerMethod handlerMethod, String method) {

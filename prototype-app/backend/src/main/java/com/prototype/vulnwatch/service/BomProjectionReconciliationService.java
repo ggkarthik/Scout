@@ -62,7 +62,7 @@ public class BomProjectionReconciliationService {
     @Scheduled(fixedDelayString = "${app.bom.reconciliation.interval-ms:300000}")
     public void reconcileProjectionDrift() {
         int driftCount = 0;
-        for (Tenant tenant : tenantService.listTenants()) {
+        for (Tenant tenant : tenantService.listActiveTenants()) {
             try {
                 driftCount += tenantSchemaExecutionService.run(tenant, reconcileTenant(tenant));
             } catch (Exception ex) {

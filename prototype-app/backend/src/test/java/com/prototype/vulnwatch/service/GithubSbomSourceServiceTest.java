@@ -78,7 +78,7 @@ class GithubSbomSourceServiceTest {
         tenant.setId(UUID.randomUUID());
         tenant.setName("Tenant A");
         lenient().when(workspaceService.getWorkspace()).thenReturn(tenant);
-        lenient().when(tenantService.listTenants()).thenReturn(java.util.List.of(tenant));
+        lenient().when(tenantService.listActiveTenants()).thenReturn(java.util.List.of(tenant));
         lenient().when(tenantSchemaExecutionService.run(org.mockito.ArgumentMatchers.any(Tenant.class), org.mockito.ArgumentMatchers.<Supplier<?>>any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
         lenient().when(tenantSchemaExecutionService.run(org.mockito.ArgumentMatchers.any(UUID.class), org.mockito.ArgumentMatchers.<Supplier<?>>any()))

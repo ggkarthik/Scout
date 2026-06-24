@@ -34,6 +34,7 @@ public class FindingRecomputeService {
     private final VulnerabilityTargetRepository vulnerabilityTargetRepository;
     private final OrgCveRecordRepository orgCveRecordRepository;
     private final OrgCveRecordService orgCveRecordService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public FindingRecomputeService(
             FindingAssetRecomputeService findingAssetRecomputeService,
@@ -44,7 +45,8 @@ public class FindingRecomputeService {
             InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
             VulnerabilityTargetRepository vulnerabilityTargetRepository,
             OrgCveRecordRepository orgCveRecordRepository,
-            OrgCveRecordService orgCveRecordService
+            OrgCveRecordService orgCveRecordService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.findingAssetRecomputeService = findingAssetRecomputeService;
         this.findingComponentRecomputeService = findingComponentRecomputeService;
@@ -55,6 +57,7 @@ public class FindingRecomputeService {
         this.vulnerabilityTargetRepository = vulnerabilityTargetRepository;
         this.orgCveRecordRepository = orgCveRecordRepository;
         this.orgCveRecordService = orgCveRecordService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     @Transactional
@@ -67,17 +70,23 @@ public class FindingRecomputeService {
         return findingAssetRecomputeService.recomputeForAssets(assets);
     }
 
-    @Transactional
     public int recomputeOnSoftwareDelta(UUID tenantId, UUID componentId) {
-        return findingComponentRecomputeService.recomputeOnSoftwareDelta(tenantId, componentId);
+        if (tenantId == null || componentId == null) {
+            return 0;
+        }
+        return recomputeOnSoftwareDeltaBatch(tenantId, List.of(componentId));
     }
 
-    @Transactional
     public int recomputeOnSoftwareDeltaBatch(UUID tenantId, Collection<UUID> componentIds) {
-        return findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
+        if (tenantId == null || componentIds == null || componentIds.isEmpty()) {
+            return 0;
+        }
+        return tenantWorkRunner.runScoped(
+                tenantId,
+                () -> findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds)
+        );
     }
 
-    @Transactional
     public int recomputeOnCveDelta(UUID vulnerabilityId) {
         if (vulnerabilityId == null) {
             return 0;
@@ -85,7 +94,6 @@ public class FindingRecomputeService {
         return recomputeOnCveDeltaBatch(List.of(vulnerabilityId));
     }
 
-    @Transactional
     public int recomputeOnCveDeltaBatch(Collection<UUID> vulnerabilityIds) {
         List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
         if (scopedVulnerabilityIds.isEmpty()) {
@@ -94,18 +102,19 @@ public class FindingRecomputeService {
         Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(scopedVulnerabilityIds);
         int total = 0;
         for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
-            total += findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue());
+            total += tenantWorkRunner.runScoped(
+                    entry.getKey(),
+                    () -> findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue())
+            );
         }
         refreshMetadataForTenantsWithoutComponentRecompute(scopedVulnerabilityIds, componentsByTenant.keySet());
         return total;
     }
 
-    @Transactional
     public int applyVexDelta(UUID tenantId, UUID vulnerabilityId) {
         return applyVexDelta(tenantId, vulnerabilityId, null);
     }
 
-    @Transactional
     public int applyVexDeltaForVulnerability(UUID vulnerabilityId, String sourceKey) {
         if (vulnerabilityId == null) {
             return 0;
@@ -113,7 +122,6 @@ public class FindingRecomputeService {
         return applyVexDeltaBatch(List.of(vulnerabilityId), sourceKey);
     }
 
-    @Transactional
     public int applyVexDeltaBatch(Collection<UUID> vulnerabilityIds, String sourceKey) {
         List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
         if (scopedVulnerabilityIds.isEmpty()) {
@@ -122,13 +130,15 @@ public class FindingRecomputeService {
         Map<UUID, Set<UUID>> componentsByTenant = collectAffectedComponentsByTenant(scopedVulnerabilityIds);
         int total = 0;
         for (Map.Entry<UUID, Set<UUID>> entry : componentsByTenant.entrySet()) {
-            total += findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue());
+            total += tenantWorkRunner.runScoped(
+                    entry.getKey(),
+                    () -> findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(entry.getKey(), entry.getValue())
+            );
         }
         refreshMetadataForTenantsWithoutComponentRecompute(scopedVulnerabilityIds, componentsByTenant.keySet());
         return total;
     }
 
-    @Transactional
     public int applyVexDelta(UUID tenantId, UUID vulnerabilityId, String sourceKey) {
         if (tenantId == null || vulnerabilityId == null) {
             return 0;
@@ -138,10 +148,12 @@ public class FindingRecomputeService {
         if (affectedComponentIds.isEmpty()) {
             return orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, List.of(vulnerabilityId));
         }
-        return findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, affectedComponentIds);
+        return tenantWorkRunner.runScoped(
+                tenantId,
+                () -> findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, affectedComponentIds)
+        );
     }
 
-    @Transactional
     public int refreshMetadataForVulnerabilityBatch(Collection<UUID> vulnerabilityIds) {
         List<UUID> scopedVulnerabilityIds = normalizeIds(vulnerabilityIds);
         if (scopedVulnerabilityIds.isEmpty()) {
@@ -154,7 +166,6 @@ public class FindingRecomputeService {
         return updated;
     }
 
-    @Transactional
     public int refreshLifecycleForComponents(UUID tenantId, Collection<UUID> componentIds) {
         if (tenantId == null) {
             return 0;
@@ -163,15 +174,17 @@ public class FindingRecomputeService {
         if (scopedComponentIds.isEmpty()) {
             return 0;
         }
-        Set<UUID> vulnerabilityIds =
-                componentVulnerabilityStateRepository.findDistinctVulnerabilityIdsByTenantIdAndComponentIds(
-                        tenantId,
-                        scopedComponentIds
-                );
-        if (vulnerabilityIds.isEmpty()) {
-            return 0;
-        }
-        return orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, vulnerabilityIds);
+        return tenantWorkRunner.runScoped(tenantId, () -> {
+            Set<UUID> vulnerabilityIds =
+                    componentVulnerabilityStateRepository.findDistinctVulnerabilityIdsByTenantIdAndComponentIds(
+                            tenantId,
+                            scopedComponentIds
+                    );
+            if (vulnerabilityIds.isEmpty()) {
+                return 0;
+            }
+            return orgCveRecordService.refreshForTenantAndVulnerabilities(tenantId, vulnerabilityIds);
+        });
     }
 
     @Transactional(readOnly = true)

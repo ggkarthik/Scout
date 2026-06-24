@@ -182,7 +182,7 @@ public class FindingDeltaQueueService {
         // findings/projections never recomputed). Drain each tenant's queue inside its own schema
         // context. Never let an exception escape: a @Scheduled task that throws is not rescheduled.
         try {
-            for (Tenant tenant : tenantService.listTenants()) {
+            for (Tenant tenant : tenantService.listActiveTenants()) {
                 try {
                     tenantSchemaExecutionService.run(tenant, () -> {
                         List<FindingDeltaQueueEntry> claimed = claimBatch();

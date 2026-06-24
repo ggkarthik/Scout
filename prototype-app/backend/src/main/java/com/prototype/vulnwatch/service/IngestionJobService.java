@@ -267,7 +267,7 @@ public class IngestionJobService {
     public int recoverInterruptedRunningJobs() {
         Instant now = Instant.now();
         int recovered = 0;
-        for (Tenant tenant : tenantService.listTenants()) {
+        for (Tenant tenant : tenantService.listActiveTenants()) {
             List<IngestionJob> stale = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
             if (stale.isEmpty()) {
                 continue;

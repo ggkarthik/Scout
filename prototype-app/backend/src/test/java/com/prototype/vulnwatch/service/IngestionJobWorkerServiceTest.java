@@ -56,7 +56,7 @@ class IngestionJobWorkerServiceTest {
     void pollJobsContinuesAfterOneTenantFails() {
         Tenant broken = tenant("broken");
         Tenant healthy = tenant("healthy");
-        when(tenantService.listTenants()).thenReturn(List.of(broken, healthy));
+        when(tenantService.listActiveTenants()).thenReturn(List.of(broken, healthy));
         doThrow(new IllegalStateException("schema drift"))
                 .when(ingestionJobService).claimPendingJobs(broken, 10, 1);
 
@@ -73,11 +73,11 @@ class IngestionJobWorkerServiceTest {
 
     @Test
     void pollJobsDoesNotThrowWhenListTenantsFails() {
-        // Regression: listTenants() used to be called outside the try/catch. When it threw (e.g. a
+        // Regression: tenant listing used to be called outside the try/catch. When it threw (e.g. a
         // transient DB error after a host sleep), the exception escaped pollJobs and Spring stopped
         // rescheduling the poller, leaving every ingestion job stuck in QUEUED. pollJobs must swallow
         // it so the periodic task keeps running.
-        when(tenantService.listTenants()).thenThrow(new IllegalStateException("connection pool exhausted"));
+        when(tenantService.listActiveTenants()).thenThrow(new IllegalStateException("connection pool exhausted"));
 
         org.assertj.core.api.Assertions.assertThatCode(() -> service.pollJobs())
                 .doesNotThrowAnyException();

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
 class TenantSchemaExecutionServiceTest {
@@ -33,6 +35,7 @@ class TenantSchemaExecutionServiceTest {
 
     @AfterEach
     void tearDown() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
         TenantContext.clear();
     }
 
@@ -77,5 +80,43 @@ class TenantSchemaExecutionServiceTest {
         verify(tenantService).resolveTenantUuid(tenantId);
         verify(tenantSchemaService).schemaNameForTenant(tenant);
         verify(tenantSchemaService).ensureSchemaExists("tenant_acme");
+    }
+
+    @Test
+    void guardAllowsSameTenantInsideActiveTransaction() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setSchemaName("tenant_acme");
+
+        when(tenantSchemaService.schemaNameForTenant(tenant)).thenReturn("tenant_acme");
+
+        TenantContext.setCurrentTenantId(tenantId);
+        TenantContext.setCurrentSchemaName("tenant_acme");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        String result = service.run(tenant, () -> "ok");
+
+        assertThat(result).isEqualTo("ok");
+    }
+
+    @Test
+    void guardFailsDifferentTenantInsideActiveTransactionWhenConfiguredToFail() {
+        service = new TenantSchemaExecutionService(tenantService, tenantSchemaService, "FAIL");
+        UUID currentTenantId = UUID.randomUUID();
+        UUID requestedTenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(requestedTenantId);
+        tenant.setSchemaName("tenant_beta");
+
+        when(tenantSchemaService.schemaNameForTenant(tenant)).thenReturn("tenant_beta");
+
+        TenantContext.setCurrentTenantId(currentTenantId);
+        TenantContext.setCurrentSchemaName("tenant_acme");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        assertThatThrownBy(() -> service.run(tenant, () -> "should not run"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Tenant context switch requested inside an active transaction");
     }
 }

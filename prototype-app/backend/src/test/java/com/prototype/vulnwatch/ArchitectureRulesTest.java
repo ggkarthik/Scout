@@ -1,11 +1,14 @@
 package com.prototype.vulnwatch;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Transactional;
 
 @AnalyzeClasses(
         packages = "com.prototype.vulnwatch",
@@ -58,4 +61,10 @@ class ArchitectureRulesTest {
                             "..service.vulningestion.."
                     )
                     .should().dependOnClassesThat().resideInAPackage("org.springframework.web.client..");
+
+    @ArchTest
+    static final ArchRule scheduled_methods_should_not_open_transactions_directly =
+            noMethods()
+                    .that().areAnnotatedWith(Scheduled.class)
+                    .should().beAnnotatedWith(Transactional.class);
 }

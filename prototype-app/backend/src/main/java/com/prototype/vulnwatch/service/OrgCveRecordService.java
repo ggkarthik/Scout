@@ -51,66 +51,66 @@ public class OrgCveRecordService {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final TenantRepository tenantRepository;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public OrgCveRecordService(
             OrgCveRecordRepository orgCveRecordRepository,
             VulnerabilityRepository vulnerabilityRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             TenantRepository tenantRepository,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.orgCveRecordRepository = orgCveRecordRepository;
         this.vulnerabilityRepository = vulnerabilityRepository;
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.tenantRepository = tenantRepository;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
-    @Transactional
     public int refreshForAllTenants(UUID vulnerabilityId) {
         if (vulnerabilityId == null) {
             return 0;
         }
-        int updated = 0;
-        List<Tenant> tenants = tenantRepository.findAllByOrderByCreatedAtAsc();
-        for (Tenant tenant : tenants) {
-            updated += refreshForTenantAndVulnerabilities(tenant, List.of(vulnerabilityId));
-        }
-        return updated;
+        int[] updated = {0};
+        tenantWorkRunner.forEachActiveTenant(tenant ->
+                updated[0] += refreshForTenantAndVulnerabilitiesInSchema(tenant, List.of(vulnerabilityId))
+        );
+        return updated[0];
     }
 
-    @Transactional
     public int refreshForTenant(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
 
-        List<UUID> vulnerabilityIds = vulnerabilityRepository.findAllIdsOrderedForOrgExposureRefresh();
-        if (vulnerabilityIds.isEmpty()) {
-            return 0;
-        }
+        return tenantWorkRunner.runScoped(tenant, () -> {
+            List<UUID> vulnerabilityIds = vulnerabilityRepository.findAllIdsOrderedForOrgExposureRefresh();
+            if (vulnerabilityIds.isEmpty()) {
+                return 0;
+            }
 
-        int updated = 0;
-        for (int offset = 0; offset < vulnerabilityIds.size(); offset += REFRESH_BATCH_SIZE) {
-            int end = Math.min(offset + REFRESH_BATCH_SIZE, vulnerabilityIds.size());
-            updated += refreshForTenantAndVulnerabilities(tenant, vulnerabilityIds.subList(offset, end));
-        }
-        return updated;
+            int updated = 0;
+            for (int offset = 0; offset < vulnerabilityIds.size(); offset += REFRESH_BATCH_SIZE) {
+                int end = Math.min(offset + REFRESH_BATCH_SIZE, vulnerabilityIds.size());
+                updated += refreshForTenantAndVulnerabilitiesInSchema(tenant, vulnerabilityIds.subList(offset, end));
+            }
+            return updated;
+        });
     }
 
-    @Transactional
     public int refreshForTenantAndVulnerabilities(UUID tenantId, Collection<UUID> vulnerabilityIds) {
         if (tenantId == null || vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return 0;
         }
-        return tenantRepository.findById(tenantId)
-                .map(tenant -> refreshForTenantAndVulnerabilities(tenant, vulnerabilityIds))
-                .orElse(0);
+        return tenantWorkRunner.runScoped(tenantId, () -> tenantRepository.findById(tenantId)
+                .map(tenant -> refreshForTenantAndVulnerabilitiesInSchema(tenant, vulnerabilityIds))
+                .orElse(0));
     }
 
-    @Transactional
     public int refreshForTenantAndVulnerabilities(Tenant tenant, Collection<UUID> vulnerabilityIds) {
-        return tenantSchemaExecutionService.run(tenant, () -> refreshForTenantAndVulnerabilitiesInSchema(tenant, vulnerabilityIds));
+        return tenantWorkRunner.runScoped(tenant, () -> refreshForTenantAndVulnerabilitiesInSchema(tenant, vulnerabilityIds));
     }
 
     private int refreshForTenantAndVulnerabilitiesInSchema(Tenant tenant, Collection<UUID> vulnerabilityIds) {

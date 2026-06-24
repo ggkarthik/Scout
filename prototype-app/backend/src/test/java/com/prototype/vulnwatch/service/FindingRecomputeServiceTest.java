@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,6 +48,7 @@ class FindingRecomputeServiceTest {
     @Mock private VulnerabilityTargetRepository vulnerabilityTargetRepository;
     @Mock private OrgCveRecordRepository orgCveRecordRepository;
     @Mock private OrgCveRecordService orgCveRecordService;
+    @Mock private TenantWorkRunner tenantWorkRunner;
 
     private FindingRecomputeService findingRecomputeService;
 
@@ -61,8 +63,11 @@ class FindingRecomputeServiceTest {
                 inventoryComponentCpeMapRepository,
                 vulnerabilityTargetRepository,
                 orgCveRecordRepository,
-                orgCveRecordService
+                orgCveRecordService,
+                tenantWorkRunner
         );
+        org.mockito.Mockito.lenient().when(tenantWorkRunner.runScoped(any(UUID.class), any(Supplier.class)))
+                .thenAnswer(invocation -> invocation.getArgument(1, Supplier.class).get());
     }
 
     // -------------- pure delegations --------------
@@ -71,12 +76,12 @@ class FindingRecomputeServiceTest {
     void recomputeOnSoftwareDeltaDelegatesToComponentService() {
         UUID tenantId = UUID.randomUUID();
         UUID componentId = UUID.randomUUID();
-        when(findingComponentRecomputeService.recomputeOnSoftwareDelta(tenantId, componentId)).thenReturn(4);
+        when(findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(eq(tenantId), anyCollection())).thenReturn(4);
 
         int total = findingRecomputeService.recomputeOnSoftwareDelta(tenantId, componentId);
 
         assertEquals(4, total);
-        verify(findingComponentRecomputeService).recomputeOnSoftwareDelta(tenantId, componentId);
+        verify(findingComponentRecomputeService).recomputeOnSoftwareDeltaBatch(eq(tenantId), anyCollection());
     }
 
     @Test
