@@ -10,9 +10,9 @@ import com.prototype.vulnwatch.support.PostgresITSupport;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +25,6 @@ class RlsBackstopPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("rls_backstop");
-    private static final String RUNTIME_ROLE = "rls_runtime_role";
 
     @DynamicPropertySource
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
@@ -47,21 +46,21 @@ class RlsBackstopPostgresIntegrationTest {
 
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
              Statement statement = connection.createStatement()) {
-            statement.execute("SET ROLE " + RUNTIME_ROLE);
-            statement.execute("SELECT set_config('app.current_tenant_id', '" + defaultTenant.getId() + "', FALSE)");
+            statement.execute("SET ROLE rls_runtime_role");
+            setCurrentTenant(connection, defaultTenant.getId());
 
-            statement.execute(assetInsertSql(defaultTenant.getId(), "rls-ok"));
+            insertAsset(connection, defaultTenant.getId(), "rls-ok");
 
             SQLException crossTenant = assertThrows(
                     SQLException.class,
-                    () -> statement.execute(assetInsertSql(otherTenant.getId(), "rls-cross-tenant"))
+                    () -> insertAsset(connection, otherTenant.getId(), "rls-cross-tenant")
             );
             assertEquals("42501", crossTenant.getSQLState());
 
             statement.execute("RESET app.current_tenant_id");
             SQLException missingContext = assertThrows(
                     SQLException.class,
-                    () -> statement.execute(assetInsertSql(defaultTenant.getId(), "rls-missing-context"))
+                    () -> insertAsset(connection, defaultTenant.getId(), "rls-missing-context")
             );
             assertEquals("42501", missingContext.getSQLState());
         }
@@ -79,17 +78,24 @@ class RlsBackstopPostgresIntegrationTest {
     }
 
     private void prepareRuntimeRole() {
-        platformJdbcTemplate.execute("DROP ROLE IF EXISTS " + RUNTIME_ROLE);
-        platformJdbcTemplate.execute("CREATE ROLE " + RUNTIME_ROLE);
-        platformJdbcTemplate.execute("GRANT USAGE ON SCHEMA platform, tenant_default TO " + RUNTIME_ROLE);
-        platformJdbcTemplate.execute("GRANT SELECT, REFERENCES ON ALL TABLES IN SCHEMA platform TO " + RUNTIME_ROLE);
-        platformJdbcTemplate.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA tenant_default TO " + RUNTIME_ROLE);
-        platformJdbcTemplate.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA tenant_default TO " + RUNTIME_ROLE);
+        platformJdbcTemplate.execute("DROP ROLE IF EXISTS rls_runtime_role");
+        platformJdbcTemplate.execute("CREATE ROLE rls_runtime_role");
+        platformJdbcTemplate.execute("GRANT USAGE ON SCHEMA platform, tenant_default TO rls_runtime_role");
+        platformJdbcTemplate.execute("GRANT SELECT, REFERENCES ON ALL TABLES IN SCHEMA platform TO rls_runtime_role");
+        platformJdbcTemplate.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA tenant_default TO rls_runtime_role");
+        platformJdbcTemplate.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA tenant_default TO rls_runtime_role");
     }
 
-    private String assetInsertSql(UUID tenantId, String identifier) {
-        Instant now = Instant.now();
-        return """
+    private void setCurrentTenant(Connection connection, UUID tenantId) throws SQLException {
+        try (PreparedStatement statement =
+                     connection.prepareStatement("SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
+            statement.setString(1, tenantId.toString());
+            statement.execute();
+        }
+    }
+
+    private void insertAsset(Connection connection, UUID tenantId, String identifier) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO tenant_default.assets (
                     id,
                     business_criticality,
@@ -100,15 +106,21 @@ class RlsBackstopPostgresIntegrationTest {
                     type,
                     tenant_id
                 ) VALUES (
-                    '%s',
+                    ?,
                     'MEDIUM',
-                    '%s',
-                    '%s',
-                    '%s',
+                    now(),
+                    ?,
+                    ?,
                     'ACTIVE',
                     'APPLICATION',
-                    '%s'
+                    ?
                 )
-                """.formatted(UUID.randomUUID(), now, identifier, identifier, tenantId);
+                """)) {
+            statement.setObject(1, UUID.randomUUID());
+            statement.setString(2, identifier);
+            statement.setString(3, identifier);
+            statement.setObject(4, tenantId);
+            statement.execute();
+        }
     }
 }
