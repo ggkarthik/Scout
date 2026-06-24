@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,9 @@ class FindingRecomputeServiceDeltaRefreshTest {
     @Mock
     private OrgCveRecordService orgCveRecordService;
 
+    @Mock
+    private TenantWorkRunner tenantWorkRunner;
+
     private FindingRecomputeService findingRecomputeService;
 
     @BeforeEach
@@ -68,8 +72,11 @@ class FindingRecomputeServiceDeltaRefreshTest {
                 inventoryComponentCpeMapRepository,
                 vulnerabilityTargetRepository,
                 orgCveRecordRepository,
-                orgCveRecordService
+                orgCveRecordService,
+                tenantWorkRunner
         );
+        org.mockito.Mockito.lenient().when(tenantWorkRunner.runScoped(org.mockito.ArgumentMatchers.any(UUID.class), org.mockito.ArgumentMatchers.any(Supplier.class)))
+                .thenAnswer(invocation -> invocation.getArgument(1, Supplier.class).get());
     }
 
     @Test

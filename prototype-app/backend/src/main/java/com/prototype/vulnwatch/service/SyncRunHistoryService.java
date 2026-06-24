@@ -48,19 +48,13 @@ public class SyncRunHistoryService {
 
     private final SyncRunRepository syncRunRepository;
     private final RequestActorService requestActorService;
-    private final WorkspaceService workspaceService;
-    private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public SyncRunHistoryService(
             SyncRunRepository syncRunRepository,
-            RequestActorService requestActorService,
-            WorkspaceService workspaceService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            RequestActorService requestActorService
     ) {
         this.syncRunRepository = syncRunRepository;
         this.requestActorService = requestActorService;
-        this.workspaceService = workspaceService;
-        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
     public List<SyncRunResponse> list(String category, int limit) {
@@ -222,9 +216,7 @@ public class SyncRunHistoryService {
     }
 
     private <T> T inPlatformWorkspace(java.util.function.Supplier<T> supplier) {
-        return tenantSchemaExecutionService.run(
-                workspaceService.getPlatformWorkspace(WorkspaceService.PlatformWorkspaceUseCase.PLATFORM_VULNERABILITY_RUN_HISTORY),
-                supplier);
+        return TenantContext.runAsPlatform(supplier);
     }
 
     private SyncRunClassification classifyRunType(String syncType) {

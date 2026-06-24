@@ -97,6 +97,34 @@ class TenantServiceTest {
     }
 
     @Test
+    void listActiveTenantsFiltersInactiveAndDeletedTenants() {
+        Tenant active = new Tenant();
+        active.setName("Active");
+        active.setStatus("ACTIVE");
+        Tenant suspended = new Tenant();
+        suspended.setName("Suspended");
+        suspended.setStatus("SUSPENDED");
+        Tenant expired = new Tenant();
+        expired.setName("Expired");
+        expired.setStatus("ACTIVE");
+        expired.setExpiredAt(Instant.now());
+        Tenant purging = new Tenant();
+        purging.setName("Purging");
+        purging.setStatus("ACTIVE");
+        purging.setPurgeStartedAt(Instant.now());
+        Tenant deleted = new Tenant();
+        deleted.setName("Deleted");
+        deleted.setStatus("ACTIVE");
+        deleted.setDeletedAt(Instant.now());
+        when(tenantRepository.findAllByOrderByCreatedAtAsc())
+                .thenReturn(List.of(active, suspended, expired, purging, deleted));
+
+        List<Tenant> tenants = tenantService.listActiveTenants();
+
+        assertEquals(List.of(active), tenants);
+    }
+
+    @Test
     void getDefaultTenantFallsBackToSchemaName() {
         Tenant tenant = new Tenant();
         tenant.setName("Platform Workspace");

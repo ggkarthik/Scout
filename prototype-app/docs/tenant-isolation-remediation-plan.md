@@ -1,6 +1,6 @@
 # Tenant Isolation Remediation Plan
 
-Status: proposed · Owner: TBD · Last updated: 2026-06-24
+Status: implementation in progress · Owner: TBD · Last updated: 2026-06-24 (platform↔tenant boundary implemented; RLS rollout gated)
 
 This plan addresses the findings from the tenant-isolation architecture review. It is ordered to
 **stop active leaks first, prevent recurrence second, and install the fail-closed backstop last** — so
@@ -14,7 +14,7 @@ connection-acquire time. The review found that isolation rests on this single me
 mechanism's core invariant is violated in ~10 background-processing sites, and that there is no
 database-level backstop (Row-Level Security is dead code).
 
-### Two root causes
+### Three root causes
 
 1. **No defense in depth.** Isolation rests entirely on `search_path`. RLS is aspirational
    (no `CREATE POLICY` / `ENABLE ROW LEVEL SECURITY` anywhere; nothing reads `app.current_tenant_id`),
@@ -25,6 +25,11 @@ database-level backstop (Row-Level Security is dead code).
    tenants → only `tenant_default` is processed; (b) a `@Transactional` method calls
    `tenantSchemaExecutionService.run(...)` internally → the connection binds the default schema before
    context switches → silently wrong schema.
+3. **The platform↔tenant boundary was historically enforced only at the application layer.** The shared
+   `platform` schema sat in every tenant connection's `search_path`, the runtime role owned/superused all
+   schemas, and the platform "plane" borrowed `tenant_default`. This cycle now gives platform work an
+   explicit `runAsPlatform` execution context with a platform-only search path, but Phase 4 must still add
+   the DB role/RLS backstop for sensitive platform tables and runtime privileges.
 
 ## Findings reference
 
@@ -39,10 +44,15 @@ database-level backstop (Row-Level Security is dead code).
 | 7 | High | `TenantService.listTenants()` `:65` | Returns all statuses → scheduled jobs keep processing SUSPENDED/EXPIRED/PURGING tenants; `TenantStatusFilter` only blocks HTTP. |
 | 8 | Medium | `VulnerabilityIntelMaintenanceService.scheduledVexStalenessRecompute` `:139`; `LegacyGithubSyncRunBackfillService` `:68` | Same context-before-tx bug; per-tenant reads collapse to default. |
 | 9 | Medium | `JwtTenantAuthenticationService:131` vs `WorkspaceService.getWorkspace` | PO switch-in via `active_tenant_id` resolves to null tenant → feature inert/self-inconsistent. |
+| 10 | High | `SensitiveTenantActionInterceptor` + `PlatformAdminRequestPaths` (whitelists `/api/operations/`, `/api/connectors/vulnerability-sources`) | **Fixed in this branch:** write-like `@SensitiveTenantAction` handlers require WRITE-enabled support grants for platform owners regardless of URL; platform path bypass applies only to unannotated true-platform endpoints. |
+| 11 | Medium | `EolController` `/api/eol/admin/refresh/*`, `/api/eol/mappings/confirm` | **Fixed in this branch:** EOL admin/confirm mutation endpoints require `ROLE_PLATFORM_OWNER`; tenant read endpoints remain unchanged. |
+| 12 | High | `TenantContext.runAsPlatform`/`isPlatformContext`; historic `WorkspaceService.getPlatformWorkspace()` == `getDefaultTenant()` | **Fixed in this branch:** platform work uses explicit platform context, platform connections use `platform,public` search path, `WorkspaceService.getPlatformWorkspace()` was removed, and per-tenant EOL work fans out through `TenantWorkRunner`. |
+| 13 | Critical (posture) | Shared `platform` schema in every tenant `search_path` + single owner/superuser DB role; RLS plan scope excludes sensitive platform tables | `platform.tenants`, `app_users` (incl. password hashes), `tenant_memberships`, `tenant_support_grants`, `plan_entitlements` are reachable by any tenant-context connection with no DB backstop; the planned RLS scope (per-tenant tables + 2 per-user platform tables) does not cover them, so the platform↔tenant data boundary stays application-layer-only even post-Phase 4. |
 
 Already fixed this cycle (reference pattern for the rest): the async ingestion worker
 (`IngestionJobService` / `IngestionJobWorkerService`), the finding-delta drain (`FindingDeltaQueueService`),
-the scheduler-death gap (`SchedulingConfig`), and the missing entitlement-table migrations (V1 + V27).
+the scheduler-death gap (`SchedulingConfig`), the missing entitlement-table migrations (V1 + V27), and the
+platform-boundary slice (#10/#11/#12).
 
 ---
 
@@ -54,14 +64,19 @@ the scheduler-death gap (`SchedulingConfig`), and the missing entitlement-table 
      top-level guard so a throw cannot unschedule a `@Scheduled` caller.
    - `runScoped(tenant, Supplier)` = `run(tenant, () -> transactionTemplate.execute(...))` for the
      context-first-then-tx pattern. This becomes the only sanctioned way to do background per-tenant work.
-2. **Detection-mode instrumentation (ships dark):** in `TenantAwareDataSource.applyTenantContext`,
+2. **Tenant-switch runtime guard (ships WARN):** in `TenantSchemaExecutionService.run(...)`, detect when
+   code requests a **different** tenant/schema while a transaction is already active. Start in WARN in every
+   environment; flip to FAIL only after Phase 1 fixes are complete and telemetry is clean. This catches the
+   real mid-transaction switch defect, including transitive calls, without false-positiveing safe same-tenant
+   request-path reuse.
+3. **Detection-mode instrumentation (ships dark):** in `TenantAwareDataSource.applyTenantContext`,
    sampled `WARN` + metric `tenant.context.missing` when a connection binds with empty/sentinel context
    outside a known platform path. Sizes the problem without changing behavior.
-3. **CI gates (build-fail only):**
-   - ArchUnit: no `@Transactional` method may reference `tenantSchemaExecutionService.run`.
+4. **CI gates (build-fail only):**
+   - ArchUnit: `@Scheduled` methods must not be `@Transactional`.
    - Migration grep gate: reject new `postgres_reset/` files with `tenant_default.`-qualified or
      unqualified per-tenant DDL unless they use the `information_schema.tables` loop pattern.
-4. **Datasource resource hardening:** wrap `applyTenantContext` so a failure closes the borrowed
+5. **Datasource resource hardening:** wrap `applyTenantContext` so a failure closes the borrowed
    connection instead of leaking an un-reset one back to the pool (`TenantAwareDataSource.java:44-55`).
 
 **Exit:** helper + gates merged; detection metric live; no behavior change; tests green.
@@ -84,21 +99,41 @@ test (the job's effect must land in a non-default tenant, not `tenant_default`).
 Test template: `IngestionJobTenantScopingPostgresIntegrationTest`. ITs depend on the fresh-DB migration
 fix already landed (V1 + V27).
 
-**Exit:** all sites migrated; `tenant.context.missing` ≈ 0 for these jobs; ArchUnit gate passes.
+**Platform-plane context (#12 — completed in this branch):** platform work now has a real execution
+context rather than borrowing `tenant_default`.
+- `TenantContext.runAsPlatform(...)` wraps global vuln-intel/EOL/EPSS entry points.
+- Platform context sets `search_path = platform,public`, so unqualified tenant-table access fails loudly
+  instead of silently hitting `tenant_default`; explicit `platform.*` entities remain valid.
+- `sync_runs` is now owned by `platform.sync_runs` (with V30 migrating legacy tenant-schema copies), so
+  platform run-history and startup recovery work under `runAsPlatform` without borrowing `tenant_default`.
+- `WorkspaceService.getPlatformWorkspace()` was removed; sync-run history now uses platform context.
+- Per-tenant EOL mapping/denormalization/date-sweep work fans out through `TenantWorkRunner`.
+- `PlatformContextPostgresIntegrationTest` verifies explicit platform access succeeds and unqualified
+  tenant-table access fails in platform context.
+
+**Exit:** all sites migrated; `tenant.context.missing` ≈ 0 for these jobs; ArchUnit gate passes; global jobs
+run in explicit platform context and their per-tenant deltas reach every tenant.
 
 ## Phase 2 — Authorization model repair · ~3–4 days (parallel with Phase 1)
 
 1. **#5 / #9** — In `JwtTenantAuthenticationService.resolveTenant`, the `tenant_id`/`tenant_slug` branches
    must apply the same support-grant + accessibility checks as the `active_tenant_id` path; reconcile the
    `active_tenant_id` → null behavior so switch-in yields a usable, grant-checked tenant.
-2. **#6** — Invoke `requireActiveGrantForWrite` on the tenant-write path; make
-   `SensitiveTenantActionInterceptor` grant-aware (READ_ONLY vs WRITE_ENABLED); re-review
-   `PlatformAdminRequestPaths` and remove tenant-data-touching prefixes.
-3. **#7** — Add `tenantService.listActiveTenants()` (filters SUSPENDED/EXPIRED/PURGING/DELETED) and make
+2. **#11 — completed:** `EolController` admin/confirm mutation endpoints (`/api/eol/admin/refresh/*`,
+   `/api/eol/mappings/confirm`) require `ROLE_PLATFORM_OWNER`.
+3. **#6 — completed for sensitive tenant actions:** `SensitiveTenantActionInterceptor` invokes
+   `requireActiveGrantForWrite` for platform-owner tenant writes and respects READ_ONLY vs WRITE_ENABLED.
+4. **#7** — Add `tenantService.listActiveTenants()` (filters SUSPENDED/EXPIRED/PURGING/DELETED) and make
    `TenantWorkRunner.forEachTenant` use it by default.
+5. **#10 — completed:** `@SensitiveTenantAction` wins over the URL whitelist. If a handler is annotated
+   and the HTTP method is write-like (`POST`/`PUT`/`PATCH`/`DELETE`), an active WRITE-enabled grant is
+   required regardless of URL. `PlatformAdminRequestPaths` only bypasses unannotated true-platform endpoints.
+6. **#5/#13 — platform-owner identity:** keep the prod creator-key enforcement (`ProductionSafetyValidator`),
+   and stop auto-persisting `PLATFORM_OWNER` from a verbatim JWT roles claim without an out-of-band check.
 
-**Blocking input needed:** production OIDC claim shape (`APP_JWT_TENANT_ID_CLAIM` vs `active_tenant_id`) —
-determines whether #5 is reachable in prod and how to gate it.
+**Verification item:** confirm production OIDC claim shape (`APP_JWT_TENANT_ID_CLAIM` vs `active_tenant_id`)
+after implementation. Do not block the fix on this; secure `tenant_id`, `tenant_slug`, and
+`active_tenant_id` uniformly.
 
 ## Phase 3 — Schema-drift remediation · ~2–3 days (parallel with Phase 1)
 
@@ -114,15 +149,17 @@ determines whether #5 is reachable in prod and how to gate it.
 
 ## Phase 4 — RLS + fail-closed defaults (backstop) · ~4–6 days
 
-Done last, after Phases 1 and 3, so enforcement does not cause outages.
+Done last, after Phases 1 (incl. the platform-plane-context prerequisite, #12) and 3, so enforcement does
+not cause outages. Note: on the current branch, RLS was deliberately deferred behind a documented no-op
+rollout gate (`V29__tenant_rls_rollout_gate.sql`) — this phase replaces that gate.
 
 1. **#2** — Enable RLS on every per-tenant table (all-schemas loop migration):
    ```sql
    ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
    ALTER TABLE <t> FORCE ROW LEVEL SECURITY;
    CREATE POLICY tenant_isolation ON <t>
-     USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-     WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+     USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+     WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);
    ```
    - Apply to per-tenant-schema tables and per-`tenant_id` tables in `platform`
      (`personal_finding_queues`, `finding_queue_preferences`). Exclude genuinely global `platform.*`.
@@ -130,9 +167,23 @@ Done last, after Phases 1 and 3, so enforcement does not cause outages.
    - Update `provisionTenantSchema` to (re)create policies on clone.
 2. **#2** — Fail-closed default: missing context resolves to a non-existent/empty schema (not
    `tenant_default`); the sentinel `app.current_tenant_id` matches no rows.
-3. **Staged rollout:** permissive/logging posture or staging clone first → run full scheduled-job + e2e
+3. **DB-role preflight (hard gate):** production/preproduction app runtime roles must be
+   `rolsuper = false`, `rolbypassrls = false`, and must not own protected tenant/platform tables. Use a
+   distinct migration/schema-owner role for Flyway/schema ownership; do not run the app as the owner role.
+4. **#13 — extend the data-tier control to sensitive platform tables with table-specific semantics.** The
+   per-tenant RLS above does not protect the platform control plane by itself:
+   - `tenant_memberships`, `tenant_support_grants`, `plan_entitlements` are tenant-keyed, so tenant-id RLS
+     can apply where the tenant-runtime role needs read access.
+   - `app_users` and `tenants` are global identity/registry tables, not tenant-keyed. Do **not** apply a
+     naive `tenant_id = current_setting(...)` policy. Keep read access needed for authentication/tenant
+     resolution, revoke tenant-runtime writes, retain app-layer filtering, or add membership-aware policies
+     where reads can be safely constrained.
+   - Split runtime privileges into `tenant-runtime`, `platform-runtime`, and `migration-owner` roles. Route
+     platform control-plane writes and ingestion through the platform role; tenant request handling should
+     not have blanket write access to global platform tables.
+5. **Staged rollout:** permissive/logging posture or staging clone first → run full scheduled-job + e2e
    suite under RLS → flip to `FORCE` in prod. Documented fast rollback (drop policies; mind `flyway:repair`).
-4. Remove the now-accurate "enables RLS" Javadoc caveat; document the model.
+6. Remove the now-accurate "enables RLS" Javadoc caveat; document the model.
 
 **Exit:** RLS `FORCE` on all per-tenant tables; a deliberate cross-tenant write is rejected by the DB;
 contextless query fails closed; full job suite green under RLS.
@@ -150,6 +201,10 @@ Phase 0 (guardrails) ──┬──► Phase 1 (fix bugs) ───────
 - Phase 0 first (everything builds on the helper + gates).
 - Phases 1/2/3 parallelizable.
 - Phase 4 must follow 1 and 3 (RLS needs correct context everywhere + `tenant_id` populated on all rows).
+  The platform-plane-context work (Phase 1, #12) is a hard prerequisite — contextless platform jobs writing
+  into tenant-scoped tables will be RLS-rejected otherwise.
+- The platform↔tenant **control-plane** fixes (#10/#11, Phase 2) and **data-plane** scope extension (#13,
+  Phase 4) are largely independent of the per-tenant background work and can proceed in parallel.
 
 ## Effort & risk
 

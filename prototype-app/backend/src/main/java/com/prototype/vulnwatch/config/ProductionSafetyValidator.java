@@ -2,7 +2,9 @@ package com.prototype.vulnwatch.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,6 +21,8 @@ public class ProductionSafetyValidator {
     private final boolean requireTenantContext;
     private final String corsAllowedOrigins;
     private final boolean testPersonasEnabled;
+    private final JdbcTemplate platformJdbcTemplate;
+    private final boolean validateRlsRuntimeRole;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -31,7 +35,9 @@ public class ProductionSafetyValidator {
             @Value("${app.tenancy.allow-header-tenant-selection:false}") boolean allowHeaderTenantSelection,
             @Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins,
-            @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled
+            @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled,
+            @Value("${app.security.validate-rls-runtime-role:false}") boolean validateRlsRuntimeRole,
+            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
     ) {
         this.requireProductionSecrets = requireProductionSecrets;
         this.apiKey = apiKey;
@@ -44,6 +50,8 @@ public class ProductionSafetyValidator {
         this.requireTenantContext = requireTenantContext;
         this.corsAllowedOrigins = corsAllowedOrigins;
         this.testPersonasEnabled = testPersonasEnabled;
+        this.platformJdbcTemplate = platformJdbcTemplate;
+        this.validateRlsRuntimeRole = validateRlsRuntimeRole;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -75,6 +83,49 @@ public class ProductionSafetyValidator {
         }
         if (testPersonasEnabled) {
             throw new IllegalStateException("APP_TEST_PERSONAS_ENABLED must be false for production startup.");
+        }
+        if (validateRlsRuntimeRole) {
+            validateRuntimeRoleCannotBypassRls();
+        }
+    }
+
+    private void validateRuntimeRoleCannotBypassRls() {
+        if (platformJdbcTemplate == null) {
+            throw new IllegalStateException("platformJdbcTemplate is required for production DB role safety validation.");
+        }
+        Boolean superuser = platformJdbcTemplate.queryForObject("""
+                select rolsuper
+                from pg_roles
+                where rolname = current_user
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(superuser)) {
+            throw new IllegalStateException("Production DB runtime role must not be a PostgreSQL superuser; superusers bypass RLS.");
+        }
+        Boolean bypassRls = platformJdbcTemplate.queryForObject("""
+                select rolbypassrls
+                from pg_roles
+                where rolname = current_user
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(bypassRls)) {
+            throw new IllegalStateException("Production DB runtime role must not have BYPASSRLS.");
+        }
+        String isSuperuser = platformJdbcTemplate.queryForObject("select current_setting('is_superuser')", String.class);
+        if ("on".equalsIgnoreCase(isSuperuser) || "true".equalsIgnoreCase(isSuperuser)) {
+            throw new IllegalStateException("Production DB runtime role reports is_superuser=true; RLS would be bypassed.");
+        }
+        Boolean ownsTenantTables = platformJdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from pg_class c
+                    join pg_namespace n on n.oid = c.relnamespace
+                    join pg_roles r on r.oid = c.relowner
+                    where n.nspname in ('tenant_default', 'platform')
+                      and c.relkind in ('r', 'p')
+                      and r.rolname = current_user
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(ownsTenantTables)) {
+            throw new IllegalStateException("Production DB runtime role must not own tenant/platform tables protected by RLS.");
         }
     }
 

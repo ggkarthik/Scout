@@ -85,6 +85,7 @@ public class EolRefreshService {
     private final TenantRepository tenantRepository;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final QualityIssueProjectionService qualityIssueProjectionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public EolRefreshService(
             EolApiClient eolApiClient,
@@ -100,7 +101,8 @@ public class EolRefreshService {
             OrgCveRecordService orgCveRecordService,
             TenantRepository tenantRepository,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
-            QualityIssueProjectionService qualityIssueProjectionService) {
+            QualityIssueProjectionService qualityIssueProjectionService,
+            TenantWorkRunner tenantWorkRunner) {
         this.eolApiClient = eolApiClient;
         this.catalogRepository = catalogRepository;
         this.releaseRepository = releaseRepository;
@@ -115,6 +117,7 @@ public class EolRefreshService {
         this.tenantRepository = tenantRepository;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.qualityIssueProjectionService = qualityIssueProjectionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     // -------------------------------------------------------------------------
@@ -122,82 +125,92 @@ public class EolRefreshService {
     // -------------------------------------------------------------------------
 
     public SyncTriggerResponse triggerCatalogRefresh() {
-        SyncRun run = startRun("EOL_CATALOG_REFRESH");
-        ingestionExecutor.execute(() -> {
-            run.setStatus("running");
-            syncRunRepository.save(run);
-            try {
-                int count = runCatalogRefresh();
-                completeRun(run, "completed", count);
-            } catch (Exception e) {
-                completeRun(run, "failed", e.getMessage());
-            }
+        return TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_CATALOG_REFRESH");
+            ingestionExecutor.execute(() -> TenantContext.runAsPlatform(() -> {
+                run.setStatus("running");
+                syncRunRepository.save(run);
+                try {
+                    int count = runCatalogRefresh();
+                    completeRun(run, "completed", count);
+                } catch (Exception e) {
+                    completeRun(run, "failed", e.getMessage());
+                }
+            }));
+            return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL catalog refresh queued");
         });
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL catalog refresh queued");
     }
 
     public SyncTriggerResponse triggerReleaseRefresh() {
-        SyncRun run = startRun("EOL_RELEASE_REFRESH");
-        ingestionExecutor.execute(() -> {
-            run.setStatus("running");
-            syncRunRepository.save(run);
-            try {
-                int count = runReleaseRefresh();
-                completeRun(run, "completed", count);
-            } catch (Exception e) {
-                completeRun(run, "failed", e.getMessage());
-            }
+        return TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_RELEASE_REFRESH");
+            ingestionExecutor.execute(() -> TenantContext.runAsPlatform(() -> {
+                run.setStatus("running");
+                syncRunRepository.save(run);
+                try {
+                    int count = runReleaseRefresh();
+                    completeRun(run, "completed", count);
+                } catch (Exception e) {
+                    completeRun(run, "failed", e.getMessage());
+                }
+            }));
+            return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL release data refresh queued");
         });
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL release data refresh queued");
     }
 
     public SyncTriggerResponse triggerMappingResolve() {
-        SyncRun run = startRun("EOL_MAPPING_RESOLVE");
-        ingestionExecutor.execute(() -> {
-            run.setStatus("running");
-            syncRunRepository.save(run);
-            try {
-                int count = runMappingResolve();
-                completeRun(run, "completed", count);
-            } catch (Exception e) {
-                completeRun(run, "failed", e.getMessage());
-            }
+        return TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_MAPPING_RESOLVE");
+            ingestionExecutor.execute(() -> TenantContext.runAsPlatform(() -> {
+                run.setStatus("running");
+                syncRunRepository.save(run);
+                try {
+                    int count = runMappingResolveAcrossTenants();
+                    completeRun(run, "completed", count);
+                } catch (Exception e) {
+                    completeRun(run, "failed", e.getMessage());
+                }
+            }));
+            return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL mapping resolution queued");
         });
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL mapping resolution queued");
     }
 
     public SyncTriggerResponse triggerDenormalize() {
-        SyncRun run = startRun("EOL_DENORMALIZE");
-        ingestionExecutor.execute(() -> {
-            run.setStatus("running");
-            syncRunRepository.save(run);
-            try {
-                int count = runDenormalize();
-                completeRun(run, "completed", count);
-            } catch (Exception e) {
-                completeRun(run, "failed", e.getMessage());
-            }
+        return TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_DENORMALIZE");
+            ingestionExecutor.execute(() -> TenantContext.runAsPlatform(() -> {
+                run.setStatus("running");
+                syncRunRepository.save(run);
+                try {
+                    int count = runDenormalizeAcrossTenants();
+                    completeRun(run, "completed", count);
+                } catch (Exception e) {
+                    completeRun(run, "failed", e.getMessage());
+                }
+            }));
+            return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL denormalization queued");
         });
-        return new SyncTriggerResponse(run.getId(), run.getStatus(), "EOL denormalization queued");
     }
 
     public SyncTriggerResponse triggerFullRefresh() {
-        SyncRun run = startRun("EOL_FULL_REFRESH");
-        ingestionExecutor.execute(() -> {
-            run.setStatus("running");
-            syncRunRepository.save(run);
-            try {
-                int catalogCount  = runCatalogRefresh();
-                int releaseCount  = runReleaseRefresh();
-                int mappingCount  = runMappingResolve();
-                int denormCount   = runDenormalize();
-                completeRun(run, "completed", catalogCount + releaseCount + mappingCount + denormCount);
-            } catch (Exception e) {
-                completeRun(run, "failed", e.getMessage());
-            }
+        return TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_FULL_REFRESH");
+            ingestionExecutor.execute(() -> TenantContext.runAsPlatform(() -> {
+                run.setStatus("running");
+                syncRunRepository.save(run);
+                try {
+                    int catalogCount  = runCatalogRefresh();
+                    int releaseCount  = runReleaseRefresh();
+                    int mappingCount  = runMappingResolveAcrossTenants();
+                    int denormCount   = runDenormalizeAcrossTenants();
+                    completeRun(run, "completed", catalogCount + releaseCount + mappingCount + denormCount);
+                } catch (Exception e) {
+                    completeRun(run, "failed", e.getMessage());
+                }
+            }));
+            return new SyncTriggerResponse(run.getId(), run.getStatus(),
+                    "EOL full refresh queued (catalog → releases → mappings → denormalize)");
         });
-        return new SyncTriggerResponse(run.getId(), run.getStatus(),
-                "EOL full refresh queued (catalog → releases → mappings → denormalize)");
     }
 
     private SyncRun startRun(String type) {
@@ -228,13 +241,15 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.catalog-refresh-cron:0 0 2 * * SUN}")
     public void fullCatalogRefresh() {
-        if (!enabled) { LOG.debug("EOL refresh disabled; skipping catalog refresh"); return; }
-        try {
-            int count = runCatalogRefresh();
-            LOG.info("EOL catalog refresh complete — upserted {} products", count);
-        } catch (Exception e) {
-            LOG.error("EOL catalog refresh failed", e);
-        }
+        TenantContext.runAsPlatform(() -> {
+            if (!enabled) { LOG.debug("EOL refresh disabled; skipping catalog refresh"); return; }
+            try {
+                int count = runCatalogRefresh();
+                LOG.info("EOL catalog refresh complete — upserted {} products", count);
+            } catch (Exception e) {
+                LOG.error("EOL catalog refresh failed", e);
+            }
+        });
     }
 
     private int runCatalogRefresh() {
@@ -274,13 +289,15 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.release-refresh-cron:0 0 3 * * SUN}")
     public void releaseDataRefresh() {
-        if (!enabled) { LOG.debug("EOL refresh disabled; skipping release data refresh"); return; }
-        try {
-            int count = runReleaseRefresh();
-            LOG.info("EOL release refresh complete — {} cycles upserted", count);
-        } catch (Exception e) {
-            LOG.error("EOL release data refresh failed", e);
-        }
+        TenantContext.runAsPlatform(() -> {
+            if (!enabled) { LOG.debug("EOL refresh disabled; skipping release data refresh"); return; }
+            try {
+                int count = runReleaseRefresh();
+                LOG.info("EOL release refresh complete — {} cycles upserted", count);
+            } catch (Exception e) {
+                LOG.error("EOL release data refresh failed", e);
+            }
+        });
     }
 
     private int runReleaseRefresh() {
@@ -372,7 +389,7 @@ public class EolRefreshService {
     public void resolveInstanceMappings() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping mapping resolution"); return; }
         try {
-            int count = runMappingResolve();
+            int count = runMappingResolveAcrossTenants();
             LOG.info("EOL mapping resolution complete — {} new/updated mappings", count);
         } catch (Exception e) {
             LOG.error("EOL mapping resolution failed", e);
@@ -384,6 +401,12 @@ public class EolRefreshService {
         return slugResolverService.resolveAll();
     }
 
+    private int runMappingResolveAcrossTenants() {
+        DenormalizeAccumulator accumulator = new DenormalizeAccumulator();
+        tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(runMappingResolve()));
+        return accumulator.count();
+    }
+
     // -------------------------------------------------------------------------
     // Job 4: Denormalize EOL status — set-based DISTINCT ON rewrite
     // -------------------------------------------------------------------------
@@ -392,11 +415,17 @@ public class EolRefreshService {
     public void denormalizeEolStatus() {
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping denormalization"); return; }
         try {
-            int count = runDenormalize();
+            int count = runDenormalizeAcrossTenants();
             LOG.info("EOL denormalization complete — {} rows updated", count);
         } catch (Exception e) {
             LOG.error("EOL denormalization failed", e);
         }
+    }
+
+    private int runDenormalizeAcrossTenants() {
+        DenormalizeAccumulator accumulator = new DenormalizeAccumulator();
+        tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(runDenormalize()));
+        return accumulator.count();
     }
 
     private int runDenormalize() {
@@ -408,6 +437,18 @@ public class EolRefreshService {
         enqueueLifecycleDeltasForTrackedComponents("eol-denormalize");
         softwareIdentitySummaryProjectionService.refreshAll();
         return instancesUpdated + componentsUpdated;
+    }
+
+    private static final class DenormalizeAccumulator {
+        private int count;
+
+        void add(int value) {
+            count += value;
+        }
+
+        int count() {
+            return count;
+        }
     }
 
     public int refreshConfirmedMapping(String normalizedKey) {
@@ -427,15 +468,18 @@ public class EolRefreshService {
             LOG.debug("EOL refresh disabled; skipping lifecycle date sweep");
             return;
         }
-        SyncRun run = startRun("EOL_DATE_SWEEP");
-        run.setStatus("running");
-        syncRunRepository.save(run);
-        try {
-            int updated = runLifecycleDateSweep();
-            completeRun(run, "completed", updated);
-        } catch (Exception e) {
-            completeRun(run, "failed", e.getMessage());
-        }
+        TenantContext.runAsPlatform(() -> {
+            SyncRun run = startRun("EOL_DATE_SWEEP");
+            run.setStatus("running");
+            syncRunRepository.save(run);
+            try {
+                DenormalizeAccumulator accumulator = new DenormalizeAccumulator();
+                tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(runLifecycleDateSweep()));
+                completeRun(run, "completed", accumulator.count());
+            } catch (Exception e) {
+                completeRun(run, "failed", e.getMessage());
+            }
+        });
     }
 
     int runLifecycleDateSweep() {

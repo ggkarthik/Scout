@@ -45,6 +45,7 @@ public class FindingWorkflowService {
     private final ObjectProvider<AuditEventService> auditEventServiceProvider;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingListProjectionService findingListProjectionService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public FindingWorkflowService(
             FindingRepository findingRepository,
@@ -55,7 +56,8 @@ public class FindingWorkflowService {
             ObjectMapper objectMapper,
             ObjectProvider<AuditEventService> auditEventServiceProvider,
             TenantSchemaExecutionService tenantSchemaExecutionService,
-            FindingListProjectionService findingListProjectionService
+            FindingListProjectionService findingListProjectionService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.findingRepository = findingRepository;
         this.findingCommentRepository = findingCommentRepository;
@@ -66,6 +68,7 @@ public class FindingWorkflowService {
         this.auditEventServiceProvider = auditEventServiceProvider;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.findingListProjectionService = findingListProjectionService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     @Transactional
@@ -328,9 +331,12 @@ public class FindingWorkflowService {
     }
 
     @Scheduled(cron = "0 */15 * * * *")
-    @Transactional
     public void reopenExpiredSuppressions() {
         Instant now = Instant.now();
+        tenantWorkRunner.forEachActiveTenant(tenant -> reopenExpiredSuppressionsInTenant(now));
+    }
+
+    private void reopenExpiredSuppressionsInTenant(Instant now) {
         List<Finding> expired = findingRepository.findByStatusAndSuppressedUntilBefore(FindingStatus.SUPPRESSED, now);
         for (Finding finding : expired) {
             finding.setStatus(FindingStatus.OPEN);
@@ -354,11 +360,12 @@ public class FindingWorkflowService {
     }
 
     @Scheduled(cron = "0 0 * * * *")
-    @Transactional
     public void autoCloseFindingsByPolicy() {
         Instant now = Instant.now();
-        List<RiskPolicy> policies = riskPolicyRepository.findAll();
-        runAutoCloseForPolicies(policies, now, false);
+        tenantWorkRunner.forEachActiveTenant(tenant -> {
+            List<RiskPolicy> policies = riskPolicyRepository.findAll();
+            runAutoCloseForPolicies(policies, now, false);
+        });
     }
 
     @Transactional

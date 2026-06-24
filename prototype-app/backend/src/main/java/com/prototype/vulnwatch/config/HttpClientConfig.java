@@ -1,9 +1,11 @@
 package com.prototype.vulnwatch.config;
 
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.client.http.OutboundHttpClient;
 import com.prototype.vulnwatch.client.http.OutboundPolicyDefaults;
 import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.time.Duration;
+import org.springframework.core.task.TaskDecorator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
@@ -62,6 +64,7 @@ public class HttpClientConfig {
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(50);
         executor.setThreadNamePrefix("sbom-job-");
+        executor.setTaskDecorator(tenantContextTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -73,6 +76,7 @@ public class HttpClientConfig {
         executor.setMaxPoolSize(1);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("integration-queue-");
+        executor.setTaskDecorator(tenantContextTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -84,8 +88,23 @@ public class HttpClientConfig {
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("connector-sync-");
+        executor.setTaskDecorator(tenantContextTaskDecorator());
         executor.initialize();
         return executor;
     }
 
+    static TaskDecorator tenantContextTaskDecorator() {
+        return runnable -> {
+            TenantContext.Snapshot captured = TenantContext.capture();
+            return () -> {
+                TenantContext.Snapshot previous = TenantContext.capture();
+                try {
+                    TenantContext.restore(captured);
+                    runnable.run();
+                } finally {
+                    TenantContext.restore(previous);
+                }
+            };
+        };
+    }
 }

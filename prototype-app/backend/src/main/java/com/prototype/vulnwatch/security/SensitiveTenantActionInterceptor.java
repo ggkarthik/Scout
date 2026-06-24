@@ -2,7 +2,7 @@ package com.prototype.vulnwatch.security;
 
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
-import com.prototype.vulnwatch.web.PlatformAdminRequestPaths;
+import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
@@ -15,11 +15,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
 
     private final RequestActorService requestActorService;
+    private final TenantSupportGrantService tenantSupportGrantService;
 
     public SensitiveTenantActionInterceptor(
-            RequestActorService requestActorService
+            RequestActorService requestActorService,
+            TenantSupportGrantService tenantSupportGrantService
     ) {
         this.requestActorService = requestActorService;
+        this.tenantSupportGrantService = tenantSupportGrantService;
     }
 
     @Override
@@ -31,16 +34,25 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
         if (!actor.actingAsPlatformOwner()) {
             return true;
         }
-        // Platform and operations endpoints are platform-administration actions gated by ROLE_PLATFORM_OWNER;
-        // they are not tenant-data operations so the support-grant check does not apply.
-        if (PlatformAdminRequestPaths.isPlatformAdminPath(request.getRequestURI())) {
-            return true;
+        if (actor.tenantId() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owner tenant context is required");
         }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owners cannot perform tenant-scoped actions");
+        tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());
+        return true;
     }
 
     private boolean requiresConfirmation(HandlerMethod handlerMethod, String method) {
+        if (!isWriteMethod(method)) {
+            return false;
+        }
         return handlerMethod.hasMethodAnnotation(SensitiveTenantAction.class)
                 || handlerMethod.getBeanType().isAnnotationPresent(SensitiveTenantAction.class);
+    }
+
+    private boolean isWriteMethod(String method) {
+        return "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
     }
 }

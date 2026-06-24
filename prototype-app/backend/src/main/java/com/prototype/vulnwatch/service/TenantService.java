@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,6 +65,13 @@ public class TenantService {
     @Transactional(readOnly = true)
     public List<Tenant> listTenants() {
         return tenantRepository.findAllByOrderByCreatedAtAsc();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Tenant> listActiveTenants() {
+        return tenantRepository.findAllByOrderByCreatedAtAsc().stream()
+                .filter(this::isActiveTenantForBackgroundWork)
+                .toList();
     }
 
     @Transactional
@@ -154,5 +162,17 @@ public class TenantService {
         return tenant.getDeletedAt() == null
                 && tenant.getPurgedAt() == null
                 && "ACTIVE".equalsIgnoreCase(tenant.getStatus());
+    }
+
+    private boolean isActiveTenantForBackgroundWork(Tenant tenant) {
+        if (tenant == null) {
+            return false;
+        }
+        String status = tenant.getStatus() == null ? "" : tenant.getStatus().trim().toUpperCase(Locale.ROOT);
+        return "ACTIVE".equals(status)
+                && tenant.getDeletedAt() == null
+                && tenant.getExpiredAt() == null
+                && tenant.getPurgeStartedAt() == null
+                && tenant.getPurgedAt() == null;
     }
 }

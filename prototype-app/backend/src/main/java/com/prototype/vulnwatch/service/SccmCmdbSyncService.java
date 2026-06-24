@@ -82,7 +82,7 @@ public class SccmCmdbSyncService {
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
         List<ConfigRef> configs = new java.util.ArrayList<>();
-        for (var tenant : tenantService.listTenants()) {
+        for (var tenant : tenantService.listActiveTenants()) {
             tenantSchemaExecutionService.run(tenant, () -> {
                 sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
                         .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
