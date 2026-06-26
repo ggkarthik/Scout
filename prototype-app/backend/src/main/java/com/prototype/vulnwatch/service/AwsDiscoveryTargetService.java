@@ -17,6 +17,7 @@ import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryTargetRepository;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -37,6 +38,7 @@ public class AwsDiscoveryTargetService {
     private final AwsDiscoveryClient awsDiscoveryClient;
     private final ObjectMapper objectMapper;
     private final TenantQuotaService tenantQuotaService;
+    private final CredentialEncryptionService credentialEncryptionService;
 
     public AwsDiscoveryTargetService(
             AwsDiscoveryConfigRepository configRepository,
@@ -44,7 +46,8 @@ public class AwsDiscoveryTargetService {
             AssetRepository assetRepository,
             AwsDiscoveryClient awsDiscoveryClient,
             ObjectMapper objectMapper,
-            TenantQuotaService tenantQuotaService
+            TenantQuotaService tenantQuotaService,
+            CredentialEncryptionService credentialEncryptionService
     ) {
         this.configRepository = configRepository;
         this.targetRepository = targetRepository;
@@ -52,6 +55,7 @@ public class AwsDiscoveryTargetService {
         this.awsDiscoveryClient = awsDiscoveryClient;
         this.objectMapper = objectMapper;
         this.tenantQuotaService = tenantQuotaService;
+        this.credentialEncryptionService = credentialEncryptionService;
     }
 
     @Transactional(readOnly = true)
@@ -93,21 +97,17 @@ public class AwsDiscoveryTargetService {
         Instant testedAt = Instant.now();
         AwsCredentialsProvider creds;
         try {
-            creds = AwsCredentialProvider.from(target.getConfig(), target);
+            creds = AwsCredentialProvider.from(configWithDecryptedCredential(target.getConfig()), target);
         } catch (Exception e) {
             persistTestResult(target, "FAILED", e.getMessage(), testedAt, null);
-            return new AwsConnectionTestResponse("FAILED", e.getMessage(), null, Collections.emptyList(), testedAt);
+            return failedResponse(appendExternalIdHint(e.getMessage(), target.getRoleArn(), target.getExternalId()), testedAt);
         }
 
         List<String> regions = parseRegions(target.getRegionsJson());
         AwsConnectivityResult result = awsDiscoveryClient.testConnectivity(creds, regions);
-        String status = result.success() ? "SUCCESS" : "FAILED";
-        String message = result.success()
-                ? "AWS target connection succeeded. Account: " + result.accountId()
-                + ". Reachable regions: " + String.join(", ", result.reachableRegions()) + "."
-                : "AWS target connection failed: " + result.errorMessage();
-        persistTestResult(target, status, message, testedAt, result.accountId());
-        return new AwsConnectionTestResponse(status, message, result.accountId(), result.reachableRegions(), testedAt);
+        AwsConnectionTestResponse response = toTestResponse(result, target, testedAt);
+        persistTestResult(target, response.status(), response.message(), testedAt, response.resolvedAccountId());
+        return response;
     }
 
     @Transactional
@@ -215,6 +215,89 @@ public class AwsDiscoveryTargetService {
         } catch (Exception e) {
             return List.of("us-east-1");
         }
+    }
+
+    private String formatRegionErrors(java.util.Map<String, String> regionErrors) {
+        if (regionErrors == null || regionErrors.isEmpty()) {
+            return "";
+        }
+        return " Region errors: " + regionErrors.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .toList() + ".";
+    }
+
+    private String formatWarnings(List<String> warnings) {
+        if (warnings == null || warnings.isEmpty()) {
+            return "";
+        }
+        return " Warnings: " + String.join(" | ", warnings) + ".";
+    }
+
+    private AwsConnectionTestResponse toTestResponse(
+            AwsConnectivityResult result,
+            AwsDiscoveryTarget target,
+            Instant testedAt
+    ) {
+        if (!result.success()) {
+            return failedResponse(
+                    appendExternalIdHint("AWS target connection failed: " + result.errorMessage(), target.getRoleArn(), target.getExternalId()),
+                    testedAt
+            );
+        }
+        String status = (!result.regionErrors().isEmpty() || !result.warnings().isEmpty()) ? "SUCCESS_WITH_WARNINGS" : "SUCCESS";
+        String message = appendExternalIdHint(
+                "AWS target connection succeeded. Account: " + result.accountId()
+                        + ". Reachable regions: " + String.join(", ", result.reachableRegions()) + "."
+                        + formatRegionErrors(result.regionErrors())
+                        + formatWarnings(result.warnings()),
+                target.getRoleArn(),
+                target.getExternalId()
+        );
+        return new AwsConnectionTestResponse(
+                status,
+                message,
+                result.accountId(),
+                result.reachableRegions(),
+                result.warnings(),
+                result.regionErrors(),
+                testedAt
+        );
+    }
+
+    private AwsConnectionTestResponse failedResponse(String message, Instant testedAt) {
+        return new AwsConnectionTestResponse("FAILED", message, null, Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), testedAt);
+    }
+
+    private String appendExternalIdHint(String message, String roleArn, String externalId) {
+        if (!hasText(roleArn) || hasText(externalId)) {
+            return message;
+        }
+        String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
+        if (!normalized.contains("assumerole") && !normalized.contains("accessdenied") && !normalized.contains("not authorized")) {
+            return message;
+        }
+        return message + " Role may require External ID; configure it in the connector if the trust policy uses sts:ExternalId.";
+    }
+
+    private AwsDiscoveryConfig configWithDecryptedCredential(AwsDiscoveryConfig config) {
+        if (config == null || !hasText(config.getCredentialSecret())) {
+            return config;
+        }
+        AwsDiscoveryConfig runtimeConfig = new AwsDiscoveryConfig();
+        runtimeConfig.setTenant(config.getTenant());
+        runtimeConfig.setSourceSystem(config.getSourceSystem());
+        runtimeConfig.setAuthType(config.getAuthType());
+        runtimeConfig.setAccessKeyId(config.getAccessKeyId());
+        runtimeConfig.setCredentialSecret(credentialEncryptionService.decrypt(config.getCredentialSecret()));
+        runtimeConfig.setCrossAccountRoleArn(config.getCrossAccountRoleArn());
+        runtimeConfig.setExternalId(config.getExternalId());
+        runtimeConfig.setAwsAccountId(config.getAwsAccountId());
+        runtimeConfig.setRegionsJson(config.getRegionsJson());
+        runtimeConfig.setResourceTypesJson(config.getResourceTypesJson());
+        runtimeConfig.setEnabled(config.isEnabled());
+        runtimeConfig.setAutoSyncEnabled(config.isAutoSyncEnabled());
+        runtimeConfig.setIntervalMinutes(config.getIntervalMinutes());
+        return runtimeConfig;
     }
 
     private boolean hasText(String value) {

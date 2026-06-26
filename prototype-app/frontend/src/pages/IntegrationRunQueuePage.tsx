@@ -43,7 +43,7 @@ function formatRunDomain(run: SyncRun): string {
 function runStatusClass(value: string): string {
   const n = value.trim().toUpperCase();
   if (n === 'FAILED') return 'status-failure';
-  if (n === 'PARTIAL_SUCCESS') return 'status-warning';
+  if (n === 'PARTIAL_SUCCESS' || n === 'COMPLETED_WITH_ERRORS' || n === 'SUCCESS_WITH_WARNINGS') return 'status-warning';
   if (n === 'COMPLETED') return 'status-success';
   if (n === 'RUNNING' || n === 'STARTED' || n === 'QUEUED') return 'status-open';
   return `status-${value.toLowerCase().replace('_', '-')}`;
@@ -66,7 +66,7 @@ function metaNum(meta: Record<string, unknown>, key: string): number | undefined
 
 function totalRecords(run: SyncRun, meta: Record<string, unknown>): string {
   // For inventory runs prefer metadata counts
-  const assets = metaNum(meta, 'assetsIngested');
+  const assets = metaNum(meta, 'assetsIngested') ?? metaNum(meta, 'assetsUpserted');
   const rawComponents = metaNum(meta, 'componentsIngested')
     ?? ((metaNum(meta, 'inventoryComponentsCreated') ?? 0) + (metaNum(meta, 'inventoryComponentsUpdated') ?? 0));
   const components = rawComponents > 0 ? rawComponents : undefined;
@@ -151,8 +151,13 @@ function buildRows(runs: SyncRun[]): DataTableRow[] {
               {detailLine('Failed', run.recordsFailed ?? 0)}
               {detailLine('Assets discovered', metaNum(meta, 'assetsDiscovered'))}
               {detailLine('Assets ingested', metaNum(meta, 'assetsIngested'))}
+              {detailLine('Assets upserted', metaNum(meta, 'assetsUpserted'))}
+              {detailLine('Assets marked inactive', metaNum(meta, 'assetsMarkedInactive'))}
               {detailLine('Assets failed', metaNum(meta, 'assetsFailed'))}
               {detailLine('Components', metaNum(meta, 'componentsIngested'))}
+              {detailLine('SSM assets ingested', metaNum(meta, 'ssmAssetsIngested'))}
+              {detailLine('Software created', metaNum(meta, 'softwareInstancesCreated'))}
+              {detailLine('Software updated', metaNum(meta, 'softwareInstancesUpdated'))}
               {detailLine('Findings', metaNum(meta, 'findingsGenerated'))}
               {detailLine('Hosts created', metaNum(meta, 'ciCreated'))}
               {detailLine('SW created', metaNum(meta, 'softwareInstancesCreated'))}
