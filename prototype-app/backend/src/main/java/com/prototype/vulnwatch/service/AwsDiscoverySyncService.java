@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.AwsCredentialProvider;
 import com.prototype.vulnwatch.client.AwsDiscoveryClient;
+import com.prototype.vulnwatch.client.AwsDiscoveryClient.AwsEc2FetchResult;
 import com.prototype.vulnwatch.client.AwsDiscoveryClient.AwsResourceRecord;
 import com.prototype.vulnwatch.domain.AwsDiscoveryConfig;
 import com.prototype.vulnwatch.domain.AwsDiscoveryTarget;
@@ -14,6 +15,7 @@ import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryTargetRepository;
 import com.prototype.vulnwatch.repo.SyncRunRepository;
 import com.prototype.vulnwatch.service.AwsResourceIngestionService.IngestionResult;
+import com.prototype.vulnwatch.service.AwsResourceIngestionService.SsmInventoryIngestionSummary;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
@@ -220,19 +222,33 @@ public class AwsDiscoverySyncService {
                 int totalFetched = 0;
                 int recordsFailed = 0;
                 int assetsUpserted = 0;
+                int softwareInstancesCreated = 0;
+                int softwareInstancesUpdated = 0;
                 int componentsCreated = 0;
                 int componentsUpdated = 0;
+                int findingsGenerated = 0;
+                int warningTargets = 0;
                 int assetsMarkedInactive = 0;
+                List<String> visibleMessages = new ArrayList<>();
                 List<Map<String, Object>> targetResults = new ArrayList<>();
 
                 for (AwsDiscoveryTarget target : targets) {
                     TargetRunResult targetResult = executeTarget(config, target, runId, triggerMode, runStartTime);
                     totalFetched += targetResult.recordsFetched();
                     recordsFailed += targetResult.failed() ? 1 : 0;
+                    warningTargets += targetResult.warning() ? 1 : 0;
                     assetsUpserted += targetResult.ingestionResult().assetsUpserted();
+                    softwareInstancesCreated += targetResult.ssmSummary().softwareInstancesCreated();
+                    softwareInstancesUpdated += targetResult.ssmSummary().softwareInstancesUpdated();
                     componentsCreated += targetResult.ingestionResult().inventoryComponentsCreated();
+                    componentsCreated += targetResult.ssmSummary().inventoryComponentsCreated();
                     componentsUpdated += targetResult.ingestionResult().inventoryComponentsUpdated();
+                    componentsUpdated += targetResult.ssmSummary().inventoryComponentsUpdated();
+                    findingsGenerated += targetResult.ssmSummary().findingsGenerated();
                     assetsMarkedInactive += targetResult.ingestionResult().assetsMarkedInactive();
+                    if (hasText(targetResult.visibleMessage())) {
+                        visibleMessages.add(targetResult.visibleMessage());
+                    }
                     targetResults.add(targetResult.metadata());
                     updateRunProgress(runId, totalFetched, "ingesting-targets", triggerMode, config, targetResults);
                 }
@@ -241,8 +257,18 @@ public class AwsDiscoverySyncService {
                         configId,
                         runId,
                         new IngestionResult(assetsUpserted, componentsCreated, componentsUpdated, assetsMarkedInactive),
+                        new SsmInventoryIngestionSummary(
+                                0,
+                                softwareInstancesCreated,
+                                softwareInstancesUpdated,
+                                componentsCreated,
+                                componentsUpdated,
+                                findingsGenerated
+                        ),
                         totalFetched,
                         recordsFailed,
+                        warningTargets,
+                        summarizeVisibleMessages(visibleMessages),
                         triggerMode,
                         config,
                         targetResults
@@ -274,7 +300,29 @@ public class AwsDiscoverySyncService {
                     : AwsCredentialProvider.from(runtimeConfig, target);
             List<String> regions = parseRegions(defaultIfBlank(target.getRegionsJson(), config.getRegionsJson()));
             List<String> resourceTypes = parseResourceTypes(defaultIfBlank(target.getResourceTypesJson(), config.getResourceTypesJson()));
-            List<AwsResourceRecord> allRecords = fetchTargetRecords(creds, regions);
+            AwsEc2FetchResult fetchResult = fetchTargetRecords(creds, regions);
+            List<AwsResourceRecord> allRecords = fetchResult.records();
+            String regionErrorSummary = summarizeRegionErrors(fetchResult.regionErrors());
+
+            if (allRecords.isEmpty() && !regions.isEmpty() && fetchResult.regionErrors().size() == regions.size()) {
+                String errorMessage = appendExternalIdHint(
+                        "AWS target discovery failed for all configured regions. " + regionErrorSummary,
+                        target.getRoleArn(),
+                        target.getExternalId()
+                );
+                metadata.put("status", "failed");
+                metadata.put("error", errorMessage);
+                metadata.put("regionErrors", fetchResult.regionErrors());
+                return new TargetRunResult(
+                        0,
+                        true,
+                        false,
+                        new IngestionResult(0, 0, 0, 0),
+                        new SsmInventoryIngestionSummary(0, 0, 0, 0, 0, 0),
+                        metadata,
+                        errorMessage
+                );
+            }
 
             LOG.info("AWS Discovery run {} target {} fetched {} records", runId, accountId, allRecords.size());
             IngestionResult result = awsResourceIngestionService.ingestAll(
@@ -283,18 +331,30 @@ public class AwsDiscoverySyncService {
             List<AwsResourceRecord> ec2Records = allRecords.stream()
                     .filter(r -> "EC2".equalsIgnoreCase(r.resourceType()))
                     .toList();
+            SsmInventoryIngestionSummary ssmSummary = new SsmInventoryIngestionSummary(0, 0, 0, 0, 0, 0);
             if (!ec2Records.isEmpty()) {
-                awsResourceIngestionService.ingestEc2SsmPackages(
+                ssmSummary = awsResourceIngestionService.ingestEc2SsmPackages(
                         ec2Records, creds, regions, config.getTenant(), accountId);
             }
 
             Instant completedAt = Instant.now();
-            metadata.put("status", "completed");
+            boolean warning = !fetchResult.regionErrors().isEmpty();
+            metadata.put("status", warning ? "completed_with_errors" : "completed");
             metadata.put("recordsFetched", allRecords.size());
+            metadata.put("assetsIngested", result.assetsUpserted());
             metadata.put("assetsUpserted", result.assetsUpserted());
-            metadata.put("inventoryComponentsCreated", result.inventoryComponentsCreated());
-            metadata.put("inventoryComponentsUpdated", result.inventoryComponentsUpdated());
+            metadata.put("ssmAssetsIngested", ssmSummary.assetsIngested());
+            metadata.put("softwareInstancesCreated", ssmSummary.softwareInstancesCreated());
+            metadata.put("softwareInstancesUpdated", ssmSummary.softwareInstancesUpdated());
+            metadata.put("componentsIngested", ssmSummary.inventoryComponentsCreated() + ssmSummary.inventoryComponentsUpdated());
+            metadata.put("inventoryComponentsCreated", result.inventoryComponentsCreated() + ssmSummary.inventoryComponentsCreated());
+            metadata.put("inventoryComponentsUpdated", result.inventoryComponentsUpdated() + ssmSummary.inventoryComponentsUpdated());
+            metadata.put("findingsGenerated", ssmSummary.findingsGenerated());
             metadata.put("assetsMarkedInactive", result.assetsMarkedInactive());
+            if (warning) {
+                metadata.put("regionErrors", fetchResult.regionErrors());
+                metadata.put("warning", regionErrorSummary);
+            }
             if (target.getId() != null) {
                 transactionTemplate.executeWithoutResult(status -> {
                     awsDiscoveryTargetRepository.findById(target.getId()).ifPresent(existing -> {
@@ -305,16 +365,24 @@ public class AwsDiscoverySyncService {
                     });
                 });
             }
-            return new TargetRunResult(allRecords.size(), false, result, metadata);
+            return new TargetRunResult(allRecords.size(), false, warning, result, ssmSummary, metadata, warning ? regionErrorSummary : null);
         } catch (Exception e) {
             LOG.warn("AWS Discovery run {} target {} failed: {}", runId, accountId, e.getMessage(), e);
             metadata.put("status", "failed");
             metadata.put("error", e.getMessage());
-            return new TargetRunResult(0, true, new IngestionResult(0, 0, 0, 0), metadata);
+            return new TargetRunResult(
+                    0,
+                    true,
+                    false,
+                    new IngestionResult(0, 0, 0, 0),
+                    new SsmInventoryIngestionSummary(0, 0, 0, 0, 0, 0),
+                    metadata,
+                    e.getMessage()
+            );
         }
     }
 
-    private List<AwsResourceRecord> fetchTargetRecords(
+    private AwsEc2FetchResult fetchTargetRecords(
             AwsCredentialsProvider creds,
             List<String> regions
     ) {
@@ -322,7 +390,7 @@ public class AwsDiscoverySyncService {
             return awsDiscoveryClient.fetchEc2Instances(creds, regions);
         } catch (Exception e) {
             LOG.warn("AWS Discovery: error fetching EC2 resources: {}", e.getMessage(), e);
-            return List.of();
+            return new AwsEc2FetchResult(List.of(), Map.of("global", e.getMessage()));
         }
     }
 
@@ -368,32 +436,48 @@ public class AwsDiscoverySyncService {
             UUID configId,
             UUID runId,
             IngestionResult result,
+            SsmInventoryIngestionSummary ssmSummary,
             int fetched,
             int failedTargets,
+            int warningTargets,
+            String visibleMessage,
             String triggerMode,
             AwsDiscoveryConfig config,
             List<Map<String, Object>> targetResults
     ) {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
-            run.setStatus(failedTargets > 0 ? "completed_with_errors" : "completed");
+            boolean allTargetsFailed = !targetResults.isEmpty() && failedTargets == targetResults.size() && fetched == 0;
+            boolean hasWarnings = failedTargets > 0 || warningTargets > 0;
+            run.setStatus(allTargetsFailed ? "failed" : hasWarnings ? "completed_with_errors" : "completed");
             run.setRecordsFetched(fetched);
-            run.setRecordsInserted(result.assetsUpserted() + result.inventoryComponentsCreated());
-            run.setRecordsUpdated(result.inventoryComponentsUpdated());
+            run.setRecordsInserted(result.assetsUpserted() + ssmSummary.inventoryComponentsCreated());
+            run.setRecordsUpdated(ssmSummary.inventoryComponentsUpdated());
             run.setRecordsFailed(failedTargets);
-            run.setErrorMessage(failedTargets > 0 ? failedTargets + " AWS discovery target(s) failed" : null);
+            run.setErrorMessage(hasText(visibleMessage)
+                    ? visibleMessage
+                    : failedTargets > 0 ? failedTargets + " AWS discovery target(s) failed"
+                    : warningTargets > 0 ? warningTargets + " AWS discovery target(s) completed with region errors"
+                    : null);
             run.setCompletedAt(Instant.now());
 
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("triggerMode", triggerMode);
             metadata.put("sourceSystem", "aws");
             metadata.put("awsAccountId", defaultIfBlank(config.getAwsAccountId(), "unknown"));
+            metadata.put("assetsIngested", result.assetsUpserted());
             metadata.put("assetsUpserted", result.assetsUpserted());
-            metadata.put("inventoryComponentsCreated", result.inventoryComponentsCreated());
-            metadata.put("inventoryComponentsUpdated", result.inventoryComponentsUpdated());
+            metadata.put("ssmAssetsIngested", ssmSummary.assetsIngested());
+            metadata.put("softwareInstancesCreated", ssmSummary.softwareInstancesCreated());
+            metadata.put("softwareInstancesUpdated", ssmSummary.softwareInstancesUpdated());
+            metadata.put("componentsIngested", ssmSummary.inventoryComponentsCreated() + ssmSummary.inventoryComponentsUpdated());
+            metadata.put("inventoryComponentsCreated", ssmSummary.inventoryComponentsCreated());
+            metadata.put("inventoryComponentsUpdated", ssmSummary.inventoryComponentsUpdated());
+            metadata.put("findingsGenerated", ssmSummary.findingsGenerated());
             metadata.put("assetsMarkedInactive", result.assetsMarkedInactive());
             metadata.put("totalRecordsFetched", fetched);
             metadata.put("failedTargets", failedTargets);
+            metadata.put("warningTargets", warningTargets);
             metadata.put("targets", targetResults);
             run.setMetadataJson(toJson(metadata));
 
@@ -512,6 +596,38 @@ public class AwsDiscoverySyncService {
         return value != null && !value.isBlank();
     }
 
+    private String summarizeRegionErrors(Map<String, String> regionErrors) {
+        if (regionErrors == null || regionErrors.isEmpty()) {
+            return null;
+        }
+        return "Region errors: " + regionErrors.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .toList();
+    }
+
+    private String summarizeVisibleMessages(List<String> messages) {
+        if (messages == null) {
+            return null;
+        }
+        return messages.stream()
+                .filter(this::hasText)
+                .distinct()
+                .limit(3)
+                .reduce((left, right) -> left + " | " + right)
+                .orElse(null);
+    }
+
+    private String appendExternalIdHint(String message, String roleArn, String externalId) {
+        if (!hasText(roleArn) || hasText(externalId)) {
+            return message;
+        }
+        String lower = message == null ? "" : message.toLowerCase(java.util.Locale.ROOT);
+        if (!lower.contains("assumerole") && !lower.contains("accessdenied") && !lower.contains("not authorized")) {
+            return message;
+        }
+        return message + " Role may require External ID; configure it in the connector if the trust policy uses sts:ExternalId.";
+    }
+
     private record ClaimedRun(
             UUID configId,
             UUID runId,
@@ -523,7 +639,10 @@ public class AwsDiscoverySyncService {
     private record TargetRunResult(
             int recordsFetched,
             boolean failed,
+            boolean warning,
             IngestionResult ingestionResult,
-            Map<String, Object> metadata
+            SsmInventoryIngestionSummary ssmSummary,
+            Map<String, Object> metadata,
+            String visibleMessage
     ) {}
 }
