@@ -341,10 +341,12 @@ export type AwsDiscoveryTargetRequest = {
 };
 
 export type AwsConnectionTestResponse = {
-  status: 'SUCCESS' | 'FAILED';
+  status: 'SUCCESS' | 'SUCCESS_WITH_WARNINGS' | 'FAILED';
   message: string;
   resolvedAccountId?: string;
   reachableRegions: string[];
+  warnings: string[];
+  regionErrors: Record<string, string>;
   testedAt: string;
 };
 

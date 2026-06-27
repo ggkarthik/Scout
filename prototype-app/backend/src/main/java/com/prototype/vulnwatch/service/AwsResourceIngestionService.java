@@ -15,6 +15,7 @@ import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.AwsDiscoveryConfig;
 import com.prototype.vulnwatch.domain.Ci;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.CmdbInventorySyncResponse;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.CiRepository;
 import jakarta.persistence.EntityManager;
@@ -75,6 +76,15 @@ public class AwsResourceIngestionService {
             int inventoryComponentsCreated,
             int inventoryComponentsUpdated,
             int assetsMarkedInactive
+    ) {}
+
+    public record SsmInventoryIngestionSummary(
+            int assetsIngested,
+            int softwareInstancesCreated,
+            int softwareInstancesUpdated,
+            int inventoryComponentsCreated,
+            int inventoryComponentsUpdated,
+            int findingsGenerated
     ) {}
 
     // ── Main entry point ────────────────────────────────────────────────────────────────────────
@@ -229,13 +239,20 @@ public class AwsResourceIngestionService {
      * enabling full CPE-based vulnerability correlation for those instances.
      */
     @Transactional
-    public void ingestEc2SsmPackages(
+    public SsmInventoryIngestionSummary ingestEc2SsmPackages(
             List<AwsResourceRecord> ec2Records,
             AwsCredentialsProvider creds,
             List<String> regions,
             Tenant tenant,
             String awsAccountId
     ) {
+        int assetsIngested = 0;
+        int softwareInstancesCreated = 0;
+        int softwareInstancesUpdated = 0;
+        int inventoryComponentsCreated = 0;
+        int inventoryComponentsUpdated = 0;
+        int findingsGenerated = 0;
+
         for (String region : regions) {
             try (SsmClient ssm = SsmClient.builder()
                     .region(Region.of(region))
@@ -257,7 +274,7 @@ public class AwsResourceIngestionService {
                         if (packageFetch.rows().isEmpty()) continue;
 
                         List<Map<String, String>> discoveryRows = List.of(); // SSM has no separate discovery model
-                        cmdbIngestionService.ingestRows(
+                        CmdbInventorySyncResponse response = cmdbIngestionService.ingestRows(
                                 tenant,
                                 "aws",
                                 packageFetch.rows(),
@@ -272,6 +289,12 @@ public class AwsResourceIngestionService {
                                         null
                                 )
                         );
+                        assetsIngested += response.assetsIngested();
+                        softwareInstancesCreated += response.softwareInstancesCreated();
+                        softwareInstancesUpdated += response.softwareInstancesUpdated();
+                        inventoryComponentsCreated += response.inventoryComponentsCreated();
+                        inventoryComponentsUpdated += response.inventoryComponentsUpdated();
+                        findingsGenerated += response.findingsRecomputed();
                         LOG.debug("SSM package ingestion complete for EC2 instance {}", instanceId);
                     } catch (Exception e) {
                         LOG.warn("SSM package ingestion failed for EC2 {}: {}", instanceId, e.getMessage());
@@ -281,6 +304,14 @@ public class AwsResourceIngestionService {
                 LOG.warn("SSM client setup failed for region {}: {}", region, e.getMessage());
             }
         }
+        return new SsmInventoryIngestionSummary(
+                assetsIngested,
+                softwareInstancesCreated,
+                softwareInstancesUpdated,
+                inventoryComponentsCreated,
+                inventoryComponentsUpdated,
+                findingsGenerated
+        );
     }
 
     private InstanceInformation describeSsmInstance(SsmClient ssm, String instanceId) {

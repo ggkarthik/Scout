@@ -63,6 +63,7 @@ class InventoryConnectorTenantScopingTest {
 
         AwsDiscoveryConfigService service = new AwsDiscoveryConfigService(
                 awsDiscoveryConfigRepository,
+                awsDiscoveryTargetRepository,
                 awsDiscoveryClient,
                 new ObjectMapper(),
                 tenantQuotaService,
@@ -129,7 +130,8 @@ class InventoryConnectorTenantScopingTest {
                 assetRepository,
                 awsDiscoveryClient,
                 new ObjectMapper(),
-                tenantQuotaService
+                tenantQuotaService,
+                credentialEncryptionService
         );
 
         when(awsDiscoveryTargetRepository.findByIdAndTenant_Id(targetId, tenant.getId()))
@@ -161,7 +163,8 @@ class InventoryConnectorTenantScopingTest {
                 assetRepository,
                 awsDiscoveryClient,
                 new ObjectMapper(),
-                tenantQuotaService
+                tenantQuotaService,
+                credentialEncryptionService
         );
 
         when(awsDiscoveryTargetRepository.findByIdAndTenant_Id(targetId, tenant.getId()))
@@ -182,7 +185,8 @@ class InventoryConnectorTenantScopingTest {
                 assetRepository,
                 awsDiscoveryClient,
                 new ObjectMapper(),
-                tenantQuotaService
+                tenantQuotaService,
+                credentialEncryptionService
         );
 
         when(awsDiscoveryTargetRepository.findByIdAndTenant_Id(targetId, tenant.getId()))
