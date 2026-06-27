@@ -12,7 +12,9 @@ type InventoryRunMetadata = {
   assetType?: string;
   assetsDiscovered?: number;
   assetsIngested?: number;
+  assetsUpserted?: number;
   assetsFailed?: number;
+  assetsMarkedInactive?: number;
   componentsIngested?: number;
   findingsGenerated?: number;
   triggerMode?: string;
@@ -26,6 +28,7 @@ type InventoryRunMetadata = {
   ciAliasesCreated?: number;
   softwareInstancesCreated?: number;
   softwareInstancesUpdated?: number;
+  ssmAssetsIngested?: number;
   inventoryComponentsCreated?: number;
   inventoryComponentsUpdated?: number;
   message?: string;
@@ -88,6 +91,7 @@ function formatSourceSystem(value?: string): string {
 
 function formatSyncType(value: string): string {
   const normalized = value.trim().toUpperCase();
+  if (normalized === 'AWS_DISCOVERY') return 'AWS Cloud Discovery';
   if (normalized === 'SERVICENOW_CMDB') return 'ServiceNow CMDB Live Sync';
   if (normalized === 'GITHUB_REPOSITORY_SBOM') return 'GitHub Repository SBOM';
   if (normalized === 'GITHUB_GHCR_SBOM') return 'GitHub GHCR SBOM';
@@ -104,7 +108,7 @@ function formatRunStatus(value: string): string {
 function runStatusClass(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (normalized === 'FAILED') return 'status-failure';
-  if (normalized === 'PARTIAL_SUCCESS') return 'status-warning';
+  if (normalized === 'PARTIAL_SUCCESS' || normalized === 'COMPLETED_WITH_ERRORS' || normalized === 'SUCCESS_WITH_WARNINGS') return 'status-warning';
   if (normalized === 'COMPLETED') return 'status-success';
   if (normalized === 'RUNNING' || normalized === 'STARTED') return 'status-open';
   if (normalized === 'QUEUED') return 'status-open';
@@ -116,7 +120,7 @@ function formatCount(value?: number): string {
 }
 
 function readAssetsIngested(metadata: InventoryRunMetadata): number | undefined {
-  return metadata.assetsIngested;
+  return metadata.assetsIngested ?? metadata.assetsUpserted;
 }
 
 function readComponentsIngested(run: SyncRun, metadata: InventoryRunMetadata): number | undefined {
@@ -197,6 +201,8 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
               {detailLine('Table', metadata.tableName)}
               {detailLine('Assets discovered', metadata.assetsDiscovered)}
               {detailLine('Assets ingested', metadata.assetsIngested)}
+              {detailLine('Assets upserted', metadata.assetsUpserted)}
+              {detailLine('Assets marked inactive', metadata.assetsMarkedInactive)}
               {detailLine('Assets failed', metadata.assetsFailed)}
               {detailLine('Fetched', run.recordsFetched)}
               {detailLine('Failed', run.recordsFailed ?? 0)}
@@ -207,6 +213,7 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
               {detailLine('Unmatched discovery', metadata.unmatchedDiscoveryRows)}
               {detailLine('Hosts created', metadata.ciCreated)}
               {detailLine('Aliases created', metadata.ciAliasesCreated)}
+              {detailLine('SSM assets ingested', metadata.ssmAssetsIngested)}
               {detailLine('Software created', metadata.softwareInstancesCreated)}
               {detailLine('Software updated', metadata.softwareInstancesUpdated)}
               {detailLine('Components created', metadata.inventoryComponentsCreated)}

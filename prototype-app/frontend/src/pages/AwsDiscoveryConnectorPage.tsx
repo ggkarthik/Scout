@@ -30,6 +30,26 @@ function parseRegions(json?: string): string[] {
   try { return JSON.parse(json) as string[]; } catch { return ['us-east-1']; }
 }
 
+function isWarningStatus(status?: string): boolean {
+  return status?.trim().toUpperCase() === 'SUCCESS_WITH_WARNINGS';
+}
+
+function isFailedStatus(status?: string): boolean {
+  return status?.trim().toUpperCase() === 'FAILED';
+}
+
+function testResultTone(status?: string): 'success' | 'warning' | 'error' {
+  if (isFailedStatus(status)) return 'error';
+  if (isWarningStatus(status)) return 'warning';
+  return 'success';
+}
+
+function testResultLabel(status?: string): string {
+  if (isFailedStatus(status)) return 'Connection failed';
+  if (isWarningStatus(status)) return 'Connection succeeded with warnings';
+  return 'Connection successful';
+}
+
 // ── Default form ──────────────────────────────────────────────────────────────
 
 function defaultForm(): AwsDiscoveryConfigRequest {
@@ -98,6 +118,7 @@ export function AwsDiscoveryConnectorPage() {
   const targetsQuery = useAwsDiscoveryTargetsQuery(Boolean(config?.configured));
   const targets = targetsQuery.data ?? [];
 
+  const [activeTab, setActiveTab] = React.useState<'connection' | 'accounts'>('connection');
   const [form, setForm] = React.useState<AwsDiscoveryConfigRequest>(defaultForm);
   const [selectedRegions, setSelectedRegions] = React.useState<string[]>(['us-east-1']);
   const [showSecret, setShowSecret] = React.useState(false);
@@ -281,6 +302,10 @@ export function AwsDiscoveryConnectorPage() {
     { label: 'Daily', minutes: 1440 },
     { label: 'Weekly', minutes: 10080 }
   ];
+  const roleConfigured = form.authType === 'CROSS_ACCOUNT_ROLE' || Boolean(form.crossAccountRoleArn?.trim());
+  const targetRoleConfigured = Boolean(targetForm.roleArn?.trim());
+  const showExternalIdWarning = roleConfigured && !form.externalId?.trim();
+  const showTargetExternalIdWarning = targetRoleConfigured && !targetForm.externalId?.trim();
 
   return (
     <section className="panel">
@@ -305,6 +330,18 @@ export function AwsDiscoveryConnectorPage() {
         </div>
       )}
 
+      {config?.lastTestStatus && (
+        <div className={`notice ${testResultTone(config.lastTestStatus)}`}>
+          <strong>Last AWS test: {config.lastTestStatus}</strong>
+          {config.lastTestedAt && ` · ${formatTimestamp(config.lastTestedAt)}`}
+          {config.lastTestMessage && (
+            <div className="panel-caption" style={{ marginTop: 6, color: 'inherit' }}>
+              {config.lastTestMessage}
+            </div>
+          )}
+        </div>
+      )}
+
       {!config?.configured && (
         <div className="notice">
           This connector is not yet configured. Select an authentication method and save.
@@ -313,339 +350,435 @@ export function AwsDiscoveryConnectorPage() {
 
       {displayError && <div className="notice error">{displayError}</div>}
 
-      <div className="form-section">
-        <h4 className="form-section-title">Accounts</h4>
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Role</th>
-                <th>Regions</th>
-                <th>Status</th>
-                <th>SSM Coverage</th>
-                <th>Last Sync</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {targets.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="empty-state">No AWS accounts configured yet.</td>
-                </tr>
-              )}
-              {targets.map((target) => (
-                <tr key={target.id}>
-                  <td>
-                    <strong>{target.accountName || target.accountId || 'AWS Account'}</strong>
-                    <span className="panel-caption" style={{ display: 'block' }}>{target.accountId || 'Account ID unresolved'}</span>
-                  </td>
-                  <td><span className="panel-caption">{target.roleArn || 'Connector credentials'}</span></td>
-                  <td><span className="panel-caption">{parseRegions(target.regionsJson).join(', ')}</span></td>
-                  <td>
-                    <span className={target.enabled ? 'status-pill status-success' : 'status-pill'}>
-                      {target.enabled ? 'Enabled' : 'Disabled'}
+      {/* ── Tab navigation ── */}
+      <div className="connector-tab-bar">
+        <button
+          type="button"
+          className={`connector-tab-btn${activeTab === 'connection' ? ' connector-tab-btn--active' : ''}`}
+          onClick={() => setActiveTab('connection')}
+        >
+          Connection
+        </button>
+        <button
+          type="button"
+          className={`connector-tab-btn${activeTab === 'accounts' ? ' connector-tab-btn--active' : ''}`}
+          onClick={() => setActiveTab('accounts')}
+        >
+          Multi-Account
+        </button>
+      </div>
+
+      {/* ── Tab 1: Connection ── */}
+      {activeTab === 'connection' && (
+        <>
+          {/* Authentication */}
+          <div className="form-section">
+            <h4 className="form-section-title">Authentication</h4>
+            <div className="form-grid">
+              <label>
+                <span>
+                  Auth Method <span className="sn-required">*</span>{' '}
+                  <InfoTooltip text="How VulnWatch authenticates to AWS. Instance Metadata uses the EC2/ECS IAM role. Access Key uses static credentials. Cross-Account Role assumes a role in another account." />
+                </span>
+                <select
+                  value={form.authType}
+                  onChange={(e) => updateField('authType', e.target.value as AwsAuthType)}
+                >
+                  <option value="INSTANCE_METADATA">Instance Metadata (IAM Role)</option>
+                  <option value="ACCESS_KEY">Access Key ID + Secret</option>
+                  <option value="CROSS_ACCOUNT_ROLE">Cross-Account IAM Role</option>
+                </select>
+              </label>
+
+              {form.authType === 'ACCESS_KEY' && (
+                <>
+                  <label>
+                    <span>
+                      Access Key ID <span className="sn-required">*</span>
                     </span>
-                    {target.lastTestStatus && <span className="panel-caption" style={{ display: 'block' }}>{target.lastTestStatus}</span>}
-                  </td>
-                  <td>
-                    <span>{target.softwareInventoryHostCount}/{target.hostCount} with inventory</span>
-                    <span className="panel-caption" style={{ display: 'block' }}>
-                      SSM {target.ssmManagedHostCount}, missing IAM {target.missingIamInstanceProfileCount}
+                    <input
+                      type="text"
+                      value={form.accessKeyId ?? ''}
+                      onChange={(e) => updateField('accessKeyId', e.target.value)}
+                      placeholder="AKIAIOSFODNN7EXAMPLE"
+                    />
+                  </label>
+                  <label>
+                    <span>
+                      Secret Access Key <span className="sn-required">*</span>{' '}
+                      <InfoTooltip text={config?.hasCredential ? 'A secret is saved. Enter a new value only to rotate it.' : 'Required to authenticate API calls.'} />
                     </span>
-                  </td>
-                  <td>{formatTimestamp(target.lastSyncAt)}</td>
-                  <td>
-                    <div className="button-row">
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => editTarget(target)} disabled={!canManageConnector}>Edit</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void testTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Test</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void syncTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Sync</button>
-                      <button type="button" className="btn btn-secondary btn-inline" onClick={() => void deleteTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Delete</button>
+                    <div className="secure-input-row">
+                      <input
+                        type={showSecret ? 'text' : 'password'}
+                        value={form.credentialSecret ?? ''}
+                        onChange={(e) => updateField('credentialSecret', e.target.value)}
+                        placeholder={config?.hasCredential ? 'Leave blank to keep saved secret' : 'Enter secret access key'}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-inline"
+                        onClick={() => setShowSecret((v) => !v)}
+                        aria-label={showSecret ? 'Hide secret' : 'Show secret'}
+                      >
+                        {showSecret ? 'Hide' : 'Show'}
+                      </button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    {config?.hasCredential && (
+                      <span className="sn-saved-badge">✓ Secret saved — leave blank to keep it</span>
+                    )}
+                  </label>
+                </>
+              )}
 
-        <div className="form-grid" style={{ marginTop: 16 }}>
-          <label>
-            <span>Account name</span>
-            <input
-              type="text"
-              value={targetForm.accountName ?? ''}
-              onChange={(e) => setTargetForm((cur) => ({ ...cur, accountName: e.target.value }))}
-              placeholder="Production shared services"
-            />
-          </label>
-          <label>
-            <span>Account ID</span>
-            <input
-              type="text"
-              value={targetForm.accountId ?? ''}
-              onChange={(e) => setTargetForm((cur) => ({ ...cur, accountId: e.target.value }))}
-              placeholder="123456789012"
-            />
-          </label>
-          <label>
-            <span>Role ARN</span>
-            <input
-              type="text"
-              value={targetForm.roleArn ?? ''}
-              onChange={(e) => setTargetForm((cur) => ({ ...cur, roleArn: e.target.value }))}
-              placeholder="arn:aws:iam::123456789012:role/ScoutDiscoveryReadOnlyRole"
-            />
-          </label>
-          <label>
-            <span>External ID</span>
-            <input
-              type="text"
-              value={targetForm.externalId ?? ''}
-              onChange={(e) => setTargetForm((cur) => ({ ...cur, externalId: e.target.value }))}
-              placeholder="optional-external-id"
-            />
-          </label>
-          <label>
-            <span>Regions JSON</span>
-            <input
-              type="text"
-              value={targetForm.regionsJson ?? ''}
-              onChange={(e) => setTargetForm((cur) => ({ ...cur, regionsJson: e.target.value }))}
-              placeholder='["us-east-1"]'
-            />
-          </label>
-        </div>
-        <label className="sn-toggle-row" style={{ marginTop: 8 }}>
-          <input
-            type="checkbox"
-            checked={targetForm.enabled ?? true}
-            onChange={(e) => setTargetForm((cur) => ({ ...cur, enabled: e.target.checked }))}
-          />
-          <span>Enable this account target</span>
-        </label>
-        <div className="button-row section-actions">
-          <button type="button" className="btn btn-primary" onClick={() => void saveTarget()} disabled={Boolean(targetBusy) || saving}>
-            {targetBusy === 'save' ? 'Saving...' : editingTargetId ? 'Update Account' : 'Add Account'}
-          </button>
-          {editingTargetId && (
-            <button type="button" className="btn btn-secondary" onClick={resetTargetForm} disabled={Boolean(targetBusy)}>
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
+              {form.authType === 'CROSS_ACCOUNT_ROLE' && (
+                <>
+                  <label>
+                    <span>
+                      Cross-Account Role ARN <span className="sn-required">*</span>{' '}
+                      <InfoTooltip text="The ARN of the IAM role in the target AWS account that VulnWatch should assume." />
+                    </span>
+                    <input
+                      type="text"
+                      value={form.crossAccountRoleArn ?? ''}
+                      onChange={(e) => updateField('crossAccountRoleArn', e.target.value)}
+                      placeholder="arn:aws:iam::123456789012:role/VulnWatchDiscoveryRole"
+                    />
+                  </label>
+                  <label>
+                    <span>
+                      External ID{' '}
+                      <InfoTooltip text="Optional in AWS generally, but required if the role trust policy uses sts:ExternalId. The value must match exactly." />
+                    </span>
+                    <input
+                      type="text"
+                      value={form.externalId ?? ''}
+                      onChange={(e) => updateField('externalId', e.target.value)}
+                      placeholder="vulnwatch-external-id"
+                    />
+                  </label>
+                </>
+              )}
 
-      {/* ── SECTION 1: Authentication ── */}
-      <div className="form-section">
-        <h4 className="form-section-title">Authentication</h4>
-        <div className="form-grid">
-          <label>
-            <span>
-              Auth Method <span className="sn-required">*</span>{' '}
-              <InfoTooltip text="How VulnWatch authenticates to AWS. Instance Metadata uses the EC2/ECS IAM role. Access Key uses static credentials. Cross-Account Role assumes a role in another account." />
-            </span>
-            <select
-              value={form.authType}
-              onChange={(e) => updateField('authType', e.target.value as AwsAuthType)}
-            >
-              <option value="INSTANCE_METADATA">Instance Metadata (IAM Role)</option>
-              <option value="ACCESS_KEY">Access Key ID + Secret</option>
-              <option value="CROSS_ACCOUNT_ROLE">Cross-Account IAM Role</option>
-            </select>
-          </label>
-
-          {form.authType === 'ACCESS_KEY' && (
-            <>
-              <label>
-                <span>
-                  Access Key ID <span className="sn-required">*</span>
-                </span>
-                <input
-                  type="text"
-                  value={form.accessKeyId ?? ''}
-                  onChange={(e) => updateField('accessKeyId', e.target.value)}
-                  placeholder="AKIAIOSFODNN7EXAMPLE"
-                />
-              </label>
-              <label>
-                <span>
-                  Secret Access Key <span className="sn-required">*</span>{' '}
-                  <InfoTooltip text={config?.hasCredential ? 'A secret is saved. Enter a new value only to rotate it.' : 'Required to authenticate API calls.'} />
-                </span>
-                <div className="secure-input-row">
-                  <input
-                    type={showSecret ? 'text' : 'password'}
-                    value={form.credentialSecret ?? ''}
-                    onChange={(e) => updateField('credentialSecret', e.target.value)}
-                    placeholder={config?.hasCredential ? 'Leave blank to keep saved secret' : 'Enter secret access key'}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-inline"
-                    onClick={() => setShowSecret((v) => !v)}
-                    aria-label={showSecret ? 'Hide secret' : 'Show secret'}
-                  >
-                    {showSecret ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-                {config?.hasCredential && (
-                  <span className="sn-saved-badge">✓ Secret saved — leave blank to keep it</span>
-                )}
-              </label>
-            </>
-          )}
-
-          {form.authType === 'CROSS_ACCOUNT_ROLE' && (
-            <>
-              <label>
-                <span>
-                  Cross-Account Role ARN <span className="sn-required">*</span>{' '}
-                  <InfoTooltip text="The ARN of the IAM role in the target AWS account that VulnWatch should assume." />
-                </span>
-                <input
-                  type="text"
-                  value={form.crossAccountRoleArn ?? ''}
-                  onChange={(e) => updateField('crossAccountRoleArn', e.target.value)}
-                  placeholder="arn:aws:iam::123456789012:role/VulnWatchDiscoveryRole"
-                />
-              </label>
-              <label>
-                <span>
-                  External ID{' '}
-                  <InfoTooltip text="Optional external ID for the AssumeRole call. Recommended for cross-account trust." />
-                </span>
-                <input
-                  type="text"
-                  value={form.externalId ?? ''}
-                  onChange={(e) => updateField('externalId', e.target.value)}
-                  placeholder="vulnwatch-external-id"
-                />
-              </label>
-            </>
-          )}
-
-          {config?.awsAccountId && (
-            <label>
-              <span>Resolved AWS Account ID <InfoTooltip text="Populated automatically after a successful Test Connection." /></span>
-              <input type="text" value={config.awsAccountId} readOnly />
-            </label>
-          )}
-        </div>
-      </div>
-
-      {/* ── SECTION 2: Regions ── */}
-      <div className="form-section">
-        <h4 className="form-section-title">Regions</h4>
-        <fieldset className="aws-region-fieldset">
-          <legend className="aws-region-legend">
-            AWS Regions <span className="sn-required">*</span>{' '}
-            <InfoTooltip text="Select one or more AWS regions to discover resources in." />
-          </legend>
-          <div className="aws-region-actions">
-            <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([...AWS_REGIONS])}>Select all</button>
-            <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([AWS_REGIONS[0]])}>Clear</button>
+              {config?.awsAccountId && (
+                <label>
+                  <span>Resolved AWS Account ID <InfoTooltip text="Populated automatically after a successful Test Connection." /></span>
+                  <input type="text" value={config.awsAccountId} readOnly />
+                </label>
+              )}
+            </div>
+            {showExternalIdWarning && (
+              <div className="notice warning" style={{ marginTop: 12 }}>
+                <strong>External ID may be required.</strong> If the role trust policy uses <code>sts:ExternalId</code>, this value must be configured here and match exactly or <code>AssumeRole</code> will fail.
+              </div>
+            )}
           </div>
-          <div className="aws-region-grid">
-            {AWS_REGIONS.map((region) => (
-              <label key={region} className="aws-region-checkbox">
+
+          {/* Regions */}
+          <div className="form-section">
+            <h4 className="form-section-title">Regions</h4>
+            <fieldset className="aws-region-fieldset">
+              <legend className="aws-region-legend">
+                AWS Regions <span className="sn-required">*</span>{' '}
+                <InfoTooltip text="Select one or more AWS regions to discover resources in." />
+              </legend>
+              <div className="aws-region-actions">
+                <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([...AWS_REGIONS])}>Select all</button>
+                <button type="button" className="btn btn-secondary btn-inline" onClick={() => setSelectedRegions([AWS_REGIONS[0]])}>Clear</button>
+              </div>
+              <div className="aws-region-grid">
+                {AWS_REGIONS.map((region) => (
+                  <label key={region} className="aws-region-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedRegions.includes(region)}
+                      onChange={(e) => {
+                        setSelectedRegions((prev) => {
+                          if (e.target.checked) return [...prev, region];
+                          const next = prev.filter((r) => r !== region);
+                          return next.length > 0 ? next : prev;
+                        });
+                      }}
+                    />
+                    <span>{region}</span>
+                  </label>
+                ))}
+              </div>
+              <span className="panel-caption" style={{ marginTop: 4, display: 'block' }}>
+                Selected: {selectedRegions.join(', ') || '—'}
+              </span>
+            </fieldset>
+          </div>
+
+          {/* Sync Settings */}
+          <div className="form-section">
+            <h4 className="form-section-title">Sync Settings</h4>
+            <div className="sn-toggle-group">
+              <label className="sn-toggle-row">
                 <input
                   type="checkbox"
-                  checked={selectedRegions.includes(region)}
-                  onChange={(e) => {
-                    setSelectedRegions((prev) => {
-                      if (e.target.checked) return [...prev, region];
-                      const next = prev.filter((r) => r !== region);
-                      return next.length > 0 ? next : prev;
-                    });
-                  }}
+                  checked={form.autoSyncEnabled ?? false}
+                  onChange={(e) => updateField('autoSyncEnabled', e.target.checked)}
                 />
-                <span>{region}</span>
+                <span>Enable scheduled sync</span>
+                <InfoTooltip text="Automatically discovers AWS resources on the configured interval." />
               </label>
-            ))}
+            </div>
+            {form.autoSyncEnabled && (
+              <div className="form-grid sn-sync-interval-grid" style={{ marginTop: 8 }}>
+                <label>
+                  <span>Sync Interval <InfoTooltip text="How frequently the scheduled sync runs." /></span>
+                  <select
+                    value={form.intervalMinutes ?? 1440}
+                    onChange={(e) => updateField('intervalMinutes', Number(e.target.value))}
+                  >
+                    {intervalOptions.map(({ label, minutes }) => (
+                      <option key={minutes} value={minutes}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
           </div>
-          <span className="panel-caption" style={{ marginTop: 4, display: 'block' }}>
-            Selected: {selectedRegions.join(', ') || '—'}
-          </span>
-        </fieldset>
-      </div>
 
-      {/* ── SECTION 4: Sync Settings ── */}
-      <div className="form-section">
-        <h4 className="form-section-title">Sync Settings</h4>
-        <div className="sn-toggle-group">
-          <label className="sn-toggle-row">
-            <input
-              type="checkbox"
-              checked={form.autoSyncEnabled ?? false}
-              onChange={(e) => updateField('autoSyncEnabled', e.target.checked)}
-            />
-            <span>Enable scheduled sync</span>
-            <InfoTooltip text="Automatically discovers AWS resources on the configured interval." />
-          </label>
-        </div>
-        {form.autoSyncEnabled && (
-          <div className="form-grid sn-sync-interval-grid" style={{ marginTop: 8 }}>
-            <label>
-              <span>Sync Interval <InfoTooltip text="How frequently the scheduled sync runs." /></span>
-              <select
-                value={form.intervalMinutes ?? 1440}
-                onChange={(e) => updateField('intervalMinutes', Number(e.target.value))}
-              >
-                {intervalOptions.map(({ label, minutes }) => (
-                  <option key={minutes} value={minutes}>{label}</option>
-                ))}
-              </select>
-            </label>
+          {/* Connection tab action bar */}
+          <div className="button-row section-actions sn-action-bar">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void saveConnector()}
+              disabled={!canManageConnector || saving || testing || syncing}
+            >
+              {saving ? 'Saving...' : 'Save Connector'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void testConnection()}
+              disabled={!canManageConnector || testing || saving || syncing}
+            >
+              {testing ? 'Testing...' : 'Test Connection'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void triggerSync()}
+              disabled={!canManageConnector || syncing || saving || testing}
+            >
+              {syncing ? 'Running...' : 'Run Integration Now'}
+            </button>
           </div>
-        )}
-      </div>
 
-      {/* ── Action bar ── */}
-      <div className="button-row section-actions sn-action-bar">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => void saveConnector()}
-          disabled={!canManageConnector || saving || testing || syncing}
-        >
-          {saving ? 'Saving...' : 'Save Connector'}
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => void testConnection()}
-          disabled={!canManageConnector || testing || saving || syncing}
-        >
-          {testing ? 'Testing...' : 'Test Connection'}
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => void triggerSync()}
-          disabled={!canManageConnector || syncing || saving || testing}
-        >
-          {syncing ? 'Running...' : 'Run Integration Now'}
-        </button>
-      </div>
-
-      {testResult && (
-        <div className={`notice sn-test-result ${testResult.status === 'SUCCESS' ? 'success' : 'error'}`}>
-          <strong>{testResult.status === 'SUCCESS' ? '✓ Connection successful' : '✗ Connection failed'}</strong>
-          {' — '}{testResult.message}
-          {testResult.status === 'SUCCESS' && testResult.reachableRegions.length > 0 && (
-            <span className="sn-table-checks">
-              Reachable regions: {testResult.reachableRegions.join(', ')}
-            </span>
+          {testResult && (
+            <div className={`notice sn-test-result ${testResultTone(testResult.status)}`}>
+              <strong>{testResultLabel(testResult.status)}</strong>
+              {' — '}{testResult.message}
+              {!isFailedStatus(testResult.status) && testResult.reachableRegions.length > 0 && (
+                <span className="sn-table-checks">
+                  Reachable regions: {testResult.reachableRegions.join(', ')}
+                </span>
+              )}
+              {testResult.warnings.length > 0 && (
+                <div className="panel-caption" style={{ marginTop: 6 }}>
+                  Warnings: {testResult.warnings.join(' | ')}
+                </div>
+              )}
+            </div>
           )}
-        </div>
+
+          {syncResult && (
+            <div className="notice">
+              <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
+              <a href={pathForConnectView('run-history')}>Integration Run Queue</a>.
+            </div>
+          )}
+        </>
       )}
 
-      {syncResult && (
-        <div className="notice">
-          <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
-          <a href={pathForConnectView('run-history')}>Integration Run Queue</a>.
-        </div>
+      {/* ── Tab 2: Multi-Account ── */}
+      {activeTab === 'accounts' && (
+        <>
+          <div className="form-section">
+            <h4 className="form-section-title">AWS Account Targets</h4>
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Role</th>
+                    <th>Regions</th>
+                    <th>Status</th>
+                    <th>SSM Coverage</th>
+                    <th>Last Sync</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {targets.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="empty-state">No AWS accounts configured yet.</td>
+                    </tr>
+                  )}
+                  {targets.map((target) => (
+                    <tr key={target.id}>
+                      <td>
+                        <strong>{target.accountName || target.accountId || 'AWS Account'}</strong>
+                        <span className="panel-caption" style={{ display: 'block' }}>{target.accountId || 'Account ID unresolved'}</span>
+                      </td>
+                      <td><span className="panel-caption">{target.roleArn || 'Connector credentials'}</span></td>
+                      <td><span className="panel-caption">{parseRegions(target.regionsJson).join(', ')}</span></td>
+                      <td>
+                        <span className={target.enabled ? 'status-pill status-success' : 'status-pill'}>
+                          {target.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        {target.lastTestStatus && <span className="panel-caption" style={{ display: 'block' }}>{target.lastTestStatus}</span>}
+                        {target.lastTestMessage && <span className="panel-caption" style={{ display: 'block', marginTop: 4 }}>{target.lastTestMessage}</span>}
+                      </td>
+                      <td>
+                        <span>{target.softwareInventoryHostCount}/{target.hostCount} with inventory</span>
+                        <span className="panel-caption" style={{ display: 'block' }}>
+                          SSM {target.ssmManagedHostCount}, missing IAM {target.missingIamInstanceProfileCount}
+                        </span>
+                      </td>
+                      <td>{formatTimestamp(target.lastSyncAt)}</td>
+                      <td>
+                        <div className="button-row">
+                          <button type="button" className="btn btn-secondary btn-inline" onClick={() => editTarget(target)} disabled={!canManageConnector}>Edit</button>
+                          <button type="button" className="btn btn-secondary btn-inline" onClick={() => void testTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Test</button>
+                          <button type="button" className="btn btn-secondary btn-inline" onClick={() => void syncTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Sync</button>
+                          <button type="button" className="btn btn-secondary btn-inline" onClick={() => void deleteTarget(target.id)} disabled={!canManageConnector || Boolean(targetBusy)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="form-grid" style={{ marginTop: 16 }}>
+              <label>
+                <span>Account name</span>
+                <input
+                  type="text"
+                  value={targetForm.accountName ?? ''}
+                  onChange={(e) => setTargetForm((cur) => ({ ...cur, accountName: e.target.value }))}
+                  placeholder="Production shared services"
+                />
+              </label>
+              <label>
+                <span>Account ID</span>
+                <input
+                  type="text"
+                  value={targetForm.accountId ?? ''}
+                  onChange={(e) => setTargetForm((cur) => ({ ...cur, accountId: e.target.value }))}
+                  placeholder="123456789012"
+                />
+              </label>
+              <label>
+                <span>Role ARN</span>
+                <input
+                  type="text"
+                  value={targetForm.roleArn ?? ''}
+                  onChange={(e) => setTargetForm((cur) => ({ ...cur, roleArn: e.target.value }))}
+                  placeholder="arn:aws:iam::123456789012:role/ScoutDiscoveryReadOnlyRole"
+                />
+              </label>
+              <label>
+                <span>External ID</span>
+                <input
+                  type="text"
+                  value={targetForm.externalId ?? ''}
+                  onChange={(e) => setTargetForm((cur) => ({ ...cur, externalId: e.target.value }))}
+                  placeholder="optional-external-id"
+                />
+              </label>
+              <label>
+                <span>Regions JSON</span>
+                <input
+                  type="text"
+                  value={targetForm.regionsJson ?? ''}
+                  onChange={(e) => setTargetForm((cur) => ({ ...cur, regionsJson: e.target.value }))}
+                  placeholder='["us-east-1"]'
+                />
+              </label>
+            </div>
+            {showTargetExternalIdWarning && (
+              <div className="notice warning" style={{ marginTop: 12 }}>
+                <strong>External ID may be required.</strong> If this target role trust policy uses <code>sts:ExternalId</code>, the value must match exactly.
+              </div>
+            )}
+            <label className="sn-toggle-row" style={{ marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={targetForm.enabled ?? true}
+                onChange={(e) => setTargetForm((cur) => ({ ...cur, enabled: e.target.checked }))}
+              />
+              <span>Enable this account target</span>
+            </label>
+            <div className="button-row section-actions">
+              <button type="button" className="btn btn-primary" onClick={() => void saveTarget()} disabled={Boolean(targetBusy) || saving}>
+                {targetBusy === 'save' ? 'Saving...' : editingTargetId ? 'Update Account' : 'Add Account'}
+              </button>
+              {editingTargetId && (
+                <button type="button" className="btn btn-secondary" onClick={resetTargetForm} disabled={Boolean(targetBusy)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Accounts tab action bar */}
+          <div className="button-row section-actions sn-action-bar">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void saveConnector()}
+              disabled={!canManageConnector || saving || testing || syncing}
+            >
+              {saving ? 'Saving...' : 'Save Connector'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void testConnection()}
+              disabled={!canManageConnector || testing || saving || syncing}
+            >
+              {testing ? 'Testing...' : 'Test Connection'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void triggerSync()}
+              disabled={!canManageConnector || syncing || saving || testing}
+            >
+              {syncing ? 'Running...' : 'Run Integration Now'}
+            </button>
+          </div>
+
+          {testResult && (
+            <div className={`notice sn-test-result ${testResultTone(testResult.status)}`}>
+              <strong>{testResultLabel(testResult.status)}</strong>
+              {' — '}{testResult.message}
+              {!isFailedStatus(testResult.status) && testResult.reachableRegions.length > 0 && (
+                <span className="sn-table-checks">
+                  Reachable regions: {testResult.reachableRegions.join(', ')}
+                </span>
+              )}
+              {testResult.warnings.length > 0 && (
+                <div className="panel-caption" style={{ marginTop: 6 }}>
+                  Warnings: {testResult.warnings.join(' | ')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {syncResult && (
+            <div className="notice">
+              <strong>Integration queued.</strong> {syncResult.message}. Track progress in{' '}
+              <a href={pathForConnectView('run-history')}>Integration Run Queue</a>.
+            </div>
+          )}
+        </>
       )}
 
       <div className="button-row section-actions">
