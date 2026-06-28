@@ -17,7 +17,8 @@ import {
   useServiceNowCmdbConfigQuery
 } from '../features/connect/queries';
 import { useActor } from '../features/auth/context';
-import { canAccessPlatformConsole, hasRole } from '../features/auth/roles';
+import { canAccessPlatformConsole, canManageSourceFilters, hasRole } from '../features/auth/roles';
+import { VulnerabilitySourcesSection } from './ConfigurationsPage';
 import { timeAgo } from '../lib/time';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { BomManagementPage } from './BomManagementPage';
@@ -802,6 +803,17 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                   )}
                 </div>
               ))}
+
+            {/* Vulnerability Intelligence — 3rd section */}
+            <div className="connect-source-section">
+              <div className="connect-source-section-head">
+                <h4>Vulnerability Intelligence</h4>
+                <span className="panel-caption">
+                  Select which ingested sources drive tenant correlation while keeping the broader repository visible for research.
+                </span>
+              </div>
+              <VulnerabilitySourcesSection canEdit={canManageSourceFilters(actor)} />
+            </div>
           </div>
         </section>
       )}

@@ -538,7 +538,7 @@
   position: absolute;
   top: 4px;
   left: 0;
-  min-width: 200px;
+  min-width: 260px;
   background: var(--panel, #fff);
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 8px;
@@ -579,6 +579,23 @@
   gap: 8px;
   font-size: 12px;
   cursor: pointer;
+}
+
+/* Compact severity pills inside filter popovers */
+.fpl-col-filter-checks .severity-pill {
+  min-width: unset;
+  min-height: unset;
+  white-space: nowrap;
+  padding: 2px 8px;
+}
+
+/* Select-all / clear-all row inside checkbox groups */
+.fpl-col-filter-select-all {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
 }
 
 .fpl-col-filter-input {

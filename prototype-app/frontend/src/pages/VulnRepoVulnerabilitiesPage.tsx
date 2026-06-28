@@ -4,7 +4,6 @@ import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../comp
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForPlatformVulnIntelDetail, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
-import { canUseEntitlement } from '../features/auth/entitlements';
 import { canAccessPlatformConsole } from '../features/auth/roles';
 import type { CveDetail, CveMatchedSoftware, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
 import { useCveDetailQuery, useRiskPolicyQuery, useSavedAiSolutionQuery, useSavedInvestigationSummaryQuery, useVulnRepoVulnerabilitiesQuery } from '../features/cve-workbench/queries';
@@ -18,9 +17,10 @@ const RUNBOOK_TASK_IDS = ['review-asset-inventory', 'find-false-positive', 'end-
 const SEVERITY_FILTER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 const STATUS_FILTER_OPTIONS = ['OPEN', 'IN_PROGRESS', 'NOT_STARTED', 'DONE'];
 const RISK_TIER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+const ORG_IMPACT_OPTIONS = ['HIGH', 'MEDIUM', 'LOW', 'NONE'];
 
 // Column-level filter types
-type IntelColKey = 'cve' | 'severity' | 'cvss' | 'epss' | 'cveRisk' | 'applicable' | 'investigationStatus';
+type IntelColKey = 'cve' | 'severity' | 'cvss' | 'epss' | 'cveRisk' | 'applicable' | 'investigationStatus' | 'orgImpact' | 'openFindings' | 'hasAiSummary';
 type IntelColFilters = {
   cve: string;
   severity: string[];
@@ -29,9 +29,13 @@ type IntelColFilters = {
   cveRisk: string[];
   applicable: string;
   investigationStatus: string[];
+  orgImpact: string[];
+  openFindings: string;
+  hasAiSummary: string;
 };
 const DEFAULT_INTEL_COL_FILTERS: IntelColFilters = {
   cve: '', severity: [], cvss: '', epss: '', cveRisk: [], applicable: '', investigationStatus: [],
+  orgImpact: [], openFindings: '', hasAiSummary: '',
 };
 
 // Funnel SVG icon used in column headers
@@ -89,7 +93,6 @@ type SoftwareDrawerRow = {
 };
 
 type DrawerMode = 'metadata' | 'software' | 'summary' | 'ai-solution';
-type CorrelationFilter = 'all' | 'included' | 'excluded';
 
 function parseCombinedSearchInput(value: string): { query?: string; software?: string } {
   const normalized = value.trim();
@@ -223,7 +226,6 @@ function buildSoftwareDrawerRows(detail: CveDetail | null): SoftwareDrawerRow[] 
 export function VulnRepoVulnerabilitiesPage() {
   const navigate = useNavigate();
   const actor = useActor();
-  const canViewAiSolutions = canUseEntitlement(actor, 'ai.solution_generation');
   const platformScope = !!actor?.platformScope && canAccessPlatformConsole(actor);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = React.useMemo(() => searchParams.get('query')?.trim() ?? '', [searchParams]);
@@ -246,14 +248,13 @@ export function VulnRepoVulnerabilitiesPage() {
   const initialApplicable = React.useMemo(() => searchParams.get('applicable') === 'true', [searchParams]);
   const initialImpactedOnly = React.useMemo(() => searchParams.get('impactedOnly') === 'true', [searchParams]);
   const initialHasFindings = React.useMemo(() => searchParams.get('hasFindings') === 'true', [searchParams]);
-  const initialSource = React.useMemo(() => searchParams.get('source')?.trim() ?? '', [searchParams]);
+  const initialSources = React.useMemo(() => parseCsvParam(searchParams.get('source')), [searchParams]);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState(initialQuery);
   const [query, setQuery] = React.useState(initialQuery);
   const [severityFilters, setSeverityFilters] = React.useState<string[]>(parseCsvParam(initialSeverity));
   const [statusFilters, setStatusFilters] = React.useState<string[]>(initialStatuses);
-  const [sourceFilter, setSourceFilter] = React.useState<string>(initialSource);
-  const [correlationFilter, setCorrelationFilter] = React.useState<CorrelationFilter>('all');
+  const [sourceFilters, setSourceFilters] = React.useState<string[]>(initialSources);
   const [selectedSoftwareRecord, setSelectedSoftwareRecord] = React.useState<OrgSpecificCveExposureRecord | null>(null);
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
   const [colFilters, setColFilters] = React.useState<IntelColFilters>(DEFAULT_INTEL_COL_FILTERS);
@@ -277,7 +278,7 @@ export function VulnRepoVulnerabilitiesPage() {
       ? undefined
       : (initialIncludeAll || undefined),
     impactedOnly: initialImpactedOnly || undefined,
-    source: sourceFilter || undefined,
+    source: sourceFilters.length === 1 ? sourceFilters[0] : undefined,
   }, platformScope);
   const policyQuery = useRiskPolicyQuery();
   const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
@@ -308,9 +309,10 @@ export function VulnRepoVulnerabilitiesPage() {
     setQuery(initialQuery);
     setSeverityFilters(parseCsvParam(initialSeverity));
     setStatusFilters(initialStatuses);
-    setSourceFilter(initialSource);
+    setSourceFilters(initialSources);
     setPage(0);
-  }, [initialApplicable, initialImpactedOnly, initialInKev, initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses, initialSource]);
+  }, [initialApplicable, initialImpactedOnly, initialInKev, initialCreatedSinceDays, initialExploitOnly, initialIncludeAll, initialQuery, initialSeverity, initialSoftware, initialSoftwareIdentityId, initialSoftwareScope, initialStatuses, initialSources]);
+
 
   // Reset to page 0 when applicable column filter changes (server query changes)
   React.useEffect(() => {
@@ -338,16 +340,19 @@ export function VulnRepoVulnerabilitiesPage() {
     if (key === 'cveRisk') return f.cveRisk.length > 0;
     if (key === 'applicable') return f.applicable !== '';
     if (key === 'investigationStatus') return f.investigationStatus.length > 0;
+    if (key === 'orgImpact') return f.orgImpact.length > 0;
+    if (key === 'openFindings') return f.openFindings !== '';
+    if (key === 'hasAiSummary') return f.hasAiSummary !== '';
     return false;
   }
 
   function clearColFilter(key: IntelColKey) {
-    const empty = ['severity', 'cveRisk', 'investigationStatus'].includes(key) ? [] : '';
+    const empty = ['severity', 'cveRisk', 'investigationStatus', 'orgImpact'].includes(key) ? [] : '';
     setColFilters((f) => ({ ...f, [key]: empty }));
     setOpenColFilter(null);
   }
 
-  function toggleColArr(key: 'severity' | 'cveRisk' | 'investigationStatus', value: string) {
+  function toggleColArr(key: 'severity' | 'cveRisk' | 'investigationStatus' | 'orgImpact', value: string) {
     setColFilters((f) => {
       const arr = f[key] as string[];
       return { ...f, [key]: arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value] };
@@ -360,8 +365,41 @@ export function VulnRepoVulnerabilitiesPage() {
     const colLabel: Record<IntelColKey, string> = {
       cve: 'Vulnerability ID', severity: 'Severity', cvss: 'CVSS',
       epss: 'EPSS', cveRisk: 'S.AI Risk', applicable: 'Applicable',
-      investigationStatus: 'Investigation Status',
+      investigationStatus: 'Investigation Status', orgImpact: 'Org Impact',
+      openFindings: 'Open Findings', hasAiSummary: 'AI Summaries',
     };
+
+    function checkboxGroup<T extends string>(
+      key: 'severity' | 'cveRisk' | 'investigationStatus' | 'orgImpact',
+      options: T[],
+      renderLabel: (v: T) => React.ReactNode,
+    ): React.ReactNode {
+      const selected = colFilters[key] as string[];
+      const allSelected = selected.length === options.length;
+      return (
+        <div className="fpl-col-filter-checks">
+          <div className="fpl-col-filter-select-all">
+            <button
+              type="button"
+              className="fpl-col-filter-clear"
+              onClick={() => {
+                setColFilters((f) => ({ ...f, [key]: allSelected ? [] : [...options] }));
+                setPage(0);
+              }}
+            >
+              {allSelected ? 'Clear all' : 'Select all'}
+            </button>
+          </div>
+          {options.map((v) => (
+            <label key={v} className="fpl-col-filter-check">
+              <input type="checkbox" checked={selected.includes(v)} onChange={() => toggleColArr(key, v)} />
+              {renderLabel(v)}
+            </label>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="fpl-col-filter-popover" ref={colFilterRef}>
         <div className="fpl-col-filter-header">
@@ -375,16 +413,9 @@ export function VulnRepoVulnerabilitiesPage() {
             value={colFilters.cve}
             onChange={(e) => { setColFilters((f) => ({ ...f, cve: e.target.value })); setPage(0); }} />
         )}
-        {colKey === 'severity' && (
-          <div className="fpl-col-filter-checks">
-            {SEVERITY_FILTER_OPTIONS.map((v) => (
-              <label key={v} className="fpl-col-filter-check">
-                <input type="checkbox" checked={colFilters.severity.includes(v)} onChange={() => toggleColArr('severity', v)} />
-                <span className={severityClassName(v)} style={{ fontSize: 11 }}>{formatLabel(v)}</span>
-              </label>
-            ))}
-          </div>
-        )}
+        {colKey === 'severity' && checkboxGroup('severity', SEVERITY_FILTER_OPTIONS, (v) => (
+          <span className={severityClassName(v)}>{formatLabel(v)}</span>
+        ))}
         {colKey === 'cvss' && (
           <input autoFocus type="number" min={0} max={10} step={0.1} className="fpl-col-filter-input"
             placeholder="Min CVSS score (0–10)" value={colFilters.cvss}
@@ -395,16 +426,12 @@ export function VulnRepoVulnerabilitiesPage() {
             placeholder="Min EPSS % (0–100)" value={colFilters.epss}
             onChange={(e) => { setColFilters((f) => ({ ...f, epss: e.target.value })); setPage(0); }} />
         )}
-        {colKey === 'cveRisk' && (
-          <div className="fpl-col-filter-checks">
-            {RISK_TIER_OPTIONS.map((tier) => (
-              <label key={tier} className="fpl-col-filter-check">
-                <input type="checkbox" checked={colFilters.cveRisk.includes(tier)} onChange={() => toggleColArr('cveRisk', tier)} />
-                <span>{formatLabel(tier)}</span>
-              </label>
-            ))}
-          </div>
-        )}
+        {colKey === 'cveRisk' && checkboxGroup('cveRisk', RISK_TIER_OPTIONS, (tier) => (
+          <span>{formatLabel(tier)}</span>
+        ))}
+        {colKey === 'orgImpact' && checkboxGroup('orgImpact', ORG_IMPACT_OPTIONS, (v) => (
+          <span>{v === 'NONE' ? 'No Impact' : formatLabel(v)}</span>
+        ))}
         {colKey === 'applicable' && (
           <div className="fpl-col-filter-checks">
             {(['YES', 'NO'] as const).map((v) => (
@@ -417,12 +444,29 @@ export function VulnRepoVulnerabilitiesPage() {
             ))}
           </div>
         )}
-        {colKey === 'investigationStatus' && (
+        {colKey === 'investigationStatus' && checkboxGroup('investigationStatus', STATUS_FILTER_OPTIONS, (v) => (
+          <span>{formatLabel(v)}</span>
+        ))}
+        {colKey === 'openFindings' && (
           <div className="fpl-col-filter-checks">
-            {STATUS_FILTER_OPTIONS.map((v) => (
+            {(['yes', 'no'] as const).map((v) => (
               <label key={v} className="fpl-col-filter-check">
-                <input type="checkbox" checked={colFilters.investigationStatus.includes(v)} onChange={() => toggleColArr('investigationStatus', v)} />
-                <span>{formatLabel(v)}</span>
+                <input type="radio" name="intel-openfindings-filter"
+                  checked={colFilters.openFindings === v}
+                  onChange={() => { setColFilters((f) => ({ ...f, openFindings: f.openFindings === v ? '' : v })); setPage(0); }} />
+                <span>{v === 'yes' ? 'Has open findings' : 'No open findings'}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {colKey === 'hasAiSummary' && (
+          <div className="fpl-col-filter-checks">
+            {(['yes', 'no'] as const).map((v) => (
+              <label key={v} className="fpl-col-filter-check">
+                <input type="radio" name="intel-aisum-filter"
+                  checked={colFilters.hasAiSummary === v}
+                  onChange={() => { setColFilters((f) => ({ ...f, hasAiSummary: f.hasAiSummary === v ? '' : v })); setPage(0); }} />
+                <span>{v === 'yes' ? 'Has AI summary / solution' : 'No AI summary'}</span>
               </label>
             ))}
           </div>
@@ -472,15 +516,32 @@ export function VulnRepoVulnerabilitiesPage() {
       if (colFilters.investigationStatus.length > 0 && !colFilters.investigationStatus.includes(statusForRecord(item))) {
         return false;
       }
-      if (correlationFilter === 'included' && !(item.includedInCorrelation ?? true)) {
-        return false;
+      if (colFilters.orgImpact.length > 0) {
+        const r = computeCveRiskScore(item, policyQuery.data);
+        const impact = computeOrgImpact(item, r.score, 0);
+        if (!colFilters.orgImpact.includes(impact)) return false;
       }
-      if (correlationFilter === 'excluded' && (item.excludedCorrelationSources?.length ?? 0) === 0) {
-        return false;
+      if (colFilters.openFindings === 'yes' && item.openFindings === 0) return false;
+      if (colFilters.openFindings === 'no' && item.openFindings > 0) return false;
+      if (colFilters.hasAiSummary === 'yes') {
+        const hasSummary = item.hasInvestigationSummary || getLocalSummaryMode(item.externalId) !== null || item.hasAiSolution;
+        if (!hasSummary) return false;
+      }
+      if (colFilters.hasAiSummary === 'no') {
+        const hasSummary = item.hasInvestigationSummary || getLocalSummaryMode(item.externalId) !== null || item.hasAiSolution;
+        if (hasSummary) return false;
+      }
+      if (sourceFilters.length > 0) {
+        const itemSources = (item.sources ?? []).map((s) => s.toLowerCase());
+        const matchesSource = sourceFilters.some((sf) => {
+          const lower = sf.toLowerCase();
+          return itemSources.includes(lower) || (lower === 'kev' && item.inKev);
+        });
+        if (!matchesSource) return false;
       }
       return true;
     })
-  ), [items, severityFilters, statusFilters, initialApplicable, initialHasFindings, colFilters, policyQuery.data, correlationFilter]);
+  ), [items, severityFilters, statusFilters, initialApplicable, initialHasFindings, colFilters, policyQuery.data, sourceFilters]);
 
   const writeFilterParams = React.useCallback((updates: {
     severity?: string[];
@@ -527,9 +588,9 @@ export function VulnRepoVulnerabilitiesPage() {
                   className="btn-link vuln-repo-cve-link"
                   onClick={() => navigate(pathForPlatformVulnIntelDetail(item.externalId))}
                 >
-                  {sourceFilter === 'euvd' && item.euvdId ? (
+                  {sourceFilters.length === 1 && sourceFilters[0] === 'euvd' && item.euvdId ? (
                     <span className="mono">{item.euvdId}</span>
-                  ) : sourceFilter === 'japan-vulndb' && item.jvndbId ? (
+                  ) : sourceFilters.length === 1 && sourceFilters[0] === 'japan-vulndb' && item.jvndbId ? (
                     <span className="mono">{item.jvndbId}</span>
                   ) : (
                     <>
@@ -553,17 +614,17 @@ export function VulnRepoVulnerabilitiesPage() {
                   className="btn-link vuln-repo-cve-link"
                   onClick={() => {
                     const base = pathForVulnRepoView('org-cves', item.externalId);
-                    const dest = sourceFilter === 'euvd' && item.euvdId
+                    const dest = sourceFilters.length === 1 && sourceFilters[0] === 'euvd' && item.euvdId
                       ? `${base}?euvdId=${encodeURIComponent(item.euvdId)}`
-                      : sourceFilter === 'japan-vulndb' && item.jvndbId
+                      : sourceFilters.length === 1 && sourceFilters[0] === 'japan-vulndb' && item.jvndbId
                         ? `${base}?jvndbId=${encodeURIComponent(item.jvndbId)}`
                         : base;
                     navigate(dest);
                   }}
                 >
-                  {sourceFilter === 'euvd' && item.euvdId ? (
+                  {sourceFilters.length === 1 && sourceFilters[0] === 'euvd' && item.euvdId ? (
                     <span className="mono">{item.euvdId}</span>
-                  ) : sourceFilter === 'japan-vulndb' && item.jvndbId ? (
+                  ) : sourceFilters.length === 1 && sourceFilters[0] === 'japan-vulndb' && item.jvndbId ? (
                     <span className="mono">{item.jvndbId}</span>
                   ) : (
                     <>
@@ -662,11 +723,6 @@ export function VulnRepoVulnerabilitiesPage() {
                       }}>{label}</span>
                     );
                   })}
-                  {!platformScope && (item.excludedCorrelationSources?.length ?? 0) > 0 ? (
-                    <span className="status-pill status-warning" title={`Excluded sources: ${(item.excludedCorrelationSources ?? []).join(', ')}`}>
-                      Excluded from correlation
-                    </span>
-                  ) : null}
                 </div>
               );
             })(),
@@ -749,7 +805,7 @@ export function VulnRepoVulnerabilitiesPage() {
         },
       };
     })
-  ), [canViewAiSolutions, filteredItems, navigate, policyQuery.data, platformScope, sourceFilter]);
+  ), [filteredItems, navigate, policyQuery.data, platformScope, sourceFilters]);
 
   const activeChips = React.useMemo<Array<{ label: string; onRemove: () => void }>>(() => {
     const chips: Array<{ label: string; onRemove: () => void }> = [];
@@ -798,17 +854,21 @@ export function VulnRepoVulnerabilitiesPage() {
     colFilters.investigationStatus.forEach((s) => {
       chips.push({ label: `Inv. Status: ${formatLabel(s)}`, onRemove: () => { setColFilters((f) => ({ ...f, investigationStatus: f.investigationStatus.filter((x) => x !== s) })); setPage(0); } });
     });
-    if (sourceFilter) {
-      chips.push({ label: `Source: ${{ nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory', 'japan-vulndb': 'JVNDB' }[sourceFilter] ?? sourceFilter}`, onRemove: () => { setSourceFilter(''); setPage(0); } });
+    colFilters.orgImpact.forEach((v) => {
+      chips.push({ label: `Impact: ${v === 'NONE' ? 'No Impact' : formatLabel(v)}`, onRemove: () => { setColFilters((f) => ({ ...f, orgImpact: f.orgImpact.filter((x) => x !== v) })); setPage(0); } });
+    });
+    if (colFilters.openFindings) {
+      chips.push({ label: colFilters.openFindings === 'yes' ? 'Open Findings: Yes' : 'Open Findings: None', onRemove: () => { setColFilters((f) => ({ ...f, openFindings: '' })); setPage(0); } });
     }
-    if (!platformScope && correlationFilter !== 'all') {
-      chips.push({
-        label: correlationFilter === 'included' ? 'Correlation: Included only' : 'Correlation: Excluded only',
-        onRemove: () => { setCorrelationFilter('all'); setPage(0); }
-      });
+    if (colFilters.hasAiSummary) {
+      chips.push({ label: colFilters.hasAiSummary === 'yes' ? 'AI Summary: Yes' : 'AI Summary: No', onRemove: () => { setColFilters((f) => ({ ...f, hasAiSummary: '' })); setPage(0); } });
     }
+    const SOURCE_LABELS: Record<string, string> = { nvd: 'NVD', euvd: 'EUVD', ghsa: 'GHSA', kev: 'KEV', 'csaf-redhat': 'Red Hat', 'vex-microsoft': 'Microsoft', advisory: 'Advisory', 'japan-vulndb': 'JVNDB' };
+    sourceFilters.forEach((s) => {
+      chips.push({ label: `Source: ${SOURCE_LABELS[s.toLowerCase()] ?? s}`, onRemove: () => { setSourceFilters((f) => f.filter((x) => x !== s)); setPage(0); } });
+    });
     return chips;
-  }, [initialApplicable, severityFilters, statusFilters, sourceFilter, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters, correlationFilter, platformScope]);
+  }, [initialApplicable, severityFilters, statusFilters, sourceFilters, colFilters, searchParams, setSearchParams, updateSeverityFilters, updateStatusFilters]);
 
   const dashboardFilterChips = React.useMemo(() => {
     const keys = ['exploitOnly', 'inKev', 'createdSinceDays', 'software', 'softwareScope', 'includeAll', 'impactedOnly', 'hasFindings'];
@@ -823,6 +883,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const clearAllFilters = React.useCallback(() => {
     setSeverityFilters([]);
     setStatusFilters([]);
+    setSourceFilters([]);
     setColFilters(DEFAULT_INTEL_COL_FILTERS);
     setOpenColFilter(null);
     const nextParams = new URLSearchParams(searchParams);
@@ -867,9 +928,9 @@ export function VulnRepoVulnerabilitiesPage() {
     const baseColumns: DataTableColumn[] = [
       cveCol, titleCol, severityCol, cvssCol, epssCol,
       { id: 'cveRisk', label: 'S.AI Risk', initialSize: 100, headerProps: { style: relStyle }, header: filterable('cveRisk', 'S.AI Risk') },
-      { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 110 },
+      { id: 'orgImpact', label: 'Impact', initialSize: 110, headerProps: { style: relStyle }, header: filterable('orgImpact', 'Impact') },
       sourcesCol,
-      { id: 'openFindings', label: 'Open Findings', header: 'Open Findings', initialSize: 120 },
+      { id: 'openFindings', label: 'Open Findings', initialSize: 120, headerProps: { style: relStyle }, header: filterable('openFindings', 'Open Findings') },
       { id: 'lastEvaluated', label: 'Last Evaluated', header: 'Last Evaluated', initialSize: 180 },
     ];
     return [
@@ -878,7 +939,7 @@ export function VulnRepoVulnerabilitiesPage() {
       { id: 'investigationStatus', label: 'Investigation Status', initialSize: 170, headerProps: { style: relStyle }, header: filterable('investigationStatus', 'Investigation Status') },
       baseColumns[7],
       { id: 'impactedSoftware', label: 'Impacted Software', header: 'Impacted Software', initialSize: 180 },
-      { id: 'investigationSummary', label: 'AI Summaries', header: 'AI Summaries', initialSize: 140 },
+      { id: 'investigationSummary', label: 'AI Summaries', initialSize: 140, headerProps: { style: relStyle }, header: filterable('hasAiSummary', 'AI Summaries') },
       ...baseColumns.slice(8),
     ];
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -909,80 +970,37 @@ export function VulnRepoVulnerabilitiesPage() {
 
       <div className="fpl-toolbar vuln-repo-intel-toolbar">
         <div className="fpl-toolbar-left">
-          {/* Column-level inline filter: Severity */}
-          <label className="vuln-repo-filter-select">
-            <span>Severity</span>
-            <select
-              value=""
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next && !severityFilters.includes(next)) {
-                  updateSeverityFilters([...severityFilters, next]);
-                }
-              }}
-            >
-              <option value="">Add severity...</option>
-              {SEVERITY_FILTER_OPTIONS.map((option) => (
-                <option key={option} value={option} disabled={severityFilters.includes(option)}>
-                  {formatLabel(option)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/* Column-level inline filter: Status */}
-          <label className="vuln-repo-filter-select">
-            <span>Status</span>
-            <select
-              value=""
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next && !statusFilters.includes(next)) {
-                  updateStatusFilters([...statusFilters, next]);
-                }
-              }}
-            >
-              <option value="">Add status...</option>
-              {STATUS_FILTER_OPTIONS.map((option) => (
-                <option key={option} value={option} disabled={statusFilters.includes(option)}>
-                  {formatLabel(option)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/* Source filter */}
-          <label className="vuln-repo-filter-select">
-            <span>Source</span>
-            <select
-              value={sourceFilter}
-              onChange={(e) => { setSourceFilter(e.target.value); setPage(0); }}
-            >
-              <option value="">All sources</option>
-              <option value="nvd">NVD</option>
-              <option value="euvd">EUVD</option>
-              <option value="japan-vulndb">JVNDB</option>
-              <option value="ghsa">GHSA</option>
-              <option value="kev">KEV</option>
-              <option value="csaf-redhat">Red Hat</option>
-              <option value="vex-microsoft">Microsoft</option>
-              <option value="advisory">Advisory</option>
-            </select>
-          </label>
-
-          {!platformScope ? (
-            <label className="vuln-repo-filter-select">
-              <span>Correlation</span>
-              <select
-                value={correlationFilter}
-                onChange={(e) => { setCorrelationFilter(e.target.value as CorrelationFilter); setPage(0); }}
-              >
-                <option value="all">All repository items</option>
-                <option value="included">Included in correlation</option>
-                <option value="excluded">Excluded from correlation</option>
-              </select>
-            </label>
-          ) : null}
+          {/* Source filter pills */}
+          <div className="vuln-repo-source-pills">
+            <span className="vuln-repo-source-pills-label">Source</span>
+            <div className="vuln-repo-source-pills-row">
+              {[
+                { value: 'nvd', label: 'NVD' },
+                { value: 'euvd', label: 'EUVD' },
+                { value: 'japan-vulndb', label: 'JVNDB' },
+                { value: 'ghsa', label: 'GHSA' },
+                { value: 'kev', label: 'KEV' },
+                { value: 'csaf-redhat', label: 'Red Hat' },
+                { value: 'vex-microsoft', label: 'Microsoft' },
+                { value: 'advisory', label: 'Advisory' },
+              ].map(({ value, label }) => {
+                const active = sourceFilters.includes(value);
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`vuln-repo-source-pill${active ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setSourceFilters((f) => f.includes(value) ? f.filter((x) => x !== value) : [...f, value]);
+                      setPage(0);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Active filter chips — one chip per selected value */}
           {(activeChips.length > 0 || dashboardFilterChips.length > 0) && (
@@ -1018,12 +1036,12 @@ export function VulnRepoVulnerabilitiesPage() {
 
           {/* Search — pushed to far right */}
           <div className="vuln-repo-intel-search">
-            <label htmlFor="vuln-repo-vuln-search">Search CVE / Description</label>
             <input
               id="vuln-repo-vuln-search"
+              aria-label="Search CVE / Description"
               value={queryInput}
               onChange={(event) => updateSearchFilter(event.target.value)}
-              placeholder="CVE-2026-1526"
+              placeholder="Search CVE / Description"
             />
           </div>
         </div>
