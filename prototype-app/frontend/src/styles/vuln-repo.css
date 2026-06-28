@@ -619,9 +619,9 @@
 }
 
 .vuln-repo-intel-toolbar .fpl-toolbar-left {
-  align-items: flex-end;
-  flex-wrap: nowrap;
-  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }
@@ -631,25 +631,17 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  align-self: flex-end;
-  padding-bottom: 2px;
 }
 
 .vuln-repo-intel-search {
   flex: 0 1 260px;
   width: min(260px, 100%);
   margin-left: auto;
-  align-self: flex-end;
+  align-self: center;
 }
 
 .vuln-repo-intel-search label {
-  display: block;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  margin-bottom: 4px;
+  display: none;
 }
 
 .vuln-repo-intel-search input {
@@ -689,6 +681,58 @@
   padding: 0 32px 0 12px;
   font-weight: 600;
   font-size: 0.875rem;
+}
+
+/* Source filter pills */
+.vuln-repo-source-pills {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vuln-repo-source-pills-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.vuln-repo-source-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.vuln-repo-source-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.vuln-repo-source-pill:hover {
+  border-color: var(--accent, #3b82f6);
+  color: var(--title);
+}
+
+.vuln-repo-source-pill.is-active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
 }
 
 .intel-col-header-inner {

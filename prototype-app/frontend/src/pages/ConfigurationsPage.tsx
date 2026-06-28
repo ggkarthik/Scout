@@ -29,7 +29,7 @@ import type {
   RunbookTaskStateRecord,
 } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings' | 'vulnerability-sources';
+type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings';
 
 interface ConfigNavItem {
   key: ConfigNavKey;
@@ -59,11 +59,6 @@ const CONFIG_NAV: ConfigNavItem[] = [
     key: 'ownership',
     label: 'Ownership',
     description: 'Rule-based user group assignment',
-  },
-  {
-    key: 'vulnerability-sources',
-    label: 'Vulnerability Sources',
-    description: 'Choose which sources participate in tenant correlation',
   },
   {
     key: 'findings-score',
@@ -2068,10 +2063,6 @@ export function ConfigurationsPage() {
     <SuppressionSection canEdit={canEditRiskPolicy} />
   );
 
-  const renderVulnerabilitySources = () => (
-    <VulnerabilitySourcesSection canEdit={canEditRiskPolicy} />
-  );
-
   const renderAutoFindings = () => (
     <AutoFindingRulesSection canEdit={canEditRiskPolicy} />
   );
@@ -2096,11 +2087,6 @@ export function ConfigurationsPage() {
       title: 'Ownership',
       description:
         'Route records to the right user group using rule-based ownership conditions.',
-    },
-    'vulnerability-sources': {
-      title: 'Vulnerability Sources',
-      description:
-        'Select which ingested sources should drive tenant correlation while keeping the broader repository visible for research.',
     },
     'findings-score': {
       title: 'Findings Score',
@@ -2167,7 +2153,6 @@ export function ConfigurationsPage() {
           {activeSection === 'sla' && renderSla()}
           {activeSection === 'automation' && renderAutomation()}
           {activeSection === 'ownership' && renderOwnership()}
-          {activeSection === 'vulnerability-sources' && renderVulnerabilitySources()}
           {activeSection === 'findings-score' && renderFindingsScore()}
           {activeSection === 'suppress' && renderSuppress()}
           {activeSection === 'auto-findings' && renderAutoFindings()}
@@ -2260,7 +2245,7 @@ function toSourceFilterRequest(config: VulnerabilitySourceFilterConfig): Vulnera
   };
 }
 
-function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
+export function VulnerabilitySourcesSection({ canEdit }: { canEdit: boolean }) {
   const actor = useActor();
   const canRunSync = canManageSourceFilters(actor);
   const [configs, setConfigs] = React.useState<VulnerabilitySourceFilterConfig[]>([]);
