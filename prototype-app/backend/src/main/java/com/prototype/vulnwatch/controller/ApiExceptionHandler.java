@@ -10,6 +10,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -102,6 +103,17 @@ public class ApiExceptionHandler {
     public Map<String, Object> handleLockContention(Exception ex) {
         log.warn("Lock contention while handling API request: {}", ex.getMessage(), ex);
         return error("RESOURCE_BUSY", "Another ingestion is in progress for this asset. Please retry shortly.");
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, Object> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation while handling API request: {}", ex.getMessage(), ex);
+        String message = ex.getMessage() == null ? "" : ex.getMessage();
+        if (message.contains("uk_aws_discovery_targets_config_account")) {
+            return error("BAD_REQUEST", "AWS account target already exists for this connector.");
+        }
+        return error("BAD_REQUEST", "Request conflicts with existing data.");
     }
 
     @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
