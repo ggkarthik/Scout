@@ -348,7 +348,7 @@ export function ExposureDashboardPage() {
         <button
           type="button"
           className={`exec-kpi exec-kpi--${needsAttention > 0 ? 'warn' : 'neutral'}`}
-          onClick={() => navigate(pathForVulnRepoView('org-cves'))}
+          onClick={() => navigate('/vuln-repo/vulnerabilities?impactedOnly=true&hasFindings=false')}
         >
           <div className="exec-kpi-value">{fmt(needsAttention)}</div>
           <div className="exec-kpi-label">Needs Attention</div>

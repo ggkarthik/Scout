@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../components/CVEInvestigationSummary';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
@@ -15,7 +16,7 @@ const PAGE_SIZE = 25;
 
 const RUNBOOK_TASK_IDS = ['review-asset-inventory', 'find-false-positive', 'end-of-life-analysis', 'solutions', 'installed-patch-info'];
 const SEVERITY_FILTER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
-const STATUS_FILTER_OPTIONS = ['OPEN', 'IN_PROGRESS', 'NOT_STARTED', 'DONE'];
+const STATUS_FILTER_OPTIONS = ['APPLICABLE', 'REVIEWED', 'NO_IMPACT', 'NOT_APPLICABLE'];
 const RISK_TIER_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const ORG_IMPACT_OPTIONS = ['HIGH', 'MEDIUM', 'LOW', 'NONE'];
 
@@ -179,6 +180,9 @@ function dashboardFilterLabel(key: string, value: string): string {
   if (key === 'hasFindings' && value === 'true') {
     return 'Open Findings: Yes';
   }
+  if (key === 'hasFindings' && value === 'false') {
+    return 'Open Findings: None';
+  }
   return `${formatLabel(key)}: ${value}`;
 }
 
@@ -247,7 +251,12 @@ export function VulnRepoVulnerabilitiesPage() {
   const initialIncludeAll = React.useMemo(() => searchParams.get('includeAll') === 'true', [searchParams]);
   const initialApplicable = React.useMemo(() => searchParams.get('applicable') === 'true', [searchParams]);
   const initialImpactedOnly = React.useMemo(() => searchParams.get('impactedOnly') === 'true', [searchParams]);
-  const initialHasFindings = React.useMemo(() => searchParams.get('hasFindings') === 'true', [searchParams]);
+  const initialHasFindings = React.useMemo(() => {
+    const v = searchParams.get('hasFindings');
+    if (v === 'true') return 'yes';
+    if (v === 'false') return 'no';
+    return null;
+  }, [searchParams]);
   const initialSources = React.useMemo(() => parseCsvParam(searchParams.get('source')), [searchParams]);
   const [page, setPage] = React.useState(0);
   const [queryInput, setQueryInput] = React.useState(initialQuery);
@@ -259,6 +268,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const [drawerMode, setDrawerMode] = React.useState<DrawerMode>('software');
   const [colFilters, setColFilters] = React.useState<IntelColFilters>(DEFAULT_INTEL_COL_FILTERS);
   const [openColFilter, setOpenColFilter] = React.useState<IntelColKey | null>(null);
+  const [filterAnchorPos, setFilterAnchorPos] = React.useState<{ top: number; left: number } | null>(null);
   const colFilterRef = React.useRef<HTMLDivElement | null>(null);
   const serverSeverityFilter = severityFilters.length === 1 ? severityFilters[0] : undefined;
   const vulnRepoQuery = useVulnRepoVulnerabilitiesQuery({
@@ -277,8 +287,12 @@ export function VulnRepoVulnerabilitiesPage() {
     includeAll: (initialApplicable || initialImpactedOnly || colFilters.applicable === 'YES' || statusFilters.includes('APPLICABLE'))
       ? undefined
       : (initialIncludeAll || undefined),
-    impactedOnly: initialImpactedOnly || undefined,
-    source: sourceFilters.length === 1 ? sourceFilters[0] : undefined,
+    // When applicable column filter is YES, push the filter server-side so pagination is correct
+    impactedOnly: initialImpactedOnly || (colFilters.applicable === 'YES') || undefined,
+    // Source filtering is client-side only to avoid the backend switching to a
+    // different query path (vulnerability_intel_summary vs org_cve_records) which
+    // caused the counter-intuitive jump from 876 → 5,427 CVEs when a source pill was clicked.
+    source: undefined,
   }, platformScope);
   const policyQuery = useRiskPolicyQuery();
   const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
@@ -325,6 +339,7 @@ export function VulnRepoVulnerabilitiesPage() {
     function handleClick(e: MouseEvent) {
       if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node)) {
         setOpenColFilter(null);
+        setFilterAnchorPos(null);
       }
     }
     document.addEventListener('mousedown', handleClick);
@@ -375,24 +390,11 @@ export function VulnRepoVulnerabilitiesPage() {
       renderLabel: (v: T) => React.ReactNode,
     ): React.ReactNode {
       const selected = colFilters[key] as string[];
-      const allSelected = selected.length === options.length;
       return (
         <div className="fpl-col-filter-checks">
-          <div className="fpl-col-filter-select-all">
-            <button
-              type="button"
-              className="fpl-col-filter-clear"
-              onClick={() => {
-                setColFilters((f) => ({ ...f, [key]: allSelected ? [] : [...options] }));
-                setPage(0);
-              }}
-            >
-              {allSelected ? 'Clear all' : 'Select all'}
-            </button>
-          </div>
           {options.map((v) => (
-            <label key={v} className="fpl-col-filter-check">
-              <input type="checkbox" checked={selected.includes(v)} onChange={() => toggleColArr(key, v)} />
+            <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+              <input type="checkbox" checked={selected.includes(v)} onChange={() => toggleColArr(key, v)} style={{ flexShrink: 0 }} />
               {renderLabel(v)}
             </label>
           ))}
@@ -400,14 +402,22 @@ export function VulnRepoVulnerabilitiesPage() {
       );
     }
 
-    return (
-      <div className="fpl-col-filter-popover" ref={colFilterRef}>
-        <div className="fpl-col-filter-header">
-          <span>{colLabel[colKey]}</span>
-          {hasColFilter(colKey) && (
-            <button type="button" className="fpl-col-filter-clear" onClick={() => clearColFilter(colKey)}>Clear</button>
-          )}
-        </div>
+    const style: React.CSSProperties = {
+      position: 'fixed',
+      top: filterAnchorPos?.top ?? 100,
+      left: filterAnchorPos?.left ?? 200,
+      zIndex: 9999,
+      background: '#ffffff',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+    };
+
+    return ReactDOM.createPortal(
+      <div className="fpl-col-filter-popover" ref={colFilterRef} style={style}>
+        {hasColFilter(colKey) && (
+          <div className="fpl-col-filter-clear-row">
+            <button type="button" className="fpl-col-filter-clear" onClick={() => clearColFilter(colKey)}>Clear filter</button>
+          </div>
+        )}
         {colKey === 'cve' && (
           <input autoFocus className="fpl-col-filter-input" placeholder="Search CVE ID…"
             value={colFilters.cve}
@@ -435,8 +445,8 @@ export function VulnRepoVulnerabilitiesPage() {
         {colKey === 'applicable' && (
           <div className="fpl-col-filter-checks">
             {(['YES', 'NO'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check">
-                <input type="radio" name="intel-applicable-filter"
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+                <input type="radio" name="intel-applicable-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.applicable === v}
                   onChange={() => { setColFilters((f) => ({ ...f, applicable: f.applicable === v ? '' : v })); setPage(0); }} />
                 <span>{v === 'YES' ? 'Applicable (inventory matched)' : 'Not Applicable'}</span>
@@ -445,13 +455,18 @@ export function VulnRepoVulnerabilitiesPage() {
           </div>
         )}
         {colKey === 'investigationStatus' && checkboxGroup('investigationStatus', STATUS_FILTER_OPTIONS, (v) => (
-          <span>{formatLabel(v)}</span>
+          <span>{{
+            APPLICABLE: 'Applicable',
+            REVIEWED: 'Reviewed',
+            NO_IMPACT: 'No Impact',
+            NOT_APPLICABLE: 'Not Applicable',
+          }[v] ?? formatLabel(v)}</span>
         ))}
         {colKey === 'openFindings' && (
           <div className="fpl-col-filter-checks">
             {(['yes', 'no'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check">
-                <input type="radio" name="intel-openfindings-filter"
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+                <input type="radio" name="intel-openfindings-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.openFindings === v}
                   onChange={() => { setColFilters((f) => ({ ...f, openFindings: f.openFindings === v ? '' : v })); setPage(0); }} />
                 <span>{v === 'yes' ? 'Has open findings' : 'No open findings'}</span>
@@ -462,8 +477,8 @@ export function VulnRepoVulnerabilitiesPage() {
         {colKey === 'hasAiSummary' && (
           <div className="fpl-col-filter-checks">
             {(['yes', 'no'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check">
-                <input type="radio" name="intel-aisum-filter"
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+                <input type="radio" name="intel-aisum-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.hasAiSummary === v}
                   onChange={() => { setColFilters((f) => ({ ...f, hasAiSummary: f.hasAiSummary === v ? '' : v })); setPage(0); }} />
                 <span>{v === 'yes' ? 'Has AI summary / solution' : 'No AI summary'}</span>
@@ -471,7 +486,8 @@ export function VulnRepoVulnerabilitiesPage() {
             ))}
           </div>
         )}
-      </div>
+      </div>,
+      document.body
     );
   }
 
@@ -489,7 +505,10 @@ export function VulnRepoVulnerabilitiesPage() {
       if (initialApplicable && !isApplicableByInventory(item)) {
         return false;
       }
-      if (initialHasFindings && item.openFindings === 0) {
+      if (initialHasFindings === 'yes' && item.openFindings === 0) {
+        return false;
+      }
+      if (initialHasFindings === 'no' && item.openFindings > 0) {
         return false;
       }
       // Column-level filters
@@ -907,7 +926,18 @@ export function VulnRepoVulnerabilitiesPage() {
             type="button"
             className={`fpl-filter-btn${active ? ' fpl-filter-btn--active' : ''}`}
             title={`Filter ${label}`}
-            onClick={(e) => { e.stopPropagation(); setOpenColFilter((p) => (p === colKey ? null : colKey)); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              setOpenColFilter((p) => {
+                if (p === colKey) {
+                  setFilterAnchorPos(null);
+                  return null;
+                }
+                setFilterAnchorPos({ top: rect.bottom + 4, left: Math.min(rect.left, window.innerWidth - 280) });
+                return colKey;
+              });
+            }}
           >
             <FunnelIcon active={active} />
           </button>
@@ -970,6 +1000,34 @@ export function VulnRepoVulnerabilitiesPage() {
 
       <div className="fpl-toolbar vuln-repo-intel-toolbar">
         <div className="fpl-toolbar-left">
+          {/* Scope toggle: All Intelligence vs My Org CVEs */}
+          <div className="vuln-repo-scope-toggle">
+            <button
+              type="button"
+              className={`vuln-repo-scope-btn${initialIncludeAll ? ' is-active' : ''}`}
+              onClick={() => {
+                const nextParams = new URLSearchParams(searchParams);
+                nextParams.set('includeAll', 'true');
+                setPage(0);
+                setSearchParams(nextParams);
+              }}
+            >
+              All Intelligence
+            </button>
+            <button
+              type="button"
+              className={`vuln-repo-scope-btn${!initialIncludeAll ? ' is-active' : ''}`}
+              onClick={() => {
+                const nextParams = new URLSearchParams(searchParams);
+                nextParams.delete('includeAll');
+                setPage(0);
+                setSearchParams(nextParams);
+              }}
+            >
+              My Org CVEs
+            </button>
+          </div>
+
           {/* Source filter pills */}
           <div className="vuln-repo-source-pills">
             <span className="vuln-repo-source-pills-label">Source</span>

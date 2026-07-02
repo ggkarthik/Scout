@@ -26,28 +26,27 @@ import { parseTenantInviteCsv, type ParsedBulkInviteRow } from '../features/admi
 import type { AuditEvent, ServiceAccount, TenantBulkInviteResponse, TenantInvite, TenantMember } from '../features/admin/types';
 import { canExportAudit, canManageServiceAccounts, canManageTenant, canManageUsers } from '../features/auth/roles';
 
-type RoleKey = 'Admin' | 'Security Lead' | 'Analyst' | 'Viewer';
+type RoleKey = 'Admin' | 'Analyst' | 'Viewer';
 
-const ROLE_KEYS: RoleKey[] = ['Admin', 'Security Lead', 'Analyst', 'Viewer'];
+const ROLE_KEYS: RoleKey[] = ['Admin', 'Analyst', 'Viewer'];
 
 const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
   Admin: 'Operational administration across users, integrations, inventory, and findings.',
-  'Security Lead': 'Triage ownership, risk acceptance, VEX decisions, and remediation governance.',
-  Analyst: 'Investigation workflow, comments, evidence review, and finding disposition.',
+  Analyst: 'Triage ownership, risk acceptance, VEX decisions, investigation workflow, and finding disposition.',
   Viewer: 'Read-only access for engineering leaders, auditors, and partner teams.',
 };
 
 const ROLE_MATRIX = [
-  { capability: 'Invite and remove users', admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Change roles and scopes', admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Approve VEX and risk acceptance', admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'Manage service accounts', admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Suppress findings / risk acceptance', admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'Edit risk policy and SLA', admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Trigger ingestion and connectors', admin: true, lead: false, analyst: false, viewer: false },
-  { capability: 'Investigate findings', admin: true, lead: true, analyst: true, viewer: false },
-  { capability: 'Export audit log', admin: true, lead: true, analyst: false, viewer: false },
-  { capability: 'View dashboards and reports', admin: true, lead: true, analyst: true, viewer: true },
+  { capability: 'Invite and remove users', admin: true, analyst: false, viewer: false },
+  { capability: 'Change roles and scopes', admin: true, analyst: false, viewer: false },
+  { capability: 'Approve VEX and risk acceptance', admin: true, analyst: true, viewer: false },
+  { capability: 'Manage service accounts', admin: true, analyst: false, viewer: false },
+  { capability: 'Suppress findings / risk acceptance', admin: true, analyst: true, viewer: false },
+  { capability: 'Edit risk policy and SLA', admin: true, analyst: false, viewer: false },
+  { capability: 'Trigger ingestion and connectors', admin: true, analyst: false, viewer: false },
+  { capability: 'Investigate findings', admin: true, analyst: true, viewer: false },
+  { capability: 'Export audit log', admin: true, analyst: true, viewer: false },
+  { capability: 'View dashboards and reports', admin: true, analyst: true, viewer: true },
 ];
 
 const ADMIN_TABS: Array<{ key: AdminRouteView; label: string; helper: string }> = [
@@ -92,12 +91,12 @@ function roleBucket(role: string | null | undefined): RoleKey {
   if (normalized === 'Tenant Admin') return 'Admin';
   if (normalized === 'Inventory Admin') return 'Admin';
   if (normalized === 'Creator') return 'Admin';
+  if (normalized === 'Security Analyst') return 'Analyst';
   return 'Viewer';
 }
 
 function privilegedRoleBucket(role: string | null | undefined): boolean {
-  const bucket = roleBucket(role);
-  return bucket === 'Admin' || bucket === 'Security Lead';
+  return roleBucket(role) === 'Admin';
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -158,16 +157,14 @@ function memberMatchesStructuredFilters(
 }
 
 function backendRoleForRoleKey(roleKey: RoleKey): string {
-  return roleKey === 'Admin'
-    ? 'TENANT_ADMIN'
-    : roleKey === 'Security Lead' || roleKey === 'Analyst'
-      ? 'SECURITY_ANALYST'
-      : 'READ_ONLY_AUDITOR';
+  return roleKey === 'Admin' ? 'TENANT_ADMIN'
+    : roleKey === 'Analyst' ? 'SECURITY_ANALYST'
+    : 'READ_ONLY_AUDITOR';
 }
 
 function roleKeyForBackendRole(role: string | null | undefined): RoleKey {
   if (role === 'TENANT_ADMIN' || role === 'INVENTORY_ADMIN') return 'Admin';
-  if (role === 'SECURITY_ANALYST') return 'Security Lead';
+  if (role === 'SECURITY_ANALYST') return 'Analyst';
   return 'Viewer';
 }
 
@@ -295,7 +292,7 @@ export function UserManagementPage() {
   const [auditQuery, setAuditQuery] = React.useState('');
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [isExporting, setIsExporting] = React.useState(false);
-  const [selectedMemberId, setSelectedMemberId] = React.useState<string | null>(null);
+  const [editingRoleMemberId, setEditingRoleMemberId] = React.useState<string | null>(null);
   const [bulkInviteRows, setBulkInviteRows] = React.useState<ParsedBulkInviteRow[]>([]);
   const [bulkInviteErrors, setBulkInviteErrors] = React.useState<string[]>([]);
   const [bulkInviteFileName, setBulkInviteFileName] = React.useState<string>('');
@@ -328,7 +325,7 @@ export function UserManagementPage() {
   );
 
   const memberCountByRole = React.useMemo(() => {
-    const counts: Record<RoleKey, number> = { Admin: 0, 'Security Lead': 0, Analyst: 0, Viewer: 0 };
+    const counts: Record<RoleKey, number> = { Admin: 0, Analyst: 0, Viewer: 0 };
     members.forEach((m) => { counts[roleBucket(m.role)] += 1; });
     return counts;
   }, [members]);
@@ -337,10 +334,6 @@ export function UserManagementPage() {
   const tenantName = authQuery.data?.tenantName ?? '—';
   const memberRoleOptions = React.useMemo(() => Array.from(new Set(members.map((member) => member.role))).sort(), [members]);
   const memberStatusOptions = React.useMemo(() => Array.from(new Set(members.map((member) => member.status))).sort(), [members]);
-  const selectedMember = React.useMemo(
-    () => visibleMembers.find((member) => member.id === selectedMemberId) ?? visibleMembers[0] ?? null,
-    [selectedMemberId, visibleMembers]
-  );
 
   const captionParts: string[] = [];
   if (authQuery.data?.tenantName) captionParts.push(authQuery.data.tenantName);
@@ -426,15 +419,6 @@ export function UserManagementPage() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [serviceOpen, closeService]);
 
-  React.useEffect(() => {
-    if (!selectedMemberId && visibleMembers.length > 0) {
-      setSelectedMemberId(visibleMembers[0].id);
-      return;
-    }
-    if (selectedMemberId && !visibleMembers.some((member) => member.id === selectedMemberId)) {
-      setSelectedMemberId(visibleMembers[0]?.id ?? null);
-    }
-  }, [selectedMemberId, visibleMembers]);
 
   if (!authQuery.isLoading && !mayAccessTenantAdministration) {
     return <Navigate to="/exposure" replace />;
@@ -661,8 +645,6 @@ export function UserManagementPage() {
                             visibleMembers.map((member) => (
                               <tr
                                 key={member.id}
-                                className={selectedMember?.id === member.id ? 'um-member-row-active' : undefined}
-                                onClick={() => setSelectedMemberId(member.id)}
                               >
                               <td>
                                 <div className="um-person">
@@ -693,30 +675,36 @@ export function UserManagementPage() {
                               <td>{formatTimestamp(member.createdAt)}</td>
                                 <td>
                                   <div className="um-card-actions" style={{ justifyContent: 'flex-end' }}>
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setSelectedMemberId(member.id);
-                                      }}
-                                    >
-                                      Details
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      disabled={!mayManageUsers || updateMember.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        updateMember.mutate({
-                                          memberId: member.id,
-                                          payload: { role: member.role === 'READ_ONLY_AUDITOR' ? 'SECURITY_ANALYST' : 'READ_ONLY_AUDITOR' }
-                                        });
-                                      }}
-                                    >
-                                      {member.role === 'READ_ONLY_AUDITOR' ? 'Promote' : 'Set Viewer'}
-                                    </button>
+                                    {editingRoleMemberId === member.id ? (
+                                      <select
+                                        autoFocus
+                                        defaultValue={member.role}
+                                        disabled={!mayManageUsers || updateMember.isPending}
+                                        style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--title)' }}
+                                        onChange={(event) => {
+                                          event.stopPropagation();
+                                          updateMember.mutate({ memberId: member.id, payload: { role: event.target.value } });
+                                          setEditingRoleMemberId(null);
+                                        }}
+                                        onBlur={() => setEditingRoleMemberId(null)}
+                                      >
+                                        {ROLE_KEYS.map((roleKey) => (
+                                          <option key={roleKey} value={backendRoleForRoleKey(roleKey)}>{roleKey}</option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        disabled={!mayManageUsers || updateMember.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setEditingRoleMemberId(member.id);
+                                        }}
+                                      >
+                                        Edit Role
+                                      </button>
+                                    )}
                                     {member.status.toUpperCase() === 'SUSPENDED' ? (
                                       <button
                                         type="button"
@@ -761,71 +749,6 @@ export function UserManagementPage() {
                         </tbody>
                       </table>
                     </div>
-                    {selectedMember && (
-                      <aside className="um-member-detail">
-                        <div className="um-member-detail-head">
-                          <div className="um-person">
-                            <span className="um-avatar" aria-hidden="true">{avatarInitials(selectedMember)}</span>
-                            <div className="um-person-text">
-                              <strong>{memberDisplayName(selectedMember)}</strong>
-                              <small>{selectedMember.email ?? '—'}</small>
-                            </div>
-                          </div>
-                          <span className={statusPillClass(selectedMember.status)}>{formatStatus(selectedMember.status)}</span>
-                        </div>
-                        <div className="um-member-detail-grid">
-                          <div className="um-detail-full"><span>Subject</span><strong><code>{selectedMember.subject}</code></strong></div>
-                          <div><span>Status</span><strong>{formatStatus(selectedMember.status)}</strong></div>
-                          <div><span>Member since</span><strong>{formatTimestamp(selectedMember.createdAt)}</strong></div>
-                        </div>
-                        <div className="um-member-detail-controls">
-                          <label>
-                            Role
-                            <select
-                              value={backendRoleForRoleKey(roleKeyForBackendRole(selectedMember.role))}
-                              disabled={!mayManageUsers || updateMember.isPending}
-                              onChange={(event) => updateMember.mutate({
-                                memberId: selectedMember.id,
-                                payload: { role: event.target.value }
-                              })}
-                            >
-                              {ROLE_KEYS.map((roleKey) => (
-                                <option key={roleKey} value={backendRoleForRoleKey(roleKey)}>{roleKey}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <div className="um-member-detail-actions">
-                            {selectedMember.status.toUpperCase() === 'SUSPENDED' ? (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                disabled={!mayManageUsers || updateMember.isPending}
-                                onClick={() => updateMember.mutate({ memberId: selectedMember.id, payload: { status: 'ACTIVE' } })}
-                              >
-                                Reactivate member
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                disabled={!mayManageUsers || updateMember.isPending}
-                                onClick={() => updateMember.mutate({ memberId: selectedMember.id, payload: { status: 'SUSPENDED' } })}
-                              >
-                                Suspend member
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              disabled={!mayManageUsers || deleteMember.isPending}
-                              onClick={() => deleteMember.mutate(selectedMember.id)}
-                            >
-                              Remove access
-                            </button>
-                          </div>
-                        </div>
-                      </aside>
-                    )}
                   </div>
                 )}
               </>
@@ -998,7 +921,6 @@ export function UserManagementPage() {
                       <tr>
                         <th>Capability</th>
                         <th>Admin</th>
-                        <th>Security Lead</th>
                         <th>Analyst</th>
                         <th>Viewer</th>
                       </tr>
@@ -1008,7 +930,6 @@ export function UserManagementPage() {
                         <tr key={row.capability}>
                           <td>{row.capability}</td>
                           <td><CheckMark enabled={row.admin} /></td>
-                          <td><CheckMark enabled={row.lead} /></td>
                           <td><CheckMark enabled={row.analyst} /></td>
                           <td><CheckMark enabled={row.viewer} /></td>
                         </tr>
@@ -1265,7 +1186,7 @@ export function UserManagementPage() {
               <div className="um-modal-head">
                 <div>
                   <h3 id="bulk-invite-title">Import Users from CSV</h3>
-                  <p>Upload a CSV with <code>email</code>, optional <code>displayName</code>, and optional <code>role</code>. Supported role labels: Admin, Security Lead, Analyst, Viewer.</p>
+                  <p>Upload a CSV with <code>email</code>, optional <code>displayName</code>, and optional <code>role</code>. Supported role labels: Admin, Analyst, Viewer.</p>
                 </div>
                 <button
                   type="button"
