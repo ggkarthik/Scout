@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.security;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -15,6 +16,7 @@ import com.prototype.vulnwatch.controller.ApiExceptionHandler;
 import com.prototype.vulnwatch.controller.RiskPolicyController;
 import com.prototype.vulnwatch.controller.ServiceNowCmdbConfigController;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.ServiceNowCmdbConfigResponse;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
@@ -123,6 +125,32 @@ class RbacControllerSecurityIntegrationTest {
     @Test
     void inventoryAdminCanManageConnectorConfiguration() throws Exception {
         authenticateJwt("inventory.jwt", "inventory-1", "INVENTORY_ADMIN");
+        when(serviceNowCmdbConfigService.save(any(), any())).thenReturn(new ServiceNowCmdbConfigResponse(
+                UUID.randomUUID(),
+                "servicenow",
+                true,
+                "https://example.service-now.com",
+                "BASIC",
+                "api",
+                true,
+                "cmdb_sam_sw_install",
+                "cmdb_sam_sw_discovery_model",
+                "cmdb_ci",
+                "",
+                "",
+                "sys_id",
+                "sys_id",
+                1000,
+                true,
+                false,
+                1440,
+                null,
+                null,
+                null,
+                null
+        ));
+        doThrow(new RuntimeException("audit down")).when(auditEventService)
+                .record(anyString(), anyString(), anyString(), any());
 
         mockMvc.perform(put("/api/connectors/servicenow-cmdb")
                         .header("Authorization", "Bearer inventory.jwt")

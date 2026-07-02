@@ -535,33 +535,34 @@
 /* ── column filter popover ────────────────────────────────────────────────── */
 
 .fpl-col-filter-popover {
-  position: absolute;
-  top: 4px;
-  left: 0;
-  min-width: 260px;
-  background: var(--panel, #fff);
+  min-width: 240px;
+  max-width: 340px;
+  background: #ffffff;
   border: 1px solid var(--border, #e5e7eb);
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-  z-index: 300;
-  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  z-index: 9999;
+  padding: 0;
+  overflow: hidden;
 }
 
 .fpl-col-filter-header {
+  display: none;
+}
+
+.fpl-col-filter-clear-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted, #6b7280);
-  margin-bottom: 8px;
+  justify-content: flex-end;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  background: #f9fafb;
 }
 
 .fpl-col-filter-clear {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--accent, #3b82f6);
   padding: 0;
   font-weight: 600;
@@ -570,15 +571,26 @@
 .fpl-col-filter-checks {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  padding: 6px;
 }
 
 .fpl-col-filter-check {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
   cursor: pointer;
+  color: #1a1a2e;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+.fpl-col-filter-check:hover {
+  background: #f5f7fa;
 }
 
 /* Compact severity pills inside filter popovers */
@@ -593,21 +605,23 @@
 .fpl-col-filter-select-all {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 6px;
-  padding-bottom: 6px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border, #e5e7eb);
+  background: #f9fafb;
 }
 
 .fpl-col-filter-input {
-  width: 100%;
-  padding: 6px 8px;
+  width: calc(100% - 24px);
+  margin: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
   background: var(--surface, #f8fafc);
   color: var(--title, #111827);
   outline: none;
   box-sizing: border-box;
+  display: block;
 }
 
 .fpl-col-filter-input:focus {

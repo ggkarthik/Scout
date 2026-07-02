@@ -138,8 +138,19 @@ public class LocalCredentialAuthService {
     private AuthTokenResponse loginTenantScopedUser(AppUser user) {
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
-        if (memberships.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant owner must have exactly one active tenant");
+        if (memberships.isEmpty()) {
+            List<TenantMembership> suspended = membershipRepository
+                    .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "SUSPENDED");
+            if (!suspended.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Your account has been suspended. Contact your administrator to restore access.");
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "No active tenant membership found for this account.");
+        }
+        if (memberships.size() > 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Multiple active tenant memberships found. Contact support.");
         }
         TenantMembership membership = memberships.get(0);
         tenantLifecycleGuardService.assertTenantAccessible(membership.getTenant());
@@ -215,8 +226,19 @@ public class LocalCredentialAuthService {
 
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
-        if (memberships.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant owner must have exactly one active tenant");
+        if (memberships.isEmpty()) {
+            List<TenantMembership> suspended = membershipRepository
+                    .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "SUSPENDED");
+            if (!suspended.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Your account has been suspended. Contact your administrator to restore access.");
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "No active tenant membership found for this account.");
+        }
+        if (memberships.size() > 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Multiple active tenant memberships found. Contact support.");
         }
         TenantMembership membership = memberships.get(0);
         tenantLifecycleGuardService.assertTenantAccessible(membership.getTenant());

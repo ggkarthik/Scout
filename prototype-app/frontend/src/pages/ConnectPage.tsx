@@ -636,6 +636,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<ConnectView>(initialView);
   const [activeConnector, setActiveConnector] = React.useState<ConnectorId | null>(() => readConnectorFromSearch(searchParams));
+  const [vulnIntelCollapsed, setVulnIntelCollapsed] = React.useState(false);
   const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
   const sccmConfigQuery = useSccmCmdbConfigQuery();
   const awsConfigQuery = useAwsDiscoveryConfigQuery();
@@ -806,13 +807,34 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
 
             {/* Vulnerability Intelligence — 3rd section */}
             <div className="connect-source-section">
-              <div className="connect-source-section-head">
-                <h4>Vulnerability Intelligence</h4>
-                <span className="panel-caption">
-                  Select which ingested sources drive tenant correlation while keeping the broader repository visible for research.
-                </span>
-              </div>
-              <VulnerabilitySourcesSection canEdit={canManageSourceFilters(actor)} />
+              <button
+                type="button"
+                className="config-accordion-toggle"
+                aria-expanded={!vulnIntelCollapsed}
+                onClick={() => setVulnIntelCollapsed((c) => !c)}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, textAlign: 'left' }}>
+                  <span>Vulnerability Intelligence</span>
+                  {vulnIntelCollapsed && (
+                    <span className="panel-caption" style={{ fontWeight: 400 }}>
+                      Select which ingested sources drive tenant correlation while keeping the broader repository visible for research.
+                    </span>
+                  )}
+                </div>
+                <svg className={`config-chevron${vulnIntelCollapsed ? '' : ' open'}`} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              {!vulnIntelCollapsed && (
+                <>
+                  <div className="connect-source-section-head" style={{ marginTop: 4 }}>
+                    <span className="panel-caption">
+                      Select which ingested sources drive tenant correlation while keeping the broader repository visible for research.
+                    </span>
+                  </div>
+                  <VulnerabilitySourcesSection canEdit={canManageSourceFilters(actor)} />
+                </>
+              )}
             </div>
           </div>
         </section>

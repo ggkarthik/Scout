@@ -90,7 +90,14 @@ public class ApiExceptionHandler {
         if (status == null) {
             status = HttpStatus.BAD_REQUEST;
         }
-        String code = status == HttpStatus.NOT_FOUND ? "NOT_FOUND" : "BAD_REQUEST";
+        String code = switch (status) {
+            case NOT_FOUND -> "NOT_FOUND";
+            case UNAUTHORIZED -> "UNAUTHORIZED";
+            case FORBIDDEN -> "FORBIDDEN";
+            case CONFLICT -> "CONFLICT";
+            case TOO_MANY_REQUESTS -> "TOO_MANY_REQUESTS";
+            default -> "BAD_REQUEST";
+        };
         String message = ex.getReason() == null || ex.getReason().isBlank()
                 ? status.getReasonPhrase()
                 : ex.getReason();

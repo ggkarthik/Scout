@@ -14,6 +14,8 @@ import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/connectors/servicenow-cmdb")
 public class ServiceNowCmdbConfigController {
+    private static final Logger LOG = LoggerFactory.getLogger(ServiceNowCmdbConfigController.class);
 
     private final WorkspaceService workspaceService;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
@@ -58,7 +61,7 @@ public class ServiceNowCmdbConfigController {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
         ServiceNowCmdbConfigResponse response = serviceNowCmdbConfigService.save(tenant, request);
-        auditEventService.record("connector.servicenow_cmdb.saved", "connector_config", tenant.getId().toString(), null);
+        recordAuditSafely("connector.servicenow_cmdb.saved", "connector_config", tenant.getId().toString(), null);
         return response;
     }
 
@@ -69,7 +72,7 @@ public class ServiceNowCmdbConfigController {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
         ServiceNowCmdbConnectionTestResponse response = serviceNowCmdbConfigService.test(tenant);
-        auditEventService.record("connector.servicenow_cmdb.tested", "connector_config", tenant.getId().toString(),
+        recordAuditSafely("connector.servicenow_cmdb.tested", "connector_config", tenant.getId().toString(),
                 "{\"status\":\"" + response.status() + "\"}");
         return response;
     }
@@ -81,7 +84,8 @@ public class ServiceNowCmdbConfigController {
         Tenant tenant = workspaceService.getWorkspace();
         assertDemoAllowsLiveConnector(tenant);
         SyncTriggerResponse response = serviceNowCmdbSyncService.trigger();
-        auditEventService.record("connector.servicenow_cmdb.sync_triggered", "sync_run", response.runId() == null ? null : response.runId().toString(), null);
+        recordAuditSafely("connector.servicenow_cmdb.sync_triggered", "sync_run",
+                response.runId() == null ? null : response.runId().toString(), null);
         return response;
     }
 
@@ -89,6 +93,14 @@ public class ServiceNowCmdbConfigController {
         DemoLifecycleService demoLifecycleService = demoLifecycleServiceProvider.getIfAvailable();
         if (demoLifecycleService != null) {
             demoLifecycleService.assertDemoAllowsLiveConnector(tenant);
+        }
+    }
+
+    private void recordAuditSafely(String action, String targetType, String targetId, String detailsJson) {
+        try {
+            auditEventService.record(action, targetType, targetId, detailsJson);
+        } catch (Exception ex) {
+            LOG.warn("Failed to record audit event for {} ({}): {}", action, targetType, ex.getMessage());
         }
     }
 }

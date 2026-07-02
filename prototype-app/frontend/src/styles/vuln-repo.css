@@ -735,6 +735,48 @@
   color: #fff;
 }
 
+/* Scope toggle — All Intelligence / My Org CVEs */
+.vuln-repo-scope-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+  flex-shrink: 0;
+}
+
+.vuln-repo-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.vuln-repo-scope-btn + .vuln-repo-scope-btn {
+  border-left: 1px solid var(--border);
+}
+
+.vuln-repo-scope-btn:hover {
+  background: var(--row-hover, #f5f7fa);
+  color: var(--title);
+}
+
+.vuln-repo-scope-btn.is-active {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 .intel-col-header-inner {
   display: flex;
   align-items: center;

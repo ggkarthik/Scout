@@ -531,7 +531,7 @@ function TenantDashboard() {
               <button
                 type="button"
                 className="vuln-repo-dashboard-stat-button"
-                onClick={() => navigate(pathForVulnRepoView('org-cves'))}
+                onClick={() => navigate(vulnRepoVulnerabilityPath({ impactedOnly: true, hasFindings: false }))}
               >
                 <div className="stat-card stat-critical">
                   <div className="stat-title-row">
