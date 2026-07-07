@@ -29,6 +29,8 @@
   --panel: rgba(255, 255, 255, 0.86);
   --panel-solid: #fcfdff;
   --panel-muted: #f4f7fc;
+  --surface: #eef3fa;
+  --surface-raised: #ffffff;
   --text: #1c2430;
   --muted: #58677e;
   --title: #121a27;
@@ -593,6 +595,8 @@
   --panel: rgba(12, 16, 24, 0.84);
   --panel-solid: #0d121d;
   --panel-muted: #111927;
+  --surface: #0f1724;
+  --surface-raised: #151f2f;
   --text: #d9e1ef;
   --muted: #929cac;
   --title: #f1f5ff;

@@ -333,7 +333,7 @@
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--panel-solid);
   color: var(--text);
   cursor: pointer;
 }
@@ -341,7 +341,7 @@
 .vi-source-filters {
   margin-top: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: var(--surface-alt, #f8fafc);
+  background: var(--panel-muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -426,7 +426,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--surface-alt, #f8f9fa);
+  background: var(--panel-muted);
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 16px;
@@ -507,7 +507,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--panel-solid);
   color: var(--text);
   font-size: 0.9rem;
   font-family: inherit;
@@ -618,7 +618,7 @@
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  background: var(--surface);
+  background: var(--panel-solid);
   text-align: left;
   transition: border-color 0.15s, background 0.15s;
   font-family: inherit;
