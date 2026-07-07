@@ -511,11 +511,15 @@ function isJwtAuthFailure(status: number, payload?: ApiErrorPayload, fallbackTex
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-  return combined.includes('invalid jwt')
+  const tokenSignal = combined.includes('invalid jwt')
     || combined.includes('jwt')
     || combined.includes('token expired')
-    || combined.includes('unauthorized')
-    || combined.includes('forbidden');
+    || combined.includes('token invalid')
+    || combined.includes('bearer token');
+  if (tokenSignal) {
+    return true;
+  }
+  return status === 401 && combined.includes('unauthorized');
 }
 
 function handleJwtAuthFailure(): void {
