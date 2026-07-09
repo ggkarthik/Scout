@@ -60,7 +60,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -78,6 +80,8 @@ public class CampaignService {
     private final FindingRepository findingRepository;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final ResendEmailClient resendEmailClient;
+    private TransactionTemplate readTransactionTemplate;
+    private TransactionTemplate writeTransactionTemplate;
 
     public CampaignService(
             CampaignRepository campaignRepository,
@@ -107,99 +111,295 @@ public class CampaignService {
         this.resendEmailClient = resendEmailClient;
     }
 
-    @Transactional(readOnly = true)
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.readTransactionTemplate = null;
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public List<CampaignSummaryResponse> list(Tenant tenant, CampaignStatus status) {
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeRead(() -> {
             List<Campaign> campaigns = status == null
                     ? campaignRepository.findAllByTenant_IdOrderByUpdatedAtDesc(tenant.getId())
                     : campaignRepository.findAllByTenant_IdAndStatusOrderByUpdatedAtDesc(tenant.getId(), status);
             return campaigns.stream()
                     .map(campaign -> toSummary(tenant, campaign))
                     .toList();
-        });
+        }));
     }
 
-    @Transactional
     public CampaignDetailResponse create(Tenant tenant, CampaignCreateRequest request, String actor) {
         validateCreateRequest(request);
         return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = new Campaign();
-            campaign.setTenant(tenant);
-            campaign.setName(request.name().trim());
-            campaign.setSummary(trimToNull(request.summary()));
-            campaign.setStatus(CampaignStatus.ACTIVE);
-            campaign.setCreatedBy(actor);
-            campaign.setDueAt(request.dueAt());
-            campaign.setStartedAt(Instant.now());
-            campaign.touch();
-            Campaign saved = campaignRepository.save(campaign);
-
-            List<Vulnerability> vulnerabilities = vulnerabilityRepository.findByExternalIdIn(request.cveIds().stream()
-                    .map(String::trim)
-                    .filter(value -> !value.isEmpty())
-                    .toList());
-            Map<String, Vulnerability> vulnerabilitiesByExternalId = vulnerabilities.stream()
-                    .collect(Collectors.toMap(Vulnerability::getExternalId, value -> value));
-            for (String cveId : request.cveIds()) {
-                Vulnerability vulnerability = vulnerabilitiesByExternalId.get(cveId.trim());
-                if (vulnerability == null) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown CVE: " + cveId);
-                }
-                CampaignVulnerability link = new CampaignVulnerability();
-                link.setCampaign(saved);
-                link.setVulnerability(vulnerability);
-                link.setExternalId(vulnerability.getExternalId());
-                link.setTitle(vulnerability.getTitle());
-                link.setSeverity(vulnerability.getSeverity());
-                campaignVulnerabilityRepository.save(link);
-            }
-
-            for (CampaignNotifyGroupRequest groupRequest : nullSafe(request.notifyGroups())) {
-                if (groupRequest == null || isBlank(groupRequest.groupName())) {
-                    continue;
-                }
-                CampaignNotifyGroup group = new CampaignNotifyGroup();
-                group.setCampaign(saved);
-                group.setGroupName(groupRequest.groupName().trim());
-                group.setGroupEmail(trimToNull(groupRequest.groupEmail()));
-                group.setRoleLabel(trimToNull(groupRequest.roleLabel()));
-                group.setTriggerSummary(trimToNull(groupRequest.triggerSummary()));
-                group.setNotificationsPaused(Boolean.TRUE.equals(groupRequest.notificationsPaused()));
-                campaignNotifyGroupRepository.save(group);
-            }
-
-            for (CampaignWatchlistEntryRequest watchRequest : nullSafe(request.watchlist())) {
-                if (watchRequest == null || isBlank(watchRequest.label())) {
-                    continue;
-                }
-                CampaignWatchlistEntry entry = new CampaignWatchlistEntry();
-                entry.setCampaign(saved);
-                entry.setEntryType(watchRequest.entryType());
-                entry.setLabel(watchRequest.label().trim());
-                entry.setEmail(trimToNull(watchRequest.email()));
-                entry.setTriggerPolicy(trimToNull(watchRequest.triggerPolicy()));
-                entry.setActive(!Boolean.FALSE.equals(watchRequest.active()));
-                campaignWatchlistEntryRepository.save(entry);
-            }
-
-            if (!isBlank(request.launchNote())) {
-                CampaignNote note = new CampaignNote();
-                note.setCampaign(saved);
-                note.setAuthor(actor);
-                note.setBody(request.launchNote().trim());
-                campaignNoteRepository.save(note);
-            }
-
-            recordActivity(saved, actor, "CREATED",
-                    "Campaign created from " + request.cveIds().size() + " CVE" + (request.cveIds().size() == 1 ? "" : "s") + ".");
-            deliverLaunchNotifications(saved, actor);
-            return getDetail(tenant, saved.getId());
+            UUID campaignId = executeWrite(() -> createInCurrentTenantSchema(tenant, request, actor));
+            return getDetailInCurrentTenantSchema(tenant, campaignId);
         });
     }
 
-    @Transactional(readOnly = true)
     public CampaignDetailResponse getDetail(Tenant tenant, UUID campaignId) {
+        return tenantSchemaExecutionService.run(tenant, () -> getDetailInCurrentTenantSchema(tenant, campaignId));
+    }
+
+    public CampaignDetailResponse updateStatus(Tenant tenant, UUID campaignId, CampaignStatusUpdateRequest request, String actor) {
+        if (request == null || request.status() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status is required");
+        }
         return tenantSchemaExecutionService.run(tenant, () -> {
+            executeWrite(() -> {
+                Campaign campaign = loadCampaign(tenant, campaignId);
+                campaign.setStatus(request.status());
+                if (request.status() == CampaignStatus.ACTIVE && campaign.getStartedAt() == null) {
+                    campaign.setStartedAt(Instant.now());
+                }
+                if (request.status() == CampaignStatus.PAUSED) {
+                    campaign.setPausedAt(Instant.now());
+                }
+                if (request.status() == CampaignStatus.CLOSED || request.status() == CampaignStatus.CANCELLED) {
+                    campaign.setClosedAt(Instant.now());
+                }
+                campaign.touch();
+                campaignRepository.save(campaign);
+                recordActivity(campaign, actor, "STATUS_CHANGED", "Campaign moved to " + request.status() + ".");
+                notifyWatchlistForEvent(campaign, actor, "STATUS_CHANGES", "Campaign status changed to " + request.status() + ".");
+                if (!isBlank(request.note())) {
+                    CampaignNote note = new CampaignNote();
+                    note.setCampaign(campaign);
+                    note.setAuthor(actor);
+                    note.setBody(request.note().trim());
+                    campaignNoteRepository.save(note);
+                }
+                return null;
+            });
+            return getDetailInCurrentTenantSchema(tenant, campaignId);
+        });
+    }
+
+    public CampaignNoteResponse addNote(Tenant tenant, UUID campaignId, CampaignNoteRequest request, String actor) {
+        if (request == null || isBlank(request.body())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "body is required");
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            Campaign campaign = loadCampaign(tenant, campaignId);
+            CampaignNote note = new CampaignNote();
+            note.setCampaign(campaign);
+            note.setAuthor(actor);
+            note.setBody(request.body().trim());
+            CampaignNote saved = campaignNoteRepository.save(note);
+            recordActivity(campaign, actor, "NOTE_ADDED", "Added a campaign note.");
+            notifyWatchlistForEvent(campaign, actor, "NOTES_ONLY", "New campaign note: " + saved.getBody());
+            campaign.touch();
+            campaignRepository.save(campaign);
+            return new CampaignNoteResponse(saved.getId(), saved.getAuthor(), saved.getBody(), saved.getCreatedAt());
+        }));
+    }
+
+    public CampaignDetailResponse updateNotifyGroup(
+            Tenant tenant,
+            UUID campaignId,
+            UUID notifyGroupId,
+            CampaignNotifyGroupRequest request,
+            String actor
+    ) {
+        if (request == null || isBlank(request.groupName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupName is required");
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            executeWrite(() -> {
+                Campaign campaign = loadCampaign(tenant, campaignId);
+                CampaignNotifyGroup group = campaignNotifyGroupRepository.findById(notifyGroupId)
+                        .filter(item -> item.getCampaign().getId().equals(campaignId))
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign notify group not found"));
+                group.setGroupName(request.groupName().trim());
+                group.setGroupEmail(trimToNull(request.groupEmail()));
+                group.setRoleLabel(trimToNull(request.roleLabel()));
+                group.setTriggerSummary(trimToNull(request.triggerSummary()));
+                group.setNotificationsPaused(Boolean.TRUE.equals(request.notificationsPaused()));
+                campaignNotifyGroupRepository.save(group);
+                campaign.touch();
+                campaignRepository.save(campaign);
+                recordActivity(campaign, actor, "GROUP_UPDATED", "Notify group updated: " + group.getGroupName() + ".");
+                return null;
+            });
+            return getDetailInCurrentTenantSchema(tenant, campaignId);
+        });
+    }
+
+    public CampaignDetailResponse updateWatchlistEntry(
+            Tenant tenant,
+            UUID campaignId,
+            UUID watchlistEntryId,
+            CampaignWatchlistEntryUpdateRequest request,
+            String actor
+    ) {
+        if (request == null || isBlank(request.label())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "label is required");
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            executeWrite(() -> {
+                Campaign campaign = loadCampaign(tenant, campaignId);
+                CampaignWatchlistEntry entry = campaignWatchlistEntryRepository.findById(watchlistEntryId)
+                        .filter(item -> item.getCampaign().getId().equals(campaignId))
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign watchlist entry not found"));
+                entry.setLabel(request.label().trim());
+                entry.setEmail(trimToNull(request.email()));
+                entry.setTriggerPolicy(trimToNull(request.triggerPolicy()));
+                entry.setActive(!Boolean.FALSE.equals(request.active()));
+                campaignWatchlistEntryRepository.save(entry);
+                campaign.touch();
+                campaignRepository.save(campaign);
+                recordActivity(campaign, actor, "WATCHLIST_UPDATED", "Watchlist entry updated: " + entry.getLabel() + ".");
+                return null;
+            });
+            return getDetailInCurrentTenantSchema(tenant, campaignId);
+        });
+    }
+
+    public CampaignExceptionResponse addException(Tenant tenant, UUID campaignId, CampaignExceptionRequest request, String actor) {
+        if (request == null || isBlank(request.title()) || isBlank(request.reason())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title and reason are required");
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            Campaign campaign = loadCampaign(tenant, campaignId);
+            CampaignException exception = new CampaignException();
+            exception.setCampaign(campaign);
+            exception.setFindingDisplayId(trimToNull(request.findingDisplayId()));
+            exception.setAssetName(trimToNull(request.assetName()));
+            exception.setPackageName(trimToNull(request.packageName()));
+            exception.setTitle(request.title().trim());
+            exception.setReason(request.reason().trim());
+            exception.setRequestedBy(actor);
+            exception.setDecisionDueAt(request.decisionDueAt());
+            exception.touch();
+            CampaignException saved = campaignExceptionRepository.save(exception);
+            recordActivity(campaign, actor, "EXCEPTION_ADDED", "Exception added: " + saved.getTitle() + ".");
+            notifyWatchlistForEvent(campaign, actor, "CLOSURE_RISK", "Exception raised: " + saved.getTitle() + ".");
+            campaign.touch();
+            campaignRepository.save(campaign);
+            return new CampaignExceptionResponse(
+                    saved.getId(),
+                    saved.getFindingDisplayId(),
+                    saved.getAssetName(),
+                    saved.getPackageName(),
+                    saved.getTitle(),
+                    saved.getReason(),
+                    saved.getStatus(),
+                    saved.getRequestedBy(),
+                    saved.getRequestedAt(),
+                    saved.getDecisionDueAt(),
+                    saved.getDecisionedBy(),
+                    saved.getDecisionedAt()
+            );
+        }));
+    }
+
+    public CampaignDetailResponse updateExceptionStatus(Tenant tenant, UUID campaignId, UUID exceptionId, CampaignExceptionStatusUpdateRequest request, String actor) {
+        if (request == null || request.status() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status is required");
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            executeWrite(() -> {
+                Campaign campaign = loadCampaign(tenant, campaignId);
+                CampaignException exception = campaignExceptionRepository.findById(exceptionId)
+                        .filter(item -> item.getCampaign().getId().equals(campaignId))
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign exception not found"));
+                exception.setStatus(request.status());
+                exception.setDecisionedBy(actor);
+                exception.setDecisionedAt(Instant.now());
+                exception.touch();
+                campaignExceptionRepository.save(exception);
+                recordActivity(campaign, actor, "EXCEPTION_STATUS_CHANGED", "Exception " + exception.getTitle() + " moved to " + request.status() + ".");
+                notifyWatchlistForEvent(campaign, actor, "CLOSURE_RISK", "Exception " + exception.getTitle() + " moved to " + request.status() + ".");
+                return null;
+            });
+            return getDetailInCurrentTenantSchema(tenant, campaignId);
+        });
+    }
+
+    private UUID createInCurrentTenantSchema(Tenant tenant, CampaignCreateRequest request, String actor) {
+        Campaign campaign = new Campaign();
+        campaign.setTenant(tenant);
+        campaign.setName(request.name().trim());
+        campaign.setSummary(trimToNull(request.summary()));
+        campaign.setStatus(CampaignStatus.ACTIVE);
+        campaign.setCreatedBy(actor);
+        campaign.setDueAt(request.dueAt());
+        campaign.setStartedAt(Instant.now());
+        campaign.touch();
+        Campaign saved = campaignRepository.save(campaign);
+
+        List<Vulnerability> vulnerabilities = vulnerabilityRepository.findByExternalIdIn(request.cveIds().stream()
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .toList());
+        Map<String, Vulnerability> vulnerabilitiesByExternalId = vulnerabilities.stream()
+                .collect(Collectors.toMap(Vulnerability::getExternalId, value -> value));
+        for (String cveId : request.cveIds()) {
+            Vulnerability vulnerability = vulnerabilitiesByExternalId.get(cveId.trim());
+            if (vulnerability == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown CVE: " + cveId);
+            }
+            CampaignVulnerability link = new CampaignVulnerability();
+            link.setCampaign(saved);
+            link.setVulnerability(vulnerability);
+            link.setExternalId(vulnerability.getExternalId());
+            link.setTitle(vulnerability.getTitle());
+            link.setSeverity(vulnerability.getSeverity());
+            campaignVulnerabilityRepository.save(link);
+        }
+
+        for (CampaignNotifyGroupRequest groupRequest : nullSafe(request.notifyGroups())) {
+            if (groupRequest == null || isBlank(groupRequest.groupName())) {
+                continue;
+            }
+            CampaignNotifyGroup group = new CampaignNotifyGroup();
+            group.setCampaign(saved);
+            group.setGroupName(groupRequest.groupName().trim());
+            group.setGroupEmail(trimToNull(groupRequest.groupEmail()));
+            group.setRoleLabel(trimToNull(groupRequest.roleLabel()));
+            group.setTriggerSummary(trimToNull(groupRequest.triggerSummary()));
+            group.setNotificationsPaused(Boolean.TRUE.equals(groupRequest.notificationsPaused()));
+            campaignNotifyGroupRepository.save(group);
+        }
+
+        for (CampaignWatchlistEntryRequest watchRequest : nullSafe(request.watchlist())) {
+            if (watchRequest == null || isBlank(watchRequest.label())) {
+                continue;
+            }
+            CampaignWatchlistEntry entry = new CampaignWatchlistEntry();
+            entry.setCampaign(saved);
+            entry.setEntryType(watchRequest.entryType());
+            entry.setLabel(watchRequest.label().trim());
+            entry.setEmail(trimToNull(watchRequest.email()));
+            entry.setTriggerPolicy(trimToNull(watchRequest.triggerPolicy()));
+            entry.setActive(!Boolean.FALSE.equals(watchRequest.active()));
+            campaignWatchlistEntryRepository.save(entry);
+        }
+
+        if (!isBlank(request.launchNote())) {
+            CampaignNote note = new CampaignNote();
+            note.setCampaign(saved);
+            note.setAuthor(actor);
+            note.setBody(request.launchNote().trim());
+            campaignNoteRepository.save(note);
+        }
+
+        recordActivity(saved, actor, "CREATED",
+                "Campaign created from " + request.cveIds().size() + " CVE" + (request.cveIds().size() == 1 ? "" : "s") + ".");
+        deliverLaunchNotifications(saved, actor);
+        return saved.getId();
+    }
+
+    private CampaignDetailResponse getDetailInCurrentTenantSchema(Tenant tenant, UUID campaignId) {
+        return executeRead(() -> {
             Campaign campaign = loadCampaign(tenant, campaignId);
             CampaignSummaryResponse summary = toSummary(tenant, campaign);
             return new CampaignDetailResponse(
@@ -242,175 +442,6 @@ public class CampaignService {
                     toAssetRows(tenant, campaign),
                     toEvidenceRows(tenant, campaign)
             );
-        });
-    }
-
-    @Transactional
-    public CampaignDetailResponse updateStatus(Tenant tenant, UUID campaignId, CampaignStatusUpdateRequest request, String actor) {
-        if (request == null || request.status() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status is required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            campaign.setStatus(request.status());
-            if (request.status() == CampaignStatus.ACTIVE && campaign.getStartedAt() == null) {
-                campaign.setStartedAt(Instant.now());
-            }
-            if (request.status() == CampaignStatus.PAUSED) {
-                campaign.setPausedAt(Instant.now());
-            }
-            if (request.status() == CampaignStatus.CLOSED || request.status() == CampaignStatus.CANCELLED) {
-                campaign.setClosedAt(Instant.now());
-            }
-            campaign.touch();
-            campaignRepository.save(campaign);
-            recordActivity(campaign, actor, "STATUS_CHANGED", "Campaign moved to " + request.status() + ".");
-            notifyWatchlistForEvent(campaign, actor, "STATUS_CHANGES", "Campaign status changed to " + request.status() + ".");
-            if (!isBlank(request.note())) {
-                CampaignNote note = new CampaignNote();
-                note.setCampaign(campaign);
-                note.setAuthor(actor);
-                note.setBody(request.note().trim());
-                campaignNoteRepository.save(note);
-            }
-            return getDetail(tenant, campaignId);
-        });
-    }
-
-    @Transactional
-    public CampaignNoteResponse addNote(Tenant tenant, UUID campaignId, CampaignNoteRequest request, String actor) {
-        if (request == null || isBlank(request.body())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "body is required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            CampaignNote note = new CampaignNote();
-            note.setCampaign(campaign);
-            note.setAuthor(actor);
-            note.setBody(request.body().trim());
-            CampaignNote saved = campaignNoteRepository.save(note);
-            recordActivity(campaign, actor, "NOTE_ADDED", "Added a campaign note.");
-            notifyWatchlistForEvent(campaign, actor, "NOTES_ONLY", "New campaign note: " + saved.getBody());
-            campaign.touch();
-            campaignRepository.save(campaign);
-            return new CampaignNoteResponse(saved.getId(), saved.getAuthor(), saved.getBody(), saved.getCreatedAt());
-        });
-    }
-
-    @Transactional
-    public CampaignDetailResponse updateNotifyGroup(
-            Tenant tenant,
-            UUID campaignId,
-            UUID notifyGroupId,
-            CampaignNotifyGroupRequest request,
-            String actor
-    ) {
-        if (request == null || isBlank(request.groupName())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupName is required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            CampaignNotifyGroup group = campaignNotifyGroupRepository.findById(notifyGroupId)
-                    .filter(item -> item.getCampaign().getId().equals(campaignId))
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign notify group not found"));
-            group.setGroupName(request.groupName().trim());
-            group.setGroupEmail(trimToNull(request.groupEmail()));
-            group.setRoleLabel(trimToNull(request.roleLabel()));
-            group.setTriggerSummary(trimToNull(request.triggerSummary()));
-            group.setNotificationsPaused(Boolean.TRUE.equals(request.notificationsPaused()));
-            campaignNotifyGroupRepository.save(group);
-            campaign.touch();
-            campaignRepository.save(campaign);
-            recordActivity(campaign, actor, "GROUP_UPDATED", "Notify group updated: " + group.getGroupName() + ".");
-            return getDetail(tenant, campaignId);
-        });
-    }
-
-    @Transactional
-    public CampaignDetailResponse updateWatchlistEntry(
-            Tenant tenant,
-            UUID campaignId,
-            UUID watchlistEntryId,
-            CampaignWatchlistEntryUpdateRequest request,
-            String actor
-    ) {
-        if (request == null || isBlank(request.label())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "label is required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            CampaignWatchlistEntry entry = campaignWatchlistEntryRepository.findById(watchlistEntryId)
-                    .filter(item -> item.getCampaign().getId().equals(campaignId))
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign watchlist entry not found"));
-            entry.setLabel(request.label().trim());
-            entry.setEmail(trimToNull(request.email()));
-            entry.setTriggerPolicy(trimToNull(request.triggerPolicy()));
-            entry.setActive(!Boolean.FALSE.equals(request.active()));
-            campaignWatchlistEntryRepository.save(entry);
-            campaign.touch();
-            campaignRepository.save(campaign);
-            recordActivity(campaign, actor, "WATCHLIST_UPDATED", "Watchlist entry updated: " + entry.getLabel() + ".");
-            return getDetail(tenant, campaignId);
-        });
-    }
-
-    @Transactional
-    public CampaignExceptionResponse addException(Tenant tenant, UUID campaignId, CampaignExceptionRequest request, String actor) {
-        if (request == null || isBlank(request.title()) || isBlank(request.reason())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title and reason are required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            CampaignException exception = new CampaignException();
-            exception.setCampaign(campaign);
-            exception.setFindingDisplayId(trimToNull(request.findingDisplayId()));
-            exception.setAssetName(trimToNull(request.assetName()));
-            exception.setPackageName(trimToNull(request.packageName()));
-            exception.setTitle(request.title().trim());
-            exception.setReason(request.reason().trim());
-            exception.setRequestedBy(actor);
-            exception.setDecisionDueAt(request.decisionDueAt());
-            exception.touch();
-            CampaignException saved = campaignExceptionRepository.save(exception);
-            recordActivity(campaign, actor, "EXCEPTION_ADDED", "Exception added: " + saved.getTitle() + ".");
-            notifyWatchlistForEvent(campaign, actor, "CLOSURE_RISK", "Exception raised: " + saved.getTitle() + ".");
-            campaign.touch();
-            campaignRepository.save(campaign);
-            return new CampaignExceptionResponse(
-                    saved.getId(),
-                    saved.getFindingDisplayId(),
-                    saved.getAssetName(),
-                    saved.getPackageName(),
-                    saved.getTitle(),
-                    saved.getReason(),
-                    saved.getStatus(),
-                    saved.getRequestedBy(),
-                    saved.getRequestedAt(),
-                    saved.getDecisionDueAt(),
-                    saved.getDecisionedBy(),
-                    saved.getDecisionedAt()
-            );
-        });
-    }
-
-    @Transactional
-    public CampaignDetailResponse updateExceptionStatus(Tenant tenant, UUID campaignId, UUID exceptionId, CampaignExceptionStatusUpdateRequest request, String actor) {
-        if (request == null || request.status() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status is required");
-        }
-        return tenantSchemaExecutionService.run(tenant, () -> {
-            Campaign campaign = loadCampaign(tenant, campaignId);
-            CampaignException exception = campaignExceptionRepository.findById(exceptionId)
-                    .filter(item -> item.getCampaign().getId().equals(campaignId))
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign exception not found"));
-            exception.setStatus(request.status());
-            exception.setDecisionedBy(actor);
-            exception.setDecisionedAt(Instant.now());
-            exception.touch();
-            campaignExceptionRepository.save(exception);
-            recordActivity(campaign, actor, "EXCEPTION_STATUS_CHANGED", "Exception " + exception.getTitle() + " moved to " + request.status() + ".");
-            notifyWatchlistForEvent(campaign, actor, "CLOSURE_RISK", "Exception " + exception.getTitle() + " moved to " + request.status() + ".");
-            return getDetail(tenant, campaignId);
         });
     }
 
@@ -672,6 +703,21 @@ public class CampaignService {
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    private <T> T executeRead(java.util.function.Supplier<T> work) {
+        if (readTransactionTemplate == null) {
+            return work.get();
+        }
+        T result = readTransactionTemplate.execute(status -> work.get());
+        return result == null ? work.get() : result;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     private static final class AssetAccumulator {

@@ -238,9 +238,16 @@ class VulnRepoDashboardControllerTest {
         when(orgCveAutomationStatusService.getStatus(tenant)).thenReturn(new OrgCveAutomationStatusResponse(
                 true,
                 4L,
+                1L,
                 Map.of("CVE_DELTA", 4L),
                 1L,
                 0L,
+                120L,
+                45L,
+                2L,
+                1L,
+                30L,
+                15L,
                 Instant.parse("2026-04-10T10:15:30Z"),
                 Instant.parse("2026-04-10T10:00:00Z"),
                 Instant.parse("2026-04-09T08:00:00Z")
@@ -250,6 +257,7 @@ class VulnRepoDashboardControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.automationEnabled").value(true))
                 .andExpect(jsonPath("$.pendingEventCount").value(4))
+                .andExpect(jsonPath("$.processingEventCount").value(1))
                 .andExpect(jsonPath("$.pendingByType.CVE_DELTA").value(4));
 
         verify(orgCveAutomationStatusService).getStatus(tenant);

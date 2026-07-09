@@ -75,7 +75,7 @@ public class WorkspaceService {
         if (requireTenantContext) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant context is required");
         }
-        Tenant workspace = tenantService.getDefaultTenant();
+        Tenant workspace = TenantContext.runAsPlatform(tenantService::getDefaultTenant);
         tenantLifecycleGuardService.assertTenantAccessible(workspace);
         cachedWorkspace.set(workspace);
         return workspace;

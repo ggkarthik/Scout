@@ -78,7 +78,9 @@ public class CsafSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("CSAF_MICROSOFT", List.of("CSAF_MICROSOFT", "VEX_ROLLOUT_BACKFILL"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeMicrosoftCsafSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId())
+                            .ifPresent(run -> executeCsafSync(run, CsafProvider.MICROSOFT)));
         }
         return decision.toResponse("Microsoft CSAF/VEX sync is already in progress", "Microsoft CSAF/VEX sync queued");
     }
@@ -97,7 +99,9 @@ public class CsafSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("CSAF_REDHAT", List.of("CSAF_REDHAT", "VEX_ROLLOUT_BACKFILL"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeRedhatCsafSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId())
+                            .ifPresent(run -> executeCsafSync(run, CsafProvider.REDHAT)));
         }
         return decision.toResponse("Red Hat CSAF/VEX sync is already in progress", "Red Hat CSAF/VEX sync queued");
     }

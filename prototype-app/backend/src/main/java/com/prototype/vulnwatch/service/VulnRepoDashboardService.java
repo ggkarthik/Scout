@@ -4,7 +4,6 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.VulnRepoDashboardResponse;
 import com.prototype.vulnwatch.dto.VulnRepoSoftwareAssetsResponse;
 import java.sql.Timestamp;
-import com.prototype.vulnwatch.repo.OrgCveRecordRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -23,24 +22,18 @@ import org.springframework.stereotype.Service;
 public class VulnRepoDashboardService {
 
     private static final List<String> SEVERITY_ORDER = List.of("CRITICAL", "HIGH", "MEDIUM", "LOW");
-    private static final List<String> RESOLVED_STATES = List.of("FIXED", "NOT_IMPACTED");
-    private static final List<String> UNRESOLVED_STATES = List.of("IMPACTED", "NO_PATCH", "UNKNOWN");
-    private static final List<String> IMPACTED_STATES = List.of("IMPACTED", "NO_PATCH");
     private static final int LIST_LIMIT = 5;
     private static final int IMPACTED_ASSET_LIMIT = 9;
 
-    private final OrgCveRecordRepository orgCveRecordRepository;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
     public VulnRepoDashboardService(
-            OrgCveRecordRepository orgCveRecordRepository,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
             NamedParameterJdbcTemplate jdbcTemplate,
             TenantSchemaExecutionService tenantSchemaExecutionService
     ) {
-        this.orgCveRecordRepository = orgCveRecordRepository;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.jdbcTemplate = jdbcTemplate;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
@@ -51,56 +44,74 @@ public class VulnRepoDashboardService {
             softwareIdentitySummaryProjectionService.ensureTenantProjection(tenant);
             UUID tenantId = tenant.getId();
             Instant now = Instant.now();
-
-            long trackedCount = orgCveRecordRepository.count();
-            long trackedAddedLastWeek = countTrackedAddedLastWeek(tenantId, now.minus(7, ChronoUnit.DAYS));
-            long applicableCount = countApplicableCves(tenantId, null);
-            long applicableAddedLastWeek = countApplicableCves(tenantId, now.minus(7, ChronoUnit.DAYS));
-            long impactedInvestigationDoneCount = countApplicableWithMatchedAssets(tenantId);
-            long impactedAddedLastWeek = countImpactedAddedSince(tenantId, now.minus(7, ChronoUnit.DAYS));
-            long kevAddedLastWeek = countKevAddedSince(tenantId, now.minus(7, ChronoUnit.DAYS));
-            long remediationCveCount = countCvesWithFindings(tenantId);
-            long needsAttentionCount = countNeedsAttention(tenantId);
-            long criticalUninvestigatedCount = countCriticalUninvestigated(tenantId);
-            long kevReinvestigationCount = countKevReinvestigation(tenantId);
-            long criticalCount = countBySeverity(tenantId, "CRITICAL");
-            long exploitCount = countExploitAvailable(tenantId);
-            int exploitCoveragePercent = trackedCount <= 0L
+            SummarySnapshot summarySnapshot = loadSummarySnapshot(now.minus(7, ChronoUnit.DAYS));
+            int exploitCoveragePercent = summarySnapshot.trackedCount() <= 0L
                     ? 0
-                    : (int) Math.round((double) exploitCount * 100.0d / (double) trackedCount);
-            ImpactedBreakdown impactedBreakdown = loadImpactedBreakdown(tenantId);
+                    : (int) Math.round((double) summarySnapshot.exploitCount() * 100.0d / (double) summarySnapshot.trackedCount());
 
             return new VulnRepoDashboardResponse(
                     now,
                     new VulnRepoDashboardResponse.SummaryCards(
-                            trackedCount,
-                            trackedAddedLastWeek,
-                            applicableCount,
-                            applicableAddedLastWeek,
-                            impactedInvestigationDoneCount,
-                            impactedAddedLastWeek,
-                            remediationCveCount,
-                            needsAttentionCount,
-                            criticalCount,
-                            exploitCount,
+                            summarySnapshot.trackedCount(),
+                            summarySnapshot.trackedAddedLastWeek(),
+                            summarySnapshot.applicableCount(),
+                            summarySnapshot.applicableAddedLastWeek(),
+                            summarySnapshot.impactedInvestigationDoneCount(),
+                            summarySnapshot.impactedAddedLastWeek(),
+                            summarySnapshot.remediationCveCount(),
+                            summarySnapshot.needsAttentionCount(),
+                            summarySnapshot.criticalCount(),
+                            summarySnapshot.exploitCount(),
                             exploitCoveragePercent,
-                            impactedBreakdown.critical(),
-                            impactedBreakdown.high(),
-                            impactedBreakdown.medium(),
-                            impactedBreakdown.low(),
-                            impactedBreakdown.kev(),
-                            kevAddedLastWeek,
-                            criticalUninvestigatedCount,
-                            kevReinvestigationCount
+                            summarySnapshot.impactedCriticalCount(),
+                            summarySnapshot.impactedHighCount(),
+                            summarySnapshot.impactedMediumCount(),
+                            summarySnapshot.impactedLowCount(),
+                            summarySnapshot.impactedKevCount(),
+                            summarySnapshot.kevAddedLastWeek(),
+                            summarySnapshot.criticalUninvestigatedCount(),
+                            summarySnapshot.kevReinvestigationCount()
                     ),
                     loadSeverityBreakdown(tenantId),
-                    loadResolutionStatus(tenantId),
+                    toResolutionStatus(summarySnapshot),
                     loadCriticalUnresolved(tenantId),
                     loadTopAffectedSoftware(tenantId),
                     loadRecentAdvisories(tenantId),
                     loadImpactedAssets(tenantId)
             );
         });
+    }
+
+    private record SummarySnapshot(
+            long trackedCount,
+            long trackedAddedLastWeek,
+            long applicableCount,
+            long applicableAddedLastWeek,
+            long impactedInvestigationDoneCount,
+            long impactedAddedLastWeek,
+            long kevAddedLastWeek,
+            long remediationCveCount,
+            long needsAttentionCount,
+            long criticalUninvestigatedCount,
+            long kevReinvestigationCount,
+            long criticalCount,
+            long exploitCount,
+            long impactedCriticalCount,
+            long impactedHighCount,
+            long impactedMediumCount,
+            long impactedLowCount,
+            long impactedKevCount,
+            long unresolvedCount,
+            long resolvedCount,
+            long inProgressCount,
+            long acceptedRiskCount
+    ) {
+        private static SummarySnapshot empty() {
+            return new SummarySnapshot(
+                    0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                    0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L
+            );
+        }
     }
 
     public VulnRepoSoftwareAssetsResponse getSoftwareAssets(Tenant tenant, UUID softwareIdentityId) {
@@ -198,218 +209,115 @@ public class VulnRepoDashboardService {
         });
     }
 
-    private long countTrackedAddedLastWeek(UUID tenantId, Instant start) {
-        Long count = jdbcTemplate.queryForObject(
+    private SummarySnapshot loadSummarySnapshot(Instant weekStart) {
+        SummarySnapshot snapshot = jdbcTemplate.queryForObject(
                 """
-                select count(*)
-                from org_cve_records o
-                where o.created_at >= :start
+                with finding_presence as (
+                  select distinct vulnerability_id
+                  from findings
+                ), suppressed_finding_counts as (
+                  select count(distinct vulnerability_id) as accepted_risk_count
+                  from findings
+                  where status = 'SUPPRESSED'
+                ), base as (
+                  select
+                    o.vulnerability_id,
+                    o.created_at,
+                    o.applicability_state,
+                    upper(coalesce(o.impact_state, 'UNKNOWN')) as impact_state,
+                    upper(coalesce(o.severity, 'UNKNOWN')) as severity,
+                    coalesce(o.in_kev, false) as in_kev,
+                    coalesce(o.epss_score, 0.0) as epss_score,
+                    coalesce(o.matched_asset_count, 0) as matched_asset_count,
+                    case when fp.vulnerability_id is not null then true else false end as has_finding
+                  from org_cve_records o
+                  left join finding_presence fp
+                    on fp.vulnerability_id = o.vulnerability_id
+                )
+                select
+                  count(*) as tracked_count,
+                  count(*) filter (where created_at >= :weekStart) as tracked_added_last_week,
+                  count(*) filter (where applicability_state = 'APPLICABLE') as applicable_count,
+                  count(*) filter (where applicability_state = 'APPLICABLE' and created_at >= :weekStart) as applicable_added_last_week,
+                  count(*) filter (where applicability_state = 'APPLICABLE' and matched_asset_count > 0) as impacted_investigation_done_count,
+                  count(*) filter (where created_at >= :weekStart and impact_state in ('IMPACTED', 'NO_PATCH')) as impacted_added_last_week,
+                  count(*) filter (where created_at >= :weekStart and in_kev = true) as kev_added_last_week,
+                  count(*) filter (where has_finding) as remediation_cve_count,
+                  count(*) filter (where impact_state in ('IMPACTED', 'NO_PATCH') and has_finding = false) as needs_attention_count,
+                  count(*) filter (
+                    where severity = 'CRITICAL'
+                      and applicability_state = 'APPLICABLE'
+                      and impact_state = 'UNKNOWN'
+                      and has_finding = false
+                  ) as critical_uninvestigated_count,
+                  count(*) filter (
+                    where in_kev = true
+                      and applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and impact_state not in ('FIXED', 'NOT_IMPACTED')
+                      and has_finding = false
+                  ) as kev_reinvestigation_count,
+                  count(*) filter (where severity = 'CRITICAL') as critical_count,
+                  count(*) filter (where in_kev = true or epss_score >= 0.9) as exploit_count,
+                  count(*) filter (
+                    where applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and severity = 'CRITICAL'
+                  ) as impacted_critical_count,
+                  count(*) filter (
+                    where applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and severity = 'HIGH'
+                  ) as impacted_high_count,
+                  count(*) filter (
+                    where applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and severity = 'MEDIUM'
+                  ) as impacted_medium_count,
+                  count(*) filter (
+                    where applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and severity = 'LOW'
+                  ) as impacted_low_count,
+                  count(*) filter (
+                    where applicability_state = 'APPLICABLE'
+                      and matched_asset_count > 0
+                      and in_kev = true
+                  ) as impacted_kev_count,
+                  count(*) filter (where impact_state in ('IMPACTED', 'NO_PATCH', 'UNKNOWN')) as unresolved_count,
+                  count(*) filter (where impact_state in ('FIXED', 'NOT_IMPACTED')) as resolved_count,
+                  count(*) filter (where impact_state = 'UNDER_INVESTIGATION') as in_progress_count,
+                  coalesce((select accepted_risk_count from suppressed_finding_counts), 0) as accepted_risk_count
+                from base
                 """,
                 new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("start", Timestamp.from(start)),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countApplicableCves(UUID tenantId, Instant createdSince) {
-        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
-        String createdSinceFilter = "";
-        if (createdSince != null) {
-            createdSinceFilter = " and o.created_at >= :createdSince";
-            params.addValue("createdSince", Timestamp.from(createdSince));
-        }
-        Long count = jdbcTemplate.queryForObject(
-                ("""
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where o.applicability_state = 'APPLICABLE'
-                """ + createdSinceFilter),
-                params,
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private record ImpactedBreakdown(long critical, long high, long medium, long low, long kev) {}
-
-    private ImpactedBreakdown loadImpactedBreakdown(UUID tenantId) {
-        ImpactedBreakdown result = jdbcTemplate.queryForObject(
-                """
-                select
-                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'CRITICAL' then 1 end) as critical_count,
-                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'HIGH' then 1 end) as high_count,
-                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'MEDIUM' then 1 end) as medium_count,
-                  count(case when upper(coalesce(o.severity, 'UNKNOWN')) = 'LOW' then 1 end) as low_count,
-                  count(case when o.in_kev = true then 1 end) as kev_count
-                from (
-                  select distinct o.vulnerability_id, o.severity, o.in_kev
-                  from org_cve_records o
-                  where o.applicability_state = 'APPLICABLE'
-                    and o.matched_asset_count > 0
-                ) o
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                (rs, rowNum) -> new ImpactedBreakdown(
+                        .addValue("weekStart", Timestamp.from(weekStart)),
+                (rs, rowNum) -> new SummarySnapshot(
+                        rs.getLong("tracked_count"),
+                        rs.getLong("tracked_added_last_week"),
+                        rs.getLong("applicable_count"),
+                        rs.getLong("applicable_added_last_week"),
+                        rs.getLong("impacted_investigation_done_count"),
+                        rs.getLong("impacted_added_last_week"),
+                        rs.getLong("kev_added_last_week"),
+                        rs.getLong("remediation_cve_count"),
+                        rs.getLong("needs_attention_count"),
+                        rs.getLong("critical_uninvestigated_count"),
+                        rs.getLong("kev_reinvestigation_count"),
                         rs.getLong("critical_count"),
-                        rs.getLong("high_count"),
-                        rs.getLong("medium_count"),
-                        rs.getLong("low_count"),
-                        rs.getLong("kev_count")
+                        rs.getLong("exploit_count"),
+                        rs.getLong("impacted_critical_count"),
+                        rs.getLong("impacted_high_count"),
+                        rs.getLong("impacted_medium_count"),
+                        rs.getLong("impacted_low_count"),
+                        rs.getLong("impacted_kev_count"),
+                        rs.getLong("unresolved_count"),
+                        rs.getLong("resolved_count"),
+                        rs.getLong("in_progress_count"),
+                        rs.getLong("accepted_risk_count")
                 )
         );
-        return result != null ? result : new ImpactedBreakdown(0L, 0L, 0L, 0L, 0L);
-    }
-
-    private long countApplicableWithMatchedAssets(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where o.applicability_state = 'APPLICABLE'
-                  and o.matched_asset_count > 0
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countImpactedAddedSince(UUID tenantId, Instant start) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where o.created_at >= :start
-                  and upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("start", Timestamp.from(start))
-                        .addValue("states", IMPACTED_STATES),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countKevAddedSince(UUID tenantId, Instant start) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where o.created_at >= :start
-                  and o.in_kev = true
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("start", Timestamp.from(start)),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countCvesWithFindings(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct f.vulnerability_id)
-                from findings f
-                join org_cve_records o
-                  on o.vulnerability_id = f.vulnerability_id
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countNeedsAttention(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
-                  and not exists (
-                    select 1
-                    from findings f
-                    where f.vulnerability_id = o.vulnerability_id
-                  )
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("states", IMPACTED_STATES),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countCriticalUninvestigated(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where upper(coalesce(o.severity, 'UNKNOWN')) = 'CRITICAL'
-                  and o.applicability_state = 'APPLICABLE'
-                  and upper(coalesce(o.impact_state, 'UNKNOWN')) = 'UNKNOWN'
-                  and not exists (
-                    select 1
-                    from findings f
-                    where f.vulnerability_id = o.vulnerability_id
-                  )
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countKevReinvestigation(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where o.in_kev = true
-                  and o.applicability_state = 'APPLICABLE'
-                  and o.matched_asset_count > 0
-                  and upper(coalesce(o.impact_state, 'UNKNOWN')) not in ('FIXED', 'NOT_IMPACTED')
-                  and not exists (
-                    select 1
-                    from findings f
-                    where f.vulnerability_id = o.vulnerability_id
-                  )
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countBySeverity(UUID tenantId, String severity) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(*)
-                from org_cve_records o
-                where upper(coalesce(o.severity, 'UNKNOWN')) = :severity
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("severity", severity),
-                Long.class
-        );
-        return count == null ? 0L : count;
-    }
-
-    private long countExploitAvailable(UUID tenantId) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(*)
-                from org_cve_records o
-                where (o.in_kev = true or coalesce(o.epss_score, 0) >= 0.9)
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-        return count == null ? 0L : count;
+        return snapshot == null ? SummarySnapshot.empty() : snapshot;
     }
 
     private List<VulnRepoDashboardResponse.SeverityBreakdownItem> loadSeverityBreakdown(UUID tenantId) {
@@ -438,41 +346,13 @@ public class VulnRepoDashboardService {
         return items;
     }
 
-    private VulnRepoDashboardResponse.ResolutionStatus loadResolutionStatus(UUID tenantId) {
-        long unresolvedCount = countByImpactStates(tenantId, UNRESOLVED_STATES);
-        long resolvedCount = countByImpactStates(tenantId, RESOLVED_STATES);
-        long inProgressCount = countByImpactStates(tenantId, List.of("UNDER_INVESTIGATION"));
-        Long acceptedRiskCount = jdbcTemplate.queryForObject(
-                """
-                select count(distinct f.vulnerability_id)
-                from findings f
-                where f.status = 'SUPPRESSED'
-                """,
-                new MapSqlParameterSource().addValue("tenantId", tenantId),
-                Long.class
-        );
-
+    private VulnRepoDashboardResponse.ResolutionStatus toResolutionStatus(SummarySnapshot snapshot) {
         return new VulnRepoDashboardResponse.ResolutionStatus(
-                unresolvedCount,
-                resolvedCount,
-                inProgressCount,
-                acceptedRiskCount == null ? 0L : acceptedRiskCount
+                snapshot.unresolvedCount(),
+                snapshot.resolvedCount(),
+                snapshot.inProgressCount(),
+                snapshot.acceptedRiskCount()
         );
-    }
-
-    private long countByImpactStates(UUID tenantId, List<String> states) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                select count(distinct o.vulnerability_id)
-                from org_cve_records o
-                where upper(coalesce(o.impact_state, 'UNKNOWN')) in (:states)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tenantId", tenantId)
-                        .addValue("states", states),
-                Long.class
-        );
-        return count == null ? 0L : count;
     }
 
     private List<VulnRepoDashboardResponse.CriticalUnresolvedItem> loadCriticalUnresolved(UUID tenantId) {

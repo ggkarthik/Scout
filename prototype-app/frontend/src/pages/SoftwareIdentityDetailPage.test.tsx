@@ -109,6 +109,7 @@ describe('SoftwareIdentityDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByText('lodash')).toBeInTheDocument()
     );
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders vendor/product as title when both are present', async () => {

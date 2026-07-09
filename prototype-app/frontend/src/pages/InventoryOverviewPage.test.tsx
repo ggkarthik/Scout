@@ -206,6 +206,7 @@ describe('InventoryOverviewPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Inventory Funnel')).toBeInTheDocument()
     );
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders the Lifecycle breakdown panel after data loads', async () => {

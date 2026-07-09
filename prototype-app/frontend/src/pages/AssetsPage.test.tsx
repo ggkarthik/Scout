@@ -42,6 +42,7 @@ describe('AssetsPage', () => {
     vi.spyOn(api, 'getServiceNowCmdbConfig').mockResolvedValue(buildConfig());
     renderWithProviders(<AssetsPage />);
     await waitFor(() => expect(screen.getByText('Connection')).toBeInTheDocument());
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders the Table Configuration section heading', async () => {

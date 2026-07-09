@@ -26,6 +26,7 @@ import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.PerformanceScorecardService;
 import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
@@ -95,6 +96,9 @@ class ApiSecurityIntegrationTest {
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;
+
+    @MockBean
+    private PerformanceScorecardService performanceScorecardService;
 
     @MockBean
     private JwtDecoder jwtDecoder;
@@ -179,6 +183,21 @@ class ApiSecurityIntegrationTest {
     void connectorIssuesAllowCreatorKey() throws Exception {
         when(platformTenantAttentionService.listConnectorIssues()).thenReturn(List.of());
         mockMvc.perform(get("/api/operations/connector-issues")
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void performanceScorecardIsForbiddenWithoutCreatorKey() throws Exception {
+        mockMvc.perform(get("/api/operations/performance-scorecard")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void performanceScorecardAllowsCreatorKey() throws Exception {
+        mockMvc.perform(get("/api/operations/performance-scorecard")
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key"))
                 .andExpect(status().isOk());

@@ -1,5 +1,7 @@
 package com.prototype.vulnwatch.service.vulningestion;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.NvdApiClient;
 import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.domain.SyncRun;
@@ -23,8 +25,10 @@ import com.prototype.vulnwatch.util.IdentityUtil;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -50,6 +54,7 @@ public class NvdSyncService {
     private final VulnerabilitySyncRunService syncRunService;
     private final VulnerabilityIngestionEffectsService effectsService;
     private final VulnerabilityIngestionCommonSupport support;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.nvd.default-lookback-hours:24}")
     private int defaultNvdLookbackHours;
@@ -75,7 +80,8 @@ public class NvdSyncService {
             @Qualifier("integrationQueueExecutor") TaskExecutor ingestionExecutor,
             VulnerabilitySyncRunService syncRunService,
             VulnerabilityIngestionEffectsService effectsService,
-            VulnerabilityIngestionCommonSupport support
+            VulnerabilityIngestionCommonSupport support,
+            ObjectMapper objectMapper
     ) {
         this.nvdApiClient = nvdApiClient;
         this.vulnerabilityRepository = vulnerabilityRepository;
@@ -89,6 +95,7 @@ public class NvdSyncService {
         this.syncRunService = syncRunService;
         this.effectsService = effectsService;
         this.support = support;
+        this.objectMapper = objectMapper;
     }
 
     public void runScheduledDailySync() {
@@ -107,7 +114,9 @@ public class NvdSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("NVD", List.of("NVD", "NVD_FULL"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeNvdSyncAsync(decision.run().getId(), lookbackHours));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId())
+                            .ifPresent(run -> executeNvdIncrementalSync(run, lookbackHours)));
         }
         return decision.toResponse("NVD sync is already in progress", "NVD incremental sync queued");
     }
@@ -117,11 +126,18 @@ public class NvdSyncService {
         executeNvdIncrementalSync(run, lookbackHours);
     }
 
+    public void executeQueuedNvdSyncAsync(UUID runId) {
+        SyncRun run = syncRunService.markRunning(runId);
+        executeNvdIncrementalSync(run, resolveQueuedLookbackHours(run));
+    }
+
     public SyncTriggerResponse triggerNvdFullSync(String apiKeyOverride) {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("NVD_FULL", List.of("NVD", "NVD_FULL"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeNvdFullSyncAsync(decision.run().getId(), apiKeyOverride));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId())
+                            .ifPresent(run -> executeNvdFullSync(run, apiKeyOverride)));
         }
         return decision.toResponse("NVD sync is already in progress", "NVD full sync queued");
     }
@@ -129,6 +145,11 @@ public class NvdSyncService {
     public void executeNvdFullSyncAsync(UUID runId, String apiKeyOverride) {
         SyncRun run = syncRunService.markRunning(runId);
         executeNvdFullSync(run, apiKeyOverride);
+    }
+
+    public void executeQueuedNvdFullSyncAsync(UUID runId) {
+        SyncRun run = syncRunService.markRunning(runId);
+        executeNvdFullSync(run, resolveQueuedApiKeyOverride(run));
     }
 
     public IngestionResult syncNvd(int lookbackHours) {
@@ -163,6 +184,50 @@ public class NvdSyncService {
             return new IngestionResult("failed", 0, 0, 0, message);
         }
         return executeNvdSyncInternal(run, null, null, apiKeyOverride, "NVD full sync complete");
+    }
+
+    private Map<String, Object> queuedIncrementalMetadata(int lookbackHours) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("triggerMode", "incremental");
+        metadata.put("lookbackHours", Math.max(1, lookbackHours));
+        return metadata;
+    }
+
+    private Map<String, Object> queuedFullMetadata(String apiKeyOverride) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("triggerMode", "full");
+        if (support.hasText(apiKeyOverride)) {
+            metadata.put("apiKeyOverride", apiKeyOverride);
+        }
+        return metadata;
+    }
+
+    private int resolveQueuedLookbackHours(SyncRun run) {
+        JsonNode metadata = readQueuedMetadata(run);
+        if (metadata == null || !metadata.path("lookbackHours").canConvertToInt()) {
+            return defaultNvdLookbackHours;
+        }
+        return Math.max(1, metadata.path("lookbackHours").asInt(defaultNvdLookbackHours));
+    }
+
+    private String resolveQueuedApiKeyOverride(SyncRun run) {
+        JsonNode metadata = readQueuedMetadata(run);
+        if (metadata == null) {
+            return null;
+        }
+        String apiKeyOverride = metadata.path("apiKeyOverride").asText(null);
+        return support.hasText(apiKeyOverride) ? apiKeyOverride : null;
+    }
+
+    private JsonNode readQueuedMetadata(SyncRun run) {
+        if (run == null || !support.hasText(run.getMetadataJson())) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(run.getMetadataJson());
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     private IngestionResult executeNvdSyncInternal(

@@ -55,6 +55,7 @@ describe('HostAssetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByText('web-prod-01')).toBeInTheDocument()
     );
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders host identifier below host name', async () => {

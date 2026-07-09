@@ -18,7 +18,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class InventoryComponentCpeMappingService {
@@ -26,6 +28,7 @@ public class InventoryComponentCpeMappingService {
     private final InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
     private final CpeDimensionService cpeDimensionService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public InventoryComponentCpeMappingService(
             InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository,
@@ -37,7 +40,17 @@ public class InventoryComponentCpeMappingService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public void syncActiveComponentMappings(InventoryComponent component, Collection<String> rawCpes) {
         if (component == null || component.getTenant() == null || component.getId() == null) {
             return;
@@ -45,7 +58,6 @@ public class InventoryComponentCpeMappingService {
         syncComponentMappings(List.of(component), Map.of(component.getId(), rawCpes == null ? List.of() : rawCpes));
     }
 
-    @Transactional
     public void syncComponentMappings(
             Collection<InventoryComponent> components,
             Map<UUID, ? extends Collection<String>> rawCpesByComponentId
@@ -74,12 +86,14 @@ public class InventoryComponentCpeMappingService {
         }
     }
 
-    @Transactional
     public void clearComponentMappings(InventoryComponent component) {
         if (component == null || component.getTenant() == null) {
             return;
         }
-        tenantSchemaExecutionService.run(component.getTenant(), () -> inventoryComponentCpeMapRepository.deleteByComponent(component));
+        tenantSchemaExecutionService.run(component.getTenant(), () -> executeWrite(() -> {
+            inventoryComponentCpeMapRepository.deleteByComponent(component);
+            return null;
+        }));
     }
 
     private void syncTenantComponentMappings(
@@ -104,66 +118,66 @@ public class InventoryComponentCpeMappingService {
         }
 
         Map<String, CpeDim> cpeDimsByNormalized = cpeDimensionService.resolveOrCreateAllByNormalizedCpe(allNormalizedCpes);
-        List<InventoryComponentCpeMap> existing = tenantSchemaExecutionService.run(
-                tenant,
-                () -> inventoryComponentCpeMapRepository.findByComponent_IdIn(componentIds)
-        );
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            List<InventoryComponentCpeMap> existing = inventoryComponentCpeMapRepository.findByComponent_IdIn(componentIds);
 
-        Map<UUID, List<InventoryComponentCpeMap>> existingByComponentId = new HashMap<>();
-        for (InventoryComponentCpeMap row : existing) {
-            if (row.getComponent() == null || row.getComponent().getId() == null) {
-                continue;
-            }
-            existingByComponentId.computeIfAbsent(row.getComponent().getId(), ignored -> new java.util.ArrayList<>()).add(row);
-        }
-
-        Instant now = Instant.now();
-        List<InventoryComponentCpeMap> toSave = new java.util.ArrayList<>();
-        List<InventoryComponentCpeMap> toDelete = new java.util.ArrayList<>();
-        for (InventoryComponent component : components) {
-            List<InventoryComponentCpeMap> existingRows = existingByComponentId.getOrDefault(component.getId(), List.of());
-            Map<UUID, InventoryComponentCpeMap> existingByCpeId = new HashMap<>();
-            for (InventoryComponentCpeMap row : existingRows) {
-                if (row.getCpeDim() == null || row.getCpeDim().getId() == null) {
+            Map<UUID, List<InventoryComponentCpeMap>> existingByComponentId = new HashMap<>();
+            for (InventoryComponentCpeMap row : existing) {
+                if (row.getComponent() == null || row.getComponent().getId() == null) {
                     continue;
                 }
-                existingByCpeId.put(row.getCpeDim().getId(), row);
+                existingByComponentId.computeIfAbsent(row.getComponent().getId(), ignored -> new java.util.ArrayList<>()).add(row);
             }
 
-            Set<UUID> keep = new HashSet<>();
-            for (String normalizedCpe : normalizedCpesByComponentId.getOrDefault(component.getId(), Set.of())) {
-                CpeDim dim = cpeDimsByNormalized.get(normalizedCpe);
-                if (dim == null || dim.getId() == null) {
-                    continue;
+            Instant now = Instant.now();
+            List<InventoryComponentCpeMap> toSave = new java.util.ArrayList<>();
+            List<InventoryComponentCpeMap> toDelete = new java.util.ArrayList<>();
+            for (InventoryComponent component : components) {
+                List<InventoryComponentCpeMap> existingRows = existingByComponentId.getOrDefault(component.getId(), List.of());
+                Map<UUID, InventoryComponentCpeMap> existingByCpeId = new HashMap<>();
+                for (InventoryComponentCpeMap row : existingRows) {
+                    if (row.getCpeDim() == null || row.getCpeDim().getId() == null) {
+                        continue;
+                    }
+                    existingByCpeId.put(row.getCpeDim().getId(), row);
                 }
-                keep.add(dim.getId());
-                InventoryComponentCpeMap row = existingByCpeId.get(dim.getId());
-                if (row == null) {
-                    row = new InventoryComponentCpeMap();
-                    row.setTenant(component.getTenant());
-                    row.setComponent(component);
-                    row.setCpeDim(dim);
-                    row.setFirstSeenAt(now);
+
+                Set<UUID> keep = new HashSet<>();
+                for (String normalizedCpe : normalizedCpesByComponentId.getOrDefault(component.getId(), Set.of())) {
+                    CpeDim dim = cpeDimsByNormalized.get(normalizedCpe);
+                    if (dim == null || dim.getId() == null) {
+                        continue;
+                    }
+                    keep.add(dim.getId());
+                    InventoryComponentCpeMap row = existingByCpeId.get(dim.getId());
+                    if (row == null) {
+                        row = new InventoryComponentCpeMap();
+                        row.setTenant(component.getTenant());
+                        row.setComponent(component);
+                        row.setCpeDim(dim);
+                        row.setFirstSeenAt(now);
+                    }
+                    row.setObservedVersion(component.getVersion());
+                    row.setLastSeenAt(now);
+                    toSave.add(row);
                 }
-                row.setObservedVersion(component.getVersion());
-                row.setLastSeenAt(now);
-                toSave.add(row);
+
+                for (InventoryComponentCpeMap row : existingRows) {
+                    UUID cpeId = row.getCpeDim() == null ? null : row.getCpeDim().getId();
+                    if (cpeId == null || !keep.contains(cpeId)) {
+                        toDelete.add(row);
+                    }
+                }
             }
 
-            for (InventoryComponentCpeMap row : existingRows) {
-                UUID cpeId = row.getCpeDim() == null ? null : row.getCpeDim().getId();
-                if (cpeId == null || !keep.contains(cpeId)) {
-                    toDelete.add(row);
-                }
+            if (!toSave.isEmpty()) {
+                inventoryComponentCpeMapRepository.saveAll(toSave);
             }
-        }
-
-        if (!toSave.isEmpty()) {
-            inventoryComponentCpeMapRepository.saveAll(toSave);
-        }
-        if (!toDelete.isEmpty()) {
-            inventoryComponentCpeMapRepository.deleteAll(toDelete);
-        }
+            if (!toDelete.isEmpty()) {
+                inventoryComponentCpeMapRepository.deleteAll(toDelete);
+            }
+            return null;
+        }));
     }
 
     private Set<String> normalizeRawCpes(Collection<String> rawCpes) {
@@ -181,5 +195,12 @@ public class InventoryComponentCpeMappingService {
             }
         }
         return normalized;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

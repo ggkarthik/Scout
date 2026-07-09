@@ -6,13 +6,16 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class ManualNormalizationOverrideService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public ManualNormalizationOverrideService(
             NamedParameterJdbcTemplate jdbcTemplate,
@@ -22,9 +25,19 @@ public class ManualNormalizationOverrideService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public void applyOverride(UUID tenantId, UUID componentId, UUID softwareIdentityId, String reason, String actor) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String sql = """
                     UPDATE inventory_components
                     SET manual_identity_id            = :softwareIdentityId,
@@ -41,12 +54,11 @@ public class ManualNormalizationOverrideService {
                     .addValue("tenantId", tenantId);
             jdbcTemplate.update(sql, params);
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public void revokeOverride(UUID tenantId, UUID componentId) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String sql = """
                     UPDATE inventory_components
                     SET manual_identity_id            = NULL,
@@ -60,7 +72,7 @@ public class ManualNormalizationOverrideService {
                     .addValue("tenantId", tenantId);
             jdbcTemplate.update(sql, params);
             return null;
-        });
+        }));
     }
 
     public List<SoftwareIdentityMatch> searchSoftwareIdentities(UUID tenantId, String query, int limit) {
@@ -90,12 +102,11 @@ public class ManualNormalizationOverrideService {
         });
     }
 
-    @Transactional
     public void applyOverrideToSoftwareInstance(UUID tenantId, UUID softwareInstanceId, UUID softwareIdentityId, String reason, String actor) {
         // Sets software_identity_id directly — manual_identity_* columns were never migrated
         // onto software_instances. Per-instance overrides on host software are superseded by
         // NormalizationClusterOverrideService; this fallback handles any legacy path.
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String sql = """
                     UPDATE software_instances
                     SET software_identity_id = :softwareIdentityId
@@ -107,12 +118,11 @@ public class ManualNormalizationOverrideService {
                     .addValue("tenantId", tenantId);
             jdbcTemplate.update(sql, params);
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public void revokeOverrideFromSoftwareInstance(UUID tenantId, UUID softwareInstanceId) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String sql = """
                     UPDATE software_instances
                     SET software_identity_id = NULL
@@ -123,8 +133,15 @@ public class ManualNormalizationOverrideService {
                     .addValue("tenantId", tenantId);
             jdbcTemplate.update(sql, params);
             return null;
-        });
+        }));
     }
 
     public record SoftwareIdentityMatch(UUID id, String displayName, String canonicalKey) {}
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
+    }
 }

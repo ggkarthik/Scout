@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -28,6 +30,8 @@ class SloMetricsServiceTest {
     private TenantService tenantService;
     @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock
+    private FindingProjectionStatusService findingProjectionStatusService;
 
     private SloMetricsService service;
     private Tenant tenantA;
@@ -48,6 +52,11 @@ class SloMetricsServiceTest {
         AtomicInteger uploadSuccessCalls = new AtomicInteger();
         AtomicInteger queueDepthCalls = new AtomicInteger();
         AtomicInteger queueStaleCalls = new AtomicInteger();
+        AtomicInteger processingDepthCalls = new AtomicInteger();
+        AtomicInteger processingAgeCalls = new AtomicInteger();
+        AtomicInteger ingestionQueueDepthCalls = new AtomicInteger();
+        AtomicInteger ingestionQueueAgeCalls = new AtomicInteger();
+        Instant now = Instant.now();
 
         jdbcTemplate = new JdbcTemplate() {
             @Override
@@ -59,23 +68,66 @@ class SloMetricsServiceTest {
                     return requiredType.cast(uploadCountCalls.getAndIncrement() == 0 ? 8L : 4L);
                 }
                 if (sql.contains("finding_delta_queue")) {
+                    if (sql.contains("processing_started_at")) {
+                        Instant instant = processingAgeCalls.getAndIncrement() == 0
+                                ? now.minusSeconds(700)
+                                : now.minusSeconds(120);
+                        return requiredType.cast(Timestamp.from(instant));
+                    }
+                    if (sql.contains("upper(status) = 'PROCESSING'")) {
+                        return requiredType.cast(processingDepthCalls.getAndIncrement() == 0 ? 3L : 1L);
+                    }
                     if (args == null || args.length == 0) {
                         return requiredType.cast(queueDepthCalls.getAndIncrement() == 0 ? 6L : 5L);
                     }
                     return requiredType.cast(queueStaleCalls.getAndIncrement() == 0 ? 1L : 0L);
                 }
+                if (sql.contains("ingestion_jobs")) {
+                    if (sql.contains("min(visible_at)")) {
+                        Instant instant = ingestionQueueAgeCalls.getAndIncrement() == 0
+                                ? now.minusSeconds(660)
+                                : now.minusSeconds(120);
+                        return requiredType.cast(Timestamp.from(instant));
+                    }
+                    return requiredType.cast(ingestionQueueDepthCalls.getAndIncrement() == 0 ? 20L : 4L);
+                }
                 return requiredType.cast(0L);
             }
         };
-        service = new SloMetricsService(jdbcTemplate, tenantService, tenantSchemaExecutionService);
+        when(findingProjectionStatusService.inspectProjectionStatus(tenantA))
+                .thenReturn(new FindingListProjectionService.ProjectionStatus(
+                        now.minusSeconds(3600),
+                        5,
+                        5,
+                        20L,
+                        true,
+                        0L
+                ));
+        when(findingProjectionStatusService.inspectProjectionStatus(tenantB))
+                .thenReturn(new FindingListProjectionService.ProjectionStatus(
+                        now,
+                        5,
+                        5,
+                        20L,
+                        false,
+                        0L
+                ));
+        service = new SloMetricsService(jdbcTemplate, tenantService, tenantSchemaExecutionService, findingProjectionStatusService);
 
         var response = service.evaluate();
 
         assertFalse(response.overallCompliant());
-        assertEquals(3, response.slos().size());
+        assertEquals(8, response.slos().size());
         assertEquals(11.0, response.slos().get(1).current());
         assertEquals(1.0, response.slos().get(2).current());
+        assertEquals(1.0, response.slos().get(3).current());
+        assertEquals(4.0, response.slos().get(4).current());
+        assertTrue(response.slos().get(5).current() >= 690.0);
+        assertEquals(24.0, response.slos().get(6).current());
+        assertTrue(response.slos().get(7).current() >= 650.0);
         assertTrue(response.slos().get(0).compliant());
+        assertFalse(response.slos().get(5).compliant());
+        assertFalse(response.slos().get(7).compliant());
     }
 
     private Tenant tenant(String name) {

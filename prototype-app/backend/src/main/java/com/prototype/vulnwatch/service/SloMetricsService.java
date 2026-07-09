@@ -11,7 +11,6 @@ import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * BLG-014: Evaluates platform SLOs against live repository data and returns a
@@ -26,6 +25,7 @@ public class SloMetricsService {
     private final JdbcTemplate jdbcTemplate;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final FindingProjectionStatusService findingProjectionStatusService;
 
     @Value("${app.slo.sbom-success-rate-min-pct:95.0}")
     private double sbomSuccessRateMinPct;
@@ -39,32 +39,65 @@ public class SloMetricsService {
     @Value("${app.slo.queue-stale-max-count:0}")
     private long queueStaleMaxCount;
 
+    @Value("${app.slo.queue-max-processing:100}")
+    private long queueMaxProcessing;
+
+    @Value("${app.slo.queue-processing-max-age-seconds:600}")
+    private long queueProcessingMaxAgeSeconds;
+
+    @Value("${app.slo.projection-stale-threshold-minutes:15}")
+    private long projectionStaleThresholdMinutes;
+
+    @Value("${app.slo.ingestion-queue-max-pending:25}")
+    private long ingestionQueueMaxPending;
+
+    @Value("${app.slo.ingestion-queue-max-age-seconds:600}")
+    private long ingestionQueueMaxAgeSeconds;
+
     public SloMetricsService(
             JdbcTemplate jdbcTemplate,
             TenantService tenantService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            FindingProjectionStatusService findingProjectionStatusService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.tenantService = tenantService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.findingProjectionStatusService = findingProjectionStatusService;
     }
 
-    @Transactional(readOnly = true)
     public SloStatusResponse evaluate() {
-        Instant now = Instant.now();
-        List<SloEntry> entries = new ArrayList<>();
+        return TenantContext.runAsPlatform(() -> {
+            Instant now = Instant.now();
+            List<SloEntry> entries = new ArrayList<>();
 
-        // SLO-1: SBOM ingestion success rate (last 24 h)
-        entries.add(evaluateSbomSuccessRate(now));
+            // SLO-1: SBOM ingestion success rate (last 24 h)
+            entries.add(evaluateSbomSuccessRate(now));
 
-        // SLO-2: Delta queue depth — number of PENDING items must stay bounded
-        entries.add(evaluateQueueDepth());
+            // SLO-2: Delta queue depth — number of PENDING items must stay bounded
+            entries.add(evaluateQueueDepth());
 
-        // SLO-3: Delta queue staleness — no visible-but-unprocessed items older than threshold
-        entries.add(evaluateQueueStaleness(now));
+            // SLO-3: Delta queue staleness — no visible-but-unprocessed items older than threshold
+            entries.add(evaluateQueueStaleness(now));
 
-        boolean overallCompliant = entries.stream().allMatch(SloEntry::compliant);
-        return new SloStatusResponse(now, overallCompliant, List.copyOf(entries));
+            // SLO-4: Finding workspace projection freshness
+            entries.add(evaluateProjectionFreshness(now));
+
+            // SLO-5: Delta queue processing depth — in-flight work must stay bounded
+            entries.add(evaluateProcessingDepth());
+
+            // SLO-6: Delta queue processing age — processing work must continue making progress
+            entries.add(evaluateProcessingAge(now));
+
+            // SLO-7: Ingestion queue depth — queued ingestion work must stay bounded
+            entries.add(evaluateIngestionQueueDepth());
+
+            // SLO-8: Ingestion queue age — queued ingestion work must not sit unclaimed too long
+            entries.add(evaluateIngestionQueueAge(now));
+
+            boolean overallCompliant = entries.stream().allMatch(SloEntry::compliant);
+            return new SloStatusResponse(now, overallCompliant, List.copyOf(entries));
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -145,7 +178,7 @@ public class SloMetricsService {
                         select count(*)
                         from finding_delta_queue
                         where upper(status) = 'PENDING'
-                          and visible_at <= ?
+                          and visible_after <= ?
                         """,
                         java.sql.Timestamp.from(staleThreshold)
                 )
@@ -159,5 +192,125 @@ public class SloMetricsService {
                 staleCount <= queueStaleMaxCount,
                 queueStaleThresholdMinutes + "m staleness window"
         );
+    }
+
+    private SloEntry evaluateProjectionFreshness(Instant now) {
+        long staleCount = 0L;
+        for (Tenant tenant : tenantService.listTenants()) {
+            FindingListProjectionService.ProjectionStatus status = findingProjectionStatusService.inspectProjectionStatus(tenant);
+            if (status == null || status.missing() || status.stale() || status.driftCount() != 0L) {
+                staleCount += 1L;
+            }
+        }
+        return new SloEntry(
+                "finding_projection_freshness",
+                "Tenants whose finding workspace projection is missing or older than "
+                        + projectionStaleThresholdMinutes + " minutes",
+                "tenants",
+                0L,
+                staleCount,
+                staleCount == 0L,
+                projectionStaleThresholdMinutes + "m freshness window"
+        );
+    }
+
+    private SloEntry evaluateProcessingDepth() {
+        long processing = sumAcrossTenants(tenant ->
+                queryCount("select count(*) from finding_delta_queue where upper(status) = 'PROCESSING'")
+        );
+        return new SloEntry(
+                "delta_queue_processing_depth",
+                "Number of PROCESSING finding delta events currently in-flight",
+                "events",
+                queueMaxProcessing,
+                processing,
+                processing <= queueMaxProcessing,
+                "current"
+        );
+    }
+
+    private SloEntry evaluateProcessingAge(Instant now) {
+        long oldestAgeSeconds = maxAcrossTenants(tenant -> {
+            Instant startedAt = queryInstant(
+                    """
+                    select min(processing_started_at)
+                    from finding_delta_queue
+                    where upper(status) = 'PROCESSING'
+                    """
+            );
+            return ageSeconds(startedAt, now);
+        });
+        return new SloEntry(
+                "delta_queue_processing_oldest_age",
+                "Age in seconds of the oldest PROCESSING finding delta event",
+                "seconds",
+                queueProcessingMaxAgeSeconds,
+                oldestAgeSeconds,
+                oldestAgeSeconds <= queueProcessingMaxAgeSeconds,
+                "current"
+        );
+    }
+
+    private SloEntry evaluateIngestionQueueDepth() {
+        long queued = sumAcrossTenants(tenant ->
+                queryCount("select count(*) from ingestion_jobs where upper(status) = 'QUEUED'")
+        );
+        return new SloEntry(
+                "ingestion_queue_depth",
+                "Number of QUEUED ingestion jobs awaiting workers",
+                "jobs",
+                ingestionQueueMaxPending,
+                queued,
+                queued <= ingestionQueueMaxPending,
+                "current"
+        );
+    }
+
+    private SloEntry evaluateIngestionQueueAge(Instant now) {
+        long oldestAgeSeconds = maxAcrossTenants(tenant -> {
+            Instant visibleAt = queryInstant(
+                    """
+                    select min(visible_at)
+                    from ingestion_jobs
+                    where upper(status) = 'QUEUED'
+                      and visible_at <= ?
+                    """,
+                    java.sql.Timestamp.from(now)
+            );
+            return ageSeconds(visibleAt, now);
+        });
+        return new SloEntry(
+                "ingestion_queue_oldest_age",
+                "Age in seconds of the oldest visible QUEUED ingestion job",
+                "seconds",
+                ingestionQueueMaxAgeSeconds,
+                oldestAgeSeconds,
+                oldestAgeSeconds <= ingestionQueueMaxAgeSeconds,
+                "current"
+        );
+    }
+
+    private Instant queryInstant(String sql, Object... args) {
+        java.sql.Timestamp value = jdbcTemplate.queryForObject(sql, java.sql.Timestamp.class, args);
+        return value == null ? null : value.toInstant();
+    }
+
+    private long maxAcrossTenants(java.util.function.Function<Tenant, Long> aggregator) {
+        long max = 0L;
+        for (Tenant tenant : tenantService.listTenants()) {
+            long value = tenantSchemaExecutionService.run(tenant, () -> {
+                Long result = aggregator.apply(tenant);
+                return result == null ? 0L : result;
+            });
+            max = Math.max(max, value);
+        }
+        return max;
+    }
+
+    private long ageSeconds(Instant startedAt, Instant now) {
+        if (startedAt == null || now == null || startedAt.isAfter(now)) {
+            return 0L;
+        }
+        return Math.max(0L, java.time.Duration.between(startedAt, now).getSeconds());
     }
 }

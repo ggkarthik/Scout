@@ -93,6 +93,7 @@ describe('VulnRepoDashboardPage', () => {
     renderWithProviders(<VulnRepoDashboardPage />);
 
     expect(await screen.findByText('342')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders severity breakdown items when present', async () => {

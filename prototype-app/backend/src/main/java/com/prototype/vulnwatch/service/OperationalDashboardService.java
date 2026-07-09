@@ -188,6 +188,9 @@ public class OperationalDashboardService {
                 OperationalMetricsService.KEY_VULN_INTEL_LIST,
                 OperationalMetricsService.KEY_VULN_INTEL_FILTERS,
                 OperationalMetricsService.KEY_DASHBOARD_OVERVIEW,
+                OperationalMetricsService.KEY_DASHBOARD_APPLICABLE_SOFTWARE,
+                OperationalMetricsService.KEY_DASHBOARD_IMPACTED_CVES,
+                OperationalMetricsService.KEY_DASHBOARD_CVE_INVENTORY_MAP,
                 OperationalMetricsService.KEY_VULN_REPO_DASHBOARD,
                 OperationalMetricsService.KEY_VULN_REPO_VULNERABILITIES,
                 OperationalMetricsService.KEY_VULN_REPO_ORG_CVES,
@@ -200,6 +203,15 @@ public class OperationalDashboardService {
                 OperationalMetricsService.KEY_OPERATIONS_FRESHNESS,
                 OperationalMetricsService.KEY_OPERATIONS_CATALOG,
                 OperationalMetricsService.KEY_FINDINGS_LIST,
+                OperationalMetricsService.KEY_FINDINGS_SUMMARY,
+                OperationalMetricsService.KEY_FINDINGS_DISTRIBUTIONS,
+                OperationalMetricsService.KEY_FINDINGS_BACKLOG_HEALTH,
+                OperationalMetricsService.KEY_FINDINGS_FILTERS,
+                OperationalMetricsService.KEY_FINDINGS_PROJECTION_STATUS,
+                OperationalMetricsService.KEY_INVENTORY_COMPONENTS,
+                OperationalMetricsService.KEY_INVENTORY_COMPONENT_FILTERS,
+                OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITIES,
+                OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITY_FUNNEL,
                 OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT,
                 OperationalMetricsService.KEY_SBOM_FETCH_GITHUB,
                 OperationalMetricsService.KEY_INGESTION_NVD_SYNC,
@@ -327,6 +339,9 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_VULN_INTEL_LIST -> "Vulnerability Intelligence List";
             case OperationalMetricsService.KEY_VULN_INTEL_FILTERS -> "Vulnerability Intelligence Filters";
             case OperationalMetricsService.KEY_DASHBOARD_OVERVIEW -> "Overview Dashboard";
+            case OperationalMetricsService.KEY_DASHBOARD_APPLICABLE_SOFTWARE -> "Applicable Software";
+            case OperationalMetricsService.KEY_DASHBOARD_IMPACTED_CVES -> "Impacted CVEs";
+            case OperationalMetricsService.KEY_DASHBOARD_CVE_INVENTORY_MAP -> "CVE Inventory Map";
             case OperationalMetricsService.KEY_VULN_REPO_DASHBOARD -> "Vulnerability Repository Dashboard";
             case OperationalMetricsService.KEY_VULN_REPO_VULNERABILITIES -> "Vulnerability Repository Vulnerabilities";
             case OperationalMetricsService.KEY_VULN_REPO_ORG_CVES -> "Vulnerability Investigation";
@@ -339,6 +354,15 @@ public class OperationalDashboardService {
             case OperationalMetricsService.KEY_OPERATIONS_FRESHNESS -> "Operations Freshness";
             case OperationalMetricsService.KEY_OPERATIONS_CATALOG -> "Operations Metric Catalog";
             case OperationalMetricsService.KEY_FINDINGS_LIST -> "Findings List";
+            case OperationalMetricsService.KEY_FINDINGS_SUMMARY -> "Findings Summary";
+            case OperationalMetricsService.KEY_FINDINGS_DISTRIBUTIONS -> "Findings Distributions";
+            case OperationalMetricsService.KEY_FINDINGS_BACKLOG_HEALTH -> "Findings Backlog Health";
+            case OperationalMetricsService.KEY_FINDINGS_FILTERS -> "Findings Filters";
+            case OperationalMetricsService.KEY_FINDINGS_PROJECTION_STATUS -> "Findings Projection Status";
+            case OperationalMetricsService.KEY_INVENTORY_COMPONENTS -> "Inventory Components";
+            case OperationalMetricsService.KEY_INVENTORY_COMPONENT_FILTERS -> "Inventory Component Filters";
+            case OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITIES -> "Software Identities";
+            case OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITY_FUNNEL -> "Software Identity Funnel";
             case OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT -> "SBOM Fetch Endpoint";
             case OperationalMetricsService.KEY_SBOM_FETCH_GITHUB -> "SBOM Fetch GitHub";
             case OperationalMetricsService.KEY_INGESTION_NVD_SYNC -> "NVD Sync Trigger";

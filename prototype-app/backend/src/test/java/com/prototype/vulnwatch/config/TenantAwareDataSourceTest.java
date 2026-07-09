@@ -46,6 +46,23 @@ class TenantAwareDataSourceTest {
     }
 
     @Test
+    void classifiesBootstrapConnectionsSeparatelyWithoutRuntimeWarningBucket() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TenantAwareDataSource dataSource = new TenantAwareDataSource(
+                targetConnection(),
+                true,
+                "tenant_default",
+                registry,
+                () -> false
+        );
+
+        dataSource.getConnection().close();
+
+        assertThat(registry.counter("tenant.context.missing", "classification", "bootstrap_default_tenant").count()).isEqualTo(1.0);
+        assertThat(registry.find("tenant.context.missing").tags("classification", "missing_unclassified").counter()).isNull();
+    }
+
+    @Test
     void tenantContextSetsTenantSchemaWithPlatformFallback() throws Exception {
         DataSource target = mock(DataSource.class);
         Connection connection = mock(Connection.class);

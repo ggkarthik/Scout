@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { useDashboardSummaryQuery } from '../features/dashboard/queries';
 import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import { useEolSummaryQuery } from '../features/eol/queries';
@@ -183,6 +184,12 @@ export function ExposureDashboardPage() {
   const dash = dashQ.data;
   const vuln = vulnQ.data;
   const eol = eolQ.data;
+  const refreshing = (dashQ.isFetching || vulnQ.isFetching || eolQ.isFetching) && !!(dash || vuln || eol);
+  const latestDataUpdate = latestFreshnessValue([
+    dashQ.dataUpdatedAt,
+    vuln?.generatedAt ?? vulnQ.dataUpdatedAt,
+    eolQ.dataUpdatedAt,
+  ]);
 
   if (!dash && dashQ.isPending) {
     return <div className="panel"><div className="panel-caption">Loading executive dashboard...</div></div>;
@@ -306,6 +313,11 @@ export function ExposureDashboardPage() {
 
   return (
     <div className="page-grid exec-dashboard">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing exposure view…"
+      />
 
       {/* ── Row 1: Risk Posture KPIs ── */}
       <div className="exec-kpi-grid">

@@ -162,12 +162,6 @@ function backendRoleForRoleKey(roleKey: RoleKey): string {
     : 'READ_ONLY_AUDITOR';
 }
 
-function roleKeyForBackendRole(role: string | null | undefined): RoleKey {
-  if (role === 'TENANT_ADMIN' || role === 'INVENTORY_ADMIN') return 'Admin';
-  if (role === 'SECURITY_ANALYST') return 'Analyst';
-  return 'Viewer';
-}
-
 function inviteSearchHaystack(invite: TenantInvite): string {
   return [
     invite.displayName,

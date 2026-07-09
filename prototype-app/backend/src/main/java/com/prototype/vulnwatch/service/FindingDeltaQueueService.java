@@ -4,7 +4,9 @@ import com.prototype.vulnwatch.domain.FindingDeltaQueueEntry;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingDeltaQueueEntryRepository;
+import jakarta.annotation.PostConstruct;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -12,12 +14,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * BLG-006: Durable delta queue backed by PostgreSQL.
@@ -33,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class FindingDeltaQueueService {
 
     private static final Logger LOG = LoggerFactory.getLogger(FindingDeltaQueueService.class);
+    private static final String INTERRUPTED_PROCESSING_MESSAGE =
+            "Delta processing interrupted by service restart or stalled worker";
     static final String SOFTWARE_DELTA = "SOFTWARE_DELTA";
     static final String CVE_DELTA = "CVE_DELTA";
     static final String CVE_METADATA_DELTA = "CVE_METADATA_DELTA";
@@ -52,6 +59,12 @@ public class FindingDeltaQueueService {
     private final DashboardNoiseReductionProjectionService dashboardNoiseReductionProjectionService;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    @org.springframework.beans.factory.annotation.Value("${app.correlation.delta-queue-stale-processing-threshold-minutes:30}")
+    private long staleProcessingThresholdMinutes;
+    @org.springframework.beans.factory.annotation.Value("${app.correlation.delta-queue-max-batches-per-tenant-per-poll:5}")
+    private int maxBatchesPerTenantPerPoll;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
+    private TransactionTemplate writeTransactionTemplate;
 
     public FindingDeltaQueueService(
             FindingDeltaQueueEntryRepository repository,
@@ -69,93 +82,141 @@ public class FindingDeltaQueueService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    @PostConstruct
+    public void recoverInterruptedProcessingEntries() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-delta-queue.recover-interrupted-processing")) {
+            return;
+        }
+        int recovered = recoverStaleProcessingEntries();
+        if (recovered > 0) {
+            LOG.warn("Recovered {} finding delta entries left PROCESSING by a previous worker lifecycle", recovered);
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${app.correlation.delta-queue-stale-recovery-interval-ms:60000}")
+    public void recoverStaleProcessingEntriesOnSchedule() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-delta-queue.recover-stale-processing")) {
+            return;
+        }
+        try {
+            int recovered = recoverStaleProcessingEntries();
+            if (recovered > 0) {
+                LOG.warn("Recovered {} stale finding delta entries during scheduled recovery", recovered);
+            }
+        } catch (Exception ex) {
+            LOG.warn("Delta queue stale-processing recovery failed: {}", ex.getMessage(), ex);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Public enqueueing API — same signatures as before
     // -------------------------------------------------------------------------
 
-    @Transactional
     public int enqueueSoftwareDeltas(UUID tenantId, Collection<UUID> componentIds, String sourceTag) {
         if (tenantId == null || componentIds == null || componentIds.isEmpty()) {
             return 0;
         }
-        int queued = 0;
-        for (UUID componentId : sortedUniqueIds(componentIds)) {
-            String key = "software:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
-            int inserted = repository.insertIfNotDuplicate(
-                    SOFTWARE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
-            queued += inserted;
-        }
-        return queued;
+        return executeWrite(() -> {
+            int queued = 0;
+            for (UUID componentId : sortedUniqueIds(componentIds)) {
+                String key = "software:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
+                int inserted = repository.insertIfNotDuplicate(
+                        SOFTWARE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
+                queued += inserted;
+            }
+            return queued;
+        });
     }
 
-    @Transactional
     public int enqueueCveDeltas(Collection<UUID> vulnerabilityIds, String sourceTag) {
         if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return 0;
         }
-        int queued = 0;
-        for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
-            String key = "cve:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
-            int inserted = repository.insertIfNotDuplicate(
-                    CVE_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
-            queued += inserted;
-        }
-        return queued;
+        return executeWrite(() -> {
+            int queued = 0;
+            for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
+                String key = "cve:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
+                int inserted = repository.insertIfNotDuplicate(
+                        CVE_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
+                queued += inserted;
+            }
+            return queued;
+        });
     }
 
-    @Transactional
     public int enqueueCveMetadataDeltas(Collection<UUID> vulnerabilityIds, String sourceTag) {
         if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return 0;
         }
-        int queued = 0;
-        for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
-            String key = "cve-metadata:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
-            int inserted = repository.insertIfNotDuplicate(
-                    CVE_METADATA_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
-            queued += inserted;
-        }
-        return queued;
+        return executeWrite(() -> {
+            int queued = 0;
+            for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
+                String key = "cve-metadata:" + vulnerabilityId + ":" + normalizeTag(sourceTag);
+                int inserted = repository.insertIfNotDuplicate(
+                        CVE_METADATA_DELTA, null, null, vulnerabilityId, null, normalizeTag(sourceTag), key);
+                queued += inserted;
+            }
+            return queued;
+        });
     }
 
-    @Transactional
     public int enqueueVexDeltas(Collection<UUID> vulnerabilityIds, String sourceKey, String sourceTag) {
         if (vulnerabilityIds == null || vulnerabilityIds.isEmpty()) {
             return 0;
         }
-        int queued = 0;
-        for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
-            String normalizedSourceKey = normalizeTag(sourceKey);
-            String normalizedTag      = normalizeTag(sourceTag);
-            String key = "vex:" + vulnerabilityId + ":" + normalizedSourceKey + ":" + normalizedTag;
-            int inserted = repository.insertIfNotDuplicate(
-                    VEX_DELTA, null, null, vulnerabilityId, normalizedSourceKey, normalizedTag, key);
-            queued += inserted;
-        }
-        return queued;
+        return executeWrite(() -> {
+            int queued = 0;
+            for (UUID vulnerabilityId : sortedUniqueIds(vulnerabilityIds)) {
+                String normalizedSourceKey = normalizeTag(sourceKey);
+                String normalizedTag = normalizeTag(sourceTag);
+                String key = "vex:" + vulnerabilityId + ":" + normalizedSourceKey + ":" + normalizedTag;
+                int inserted = repository.insertIfNotDuplicate(
+                        VEX_DELTA, null, null, vulnerabilityId, normalizedSourceKey, normalizedTag, key);
+                queued += inserted;
+            }
+            return queued;
+        });
     }
 
-    @Transactional
     public int enqueueLifecycleDeltas(UUID tenantId, Collection<UUID> componentIds, String sourceTag) {
         if (tenantId == null || componentIds == null || componentIds.isEmpty()) {
             return 0;
         }
-        int queued = 0;
-        for (UUID componentId : sortedUniqueIds(componentIds)) {
-            String key = "lifecycle:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
-            int inserted = repository.insertIfNotDuplicate(
-                    LIFECYCLE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
-            queued += inserted;
-        }
-        return queued;
+        return executeWrite(() -> {
+            int queued = 0;
+            for (UUID componentId : sortedUniqueIds(componentIds)) {
+                String key = "lifecycle:" + tenantId + ":" + componentId + ":" + normalizeTag(sourceTag);
+                int inserted = repository.insertIfNotDuplicate(
+                        LIFECYCLE_DELTA, tenantId, componentId, null, null, normalizeTag(sourceTag), key);
+                queued += inserted;
+            }
+            return queued;
+        });
     }
 
-    @Transactional
     public int enqueueNoiseReductionRefresh(UUID tenantId, String sourceTag) {
         if (tenantId == null) {
             return 0;
         }
-        return repository.insertIfNotDuplicate(
+        return executeWrite(() -> repository.insertIfNotDuplicate(
                 NOISE_REDUCTION_REFRESH,
                 tenantId,
                 null,
@@ -163,11 +224,32 @@ public class FindingDeltaQueueService {
                 null,
                 normalizeTag(sourceTag),
                 "noise:" + tenantId
-        );
+        ));
     }
 
     public long queueDepth() {
         return repository.countPending();
+    }
+
+    int recoverStaleProcessingEntries() {
+        return TenantContext.runAsPlatform(() -> {
+            Instant recoveredAt = Instant.now();
+            Instant cutoff = recoveredAt.minus(staleProcessingThresholdMinutes, ChronoUnit.MINUTES);
+            int recovered = 0;
+            for (Tenant tenant : tenantService.listActiveTenants()) {
+                try {
+                    int tenantRecovered = tenantSchemaExecutionService.run(tenant,
+                            () -> recoverStaleProcessingEntriesForTenant(cutoff, recoveredAt));
+                    recovered += tenantRecovered;
+                    if (tenantRecovered > 0) {
+                        LOG.warn("Recovered {} stale PROCESSING delta entries for tenant {}", tenantRecovered, tenant.getId());
+                    }
+                } catch (Exception ex) {
+                    LOG.warn("Delta queue stale-processing recovery failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+                }
+            }
+            return recovered;
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -176,26 +258,46 @@ public class FindingDeltaQueueService {
 
     @Scheduled(fixedDelayString = "${app.correlation.delta-queue-poll-interval-ms:2000}")
     public void processPendingDeltas() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-delta-queue.process-pending-deltas")) {
+            return;
+        }
         // finding_delta_queue is per-tenant. The scheduler thread carries no tenant context, so the
         // queue claim + status updates land in the default schema — without iterating tenants this only
         // ever drained tenant_default and left every other tenant's deltas PENDING forever (so their
         // findings/projections never recomputed). Drain each tenant's queue inside its own schema
         // context. Never let an exception escape: a @Scheduled task that throws is not rescheduled.
         try {
-            for (Tenant tenant : tenantService.listActiveTenants()) {
-                try {
-                    tenantSchemaExecutionService.run(tenant, () -> {
-                        List<FindingDeltaQueueEntry> claimed = claimBatch();
-                        if (!claimed.isEmpty()) {
-                            LOG.debug("Delta queue: claimed {} entries for tenant {}", claimed.size(), tenant.getId());
-                            processClaimedBatch(claimed);
-                        }
-                        return null;
-                    });
-                } catch (Exception ex) {
-                    LOG.warn("Delta queue processing failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+            TenantContext.runAsPlatform(() -> {
+                for (Tenant tenant : tenantService.listActiveTenants()) {
+                    try {
+                        tenantSchemaExecutionService.run(tenant, () -> {
+                            int batchesProcessed = 0;
+                            int maxBatches = Math.max(1, maxBatchesPerTenantPerPoll);
+                            while (batchesProcessed < maxBatches) {
+                                List<FindingDeltaQueueEntry> claimed = claimBatch();
+                                if (claimed.isEmpty()) {
+                                    break;
+                                }
+                                LOG.debug("Delta queue: claimed {} entries for tenant {} (batch {}/{})",
+                                        claimed.size(),
+                                        tenant.getId(),
+                                        batchesProcessed + 1,
+                                        maxBatches);
+                                processClaimedBatch(claimed);
+                                batchesProcessed += 1;
+                            }
+                            if (batchesProcessed == maxBatches) {
+                                LOG.debug("Delta queue: paused tenant {} after {} batches to keep one poll cycle bounded",
+                                        tenant.getId(),
+                                        maxBatches);
+                            }
+                            return null;
+                        });
+                    } catch (Exception ex) {
+                        LOG.warn("Delta queue processing failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+                    }
                 }
-            }
+            });
         } catch (Exception ex) {
             LOG.warn("Delta queue poll cycle failed before tenant iteration: {}", ex.getMessage(), ex);
         }
@@ -205,20 +307,21 @@ public class FindingDeltaQueueService {
     // Internal — transactional helpers called via Spring proxy
     // -------------------------------------------------------------------------
 
-    @Transactional
     List<FindingDeltaQueueEntry> claimBatch() {
-        List<FindingDeltaQueueEntry> entries = repository.pollPending(POLL_BATCH_SIZE);
-        if (entries.isEmpty()) {
+        return executeWrite(() -> {
+            List<FindingDeltaQueueEntry> entries = repository.pollPending(POLL_BATCH_SIZE);
+            if (entries.isEmpty()) {
+                return entries;
+            }
+            Instant now = Instant.now();
+            for (FindingDeltaQueueEntry e : entries) {
+                e.setStatus("PROCESSING");
+                e.setProcessingStartedAt(now);
+                e.setAttemptCount(e.getAttemptCount() + 1);
+            }
+            repository.saveAll(entries);
             return entries;
-        }
-        Instant now = Instant.now();
-        for (FindingDeltaQueueEntry e : entries) {
-            e.setStatus("PROCESSING");
-            e.setProcessingStartedAt(now);
-            e.setAttemptCount(e.getAttemptCount() + 1);
-        }
-        repository.saveAll(entries);
-        return entries;
+        });
     }
 
     // Not @Transactional — manages its own sub-transactions via findingRecomputeService
@@ -403,41 +506,44 @@ public class FindingDeltaQueueService {
         }
     }
 
-    @Transactional
     void markDone(Long id, int affected) {
         markDone(List.of(id), affected);
     }
 
-    @Transactional
     void markDone(Collection<Long> ids, int affected) {
-        Instant completedAt = Instant.now();
-        for (Long id : ids) {
-            repository.findById(id).ifPresent(e -> {
-                e.setStatus("DONE");
-                e.setCompletedAt(completedAt);
-                repository.save(e);
-                LOG.debug("Delta entry id={} type={} marked DONE, affected={}", id, e.getEventType(), affected);
-            });
-        }
+        executeWrite(() -> {
+            Instant completedAt = Instant.now();
+            for (Long id : ids) {
+                repository.findById(id).ifPresent(e -> {
+                    e.setStatus("DONE");
+                    e.setCompletedAt(completedAt);
+                    repository.save(e);
+                    LOG.debug("Delta entry id={} type={} marked DONE, affected={}", id, e.getEventType(), affected);
+                });
+            }
+            return null;
+        });
     }
 
-    @Transactional
     void markFailedOrRetry(Long id, int attemptCount, int maxAttempts, String errorMessage) {
-        repository.findById(id).ifPresent(e -> {
-            e.setErrorMessage(errorMessage);
-            if (attemptCount >= maxAttempts) {
-                e.setStatus("FAILED");
-                LOG.error("Delta entry id={} type={} FAILED after {} attempts: {}",
-                        id, e.getEventType(), attemptCount, errorMessage);
-            } else {
-                // Exponential backoff: 1 min, 2 min, 4 min, ...
-                long backoffSeconds = 60L * (1L << (attemptCount - 1));
-                e.setStatus("PENDING");
-                e.setVisibleAfter(Instant.now().plusSeconds(backoffSeconds));
-                LOG.warn("Delta entry id={} type={} scheduled for retry in {}s (attempt {}/{})",
-                        id, e.getEventType(), backoffSeconds, attemptCount, maxAttempts);
-            }
-            repository.save(e);
+        executeWrite(() -> {
+            repository.findById(id).ifPresent(e -> {
+                e.setErrorMessage(errorMessage);
+                e.setProcessingStartedAt(null);
+                if (attemptCount >= maxAttempts) {
+                    e.setStatus("FAILED");
+                    LOG.error("Delta entry id={} type={} FAILED after {} attempts: {}",
+                            id, e.getEventType(), attemptCount, errorMessage);
+                } else {
+                    long backoffSeconds = 60L * (1L << (attemptCount - 1));
+                    e.setStatus("PENDING");
+                    e.setVisibleAfter(Instant.now().plusSeconds(backoffSeconds));
+                    LOG.warn("Delta entry id={} type={} scheduled for retry in {}s (attempt {}/{})",
+                            id, e.getEventType(), backoffSeconds, attemptCount, maxAttempts);
+                }
+                repository.save(e);
+            });
+            return null;
         });
     }
 
@@ -478,6 +584,32 @@ public class FindingDeltaQueueService {
         return value.trim().toLowerCase(Locale.ROOT);
     }
 
+    private int recoverStaleProcessingEntriesForTenant(Instant cutoff, Instant recoveredAt) {
+        return executeWrite(() -> {
+            List<FindingDeltaQueueEntry> staleEntries = repository.findStaleProcessingEntries(cutoff);
+            if (staleEntries.isEmpty()) {
+                return 0;
+            }
+            for (FindingDeltaQueueEntry entry : staleEntries) {
+                entry.setProcessingStartedAt(null);
+                if (entry.getErrorMessage() == null || entry.getErrorMessage().isBlank()) {
+                    entry.setErrorMessage(INTERRUPTED_PROCESSING_MESSAGE);
+                }
+                if (entry.getAttemptCount() >= entry.getMaxAttempts()) {
+                    entry.setStatus("FAILED");
+                    if (entry.getCompletedAt() == null) {
+                        entry.setCompletedAt(recoveredAt);
+                    }
+                } else {
+                    entry.setStatus("PENDING");
+                    entry.setVisibleAfter(recoveredAt);
+                }
+            }
+            repository.saveAll(staleEntries);
+            return staleEntries.size();
+        });
+    }
+
     private void enqueueNoiseReductionRefreshForTenants(Collection<UUID> tenantIds, String sourceTag) {
         if (tenantIds == null || tenantIds.isEmpty()) {
             return;
@@ -506,5 +638,12 @@ public class FindingDeltaQueueService {
                 TenantContext.setCurrentSchemaName(previousSchema);
             }
         }
+    }
+
+    private <T> T executeWrite(Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

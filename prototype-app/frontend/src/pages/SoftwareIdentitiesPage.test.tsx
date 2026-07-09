@@ -95,6 +95,7 @@ describe('SoftwareIdentitiesPage', () => {
     vi.spyOn(api, 'getSoftwareIdentityFunnel').mockResolvedValue(EMPTY_FUNNEL);
     renderWithProviders(<SoftwareIdentitiesPage />);
     await waitFor(() => expect(screen.getByText('lodash')).toBeInTheDocument());
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('shows error banner when identities query fails', async () => {

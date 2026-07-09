@@ -35,28 +35,30 @@ public class PlatformInventoryConnectorHealthService {
     }
 
     public List<InventoryConnectorHealthResponse> listInventoryConnectorHealth() {
-        List<InventoryConnectorHealthResponse> responses = new ArrayList<>();
-        for (Tenant tenant : tenantService.listTenants()) {
-            tenantSchemaExecutionService.run(tenant, () -> {
-                serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
-                        .ifPresent(config -> responses.add(toResponse(tenant, "servicenow", config.isEnabled(),
-                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
-                                config.getLastTestedAt(), config.getLastSyncAt())));
-                sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
-                        .ifPresent(config -> responses.add(toResponse(tenant, "sccm", config.isEnabled(),
-                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
-                                config.getLastTestedAt(), config.getLastSyncAt())));
-                awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
-                        .ifPresent(config -> responses.add(toResponse(tenant, "aws", config.isEnabled(),
-                                config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
-                                config.getLastTestedAt(), config.getLastSyncAt())));
-                return null;
-            });
-        }
-        responses.sort(Comparator
-                .comparing(InventoryConnectorHealthResponse::tenantName, Comparator.nullsLast(String::compareToIgnoreCase))
-                .thenComparing(InventoryConnectorHealthResponse::connectorKey, Comparator.nullsLast(String::compareToIgnoreCase)));
-        return responses;
+        return TenantContext.runAsPlatform(() -> {
+            List<InventoryConnectorHealthResponse> responses = new ArrayList<>();
+            for (Tenant tenant : tenantService.listTenants()) {
+                tenantSchemaExecutionService.run(tenant, () -> {
+                    serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
+                            .ifPresent(config -> responses.add(toResponse(tenant, "servicenow", config.isEnabled(),
+                                    config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                    config.getLastTestedAt(), config.getLastSyncAt())));
+                    sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm")
+                            .ifPresent(config -> responses.add(toResponse(tenant, "sccm", config.isEnabled(),
+                                    config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                    config.getLastTestedAt(), config.getLastSyncAt())));
+                    awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+                            .ifPresent(config -> responses.add(toResponse(tenant, "aws", config.isEnabled(),
+                                    config.isAutoSyncEnabled(), config.getLastTestStatus(), config.getLastTestMessage(),
+                                    config.getLastTestedAt(), config.getLastSyncAt())));
+                    return null;
+                });
+            }
+            responses.sort(Comparator
+                    .comparing(InventoryConnectorHealthResponse::tenantName, Comparator.nullsLast(String::compareToIgnoreCase))
+                    .thenComparing(InventoryConnectorHealthResponse::connectorKey, Comparator.nullsLast(String::compareToIgnoreCase)));
+            return responses;
+        });
     }
 
     private InventoryConnectorHealthResponse toResponse(

@@ -13,7 +13,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class QualityIssueRefreshService {
@@ -28,6 +29,7 @@ public class QualityIssueRefreshService {
     private final ProjectionFreshnessIssueBuilder projectionFreshnessIssueBuilder;
     private final QualityIssuePersistenceService qualityIssuePersistenceService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate transactionTemplate;
 
     public QualityIssueRefreshService(
             TenantRepository tenantRepository,
@@ -53,27 +55,32 @@ public class QualityIssueRefreshService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
-    public int refreshAll() {
-        int total = 0;
-        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
-            total += refreshTenant(tenant);
-        }
-        return total;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
+    public int refreshAll() {
+        return TenantContext.runAsPlatform(() -> {
+            int total = 0;
+            for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+                total += refreshTenant(tenant);
+            }
+            return total;
+        });
+    }
+
     public int refreshTenant(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeInTransaction(() -> {
             UUID tenantId = tenant.getId();
             List<QualityIssueRecord> issues = buildIssuesForTenant(tenantId);
             qualityIssuePersistenceService.upsertRows(issues);
             qualityIssuePersistenceService.deleteStaleRows(tenantId, issues);
             return issues.size();
-        });
+        }));
     }
 
     public void ensureTenantProjection(Tenant tenant) {
@@ -208,6 +215,13 @@ public class QualityIssueRefreshService {
         addIssueRecords(issues, projectionFreshnessIssueBuilder.buildPostRecomputeProjectionPendingIssues(tenantId), failedSources, missingIdentityComponentIds);
 
         return new ArrayList<>(issues.values());
+    }
+
+    private <T> T executeInTransaction(java.util.function.Supplier<T> work) {
+        if (transactionTemplate == null) {
+            return work.get();
+        }
+        return transactionTemplate.execute(status -> work.get());
     }
 
     private void addIssueRecords(

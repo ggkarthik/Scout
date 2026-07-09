@@ -87,6 +87,7 @@ describe('VulnRepoVulnerabilitiesPage', () => {
     expect(screen.getByText('Only ingested')).toBeInTheDocument();
     expect(screen.getAllByText('No').length).toBeGreaterThan(0);
     expect(screen.getByText('8.8')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('shows reviewed investigation status when the server has a saved investigation summary', async () => {

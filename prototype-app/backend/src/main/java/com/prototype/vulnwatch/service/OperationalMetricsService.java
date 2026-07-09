@@ -20,6 +20,9 @@ public class OperationalMetricsService {
     public static final String KEY_VULN_REPO_ORG_CVE_STATUS = "vuln-repo-org-cves-status";
     public static final String KEY_VULN_REPO_ORG_CVE_RECOMPUTE = "vuln-repo-org-cves-recompute";
     public static final String KEY_DASHBOARD_OVERVIEW = "dashboard-overview";
+    public static final String KEY_DASHBOARD_APPLICABLE_SOFTWARE = "dashboard-applicable-software";
+    public static final String KEY_DASHBOARD_IMPACTED_CVES = "dashboard-impacted-cves";
+    public static final String KEY_DASHBOARD_CVE_INVENTORY_MAP = "dashboard-cve-inventory-map";
     public static final String KEY_OPERATIONS_DASHBOARD = "operations-dashboard";
     public static final String KEY_OPERATIONS_OVERVIEW = "operations-overview";
     public static final String KEY_OPERATIONS_INGESTION = "operations-ingestion-efficiency";
@@ -30,6 +33,15 @@ public class OperationalMetricsService {
     public static final String KEY_OPERATIONS_FRESHNESS = "operations-freshness-drift";
     public static final String KEY_OPERATIONS_CATALOG = "operations-metric-catalog";
     public static final String KEY_FINDINGS_LIST = "findings-list";
+    public static final String KEY_FINDINGS_SUMMARY = "findings-summary";
+    public static final String KEY_FINDINGS_DISTRIBUTIONS = "findings-distributions";
+    public static final String KEY_FINDINGS_BACKLOG_HEALTH = "findings-backlog-health";
+    public static final String KEY_FINDINGS_FILTERS = "findings-filters";
+    public static final String KEY_FINDINGS_PROJECTION_STATUS = "findings-projection-status";
+    public static final String KEY_INVENTORY_COMPONENTS = "inventory-components";
+    public static final String KEY_INVENTORY_COMPONENT_FILTERS = "inventory-component-filters";
+    public static final String KEY_INVENTORY_SOFTWARE_IDENTITIES = "inventory-software-identities";
+    public static final String KEY_INVENTORY_SOFTWARE_IDENTITY_FUNNEL = "inventory-software-identity-funnel";
     public static final String KEY_SBOM_FETCH_ENDPOINT = "sbom-fetch-endpoint";
     public static final String KEY_SBOM_FETCH_GITHUB = "sbom-fetch-github";
     public static final String KEY_INGESTION_NVD_SYNC = "ingestion-nvd-sync";

@@ -13,7 +13,9 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class DashboardNoiseReductionProjectionService {
@@ -24,20 +26,24 @@ public class DashboardNoiseReductionProjectionService {
     private final ObjectMapper objectMapper;
     private final OperationalMetricsService operationalMetricsService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TransactionTemplate writeTransactionTemplate;
 
     public DashboardNoiseReductionProjectionService(
             NamedParameterJdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             OperationalMetricsService operationalMetricsService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            PlatformTransactionManager transactionManager
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.operationalMetricsService = operationalMetricsService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
     public int refreshTenant(UUID tenantId) {
         if (tenantId == null) {
             return 0;
@@ -47,66 +53,8 @@ public class DashboardNoiseReductionProjectionService {
         int statusCode = 200;
         try {
             return tenantSchemaExecutionService.run(tenantId, () -> {
-                MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
-                long neverOpenedNotApplicable = queryForLong("""
-                        SELECT COUNT(*)
-                        FROM component_vulnerability_states state
-                        WHERE state.applicability_state = 'NOT_APPLICABLE'
-                          AND state.impact_state = 'NOT_IMPACTED'
-                          AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM findings finding
-                              WHERE finding.component_id = state.component_id
-                                AND finding.vulnerability_id = state.vulnerability_id
-                          )
-                        """, params);
-
-                long deferredUnderInvestigation = queryForLong("""
-                        SELECT COUNT(*)
-                        FROM component_vulnerability_states state
-                        WHERE state.applicability_state = 'UNKNOWN'
-                          AND lower(coalesce(state.applicability_reason, '')) LIKE '%under_investigation%'
-                          AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM findings finding
-                              WHERE finding.component_id = state.component_id
-                                AND finding.vulnerability_id = state.vulnerability_id
-                          )
-                        """, params);
-
-                Map<String, Long> categoryCounts = loadCategoryCounts(params);
-                Instant computedAt = Instant.now();
-                String categoryCountsJson = toJson(categoryCounts);
-
-                params.addValue("neverOpenedNotApplicable", neverOpenedNotApplicable)
-                        .addValue("deferredUnderInvestigation", deferredUnderInvestigation)
-                        .addValue("categoryCountsJson", categoryCountsJson)
-                        .addValue("lastComputedAt", toSqlTimestamp(computedAt));
-
-                jdbcTemplate.update("""
-                        INSERT INTO dashboard_noise_reduction_projection (
-                            tenant_id,
-                            never_opened_not_applicable,
-                            deferred_under_investigation,
-                            category_counts_json,
-                            last_computed_at
-                        )
-                        VALUES (
-                            :tenantId,
-                            :neverOpenedNotApplicable,
-                            :deferredUnderInvestigation,
-                            CAST(:categoryCountsJson AS jsonb),
-                            :lastComputedAt
-                        )
-                        ON CONFLICT (tenant_id) DO UPDATE SET
-                            never_opened_not_applicable = EXCLUDED.never_opened_not_applicable,
-                            deferred_under_investigation = EXCLUDED.deferred_under_investigation,
-                            category_counts_json = EXCLUDED.category_counts_json,
-                            last_computed_at = EXCLUDED.last_computed_at
-                        """, params);
-                return 1;
+                Integer refreshed = writeTransactionTemplate.execute(status -> refreshTenantInCurrentTenantSchema(tenantId));
+                return refreshed == null ? 0 : refreshed;
             });
         } catch (RuntimeException ex) {
             statusCode = 500;
@@ -139,12 +87,74 @@ public class DashboardNoiseReductionProjectionService {
         return loadProjection(tenant.getId());
     }
 
-    @Transactional(readOnly = true)
     public ProjectionSnapshot getProjectionStatus(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return ProjectionSnapshot.empty();
         }
         return loadProjection(tenant.getId());
+    }
+
+    private int refreshTenantInCurrentTenantSchema(UUID tenantId) {
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+        long neverOpenedNotApplicable = queryForLong("""
+                SELECT COUNT(*)
+                FROM component_vulnerability_states state
+                WHERE state.applicability_state = 'NOT_APPLICABLE'
+                  AND state.impact_state = 'NOT_IMPACTED'
+                  AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM findings finding
+                      WHERE finding.component_id = state.component_id
+                        AND finding.vulnerability_id = state.vulnerability_id
+                  )
+                """, params);
+
+        long deferredUnderInvestigation = queryForLong("""
+                SELECT COUNT(*)
+                FROM component_vulnerability_states state
+                WHERE state.applicability_state = 'UNKNOWN'
+                  AND lower(coalesce(state.applicability_reason, '')) LIKE '%under_investigation%'
+                  AND lower(coalesce(state.applicability_reason, '')) NOT IN ('component_not_observed', 'component_inactive')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM findings finding
+                      WHERE finding.component_id = state.component_id
+                        AND finding.vulnerability_id = state.vulnerability_id
+                  )
+                """, params);
+
+        Map<String, Long> categoryCounts = loadCategoryCounts(params);
+        Instant computedAt = Instant.now();
+        String categoryCountsJson = toJson(categoryCounts);
+
+        params.addValue("neverOpenedNotApplicable", neverOpenedNotApplicable)
+                .addValue("deferredUnderInvestigation", deferredUnderInvestigation)
+                .addValue("categoryCountsJson", categoryCountsJson)
+                .addValue("lastComputedAt", toSqlTimestamp(computedAt));
+
+        jdbcTemplate.update("""
+                INSERT INTO dashboard_noise_reduction_projection (
+                    tenant_id,
+                    never_opened_not_applicable,
+                    deferred_under_investigation,
+                    category_counts_json,
+                    last_computed_at
+                )
+                VALUES (
+                    :tenantId,
+                    :neverOpenedNotApplicable,
+                    :deferredUnderInvestigation,
+                    CAST(:categoryCountsJson AS jsonb),
+                    :lastComputedAt
+                )
+                ON CONFLICT (tenant_id) DO UPDATE SET
+                    never_opened_not_applicable = EXCLUDED.never_opened_not_applicable,
+                    deferred_under_investigation = EXCLUDED.deferred_under_investigation,
+                    category_counts_json = EXCLUDED.category_counts_json,
+                    last_computed_at = EXCLUDED.last_computed_at
+                """, params);
+        return 1;
     }
 
     private Map<String, Long> loadCategoryCounts(MapSqlParameterSource params) {

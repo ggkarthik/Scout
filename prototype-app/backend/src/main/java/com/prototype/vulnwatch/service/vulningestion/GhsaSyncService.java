@@ -132,7 +132,8 @@ public class GhsaSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("GHSA", List.of("GHSA"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeGhsaSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId()).ifPresent(this::executeGhsaSync));
         }
         return decision.toResponse("GHSA sync is already in progress", "GHSA sync queued");
     }

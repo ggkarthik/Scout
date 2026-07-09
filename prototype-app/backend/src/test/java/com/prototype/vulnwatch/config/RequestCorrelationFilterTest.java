@@ -26,6 +26,7 @@ class RequestCorrelationFilterTest {
         filter.doFilter(request, response, new MockFilterChain());
 
         assertEquals("req-123", response.getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER));
+        assertTrue(response.getHeader(RequestCorrelationFilter.SERVER_TIMING_HEADER).startsWith("app;dur="));
         assertNull(MDC.get(RequestCorrelationFilter.REQUEST_ID_MDC_KEY));
     }
 
@@ -40,5 +41,19 @@ class RequestCorrelationFilterTest {
         String generated = response.getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER);
         assertNotEquals("bad value with spaces", generated);
         assertTrue(generated.matches("[0-9a-f-]{36}"));
+    }
+
+    @Test
+    void preservesServerTimingWhenDownstreamWritesAndFlushesBody() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/dashboard");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            res.getWriter().write("{\"status\":\"ok\"}");
+            res.flushBuffer();
+        });
+
+        assertEquals("{\"status\":\"ok\"}", response.getContentAsString());
+        assertTrue(response.getHeader(RequestCorrelationFilter.SERVER_TIMING_HEADER).startsWith("app;dur="));
     }
 }

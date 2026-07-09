@@ -244,7 +244,7 @@ All API calls go through `src/api/client.ts`. Base URL: `VITE_API_BASE` (default
 - **Frontend container:** `nginx:1.27-alpine`, port 8080, `try_files $uri $uri/ /index.html` for SPA routing
 - **AWS (validation):** ECS Fargate (public subnet, assign_public_ip=true), ALB, RDS PostgreSQL db.t4g.small (private subnet), S3 + CloudFront OAC for frontend
 
-See [Production Readiness](production-readiness.md) for full deployment details and environment variable reference.
+For deployment-facing environment variables and operational endpoints, see [Backend](backend.md).
 
 ---
 

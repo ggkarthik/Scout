@@ -95,6 +95,16 @@ class IngestionJobWorkerServiceTest {
         verify(sbomJobExecutor, never()).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
     }
 
+    @Test
+    void pollJobsSkipsWhenRuntimeRoleIsApi() {
+        service.setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy.forRole("api"));
+
+        service.pollJobs();
+
+        verify(tenantService, never()).listActiveTenants();
+        verify(sbomJobExecutor, never()).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
+    }
+
     private Tenant tenant(String slug) {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());

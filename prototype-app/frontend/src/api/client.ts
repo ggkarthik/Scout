@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react';
 import type {
   OwnershipRuleRequest,
   OwnershipRuleResponse,
@@ -31,6 +32,7 @@ import type {
   CorrelationOverridePayload,
   NormalizationOverridePayload,
   OperationalDashboard,
+  PerformanceScorecard,
   OperationalQualityFilterValues,
   OperationalQualityIssueDetail,
   OperationalQualityIssuePage,
@@ -511,12 +513,14 @@ function isJwtAuthFailure(status: number, payload?: ApiErrorPayload, fallbackTex
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-  const tokenSignal = combined.includes('invalid jwt')
+  const tokenFailure = combined.includes('invalid jwt')
     || combined.includes('jwt')
     || combined.includes('token expired')
+    || combined.includes('expired token')
+    || combined.includes('invalid token')
     || combined.includes('token invalid')
     || combined.includes('bearer token');
-  if (tokenSignal) {
+  if (tokenFailure) {
     return true;
   }
   return status === 401 && combined.includes('unauthorized');
@@ -693,9 +697,31 @@ function buildApiHeaders(base?: HeadersInit, includeJsonContentType = true): Hea
   return headers;
 }
 
+function recordApiTiming(path: string, method: string, durationMs: number, status: number, requestId: string | null) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('scout:api-request', {
+      detail: {
+        path,
+        method,
+        durationMs,
+        status,
+        requestId,
+      }
+    }));
+  }
+
+  Sentry.addBreadcrumb({
+    category: 'api',
+    level: status >= 400 ? 'warning' : 'info',
+    message: `${method} ${path} -> ${status} (${durationMs}ms)`,
+    data: requestId ? { requestId } : undefined
+  });
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = buildApiHeaders(options?.headers);
   const method = options?.method?.toUpperCase() ?? 'GET';
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const platformTenantContext = typeof window === 'undefined' ? null : currentPlatformTenantContext();
   if (platformTenantContext && shouldConfirmPlatformAction(path, method)) {
     const confirmed = window.confirm(`Confirm action for tenant ${platformTenantContext.tenantId} as Platform Owner.`);
@@ -710,6 +736,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers
   });
+  const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  recordApiTiming(
+    path,
+    method,
+    Math.round(endedAt - startedAt),
+    response.status,
+    response.headers.get('X-Request-ID')
+  );
 
   if (!response.ok) {
     throw await parseApiError(response);
@@ -879,6 +913,7 @@ export const api = {
   getOperationalApiReadPath: () => request<OperationalSectionResponse<OperationalDashboard['apiReadPath']>>('/operations/api-read-path'),
   getOperationalFreshnessDrift: () => request<OperationalSectionResponse<OperationalDashboard['freshnessDrift']>>('/operations/freshness-drift'),
   getOperationalMetricCatalog: () => request<OperationalSectionResponse<OperationalDashboard['metricCatalog']>>('/operations/metric-catalog'),
+  getOperationalPerformanceScorecard: () => request<PerformanceScorecard>('/operations/performance-scorecard'),
   getOperationalTenantAttention: () => request<TenantAttentionRow[]>('/operations/tenant-attention'),
   getOperationalConnectorIssues: () => request<ConnectorIssueGroup[]>('/operations/connector-issues'),
   getOperationalQualitySummary: () => request<OperationalQualitySummary>('/operations/quality/summary'),

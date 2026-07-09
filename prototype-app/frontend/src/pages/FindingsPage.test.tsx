@@ -190,6 +190,8 @@ describe('FindingsPage', () => {
 
     await screen.findByText('F-001');
     expect(screen.getByText('CVE-2026-1234')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
+    expect(screen.getByText(/Projection healthy/i)).toBeInTheDocument();
     // Asset name appears in both the row and the "Top Assets at Risk" widget
     expect(screen.getAllByText('web-prod-01').length).toBeGreaterThan(0);
     expect(screen.getByRole('columnheader', { name: /Finding ID/ })).toBeInTheDocument();
@@ -472,6 +474,10 @@ describe('FindingsPage', () => {
           assignmentGroup: 'Security Operations',
         })],
       }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/ServiceNow incident creation completed/i)).toBeInTheDocument();
     });
   });
 

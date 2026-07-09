@@ -21,7 +21,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -68,7 +67,6 @@ public class IngestionJobService {
         this.transactionTemplate = transactionTemplate;
     }
 
-    @Transactional
     public IngestionJobAcceptedResponse enqueueEndpointJob(Tenant tenant, SbomEndpointIngestionRequest request, String requestedBy) {
         BomFetchRequest bomRequest = new BomFetchRequest(
                 com.prototype.vulnwatch.domain.BomType.SBOM,
@@ -83,7 +81,6 @@ public class IngestionJobService {
         return enqueueBomFetchJob(tenant, bomRequest, requestedBy, "remote-endpoint");
     }
 
-    @Transactional
     public IngestionJobAcceptedResponse enqueueBomFetchJob(Tenant tenant, BomFetchRequest request, String requestedBy) {
         return enqueueBomFetchJob(tenant, request, requestedBy, "bom-fetch");
     }
@@ -110,7 +107,6 @@ public class IngestionJobService {
         );
     }
 
-    @Transactional
     public IngestionJobAcceptedResponse enqueueGithubRepositoryJob(
             Tenant tenant,
             GithubSbomIngestionRequest request,
@@ -144,7 +140,6 @@ public class IngestionJobService {
         );
     }
 
-    @Transactional
     public IngestionJobAcceptedResponse enqueueGithubGhcrJob(
             Tenant tenant,
             String owner,
@@ -265,30 +260,32 @@ public class IngestionJobService {
     }
 
     public int recoverInterruptedRunningJobs() {
-        Instant now = Instant.now();
-        int recovered = 0;
-        for (Tenant tenant : tenantService.listActiveTenants()) {
-            List<IngestionJob> stale = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
-            if (stale.isEmpty()) {
-                continue;
-            }
-            for (IngestionJob job : stale) {
-                job.setStatus(STATUS_FAILED);
-                job.setFailureCode("WORKER_INTERRUPTED");
-                if (job.getFailureMessage() == null || job.getFailureMessage().isBlank()) {
-                    job.setFailureMessage("Ingestion job interrupted by service restart");
+        return TenantContext.runAsPlatform(() -> {
+            Instant now = Instant.now();
+            int recovered = 0;
+            for (Tenant tenant : tenantService.listActiveTenants()) {
+                List<IngestionJob> stale = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
+                if (stale.isEmpty()) {
+                    continue;
                 }
-                if (job.getCompletedAt() == null) {
-                    job.setCompletedAt(now);
+                for (IngestionJob job : stale) {
+                    job.setStatus(STATUS_FAILED);
+                    job.setFailureCode("WORKER_INTERRUPTED");
+                    if (job.getFailureMessage() == null || job.getFailureMessage().isBlank()) {
+                        job.setFailureMessage("Ingestion job interrupted by service restart");
+                    }
+                    if (job.getCompletedAt() == null) {
+                        job.setCompletedAt(now);
+                    }
+                }
+                tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.saveAll(stale));
+                recovered += stale.size();
+                for (IngestionJob job : stale) {
+                    recordFailed(job);
                 }
             }
-            tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.saveAll(stale));
-            recovered += stale.size();
-            for (IngestionJob job : stale) {
-                recordFailed(job);
-            }
-        }
-        return recovered;
+            return recovered;
+        });
     }
 
     public <T> T readPayload(IngestionJob job, Class<T> payloadType) {
@@ -343,7 +340,28 @@ public class IngestionJobService {
     ) {
         String normalizedAssetIdentifier = normalize(assetIdentifier);
         String dedupeKey = jobType.toLowerCase(Locale.ROOT) + ":" + normalizedAssetIdentifier;
-        Optional<IngestionJob> existing = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findActiveByDedupeKeyForUpdate(dedupeKey));
+        return tenantSchemaExecutionService.run(tenant, () -> transactionTemplate.execute(status ->
+                enqueueJobInCurrentTenantSchema(
+                        tenant,
+                        jobType,
+                        sourceType,
+                        assetIdentifier,
+                        requestedBy,
+                        payload,
+                        dedupeKey
+                )));
+    }
+
+    private IngestionJobAcceptedResponse enqueueJobInCurrentTenantSchema(
+            Tenant tenant,
+            String jobType,
+            String sourceType,
+            String assetIdentifier,
+            String requestedBy,
+            Object payload,
+            String dedupeKey
+    ) {
+        Optional<IngestionJob> existing = ingestionJobRepository.findActiveByDedupeKeyForUpdate(dedupeKey);
         if (existing.isPresent()) {
             IngestionJob job = existing.get();
             ingestionJobMetricsService.recordDeduped(sourceType);
@@ -363,10 +381,10 @@ public class IngestionJobService {
 
         IngestionJob job;
         try {
-            job = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.save(newJob));
+            job = ingestionJobRepository.save(newJob);
         } catch (DataIntegrityViolationException ex) {
-            IngestionJob existingJob = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findActiveByDedupeKeyForUpdate(dedupeKey)
-                    .orElseThrow(() -> ex));
+            IngestionJob existingJob = ingestionJobRepository.findActiveByDedupeKeyForUpdate(dedupeKey)
+                    .orElseThrow(() -> ex);
             ingestionJobMetricsService.recordDeduped(sourceType);
             auditEventService.record("ingestion.job.deduped", "ingestion_job", existingJob.getId().toString(), null);
             return new IngestionJobAcceptedResponse(existingJob.getId(), existingJob.getStatus(), "Existing ingestion job already active", true, null);

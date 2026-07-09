@@ -98,9 +98,9 @@ public class IngestionJobMetricsService {
     }
 
     private double countJobsWithStatuses(List<String> statuses) {
-        return tenantService.listTenants().stream()
+        return TenantContext.runAsPlatform(() -> tenantService.listTenants().stream()
                 .mapToLong(tenant -> tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.countByStatusIn(statuses)))
-                .sum();
+                .sum());
     }
 
     private String tagValue(String value) {

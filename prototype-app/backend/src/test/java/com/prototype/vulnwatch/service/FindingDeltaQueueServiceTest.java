@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -34,6 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class FindingDeltaQueueServiceTest {
@@ -249,6 +251,16 @@ class FindingDeltaQueueServiceTest {
     }
 
     @Test
+    void processPendingDeltasSkipsWhenRuntimeRoleIsApi() {
+        service.setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy.forRole("api"));
+
+        service.processPendingDeltas();
+
+        verifyNoInteractions(tenantService);
+        verifyNoInteractions(tenantSchemaExecutionService);
+    }
+
+    @Test
     void enqueueLifecycleDeltas_buildsLifecyclePayload() {
         UUID tenant = UUID.randomUUID();
         UUID component = UUID.randomUUID();
@@ -356,6 +368,84 @@ class FindingDeltaQueueServiceTest {
 
         verify(tenantSchemaExecutionService).run(eq(tenantA), any(java.util.function.Supplier.class));
         verify(tenantSchemaExecutionService).run(eq(tenantB), any(java.util.function.Supplier.class));
+    }
+
+    @Test
+    void processPendingDeltasDrainsMultipleBatchesPerTenantWithinConfiguredPollBudget() {
+        Tenant tenant = tenantWithSchema(UUID.randomUUID());
+        UUID componentA = UUID.randomUUID();
+        UUID componentB = UUID.randomUUID();
+        FindingDeltaQueueEntry batchOneEntry = entry(1L, FindingDeltaQueueService.SOFTWARE_DELTA, tenant.getId(), componentA, null, null);
+        FindingDeltaQueueEntry batchTwoEntry = entry(2L, FindingDeltaQueueService.SOFTWARE_DELTA, tenant.getId(), componentB, null, null);
+        ReflectionTestUtils.setField(service, "maxBatchesPerTenantPerPoll", 3);
+
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
+        when(tenantSchemaExecutionService.run(eq(tenant), any(java.util.function.Supplier.class)))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
+        when(repository.pollPending(anyInt())).thenReturn(
+                new ArrayList<>(List.of(batchOneEntry)),
+                new ArrayList<>(List.of(batchTwoEntry)),
+                List.of()
+        );
+        when(findingRecomputeService.recomputeOnSoftwareDeltaBatch(eq(tenant.getId()), eq(List.of(componentA)))).thenReturn(1);
+        when(findingRecomputeService.recomputeOnSoftwareDeltaBatch(eq(tenant.getId()), eq(List.of(componentB)))).thenReturn(1);
+        when(repository.findById(1L)).thenReturn(Optional.of(batchOneEntry));
+        when(repository.findById(2L)).thenReturn(Optional.of(batchTwoEntry));
+        when(repository.insertIfNotDuplicate(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        service.processPendingDeltas();
+
+        verify(repository, times(3)).pollPending(anyInt());
+        verify(findingRecomputeService).recomputeOnSoftwareDeltaBatch(eq(tenant.getId()), eq(List.of(componentA)));
+        verify(findingRecomputeService).recomputeOnSoftwareDeltaBatch(eq(tenant.getId()), eq(List.of(componentB)));
+    }
+
+    @Test
+    void recoverInterruptedProcessingEntriesRequeuesStaleWorkAndFailsExhaustedEntries() {
+        Tenant tenant = tenantWithSchema(UUID.randomUUID());
+        FindingDeltaQueueEntry retryable = newEntry(1L, FindingDeltaQueueService.SOFTWARE_DELTA);
+        retryable.setStatus("PROCESSING");
+        retryable.setAttemptCount(1);
+        retryable.setMaxAttempts(3);
+        retryable.setProcessingStartedAt(Instant.now().minusSeconds(3600));
+
+        FindingDeltaQueueEntry exhausted = newEntry(2L, FindingDeltaQueueService.CVE_DELTA);
+        exhausted.setStatus("PROCESSING");
+        exhausted.setAttemptCount(3);
+        exhausted.setMaxAttempts(3);
+        exhausted.setProcessingStartedAt(Instant.now().minusSeconds(3600));
+
+        when(tenantService.listActiveTenants()).thenReturn(List.of(tenant));
+        when(tenantSchemaExecutionService.run(eq(tenant), any(java.util.function.Supplier.class)))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
+        when(repository.findStaleProcessingEntries(any())).thenReturn(List.of(retryable, exhausted));
+
+        service.recoverInterruptedProcessingEntries();
+
+        assertEquals("PENDING", retryable.getStatus());
+        assertEquals("FAILED", exhausted.getStatus());
+        assertTrue(retryable.getProcessingStartedAt() == null);
+        assertTrue(exhausted.getProcessingStartedAt() == null);
+        assertTrue(retryable.getVisibleAfter() != null);
+        assertTrue(exhausted.getCompletedAt() != null);
+        verify(repository).saveAll(anyCollection());
+    }
+
+    @Test
+    void recoverStaleProcessingEntriesOnScheduleDoesNotThrowWhenListTenantsFails() {
+        when(tenantService.listActiveTenants()).thenThrow(new IllegalStateException("db unavailable"));
+
+        assertDoesNotThrow(() -> service.recoverStaleProcessingEntriesOnSchedule());
+    }
+
+    @Test
+    void recoverInterruptedProcessingEntriesSkipsWhenRuntimeRoleIsApi() {
+        service.setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy.forRole("api"));
+
+        service.recoverInterruptedProcessingEntries();
+
+        verifyNoInteractions(tenantService);
+        verify(repository, never()).saveAll(anyCollection());
     }
 
     // ----------------------------------------------------------------

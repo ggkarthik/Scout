@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import type { InventoryViewKey } from '../features/inventory/types';
 import {
   defaultAssetTypeForView,
@@ -46,6 +47,8 @@ export function InventoryComponentViewsPage({ selectedView }: Props) {
     componentTotalItems,
     componentTotalPages,
     loading,
+    refreshing,
+    latestDataUpdate,
     error
   } = useInventoryData({
     selectedView,
@@ -101,6 +104,12 @@ export function InventoryComponentViewsPage({ selectedView }: Props) {
       title={viewTitle}
       description={viewDescription}
     >
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing component inventory while keeping current results visible…"
+      />
+
       <InventorySummaryStats
         selectedView={selectedView}
         componentTotalItems={componentTotalItems}

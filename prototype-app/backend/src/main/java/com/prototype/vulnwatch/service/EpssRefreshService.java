@@ -65,6 +65,7 @@ public class EpssRefreshService {
     private final OutboundHttpClient outboundHttpClient;
     private final OutboundPolicyFactory outboundPolicyFactory;
     private final ObjectMapper objectMapper;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public EpssRefreshService(
             VulnerabilityRepository vulnerabilityRepository,
@@ -80,12 +81,22 @@ public class EpssRefreshService {
         this.objectMapper = objectMapper;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     /**
      * Daily refresh at 03:15 UTC — runs after the FIRST.org daily publication window.
      * Cron is configurable via {@code app.epss.refresh-cron}.
      */
     @Scheduled(cron = "${app.epss.refresh-cron:0 15 3 * * *}")
     public void refreshAll() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("epss.refresh-all")) {
+            return;
+        }
         TenantContext.runAsPlatform(this::refreshAllInPlatformContext);
     }
 

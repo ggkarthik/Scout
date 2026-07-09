@@ -67,7 +67,6 @@ public class TenantQuotaService {
         this.sbomAdmissionMaxActiveJobs = Math.max(1, sbomAdmissionMaxActiveJobs);
     }
 
-    @Transactional(readOnly = true)
     public void assertCanCreateConnector(Tenant tenant, String connectorType) {
         if (isUnlimitedConnectorMode(tenant)) {
             return;
@@ -82,7 +81,6 @@ public class TenantQuotaService {
         }
     }
 
-    @Transactional(readOnly = true)
     public void assertCanCreateServiceAccount(Tenant tenant) {
         int max = safeLimit(tenant.getMaxServiceAccountCount());
         long current = tenantSchemaExecutionService.run(tenant, (Supplier<Long>) serviceAccountRepository::count);
@@ -94,7 +92,6 @@ public class TenantQuotaService {
         }
     }
 
-    @Transactional(readOnly = true)
     public void assertCanRefreshTenantExposure(Tenant tenant) {
         int max = safeLimit(tenant.getMaxDailyExposureRefreshes());
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
@@ -110,7 +107,6 @@ public class TenantQuotaService {
         }
     }
 
-    @Transactional(readOnly = true)
     public void assertCanCreateSbomIngestionJob(Tenant tenant, String sourceType) {
         int max = safeLimit(tenant.getMaxDailySbomUploads());
         int rateLimitWindowSeconds = effectiveTenantLimit(tenant.getSbomRateLimitWindowSeconds(), sbomRateLimitWindowSeconds);
@@ -180,7 +176,6 @@ public class TenantQuotaService {
         }
     }
 
-    @Transactional(readOnly = true)
     public void assertCanExportRows(UUID tenantId, long requestedRows) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));

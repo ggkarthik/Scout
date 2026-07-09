@@ -24,6 +24,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.CallbackPreferringPlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 @ExtendWith(MockitoExtension.class)
 class FindingsScoreRecomputeServiceTest {
@@ -33,6 +35,7 @@ class FindingsScoreRecomputeServiceTest {
     @Mock private FindingsScoreService findingsScoreService;
     @Mock private FindingSlaService findingSlaService;
     @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock private CallbackPreferringPlatformTransactionManager transactionManager;
 
     private FindingsScoreRecomputeService service;
 
@@ -43,11 +46,16 @@ class FindingsScoreRecomputeServiceTest {
                 riskPolicyService,
                 findingsScoreService,
                 findingSlaService,
-                tenantSchemaExecutionService
+                tenantSchemaExecutionService,
+                transactionManager
         );
         doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
                 .when(tenantSchemaExecutionService)
                 .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
+        doAnswer(invocation -> invocation.getArgument(1, org.springframework.transaction.support.TransactionCallback.class)
+                .doInTransaction(new SimpleTransactionStatus()))
+                .when(transactionManager)
+                .execute(any(org.springframework.transaction.TransactionDefinition.class), any(org.springframework.transaction.support.TransactionCallback.class));
     }
 
     @Test

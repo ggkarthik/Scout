@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,10 +13,18 @@ import org.springframework.security.web.header.writers.StaticHeadersWriter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    private static final RequestMatcher HEADER_AUTH_CSRF_BYPASS = request ->
+            hasHeader(request, "Authorization")
+                    || hasHeader(request, "X-API-Key")
+                    || hasHeader(request, "X-Creator-Key");
 
     @Bean
     public SecurityFilterChain securityFilterChain(
@@ -27,10 +36,20 @@ public class SecurityConfig {
             @Value("${app.security.headers.permissions-policy:camera=(), microphone=(), geolocation=(), payment=()}") String permissionsPolicy
     ) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .requireCsrfProtectionMatcher(request ->
+                                CsrfFilter.DEFAULT_CSRF_MATCHER.matches(request) && !HEADER_AUTH_CSRF_BYPASS.matches(request))
+                        .ignoringRequestMatchers(
+                                "/actuator/**",
+                                "/api/auth/login",
+                                "/api/auth/setup-password",
+                                "/api/demo-requests",
+                                "/api/demo-invites/**",
+                                "/api/tenant-invites/**"))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .headers(headers -> headers
+                        .headers(headers -> headers
                         .contentTypeOptions(contentType -> {})
                         .frameOptions(frame -> frame.deny())
                         .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
@@ -38,7 +57,8 @@ public class SecurityConfig {
                         .addHeaderWriter(new StaticHeadersWriter("Permissions-Policy", permissionsPolicy)))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/readiness", "/actuator/health/liveness", "/actuator/info").permitAll()
+                        .requestMatchers("/actuator/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/setup-password").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
@@ -51,10 +71,15 @@ public class SecurityConfig {
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
-                .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(apiKeyAuthenticationFilter, CsrfFilter.class)
                 .addFilterAfter(requestCorrelationFilter, ApiKeyAuthenticationFilter.class)
                 .addFilterAfter(tenantStatusFilter, RequestCorrelationFilter.class);
 
         return http.build();
+    }
+
+    private static boolean hasHeader(HttpServletRequest request, String headerName) {
+        String value = request.getHeader(headerName);
+        return value != null && !value.isBlank();
     }
 }
