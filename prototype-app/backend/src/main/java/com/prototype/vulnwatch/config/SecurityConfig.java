@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,10 +13,18 @@ import org.springframework.security.web.header.writers.StaticHeadersWriter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    private static final RequestMatcher HEADER_AUTH_CSRF_BYPASS = request ->
+            hasHeader(request, "Authorization")
+                    || hasHeader(request, "X-API-Key")
+                    || hasHeader(request, "X-Creator-Key");
 
     @Bean
     public SecurityFilterChain securityFilterChain(
@@ -27,7 +36,17 @@ public class SecurityConfig {
             @Value("${app.security.headers.permissions-policy:camera=(), microphone=(), geolocation=(), payment=()}") String permissionsPolicy
     ) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .requireCsrfProtectionMatcher(request ->
+                                CsrfFilter.DEFAULT_CSRF_MATCHER.matches(request) && !HEADER_AUTH_CSRF_BYPASS.matches(request))
+                        .ignoringRequestMatchers(
+                                "/actuator/**",
+                                "/api/auth/login",
+                                "/api/auth/setup-password",
+                                "/api/demo-requests",
+                                "/api/demo-invites/**",
+                                "/api/tenant-invites/**"))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                         .headers(headers -> headers
@@ -57,5 +76,10 @@ public class SecurityConfig {
                 .addFilterAfter(tenantStatusFilter, RequestCorrelationFilter.class);
 
         return http.build();
+    }
+
+    private static boolean hasHeader(HttpServletRequest request, String headerName) {
+        String value = request.getHeader(headerName);
+        return value != null && !value.isBlank();
     }
 }
