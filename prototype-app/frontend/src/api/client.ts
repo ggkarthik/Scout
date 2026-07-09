@@ -518,6 +518,7 @@ function isJwtAuthFailure(status: number, payload?: ApiErrorPayload, fallbackTex
     || combined.includes('token expired')
     || combined.includes('expired token')
     || combined.includes('invalid token')
+    || combined.includes('token invalid')
     || combined.includes('bearer token');
   if (tokenFailure) {
     return true;

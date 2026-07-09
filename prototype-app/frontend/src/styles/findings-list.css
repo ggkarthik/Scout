@@ -537,7 +537,7 @@
 .fpl-col-filter-popover {
   min-width: 240px;
   max-width: 340px;
-  background: #ffffff;
+  background: var(--panel-solid, #0d121d);
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 10px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.18);
@@ -555,7 +555,7 @@
   justify-content: flex-end;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border, #e5e7eb);
-  background: #f9fafb;
+  background: var(--surface, #111927);
 }
 
 .fpl-col-filter-clear {
@@ -583,14 +583,14 @@
   padding: 12px 14px;
   font-size: 14px;
   cursor: pointer;
-  color: #1a1a2e;
-  background: #ffffff;
+  color: var(--title, #f1f5ff);
+  background: var(--panel-solid, #0d121d);
   border-radius: 6px;
   border: 1px solid var(--border, #e5e7eb);
 }
 
 .fpl-col-filter-check:hover {
-  background: #f5f7fa;
+  background: var(--surface, #111927);
 }
 
 /* Compact severity pills inside filter popovers */
@@ -607,7 +607,7 @@
   justify-content: flex-end;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border, #e5e7eb);
-  background: #f9fafb;
+  background: var(--surface, #111927);
 }
 
 .fpl-col-filter-input {
