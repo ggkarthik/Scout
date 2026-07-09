@@ -85,6 +85,40 @@ describe('api client auth headers', () => {
     expect(headers.get('X-Platform-Action-Confirm')).toBe('true');
     expect(headers.get('X-Platform-Action-Tenant')).toBe('tenant-456');
   });
+
+  it('preserves the session token for tenant-context authorization failures', async () => {
+    setStoredAuthToken('tenant-context-session');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'FORBIDDEN',
+      error: 'Tenant context is required'
+    }), {
+      status: 403,
+      headers: {
+        'content-type': 'application/json'
+      }
+    }));
+
+    await expect(apiRequest('/service-accounts')).rejects.toThrow('[FORBIDDEN] Tenant context is required');
+
+    expect(getStoredAuthToken()).toBe('tenant-context-session');
+  });
+
+  it('clears the session token and redirects on invalid jwt failures', async () => {
+    setStoredAuthToken('expired-session');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'UNAUTHORIZED',
+      error: 'Invalid JWT token'
+    }), {
+      status: 401,
+      headers: {
+        'content-type': 'application/json'
+      }
+    }));
+
+    await expect(apiRequest('/me')).rejects.toThrow('[UNAUTHORIZED] Invalid JWT token');
+
+    expect(getStoredAuthToken()).toBe('');
+  });
 });
 
 describe('api method coverage', () => {
