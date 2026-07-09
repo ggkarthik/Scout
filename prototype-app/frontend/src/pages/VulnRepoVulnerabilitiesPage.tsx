@@ -379,12 +379,6 @@ export function VulnRepoVulnerabilitiesPage() {
 
   function renderColFilterPopover(colKey: IntelColKey): React.ReactNode {
     if (openColFilter !== colKey) return null;
-    const colLabel: Record<IntelColKey, string> = {
-      cve: 'Vulnerability ID', severity: 'Severity', cvss: 'CVSS',
-      epss: 'EPSS', cveRisk: 'S.AI Risk', applicable: 'Applicable',
-      investigationStatus: 'Investigation Status', orgImpact: 'Org Impact',
-      openFindings: 'Open Findings', hasAiSummary: 'AI Summaries',
-    };
 
     function checkboxGroup<T extends string>(
       key: 'severity' | 'cveRisk' | 'investigationStatus' | 'orgImpact',

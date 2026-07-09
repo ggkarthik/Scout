@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.security;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -99,5 +100,13 @@ class ActuatorSecurityIntegrationTest {
     void apiEndpointsStillRequireAuth() throws Exception {
         mockMvc.perform(get("/api/auth/context"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void apiKeyAuthenticatedWritesBypassCsrfRequirement() throws Exception {
+        mockMvc.perform(post("/api/test/write")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"));
     }
 }
