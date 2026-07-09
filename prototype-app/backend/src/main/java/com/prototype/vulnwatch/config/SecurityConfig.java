@@ -71,7 +71,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
-                .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(apiKeyAuthenticationFilter, CsrfFilter.class)
                 .addFilterAfter(requestCorrelationFilter, ApiKeyAuthenticationFilter.class)
                 .addFilterAfter(tenantStatusFilter, RequestCorrelationFilter.class);
 
