@@ -25,8 +25,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class OrgCveRecordService {
@@ -52,6 +56,7 @@ public class OrgCveRecordService {
     private final TenantRepository tenantRepository;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final TenantWorkRunner tenantWorkRunner;
+    private TransactionTemplate writeTransactionTemplate;
 
     public OrgCveRecordService(
             OrgCveRecordRepository orgCveRecordRepository,
@@ -67,6 +72,17 @@ public class OrgCveRecordService {
         this.tenantRepository = tenantRepository;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.tenantWorkRunner = tenantWorkRunner;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public int refreshForAllTenants(UUID vulnerabilityId) {
@@ -263,7 +279,6 @@ public class OrgCveRecordService {
         return toSave.size();
     }
 
-    @Transactional(readOnly = true)
     public boolean isActivelySuppressed(Tenant tenant, Vulnerability vulnerability, Instant at) {
         if (tenant == null || tenant.getId() == null || vulnerability == null) {
             return false;
@@ -273,7 +288,6 @@ public class OrgCveRecordService {
                 .orElse(false);
     }
 
-    @Transactional
     public OrgCveRecord suppress(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -287,7 +301,7 @@ public class OrgCveRecordService {
             throw new IllegalArgumentException("Tenant and vulnerability are required");
         }
         Instant now = suppressedAt == null ? Instant.now() : suppressedAt;
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
             OrgCveRecord record = orgCveRecordRepository.findByVulnerability(vulnerability)
                     .orElseGet(() -> initializeRecord(tenant, vulnerability, now));
             record.setSuppressionReason(trimToNull(reason));
@@ -300,7 +314,14 @@ public class OrgCveRecordService {
             }
             record.touch();
             return orgCveRecordRepository.save(record);
-        });
+        }));
+    }
+
+    private <T> T executeWrite(Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     private boolean applySnapshot(OrgCveRecord record, OrgCveSnapshot snapshot) {

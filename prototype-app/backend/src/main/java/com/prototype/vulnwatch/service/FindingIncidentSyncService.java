@@ -26,6 +26,7 @@ public class FindingIncidentSyncService {
     private final ServiceNowIncidentService serviceNowIncidentService;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     private final TenantWorkRunner tenantWorkRunner;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public FindingIncidentSyncService(
             FindingRepository findingRepository,
@@ -39,9 +40,19 @@ public class FindingIncidentSyncService {
         this.tenantWorkRunner = tenantWorkRunner;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     /** Scheduled daily at 07:00 to sync ServiceNow incident statuses back to findings. */
     @Scheduled(cron = "0 0 7 * * *")
     public void syncIncidentStatuses() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-incident-sync.sync-incident-statuses")) {
+            return;
+        }
         log.info("Starting ServiceNow incident status sync for all linked findings");
         try {
             syncAll();

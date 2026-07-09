@@ -2,11 +2,25 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.prototype.vulnwatch.domain.Asset;
+import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.FixRecord;
+import com.prototype.vulnwatch.domain.Finding;
+import com.prototype.vulnwatch.domain.FindingDecisionState;
+import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.InventoryComponent;
+import com.prototype.vulnwatch.domain.InventoryComponentStatus;
+import com.prototype.vulnwatch.domain.SbomFormat;
+import com.prototype.vulnwatch.domain.SbomUpload;
+import com.prototype.vulnwatch.domain.Vulnerability;
+import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.repo.AssetRepository;
+import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
@@ -15,6 +29,7 @@ import com.prototype.vulnwatch.support.FindingWorkspaceSeedSupport;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,6 +71,9 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
 
     @Autowired
     private FindingRepository findingRepository;
+
+    @Autowired
+    private FixRecordRepository fixRecordRepository;
 
     @Autowired
     private FindingListProjectionService findingListProjectionService;
@@ -170,5 +188,112 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
 
         assertTrue(firstPageMs >= 0);
         assertTrue(laterPageMs >= 0);
+    }
+
+    @Test
+    void projectionRefreshUsesCaseInsensitivePatchableFixLookup() {
+        Vulnerability patchable = createVulnerability("CVE-2099-PATCHABLE");
+        Vulnerability noFix = createVulnerability("CVE-2099-NOFIX");
+        InventoryComponent patchableComponent = createComponent("patchable-component");
+        InventoryComponent noFixComponent = createComponent("nofix-component");
+
+        createFinding(patchableComponent, patchable);
+        createFinding(noFixComponent, noFix);
+
+        tenantSchemaExecutionService.run(tenant, () -> {
+            fixRecordRepository.save(createFixRecord(patchable.getExternalId().toLowerCase(), FixRecord.FixType.PATCH));
+            fixRecordRepository.save(createFixRecord(noFix.getExternalId().toLowerCase(), FixRecord.FixType.NO_FIX));
+            return null;
+        });
+
+        findingListProjectionService.refreshTenant(tenant);
+
+        Map<String, Boolean> patchAvailability = tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.query(
+                """
+                select vulnerability_id, patch_available
+                from finding_list_projection
+                where vulnerability_id in (:vulnerabilityIds)
+                """,
+                new MapSqlParameterSource().addValue("vulnerabilityIds", java.util.List.of(
+                        patchable.getExternalId(),
+                        noFix.getExternalId()
+                )),
+                rs -> {
+                    java.util.Map<String, Boolean> values = new java.util.LinkedHashMap<>();
+                    while (rs.next()) {
+                        values.put(rs.getString("vulnerability_id"), rs.getBoolean("patch_available"));
+                    }
+                    return values;
+                }
+        ));
+
+        assertEquals(Boolean.TRUE, patchAvailability.get(patchable.getExternalId()));
+        assertEquals(Boolean.FALSE, patchAvailability.get(noFix.getExternalId()));
+        assertNotEquals(patchAvailability.get(patchable.getExternalId()), patchAvailability.get(noFix.getExternalId()));
+    }
+
+    private Vulnerability createVulnerability(String externalId) {
+        Vulnerability vulnerability = new Vulnerability();
+        vulnerability.setExternalId(externalId);
+        vulnerability.setSource(VulnerabilitySource.NVD);
+        vulnerability.setTitle(externalId + " title");
+        vulnerability.setSeverity("HIGH");
+        vulnerability.setCvssScore(8.2);
+        vulnerability.setDescription("Synthetic vulnerability for projection patch lookup coverage.");
+        vulnerability.touch();
+        return vulnerabilityRepository.save(vulnerability);
+    }
+
+    private InventoryComponent createComponent(String suffix) {
+        Asset asset = new Asset();
+        asset.setTenant(tenant);
+        asset.setType(AssetType.HOST);
+        asset.setName("projection-" + suffix);
+        asset.setIdentifier("asset:projection-" + suffix);
+        asset = assetRepository.save(asset);
+
+        SbomUpload upload = new SbomUpload();
+        upload.setTenant(tenant);
+        upload.setAsset(asset);
+        upload.setFormat(SbomFormat.CYCLONEDX);
+        upload.setOriginalFilename("projection-" + suffix + ".json");
+        upload = sbomUploadRepository.save(upload);
+
+        InventoryComponent component = new InventoryComponent();
+        component.setTenant(tenant);
+        component.setAsset(asset);
+        component.setSbomUpload(upload);
+        component.setEcosystem("maven");
+        component.setPackageName("projection-" + suffix);
+        component.setVersion("1.0.0");
+        component.setPurl("pkg:maven/com.example/projection-" + suffix + "@1.0.0");
+        component.setComponentStatus(InventoryComponentStatus.ACTIVE);
+        return inventoryComponentRepository.save(component);
+    }
+
+    private void createFinding(InventoryComponent component, Vulnerability vulnerability) {
+        Finding finding = new Finding();
+        finding.setTenant(tenant);
+        finding.setAsset(component.getAsset());
+        finding.setComponent(component);
+        finding.setVulnerability(vulnerability);
+        finding.setStatus(FindingStatus.OPEN);
+        finding.setDecisionState(FindingDecisionState.AFFECTED);
+        finding.setMatchedBy("cpe-indexed-direct");
+        finding.setRiskScore(9.5);
+        finding.setConfidenceScore(0.98);
+        finding.setEvidence("{\"source\":\"projection-test\"}");
+        findingRepository.save(finding);
+    }
+
+    private FixRecord createFixRecord(String cveId, FixRecord.FixType fixType) {
+        FixRecord fixRecord = new FixRecord();
+        fixRecord.setTenant(tenant);
+        fixRecord.setCveId(cveId);
+        fixRecord.setSummary("Fix for " + cveId);
+        fixRecord.setDescription("Projection test fix record");
+        fixRecord.setFixType(fixType.name());
+        fixRecord.setRecommendationSource(FixRecord.RecommendationSource.REFERENCE.name());
+        return fixRecord;
     }
 }

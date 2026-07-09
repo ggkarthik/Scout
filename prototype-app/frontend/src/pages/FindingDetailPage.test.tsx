@@ -118,6 +118,7 @@ describe('FindingDetailPage', () => {
     expect(screen.getByRole('button', { name: 'Defer' })).toBeInTheDocument();
     // CVE ID surfaces from the finding
     expect(await screen.findByText(/CVE-2026-1234/)).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('hides workflow action buttons when the finding is already RESOLVED', () => {

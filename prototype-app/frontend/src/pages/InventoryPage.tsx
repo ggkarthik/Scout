@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { api } from '../api/client';
 import { pathForInventoryHostAsset, pathForConnectView } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
@@ -608,6 +609,14 @@ export function InventoryPage(_: Props) {
   }, [quickFilter, searchValue, selectedEnvironments, selectedOperatingSystems, selectedSourceSystems]);
 
   const loading = assetsQuery.isPending || hostDetailsQuery.isPending;
+  const refreshing = (assetsQuery.isFetching || hostDetailsQuery.isFetching) && hostRecords.length > 0;
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    assetsQuery.dataUpdatedAt,
+    hostDetailsQuery.dataUpdatedAt
+  ]), [
+    assetsQuery.dataUpdatedAt,
+    hostDetailsQuery.dataUpdatedAt
+  ]);
   const errorMessage = assetsQuery.error instanceof Error
     ? assetsQuery.error.message
     : hostDetailsQuery.error instanceof Error
@@ -632,6 +641,12 @@ export function InventoryPage(_: Props) {
       description="Discovered hosts, their installed software, and current exposure."
       legacyClassName="inventory-page-shell"
     >
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing host inventory while keeping current results visible…"
+      />
+
       <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy

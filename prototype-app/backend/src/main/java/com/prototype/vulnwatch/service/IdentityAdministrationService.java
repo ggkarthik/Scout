@@ -18,7 +18,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class IdentityAdministrationService {
@@ -31,6 +34,8 @@ public class IdentityAdministrationService {
     private final TenantQuotaService tenantQuotaService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
+    private TransactionTemplate readTransactionTemplate;
+    private TransactionTemplate writeTransactionTemplate;
 
     public IdentityAdministrationService(
             AppUserRepository userRepository,
@@ -50,6 +55,21 @@ public class IdentityAdministrationService {
         this.tenantQuotaService = tenantQuotaService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.readTransactionTemplate = null;
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @Transactional(readOnly = true)
@@ -144,46 +164,53 @@ public class IdentityAdministrationService {
         appUserGlobalRoleService.revokeRole(user, normalizeRole(role));
     }
 
-    @Transactional(readOnly = true)
     public List<ServiceAccount> listServiceAccounts(UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
-        return tenantSchemaExecutionService.run(tenant, serviceAccountRepository::findAllByOrderByCreatedAtAsc);
+        return tenantSchemaExecutionService.run(tenant, () -> executeRead(serviceAccountRepository::findAllByOrderByCreatedAtAsc));
     }
 
-    @Transactional
     public ServiceAccount createServiceAccount(UUID tenantId, String name, String keyId, String role) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
         tenantQuotaService.assertCanCreateServiceAccount(tenant);
-        ServiceAccount account = new ServiceAccount();
-        account.setTenant(tenant);
-        account.setName(requireText(name, "name"));
-        account.setKeyId(requireText(keyId, "keyId"));
-        account.setRole(normalizeRole(role));
-        return serviceAccountRepository.save(account);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            ServiceAccount account = new ServiceAccount();
+            account.setTenant(tenant);
+            account.setName(requireText(name, "name"));
+            account.setKeyId(requireText(keyId, "keyId"));
+            account.setRole(normalizeRole(role));
+            return serviceAccountRepository.save(account);
+        }));
     }
 
-    @Transactional
     public void deleteServiceAccount(UUID tenantId, UUID accountId) {
-        ServiceAccount account = serviceAccountRepository.findById(accountId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown service account: " + accountId));
-        if (account.getTenant() == null || !tenantId.equals(account.getTenant().getId())) {
-            throw new IllegalArgumentException("Service account does not belong to tenant: " + tenantId);
-        }
-        serviceAccountRepository.delete(account);
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            ServiceAccount account = serviceAccountRepository.findById(accountId)
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown service account: " + accountId));
+            if (account.getTenant() == null || !tenantId.equals(account.getTenant().getId())) {
+                throw new IllegalArgumentException("Service account does not belong to tenant: " + tenantId);
+            }
+            serviceAccountRepository.delete(account);
+            return null;
+        }));
     }
 
-    @Transactional
     public ServiceAccount deactivateServiceAccount(UUID tenantId, UUID accountId) {
-        ServiceAccount account = serviceAccountRepository.findById(accountId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown service account: " + accountId));
-        if (account.getTenant() == null || !tenantId.equals(account.getTenant().getId())) {
-            throw new IllegalArgumentException("Service account does not belong to tenant: " + tenantId);
-        }
-        account.setStatus("PAUSED");
-        account.setUpdatedAt(Instant.now());
-        return serviceAccountRepository.save(account);
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            ServiceAccount account = serviceAccountRepository.findById(accountId)
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown service account: " + accountId));
+            if (account.getTenant() == null || !tenantId.equals(account.getTenant().getId())) {
+                throw new IllegalArgumentException("Service account does not belong to tenant: " + tenantId);
+            }
+            account.setStatus("PAUSED");
+            account.setUpdatedAt(Instant.now());
+            return serviceAccountRepository.save(account);
+        }));
     }
 
     @Transactional
@@ -291,6 +318,21 @@ public class IdentityAdministrationService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private <T> T executeRead(java.util.function.Supplier<T> work) {
+        if (readTransactionTemplate == null) {
+            return work.get();
+        }
+        T result = readTransactionTemplate.execute(status -> work.get());
+        return result == null ? work.get() : result;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     private PlatformUserResponse toPlatformUserResponse(AppUser user, java.util.Set<String> roles) {

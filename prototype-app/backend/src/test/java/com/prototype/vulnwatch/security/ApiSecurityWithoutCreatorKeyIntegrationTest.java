@@ -20,6 +20,7 @@ import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.PerformanceScorecardService;
 import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantService;
@@ -82,6 +83,9 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     private OperationalMetricsService operationalMetricsService;
 
     @MockBean
+    private PerformanceScorecardService performanceScorecardService;
+
+    @MockBean
     private TenantSupportGrantService tenantSupportGrantService;
 
     @BeforeEach
@@ -115,6 +119,12 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
     void connectorIssuesAllowApiKeyWhenCreatorKeyIsNotConfigured() throws Exception {
         when(platformTenantAttentionService.listConnectorIssues()).thenReturn(List.of());
         mockMvc.perform(get("/api/operations/connector-issues").header("X-API-Key", "test-api-key"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void performanceScorecardAllowsApiKeyWhenCreatorKeyIsNotConfigured() throws Exception {
+        mockMvc.perform(get("/api/operations/performance-scorecard").header("X-API-Key", "test-api-key"))
                 .andExpect(status().isOk());
     }
 

@@ -16,7 +16,9 @@ import jakarta.persistence.EntityNotFoundException;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class CveInvestigationSummaryPersistenceService {
@@ -28,6 +30,7 @@ public class CveInvestigationSummaryPersistenceService {
     private final TenantService tenantService;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public CveInvestigationSummaryPersistenceService(
             OrgCveRecordRepository orgCveRecordRepository,
@@ -47,7 +50,17 @@ public class CveInvestigationSummaryPersistenceService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public void saveSummary(
             String cveId,
             Map<String, Object> input,
@@ -57,7 +70,7 @@ public class CveInvestigationSummaryPersistenceService {
         Tenant tenant = tenantService.resolveTenantUuid(requestActorService.currentActor().tenantId());
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
                 .orElseThrow(() -> new EntityNotFoundException("Vulnerability not found: " + cveId));
-        tenantSchemaExecutionService.run(tenant, () -> {
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
             OrgCveRecord record = orgCveRecordRepository.findByVulnerability(vulnerability)
                     .orElseThrow(() -> new EntityNotFoundException("Org CVE record not found for: " + cveId));
             OrgCveAiArtifact artifact = orgCveAiArtifactRepository.findByOrgCveRecordId(record.getId())
@@ -74,10 +87,10 @@ public class CveInvestigationSummaryPersistenceService {
             orgCveAiArtifactRepository.save(artifact);
             record.touch();
             orgCveRecordRepository.save(record);
-        });
+            return null;
+        }));
     }
 
-    @Transactional(readOnly = true)
     public SavedCveInvestigationSummaryResponse getSavedSummary(String cveId) {
         Tenant tenant = tenantService.resolveTenantUuid(requestActorService.currentActor().tenantId());
         Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
@@ -115,5 +128,12 @@ public class CveInvestigationSummaryPersistenceService {
         OrgCveAiArtifact artifact = new OrgCveAiArtifact();
         artifact.setOrgCveRecord(record);
         return artifact;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

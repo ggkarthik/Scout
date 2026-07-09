@@ -1,4 +1,5 @@
 import React from 'react';
+import { latestFreshnessValue } from '../../components/PageFreshnessStatus';
 import type {
   InventoryComponentFilterValues,
   InventoryComponentRecord
@@ -28,6 +29,8 @@ type UseInventoryDataResult = {
   componentTotalPages: number;
   componentFilterValues: InventoryComponentFilterValues;
   loading: boolean;
+  refreshing: boolean;
+  latestDataUpdate: number | null;
   error: string;
   refreshInventory: () => Promise<void>;
 };
@@ -114,12 +117,23 @@ export function useInventoryData({
     ]);
   }, [componentFiltersQuery, inventoryQuery]);
 
+  const rows = inventoryQuery.data?.items ?? [];
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    inventoryQuery.dataUpdatedAt,
+    componentFiltersQuery.dataUpdatedAt
+  ]), [
+    componentFiltersQuery.dataUpdatedAt,
+    inventoryQuery.dataUpdatedAt
+  ]);
+
   return {
-    rows: inventoryQuery.data?.items ?? [],
+    rows,
     componentTotalItems: inventoryQuery.data?.totalItems ?? 0,
     componentTotalPages: inventoryQuery.data?.totalPages ?? 0,
     componentFilterValues,
     loading: inventoryQuery.isLoading || inventoryQuery.isFetching || componentFiltersQuery.isLoading,
+    refreshing: (inventoryQuery.isFetching || componentFiltersQuery.isFetching) && rows.length > 0,
+    latestDataUpdate,
     error: inventoryQuery.error instanceof Error ? String(inventoryQuery.error) : '',
     refreshInventory
   };

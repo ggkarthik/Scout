@@ -31,7 +31,10 @@ import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FindingWorkflowService {
@@ -46,6 +49,8 @@ public class FindingWorkflowService {
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingListProjectionService findingListProjectionService;
     private final TenantWorkRunner tenantWorkRunner;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
+    private TransactionTemplate writeTransactionTemplate;
 
     public FindingWorkflowService(
             FindingRepository findingRepository,
@@ -69,6 +74,24 @@ public class FindingWorkflowService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.findingListProjectionService = findingListProjectionService;
         this.tenantWorkRunner = tenantWorkRunner;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
     }
 
     @Transactional
@@ -332,6 +355,9 @@ public class FindingWorkflowService {
 
     @Scheduled(cron = "0 */15 * * * *")
     public void reopenExpiredSuppressions() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-workflow.reopen-expired-suppressions")) {
+            return;
+        }
         Instant now = Instant.now();
         tenantWorkRunner.forEachActiveTenant(tenant -> reopenExpiredSuppressionsInTenant(now));
     }
@@ -361,6 +387,9 @@ public class FindingWorkflowService {
 
     @Scheduled(cron = "0 0 * * * *")
     public void autoCloseFindingsByPolicy() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-workflow.auto-close-findings")) {
+            return;
+        }
         Instant now = Instant.now();
         tenantWorkRunner.forEachActiveTenant(tenant -> {
             List<RiskPolicy> policies = riskPolicyRepository.findAll();
@@ -368,83 +397,78 @@ public class FindingWorkflowService {
         });
     }
 
-    @Transactional
     public int executeAutoCloseNow(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
-        RiskPolicy policy = tenantSchemaExecutionService.run(
-                tenant,
-                () -> riskPolicyRepository.findTopByOrderByUpdatedAtDesc()
-        ).orElse(null);
-        if (policy == null) {
-            return 0;
-        }
-        return runAutoCloseForPolicies(List.of(policy), Instant.now(), true);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            RiskPolicy policy = riskPolicyRepository.findTopByOrderByUpdatedAtDesc().orElse(null);
+            if (policy == null) {
+                return 0;
+            }
+            return runAutoCloseForPolicyInCurrentTenantSchema(policy, Instant.now(), true);
+        }));
     }
 
     private int runAutoCloseForPolicies(List<RiskPolicy> policies, Instant now, boolean ignoreSchedule) {
         int updated = 0;
         for (RiskPolicy policy : policies) {
-            if (!policy.isAutoCloseEnabled() || !policy.isAutoCloseNotObservedEnabled()) {
-                continue;
-            }
-            if (!ignoreSchedule && !isAutoCloseRunDue(policy, now)) {
-                continue;
-            }
-            String identifier = trimToNull(policy.getAutoCloseAssetIdentifier());
-            List<Finding> findings;
-            if (identifier == null) {
-                findings = tenantSchemaExecutionService.run(
-                        policy.getTenant(),
-                        () -> findingRepository.findAutoCloseCandidates(
-                                policy.getTenant(), FindingStatus.OPEN, now)
-                );
-            } else {
-                Asset asset = tenantSchemaExecutionService.run(
-                        policy.getTenant(),
-                        () -> assetRepository.findByIdentifier(identifier)
-                ).orElse(null);
-                if (asset == null) {
-                    continue;
-                }
-                findings = tenantSchemaExecutionService.run(
-                        policy.getTenant(),
-                        () -> findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN).stream()
-                                .filter(finding -> finding.getAutoCloseEligibleAt() != null
-                                        && !finding.getAutoCloseEligibleAt().isAfter(now))
-                                .toList()
-                );
-            }
-
-            List<Finding> toPersist = new ArrayList<>();
-            for (Finding finding : findings) {
-                if (finding.getConsecutiveMisses() < policy.getAutoCloseRequiredConsecutiveMisses()) {
-                    continue;
-                }
-                autoCloseFinding(
-                        finding,
-                        FindingCloseReason.AUTO_NOT_OBSERVED,
-                        "Finding auto-closed because it was not observed in recent scans",
-                        Map.of(
-                                "assetIdentifier", identifier == null ? "" : identifier,
-                                "autoCloseEligibleAt", finding.getAutoCloseEligibleAt(),
-                                "consecutiveMisses", finding.getConsecutiveMisses(),
-                                "autoCloseAfterDays", policy.getAutoCloseAfterDays(),
-                                "requiredConsecutiveMisses", policy.getAutoCloseRequiredConsecutiveMisses()
-                        ),
-                        now);
-                toPersist.add(finding);
-            }
-            if (!toPersist.isEmpty()) {
-                findingRepository.saveAll(toPersist);
-                findingListProjectionService.refreshTenant(policy.getTenant());
-                updated += toPersist.size();
-            }
-            policy.setAutoCloseLastRunAt(now);
-            riskPolicyRepository.save(policy);
+            updated += tenantSchemaExecutionService.run(
+                    policy.getTenant(),
+                    () -> runAutoCloseForPolicyInCurrentTenantSchema(policy, now, ignoreSchedule)
+            );
         }
         return updated;
+    }
+
+    private int runAutoCloseForPolicyInCurrentTenantSchema(RiskPolicy policy, Instant now, boolean ignoreSchedule) {
+        if (!policy.isAutoCloseEnabled() || !policy.isAutoCloseNotObservedEnabled()) {
+            return 0;
+        }
+        if (!ignoreSchedule && !isAutoCloseRunDue(policy, now)) {
+            return 0;
+        }
+        String identifier = trimToNull(policy.getAutoCloseAssetIdentifier());
+        List<Finding> findings;
+        if (identifier == null) {
+            findings = findingRepository.findAutoCloseCandidates(policy.getTenant(), FindingStatus.OPEN, now);
+        } else {
+            Asset asset = assetRepository.findByIdentifier(identifier).orElse(null);
+            if (asset == null) {
+                return 0;
+            }
+            findings = findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN).stream()
+                    .filter(finding -> finding.getAutoCloseEligibleAt() != null
+                            && !finding.getAutoCloseEligibleAt().isAfter(now))
+                    .toList();
+        }
+
+        List<Finding> toPersist = new ArrayList<>();
+        for (Finding finding : findings) {
+            if (finding.getConsecutiveMisses() < policy.getAutoCloseRequiredConsecutiveMisses()) {
+                continue;
+            }
+            autoCloseFinding(
+                    finding,
+                    FindingCloseReason.AUTO_NOT_OBSERVED,
+                    "Finding auto-closed because it was not observed in recent scans",
+                    Map.of(
+                            "assetIdentifier", identifier == null ? "" : identifier,
+                            "autoCloseEligibleAt", finding.getAutoCloseEligibleAt(),
+                            "consecutiveMisses", finding.getConsecutiveMisses(),
+                            "autoCloseAfterDays", policy.getAutoCloseAfterDays(),
+                            "requiredConsecutiveMisses", policy.getAutoCloseRequiredConsecutiveMisses()
+                    ),
+                    now);
+            toPersist.add(finding);
+        }
+        if (!toPersist.isEmpty()) {
+            findingRepository.saveAll(toPersist);
+            findingListProjectionService.refreshTenant(policy.getTenant());
+        }
+        policy.setAutoCloseLastRunAt(now);
+        riskPolicyRepository.save(policy);
+        return toPersist.size();
     }
 
     private boolean isAutoCloseRunDue(RiskPolicy policy, Instant now) {
@@ -495,5 +519,12 @@ public class FindingWorkflowService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

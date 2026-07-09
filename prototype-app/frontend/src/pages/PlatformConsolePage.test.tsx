@@ -125,6 +125,7 @@ describe('PlatformConsolePage tenant context controls', () => {
     renderPlatformOperations();
 
     expect(await screen.findByText('Tenant Attention Queue')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
     expect(screen.getAllByText('Tenant A')).toHaveLength(2);
     expect(screen.getByText('Tenant suspended, Connector error')).toBeInTheDocument();
     expect(screen.getAllByText('aws')).toHaveLength(2);
@@ -154,6 +155,65 @@ describe('PlatformConsolePage tenant context controls', () => {
       name: /Affected Tenants: The tenants currently impacted by this connector problem\./
     })).toBeInTheDocument();
   });
+
+  it('renders enterprise performance guardrails in reliability view', async () => {
+    mockOperationsApi({
+      performanceScorecard: {
+        generatedAt: '2026-06-22T00:00:00Z',
+        scaleProfile: '1M inventory components / 250k findings / 100 concurrent users',
+        overallCompliant: false,
+        routeFailureCount: 1,
+        routeNoDataCount: 0,
+        freshnessFailureCount: 1,
+        resourceFailureCount: 1,
+        resourceNoDataCount: 0,
+        routeItems: [{
+          key: 'findings-list',
+          label: 'Findings List',
+          path: '/api/findings',
+          category: 'paginated-list',
+          status: 'FAIL',
+          unit: 'ms',
+          targetP95Ms: 800,
+          targetP99Ms: 1500,
+          requestCount: 25,
+          currentP95Ms: 920,
+          currentP99Ms: 1510,
+          compliant: false,
+          note: 'Observed latency exceeds at least one current target.'
+        }],
+        freshnessItems: [{
+          key: 'delta_queue_processing_oldest_age',
+          label: 'Delta Queue Processing Oldest Age',
+          unit: 'seconds',
+          targetValue: 600,
+          currentValue: 920,
+          compliant: false,
+          window: '15m freshness window'
+        }],
+        resourceItems: [{
+          key: 'db-pool-active-utilization',
+          label: 'DB Pool Active Utilization',
+          category: 'database',
+          status: 'FAIL',
+          unit: '%',
+          targetValue: 80,
+          currentValue: 92,
+          compliant: false,
+          note: 'Active connections 23 of 25.'
+        }]
+      }
+    });
+
+    renderPlatformOperations('/platform/operations?ops=reliability');
+
+    expect(await screen.findByText('Enterprise Performance Guardrails')).toBeInTheDocument();
+    expect(screen.getByText('Validated against 1M inventory components / 250k findings / 100 concurrent users.')).toBeInTheDocument();
+    expect(screen.getAllByText('Delta Queue Processing Oldest Age').length).toBeGreaterThan(0);
+    expect(screen.getByText('DB Pool Active Utilization')).toBeInTheDocument();
+    expect(screen.getByText('Findings List')).toBeInTheDocument();
+    expect(screen.getAllByText('Needs attention').length).toBeGreaterThan(0);
+  });
 });
 
 function renderPlatformTenants(actor: ActorContext, queryClient: ReturnType<typeof createTestQueryClient>) {
@@ -171,11 +231,11 @@ function renderPlatformTenants(actor: ActorContext, queryClient: ReturnType<type
   );
 }
 
-function renderPlatformOperations() {
+function renderPlatformOperations(initialEntry = '/platform/operations?ops=overview') {
   const queryClient = createTestQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/platform/operations?ops=overview']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/platform/operations" element={<PlatformConsolePage selectedView="operations" />} />
         </Routes>
@@ -186,10 +246,12 @@ function renderPlatformOperations() {
 
 function mockOperationsApi({
   tenantAttention = [],
-  connectorIssues = []
+  connectorIssues = [],
+  performanceScorecard
 }: {
   tenantAttention?: Awaited<ReturnType<typeof api.getOperationalTenantAttention>>;
   connectorIssues?: Awaited<ReturnType<typeof api.getOperationalConnectorIssues>>;
+  performanceScorecard?: Awaited<ReturnType<typeof api.getOperationalPerformanceScorecard>>;
 } = {}) {
   vi.spyOn(api, 'getOperationalOverview').mockResolvedValue({
     generatedAt: '2026-06-22T00:00:00Z',
@@ -253,6 +315,19 @@ function mockOperationsApi({
     evaluatedAt: '2026-06-22T00:00:00Z',
     overallCompliant: true,
     slos: []
+  });
+  vi.spyOn(api, 'getOperationalPerformanceScorecard').mockResolvedValue(performanceScorecard ?? {
+    generatedAt: '2026-06-22T00:00:00Z',
+    scaleProfile: '1M inventory components / 250k findings / 100 concurrent users',
+    overallCompliant: true,
+    routeFailureCount: 0,
+    routeNoDataCount: 0,
+    freshnessFailureCount: 0,
+    resourceFailureCount: 0,
+    resourceNoDataCount: 0,
+    routeItems: [],
+    freshnessItems: [],
+    resourceItems: []
   });
   vi.spyOn(api, 'listTenants').mockResolvedValue([]);
   vi.spyOn(api, 'listInventoryConnectorHealth').mockResolvedValue([]);

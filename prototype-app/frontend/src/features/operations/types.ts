@@ -107,6 +107,58 @@ export type OperationalMetricDefinition = {
   description: string;
 };
 
+export type PerformanceRouteScorecardItem = {
+  key: string;
+  label: string;
+  path: string;
+  category: string;
+  status: 'PASS' | 'FAIL' | 'NO_DATA' | string;
+  unit: string;
+  targetP95Ms: number;
+  targetP99Ms: number;
+  requestCount: number;
+  currentP95Ms: number;
+  currentP99Ms: number;
+  compliant: boolean;
+  note: string;
+};
+
+export type PerformanceSloScorecardItem = {
+  key: string;
+  label: string;
+  unit: string;
+  targetValue: number;
+  currentValue: number;
+  compliant: boolean;
+  window: string;
+};
+
+export type PerformanceResourceCeilingItem = {
+  key: string;
+  label: string;
+  category: string;
+  status: 'PASS' | 'FAIL' | 'NO_DATA' | string;
+  unit: string;
+  targetValue: number;
+  currentValue: number;
+  compliant: boolean;
+  note: string;
+};
+
+export type PerformanceScorecard = {
+  generatedAt: string;
+  scaleProfile: string;
+  overallCompliant: boolean;
+  routeFailureCount: number;
+  routeNoDataCount: number;
+  freshnessFailureCount: number;
+  resourceFailureCount: number;
+  resourceNoDataCount: number;
+  routeItems: PerformanceRouteScorecardItem[];
+  freshnessItems: PerformanceSloScorecardItem[];
+  resourceItems: PerformanceResourceCeilingItem[];
+};
+
 export type TenantAttentionRow = {
   tenantId: string;
   tenantName: string;

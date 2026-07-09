@@ -35,6 +35,7 @@ public class PlatformVulnRepoService {
 
     private static final String EXTERNAL_ID_PREFIX = "CVE-";
     private static final List<String> SEVERITY_ORDER = List.of("CRITICAL", "HIGH", "MEDIUM", "LOW");
+    private static final List<UUID> UNSCOPED_VULNERABILITY_IDS = List.of(new UUID(0L, 0L));
 
     private final VulnerabilityRepository vulnerabilityRepository;
     private final VulnerabilityIntelSummarySourceRepository vulnerabilityIntelSummarySourceRepository;
@@ -74,32 +75,33 @@ public class PlatformVulnRepoService {
         String normalizedSeverity = hasText(severity) ? severity.trim().toUpperCase(Locale.ROOT) : null;
         String normalizedSource = hasText(source) ? source.trim().toLowerCase(Locale.ROOT) : null;
         var pageable = PageRequest.of(safePage, safeSize);
+        ScopedVulnerabilityIds scopedVulnerabilityIds = resolveSourceScopedVulnerabilityIds(normalizedSource);
+
+        if (scopedVulnerabilityIds.empty()) {
+            return new PlatformVulnRepoPageResponse(List.of(), safePage, safeSize, 0L, 0);
+        }
 
         Page<Vulnerability> vulnerabilityPage = normalizedQueryUpper == null
-                ? vulnerabilityRepository.searchVulnerabilityIntelWithoutQuery(
+                ? vulnerabilityRepository.searchVulnerabilityIntelWithoutQueryScoped(
                         EXTERNAL_ID_PREFIX,
                         null,
-                        false,
-                        null,
+                        scopedVulnerabilityIds.enabled(),
+                        scopedVulnerabilityIds.vulnerabilityIds(),
                         normalizedSeverity != null,
                         normalizedSeverity == null ? List.of() : List.of(normalizedSeverity),
-                        normalizedSource != null,
-                        normalizedSource == null ? List.of() : List.of(normalizedSource),
                         false,
                         List.of(),
                         inKev,
                         pageable
                 )
-                : vulnerabilityRepository.searchVulnerabilityIntel(
+                : vulnerabilityRepository.searchVulnerabilityIntelScoped(
                         EXTERNAL_ID_PREFIX,
                         normalizedQueryUpper,
                         null,
-                        false,
-                        null,
+                        scopedVulnerabilityIds.enabled(),
+                        scopedVulnerabilityIds.vulnerabilityIds(),
                         normalizedSeverity != null,
                         normalizedSeverity == null ? List.of() : List.of(normalizedSeverity),
-                        normalizedSource != null,
-                        normalizedSource == null ? List.of() : List.of(normalizedSource),
                         false,
                         List.of(),
                         inKev,
@@ -138,7 +140,9 @@ public class PlatformVulnRepoService {
         }
 
         List<OrgSpecificCveExposureRecordResponse> items = vulnerabilities.stream()
-                .map(vulnerability -> new OrgSpecificCveExposureRecordResponse(
+                .map(vulnerability -> {
+                    List<String> sources = normalizeSources(sourcesByVulnerability.get(vulnerability.getId()), vulnerability.isInKev());
+                    return new OrgSpecificCveExposureRecordResponse(
                         syntheticRecordId(vulnerability),
                         vulnerability.getId(),
                         vulnerability.getExternalId(),
@@ -175,13 +179,14 @@ public class PlatformVulnRepoService {
                         null,
                         null,
                         null,
-                        normalizeSources(sourcesByVulnerability.get(vulnerability.getId()), vulnerability.isInKev()),
+                        sources,
                         euvdIdByVulnerability.get(vulnerability.getId()),
                         jvndbIdByVulnerability.get(vulnerability.getId()),
                         true,
-                        normalizeSources(sourcesByVulnerability.get(vulnerability.getId()), vulnerability.isInKev()),
+                        sources,
                         List.of()
-                ))
+                );
+                })
                 .toList();
 
         return new PlatformVulnRepoPageResponse(
@@ -249,6 +254,18 @@ public class PlatformVulnRepoService {
                 Long.class
         );
         return count == null ? 0L : count;
+    }
+
+    private ScopedVulnerabilityIds resolveSourceScopedVulnerabilityIds(String normalizedSource) {
+        if (!hasText(normalizedSource)) {
+            return ScopedVulnerabilityIds.unscopedScope();
+        }
+        List<UUID> vulnerabilityIds =
+                vulnerabilityIntelObservationRepository.findDistinctVulnerabilityIdsBySourceSystems(List.of(normalizedSource));
+        if (vulnerabilityIds.isEmpty()) {
+            return ScopedVulnerabilityIds.emptyScope();
+        }
+        return ScopedVulnerabilityIds.scopedScope(vulnerabilityIds);
     }
 
     private long countBySeverity(String severity) {
@@ -558,5 +575,19 @@ public class PlatformVulnRepoService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record ScopedVulnerabilityIds(boolean enabled, boolean empty, List<UUID> vulnerabilityIds) {
+        private static ScopedVulnerabilityIds unscopedScope() {
+            return new ScopedVulnerabilityIds(false, false, UNSCOPED_VULNERABILITY_IDS);
+        }
+
+        private static ScopedVulnerabilityIds scopedScope(List<UUID> vulnerabilityIds) {
+            return new ScopedVulnerabilityIds(true, false, vulnerabilityIds.stream().distinct().toList());
+        }
+
+        private static ScopedVulnerabilityIds emptyScope() {
+            return new ScopedVulnerabilityIds(true, true, UNSCOPED_VULNERABILITY_IDS);
+        }
     }
 }

@@ -7,7 +7,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class FindingListProjectionService {
@@ -30,27 +29,22 @@ public class FindingListProjectionService {
         return findingProjectionRefreshService.refreshTenant(tenant);
     }
 
-    @Transactional(readOnly = true)
     public void ensureTenantProjection(Tenant tenant) {
         findingProjectionQueryService.ensureTenantProjection(tenant);
     }
 
-    @Transactional(readOnly = true)
     public ProjectionPage queryPage(Tenant tenant, FindingsFilter filter, String cursor, int limit) {
         return findingProjectionQueryService.queryPage(tenant, filter, cursor, limit);
     }
 
-    @Transactional(readOnly = true)
     public List<ProjectionRecord> loadRows(Tenant tenant, FindingsFilter filter) {
         return findingProjectionQueryService.loadRows(tenant, filter);
     }
 
-    @Transactional(readOnly = true)
     public ProjectionStatus getProjectionStatus(Tenant tenant) {
         return findingProjectionStatusService.getProjectionStatus(tenant);
     }
 
-    @Transactional(readOnly = true)
     public ProjectionStatus inspectProjectionStatus(Tenant tenant) {
         return findingProjectionStatusService.inspectProjectionStatus(tenant);
     }

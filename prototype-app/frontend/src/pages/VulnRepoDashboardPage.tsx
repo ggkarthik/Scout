@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import { pathForInventoryView, pathForVulnRepoHostAsset, pathForVulnRepoSoftwareAssets, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole } from '../features/auth/roles';
@@ -113,17 +114,6 @@ function renderCriticalUnresolvedTags(item: VulnRepoDashboardCriticalUnresolvedI
 
 function advisoryRelativeTimeLabel(value?: string): string {
   return value ? relativeTime(value) : 'Recently';
-}
-
-function formatGeneratedAt(value?: string): string | null {
-  if (!value) {
-    return null;
-  }
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) {
-    return null;
-  }
-  return `Last updated ${new Date(timestamp).toLocaleString()}`;
 }
 
 function vulnRepoVulnerabilityPath(filters?: Record<string, string | number | boolean | undefined>) {
@@ -388,10 +378,6 @@ function TenantDashboard() {
         .slice(0, 5),
     [dashboard?.topAffectedSoftware]
   );
-  const generatedAtLabel = React.useMemo(
-    () => formatGeneratedAt(dashboard?.generatedAt),
-    [dashboard?.generatedAt]
-  );
   const riskOverviewCard = dashboard ? (
     <div className="vuln-repo-dashboard-stat-button">
       <div className="stat-card">
@@ -433,11 +419,11 @@ function TenantDashboard() {
 
   return (
     <div className="page-grid vuln-repo-dashboard-page">
-      {generatedAtLabel ? (
-        <div className="panel-caption vuln-repo-dashboard-generated-at">
-          {refreshing ? 'Refreshing dashboard...' : generatedAtLabel}
-        </div>
-      ) : null}
+      <PageFreshnessStatus
+        updatedAt={dashboard?.generatedAt ?? dashboardQuery.dataUpdatedAt}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing vulnerability repository dashboard…"
+      />
 
       {loading ? <div className="panel"><div className="panel-caption">Loading dashboard...</div></div> : null}
       {!dashboard && !loading && error ? <div className="panel"><div className="notice error">Failed to load dashboard: {error}</div></div> : null}

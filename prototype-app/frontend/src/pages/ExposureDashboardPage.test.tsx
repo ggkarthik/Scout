@@ -144,6 +144,7 @@ describe('ExposureDashboardPage', () => {
     renderWithProviders(<ExposureDashboardPage />);
 
     expect(await screen.findByText('17')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders critical findings count', async () => {

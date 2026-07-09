@@ -63,6 +63,7 @@ public class ServiceNowCmdbSyncService {
     private final WorkspaceService workspaceService;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public ServiceNowCmdbSyncService(
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
@@ -92,9 +93,19 @@ public class ServiceNowCmdbSyncService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     public SyncTriggerResponse trigger() {
         var tenant = workspaceService.getWorkspace();
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun(tenant));
+        ClaimedRun claimed = tenantSchemaExecutionService.run(
+                tenant,
+                () -> transactionTemplate.execute(status -> claimManualRun(tenant))
+        );
         if (!claimed.reusedActiveRun()) {
             integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual"));
             return new SyncTriggerResponse(claimed.runId(), "queued", "ServiceNow CMDB sync queued");
@@ -104,15 +115,21 @@ public class ServiceNowCmdbSyncService {
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
-        List<ConfigRef> configs = new ArrayList<>();
-        for (var tenant : tenantService.listActiveTenants()) {
-            tenantSchemaExecutionService.run(tenant, () -> {
-                serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
-                        .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
-                        .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
-                return null;
-            });
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("servicenow-cmdb.run-scheduled-syncs")) {
+            return;
         }
+        List<ConfigRef> configs = TenantContext.runAsPlatform(() -> {
+            List<ConfigRef> scheduledConfigs = new ArrayList<>();
+            for (var tenant : tenantService.listActiveTenants()) {
+                tenantSchemaExecutionService.run(tenant, () -> {
+                    serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
+                            .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
+                            .ifPresent(config -> scheduledConfigs.add(new ConfigRef(config.getId(), tenant.getId())));
+                    return null;
+                });
+            }
+            return scheduledConfigs;
+        });
         for (ConfigRef configRef : configs) {
             ClaimedRun claimed = tenantSchemaExecutionService.run(configRef.tenantId(), () -> {
                 ServiceNowCmdbConfig config = serviceNowCmdbConfigRepository.findById(configRef.configId()).orElse(null);

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { pathForVulnRepoView } from '../app/routes';
+import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import { usePlatformVulnIntelDetailQuery } from '../features/vuln-repo-dashboard/queries';
 import type { PlatformVulnIntelSourceObservation } from '../features/vuln-repo-dashboard/types';
 import { severityClassName } from '../features/cve-workbench/formatting';
@@ -79,6 +80,7 @@ export function PlatformVulnIntelDetailPage() {
   const navigate = useNavigate();
   const query = usePlatformVulnIntelDetailQuery(externalId ?? '');
   const detail = query.data;
+  const refreshing = query.isFetching && !!detail;
 
   const bestDescription = detail?.fullDescription || detail?.description;
 
@@ -94,6 +96,12 @@ export function PlatformVulnIntelDetailPage() {
         </button>
       </div>
 
+      <PageFreshnessStatus
+        updatedAt={query.dataUpdatedAt}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing vulnerability intelligence while keeping current details visible…"
+      />
+
       {query.isPending && !detail ? (
         <div className="panel"><div className="panel-caption">Loading...</div></div>
       ) : null}
@@ -103,6 +111,12 @@ export function PlatformVulnIntelDetailPage() {
           <div className="notice error">
             {query.error instanceof Error ? query.error.message : 'Failed to load vulnerability details'}
           </div>
+        </div>
+      ) : null}
+
+      {detail && query.error ? (
+        <div className="notice error">
+          Using current vulnerability details while refresh failed: {query.error instanceof Error ? query.error.message : 'Failed to refresh vulnerability details'}
         </div>
       ) : null}
 

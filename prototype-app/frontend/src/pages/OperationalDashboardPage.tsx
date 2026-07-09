@@ -43,11 +43,15 @@ import {
   OperationalIngestionEfficiency,
   OperationalIngestionSourceMetric,
   OperationalMetricDefinition,
+  PerformanceResourceCeilingItem,
+  PerformanceRouteScorecardItem,
+  PerformanceScorecard,
   OperationalSectionResponse,
   OperationalSourceFreshness,
   SloStatus
 } from '../features/operations/types';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { StatCard } from '../components/StatCard';
 import {
   type PipelinePayload,
@@ -86,7 +90,9 @@ const LEGACY_VIEW_ALIASES: Record<string, OperationsViewKey> = {
   readPath: 'platform-health',
   'metric-catalog': 'platform-health',
   catalog: 'platform-health',
-  slo: 'platform-health'
+  slo: 'platform-health',
+  scorecard: 'platform-health',
+  'performance-scorecard': 'platform-health'
 };
 
 function normalizeOperationsView(value: string | null | undefined): OperationsViewKey {
@@ -166,11 +172,35 @@ const METRIC_HELP: Record<string, string> = {
   'CPE Fallback Drift (7d)': 'Seven-day change in the share of findings relying on fallback CPE matching.',
   'SLOs Defined': 'Total number of tracked service-level objectives.',
   'SLOs Passing': 'Number of tracked service-level objectives currently meeting target.',
-  'SLOs Failing': 'Number of tracked service-level objectives currently breaching target.'
+  'SLOs Failing': 'Number of tracked service-level objectives currently breaching target.',
+  'Enterprise Scale Profile': 'Target enterprise workload profile the scorecard is validating against.',
+  'Route Budget Failures': 'Number of interactive routes currently breaching their target latency envelope.',
+  'Route Budget No Data': 'Number of interactive routes without enough recent samples to score yet.',
+  'Freshness Failures': 'Number of freshness and mixed-load guardrails currently outside target.',
+  'Resource Ceiling Failures': 'Number of runtime resource ceilings currently exceeding target.',
+  'Resource Ceiling No Data': 'Number of resource ceilings that could not be measured in the current runtime.',
+  'Enterprise Scorecard': 'Overall pass/fail state for the current enterprise performance certification snapshot.'
 };
 
 function formatPercent(value: number): string {
   return `${(value ?? 0).toFixed(1)}%`;
+}
+
+function formatMetricValue(value: number, unit: string): string {
+  if (unit === '%') {
+    return formatPercent(value);
+  }
+  if (unit === 'ms') {
+    return `${value.toFixed(1)} ms`;
+  }
+  if (unit === 'threads') {
+    return `${Math.round(value).toLocaleString()} threads`;
+  }
+  return `${value.toLocaleString()}${unit ? ` ${unit}` : ''}`;
+}
+
+function statusClass(status: string): string {
+  return status === 'PASS' ? 'slo-pass' : 'slo-fail';
 }
 
 function isCreatorAccessError(error: string): boolean {
@@ -269,6 +299,64 @@ function EndpointMetricsTable({ rows = [] }: { rows?: OperationalEndpointMetric[
           <span>{row.averageMs.toFixed(1)}</span>
           <span>{row.p95Ms.toFixed(1)}</span>
           <span>{row.p99Ms.toFixed(1)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RouteScorecardTable({ rows = [] }: { rows?: PerformanceRouteScorecardItem[] }) {
+  if (rows.length === 0) {
+    return <div className="panel-caption">No route scorecard entries available yet.</div>;
+  }
+  return (
+    <div className="ops-table">
+      <div className="ops-table-header">
+        <span>Route</span>
+        <span>Category</span>
+        <span>Requests</span>
+        <span>P95 / Target</span>
+        <span>P99 / Target</span>
+        <span>Status</span>
+        <span>Note</span>
+      </div>
+      {rows.map((row) => (
+        <div key={row.key} className="ops-table-row ops-table-row-wide">
+          <span>{row.label}</span>
+          <span>{row.category}</span>
+          <span>{row.requestCount.toLocaleString()}</span>
+          <span>{row.currentP95Ms.toFixed(1)} / {row.targetP95Ms.toFixed(0)} ms</span>
+          <span>{row.currentP99Ms.toFixed(1)} / {row.targetP99Ms.toFixed(0)} ms</span>
+          <span className={statusClass(row.status)}>{row.status}</span>
+          <span>{row.note}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResourceCeilingsTable({ rows = [] }: { rows?: PerformanceResourceCeilingItem[] }) {
+  if (rows.length === 0) {
+    return <div className="panel-caption">No resource ceiling entries available yet.</div>;
+  }
+  return (
+    <div className="ops-table">
+      <div className="ops-table-header">
+        <span>Resource</span>
+        <span>Category</span>
+        <span>Target</span>
+        <span>Current</span>
+        <span>Status</span>
+        <span>Note</span>
+      </div>
+      {rows.map((row) => (
+        <div key={row.key} className="ops-table-row ops-table-row-wide">
+          <span>{row.label}</span>
+          <span>{row.category}</span>
+          <span>{formatMetricValue(row.targetValue, row.unit)}</span>
+          <span>{formatMetricValue(row.currentValue, row.unit)}</span>
+          <span className={statusClass(row.status)}>{row.status}</span>
+          <span>{row.note}</span>
         </div>
       ))}
     </div>
@@ -422,6 +510,47 @@ function renderSlo(data: SloStatus) {
   );
 }
 
+function renderPerformanceScorecard(data: PerformanceScorecard) {
+  if (!data) {
+    return <div className="panel"><div className="panel-header"><h3>Enterprise Performance Scorecard</h3></div><div className="panel-caption">No data available.</div></div>;
+  }
+
+  return (
+    <div className="page-grid">
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Enterprise Performance Scorecard <span className={data.overallCompliant ? 'slo-pass' : 'slo-fail'}>{data.overallCompliant ? 'PASSING' : 'FAILING'}</span></h3>
+          <span className="panel-caption">{formatGeneratedAt(data.generatedAt)}</span>
+        </div>
+        <div className="noise-summary-grid">
+          <SummaryMetricCard label="Enterprise Scale Profile" value={data.scaleProfile} />
+          <SummaryMetricCard label="Route Budget Failures" value={data.routeFailureCount.toLocaleString()} />
+          <SummaryMetricCard label="Freshness Failures" value={data.freshnessFailureCount.toLocaleString()} />
+          <SummaryMetricCard label="Resource Ceiling Failures" value={data.resourceFailureCount.toLocaleString()} />
+          <SummaryMetricCard label="Route Budget No Data" value={data.routeNoDataCount.toLocaleString()} />
+          <SummaryMetricCard label="Resource Ceiling No Data" value={data.resourceNoDataCount.toLocaleString()} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Interactive Route Budgets</h3>
+          <span className="panel-caption">Target p95/p99 latency validation for tracked API routes.</span>
+        </div>
+        <RouteScorecardTable rows={data.routeItems ?? []} />
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Runtime Resource Ceilings</h3>
+          <span className="panel-caption">Current runtime ceilings for heap, DB pool, and worker executors.</span>
+        </div>
+        <ResourceCeilingsTable rows={data.resourceItems ?? []} />
+      </section>
+    </div>
+  );
+}
+
 function renderPipeline(payload: PipelinePayload) {
   const ingestion = payload.ingestion.data;
   const freshness = payload.freshness.data;
@@ -446,6 +575,7 @@ function renderPipeline(payload: PipelinePayload) {
 function renderPlatformHealth(payload: PlatformHealthPayload) {
   const readPath = payload.readPath.data;
   const sloItems = payload.slo?.slos ?? [];
+  const performanceScorecard = payload.performanceScorecard;
 
   return (
     <div className="page-grid">
@@ -461,11 +591,13 @@ function renderPlatformHealth(payload: PlatformHealthPayload) {
           />
           <StatCard title="Cache Hit Ratio" value={Math.round(readPath.filterCacheHitRatioPercent)} caption="Percent" description={METRIC_HELP['Cache Hit Ratio']} />
           <StatCard title="Failing SLOs" value={sloItems.filter((item) => !item.compliant).length} tone={sloItems.some((item) => !item.compliant) ? 'critical' : undefined} description={METRIC_HELP['Failing SLOs']} />
+          <StatCard title="Resource Ceiling Failures" value={performanceScorecard?.resourceFailureCount ?? 0} tone={(performanceScorecard?.resourceFailureCount ?? 0) > 0 ? 'critical' : undefined} description={METRIC_HELP['Resource Ceiling Failures']} />
         </div>
       ) : null}
 
       {renderReadPath(payload.readPath)}
       {renderSlo(payload.slo)}
+      {renderPerformanceScorecard(payload.performanceScorecard)}
       {renderCatalog(payload.catalog)}
     </div>
   );
@@ -476,6 +608,51 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
   const operationsViewQuery = useOperationsViewQuery(normalizedView);
   const payload = operationsViewQuery.data ?? null;
   const error = operationsViewQuery.error instanceof Error ? operationsViewQuery.error.message : null;
+  const latestOperationalUpdate = React.useMemo(() => {
+    if (!payload) {
+      return operationsViewQuery.dataUpdatedAt;
+    }
+    if (normalizedView === 'pipeline') {
+      const pipelinePayload = payload as PipelinePayload;
+      return latestFreshnessValue([
+        pipelinePayload.ingestion.generatedAt,
+        pipelinePayload.freshness.generatedAt,
+        operationsViewQuery.dataUpdatedAt,
+      ]);
+    }
+    const platformHealthPayload = payload as PlatformHealthPayload;
+    return latestFreshnessValue([
+      platformHealthPayload.readPath.generatedAt,
+      platformHealthPayload.catalog.generatedAt,
+      platformHealthPayload.performanceScorecard.generatedAt,
+      platformHealthPayload.slo?.evaluatedAt,
+      operationsViewQuery.dataUpdatedAt,
+    ]);
+  }, [normalizedView, operationsViewQuery.dataUpdatedAt, payload]);
+  const operationalDelayMessage = React.useMemo(() => {
+    if (!payload) {
+      return null;
+    }
+    if (normalizedView === 'pipeline') {
+      const pipelinePayload = payload as PipelinePayload;
+      const staleCount = pipelinePayload.freshness.data?.staleSourceCount ?? 0;
+      return staleCount > 0
+        ? 'Some shared sources are stale, so operational data may lag until those refreshes complete.'
+        : null;
+    }
+    const platformHealthPayload = payload as PlatformHealthPayload;
+    return (platformHealthPayload.performanceScorecard?.freshnessFailureCount ?? 0) > 0
+      ? 'Some freshness guardrails are outside target, so health signals may update more slowly than expected.'
+      : null;
+  }, [normalizedView, payload]);
+  const freshnessStrip = payload ? (
+    <PageFreshnessStatus
+      updatedAt={latestOperationalUpdate}
+      isRefreshing={operationsViewQuery.isFetching}
+      delayedMessage={operationalDelayMessage}
+      refreshLabel={normalizedView === 'pipeline' ? 'Refreshing pipeline analytics…' : 'Refreshing platform health signals…'}
+    />
+  ) : null;
 
   if (normalizedView === 'quality') {
     const nextParams = new URLSearchParams(redirectSearch);
@@ -512,6 +689,7 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
         <OperationsSectionErrorBoundary viewKey={normalizedView}>
           <div className="page-grid">
             <div className="panel">Operational data may be stale: {error}</div>
+            {freshnessStrip}
             {content}
           </div>
         </OperationsSectionErrorBoundary>
@@ -571,6 +749,7 @@ export function OperationalDashboardPage({ selectedView, redirectSearch = '' }: 
         <span className="ops-context-label">Operations</span>
         <span className="ops-context-view">{normalizedView === 'pipeline' ? 'Pipeline Analytics' : 'Platform Health'}</span>
       </div>
+      {freshnessStrip}
       {content}
     </OperationsSectionErrorBoundary>
   );

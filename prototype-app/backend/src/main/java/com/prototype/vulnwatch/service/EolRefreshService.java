@@ -86,6 +86,7 @@ public class EolRefreshService {
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final QualityIssueProjectionService qualityIssueProjectionService;
     private final TenantWorkRunner tenantWorkRunner;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public EolRefreshService(
             EolApiClient eolApiClient,
@@ -118,6 +119,13 @@ public class EolRefreshService {
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.qualityIssueProjectionService = qualityIssueProjectionService;
         this.tenantWorkRunner = tenantWorkRunner;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
     }
 
     // -------------------------------------------------------------------------
@@ -241,6 +249,9 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.catalog-refresh-cron:0 0 2 * * SUN}")
     public void fullCatalogRefresh() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("eol.full-catalog-refresh")) {
+            return;
+        }
         TenantContext.runAsPlatform(() -> {
             if (!enabled) { LOG.debug("EOL refresh disabled; skipping catalog refresh"); return; }
             try {
@@ -289,6 +300,9 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.release-refresh-cron:0 0 3 * * SUN}")
     public void releaseDataRefresh() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("eol.release-data-refresh")) {
+            return;
+        }
         TenantContext.runAsPlatform(() -> {
             if (!enabled) { LOG.debug("EOL refresh disabled; skipping release data refresh"); return; }
             try {
@@ -387,6 +401,9 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.resolve-mappings-cron:0 30 3 * * SUN}")
     public void resolveInstanceMappings() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("eol.resolve-instance-mappings")) {
+            return;
+        }
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping mapping resolution"); return; }
         try {
             int count = runMappingResolveAcrossTenants();
@@ -413,6 +430,9 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.denormalize-cron:0 0 4 * * SUN}")
     public void denormalizeEolStatus() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("eol.denormalize-status")) {
+            return;
+        }
         if (!enabled) { LOG.debug("EOL refresh disabled; skipping denormalization"); return; }
         try {
             int count = runDenormalizeAcrossTenants();
@@ -464,6 +484,9 @@ public class EolRefreshService {
 
     @Scheduled(cron = "${app.eol.lifecycle-date-sweep-cron:0 15 0 * * *}")
     public void lifecycleDateSweep() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("eol.lifecycle-date-sweep")) {
+            return;
+        }
         if (!enabled) {
             LOG.debug("EOL refresh disabled; skipping lifecycle date sweep");
             return;

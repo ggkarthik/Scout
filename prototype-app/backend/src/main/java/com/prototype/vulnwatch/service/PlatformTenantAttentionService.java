@@ -36,75 +36,79 @@ public class PlatformTenantAttentionService {
     }
 
     public List<OperationalTenantAttentionResponse> listTenantAttention() {
-        Map<UUID, TenantAttentionAggregate> aggregates = new LinkedHashMap<>();
+        return TenantContext.runAsPlatform(() -> {
+            Map<UUID, TenantAttentionAggregate> aggregates = new LinkedHashMap<>();
 
-        for (Tenant tenant : tenantService.listTenants()) {
-            String status = normalize(tenant.getStatus());
-            if ("SUSPENDED".equals(status) || "EXPIRED".equals(status)) {
-                TenantAttentionAggregate aggregate = aggregates.computeIfAbsent(
-                        tenant.getId(),
-                        ignored -> new TenantAttentionAggregate(tenant.getId(), tenant.getName(), defaultStatus(tenant.getStatus()))
-                );
-                if ("SUSPENDED".equals(status)) {
-                    aggregate.reasons.add(REASON_TENANT_SUSPENDED);
-                } else {
-                    aggregate.reasons.add(REASON_TENANT_EXPIRED);
+            for (Tenant tenant : tenantService.listTenants()) {
+                String status = normalize(tenant.getStatus());
+                if ("SUSPENDED".equals(status) || "EXPIRED".equals(status)) {
+                    TenantAttentionAggregate aggregate = aggregates.computeIfAbsent(
+                            tenant.getId(),
+                            ignored -> new TenantAttentionAggregate(tenant.getId(), tenant.getName(), defaultStatus(tenant.getStatus()))
+                    );
+                    if ("SUSPENDED".equals(status)) {
+                        aggregate.reasons.add(REASON_TENANT_SUSPENDED);
+                    } else {
+                        aggregate.reasons.add(REASON_TENANT_EXPIRED);
+                    }
                 }
             }
-        }
 
-        for (InventoryConnectorHealthResponse connector : platformInventoryConnectorHealthService.listInventoryConnectorHealth()) {
-            String healthState = normalize(connector.healthState());
-            if (!"ERROR".equals(healthState) && !"PENDING".equals(healthState)) {
-                continue;
+            for (InventoryConnectorHealthResponse connector : platformInventoryConnectorHealthService.listInventoryConnectorHealth()) {
+                String healthState = normalize(connector.healthState());
+                if (!"ERROR".equals(healthState) && !"PENDING".equals(healthState)) {
+                    continue;
+                }
+                TenantAttentionAggregate aggregate = aggregates.computeIfAbsent(
+                        connector.tenantId(),
+                        ignored -> new TenantAttentionAggregate(connector.tenantId(), connector.tenantName(), "ACTIVE")
+                );
+                aggregate.affectedConnectors.add(connector.connectorKey());
+                aggregate.reasons.add("ERROR".equals(healthState) ? REASON_CONNECTOR_ERROR : REASON_CONNECTOR_PENDING);
+                aggregate.latestRelevantSyncAt = latestInstant(aggregate.latestRelevantSyncAt, connector.lastSyncAt());
             }
-            TenantAttentionAggregate aggregate = aggregates.computeIfAbsent(
-                    connector.tenantId(),
-                    ignored -> new TenantAttentionAggregate(connector.tenantId(), connector.tenantName(), "ACTIVE")
-            );
-            aggregate.affectedConnectors.add(connector.connectorKey());
-            aggregate.reasons.add("ERROR".equals(healthState) ? REASON_CONNECTOR_ERROR : REASON_CONNECTOR_PENDING);
-            aggregate.latestRelevantSyncAt = latestInstant(aggregate.latestRelevantSyncAt, connector.lastSyncAt());
-        }
 
-        return aggregates.values().stream()
-                .filter(aggregate -> !aggregate.reasons.isEmpty())
-                .sorted(Comparator
-                        .comparingInt((TenantAttentionAggregate aggregate) -> lifecyclePriority(aggregate.tenantStatus))
-                        .thenComparing((TenantAttentionAggregate left, TenantAttentionAggregate right) ->
-                                Integer.compare(right.reasons.size(), left.reasons.size()))
-                        .thenComparing(aggregate -> aggregate.tenantName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
-                .map(aggregate -> new OperationalTenantAttentionResponse(
-                        aggregate.tenantId,
-                        aggregate.tenantName,
-                        aggregate.tenantStatus,
-                        List.copyOf(aggregate.reasons),
-                        List.copyOf(aggregate.affectedConnectors),
-                        aggregate.latestRelevantSyncAt
-                ))
-                .toList();
+            return aggregates.values().stream()
+                    .filter(aggregate -> !aggregate.reasons.isEmpty())
+                    .sorted(Comparator
+                            .comparingInt((TenantAttentionAggregate aggregate) -> lifecyclePriority(aggregate.tenantStatus))
+                            .thenComparing((TenantAttentionAggregate left, TenantAttentionAggregate right) ->
+                                    Integer.compare(right.reasons.size(), left.reasons.size()))
+                            .thenComparing(aggregate -> aggregate.tenantName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
+                    .map(aggregate -> new OperationalTenantAttentionResponse(
+                            aggregate.tenantId,
+                            aggregate.tenantName,
+                            aggregate.tenantStatus,
+                            List.copyOf(aggregate.reasons),
+                            List.copyOf(aggregate.affectedConnectors),
+                            aggregate.latestRelevantSyncAt
+                    ))
+                    .toList();
+        });
     }
 
     public List<OperationalConnectorIssueGroupResponse> listConnectorIssues() {
-        Map<String, Set<String>> connectorTenants = new LinkedHashMap<>();
-        for (InventoryConnectorHealthResponse connector : platformInventoryConnectorHealthService.listInventoryConnectorHealth()) {
-            String healthState = normalize(connector.healthState());
-            if (!"ERROR".equals(healthState) && !"PENDING".equals(healthState)) {
-                continue;
+        return TenantContext.runAsPlatform(() -> {
+            Map<String, Set<String>> connectorTenants = new LinkedHashMap<>();
+            for (InventoryConnectorHealthResponse connector : platformInventoryConnectorHealthService.listInventoryConnectorHealth()) {
+                String healthState = normalize(connector.healthState());
+                if (!"ERROR".equals(healthState) && !"PENDING".equals(healthState)) {
+                    continue;
+                }
+                connectorTenants.computeIfAbsent(connector.connectorKey(), ignored -> new LinkedHashSet<>()).add(connector.tenantName());
             }
-            connectorTenants.computeIfAbsent(connector.connectorKey(), ignored -> new LinkedHashSet<>()).add(connector.tenantName());
-        }
 
-        List<OperationalConnectorIssueGroupResponse> groups = new ArrayList<>();
-        connectorTenants.forEach((connectorKey, tenants) -> groups.add(new OperationalConnectorIssueGroupResponse(
-                connectorKey,
-                tenants.size(),
-                List.copyOf(tenants)
-        )));
-        groups.sort(Comparator
-                .comparingLong(OperationalConnectorIssueGroupResponse::affectedTenantCount).reversed()
-                .thenComparing(OperationalConnectorIssueGroupResponse::connectorKey, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)));
-        return groups;
+            List<OperationalConnectorIssueGroupResponse> groups = new ArrayList<>();
+            connectorTenants.forEach((connectorKey, tenants) -> groups.add(new OperationalConnectorIssueGroupResponse(
+                    connectorKey,
+                    tenants.size(),
+                    List.copyOf(tenants)
+            )));
+            groups.sort(Comparator
+                    .comparingLong(OperationalConnectorIssueGroupResponse::affectedTenantCount).reversed()
+                    .thenComparing(OperationalConnectorIssueGroupResponse::connectorKey, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)));
+            return groups;
+        });
     }
 
     private String defaultStatus(String status) {

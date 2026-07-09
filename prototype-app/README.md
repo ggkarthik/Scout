@@ -1,6 +1,6 @@
 # VulnWatch Prototype
 
-Last updated: 2026-05-27
+Last updated: 2026-07-07
 
 VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection and workflow.
 
@@ -13,9 +13,7 @@ VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability i
 | [Business Logic Guide](docs/business-logic-guide.md) | Domain concepts, pipeline flows, finding lifecycle, EOL tracking |
 | [Database](docs/database.md) | Schema design, table inventory, migration strategy |
 | [Frontend](docs/frontend.md) | React app structure, routes, components, state management |
-| [Production Readiness](docs/production-readiness.md) | Deployment, env vars, health checks, monitoring |
-| [Non-Production Test Personas](docs/non-production-test-personas.md) | Dev/preprod persona setup and manual check procedures |
-| [Customer Demo Runbook](docs/runbooks/customer-demo.md) | Step-by-step demo provisioning and walkthrough |
+| [Performance Governance Runbook](docs/runbooks/performance-governance.md) | CI/nightly certification flow, runtime roles, rollback gates |
 
 ## Quick Start
 
@@ -41,6 +39,54 @@ npm run dev    # dev server on port 5173
 
 - Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:8080/api`
+- Performance scorecard helper: `./scripts/performance-scorecard.sh`
+- Baseline warmup helper: `./scripts/performance-baseline.sh`
+- Correlation freshness helper: `./scripts/correlation-certification.sh`
+- Full enterprise certification helper: `./scripts/enterprise-performance-certification.sh`
+
+Set `APP_RUNTIME_ROLE=api` on API-serving nodes to suppress scheduled background workers there while keeping default local behavior unchanged. Leave it unset or set it to `all` for the current single-node setup.
+Set `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,prometheus` when running the performance and correlation certification scripts in environments where Prometheus exposure is not enabled by default.
+
+Example enterprise certification pass:
+
+```bash
+cd prototype-app
+BASE_URL=http://127.0.0.1:8080 \
+API_KEY=change-me-in-prod \
+CREATOR_KEY=local-creator \
+SEED_DEMO_DATA=true \
+FAIL_ON_NONCOMPLIANT=true \
+./scripts/enterprise-performance-certification.sh
+```
+
+This orchestrates the baseline capture, correlation/freshness certification, and a final performance scorecard snapshot into one artifact directory.
+
+For a one-command local or CI governance pass that can start the backend, wait for readiness, and emit the certification artifact set:
+
+```bash
+cd prototype-app
+BASE_URL=http://127.0.0.1:8080 \
+API_KEY=change-me-in-prod \
+CREATOR_KEY=local-creator \
+START_BACKEND=true \
+SPRING_PROFILES_ACTIVE=local \
+MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,prometheus \
+sh ./scripts/run-performance-governance.sh
+```
+
+## Performance Governance
+
+The repository now includes a dedicated GitHub Actions workflow:
+
+- `.github/workflows/performance-governance.yml`
+
+It runs:
+
+- nightly on a schedule
+- on pull requests that touch backend, script, docs, and workflow changes
+- on demand through `workflow_dispatch`
+
+The workflow boots the backend against a Postgres service using the `local` profile, runs the full enterprise certification pass, and uploads the resulting artifacts for review. Demo seeding is off by default and only enabled through explicit manual dispatch input.
 
 ### Default Local Auth
 

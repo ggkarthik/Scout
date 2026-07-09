@@ -55,13 +55,15 @@ public class TenantIsolationConfig {
             HikariDataSource hikariDataSource,
             @org.springframework.beans.factory.annotation.Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
             @org.springframework.beans.factory.annotation.Value("${app.tenancy.default-schema:tenant_default}") String defaultSchemaName,
-            ObjectProvider<MeterRegistry> meterRegistryProvider
+            ObjectProvider<MeterRegistry> meterRegistryProvider,
+            ApplicationLifecycleState applicationLifecycleState
     ) {
         return new TenantAwareDataSource(
                 hikariDataSource,
                 requireTenantContext,
                 defaultSchemaName,
-                meterRegistryProvider.getIfAvailable()
+                meterRegistryProvider.getIfAvailable(),
+                applicationLifecycleState::isApplicationReady
         );
     }
 

@@ -13,6 +13,7 @@ import type {
 import type { CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import {
   useFindingBacklogHealthQuery,
   useFindingDistributionsQuery,
@@ -160,8 +161,10 @@ function formatProjectionStatus(status?: FindingProjectionStatus | null): string
   if (!status) {
     return 'Projection status unavailable.';
   }
-  const freshness = status.stale ? 'stale' : 'healthy';
-  return `Projection ${freshness} · ${status.findingCount.toLocaleString()} findings materialized`;
+  const freshness = status.stale ? 'Projection delayed' : 'Projection healthy';
+  const drift = status.driftCount > 0 ? ` · ${status.driftCount.toLocaleString()} drifted row${status.driftCount === 1 ? '' : 's'}` : '';
+  const computed = status.lastComputedAt ? ` · computed ${new Date(status.lastComputedAt).toLocaleString()}` : '';
+  return `${freshness} · ${status.findingCount.toLocaleString()} findings materialized${drift}${computed}`;
 }
 
 function groupValue(r: Finding, key: string): string {
@@ -236,6 +239,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [actionModal, setActionModal] = React.useState<ActionType | null>(null);
   const [actionLoading, setActionLoading] = React.useState(false);
   const [actionError, setActionError] = React.useState('');
+  const [actionNotice, setActionNotice] = React.useState<{ tone: 'info' | 'success'; message: string } | null>(null);
   const [showMoreActions, setShowMoreActions] = React.useState(false);
   const moreActionsRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -310,7 +314,19 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const totalItems = findingsQuery.data?.totalItems ?? 0;
   const totalPages = findingsQuery.data?.totalPages ?? 0;
   const nextCursor = findingsQuery.data?.nextCursor ?? null;
-  const loading    = findingsQuery.isLoading || findingsQuery.isFetching;
+  const initialLoading = findingsQuery.isLoading && !findingsQuery.data;
+  const refreshingResults = findingsQuery.isFetching && !!findingsQuery.data;
+  const loading = initialLoading || refreshingResults;
+  const latestDataUpdate = latestFreshnessValue([
+    findingsQuery.dataUpdatedAt,
+    summaryQuery.dataUpdatedAt,
+    distributionsQuery.dataUpdatedAt,
+    backlogHealthQuery.dataUpdatedAt,
+    projectionStatusQuery.data?.lastComputedAt,
+  ]);
+  const delayedProjectionMessage = projectionStatusQuery.data?.stale
+    ? 'Data may be delayed while the findings projection catches up to recent changes.'
+    : null;
 
   const rows = React.useMemo(
     () => applyColFilters(allRows, colFilters, dueDateBand),
@@ -639,13 +655,16 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   // ── actions ────────────────────────────────────────────────────────────────
   type ActionType = 'create-incident'|'defer'|'resolve'|'false-positive'|'duplicate'|'delete'|'assign';
-  function openAction(t: ActionType) { if (!hasSelection) return; setShowMoreActions(false); setActionError(''); setActionModal(t); }
+  function openAction(t: ActionType) { if (!hasSelection) return; setShowMoreActions(false); setActionError(''); setActionNotice(null); setActionModal(t); }
   function closeModal() {
     setActionModal(null); setActionError('');
     setDeferReason(''); setDeferExpiry(''); setFpJustification(''); setDuplicateOf('');
     setIncidentNotes(''); setIncidentPriority('3'); setIncidentAssignedTo('');
     setIncidentAssignmentGroup(''); setIncidentDueDate('');
     setAssignGroupTarget('');
+  }
+  function publishActionNotice(message: string, tone: 'info' | 'success' = 'success') {
+    setActionNotice({ message, tone });
   }
   async function execAll(payload: Record<string,unknown>) {
     await api.bulkUpdateFindingWorkflow({
@@ -665,21 +684,23 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     ]);
     setSelectedIds(new Set());
   }
-  async function handleResolve()     { setActionLoading(true); try { await execAll({status:'RESOLVED',actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
-  async function handleReopen()      { if (!hasSelection) return; setActionLoading(true); try { await execAll({status:'OPEN',actor:'local-analyst'}); } catch(e){console.error(e);} finally{setActionLoading(false); setShowMoreActions(false);} }
-  async function handleDefer()       { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:deferReason||'DEFERRED',suppressedUntil:deferExpiry?new Date(deferExpiry).toISOString():undefined,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
-  async function handleFalsePos()    { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`FALSE_POSITIVE${fpJustification?': '+fpJustification:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
-  async function handleDuplicate()   { setActionLoading(true); try { await execAll({status:'SUPPRESSED',suppressionReason:`DUPLICATE${duplicateOf?': '+duplicateOf:''}`,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
-  async function handleAssign()      { setActionLoading(true); try { await execAll({assignedTo:assignGroupTarget,actor:'local-analyst'}); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleResolve()     { setActionLoading(true); try { const count = selectedFindings.length; await execAll({status:'RESOLVED',actor:'local-analyst'}); publishActionNotice(`Resolved ${count.toLocaleString()} finding${count === 1 ? '' : 's'}.`); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleReopen()      { if (!hasSelection) return; setActionLoading(true); try { const count = selectedFindings.length; await execAll({status:'OPEN',actor:'local-analyst'}); publishActionNotice(`Reopened ${count.toLocaleString()} finding${count === 1 ? '' : 's'}.`); } catch(e){console.error(e);} finally{setActionLoading(false); setShowMoreActions(false);} }
+  async function handleDefer()       { setActionLoading(true); try { const count = selectedFindings.length; await execAll({status:'SUPPRESSED',suppressionReason:deferReason||'DEFERRED',suppressedUntil:deferExpiry?new Date(deferExpiry).toISOString():undefined,actor:'local-analyst'}); publishActionNotice(`Deferred ${count.toLocaleString()} finding${count === 1 ? '' : 's'}.`); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleFalsePos()    { setActionLoading(true); try { const count = selectedFindings.length; await execAll({status:'SUPPRESSED',suppressionReason:`FALSE_POSITIVE${fpJustification?': '+fpJustification:''}`,actor:'local-analyst'}); publishActionNotice(`Marked ${count.toLocaleString()} finding${count === 1 ? '' : 's'} as false positive.`); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleDuplicate()   { setActionLoading(true); try { const count = selectedFindings.length; await execAll({status:'SUPPRESSED',suppressionReason:`DUPLICATE${duplicateOf?': '+duplicateOf:''}`,actor:'local-analyst'}); publishActionNotice(`Marked ${count.toLocaleString()} finding${count === 1 ? '' : 's'} as duplicate.`); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
+  async function handleAssign()      { setActionLoading(true); try { const count = selectedFindings.length; await execAll({assignedTo:assignGroupTarget,actor:'local-analyst'}); publishActionNotice(`Assigned ${count.toLocaleString()} finding${count === 1 ? '' : 's'}${assignGroupTarget ? ` to ${assignGroupTarget}` : ''}.`); closeModal(); } catch(e){setActionError(String(e));} finally{setActionLoading(false);} }
   async function handleDelete() {
     setActionLoading(true);
     try {
+      const count = selectedFindings.length;
       await api.bulkDeleteFindings(selectedFindings.map(f => f.id));
       void findingsQuery.refetch();
       void summaryQuery.refetch();
       void distributionsQuery.refetch();
       void backlogHealthQuery.refetch();
       setSelectedIds(new Set());
+      publishActionNotice(`Deleted ${count.toLocaleString()} finding${count === 1 ? '' : 's'}.`);
       closeModal();
     } catch(e) { setActionError(String(e)); } finally { setActionLoading(false); }
   }
@@ -688,6 +709,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     try {
       const byCve = new Map<string,Finding[]>();
       for (const f of selectedFindings) { const l=byCve.get(f.vulnerabilityId)??[]; l.push(f); byCve.set(f.vulnerabilityId,l); }
+      publishActionNotice(`Submitting ServiceNow incident creation for ${selectedFindings.length.toLocaleString()} finding${selectedFindings.length === 1 ? '' : 's'}…`, 'info');
       for (const [cveId, findings] of byCve) {
         const top = findings.reduce((b,f)=>(SEVERITY_ORDER[f.severity]??5)<(SEVERITY_ORDER[b.severity]??5)?f:b, findings[0]!);
         const payload: CreateServiceNowIncidentRequest = {
@@ -700,8 +722,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         };
         await cveWorkbenchApi.createServiceNowIncident(cveId, payload);
       }
-      void findingsQuery.refetch(); setSelectedIds(new Set()); closeModal();
-    } catch(e) { setActionError(String(e)); }
+      void findingsQuery.refetch();
+      setSelectedIds(new Set());
+      publishActionNotice(`ServiceNow incident creation completed for ${selectedFindings.length.toLocaleString()} finding${selectedFindings.length === 1 ? '' : 's'} across ${byCve.size.toLocaleString()} CVE${byCve.size === 1 ? '' : 's'}.`);
+      closeModal();
+    } catch(e) { setActionNotice(null); setActionError(String(e)); }
     finally { setActionLoading(false); }
   }
 
@@ -1010,6 +1035,17 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
 
   return (
     <div className="fpl-root">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshingResults}
+        delayedMessage={delayedProjectionMessage}
+        refreshLabel="Refreshing findings while keeping current results visible…"
+      />
+      {actionNotice && (
+        <div className={`notice${actionNotice.tone === 'success' ? ' success' : ''}`} style={{ marginBottom: 12 }} role="status">
+          {actionNotice.message}
+        </div>
+      )}
       {workspaceError && (
         <div className="notice error" style={{ marginBottom: 12 }}>
           {workspaceError.message}
@@ -1178,6 +1214,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       {/* ── main table ───────────────────────────────────────────────────── */}
       <div className="fpl-table-wrap">
         {findingsQuery.error && <div className="notice error">Failed to load findings: {String(findingsQuery.error)}</div>}
+        {refreshingResults && rows.length > 0 ? (
+          <div className="notice" role="status" style={{ marginBottom: 12 }}>
+            Updating results for the active filters. Current rows stay visible until the refresh completes.
+          </div>
+        ) : null}
 
         <div className="fpl-table-scroll">
           <table className="fpl-table">
@@ -1192,7 +1233,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
               </tr>
             </thead>
             <tbody>
-              {loading && rows.length===0 ? (
+              {initialLoading && rows.length===0 ? (
                 <tr><td colSpan={visColDefs.length+1} className="fpl-loading-row">Loading findings…</td></tr>
               ) : rows.length===0 ? (
                 <tr><td colSpan={visColDefs.length+1} className="fpl-empty-row">

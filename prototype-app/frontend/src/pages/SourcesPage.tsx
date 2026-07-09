@@ -295,6 +295,7 @@ export function SourcesPage({
   const actor = useActor();
   const queryClient = useQueryClient();
   const [message, setMessage] = React.useState('');
+  const [messageTone, setMessageTone] = React.useState<'info' | 'success' | 'warning' | 'error'>('info');
   const [busy, setBusy] = React.useState<string | null>(null);
   const [confirmFullSync, setConfirmFullSync] = React.useState(false);
   const [nvdFullSyncApiKey, setNvdFullSyncApiKey] = React.useState(readStoredNvdFullSyncApiKey);
@@ -346,12 +347,29 @@ export function SourcesPage({
   const { refetch: refetchVexRepairSummary } = vexRepairSummaryQuery;
   const { refetch: refetchSourceFilterConfig } = sourceFilterConfigQuery;
 
+  const publishMessage = React.useCallback((text: string, tone: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+    setMessage(text);
+    setMessageTone(tone);
+  }, []);
+
+  const describeQueuedRun = React.useCallback((label: string, runId?: string, status?: string, detail?: string): string => {
+    const normalized = String(status ?? '').trim().toUpperCase();
+    const runLabel = runId ? `Run ${runId}` : 'Run';
+    if (normalized === 'RUNNING' || normalized === 'IN_PROGRESS' || normalized === 'PROCESSING') {
+      return `${label} is running. ${runLabel} is in progress.${detail ? ` ${detail}` : ''}`;
+    }
+    if (normalized === 'COMPLETED' || normalized === 'SUCCEEDED' || normalized === 'SUCCESS') {
+      return `${label} completed.${detail ? ` ${detail}` : ''}`;
+    }
+    return `${label} queued. ${runLabel} is waiting to start.${detail ? ` ${detail}` : ''}`;
+  }, []);
+
   const refreshRuns = React.useCallback(async () => {
     const result = await refetchSyncRuns();
     if (result.error) {
-      setMessage(result.error instanceof Error ? result.error.message : String(result.error));
+      publishMessage(result.error instanceof Error ? result.error.message : String(result.error), 'error');
     }
-  }, [refetchSyncRuns]);
+  }, [publishMessage, refetchSyncRuns]);
 
   const refreshVexRepairSummary = React.useCallback(async () => {
     if (!shouldLoadVexRepairSummary) {
@@ -359,9 +377,9 @@ export function SourcesPage({
     }
     const result = await refetchVexRepairSummary();
     if (result.error) {
-      setMessage(result.error instanceof Error ? result.error.message : String(result.error));
+      publishMessage(result.error instanceof Error ? result.error.message : String(result.error), 'error');
     }
-  }, [shouldLoadVexRepairSummary, refetchVexRepairSummary]);
+  }, [publishMessage, shouldLoadVexRepairSummary, refetchVexRepairSummary]);
 
   const refreshSourceFilters = React.useCallback(async () => {
     if (activeSourceFilterKey == null) {
@@ -371,9 +389,9 @@ export function SourcesPage({
     }
     const result = await refetchSourceFilterConfig();
     if (result.error && !isNotFoundError(result.error)) {
-      setMessage(result.error instanceof Error ? result.error.message : String(result.error));
+      publishMessage(result.error instanceof Error ? result.error.message : String(result.error), 'error');
     }
-  }, [activeSourceFilterKey, refetchSourceFilterConfig]);
+  }, [activeSourceFilterKey, publishMessage, refetchSourceFilterConfig]);
 
   React.useEffect(() => {
     if (refreshSignal === previousRefreshSignalRef.current) {
@@ -429,17 +447,17 @@ export function SourcesPage({
     fn: () => Promise<{ runId?: string; status?: string; message?: string } | unknown>
   ): Promise<void> => {
     setBusy(label);
-    setMessage(`${label} started...`);
+    publishMessage(`${label} accepted. Checking run status…`);
     try {
       const response = await fn();
       if (response && typeof response === 'object' && 'runId' in response) {
         const typed = response as { runId?: string; status?: string; message?: string };
-        setMessage(`${label} queued: ${typed.runId ?? 'n/a'} (${typed.status ?? 'queued'})`);
+        publishMessage(describeQueuedRun(label, typed.runId, typed.status, typed.message), 'info');
       } else if (response && typeof response === 'object' && 'inserted' in response) {
         const typed = response as { inserted?: number; updated?: number };
-        setMessage(`${label} finished. Inserted ${typed.inserted ?? 0}, updated ${typed.updated ?? 0}.`);
+        publishMessage(`${label} completed. Inserted ${typed.inserted ?? 0}, updated ${typed.updated ?? 0}.`, 'success');
       } else {
-        setMessage(`${label} completed`);
+        publishMessage(`${label} completed.`, 'success');
       }
       if (shouldLoadRuns) {
         await refreshRuns();
@@ -449,11 +467,11 @@ export function SourcesPage({
         await queryClient.invalidateQueries({ queryKey: ['source-filter-config', activeSourceFilterKey] });
       }
     } catch (e) {
-      setMessage(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+      publishMessage(`${label} failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(null);
     }
-  }, [activeSourceFilterKey, queryClient, refreshRuns, refreshVexRepairSummary, shouldLoadRuns]);
+  }, [activeSourceFilterKey, describeQueuedRun, publishMessage, queryClient, refreshRuns, refreshVexRepairSummary, shouldLoadRuns]);
 
   const saveSourceFilters = React.useCallback(async (silent = false): Promise<boolean> => {
     if (activeSourceFilterKey == null) {
@@ -461,7 +479,7 @@ export function SourcesPage({
     }
     if (!canEditSourceFilters) {
       if (!silent) {
-        setMessage('Your role can view tenant source filters, but cannot update them.');
+        publishMessage('Your role can view tenant source filters, but cannot update them.', 'warning');
       }
       return false;
     }
@@ -476,29 +494,29 @@ export function SourcesPage({
       setSourceFilters(sourceFilterFormFromConfig(activeSourceFilterKey, saved));
       setIsDirty(false);
       if (!silent) {
-        setMessage(`${saved.sourceSystem.toUpperCase()} filters saved.`);
+        publishMessage(`${saved.sourceSystem.toUpperCase()} filters saved. New sync runs will use the updated filter set.`, 'success');
       }
       return true;
     } catch (e) {
       if (isNotFoundError(e)) {
         if (!silent) {
-          setMessage('Source filters are not available until the backend is refreshed.');
+          publishMessage('Source filters are not available until the backend is refreshed.', 'warning');
         }
         return silent;
       }
-      setMessage(e instanceof Error ? e.message : String(e));
+      publishMessage(e instanceof Error ? e.message : String(e), 'error');
       return false;
     } finally {
       setSavingSourceFilters(false);
     }
-  }, [activeSourceFilterKey, canEditSourceFilters, queryClient, sourceFilters]);
+  }, [activeSourceFilterKey, canEditSourceFilters, publishMessage, queryClient, sourceFilters]);
 
   const runSourceAction = React.useCallback(async (
     label: string,
     fn: () => Promise<{ runId?: string; status?: string; message?: string } | unknown>
   ): Promise<void> => {
     if (!canRunPlatformFeeds) {
-      setMessage('Central vulnerability repository sync is restricted to Platform Owners.');
+      publishMessage('Central vulnerability repository sync is restricted to Platform Owners.', 'warning');
       return;
     }
     if (activeSourceFilterKey != null) {
@@ -508,12 +526,12 @@ export function SourcesPage({
       }
     }
     await runAction(label, fn);
-  }, [activeSourceFilterKey, canRunPlatformFeeds, runAction, saveSourceFilters]);
+  }, [activeSourceFilterKey, canRunPlatformFeeds, publishMessage, runAction, saveSourceFilters]);
 
   const runNvdFullSync = (): void => {
     if (!currentNvdFullSyncApiKey) {
       setNvdFullSyncApiKeyRequired(true);
-      setMessage('Enter an NVD API key before starting the full corpus sync.');
+      publishMessage('Enter an NVD API key before starting the full corpus sync.', 'warning');
       window.requestAnimationFrame(() => {
         nvdFullSyncApiKeyInputRef.current?.focus();
       });
@@ -1123,7 +1141,14 @@ export function SourcesPage({
         </>
       )}
 
-      {message && <div className="notice">{message}</div>}
+      {message && (
+        <div
+          className={`notice${messageTone === 'error' ? ' error' : messageTone === 'success' ? ' success' : messageTone === 'warning' ? ' warning' : ''}`}
+          role={messageTone === 'error' ? 'alert' : 'status'}
+        >
+          {message}
+        </div>
+      )}
 
       {showQueue && (
         <>

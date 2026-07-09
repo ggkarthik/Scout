@@ -89,6 +89,7 @@ describe('InventoryComponentViewsPage', () => {
     renderWithProviders(<InventoryComponentViewsPage selectedView="hosts" />);
     await waitFor(() => expect(screen.getByText('web-prod-01')).toBeInTheDocument());
     expect(screen.getByText('lodash')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('renders summary stats when data is present', async () => {

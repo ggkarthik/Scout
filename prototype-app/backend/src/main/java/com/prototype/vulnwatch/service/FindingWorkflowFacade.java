@@ -33,7 +33,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FindingWorkflowFacade {
@@ -50,6 +52,7 @@ public class FindingWorkflowFacade {
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingUpsertService findingUpsertService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public FindingWorkflowFacade(
             FindingRepository findingRepository,
@@ -79,7 +82,17 @@ public class FindingWorkflowFacade {
         this.findingUpsertService = findingUpsertService;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public ManualFindingCreationResult createManualFindingsForVulnerability(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -92,7 +105,6 @@ public class FindingWorkflowFacade {
         return createManualFindingsForVulnerability(tenant, vulnerability, justification, userId, componentIds, applicabilityDecisions, analystDispositions, null, null);
     }
 
-    @Transactional
     public ManualFindingCreationResult createManualFindingsForVulnerability(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -104,9 +116,22 @@ public class FindingWorkflowFacade {
             String severityOverride,
             Instant dueDateOverride
     ) {
+        if (tenant == null || tenant.getId() == null) {
+            return createManualFindingsForVulnerabilityInSchema(
+                    tenant,
+                    vulnerability,
+                    justification,
+                    userId,
+                    componentIds,
+                    applicabilityDecisions,
+                    analystDispositions,
+                    severityOverride,
+                    dueDateOverride
+            );
+        }
         return tenantSchemaExecutionService.run(
                 tenant,
-                () -> createManualFindingsForVulnerabilityInSchema(
+                () -> executeWrite(() -> createManualFindingsForVulnerabilityInSchema(
                         tenant,
                         vulnerability,
                         justification,
@@ -116,7 +141,7 @@ public class FindingWorkflowFacade {
                         analystDispositions,
                         severityOverride,
                         dueDateOverride
-                )
+                ))
         );
     }
 
@@ -368,7 +393,6 @@ public class FindingWorkflowFacade {
      * CVE_FIX mode: creates ONE finding for the entire CVE, using the first eligible component
      * as the representative. All other affected assets are embedded in the finding's evidence JSON.
      */
-    @Transactional
     public ManualFindingCreationResult createCveFixGroupedFinding(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -394,7 +418,6 @@ public class FindingWorkflowFacade {
         );
     }
 
-    @Transactional
     public int suppressFindingsForVulnerability(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -406,24 +429,26 @@ public class FindingWorkflowFacade {
         if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null) {
             return 0;
         }
-        List<Finding> findings = tenantSchemaExecutionService.run(
+        return tenantSchemaExecutionService.run(
                 tenant,
-                () -> findingRepository.findByVulnerability_Id(vulnerability.getId())
-        );
-        if (findings.isEmpty()) {
-            return 0;
-        }
-        return findingWorkflowService.updateWorkflowBulk(
-                findings,
-                new FindingWorkflowUpdateRequest(
-                        FindingStatus.SUPPRESSED.name(),
-                        null,
-                        null,
-                        null,
-                        buildSuppressionReason(reason, justification),
-                        expiresAt,
-                        userId
-                )
+                () -> executeWrite(() -> {
+                    List<Finding> findings = findingRepository.findByVulnerability_Id(vulnerability.getId());
+                    if (findings.isEmpty()) {
+                        return 0;
+                    }
+                    return findingWorkflowService.updateWorkflowBulk(
+                            findings,
+                            new FindingWorkflowUpdateRequest(
+                                    FindingStatus.SUPPRESSED.name(),
+                                    null,
+                                    null,
+                                    null,
+                                    buildSuppressionReason(reason, justification),
+                                    expiresAt,
+                                    userId
+                            )
+                    );
+                })
         );
     }
 
@@ -650,6 +675,13 @@ public class FindingWorkflowFacade {
         } catch (Exception ignored) {
             return "{}";
         }
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     private boolean hasText(String value) {

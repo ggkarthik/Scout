@@ -14,7 +14,9 @@ import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -25,6 +27,8 @@ public class OwnershipRuleService {
     private final FindingsScoreService findingsScoreService;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate readTransactionTemplate;
+    private TransactionTemplate writeTransactionTemplate;
 
     public OwnershipRuleService(
             OwnershipRuleRepository repository,
@@ -40,48 +44,66 @@ public class OwnershipRuleService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional(readOnly = true)
-    public List<OwnershipRuleResponse> list(Tenant tenant) {
-        return tenantSchemaExecutionService.run(tenant, repository::findAllByOrderByExecutionOrderAscCreatedAtAsc)
-                .stream()
-                .map(rule -> toResponse(rule, tenant))
-                .toList();
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.readTransactionTemplate = null;
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
+    public List<OwnershipRuleResponse> list(Tenant tenant) {
+        return tenantSchemaExecutionService.run(tenant, () -> executeRead(() -> repository.findAllByOrderByExecutionOrderAscCreatedAtAsc()
+                .stream()
+                .map(this::toResponseInCurrentTenantSchema)
+                .toList()));
+    }
+
     public OwnershipRuleResponse create(Tenant tenant, OwnershipRuleRequest request) {
         validateRequest(request);
-        OwnershipRule rule = new OwnershipRule();
-        rule.setTenant(tenant);
-        rule.setName(request.name().trim());
-        rule.setConditionJson(request.condition());
-        rule.setUserGroup(request.userGroup().trim());
-        rule.setExecutionOrder(request.executionOrder() != null ? request.executionOrder() : 0);
-        return toResponse(repository.save(rule), tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            OwnershipRule rule = new OwnershipRule();
+            rule.setTenant(tenant);
+            rule.setName(request.name().trim());
+            rule.setConditionJson(request.condition());
+            rule.setUserGroup(request.userGroup().trim());
+            rule.setExecutionOrder(request.executionOrder() != null ? request.executionOrder() : 0);
+            return toResponseInCurrentTenantSchema(repository.save(rule));
+        }));
     }
 
-    @Transactional
     public OwnershipRuleResponse update(UUID id, Tenant tenant, OwnershipRuleRequest request) {
         validateRequest(request);
-        OwnershipRule rule = repository.findById(id)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
-        rule.setName(request.name().trim());
-        rule.setConditionJson(request.condition());
-        rule.setUserGroup(request.userGroup().trim());
-        if (request.executionOrder() != null) {
-            rule.setExecutionOrder(request.executionOrder());
-        }
-        rule.touch();
-        return toResponse(repository.save(rule), tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            OwnershipRule rule = repository.findById(id)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
+            rule.setName(request.name().trim());
+            rule.setConditionJson(request.condition());
+            rule.setUserGroup(request.userGroup().trim());
+            if (request.executionOrder() != null) {
+                rule.setExecutionOrder(request.executionOrder());
+            }
+            rule.touch();
+            return toResponseInCurrentTenantSchema(repository.save(rule));
+        }));
     }
 
-    @Transactional
     public void delete(UUID id, Tenant tenant) {
-        OwnershipRule rule = repository.findById(id)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
-        repository.delete(rule);
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            OwnershipRule rule = repository.findById(id)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
+            repository.delete(rule);
+            return null;
+        }));
     }
 
     /**
@@ -101,16 +123,14 @@ public class OwnershipRuleService {
      * Applies ownership rules to all findings for the tenant.
      * Returns the count of findings whose ownerGroup was changed.
      */
-    @Transactional
     public int applyToAll(Tenant tenant) {
-        List<OwnershipRule> rules = tenantSchemaExecutionService.run(
-                tenant,
-                repository::findAllByOrderByExecutionOrderAscCreatedAtAsc
-        );
-        if (rules.isEmpty()) {
-            return 0;
-        }
-        return applyRulesToFindings(tenant, rules);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            List<OwnershipRule> rules = repository.findAllByOrderByExecutionOrderAscCreatedAtAsc();
+            if (rules.isEmpty()) {
+                return 0;
+            }
+            return applyRulesToFindingsInCurrentTenantSchema(rules);
+        }));
     }
 
     /**
@@ -118,19 +138,17 @@ public class OwnershipRuleService {
      * Any finding matching the rule has its ownerGroup set to the rule's userGroup.
      * Returns the count of findings updated.
      */
-    @Transactional
     public int applyRule(UUID ruleId, Tenant tenant) {
-        OwnershipRule rule = repository.findById(ruleId)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
-        return applyRulesToFindings(tenant, List.of(rule));
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            OwnershipRule rule = repository.findById(ruleId)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ownership rule not found"));
+            return applyRulesToFindingsInCurrentTenantSchema(List.of(rule));
+        }));
     }
 
-    private int applyRulesToFindings(Tenant tenant, List<OwnershipRule> rules) {
-        List<Finding> findings = tenantSchemaExecutionService.run(
-                tenant,
-                () -> findingRepository.findAllByOrderByUpdatedAtDesc()
-        );
+    private int applyRulesToFindingsInCurrentTenantSchema(List<OwnershipRule> rules) {
+        List<Finding> findings = findingRepository.findAllByOrderByUpdatedAtDesc();
         List<Finding> changed = new ArrayList<>();
         for (Finding finding : findings) {
             String previous = finding.getOwnerGroup();
@@ -188,11 +206,8 @@ public class OwnershipRuleService {
         }
     }
 
-    private OwnershipRuleResponse toResponse(OwnershipRule rule, Tenant tenant) {
-        long matchedCount = tenantSchemaExecutionService.run(
-                tenant,
-                () -> findingRepository.countByOwnerGroup(rule.getUserGroup())
-        );
+    private OwnershipRuleResponse toResponseInCurrentTenantSchema(OwnershipRule rule) {
+        long matchedCount = findingRepository.countByOwnerGroup(rule.getUserGroup());
         return new OwnershipRuleResponse(
                 rule.getId(),
                 rule.getName(),
@@ -203,5 +218,20 @@ public class OwnershipRuleService {
                 rule.getCreatedAt(),
                 rule.getUpdatedAt()
         );
+    }
+
+    private <T> T executeRead(java.util.function.Supplier<T> work) {
+        if (readTransactionTemplate == null) {
+            return work.get();
+        }
+        T result = readTransactionTemplate.execute(status -> work.get());
+        return result == null ? work.get() : result;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

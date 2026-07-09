@@ -39,8 +39,13 @@ public class FindingProjectionRefreshService {
     }
 
     public int refreshTenant(Tenant tenant) {
-        Integer refreshed = writeTransactionTemplate.execute(status -> refreshTenantInternal(tenant));
-        return refreshed == null ? 0 : refreshed;
+        if (tenant == null || tenant.getId() == null) {
+            return 0;
+        }
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            Integer refreshed = writeTransactionTemplate.execute(status -> refreshTenantInCurrentTenantSchema());
+            return refreshed == null ? 0 : refreshed;
+        });
     }
 
     long countProjectedRows() {
@@ -56,115 +61,111 @@ public class FindingProjectionRefreshService {
         return findingRepository.count();
     }
 
-    private int refreshTenantInternal(Tenant tenant) {
-        if (tenant == null || tenant.getId() == null) {
-            return 0;
-        }
+    private int refreshTenantInCurrentTenantSchema() {
         long startedAtNs = System.nanoTime();
         int statusCode = 200;
         try {
-            return tenantSchemaExecutionService.run(tenant, () -> {
-                jdbcTemplate.getJdbcTemplate().execute("LOCK TABLE finding_list_projection IN EXCLUSIVE MODE");
-                jdbcTemplate.update("DELETE FROM finding_list_projection", new MapSqlParameterSource());
-                jdbcTemplate.update("""
-                        INSERT INTO finding_list_projection (
-                            finding_id,
-                            display_id,
-                            severity,
-                            status,
-                            decision_state,
-                            creation_source,
-                            match_method,
-                            vex_status,
-                            vex_freshness,
-                            vex_provider,
-                            confidence_score,
-                            vulnerability_id,
-                            package_name,
-                            ecosystem,
-                            owner_group,
-                            assigned_to,
-                            incident_id,
-                            due_at,
-                            asset_name,
-                            support_group,
-                            patch_available,
-                            suppressed_until,
-                            risk_score,
-                            updated_at,
-                            created_at,
-                            first_observed_at
-                        )
-                        SELECT
-                            finding.id,
-                            finding.display_id,
-                            upper(coalesce(finding.severity_override, vulnerability.severity)),
-                            cast(finding.status as varchar),
-                            cast(finding.decision_state as varchar),
-                            cast(finding.creation_source as varchar),
-                            lower(finding.matched_by),
-                            finding.vex_status,
-                            finding.vex_freshness,
-                            finding.vex_provider,
-                            finding.confidence_score,
-                            vulnerability.external_id,
-                            component.package_name,
-                            component.ecosystem,
-                            finding.owner_group,
-                            finding.assigned_to,
-                            finding.incident_id,
-                            finding.due_at,
-                            asset.name,
-                            asset.support_group,
-                            EXISTS (
-                                SELECT 1
-                                FROM fix_records fix_record
-                                WHERE upper(fix_record.cve_id) = upper(vulnerability.external_id)
-                                  AND upper(cast(fix_record.fix_type as varchar)) <> 'NO_FIX'
-                            ),
-                            finding.suppressed_until,
-                            finding.risk_score,
-                            finding.updated_at,
-                            finding.created_at,
-                            finding.first_observed_at
-                        FROM findings finding
-                        JOIN vulnerabilities vulnerability ON vulnerability.id = finding.vulnerability_id
-                        JOIN inventory_components component ON component.id = finding.component_id
-                        JOIN assets asset ON asset.id = finding.asset_id
-                        """,
-                        new MapSqlParameterSource());
-                long findingCount = countProjectedRows();
-                long sourceFindingCount = countSourceFindings();
-                long rebuildDurationMs = (System.nanoTime() - startedAtNs) / 1_000_000L;
-                MapSqlParameterSource params = new MapSqlParameterSource()
-                        .addValue("projectionKey", STATUS_KEY)
-                        .addValue("lastComputedAt", Timestamp.from(Instant.now()))
-                        .addValue("findingCount", findingCount)
-                        .addValue("sourceFindingCount", sourceFindingCount)
-                        .addValue("lastRebuildDurationMs", rebuildDurationMs);
-                jdbcTemplate.update("""
-                        INSERT INTO finding_workspace_projection_status (
-                            projection_key,
-                            last_computed_at,
-                            finding_count,
-                            source_finding_count,
-                            last_rebuild_duration_ms
-                        )
-                        VALUES (
-                            :projectionKey,
-                            :lastComputedAt,
-                            :findingCount,
-                            :sourceFindingCount,
-                            :lastRebuildDurationMs
-                        )
-                        ON CONFLICT (projection_key) DO UPDATE SET
-                            last_computed_at = EXCLUDED.last_computed_at,
-                            finding_count = EXCLUDED.finding_count,
-                            source_finding_count = EXCLUDED.source_finding_count,
-                            last_rebuild_duration_ms = EXCLUDED.last_rebuild_duration_ms
-                        """, params);
-                return Math.toIntExact(findingCount);
-            });
+            jdbcTemplate.getJdbcTemplate().execute("LOCK TABLE finding_list_projection IN EXCLUSIVE MODE");
+            jdbcTemplate.update("DELETE FROM finding_list_projection", new MapSqlParameterSource());
+            jdbcTemplate.update("""
+                    INSERT INTO finding_list_projection (
+                        finding_id,
+                        display_id,
+                        severity,
+                        status,
+                        decision_state,
+                        creation_source,
+                        match_method,
+                        vex_status,
+                        vex_freshness,
+                        vex_provider,
+                        confidence_score,
+                        vulnerability_id,
+                        package_name,
+                        ecosystem,
+                        owner_group,
+                        assigned_to,
+                        incident_id,
+                        due_at,
+                        asset_name,
+                        support_group,
+                        patch_available,
+                        suppressed_until,
+                        risk_score,
+                        updated_at,
+                        created_at,
+                        first_observed_at
+                    )
+                    SELECT
+                        finding.id,
+                        finding.display_id,
+                        upper(coalesce(finding.severity_override, vulnerability.severity)),
+                        cast(finding.status as varchar),
+                        cast(finding.decision_state as varchar),
+                        cast(finding.creation_source as varchar),
+                        lower(finding.matched_by),
+                        finding.vex_status,
+                        finding.vex_freshness,
+                        finding.vex_provider,
+                        finding.confidence_score,
+                        vulnerability.external_id,
+                        component.package_name,
+                        component.ecosystem,
+                        finding.owner_group,
+                        finding.assigned_to,
+                        finding.incident_id,
+                        finding.due_at,
+                        asset.name,
+                        asset.support_group,
+                        patchable_cves.external_id_upper IS NOT NULL,
+                        finding.suppressed_until,
+                        finding.risk_score,
+                        finding.updated_at,
+                        finding.created_at,
+                        finding.first_observed_at
+                    FROM findings finding
+                    JOIN vulnerabilities vulnerability ON vulnerability.id = finding.vulnerability_id
+                    JOIN inventory_components component ON component.id = finding.component_id
+                    JOIN assets asset ON asset.id = finding.asset_id
+                    LEFT JOIN (
+                        SELECT DISTINCT upper(fix_record.cve_id) AS external_id_upper
+                        FROM fix_records fix_record
+                        WHERE upper(fix_record.fix_type) <> 'NO_FIX'
+                    ) patchable_cves
+                      ON patchable_cves.external_id_upper = upper(vulnerability.external_id)
+                    """,
+                    new MapSqlParameterSource());
+            long findingCount = countProjectedRows();
+            long sourceFindingCount = countSourceFindings();
+            long rebuildDurationMs = (System.nanoTime() - startedAtNs) / 1_000_000L;
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("projectionKey", STATUS_KEY)
+                    .addValue("lastComputedAt", Timestamp.from(Instant.now()))
+                    .addValue("findingCount", findingCount)
+                    .addValue("sourceFindingCount", sourceFindingCount)
+                    .addValue("lastRebuildDurationMs", rebuildDurationMs);
+            jdbcTemplate.update("""
+                    INSERT INTO finding_workspace_projection_status (
+                        projection_key,
+                        last_computed_at,
+                        finding_count,
+                        source_finding_count,
+                        last_rebuild_duration_ms
+                    )
+                    VALUES (
+                        :projectionKey,
+                        :lastComputedAt,
+                        :findingCount,
+                        :sourceFindingCount,
+                        :lastRebuildDurationMs
+                    )
+                    ON CONFLICT (projection_key) DO UPDATE SET
+                        last_computed_at = EXCLUDED.last_computed_at,
+                        finding_count = EXCLUDED.finding_count,
+                        source_finding_count = EXCLUDED.source_finding_count,
+                        last_rebuild_duration_ms = EXCLUDED.last_rebuild_duration_ms
+                    """, params);
+            return Math.toIntExact(findingCount);
         } catch (RuntimeException ex) {
             statusCode = 500;
             throw ex;

@@ -12,7 +12,9 @@ import java.util.UUID;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class RiskPolicyService {
@@ -21,22 +23,59 @@ public class RiskPolicyService {
     private final InventoryComponentRepository inventoryComponentRepository;
     private final ObjectProvider<FindingDeltaQueueService> findingDeltaQueueServiceProvider;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TransactionTemplate readTransactionTemplate;
+    private final TransactionTemplate writeTransactionTemplate;
 
     public RiskPolicyService(
             RiskPolicyRepository riskPolicyRepository,
             InventoryComponentRepository inventoryComponentRepository,
             ObjectProvider<FindingDeltaQueueService> findingDeltaQueueServiceProvider,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            PlatformTransactionManager transactionManager
     ) {
         this.riskPolicyRepository = riskPolicyRepository;
         this.inventoryComponentRepository = inventoryComponentRepository;
         this.findingDeltaQueueServiceProvider = findingDeltaQueueServiceProvider;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
     public RiskPolicy getOrCreate(Tenant tenant) {
-        return tenantSchemaExecutionService.run(tenant, riskPolicyRepository::findTopByOrderByUpdatedAtDesc)
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            RiskPolicy policy = writeTransactionTemplate.execute(status -> getOrCreateInCurrentTenantSchema(tenant));
+            return policy == null ? getOrCreateInCurrentTenantSchema(tenant) : policy;
+        });
+    }
+
+    public RiskPolicyResponse update(Tenant tenant, RiskPolicyRequest req) {
+        UpdateResult updateResult = tenantSchemaExecutionService.run(tenant, () -> {
+            UpdateResult result = writeTransactionTemplate.execute(status -> updateInCurrentTenantSchema(tenant, req));
+            return result == null ? updateInCurrentTenantSchema(tenant, req) : result;
+        });
+        enqueueAutomaticFindingRecomputeIfEnabled(tenant, updateResult.previousMode(), updateResult.saved().getFindingGenerationMode());
+        return toResponse(updateResult.saved());
+    }
+
+    public RiskPolicyResponse get(Tenant tenant) {
+        return toResponse(getOrCreate(tenant));
+    }
+
+    public String getFindingsScoreConfig(Tenant tenant) {
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            String scoreConfig = readTransactionTemplate.execute(status -> riskPolicyRepository.findTopByOrderByUpdatedAtDesc()
+                    .map(RiskPolicy::getFindingsScoreConfig)
+                    .orElse(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON));
+            return scoreConfig == null ? RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON : scoreConfig;
+        });
+    }
+
+    private RiskPolicy getOrCreateInCurrentTenantSchema(Tenant tenant) {
+        return riskPolicyRepository.findTopByOrderByUpdatedAtDesc()
                 .orElseGet(() -> {
                     RiskPolicy policy = new RiskPolicy();
                     policy.setTenant(tenant);
@@ -45,9 +84,8 @@ public class RiskPolicyService {
                 });
     }
 
-    @Transactional
-    public RiskPolicyResponse update(Tenant tenant, RiskPolicyRequest req) {
-        RiskPolicy policy = getOrCreate(tenant);
+    private UpdateResult updateInCurrentTenantSchema(Tenant tenant, RiskPolicyRequest req) {
+        RiskPolicy policy = getOrCreateInCurrentTenantSchema(tenant);
         RiskPolicy.FindingGenerationMode previousMode = policy.getFindingGenerationMode();
 
         if (req.criticalThreshold() != null) {
@@ -129,19 +167,7 @@ public class RiskPolicyService {
 
         policy.touch();
         RiskPolicy saved = riskPolicyRepository.save(policy);
-        enqueueAutomaticFindingRecomputeIfEnabled(tenant, previousMode, saved.getFindingGenerationMode());
-        return toResponse(saved);
-    }
-
-    public RiskPolicyResponse get(Tenant tenant) {
-        return toResponse(getOrCreate(tenant));
-    }
-
-    @Transactional(readOnly = true)
-    public String getFindingsScoreConfig(Tenant tenant) {
-        return tenantSchemaExecutionService.run(tenant, riskPolicyRepository::findTopByOrderByUpdatedAtDesc)
-                .map(policy -> policy.getFindingsScoreConfig())
-                .orElse(RiskPolicyPresets.DEFAULT_FINDINGS_SCORE_CONFIG_JSON);
+        return new UpdateResult(saved, previousMode);
     }
 
     private RiskPolicyResponse toResponse(RiskPolicy policy) {
@@ -212,5 +238,8 @@ public class RiskPolicyService {
         }
         findingDeltaQueueService.enqueueSoftwareDeltas(tenant.getId(), componentIds, "risk-policy-auto-enable");
         findingDeltaQueueService.enqueueNoiseReductionRefresh(tenant.getId(), "risk-policy-auto-enable");
+    }
+
+    private record UpdateResult(RiskPolicy saved, RiskPolicy.FindingGenerationMode previousMode) {
     }
 }

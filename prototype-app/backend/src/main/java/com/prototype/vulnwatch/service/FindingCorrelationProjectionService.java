@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class FindingCorrelationProjectionService {
@@ -43,7 +42,6 @@ public class FindingCorrelationProjectionService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional(readOnly = true)
     public NotApplicableProjection projectNotApplicableByCorrelation(Tenant tenant) {
         List<InventoryComponent> components = tenantSchemaExecutionService.run(
                 tenant,

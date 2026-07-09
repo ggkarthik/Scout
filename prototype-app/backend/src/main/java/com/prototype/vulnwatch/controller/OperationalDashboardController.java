@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.dto.OperationalMetricDefinitionResponse;
 import com.prototype.vulnwatch.dto.OperationalNoiseLifecycleResponse;
 import com.prototype.vulnwatch.dto.OperationalNormalizationQualityResponse;
 import com.prototype.vulnwatch.dto.OperationalConnectorIssueGroupResponse;
+import com.prototype.vulnwatch.dto.PerformanceScorecardResponse;
 import com.prototype.vulnwatch.dto.OperationalTenantAttentionResponse;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -20,6 +21,7 @@ import com.prototype.vulnwatch.dto.OperationalQualityIssuePageResponse;
 import com.prototype.vulnwatch.dto.OperationalQualitySummaryResponse;
 import com.prototype.vulnwatch.service.OperationalDashboardService;
 import com.prototype.vulnwatch.service.OperationalQualityReadService;
+import com.prototype.vulnwatch.service.PerformanceScorecardService;
 import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
@@ -38,17 +40,20 @@ public class OperationalDashboardController {
     private final WorkspaceService workspaceService;
     private final OperationalQualityReadService operationalQualityReadService;
     private final PlatformTenantAttentionService platformTenantAttentionService;
+    private final PerformanceScorecardService performanceScorecardService;
 
     public OperationalDashboardController(
             OperationalDashboardService operationalDashboardService,
             WorkspaceService workspaceService,
             OperationalQualityReadService operationalQualityReadService,
-            PlatformTenantAttentionService platformTenantAttentionService
+            PlatformTenantAttentionService platformTenantAttentionService,
+            PerformanceScorecardService performanceScorecardService
     ) {
         this.operationalDashboardService = operationalDashboardService;
         this.workspaceService = workspaceService;
         this.operationalQualityReadService = operationalQualityReadService;
         this.platformTenantAttentionService = platformTenantAttentionService;
+        this.performanceScorecardService = performanceScorecardService;
     }
 
     @GetMapping("/dashboard")
@@ -94,6 +99,11 @@ public class OperationalDashboardController {
     @GetMapping("/metric-catalog")
     public OperationalSectionResponse<List<OperationalMetricDefinitionResponse>> getMetricCatalog() {
         return operationalDashboardService.getMetricCatalog();
+    }
+
+    @GetMapping("/performance-scorecard")
+    public PerformanceScorecardResponse getPerformanceScorecard() {
+        return performanceScorecardService.build();
     }
 
     @GetMapping("/tenant-attention")

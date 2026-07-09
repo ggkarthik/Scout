@@ -22,7 +22,9 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class AssetLifecycleService {
@@ -34,6 +36,8 @@ public class AssetLifecycleService {
     private final WorkspaceService workspaceService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final TenantWorkRunner tenantWorkRunner;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
+    private TransactionTemplate writeTransactionTemplate;
 
     @Value("${app.assets.stale-days-to-inactive:30}")
     private int staleDaysToInactive;
@@ -56,70 +60,99 @@ public class AssetLifecycleService {
         this.tenantWorkRunner = tenantWorkRunner;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public CmdbAssetSyncResponse syncFromCmdb(CmdbAssetSyncRequest request) {
         Tenant tenant = workspaceService.getWorkspace();
-        int inserted = 0;
-        int updated = 0;
-        for (CmdbAssetRecordRequest record : request.assets()) {
-            Asset asset = tenantSchemaExecutionService.run(
-                    tenant,
-                    () -> assetRepository.findByIdentifier(record.assetIdentifier().trim())
-            ).orElse(null);
-            boolean isNew = asset == null;
-            if (isNew) {
-                asset = new Asset();
-                asset.setTenant(tenant);
-                asset.setIdentifier(record.assetIdentifier().trim());
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            int inserted = 0;
+            int updated = 0;
+            for (CmdbAssetRecordRequest record : request.assets()) {
+                Asset asset = assetRepository.findByIdentifier(record.assetIdentifier().trim()).orElse(null);
+                boolean isNew = asset == null;
+                if (isNew) {
+                    asset = new Asset();
+                    asset.setTenant(tenant);
+                    asset.setIdentifier(record.assetIdentifier().trim());
+                }
+                asset.setType(record.assetType());
+                asset.setName(record.assetName().trim());
+                asset.setServiceName(trimToNull(record.serviceName()));
+                asset.setEnvironment(trimToNull(record.environment()));
+                asset.setOwnerTeam(trimToNull(record.ownerTeam()));
+                asset.setOwnerEmail(trimToNull(record.ownerEmail()));
+                asset.setBusinessCriticality(record.businessCriticality() == null ? BusinessCriticality.MEDIUM : record.businessCriticality());
+                if (record.assetType() == com.prototype.vulnwatch.domain.AssetType.CONTAINER_IMAGE) {
+                    asset.setImageDigest(trimToNull(record.imageDigest()));
+                    asset.setImageTag(trimToNull(record.imageTag()));
+                    asset.setImageRepository(trimToNull(record.imageRepository()));
+                    asset.setBaseImageDigest(trimToNull(record.baseImageDigest()));
+                }
+                AssetState previousState = asset.getState();
+                AssetState nextState = record.state() == null ? AssetState.ACTIVE : record.state();
+                asset.setState(nextState);
+                asset.setLastCmdbSyncAt(Instant.now());
+                asset = assetRepository.save(asset);
+                if (isNew) {
+                    inserted++;
+                } else {
+                    updated++;
+                }
+                if (previousState != nextState) {
+                    handleStateTransitionInCurrentTenantSchema(asset, previousState, nextState, "cmdb-sync");
+                }
             }
-            asset.setType(record.assetType());
-            asset.setName(record.assetName().trim());
-            asset.setServiceName(trimToNull(record.serviceName()));
-            asset.setEnvironment(trimToNull(record.environment()));
-            asset.setOwnerTeam(trimToNull(record.ownerTeam()));
-            asset.setOwnerEmail(trimToNull(record.ownerEmail()));
-            asset.setBusinessCriticality(record.businessCriticality() == null ? BusinessCriticality.MEDIUM : record.businessCriticality());
-            // BLG-011: persist container-image artifact identity fields when present
-            if (record.assetType() == com.prototype.vulnwatch.domain.AssetType.CONTAINER_IMAGE) {
-                asset.setImageDigest(trimToNull(record.imageDigest()));
-                asset.setImageTag(trimToNull(record.imageTag()));
-                asset.setImageRepository(trimToNull(record.imageRepository()));
-                asset.setBaseImageDigest(trimToNull(record.baseImageDigest()));
-            }
-            AssetState previousState = asset.getState();
-            AssetState nextState = record.state() == null ? AssetState.ACTIVE : record.state();
-            asset.setState(nextState);
-            asset.setLastCmdbSyncAt(Instant.now());
-            asset = assetRepository.save(asset);
-            if (isNew) {
-                inserted++;
-            } else {
-                updated++;
-            }
-            if (previousState != nextState) {
-                handleStateTransition(asset, previousState, nextState, "cmdb-sync");
-            }
-        }
-        return new CmdbAssetSyncResponse(
-                request.assets().size(),
-                inserted,
-                updated,
-                "CMDB asset sync completed");
+            return new CmdbAssetSyncResponse(
+                    request.assets().size(),
+                    inserted,
+                    updated,
+                    "CMDB asset sync completed");
+        }));
     }
 
-    @Transactional
     public void markInventoryIngested(Asset asset) {
-        AssetState previousState = asset.getState();
-        asset.setLastInventoryAt(Instant.now());
-        asset.setState(AssetState.ACTIVE);
-        assetRepository.save(asset);
-        if (previousState != AssetState.ACTIVE) {
-            handleStateTransition(asset, previousState, AssetState.ACTIVE, "inventory-ingest");
+        if (asset == null || asset.getTenant() == null) {
+            return;
         }
+        tenantSchemaExecutionService.run(asset.getTenant(), () -> executeWrite(() -> {
+            AssetState previousState = asset.getState();
+            asset.setLastInventoryAt(Instant.now());
+            asset.setState(AssetState.ACTIVE);
+            assetRepository.save(asset);
+            if (previousState != AssetState.ACTIVE) {
+                handleStateTransitionInCurrentTenantSchema(asset, previousState, AssetState.ACTIVE, "inventory-ingest");
+            }
+            return null;
+        }));
     }
 
-    @Transactional
     public void handleStateTransition(Asset asset, AssetState from, AssetState to, String actor) {
+        if (asset == null || asset.getTenant() == null) {
+            return;
+        }
+        tenantSchemaExecutionService.run(asset.getTenant(), () -> executeWrite(() -> {
+            handleStateTransitionInCurrentTenantSchema(asset, from, to, actor);
+            return null;
+        }));
+    }
+
+    private void handleStateTransitionInCurrentTenantSchema(Asset asset, AssetState from, AssetState to, String actor) {
         if (to == AssetState.ACTIVE) {
             return;
         }
@@ -148,6 +181,9 @@ public class AssetLifecycleService {
 
     @Scheduled(cron = "0 5 2 * * *")
     public void markStaleAssetsInactive() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("asset-lifecycle.mark-stale-assets-inactive")) {
+            return;
+        }
         Instant cutoff = Instant.now().minus(Math.max(1, staleDaysToInactive), ChronoUnit.DAYS);
         tenantWorkRunner.forEachActiveTenant(tenant -> {
             List<Asset> stale = assetRepository.findActiveAssetsWithInventoryBefore(cutoff);
@@ -155,7 +191,7 @@ public class AssetLifecycleService {
                 AssetState previousState = asset.getState();
                 asset.setState(AssetState.INACTIVE);
                 assetRepository.save(asset);
-                handleStateTransition(asset, previousState, AssetState.INACTIVE, "stale-inventory");
+                handleStateTransitionInCurrentTenantSchema(asset, previousState, AssetState.INACTIVE, "stale-inventory");
             }
         });
     }
@@ -166,5 +202,12 @@ public class AssetLifecycleService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

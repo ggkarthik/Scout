@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, apiRequest, clearStoredAuthToken, setStoredAuthToken } from './client';
+import { api, apiRequest, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from './client';
 
 function buildToken(payload: Record<string, unknown>): string {
   const encode = (value: Record<string, unknown>) => btoa(JSON.stringify(value))
@@ -184,5 +184,32 @@ describe('api method coverage', () => {
     const headers = new Headers(init?.headers);
     expect(headers.get('Authorization')).toBe('Bearer test-session-token');
     expect(headers.has('X-API-Key')).toBe(false);
+  });
+
+  it('does not clear the session for a plain 403 forbidden response', async () => {
+    setStoredAuthToken('platform-owner-session');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ message: 'Forbidden' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' }
+      })
+    );
+
+    await expect(api.getRiskPolicy()).rejects.toThrow('Forbidden');
+    expect(getStoredAuthToken()).toBe('platform-owner-session');
+  });
+
+  it('clears the session for an expired bearer token response', async () => {
+    window.history.replaceState({}, '', '/login');
+    setStoredAuthToken('expired-session');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ message: 'Bearer token expired' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' }
+      })
+    );
+
+    await expect(api.getRiskPolicy()).rejects.toThrow('Bearer token expired');
+    expect(getStoredAuthToken()).toBe('');
   });
 });

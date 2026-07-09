@@ -16,6 +16,15 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
         long getEntryCount();
     }
 
+    interface StatusSummaryRow {
+        long getPendingCount();
+        long getProcessingCount();
+        long getFailedCount();
+        Instant getOldestVisiblePendingAt();
+        Instant getOldestProcessingStartedAt();
+        Instant getLatestCompletedAt();
+    }
+
     /**
      * Atomically claim up to {@code limit} PENDING entries that are ready to process.
      * SKIP LOCKED ensures concurrent pollers never pick the same row.
@@ -58,6 +67,39 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
     @Query("SELECT COUNT(e) FROM FindingDeltaQueueEntry e WHERE e.status = 'PENDING'")
     long countPending();
 
+    @Query("SELECT COUNT(e) FROM FindingDeltaQueueEntry e WHERE e.status = 'PROCESSING'")
+    long countProcessing();
+
+    @Query("""
+            select e
+            from FindingDeltaQueueEntry e
+            where upper(e.status) = 'PROCESSING'
+              and (e.processingStartedAt is null or e.processingStartedAt <= :cutoff)
+            order by e.processingStartedAt asc, e.id asc
+            """)
+    List<FindingDeltaQueueEntry> findStaleProcessingEntries(@Param("cutoff") Instant cutoff);
+
+    @Query(value = """
+            select
+              coalesce(sum(case when status = 'PENDING' then 1 else 0 end), 0) as pendingCount,
+              coalesce(sum(case when status = 'PROCESSING' then 1 else 0 end), 0) as processingCount,
+              coalesce(sum(case when status = 'FAILED' then 1 else 0 end), 0) as failedCount,
+              min(case
+                    when status = 'PENDING' and visible_after <= :before
+                    then visible_after
+                  end) as oldestVisiblePendingAt,
+              min(case
+                    when status = 'PROCESSING'
+                    then processing_started_at
+                  end) as oldestProcessingStartedAt,
+              max(case
+                    when status = 'DONE'
+                    then completed_at
+                  end) as latestCompletedAt
+            from finding_delta_queue
+            """, nativeQuery = true)
+    StatusSummaryRow summarizeStatus(@Param("before") Instant before);
+
     @Query("""
             select e.eventType as eventType, count(e) as entryCount
             from FindingDeltaQueueEntry e
@@ -71,6 +113,17 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
 
     @Query("SELECT MAX(e.completedAt) FROM FindingDeltaQueueEntry e WHERE e.status = 'DONE'")
     Instant findLatestCompletedAt();
+
+    @Query("""
+            select min(e.visibleAfter)
+            from FindingDeltaQueueEntry e
+            where e.status = 'PENDING'
+              and e.visibleAfter <= :before
+            """)
+    Instant findOldestVisiblePendingAt(@Param("before") Instant before);
+
+    @Query("SELECT MIN(e.processingStartedAt) FROM FindingDeltaQueueEntry e WHERE e.status = 'PROCESSING'")
+    Instant findOldestProcessingStartedAt();
 
     /**
      * BLG-014: Count PENDING entries whose visible_after is before the given threshold —

@@ -8,6 +8,7 @@ import {
   type DataTableRow
 } from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import type { HostAssetDetail } from '../features/inventory/api-types';
 import { useHostAssetDetailQuery } from '../features/inventory/queries';
 import { readHostAssetIdFromSearch } from '../features/inventory/searchState';
@@ -852,8 +853,22 @@ export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPagePro
   );
   const hostDetailQuery = useHostAssetDetailQuery(selectedAssetId);
   const selectedHost = hostDetailQuery.data ?? null;
-  const loadingDetail = hostDetailQuery.isLoading || hostDetailQuery.isFetching;
+  const loadingDetail = hostDetailQuery.isLoading && !selectedHost;
+  const refreshingDetail = hostDetailQuery.isFetching && !!selectedHost;
   const error = hostDetailQuery.error instanceof Error ? hostDetailQuery.error.message : '';
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    hostDetailQuery.dataUpdatedAt,
+    selectedHost?.host.lastInventoryAt,
+    selectedHost?.host.lastCmdbSyncAt,
+    selectedHost?.host.ssmLastPingAt,
+    selectedHost?.host.ssmInventoryLastCapturedAt,
+  ]), [
+    hostDetailQuery.dataUpdatedAt,
+    selectedHost?.host.lastCmdbSyncAt,
+    selectedHost?.host.lastInventoryAt,
+    selectedHost?.host.ssmInventoryLastCapturedAt,
+    selectedHost?.host.ssmLastPingAt,
+  ]);
 
   const handleClose = React.useCallback(() => {
     if (onClose) {
@@ -881,6 +896,11 @@ export function HostAssetDetailPage({ assetId, onClose }: HostAssetDetailPagePro
           </button>
         </div>
       )}
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshingDetail}
+        refreshLabel="Refreshing host detail while keeping current context visible…"
+      />
       {error && <div className="notice error">{error}</div>}
       <HostDetailSections assetId={selectedAssetId} hostDetail={selectedHost} loadingDetail={loadingDetail} />
     </section>

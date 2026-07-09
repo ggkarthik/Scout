@@ -30,20 +30,22 @@ public class TenantWorkRunner {
     }
 
     public void forEachActiveTenant(Consumer<Tenant> work) {
-        try {
-            for (Tenant tenant : tenantService.listActiveTenants()) {
-                try {
-                    runScoped(tenant, () -> {
-                        work.accept(tenant);
-                        return null;
-                    });
-                } catch (Exception ex) {
-                    LOG.warn("Tenant-scoped background work failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+        TenantContext.runAsPlatform(() -> {
+            try {
+                for (Tenant tenant : tenantService.listActiveTenants()) {
+                    try {
+                        runScoped(tenant, () -> {
+                            work.accept(tenant);
+                            return null;
+                        });
+                    } catch (Exception ex) {
+                        LOG.warn("Tenant-scoped background work failed for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+                    }
                 }
+            } catch (Exception ex) {
+                LOG.warn("Tenant-scoped background work failed before tenant iteration: {}", ex.getMessage(), ex);
             }
-        } catch (Exception ex) {
-            LOG.warn("Tenant-scoped background work failed before tenant iteration: {}", ex.getMessage(), ex);
-        }
+        });
     }
 
     public void runScoped(Tenant tenant, Runnable work) {

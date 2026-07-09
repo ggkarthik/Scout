@@ -26,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.support.CallbackPreferringPlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 @ExtendWith(MockitoExtension.class)
 class RiskPolicyServiceTest {
@@ -34,6 +36,7 @@ class RiskPolicyServiceTest {
     @Mock private InventoryComponentRepository inventoryComponentRepository;
     @Mock private ObjectProvider<FindingDeltaQueueService> findingDeltaQueueServiceProvider;
     @Mock private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock private CallbackPreferringPlatformTransactionManager transactionManager;
 
     private RiskPolicyService service;
 
@@ -43,11 +46,16 @@ class RiskPolicyServiceTest {
         lenient().doAnswer(inv -> inv.getArgument(1, Supplier.class).get())
                 .when(tenantSchemaExecutionService)
                 .run(nullable(Tenant.class), any(Supplier.class));
+        lenient().doAnswer(inv -> inv.getArgument(1, org.springframework.transaction.support.TransactionCallback.class)
+                        .doInTransaction(new SimpleTransactionStatus()))
+                .when(transactionManager)
+                .execute(any(org.springframework.transaction.TransactionDefinition.class), any(org.springframework.transaction.support.TransactionCallback.class));
         service = new RiskPolicyService(
                 riskPolicyRepository,
                 inventoryComponentRepository,
                 findingDeltaQueueServiceProvider,
-                tenantSchemaExecutionService
+                tenantSchemaExecutionService,
+                transactionManager
         );
     }
 

@@ -4,13 +4,16 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class ManualCorrelationOverrideService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public ManualCorrelationOverrideService(
             NamedParameterJdbcTemplate jdbcTemplate,
@@ -20,14 +23,24 @@ public class ManualCorrelationOverrideService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     /**
      * Sets analyst disposition on ALL component_vulnerability_states rows for the given component,
      * regardless of specific vulnerability. This is appropriate for quality issues that flag
      * the component as a whole (no_candidates, fallback_only, low_confidence).
      */
-    @Transactional
     public void applyOverride(UUID tenantId, UUID componentId, String disposition, String reason, String actor) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             // Upsert: update existing rows, then ensure at least one row reflects the override.
             // For components with existing states (fallback/low-confidence), update all of them.
             String updateSql = """
@@ -69,12 +82,11 @@ public class ManualCorrelationOverrideService {
                 // and return without error so the caller can still run the quality refresh.
             }
             return null;
-        });
+        }));
     }
 
-    @Transactional
     public void revokeOverride(UUID tenantId, UUID componentId) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String sql = """
                     UPDATE component_vulnerability_states
                     SET analyst_disposition  = NULL,
@@ -88,6 +100,13 @@ public class ManualCorrelationOverrideService {
                     .addValue("tenantId", tenantId);
             jdbcTemplate.update(sql, params);
             return null;
-        });
+        }));
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

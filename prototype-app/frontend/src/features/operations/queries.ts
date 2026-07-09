@@ -9,6 +9,7 @@ import type {
   OperationalFreshnessDrift,
   OperationalIngestionEfficiency,
   OperationalMetricDefinition,
+  PerformanceScorecard,
   OperationalSectionResponse,
   SloStatus
 } from './types';
@@ -24,6 +25,7 @@ export type PlatformHealthPayload = {
   readPath: OperationalSectionResponse<OperationalApiReadPath>;
   slo: SloStatus;
   catalog: OperationalSectionResponse<OperationalMetricDefinition[]>;
+  performanceScorecard: PerformanceScorecard;
 };
 
 async function loadOperationsView(selectedView: OperationsDashboardViewKey): Promise<PipelinePayload | PlatformHealthPayload | null> {
@@ -41,15 +43,17 @@ async function loadOperationsView(selectedView: OperationsDashboardViewKey): Pro
       };
     }
     case 'platform-health': {
-      const [readPath, slo, catalog] = await Promise.all([
+      const [readPath, slo, catalog, performanceScorecard] = await Promise.all([
         api.getOperationalApiReadPath(),
         api.getSloStatus(),
-        api.getOperationalMetricCatalog()
+        api.getOperationalMetricCatalog(),
+        api.getOperationalPerformanceScorecard()
       ]);
       return {
         readPath,
         slo,
-        catalog
+        catalog,
+        performanceScorecard
       };
     }
     default:

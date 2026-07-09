@@ -10,7 +10,9 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Bulk-recomputes risk scores for all open findings of a tenant using the current
@@ -26,19 +28,24 @@ public class FindingsScoreRecomputeService {
     private final FindingsScoreService findingsScoreService;
     private final FindingSlaService findingSlaService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TransactionTemplate writeTransactionTemplate;
 
     public FindingsScoreRecomputeService(
             FindingRepository findingRepository,
             RiskPolicyService riskPolicyService,
             FindingsScoreService findingsScoreService,
             FindingSlaService findingSlaService,
-            TenantSchemaExecutionService tenantSchemaExecutionService
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            PlatformTransactionManager transactionManager
     ) {
         this.findingRepository = findingRepository;
         this.riskPolicyService = riskPolicyService;
         this.findingsScoreService = findingsScoreService;
         this.findingSlaService = findingSlaService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -46,16 +53,21 @@ public class FindingsScoreRecomputeService {
      *
      * @return number of findings updated
      */
-    @Transactional
     public int recomputeAll(Tenant tenant) {
         RiskPolicy policy = riskPolicyService.getOrCreate(tenant);
         String scoreConfig = policy.getFindingsScoreConfig();
+        int updated = tenantSchemaExecutionService.run(tenant, () -> {
+            Integer recomputed = writeTransactionTemplate.execute(
+                    status -> recomputeAllInCurrentTenantSchema(policy, scoreConfig)
+            );
+            return recomputed == null ? 0 : recomputed;
+        });
+        LOG.info("FindingsScoreRecompute tenant={} updated={}", tenant.getName(), updated);
+        return updated;
+    }
 
-        List<Finding> openFindings = tenantSchemaExecutionService.run(
-                tenant,
-                () -> findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN)
-        );
-
+    private int recomputeAllInCurrentTenantSchema(RiskPolicy policy, String scoreConfig) {
+        List<Finding> openFindings = findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN);
         List<Finding> toSave = new ArrayList<>();
         for (Finding finding : openFindings) {
             if (finding.getVulnerability() == null
@@ -81,7 +93,6 @@ public class FindingsScoreRecomputeService {
         if (!toSave.isEmpty()) {
             findingRepository.saveAll(toSave);
         }
-        LOG.info("FindingsScoreRecompute tenant={} updated={}", tenant.getName(), toSave.size());
         return toSave.size();
     }
 }

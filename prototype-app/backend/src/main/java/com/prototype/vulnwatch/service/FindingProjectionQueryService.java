@@ -15,7 +15,9 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FindingProjectionQueryService {
@@ -26,103 +28,113 @@ public class FindingProjectionQueryService {
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingProjectionStatusService findingProjectionStatusService;
     private final FindingProjectionRefreshService findingProjectionRefreshService;
+    private final TransactionTemplate readTransactionTemplate;
 
     public FindingProjectionQueryService(
             NamedParameterJdbcTemplate jdbcTemplate,
             TenantSchemaExecutionService tenantSchemaExecutionService,
             FindingProjectionStatusService findingProjectionStatusService,
-            FindingProjectionRefreshService findingProjectionRefreshService
+            FindingProjectionRefreshService findingProjectionRefreshService,
+            PlatformTransactionManager transactionManager
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.findingProjectionStatusService = findingProjectionStatusService;
         this.findingProjectionRefreshService = findingProjectionRefreshService;
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional(readOnly = true)
     public void ensureTenantProjection(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return;
         }
         FindingListProjectionService.ProjectionStatus status = findingProjectionStatusService.inspectProjectionStatus(tenant);
-        if (status.missing() || status.driftCount() != 0) {
+        if (status.missing() || status.stale() || status.driftCount() != 0) {
             findingProjectionRefreshService.refreshTenant(tenant);
         }
     }
 
-    @Transactional(readOnly = true)
     public FindingListProjectionService.ProjectionPage queryPage(Tenant tenant, FindingsFilter filter, String cursor, int limit) {
         ensureTenantProjection(tenant);
         int safeLimit = Math.max(1, Math.min(200, limit));
         return tenantSchemaExecutionService.run(tenant, () -> {
-            SqlFilter sqlFilter = buildSqlFilter(filter);
-            CursorState cursorState = decodeCursor(cursor);
-            MapSqlParameterSource params = sqlFilter.params()
-                    .addValue("maxDueAt", Timestamp.from(MAX_DUE_AT));
-            if (cursorState != null) {
-                params.addValue("cursorRiskScore", cursorState.riskScore())
-                        .addValue("cursorDueAt", Timestamp.from(cursorState.dueAt()))
-                        .addValue("cursorUpdatedAt", Timestamp.from(cursorState.updatedAt()))
-                        .addValue("cursorFindingId", cursorState.findingId());
-            }
-            long totalItems = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM finding_list_projection WHERE 1=1 " + sqlFilter.whereClause(),
-                    params,
-                    Long.class
-            );
-            String cursorClause = cursorState == null
-                    ? ""
-                    : """
-                        AND (
-                            risk_score < :cursorRiskScore
-                            OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) > :cursorDueAt)
-                            OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) = :cursorDueAt AND updated_at < :cursorUpdatedAt)
-                            OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) = :cursorDueAt AND updated_at = :cursorUpdatedAt AND finding_id > :cursorFindingId)
-                        )
-                        """;
-            params.addValue("limit", safeLimit + 1);
-            List<PageRow> rows = jdbcTemplate.query("""
-                    SELECT finding_id, risk_score, due_at, updated_at
-                    FROM finding_list_projection
-                    WHERE 1=1
-                    """ + sqlFilter.whereClause() + cursorClause + """
-                    
-                    ORDER BY risk_score DESC, coalesce(due_at, :maxDueAt) ASC, updated_at DESC, finding_id ASC
-                    LIMIT :limit
-                    """,
-                    params,
-                    (rs, rowNum) -> mapPageRow(rs)
-            );
-            boolean hasMore = rows.size() > safeLimit;
-            List<PageRow> pageRows = hasMore ? rows.subList(0, safeLimit) : rows;
-            String nextCursor = hasMore && !pageRows.isEmpty()
-                    ? encodeCursor(pageRows.get(pageRows.size() - 1))
-                    : null;
-            return new FindingListProjectionService.ProjectionPage(
-                    pageRows.stream().map(PageRow::findingId).toList(),
-                    totalItems,
-                    nextCursor
-            );
+            FindingListProjectionService.ProjectionPage page = readTransactionTemplate.execute(transactionStatus -> {
+                SqlFilter sqlFilter = buildSqlFilter(filter);
+                CursorState cursorState = decodeCursor(cursor);
+                MapSqlParameterSource params = sqlFilter.params()
+                        .addValue("maxDueAt", Timestamp.from(MAX_DUE_AT));
+                if (cursorState != null) {
+                    params.addValue("cursorRiskScore", cursorState.riskScore())
+                            .addValue("cursorDueAt", Timestamp.from(cursorState.dueAt()))
+                            .addValue("cursorUpdatedAt", Timestamp.from(cursorState.updatedAt()))
+                            .addValue("cursorFindingId", cursorState.findingId());
+                }
+                long totalItems = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM finding_list_projection WHERE 1=1 " + sqlFilter.whereClause(),
+                        params,
+                        Long.class
+                );
+                String cursorClause = cursorState == null
+                        ? ""
+                        : """
+                            AND (
+                                risk_score < :cursorRiskScore
+                                OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) > :cursorDueAt)
+                                OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) = :cursorDueAt AND updated_at < :cursorUpdatedAt)
+                                OR (risk_score = :cursorRiskScore AND coalesce(due_at, :maxDueAt) = :cursorDueAt AND updated_at = :cursorUpdatedAt AND finding_id > :cursorFindingId)
+                            )
+                            """;
+                params.addValue("limit", safeLimit + 1);
+                List<PageRow> rows = jdbcTemplate.query("""
+                        SELECT finding_id, risk_score, due_at, updated_at
+                        FROM finding_list_projection
+                        WHERE 1=1
+                        """ + sqlFilter.whereClause() + cursorClause + """
+                        
+                        ORDER BY risk_score DESC, coalesce(due_at, :maxDueAt) ASC, updated_at DESC, finding_id ASC
+                        LIMIT :limit
+                        """,
+                        params,
+                        (rs, rowNum) -> mapPageRow(rs)
+                );
+                boolean hasMore = rows.size() > safeLimit;
+                List<PageRow> pageRows = hasMore ? rows.subList(0, safeLimit) : rows;
+                String nextCursor = hasMore && !pageRows.isEmpty()
+                        ? encodeCursor(pageRows.get(pageRows.size() - 1))
+                        : null;
+                return new FindingListProjectionService.ProjectionPage(
+                        pageRows.stream().map(PageRow::findingId).toList(),
+                        totalItems,
+                        nextCursor
+                );
+            });
+            return page == null
+                    ? new FindingListProjectionService.ProjectionPage(List.of(), 0L, null)
+                    : page;
         });
     }
 
-    @Transactional(readOnly = true)
     public List<FindingListProjectionService.ProjectionRecord> loadRows(Tenant tenant, FindingsFilter filter) {
         ensureTenantProjection(tenant);
         return tenantSchemaExecutionService.run(tenant, () -> {
-            SqlFilter sqlFilter = buildSqlFilter(filter);
-            return jdbcTemplate.query("""
-                    SELECT finding_id, severity, status, decision_state, creation_source, match_method,
-                           vex_status, vex_freshness, vex_provider, confidence_score, vulnerability_id,
-                           package_name, ecosystem, owner_group, assigned_to, incident_id, due_at,
-                           asset_name, support_group, patch_available, suppressed_until, risk_score,
-                           updated_at, created_at, first_observed_at
-                    FROM finding_list_projection
-                    WHERE 1=1
-                    """ + sqlFilter.whereClause(),
-                    sqlFilter.params(),
-                    (rs, rowNum) -> mapProjectionRecord(rs)
-            );
+            List<FindingListProjectionService.ProjectionRecord> rows = readTransactionTemplate.execute(transactionStatus -> {
+                SqlFilter sqlFilter = buildSqlFilter(filter);
+                return jdbcTemplate.query("""
+                        SELECT finding_id, severity, status, decision_state, creation_source, match_method,
+                               vex_status, vex_freshness, vex_provider, confidence_score, vulnerability_id,
+                               package_name, ecosystem, owner_group, assigned_to, incident_id, due_at,
+                               asset_name, support_group, patch_available, suppressed_until, risk_score,
+                               updated_at, created_at, first_observed_at
+                        FROM finding_list_projection
+                        WHERE 1=1
+                        """ + sqlFilter.whereClause(),
+                        sqlFilter.params(),
+                        (rs, rowNum) -> mapProjectionRecord(rs)
+                );
+            });
+            return rows == null ? List.of() : rows;
         });
     }
 

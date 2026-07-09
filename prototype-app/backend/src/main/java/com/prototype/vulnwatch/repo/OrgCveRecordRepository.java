@@ -284,13 +284,12 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         (:softwareIdentityId is null and :softwarePattern is null)
-                        or exists (
-                          select 1
+                        or o.vulnerability.id in (
+                          select distinct cvs.vulnerability.id
                           from ComponentVulnerabilityState cvs
                           join cvs.component ic
                           left join ic.softwareIdentity sid
-                          where cvs.tenant = o.tenant
-                            and cvs.vulnerability = o.vulnerability
+                          where cvs.tenant = :tenant
                             and (
                               (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
                               or
@@ -346,13 +345,12 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         (:softwareIdentityId is null and :softwarePattern is null)
-                        or exists (
-                          select 1
+                        or o.vulnerability.id in (
+                          select distinct cvs.vulnerability.id
                           from ComponentVulnerabilityState cvs
                           join cvs.component ic
                           left join ic.softwareIdentity sid
-                          where cvs.tenant = o.tenant
-                            and cvs.vulnerability = o.vulnerability
+                          where cvs.tenant = :tenant
                             and (
                               (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
                               or
@@ -420,13 +418,12 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         (:softwareIdentityId is null and :softwarePattern is null)
-                        or exists (
-                          select 1
+                        or o.vulnerability.id in (
+                          select distinct cvs.vulnerability.id
                           from ComponentVulnerabilityState cvs
                           join cvs.component ic
                           left join ic.softwareIdentity sid
-                          where cvs.tenant = o.tenant
-                            and cvs.vulnerability = o.vulnerability
+                          where cvs.tenant = :tenant
                             and (
                               (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
                               or
@@ -482,13 +479,12 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                       )
                       and (
                         (:softwareIdentityId is null and :softwarePattern is null)
-                        or exists (
-                          select 1
+                        or o.vulnerability.id in (
+                          select distinct cvs.vulnerability.id
                           from ComponentVulnerabilityState cvs
                           join cvs.component ic
                           left join ic.softwareIdentity sid
-                          where cvs.tenant = o.tenant
-                            and cvs.vulnerability = o.vulnerability
+                          where cvs.tenant = :tenant
                             and (
                               (:softwareIdentityId is not null and sid.id = :softwareIdentityId)
                               or
