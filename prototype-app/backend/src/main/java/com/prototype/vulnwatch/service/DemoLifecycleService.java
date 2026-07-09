@@ -48,6 +48,7 @@ public class DemoLifecycleService {
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final String appBaseUrl;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public DemoLifecycleService(
             DemoRequestRepository demoRequestRepository,
@@ -77,6 +78,13 @@ public class DemoLifecycleService {
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
     }
 
     @Transactional
@@ -246,7 +254,6 @@ public class DemoLifecycleService {
         return inviteValidationResponse(invite, "Invite accepted", setupToken);
     }
 
-    @Transactional(readOnly = true)
     public DemoStatusResponse statusForTenant(Tenant tenant) {
         boolean demo = isDemoTenant(tenant);
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
@@ -279,7 +286,6 @@ public class DemoLifecycleService {
         // Demo tenants now provision with Enterprise-equivalent access by default.
     }
 
-    @Transactional(readOnly = true)
     public void assertCanUploadSbom(Tenant tenant) {
         if (!isDemoTenant(tenant)) {
             return;
@@ -303,6 +309,9 @@ public class DemoLifecycleService {
 
     @Scheduled(cron = "${app.demo.expiration-cron:0 10 * * * *}")
     public void expireDemoTenants() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("demo-lifecycle.expire-demo-tenants")) {
+            return;
+        }
         Instant now = Instant.now();
         for (Tenant tenant : tenantRepository.findByDemoExpiresAtBeforeAndPurgedAtIsNullOrderByDemoExpiresAtAsc(now)) {
             demoTenantPurgeService.processExpiredTenant(tenant.getId(), now);

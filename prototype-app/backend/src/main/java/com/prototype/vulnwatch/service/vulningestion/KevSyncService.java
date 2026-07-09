@@ -79,7 +79,8 @@ public class KevSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("KEV", List.of("KEV"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeKevSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId()).ifPresent(this::executeKevSync));
         }
         return decision.toResponse("KEV sync is already in progress", "KEV sync queued");
     }

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Finding } from '../features/findings/types';
 import { pathForVulnRepoView, pathForInventoryHostAsset, type VulnerabilityIntelRouteView } from '../app/routes';
 import { apiRequest, api } from '../api/client';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { AiSolutionApiResponse } from '../features/cve-workbench/api';
 import type { CveDetail, ServiceNowIncidentResponse, CreateServiceNowIncidentRequest } from '../features/cve-workbench/types';
@@ -222,6 +223,9 @@ export function FindingDetailPage() {
   const [aiSolution, setAiSolution] = React.useState<AiSolutionApiResponse | null>(null);
   const [hostAssetId, setHostAssetId] = React.useState<string | null>(null);
   const [hostAsset, setHostAsset] = React.useState<HostAssetSummary | null>(null);
+  const [loadingCveDetail, setLoadingCveDetail] = React.useState(false);
+  const [loadingAiSolution, setLoadingAiSolution] = React.useState(false);
+  const [loadingHostContext, setLoadingHostContext] = React.useState(false);
 
   const findingVulnId = currentFinding?.vulnerabilityId;
   const findingAssetIdentifier = currentFinding?.assetIdentifier;
@@ -229,27 +233,41 @@ export function FindingDetailPage() {
 
   React.useEffect(() => {
     if (!findingVulnId) return;
+    setLoadingCveDetail(true);
+    setLoadingAiSolution(true);
     cveWorkbenchApi.getCveDetail(findingVulnId)
       .then(d => setCveDetail(d))
-      .catch(() => setCveDetail(null));
+      .catch(() => setCveDetail(null))
+      .finally(() => setLoadingCveDetail(false));
     cveWorkbenchApi.getSavedAiSolution(findingVulnId)
       .then(r => setAiSolution(r))
-      .catch(() => setAiSolution(null));
+      .catch(() => setAiSolution(null))
+      .finally(() => setLoadingAiSolution(false));
   }, [findingVulnId]);
 
   React.useEffect(() => {
     if (!findingAssetIdentifier) return;
-    api.listAssets().then(assets => {
+    setLoadingHostContext(true);
+    setHostAssetId(null);
+    setHostAsset(null);
+    api.listAssets().then(async (assets) => {
       const match = assets.find(
         a => a.identifier === findingAssetIdentifier || a.name === findingAssetName
       );
       if (match) {
         setHostAssetId(match.id);
-        api.getHostAssetDetail(match.id)
-          .then(detail => setHostAsset(detail.host))
-          .catch(() => {});
+        try {
+          const detail = await api.getHostAssetDetail(match.id);
+          setHostAsset(detail.host);
+        } catch {
+          setHostAsset(null);
+        }
       }
-    }).catch(() => {});
+    }).catch(() => {
+      setHostAsset(null);
+    }).finally(() => {
+      setLoadingHostContext(false);
+    });
   }, [findingAssetIdentifier, findingAssetName]);
 
   if (!currentFinding) {
@@ -545,6 +563,18 @@ export function FindingDetailPage() {
   const relevantFix = (cveDetail?.fixes ?? []).find(f =>
     f.softwareEntities?.some(e => e.name?.toLowerCase() === currentFinding.packageName?.toLowerCase())
   ) ?? cveDetail?.fixes?.[0] ?? null;
+  const latestDataUpdate = latestFreshnessValue([
+    currentFinding.updatedAt,
+    currentFinding.lastObservedAt,
+    currentFinding.firstObservedAt,
+    cveDetail?.summary.modifiedAt,
+    cveDetail?.summary.publishedAt,
+    aiSolution?.generatedAt,
+    hostAsset?.lastInventoryAt,
+    hostAsset?.lastCmdbSyncAt,
+    hostAsset?.ssmLastPingAt,
+  ]);
+  const loadingSupportingContext = loadingCveDetail || loadingAiSolution || loadingHostContext;
 
   return (
     <div className="fd3-page">
@@ -571,6 +601,12 @@ export function FindingDetailPage() {
           )}
         </div>
       </div>
+
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={loadingSupportingContext}
+        refreshLabel="Loading supporting investigation context while keeping the finding visible…"
+      />
 
       {/* ── tab bar ─────────────────────────────────────────────────────── */}
       <div className="fd3-tab-bar">

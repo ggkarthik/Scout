@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import {
   CveInventoryMappingRecord,
   DashboardCveInventoryMap,
@@ -85,6 +86,13 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
   ], []);
   const topHighRiskRows = React.useMemo(() => buildCveInventoryRows(topHighRiskMap), [topHighRiskMap]);
   const latestRows = React.useMemo(() => buildCveInventoryRows(latestMap), [latestMap]);
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    dashboardQuery.dataUpdatedAt,
+    cveInventoryMapQuery.dataUpdatedAt
+  ]), [
+    cveInventoryMapQuery.dataUpdatedAt,
+    dashboardQuery.dataUpdatedAt
+  ]);
 
   if (error) {
     return <div className="panel">Failed to load dashboard: {error}</div>;
@@ -107,6 +115,12 @@ export function DashboardPage({ onViewEol }: DashboardPageProps) {
 
   return (
     <div className="page-grid">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={(dashboardQuery.isFetching || cveInventoryMapQuery.isFetching) && (!!data || !!cveInventoryMap)}
+        refreshLabel="Refreshing dashboard signals while keeping current results visible…"
+      />
+
       {isFirstRun && (
         <div className="first-run-banner">
           <div className="first-run-banner-icon">

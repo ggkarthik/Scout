@@ -35,7 +35,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
@@ -49,6 +51,7 @@ public class CiResolutionService {
     private final ObjectMapper objectMapper;
     private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     @Value("${app.cmdb.servicenow.base-url:}")
     private String serviceNowBaseUrl;
@@ -79,7 +82,17 @@ public class CiResolutionService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public Resolution resolve(
             Tenant tenant,
             String requestedSysId,
@@ -163,7 +176,6 @@ public class CiResolutionService {
         );
     }
 
-    @Transactional
     public BatchResolutionContext prepareBatchContext(
             Tenant tenant,
             String sourceSystem,
@@ -172,7 +184,14 @@ public class CiResolutionService {
         if (tenant == null || tenant.getId() == null) {
             return new BatchResolutionContext(tenant, normalizeSource(sourceSystem), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
         }
+        return tenantSchemaExecutionService.run(tenant, () -> prepareBatchContextInCurrentTenantSchema(tenant, sourceSystem, inputs));
+    }
 
+    private BatchResolutionContext prepareBatchContextInCurrentTenantSchema(
+            Tenant tenant,
+            String sourceSystem,
+            Collection<HostLookupInput> inputs
+    ) {
         Set<String> sysIds = new LinkedHashSet<>();
         Set<String> aliasNames = new LinkedHashSet<>();
         Set<String> assetIdentifiers = new LinkedHashSet<>();
@@ -246,7 +265,6 @@ public class CiResolutionService {
         );
     }
 
-    @Transactional
     public Resolution resolve(
             BatchResolutionContext context,
             Tenant tenant,
@@ -336,12 +354,11 @@ public class CiResolutionService {
         if (!hasText(normalized) || tenant == null || tenant.getId() == null) {
             return null;
         }
-        return ciAliasRepository.findByTenant_IdAndNormalizedAliasNameAndSourceSystem(
-                        tenant.getId(),
-                        normalized,
-                        sourceSystem
-                )
-                .map(alias -> new Resolution(alias.getCi(), false, false, isLowConfidence(alias.getConfidence()), "alias-cache"))
+        return tenantSchemaExecutionService.run(tenant, () -> ciAliasRepository.findByTenant_IdAndNormalizedAliasNameAndSourceSystem(
+                tenant.getId(),
+                normalized,
+                sourceSystem
+        ).map(alias -> new Resolution(alias.getCi(), false, false, isLowConfidence(alias.getConfidence()), "alias-cache"))
                 .orElseGet(() -> {
                     List<CiAlias> aliases = ciAliasRepository.findByTenant_IdAndNormalizedAliasName(tenant.getId(), normalized);
                     if (aliases.isEmpty()) {
@@ -365,7 +382,7 @@ public class CiResolutionService {
                     }
                     boolean lowConfidence = aliases.size() > 1 || isLowConfidence(selected.getConfidence());
                     return new Resolution(selected.getCi(), false, false, lowConfidence, aliases.size() > 1 ? "alias-ambiguous" : "alias");
-                });
+                }));
     }
 
     private Resolution resolveByAlias(BatchResolutionContext context, String hostName, String environment, String sourceSystem) {
@@ -414,8 +431,24 @@ public class CiResolutionService {
             boolean lowConfidence,
             String method
     ) {
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() ->
+                upsertCiInCurrentTenantSchema(tenant, sysId, hostName, environment, ownership, businessCriticality, sourceSystem, lowConfidence, method)
+        ));
+    }
+
+    private Resolution upsertCiInCurrentTenantSchema(
+            Tenant tenant,
+            String sysId,
+            String hostName,
+            String environment,
+            OwnershipDetails ownership,
+            BusinessCriticality businessCriticality,
+            String sourceSystem,
+            boolean lowConfidence,
+            String method
+    ) {
         Instant now = Instant.now();
-        Ci ci = tenantSchemaExecutionService.run(tenant, () -> ciRepository.findByTenant_IdAndSysIdIn(tenant.getId(), List.of(sysId)))
+        Ci ci = ciRepository.findByTenant_IdAndSysIdIn(tenant.getId(), List.of(sysId))
                 .stream()
                 .findFirst()
                 .orElse(null);
@@ -430,7 +463,7 @@ public class CiResolutionService {
         }
         if (asset == null) {
             String assetIdentifier = "ci:" + sysId.toLowerCase(Locale.ROOT);
-            asset = tenantSchemaExecutionService.run(tenant, () -> assetRepository.findByTenant_IdAndIdentifierIn(tenant.getId(), List.of(assetIdentifier)))
+            asset = assetRepository.findByTenant_IdAndIdentifierIn(tenant.getId(), List.of(assetIdentifier))
                     .stream()
                     .findFirst()
                     .orElseGet(Asset::new);
@@ -464,6 +497,23 @@ public class CiResolutionService {
     }
 
     private Resolution upsertCi(
+            BatchResolutionContext context,
+            Tenant tenant,
+            String sysId,
+            String hostName,
+            String environment,
+            OwnershipDetails ownership,
+            BusinessCriticality businessCriticality,
+            String sourceSystem,
+            boolean lowConfidence,
+            String method
+    ) {
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() ->
+                upsertCiInCurrentTenantSchema(context, tenant, sysId, hostName, environment, ownership, businessCriticality, sourceSystem, lowConfidence, method)
+        ));
+    }
+
+    private Resolution upsertCiInCurrentTenantSchema(
             BatchResolutionContext context,
             Tenant tenant,
             String sysId,
@@ -917,6 +967,13 @@ public class CiResolutionService {
             boolean lowConfidence,
             String resolutionMethod
     ) {
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     public record HostLookupInput(

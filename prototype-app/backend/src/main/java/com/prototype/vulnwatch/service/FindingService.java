@@ -25,18 +25,18 @@ public class FindingService {
     private final FindingQueryService findingQueryService;
     private final FindingWorkflowFacade findingWorkflowFacade;
     private final FindingAssetRecomputeService findingAssetRecomputeService;
-    private final FindingComponentRecomputeService findingComponentRecomputeService;
+    private final FindingRecomputeService findingRecomputeService;
 
     public FindingService(
             FindingQueryService findingQueryService,
             FindingWorkflowFacade findingWorkflowFacade,
             FindingAssetRecomputeService findingAssetRecomputeService,
-            FindingComponentRecomputeService findingComponentRecomputeService
+            FindingRecomputeService findingRecomputeService
     ) {
         this.findingQueryService = findingQueryService;
         this.findingWorkflowFacade = findingWorkflowFacade;
         this.findingAssetRecomputeService = findingAssetRecomputeService;
-        this.findingComponentRecomputeService = findingComponentRecomputeService;
+        this.findingRecomputeService = findingRecomputeService;
     }
 
     @Transactional
@@ -49,14 +49,12 @@ public class FindingService {
         return findingAssetRecomputeService.recomputeForAssets(assets);
     }
 
-    @Transactional
     public int recomputeOnSoftwareDelta(UUID tenantId, UUID componentId) {
-        return findingComponentRecomputeService.recomputeOnSoftwareDelta(tenantId, componentId);
+        return findingRecomputeService.recomputeOnSoftwareDelta(tenantId, componentId);
     }
 
-    @Transactional
     public int recomputeOnSoftwareDeltaBatch(UUID tenantId, Collection<UUID> componentIds) {
-        return findingComponentRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
+        return findingRecomputeService.recomputeOnSoftwareDeltaBatch(tenantId, componentIds);
     }
 
     public FindingPageResponse listByTenantPage(
@@ -97,7 +95,6 @@ public class FindingService {
         return findingQueryService.countCritical(tenant);
     }
 
-    @Transactional
     public ManualFindingCreationResult createManualFindingsForVulnerability(
             Tenant tenant,
             Vulnerability vulnerability,
@@ -118,7 +115,6 @@ public class FindingService {
         );
     }
 
-    @Transactional
     public int suppressFindingsForVulnerability(
             Tenant tenant,
             Vulnerability vulnerability,

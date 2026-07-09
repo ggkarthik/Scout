@@ -203,6 +203,9 @@ class CiResolutionServiceTest {
         CiAliasRepository ciAliasRepository = mock(CiAliasRepository.class);
         ServiceNowCmdbConfigService configService = mock(ServiceNowCmdbConfigService.class);
         TenantSchemaExecutionService tenantSchemaExecutionService = mock(TenantSchemaExecutionService.class);
+        doAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(1).get())
+                .when(tenantSchemaExecutionService)
+                .run(any(Tenant.class), any(java.util.function.Supplier.class));
 
         when(ciRepository.findByTenant_IdAndSysIdIn(eq(tenant.getId()), argThat(ids -> ids != null && ids.contains("sys-1")))).thenReturn(List.of());
         when(assetRepository.findByTenant_IdAndIdentifierIn(eq(tenant.getId()), argThat(ids -> ids != null && ids.contains("ci:sys-1")))).thenReturn(List.of());

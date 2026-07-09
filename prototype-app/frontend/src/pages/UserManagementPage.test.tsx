@@ -105,7 +105,7 @@ describe('UserManagementPage', () => {
     expect(screen.getByRole('columnheader', { name: 'Role' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Subject' })).toBeInTheDocument();
     expect(screen.getByLabelText('Filter members by role')).toBeInTheDocument();
-    expect(screen.getByText('Suspend member')).toBeInTheDocument();
+    expect(screen.getByText('Suspend')).toBeInTheDocument();
   });
 
   it('shows the workspace-unavailable notice when no tenantId is resolved', async () => {

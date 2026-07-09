@@ -4,7 +4,9 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Cluster-level normalization override service.
@@ -18,6 +20,7 @@ public class NormalizationClusterOverrideService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public NormalizationClusterOverrideService(
             NamedParameterJdbcTemplate jdbcTemplate,
@@ -25,6 +28,17 @@ public class NormalizationClusterOverrideService {
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -76,7 +90,6 @@ public class NormalizationClusterOverrideService {
     /**
      * Write the cluster link and cascade-update all matching records immediately.
      */
-    @Transactional
     public void applyClusterOverride(
             UUID tenantId,
             String sourceType,
@@ -86,7 +99,7 @@ public class NormalizationClusterOverrideService {
             String reason,
             String actor
     ) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String normalizedType = normalizeType(sourceType);
             String upsertSql = """
                     INSERT INTO software_identity_cluster_link
@@ -159,15 +172,14 @@ public class NormalizationClusterOverrideService {
                                 .addValue("packageName", parts[1]));
             }
             return null;
-        });
+        }));
     }
 
     /**
      * Soft-delete the cluster link and clear software_identity_id on previously-linked records.
      */
-    @Transactional
     public void revokeClusterOverride(UUID tenantId, String sourceType, String sourceKey, String actor) {
-        tenantSchemaExecutionService.run(tenantId, () -> {
+        tenantSchemaExecutionService.run(tenantId, () -> executeWrite(() -> {
             String normalizedType = normalizeType(sourceType);
             int updated = jdbcTemplate.update("""
                     UPDATE software_identity_cluster_link
@@ -214,7 +226,7 @@ public class NormalizationClusterOverrideService {
                                 .addValue("packageName", parts[1]));
             }
             return null;
-        });
+        }));
     }
 
     private String normalizeType(String sourceType) {
@@ -237,4 +249,11 @@ public class NormalizationClusterOverrideService {
     }
 
     public record ClusterImpactResult(long affectedAssetCount, long affectedInstanceCount) {}
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
+    }
 }

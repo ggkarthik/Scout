@@ -2,6 +2,7 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { pathForConnectView, pathForInventoryView } from '../app/routes';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { useActor } from '../features/auth/context';
 import { canManageInventorySources } from '../features/auth/roles';
 import type {
@@ -211,6 +212,13 @@ export function AssetsPage() {
 
   const queryError = serviceNowConfigQuery.error instanceof Error ? serviceNowConfigQuery.error.message : '';
   const displayError = error || queryError;
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    serviceNowConfigQuery.dataUpdatedAt,
+    config?.lastSyncAt
+  ]), [
+    config?.lastSyncAt,
+    serviceNowConfigQuery.dataUpdatedAt
+  ]);
 
   if (serviceNowConfigQuery.isPending && !config) {
     return <section className="panel">Loading ServiceNow CMDB connector...</section>;
@@ -218,6 +226,12 @@ export function AssetsPage() {
 
   return (
     <section className="panel">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={serviceNowConfigQuery.isFetching && !!config}
+        refreshLabel="Refreshing ServiceNow CMDB connector details…"
+      />
+
       {!config?.configured && (
         <div className="notice">
           This connector is not yet configured. Fill in the Connection section below to enable live ServiceNow API pulls.

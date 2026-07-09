@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { PerformanceInstrumentation } from './lib/performanceMonitoring';
 import type { InventoryViewKey } from './features/inventory/types';
 import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
@@ -1123,6 +1124,7 @@ function AppShell() {
 export default function App() {
   return (
     <React.Suspense fallback={routeLoadingFallback()}>
+      <PerformanceInstrumentation />
       <Routes>
         <Route path="/demo" element={<DemoLandingPage />} />
         <Route path="/demo/request" element={<DemoRequestPage />} />

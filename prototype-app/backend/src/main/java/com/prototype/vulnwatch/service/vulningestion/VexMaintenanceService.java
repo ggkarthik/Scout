@@ -83,7 +83,8 @@ public class VexMaintenanceService {
         }
 
         SyncRun run = syncRunService.createQueuedRun("VEX_ASSERTION_REPAIR");
-        ingestionExecutor.execute(() -> executeVexAssertionRepairAsync(run.getId()));
+        ingestionExecutor.execute(() ->
+                syncRunService.markRunningIfQueued(run.getId()).ifPresent(this::executeVexAssertionRepair));
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "VEX assertion repair queued");
     }
 
@@ -104,7 +105,8 @@ public class VexMaintenanceService {
         }
 
         SyncRun run = syncRunService.createQueuedRun("VEX_ROLLOUT_BACKFILL");
-        ingestionExecutor.execute(() -> executeVexRolloutBackfillAsync(run.getId()));
+        ingestionExecutor.execute(() ->
+                syncRunService.markRunningIfQueued(run.getId()).ifPresent(this::executeVexRolloutBackfill));
         return new SyncTriggerResponse(run.getId(), run.getStatus(), "Vendor VEX backfill queued");
     }
 

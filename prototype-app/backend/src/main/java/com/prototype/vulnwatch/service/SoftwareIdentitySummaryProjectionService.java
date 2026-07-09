@@ -6,7 +6,8 @@ import java.util.Locale;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class SoftwareIdentitySummaryProjectionService {
@@ -16,6 +17,7 @@ public class SoftwareIdentitySummaryProjectionService {
     private final TenantRepository tenantRepository;
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate transactionTemplate;
 
     public SoftwareIdentitySummaryProjectionService(
             TenantRepository tenantRepository,
@@ -27,40 +29,46 @@ public class SoftwareIdentitySummaryProjectionService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
-    @Transactional
-    public int refreshAll() {
-        int total = 0;
-        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
-            total += refreshTenant(tenant);
-        }
-        return total;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
+    public int refreshAll() {
+        return TenantContext.runAsPlatform(() -> {
+            int total = 0;
+            for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+                total += refreshTenant(tenant);
+            }
+            return total;
+        });
+    }
+
     public int refreshTenant(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return 0;
         }
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeInTransaction(() -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("tenantId", tenant.getId())
                     .addValue("nearEolThresholdDays", NEAR_EOL_THRESHOLD_DAYS);
             jdbcTemplate.update("DELETE FROM software_identity_summary", params);
             return insertSummaryRows(params, "");
-        });
+        }));
     }
 
-    @Transactional
     public int refreshByNormalizedKey(String normalizedKey) {
         String normalized = normalizeKey(normalizedKey);
         if (normalized == null) {
             return 0;
         }
-        int total = 0;
-        for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
-            total += refreshByNormalizedKeyForTenant(tenant, normalized);
-        }
-        return total;
+        return TenantContext.runAsPlatform(() -> {
+            int total = 0;
+            for (Tenant tenant : tenantRepository.findAllByOrderByCreatedAtAsc()) {
+                total += refreshByNormalizedKeyForTenant(tenant, normalized);
+            }
+            return total;
+        });
     }
 
     public void ensureTenantProjection(Tenant tenant) {
@@ -93,7 +101,7 @@ public class SoftwareIdentitySummaryProjectionService {
         if (tenant == null || tenant.getId() == null || normalized == null) {
             return 0;
         }
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeInTransaction(() -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("tenantId", tenant.getId())
                     .addValue("normalizedKey", normalized)
@@ -105,7 +113,14 @@ public class SoftwareIdentitySummaryProjectionService {
             return insertSummaryRows(params, """
                      AND lower(coalesce(sid.vendor, '')) || '::' || lower(coalesce(sid.product, '')) = :normalizedKey
                     """);
-        });
+        }));
+    }
+
+    private <T> T executeInTransaction(java.util.function.Supplier<T> work) {
+        if (transactionTemplate == null) {
+            return work.get();
+        }
+        return transactionTemplate.execute(status -> work.get());
     }
 
     private int insertSummaryRows(MapSqlParameterSource params, String filterClause) {

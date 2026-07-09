@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, setStoredAuthToken } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
 import { pathForPlatformView, pathForTab } from '../app/routes';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { useActor } from '../features/auth/context';
@@ -159,6 +160,37 @@ function formatDateTime(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : 'Never';
 }
 
+function formatPerformanceValue(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value == null) {
+    return '-';
+  }
+  if (unit === '%') {
+    return `${value.toFixed(1)}%`;
+  }
+  if (unit === 'ms') {
+    return `${value.toFixed(1)} ms`;
+  }
+  if (unit === 'threads') {
+    return `${Math.round(value).toLocaleString()} threads`;
+  }
+  return `${value.toLocaleString()}${unit ? ` ${unit}` : ''}`;
+}
+
+function reliabilityStateLabel(state: 'PASS' | 'FAIL' | 'NO_DATA' | string): string {
+  switch (state) {
+    case 'PASS':
+      return 'Healthy';
+    case 'NO_DATA':
+      return 'Awaiting telemetry';
+    default:
+      return 'Needs attention';
+  }
+}
+
+function reliabilityStateClass(state: 'PASS' | 'FAIL' | 'NO_DATA' | string): string {
+  return state === 'PASS' ? '' : 'table-critical';
+}
+
 function formatAttentionReason(reason: string): string {
   switch (reason) {
     case 'TENANT_SUSPENDED':
@@ -240,6 +272,13 @@ const TENANT_EXPERIENCE_METRIC_HELP: Record<string, string> = {
   'Read Model Readiness': 'Whether the main summary model is ready to serve tenant-facing reads.',
   'Read Performance Cache Hit Ratio': 'Percentage of eligible reads served from cache instead of being recomputed.',
   'Overall Reliability State': 'High-level pass/fail signal for the current reliability objective set.',
+  'Route Budget Failures': 'Interactive routes currently failing enterprise latency targets.',
+  'Freshness Guardrail Failures': 'Freshness or mixed-load guardrails currently outside their target envelope.',
+  'Resource Ceiling Failures': 'Runtime capacity signals currently breaching their measured ceilings.',
+  'Enterprise Guardrails': 'Condensed view of the performance guardrails most likely to turn into tenant-visible degradation.',
+  'Guardrail Signal': 'Specific performance budget or runtime ceiling being monitored.',
+  State: 'Current pass/fail or no-data state for the guardrail.',
+  Detail: 'Supporting context for why this guardrail is currently healthy or at risk.',
   Source: 'The upstream source or connector being monitored for freshness.',
   'Last Healthy Run': 'The last time this source completed successfully.',
   'Data Age': 'How long it has been since the last successful run for this source.',
@@ -306,9 +345,9 @@ function PlatformOperationsOwnerspace({
     queryKey: ['platform-operations-read-path'],
     queryFn: api.getOperationalApiReadPath
   });
-  const sloQuery = useQuery({
-    queryKey: ['platform-operations-slo'],
-    queryFn: api.getSloStatus
+  const performanceScorecardQuery = useQuery({
+    queryKey: ['platform-operations-performance-scorecard'],
+    queryFn: api.getOperationalPerformanceScorecard
   });
   const tenantsQuery = useQuery({
     queryKey: ['platform-operations-tenants'],
@@ -331,11 +370,51 @@ function PlatformOperationsOwnerspace({
   const freshness = freshnessQuery.data?.data;
   const quality = qualityQuery.data;
   const readPath = readPathQuery.data?.data;
-  const slo = sloQuery.data;
+  const performanceScorecard = performanceScorecardQuery.data;
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
   const connectorHealth = React.useMemo(() => connectorHealthQuery.data ?? [], [connectorHealthQuery.data]);
   const tenantAttentionRows = tenantAttentionQuery.data ?? [];
   const connectorIssueGroups = React.useMemo(() => connectorIssuesQuery.data ?? [], [connectorIssuesQuery.data]);
+  const latestOwnerspaceUpdate = React.useMemo(() => latestFreshnessValue([
+    overviewQuery.data?.generatedAt,
+    ingestionQuery.data?.generatedAt,
+    freshnessQuery.data?.generatedAt,
+    qualityQuery.data?.generatedAt,
+    readPathQuery.data?.generatedAt,
+    performanceScorecardQuery.data?.generatedAt,
+    tenantsQuery.dataUpdatedAt,
+    connectorHealthQuery.dataUpdatedAt,
+    tenantAttentionQuery.dataUpdatedAt,
+    connectorIssuesQuery.dataUpdatedAt,
+  ]), [
+    connectorHealthQuery.dataUpdatedAt,
+    connectorIssuesQuery.dataUpdatedAt,
+    freshnessQuery.data?.generatedAt,
+    ingestionQuery.data?.generatedAt,
+    overviewQuery.data?.generatedAt,
+    performanceScorecardQuery.data?.generatedAt,
+    qualityQuery.data?.generatedAt,
+    readPathQuery.data?.generatedAt,
+    tenantAttentionQuery.dataUpdatedAt,
+    tenantsQuery.dataUpdatedAt,
+  ]);
+  const ownerspaceRefreshing = [
+    overviewQuery,
+    ingestionQuery,
+    freshnessQuery,
+    qualityQuery,
+    readPathQuery,
+    performanceScorecardQuery,
+    tenantsQuery,
+    connectorHealthQuery,
+    tenantAttentionQuery,
+    connectorIssuesQuery
+  ].some((query) => query.isFetching);
+  const ownerspaceDelayMessage = (freshness?.staleSourceCount ?? 0) > 0
+    ? 'Some shared sources are stale, so tenant-facing dashboards may reflect older data until refresh catches up.'
+    : (performanceScorecard?.freshnessFailureCount ?? 0) > 0
+      ? 'Some freshness guardrails are outside target, so platform health signals may lag behind recent activity.'
+      : null;
 
   const tenantStats = React.useMemo(() => {
     const active = tenants.filter((tenant) => tenant.status === 'ACTIVE').length;
@@ -367,13 +446,70 @@ function PlatformOperationsOwnerspace({
     return Array.from(new Set(connectorIssueGroups.flatMap((group) => group.affectedTenants))).length;
   }, [connectorIssueGroups]);
 
+  const guardrailRows = React.useMemo(() => {
+    if (!performanceScorecard) {
+      return [];
+    }
+
+    const rows: Array<{
+      key: string;
+      signal: string;
+      state: string;
+      detail: string;
+      risk: string;
+    }> = [];
+
+    performanceScorecard.freshnessItems
+      .filter((item) => !item.compliant)
+      .forEach((item) => {
+        rows.push({
+          key: `freshness-${item.key}`,
+          signal: item.label,
+          state: 'FAIL',
+          detail: `${formatPerformanceValue(item.currentValue, item.unit)} vs target ${formatPerformanceValue(item.targetValue, item.unit)} (${item.window})`,
+          risk: 'Fresh data may arrive later than tenants expect'
+        });
+      });
+
+    performanceScorecard.resourceItems
+      .filter((item) => item.status !== 'PASS')
+      .forEach((item) => {
+        rows.push({
+          key: `resource-${item.key}`,
+          signal: item.label,
+          state: item.status,
+          detail: item.note,
+          risk: item.status === 'NO_DATA'
+            ? 'Capacity blind spots reduce confidence in tenant stability'
+            : 'Runtime saturation may slow or stall tenant-visible work'
+        });
+      });
+
+    performanceScorecard.routeItems
+      .filter((item) => item.status !== 'PASS')
+      .slice(0, 6)
+      .forEach((item) => {
+        rows.push({
+          key: `route-${item.key}`,
+          signal: item.label,
+          state: item.status,
+          detail: item.note,
+          risk: item.status === 'NO_DATA'
+            ? 'Missing route telemetry weakens performance certification confidence'
+            : 'Tenants may feel slower reads or investigation workflows'
+        });
+      });
+
+    return rows;
+  }, [performanceScorecard]);
+
   const loading = [
     overviewQuery,
     ingestionQuery,
     freshnessQuery,
     qualityQuery,
     readPathQuery,
-    sloQuery,
+    performanceScorecardQuery,
     tenantsQuery,
     connectorHealthQuery,
     tenantAttentionQuery,
@@ -404,6 +540,12 @@ function PlatformOperationsOwnerspace({
           scope="all-tenants"
           text="This view stays intentionally narrow: only the few tenant-facing signals most likely to require platform-owner action."
         />
+        <PageFreshnessStatus
+          updatedAt={latestOwnerspaceUpdate}
+          isRefreshing={ownerspaceRefreshing}
+          delayedMessage={ownerspaceDelayMessage}
+          refreshLabel="Refreshing tenant experience signals…"
+        />
         <div className="stats-grid">
           <div className="noise-summary-item">
             <div className="noise-summary-label"><MetricLabel label="Tenants With Connector Issues" description={TENANT_EXPERIENCE_METRIC_HELP['Tenants With Connector Issues']} /></div>
@@ -417,7 +559,7 @@ function PlatformOperationsOwnerspace({
           </div>
           <div className="noise-summary-item">
             <div className="noise-summary-label"><MetricLabel label="Failing SLOs" description={TENANT_EXPERIENCE_METRIC_HELP['Failing SLOs']} /></div>
-            <div className="noise-summary-value">{formatInteger((slo?.slos ?? []).filter((entry) => !entry.compliant).length)}</div>
+            <div className="noise-summary-value">{formatInteger(performanceScorecard?.freshnessFailureCount)}</div>
             <div className="platform-ops-metric-scope">All tenants</div>
           </div>
           <div className="noise-summary-item">
@@ -585,11 +727,19 @@ function PlatformOperationsOwnerspace({
               </div>
               <div className="noise-summary-item">
                 <div className="noise-summary-label"><MetricLabel label="Overall Reliability State" description={TENANT_EXPERIENCE_METRIC_HELP['Overall Reliability State']} /></div>
-                <div className="noise-summary-value">{slo?.overallCompliant ? 'Passing' : 'Failing'}</div>
+                <div className="noise-summary-value">{performanceScorecard?.overallCompliant ? 'Healthy' : 'Needs attention'}</div>
               </div>
               <div className="noise-summary-item">
                 <div className="noise-summary-label"><MetricLabel label="Read Model Readiness" description={TENANT_EXPERIENCE_METRIC_HELP['Read Model Readiness']} /></div>
                 <div className="noise-summary-value">{readPath?.summaryReadModelReady ? 'Ready' : 'Rebuilding'}</div>
+              </div>
+              <div className="noise-summary-item">
+                <div className="noise-summary-label"><MetricLabel label="Route Budget Failures" description={TENANT_EXPERIENCE_METRIC_HELP['Route Budget Failures']} /></div>
+                <div className="noise-summary-value">{formatInteger(performanceScorecard?.routeFailureCount)}</div>
+              </div>
+              <div className="noise-summary-item">
+                <div className="noise-summary-label"><MetricLabel label="Resource Ceiling Failures" description={TENANT_EXPERIENCE_METRIC_HELP['Resource Ceiling Failures']} /></div>
+                <div className="noise-summary-value">{formatInteger(performanceScorecard?.resourceFailureCount)}</div>
               </div>
             </div>
           </section>
@@ -628,13 +778,62 @@ function PlatformOperationsOwnerspace({
                 <span><MetricLabel label="Current" description={TENANT_EXPERIENCE_METRIC_HELP.Current} /></span>
                 <span><MetricLabel label="Tenant Risk" description={TENANT_EXPERIENCE_METRIC_HELP['Tenant Risk']} /></span>
               </div>
-              {(slo?.slos ?? []).map((row) => (
-                <div key={row.name} className="ops-table-row">
-                  <span>{row.name}</span>
+              {(performanceScorecard?.freshnessItems ?? []).map((row) => (
+                <div key={row.key} className="ops-table-row">
+                  <span>{row.label}</span>
                   <span>{row.window}</span>
-                  <span>{row.target}{row.unit ? ` ${row.unit}` : ''}</span>
-                  <span>{row.current}{row.unit ? ` ${row.unit}` : ''}</span>
-                  <span className={row.compliant ? '' : 'table-critical'}>{row.compliant ? 'Low visible risk' : 'Tenants may feel degraded performance'}</span>
+                  <span>{formatPerformanceValue(row.targetValue, row.unit)}</span>
+                  <span>{formatPerformanceValue(row.currentValue, row.unit)}</span>
+                  <span className={row.compliant ? '' : 'table-critical'}>{row.compliant ? 'Healthy' : 'Needs attention'}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="panel">
+            <div className="panel-header">
+              <h3>Enterprise Performance Guardrails</h3>
+              <span className="panel-caption">A compact watchlist of the failing or unmeasured performance budgets most likely to become tenant-visible.</span>
+            </div>
+            <MetricScopeNote
+              scope="platform-wide"
+              text={performanceScorecard?.scaleProfile
+                ? `Validated against ${performanceScorecard.scaleProfile}.`
+                : 'Guardrails unavailable until the performance scorecard is sampled.'}
+            />
+            <div className="noise-summary-grid">
+              <div className="noise-summary-item">
+                <div className="noise-summary-label"><MetricLabel label="Freshness Guardrail Failures" description={TENANT_EXPERIENCE_METRIC_HELP['Freshness Guardrail Failures']} /></div>
+                <div className="noise-summary-value">{formatInteger(performanceScorecard?.freshnessFailureCount)}</div>
+              </div>
+              <div className="noise-summary-item">
+                <div className="noise-summary-label"><MetricLabel label="Route Budget Failures" description={TENANT_EXPERIENCE_METRIC_HELP['Route Budget Failures']} /></div>
+                <div className="noise-summary-value">{formatInteger(performanceScorecard?.routeFailureCount)}</div>
+              </div>
+              <div className="noise-summary-item">
+                <div className="noise-summary-label"><MetricLabel label="Resource Ceiling Failures" description={TENANT_EXPERIENCE_METRIC_HELP['Resource Ceiling Failures']} /></div>
+                <div className="noise-summary-value">{formatInteger(performanceScorecard?.resourceFailureCount)}</div>
+              </div>
+            </div>
+            <div className="ops-table">
+              <div className="ops-table-header">
+                <span><MetricLabel label="Guardrail Signal" description={TENANT_EXPERIENCE_METRIC_HELP['Guardrail Signal']} /></span>
+                <span><MetricLabel label="State" description={TENANT_EXPERIENCE_METRIC_HELP.State} /></span>
+                <span><MetricLabel label="Tenant Risk" description={TENANT_EXPERIENCE_METRIC_HELP['Tenant Risk']} /></span>
+                <span><MetricLabel label="Detail" description={TENANT_EXPERIENCE_METRIC_HELP.Detail} /></span>
+              </div>
+              {guardrailRows.length === 0 ? (
+                <div className="ops-table-row">
+                  <span>No active guardrail</span>
+                  <span>Healthy</span>
+                  <span>Low visible risk</span>
+                  <span>All measured route, freshness, and resource guardrails are currently passing.</span>
+                </div>
+              ) : guardrailRows.map((row) => (
+                <div key={row.key} className="ops-table-row ops-table-row-wide">
+                  <span>{row.signal}</span>
+                  <span className={reliabilityStateClass(row.state)}>{reliabilityStateLabel(row.state)}</span>
+                  <span className={reliabilityStateClass(row.state)}>{row.risk}</span>
+                  <span>{row.detail}</span>
                 </div>
               ))}
             </div>

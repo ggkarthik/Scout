@@ -19,7 +19,9 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class SuppressionRuleService {
@@ -32,6 +34,9 @@ public class SuppressionRuleService {
     private final FindingsScoreService findingsScoreService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final TenantWorkRunner tenantWorkRunner;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
+    private TransactionTemplate readTransactionTemplate;
+    private TransactionTemplate writeTransactionTemplate;
 
     public SuppressionRuleService(
             SuppressionRuleRepository repo,
@@ -53,34 +58,63 @@ public class SuppressionRuleService {
         this.tenantWorkRunner = tenantWorkRunner;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.readTransactionTemplate = null;
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     public List<SuppressionRuleResponse> list(Tenant tenant) {
-        return tenantSchemaExecutionService.run(tenant, repo::findAllByOrderByCreatedAtAsc)
+        return tenantSchemaExecutionService.run(tenant, () -> executeRead(() -> repo.findAllByOrderByCreatedAtAsc()
                 .stream()
-                .map(r -> toResponse(r, tenant))
-                .toList();
+                .map(this::toResponseInCurrentTenantSchema)
+                .toList()));
     }
 
     public SuppressionRuleResponse create(Tenant tenant, SuppressionRuleRequest req) {
-        SuppressionRule rule = new SuppressionRule();
-        rule.setTenant(tenant);
-        applyRequest(rule, req);
-        return toResponse(repo.save(rule), tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            SuppressionRule rule = new SuppressionRule();
+            rule.setTenant(tenant);
+            applyRequest(rule, req);
+            return toResponseInCurrentTenantSchema(repo.save(rule));
+        }));
     }
 
     public SuppressionRuleResponse update(Tenant tenant, UUID id, SuppressionRuleRequest req) {
-        SuppressionRule rule = repo.findById(id)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
-        applyRequest(rule, req);
-        rule.touch();
-        return toResponse(repo.save(rule), tenant);
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            SuppressionRule rule = repo.findById(id)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
+            applyRequest(rule, req);
+            rule.touch();
+            return toResponseInCurrentTenantSchema(repo.save(rule));
+        }));
     }
 
     public void delete(Tenant tenant, UUID id) {
-        SuppressionRule rule = repo.findById(id)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
-        repo.delete(rule);
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            SuppressionRule rule = repo.findById(id)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + id));
+            repo.delete(rule);
+            return null;
+        }));
     }
 
     /**
@@ -91,34 +125,34 @@ public class SuppressionRuleService {
      * @return count of newly suppressed records
      * @throws IllegalStateException if the rule is not APPROVED
      */
-    @Transactional
     public int execute(Tenant tenant, UUID ruleId) {
-        SuppressionRule rule = repo.findById(ruleId)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            SuppressionRule rule = repo.findById(ruleId)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
 
-        if (rule.getState() != SuppressionRule.State.APPROVED) {
-            throw new IllegalStateException(
-                    "Only APPROVED rules can be executed. Rule \"" + rule.getName() + "\" is " + rule.getState() + ".");
-        }
+            if (rule.getState() != SuppressionRule.State.APPROVED) {
+                throw new IllegalStateException(
+                        "Only APPROVED rules can be executed. Rule \"" + rule.getName() + "\" is " + rule.getState() + ".");
+            }
 
-        if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
-            return executeCveRule(rule, tenant);
-        }
-        return executeFindingRule(rule, tenant);
+            if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
+                return executeCveRuleInCurrentTenantSchema(rule);
+            }
+            return executeFindingRuleInCurrentTenantSchema(rule);
+        }));
     }
 
     /**
      * Reopens all CVE records and findings suppressed by the given rule, and returns
      * the total number of records cleared.
      */
-    @Transactional
     public int reopenAllByRule(Tenant tenant, UUID ruleId) {
-        repo.findById(ruleId)
-                .filter(r -> r.getTenant().getId().equals(tenant.getId()))
-                .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            repo.findById(ruleId)
+                    .filter(r -> r.getTenant().getId().equals(tenant.getId()))
+                    .orElseThrow(() -> new NoSuchElementException("Suppression rule not found: " + ruleId));
 
-        return tenantSchemaExecutionService.run(tenant, () -> {
             List<OrgCveRecord> cveRecords = orgCveRecordRepository.findBySuppressedByRuleId(ruleId);
             for (OrgCveRecord record : cveRecords) {
                 record.setSuppressedByRuleId(null);
@@ -146,15 +180,14 @@ public class SuppressionRuleService {
             }
 
             return cveRecords.size() + findings.size();
-        });
+        }));
     }
 
     /**
      * Reopens an OrgCveRecord from rule-based suppression by clearing the rule reference.
      */
-    @Transactional
     public void reopenCveRecord(Tenant tenant, UUID recordId) {
-        tenantSchemaExecutionService.run(tenant, () -> {
+        tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
             OrgCveRecord record = orgCveRecordRepository.findById(recordId)
                     .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                     .orElseThrow(() -> new NoSuchElementException("CVE record not found: " + recordId));
@@ -166,32 +199,36 @@ public class SuppressionRuleService {
             record.setSuppressionReason(null);
             record.touch();
             orgCveRecordRepository.save(record);
-        });
+            return null;
+        }));
     }
 
     /** Nightly job — runs all APPROVED rules for every tenant at midnight. */
     @Scheduled(cron = "0 0 0 * * *")
     public void runAllApprovedRulesNightly() {
-        tenantWorkRunner.forEachActiveTenant(tenant -> {
-            for (SuppressionRule rule : repo.findAllByOrderByCreatedAtAsc()) {
-                if (rule.getState() == SuppressionRule.State.APPROVED) {
-                    if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
-                        executeCveRule(rule, tenant);
-                    } else {
-                        executeFindingRule(rule, tenant);
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("suppression-rule.run-approved-rules-nightly")) {
+            return;
+        }
+        tenantWorkRunner.forEachActiveTenant(tenant ->
+                tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+                    for (SuppressionRule rule : repo.findAllByOrderByCreatedAtAsc()) {
+                        if (rule.getState() == SuppressionRule.State.APPROVED) {
+                            if (rule.getRecordType() == SuppressionRule.RecordType.CVE) {
+                                executeCveRuleInCurrentTenantSchema(rule);
+                            } else {
+                                executeFindingRuleInCurrentTenantSchema(rule);
+                            }
+                        }
                     }
-                }
-            }
-        });
+                    return null;
+                }))
+        );
     }
 
     // ── private helpers ──────────────────────────────────────────────────────
 
-    private int executeFindingRule(SuppressionRule rule, Tenant tenant) {
-        List<Finding> openFindings = tenantSchemaExecutionService.run(
-                tenant,
-                () -> findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN)
-        );
+    private int executeFindingRuleInCurrentTenantSchema(SuppressionRule rule) {
+        List<Finding> openFindings = findingRepository.findByStatusOrderByUpdatedAtDesc(FindingStatus.OPEN);
 
         List<Finding> toSuppress = new ArrayList<>();
         for (Finding finding : openFindings) {
@@ -217,12 +254,9 @@ public class SuppressionRuleService {
         return toSuppress.size();
     }
 
-    private int executeCveRule(SuppressionRule rule, Tenant tenant) {
+    private int executeCveRuleInCurrentTenantSchema(SuppressionRule rule) {
         // Only process records not yet suppressed by any rule
-        List<OrgCveRecord> candidates = tenantSchemaExecutionService.run(
-                tenant,
-                orgCveRecordRepository::findBySuppressedByRuleIdIsNull
-        );
+        List<OrgCveRecord> candidates = orgCveRecordRepository.findBySuppressedByRuleIdIsNull();
 
         if (candidates.isEmpty()) {
             return 0;
@@ -238,8 +272,7 @@ public class SuppressionRuleService {
 
         // Map<vulnId, Set<softwareName>> — package names from matched inventory components
         java.util.Map<UUID, java.util.Set<String>> namesByVuln = new java.util.HashMap<>();
-        tenantSchemaExecutionService.run(tenant, () -> cvsRepository.findByVulnerability_IdIn(vulnIds))
-                .forEach(cvs -> {
+        cvsRepository.findByVulnerability_IdIn(vulnIds).forEach(cvs -> {
                     if (cvs.getComponent() != null && cvs.getComponent().getPackageName() != null
                             && !cvs.getComponent().getPackageName().isBlank()) {
                         namesByVuln
@@ -311,12 +344,9 @@ public class SuppressionRuleService {
         rule.setValidTo(req.validTo() != null ? Instant.parse(req.validTo()) : null);
     }
 
-    private SuppressionRuleResponse toResponse(SuppressionRule r, Tenant tenant) {
-        long suppressedCount = tenantSchemaExecutionService.run(
-                tenant,
-                () -> findingRepository.countBySuppressedByRuleId(r.getId())
-                        + orgCveRecordRepository.countBySuppressedByRuleId(r.getId())
-        );
+    private SuppressionRuleResponse toResponseInCurrentTenantSchema(SuppressionRule r) {
+        long suppressedCount = findingRepository.countBySuppressedByRuleId(r.getId())
+                + orgCveRecordRepository.countBySuppressedByRuleId(r.getId());
         return new SuppressionRuleResponse(
                 r.getId(),
                 r.getName(),
@@ -331,5 +361,20 @@ public class SuppressionRuleService {
                 r.getUpdatedAt(),
                 suppressedCount
         );
+    }
+
+    private <T> T executeRead(java.util.function.Supplier<T> work) {
+        if (readTransactionTemplate == null) {
+            return work.get();
+        }
+        T result = readTransactionTemplate.execute(status -> work.get());
+        return result == null ? work.get() : result;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 }

@@ -202,6 +202,7 @@ export function BomManagementPage({
   const [loading, setLoading] = React.useState(false);
   const [queuedJobId, setQueuedJobId] = React.useState<string | null>(null);
   const [queueMessage, setQueueMessage] = React.useState('');
+  const [queueMessageTone, setQueueMessageTone] = React.useState<'info' | 'success' | 'warning'>('info');
   const [ingestError, setIngestError] = React.useState('');
   const [ingestResult, setIngestResult] = React.useState<BomIngestionResult | null>(null);
   const [selectedCbomAssetId, setSelectedCbomAssetId] = React.useState<string | null>(null);
@@ -312,12 +313,17 @@ export function BomManagementPage({
         if (job.status === 'SUCCEEDED') {
           const parsed = parseJobResult(job);
           setIngestResult(parsed);
-          setQueueMessage(parsed ? 'BOM fetch completed successfully.' : 'Completed, but result could not be read.');
+          setQueueMessageTone('success');
+          setQueueMessage(parsed ? 'BOM fetch completed successfully. Results are now available below.' : 'BOM fetch completed, but the result payload could not be read.');
           setQueuedJobId(null);
         } else if (job.status === 'FAILED' || job.status === 'CANCELLED') {
           setIngestError(job.failureMessage || 'BOM fetch failed.');
           setQueuedJobId(null);
         } else {
+          setQueueMessageTone('info');
+          setQueueMessage(job.status === 'RUNNING'
+            ? `BOM fetch is running for job ${queuedJobId}.`
+            : `BOM fetch is queued for job ${queuedJobId}.`);
           window.setTimeout(() => void poll(), 1500);
         }
       } catch (err) {
@@ -375,7 +381,7 @@ export function BomManagementPage({
     if (!assetIdentifier.trim()) { setIngestError('Asset Identifier is required'); return; }
     if (manualMode === 'url' && !sourceUrl.trim()) { setIngestError('Source URL is required'); return; }
     if (manualMode === 'file' && !file) { setIngestError('Please select a BOM file'); return; }
-    setIngestError(''); setIngestResult(null); setQueuedJobId(null); setQueueMessage(''); setLoading(true);
+    setIngestError(''); setIngestResult(null); setQueuedJobId(null); setQueueMessage(''); setQueueMessageTone('info'); setLoading(true);
     try {
       if (manualMode === 'url') {
         const payload: BomFetchPayload = {
@@ -385,7 +391,12 @@ export function BomManagementPage({
         };
         const accepted = await api.bomFetch(payload);
         setQueuedJobId(accepted.jobId);
-        setQueueMessage(accepted.existingJob ? `Using existing job ${accepted.jobId}.` : `Queued job ${accepted.jobId}.`);
+        setQueueMessageTone('info');
+        setQueueMessage(
+          accepted.existingJob
+            ? `Using existing ingestion job ${accepted.jobId}. This page will update automatically when it finishes.`
+            : `Queued ingestion job ${accepted.jobId}. This page will update automatically when processing starts and completes.`
+        );
       } else {
         const fd = new FormData();
         fd.append('file', file!); fd.append('bomType', bomType); fd.append('assetType', assetType);
@@ -613,7 +624,9 @@ export function BomManagementPage({
           </div>
 
           {queueMessage && (
-            <div className="notice">{queueMessage}{queuedJobId && <span> Waiting for job <code>{queuedJobId}</code>…</span>}</div>
+            <div className={`notice${queueMessageTone === 'success' ? ' success' : queueMessageTone === 'warning' ? ' warning' : ''}`} role="status">
+              {queueMessage}
+            </div>
           )}
 
           {ingestResult && (

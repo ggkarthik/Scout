@@ -68,6 +68,15 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         if ("GET".equalsIgnoreCase(method) && "/api/dashboard".equals(path)) {
             return OperationalMetricsService.KEY_DASHBOARD_OVERVIEW;
         }
+        if ("GET".equalsIgnoreCase(method) && "/api/dashboard/applicable-software".equals(path)) {
+            return OperationalMetricsService.KEY_DASHBOARD_APPLICABLE_SOFTWARE;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/dashboard/impacted-cves".equals(path)) {
+            return OperationalMetricsService.KEY_DASHBOARD_IMPACTED_CVES;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/dashboard/cve-inventory-map".equals(path)) {
+            return OperationalMetricsService.KEY_DASHBOARD_CVE_INVENTORY_MAP;
+        }
         if ("GET".equalsIgnoreCase(method) && "/api/operations/dashboard".equals(path)) {
             return OperationalMetricsService.KEY_OPERATIONS_DASHBOARD;
         }
@@ -97,6 +106,33 @@ public class OperationalMetricsInterceptor implements HandlerInterceptor {
         }
         if ("GET".equalsIgnoreCase(method) && "/api/findings".equals(path)) {
             return OperationalMetricsService.KEY_FINDINGS_LIST;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/findings/summary".equals(path)) {
+            return OperationalMetricsService.KEY_FINDINGS_SUMMARY;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/findings/distributions".equals(path)) {
+            return OperationalMetricsService.KEY_FINDINGS_DISTRIBUTIONS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/findings/backlog-health".equals(path)) {
+            return OperationalMetricsService.KEY_FINDINGS_BACKLOG_HEALTH;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/findings/filters".equals(path)) {
+            return OperationalMetricsService.KEY_FINDINGS_FILTERS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/findings/projection-status".equals(path)) {
+            return OperationalMetricsService.KEY_FINDINGS_PROJECTION_STATUS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/inventory/components".equals(path)) {
+            return OperationalMetricsService.KEY_INVENTORY_COMPONENTS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/inventory/components/filters".equals(path)) {
+            return OperationalMetricsService.KEY_INVENTORY_COMPONENT_FILTERS;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/inventory/software-identities".equals(path)) {
+            return OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITIES;
+        }
+        if ("GET".equalsIgnoreCase(method) && "/api/inventory/software-identities/funnel".equals(path)) {
+            return OperationalMetricsService.KEY_INVENTORY_SOFTWARE_IDENTITY_FUNNEL;
         }
         if ("POST".equalsIgnoreCase(method) && "/api/sbom-fetch".equals(path)) {
             return OperationalMetricsService.KEY_SBOM_FETCH_ENDPOINT;

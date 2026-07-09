@@ -6,7 +6,6 @@ import java.time.Instant;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TenantBootstrapService {
@@ -23,41 +22,42 @@ public class TenantBootstrapService {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void ensureBootstrapTenant() {
-        tenantSchemaService.ensureSchemaExists(tenantSchemaService.defaultSchemaName());
+        TenantContext.runAsPlatform(() -> {
+            tenantSchemaService.ensureSchemaExists(tenantSchemaService.defaultSchemaName());
 
-        Tenant defaultTenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
-                .orElseGet(() -> {
-                    Tenant tenant = new Tenant();
-                    tenant.setName(TenantService.DEFAULT_TENANT_NAME);
-                    tenant.setSlug("default-workspace");
-                    tenant.setSchemaName(tenantSchemaService.defaultSchemaName());
-                    return tenantRepository.save(tenant);
-                });
+            Tenant defaultTenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
+                    .orElseGet(() -> {
+                        Tenant tenant = new Tenant();
+                        tenant.setName(TenantService.DEFAULT_TENANT_NAME);
+                        tenant.setSlug("default-workspace");
+                        tenant.setSchemaName(tenantSchemaService.defaultSchemaName());
+                        return tenantRepository.save(tenant);
+                    });
 
-        boolean changed = false;
-        String normalizedDefaultSchema = tenantSchemaService.defaultSchemaName();
-        if (!normalizedDefaultSchema.equals(defaultTenant.getSchemaName())) {
-            defaultTenant.setSchemaName(normalizedDefaultSchema);
-            defaultTenant.setUpdatedAt(Instant.now());
-            changed = true;
-        }
-
-        for (Tenant tenant : tenantRepository.findAll()) {
-            String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()
-                    ? tenantSchemaService.deriveSchemaName(tenant.getSlug())
-                    : tenantSchemaService.normalizeSchemaName(tenant.getSchemaName());
-            if (!normalizedSchema.equals(tenant.getSchemaName())) {
-                tenant.setSchemaName(normalizedSchema);
-                tenant.setUpdatedAt(Instant.now());
-                tenantRepository.save(tenant);
+            boolean changed = false;
+            String normalizedDefaultSchema = tenantSchemaService.defaultSchemaName();
+            if (!normalizedDefaultSchema.equals(defaultTenant.getSchemaName())) {
+                defaultTenant.setSchemaName(normalizedDefaultSchema);
+                defaultTenant.setUpdatedAt(Instant.now());
+                changed = true;
             }
-            tenantSchemaService.ensureSchemaExists(tenant.getSchemaName());
-        }
 
-        if (changed) {
-            tenantRepository.save(defaultTenant);
-        }
+            for (Tenant tenant : tenantRepository.findAll()) {
+                String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()
+                        ? tenantSchemaService.deriveSchemaName(tenant.getSlug())
+                        : tenantSchemaService.normalizeSchemaName(tenant.getSchemaName());
+                if (!normalizedSchema.equals(tenant.getSchemaName())) {
+                    tenant.setSchemaName(normalizedSchema);
+                    tenant.setUpdatedAt(Instant.now());
+                    tenantRepository.save(tenant);
+                }
+                tenantSchemaService.ensureSchemaExists(tenant.getSchemaName());
+            }
+
+            if (changed) {
+                tenantRepository.save(defaultTenant);
+            }
+        });
     }
 }

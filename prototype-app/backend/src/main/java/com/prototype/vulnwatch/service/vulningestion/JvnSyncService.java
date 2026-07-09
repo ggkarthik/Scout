@@ -51,7 +51,8 @@ public class JvnSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("JVN", List.of("JVN"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeJvnSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId()).ifPresent(this::executeJvnSync));
         }
         return decision.toResponse("JVN sync is already in progress", "JVN sync queued");
     }

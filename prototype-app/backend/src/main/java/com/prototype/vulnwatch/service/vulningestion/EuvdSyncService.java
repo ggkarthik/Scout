@@ -50,7 +50,8 @@ public class EuvdSyncService {
         VulnerabilitySyncRunService.TriggerDecision decision =
                 syncRunService.prepareQueuedRun("EUVD", List.of("EUVD"));
         if (decision.queuedNewRun()) {
-            ingestionExecutor.execute(() -> executeEuvdSyncAsync(decision.run().getId()));
+            ingestionExecutor.execute(() ->
+                    syncRunService.markRunningIfQueued(decision.run().getId()).ifPresent(this::executeEuvdSync));
         }
         return decision.toResponse("EUVD sync is already in progress", "EUVD sync queued");
     }

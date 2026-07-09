@@ -4,31 +4,40 @@ import com.prototype.vulnwatch.domain.Tenant;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FindingProjectionStatusService {
 
     private static final String STATUS_KEY = "finding-workspace";
-    private static final long STALE_AFTER_SECONDS = 15 * 60L;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingProjectionRefreshService findingProjectionRefreshService;
+    private final TransactionTemplate readTransactionTemplate;
+    private final long staleAfterSeconds;
 
     public FindingProjectionStatusService(
             NamedParameterJdbcTemplate jdbcTemplate,
             TenantSchemaExecutionService tenantSchemaExecutionService,
-            FindingProjectionRefreshService findingProjectionRefreshService
+            FindingProjectionRefreshService findingProjectionRefreshService,
+            PlatformTransactionManager transactionManager,
+            @Value("${app.slo.projection-stale-threshold-minutes:15}") long projectionStaleThresholdMinutes
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.findingProjectionRefreshService = findingProjectionRefreshService;
+        this.readTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readTransactionTemplate.setReadOnly(true);
+        this.readTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.staleAfterSeconds = Math.max(1L, projectionStaleThresholdMinutes) * 60L;
     }
 
-    @Transactional(readOnly = true)
     public FindingListProjectionService.ProjectionStatus getProjectionStatus(Tenant tenant) {
         FindingListProjectionService.ProjectionStatus status = inspectProjectionStatus(tenant);
         if (status.missing()) {
@@ -38,35 +47,37 @@ public class FindingProjectionStatusService {
         return status;
     }
 
-    @Transactional(readOnly = true)
     public FindingListProjectionService.ProjectionStatus inspectProjectionStatus(Tenant tenant) {
         if (tenant == null || tenant.getId() == null) {
             return FindingListProjectionService.ProjectionStatus.empty();
         }
         return tenantSchemaExecutionService.run(tenant, () -> {
-            long currentProjectedCount = findingProjectionRefreshService.countProjectedRows();
-            long sourceFindingCount = findingProjectionRefreshService.countSourceFindings();
-            return jdbcTemplate.query("""
-                    SELECT last_computed_at, last_rebuild_duration_ms
-                    FROM finding_workspace_projection_status
-                    WHERE projection_key = :projectionKey
-                    """,
-                    new MapSqlParameterSource().addValue("projectionKey", STATUS_KEY),
-                    rs -> rs.next()
-                            ? new FindingListProjectionService.ProjectionStatus(
-                                    rs.getTimestamp("last_computed_at").toInstant(),
-                                    currentProjectedCount,
-                                    sourceFindingCount,
-                                    coalesceNullableLong(rs, "last_rebuild_duration_ms"),
-                                    buildStaleFlag(
-                                            rs.getTimestamp("last_computed_at") == null ? null : rs.getTimestamp("last_computed_at").toInstant(),
-                                            currentProjectedCount,
-                                            sourceFindingCount
-                                    ),
-                                    Math.abs(currentProjectedCount - sourceFindingCount)
-                            )
-                            : FindingListProjectionService.ProjectionStatus.missing(sourceFindingCount)
-            );
+            FindingListProjectionService.ProjectionStatus status = readTransactionTemplate.execute(transactionStatus -> {
+                long currentProjectedCount = findingProjectionRefreshService.countProjectedRows();
+                long sourceFindingCount = findingProjectionRefreshService.countSourceFindings();
+                return jdbcTemplate.query("""
+                        SELECT last_computed_at, last_rebuild_duration_ms
+                        FROM finding_workspace_projection_status
+                        WHERE projection_key = :projectionKey
+                        """,
+                        new MapSqlParameterSource().addValue("projectionKey", STATUS_KEY),
+                        rs -> rs.next()
+                                ? new FindingListProjectionService.ProjectionStatus(
+                                        rs.getTimestamp("last_computed_at").toInstant(),
+                                        currentProjectedCount,
+                                        sourceFindingCount,
+                                        coalesceNullableLong(rs, "last_rebuild_duration_ms"),
+                                        buildStaleFlag(
+                                                rs.getTimestamp("last_computed_at") == null ? null : rs.getTimestamp("last_computed_at").toInstant(),
+                                                currentProjectedCount,
+                                                sourceFindingCount
+                                        ),
+                                        Math.abs(currentProjectedCount - sourceFindingCount)
+                                )
+                                : FindingListProjectionService.ProjectionStatus.missing(sourceFindingCount)
+                );
+            });
+            return status == null ? FindingListProjectionService.ProjectionStatus.empty() : status;
         });
     }
 
@@ -82,6 +93,6 @@ public class FindingProjectionStatusService {
         if (findingCount != sourceFindingCount) {
             return true;
         }
-        return Duration.between(lastComputedAt, Instant.now()).getSeconds() > STALE_AFTER_SECONDS;
+        return Duration.between(lastComputedAt, Instant.now()).getSeconds() > staleAfterSeconds;
     }
 }

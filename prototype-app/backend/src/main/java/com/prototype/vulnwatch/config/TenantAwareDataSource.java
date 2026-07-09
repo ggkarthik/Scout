@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -34,6 +35,7 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     private final boolean requireTenantContext;
     private final String defaultTenantSchema;
     private final MeterRegistry meterRegistry;
+    private final BooleanSupplier applicationReadySupplier;
 
     public TenantAwareDataSource(
             javax.sql.DataSource targetDataSource,
@@ -41,10 +43,21 @@ public class TenantAwareDataSource extends DelegatingDataSource {
             String defaultTenantSchema,
             MeterRegistry meterRegistry
     ) {
+        this(targetDataSource, requireTenantContext, defaultTenantSchema, meterRegistry, () -> true);
+    }
+
+    public TenantAwareDataSource(
+            javax.sql.DataSource targetDataSource,
+            boolean requireTenantContext,
+            String defaultTenantSchema,
+            MeterRegistry meterRegistry,
+            BooleanSupplier applicationReadySupplier
+    ) {
         super(targetDataSource);
         this.requireTenantContext = requireTenantContext;
         this.defaultTenantSchema = defaultTenantSchema;
         this.meterRegistry = meterRegistry;
+        this.applicationReadySupplier = applicationReadySupplier == null ? () -> true : applicationReadySupplier;
     }
 
     @Override
@@ -133,6 +146,8 @@ public class TenantAwareDataSource extends DelegatingDataSource {
             classification = "tenant";
         } else if (TenantContext.isPlatformContext()) {
             classification = "platform";
+        } else if (!applicationReadySupplier.getAsBoolean()) {
+            classification = "bootstrap_default_tenant";
         } else {
             classification = "missing_unclassified";
             LOG.warn("Tenant-aware connection acquired without tenant or platform context");

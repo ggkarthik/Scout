@@ -32,7 +32,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import com.prototype.vulnwatch.util.LogUtil;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FixRecordService {
@@ -48,6 +50,7 @@ public class FixRecordService {
     private final OpenAiClient openAiClient;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private TransactionTemplate writeTransactionTemplate;
 
     public FixRecordService(
             FixRecordRepository fixRecordRepository,
@@ -69,6 +72,17 @@ public class FixRecordService {
         this.openAiClient = openAiClient;
         this.objectMapper = objectMapper;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        if (transactionManager == null) {
+            this.writeTransactionTemplate = null;
+            return;
+        }
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.writeTransactionTemplate.setReadOnly(false);
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public List<FixRecordResponse> getFixRecords(Tenant tenant, String cveId) {
@@ -95,9 +109,8 @@ public class FixRecordService {
             int assetCount
     ) {}
 
-    @Transactional
     public List<FixRecordResponse> saveAnalystFixes(Tenant tenant, String cveId, List<AnalystFixEntry> entries) {
-        return tenantSchemaExecutionService.run(tenant, () -> {
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
             List<FixRecord> existing = fixRecordRepository.findByCveIdOrderByCreatedAtAsc(cveId)
                     .stream()
                     .filter(r -> FixRecord.RecommendationSource.ANALYST.name().equals(r.getRecommendationSource()))
@@ -129,20 +142,21 @@ public class FixRecordService {
                 saved.add(fixRecordRepository.save(r));
             }
             return saved.stream().map(this::toResponse).toList();
-        });
+        }));
     }
 
-    @Transactional
     public List<FixRecordResponse> generateFixRecords(Tenant tenant, String cveId) {
         return generateFixRecords(tenant, cveId, List.of());
     }
 
-    @Transactional
     public List<FixRecordResponse> generateFixRecords(
             Tenant tenant, String cveId,
             List<com.prototype.vulnwatch.controller.CveDetailController.GenerateFixesSoftwareEntry> extraSoftware
     ) {
-        return tenantSchemaExecutionService.run(tenant, () -> generateFixRecordsInTenantSchema(tenant, cveId, extraSoftware));
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> executeWrite(() -> generateFixRecordsInTenantSchema(tenant, cveId, extraSoftware))
+        );
     }
 
     private List<FixRecordResponse> generateFixRecordsInTenantSchema(
@@ -537,6 +551,13 @@ public class FixRecordService {
         r.setSourceUrlsJson(toJson(referenceUrls));
         r.setGeneratedAt(Instant.now());
         return r;
+    }
+
+    private <T> T executeWrite(java.util.function.Supplier<T> work) {
+        if (writeTransactionTemplate == null) {
+            return work.get();
+        }
+        return writeTransactionTemplate.execute(status -> work.get());
     }
 
     @SuppressWarnings("unchecked")

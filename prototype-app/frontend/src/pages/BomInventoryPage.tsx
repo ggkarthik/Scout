@@ -7,6 +7,7 @@ import {
   type BomLineageItem,
   type BomWorkflowSummary,
 } from '../api/client';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { timeAgo } from '../lib/time';
 
 function BomTypeTag({ bomType }: { bomType: string }) {
@@ -134,9 +135,21 @@ function BomDetailPanel({ bomId, onClose }: { bomId: string; onClose: () => void
   });
 
   const detail: BomDetail | undefined = detailQuery.data;
+  const latestDataUpdate = latestFreshnessValue([
+    detailQuery.dataUpdatedAt,
+    lineageQuery.dataUpdatedAt,
+    detail?.ingestedAt,
+  ]);
+  const detailRefreshing = (detailQuery.isFetching || lineageQuery.isFetching) && (!!detail || Boolean(lineageQuery.data));
 
   return (
     <div className="bom-detail-panel">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={detailRefreshing}
+        refreshLabel="Refreshing BOM detail while keeping current context visible…"
+      />
+
       <div className="bom-detail-header">
         <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
           ← Back
@@ -470,6 +483,14 @@ export function BomInventoryPage() {
   const allItems: BomInventoryItem[] = inventoryQuery.data ?? [];
   const filtered = typeFilter ? allItems.filter((r) => r.bomType === typeFilter) : allItems;
   const summary = dashboardQuery.data;
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    dashboardQuery.dataUpdatedAt,
+    inventoryQuery.dataUpdatedAt
+  ]), [
+    dashboardQuery.dataUpdatedAt,
+    inventoryQuery.dataUpdatedAt
+  ]);
+  const refreshing = (dashboardQuery.isFetching || inventoryQuery.isFetching) && (allItems.length > 0 || Boolean(summary));
 
   if (selectedBomId) {
     return (
@@ -482,6 +503,12 @@ export function BomInventoryPage() {
 
   return (
     <div className="bom-inventory-page">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing BOM inventory while keeping current results visible…"
+      />
+
       {/* Delete confirmation modal */}
       {confirmDelete && (
         <div style={{

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import {
   pathForInventoryHostAsset,
   pathForInventoryView,
@@ -149,13 +150,6 @@ const INVENTORY_WORKSPACE_TAB_CONFIG: Record<QualityInventoryWorkspaceTab, {
 
 function hasValue(value?: string | null): boolean {
   return Boolean(value && value.trim().length > 0);
-}
-
-function formatRefetchedAt(value?: number): string {
-  if (!value) {
-    return 'Refreshing when data arrives';
-  }
-  return `Last refreshed ${new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 function normalizeAssetType(value?: string | null): SupportedAssetType | null {
@@ -961,22 +955,42 @@ export function InventoryOverviewPage() {
     inventoryComponentsQuery.error
   ]);
 
-  const lastUpdated = Math.max(
-    dashboardQuery.dataUpdatedAt || 0,
-    softwareQuery.dataUpdatedAt || 0,
-    eolSummaryQuery.dataUpdatedAt || 0,
-    unresolvedMappingsQuery.dataUpdatedAt || 0,
-    qualitySummaryQuery.dataUpdatedAt || 0,
-    applicableSoftwareQuery.dataUpdatedAt || 0,
-    inventoryComponentsQuery.dataUpdatedAt || 0,
-    assetsQuery.dataUpdatedAt || 0,
-    hostDetailsQuery.dataUpdatedAt || 0
-  );
-
   const totalKnownAssets = assetTypeSummaries.reduce((sum, summary) => sum + summary.totalAssetCount, 0);
   const activeComponentCount = inventoryComponentsQuery.data?.length ?? dashboard?.components ?? 0;
   const overviewLoading = softwareLoading || assetLoading;
   const overviewHasData = totalKnownAssets > 0 || activeComponentCount > 0 || softwareRows.length > 0 || assetRecords.length > 0;
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    dashboardQuery.dataUpdatedAt,
+    softwareQuery.dataUpdatedAt,
+    eolSummaryQuery.dataUpdatedAt,
+    unresolvedMappingsQuery.dataUpdatedAt,
+    qualitySummaryQuery.dataUpdatedAt,
+    applicableSoftwareQuery.dataUpdatedAt,
+    inventoryComponentsQuery.dataUpdatedAt,
+    assetsQuery.dataUpdatedAt,
+    hostDetailsQuery.dataUpdatedAt
+  ]), [
+    applicableSoftwareQuery.dataUpdatedAt,
+    assetsQuery.dataUpdatedAt,
+    dashboardQuery.dataUpdatedAt,
+    eolSummaryQuery.dataUpdatedAt,
+    hostDetailsQuery.dataUpdatedAt,
+    inventoryComponentsQuery.dataUpdatedAt,
+    qualitySummaryQuery.dataUpdatedAt,
+    softwareQuery.dataUpdatedAt,
+    unresolvedMappingsQuery.dataUpdatedAt
+  ]);
+  const overviewRefreshing = overviewHasData && [
+    dashboardQuery,
+    softwareQuery,
+    eolSummaryQuery,
+    unresolvedMappingsQuery,
+    qualitySummaryQuery,
+    applicableSoftwareQuery,
+    inventoryComponentsQuery,
+    assetsQuery,
+    hostDetailsQuery
+  ].some((query) => query.isFetching);
   const normalizationIssueCount = qualityDomainCount(qualitySummary, 'NORMALIZATION');
   const correlationIssueCount = qualityDomainCount(qualitySummary, 'CORRELATION');
   const unmatchedEolCount = qualityDomainCount(qualitySummary, 'EOL');
@@ -1171,9 +1185,11 @@ export function InventoryOverviewPage() {
 
   return (
     <section className="inventory-overview-shell vuln-repo-dashboard-page">
-      <div className="inventory-overview-status-row vuln-repo-dashboard-generated-at">
-        <span className="panel-caption">{formatRefetchedAt(lastUpdated || undefined)}</span>
-      </div>
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={overviewRefreshing}
+        refreshLabel="Refreshing inventory overview while keeping current signals visible…"
+      />
 
       {(openWorkspaceTabs.length > 0 || activeWorkspaceTab !== 'overview') ? (
       <div className="inventory-workspace-tabs" role="tablist" aria-label="Inventory workspace tabs">

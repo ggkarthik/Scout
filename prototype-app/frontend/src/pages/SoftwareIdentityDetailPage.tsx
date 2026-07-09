@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import type { Finding } from '../features/findings/types';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
 import { pathForInventoryHostAsset, pathForInventoryView, pathForVulnRepoView } from '../app/routes';
@@ -579,12 +580,35 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
     return <div className="notice error">Software identity was not found.</div>;
   }
 
+  const latestDataUpdate = latestFreshnessValue([
+    detailQuery.dataUpdatedAt,
+    metadataQuery.dataUpdatedAt,
+    vulnerabilitiesQuery.dataUpdatedAt,
+    findingsQuery.dataUpdatedAt,
+    fixRecordsQuery.dataUpdatedAt,
+    detail.lastObservedAt,
+    metadata.updatedAt,
+    metadata.recommendationUpdatedAt,
+  ]);
+  const detailRefreshing = [
+    detailQuery,
+    metadataQuery,
+    vulnerabilitiesQuery,
+    findingsQuery,
+    fixRecordsQuery
+  ].some((query) => query.isFetching);
   const criticalAssets = detail.assets.filter(isCriticalAsset);
   const eolVersionCount = detail.versions.filter((version) => version.isEol || (version.eolDaysRemaining != null && version.eolDaysRemaining <= 90)).length;
   const bomEvidence = detail.bomEvidence;
 
   return (
     <section className="inventory-page-shell software-detail-page">
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={detailRefreshing}
+        refreshLabel="Refreshing software identity details while keeping current context visible…"
+      />
+
       <div className="inventory-section-card sdi-page">
 
         {/* Hero */}

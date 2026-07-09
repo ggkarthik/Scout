@@ -103,6 +103,7 @@ describe('InventoryPage', () => {
     await waitFor(() =>
       expect(screen.getAllByText('web-prod-01').length).toBeGreaterThanOrEqual(1)
     );
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 
   it('shows empty state when no hosts are returned', async () => {

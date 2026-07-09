@@ -55,6 +55,7 @@ public class AwsDiscoverySyncService {
     private final WorkspaceService workspaceService;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public AwsDiscoverySyncService(
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository,
@@ -88,9 +89,19 @@ public class AwsDiscoverySyncService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     public SyncTriggerResponse trigger() {
         Tenant tenant = workspaceService.getWorkspace();
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimManualRun(tenant));
+        ClaimedRun claimed = tenantSchemaExecutionService.run(
+                tenant,
+                () -> transactionTemplate.execute(status -> claimManualRun(tenant))
+        );
         if (!claimed.reusedActiveRun()) {
             integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual", null));
             return new SyncTriggerResponse(claimed.runId(), "queued", "AWS Cloud Discovery sync queued");
@@ -100,7 +111,10 @@ public class AwsDiscoverySyncService {
 
     public SyncTriggerResponse triggerTarget(Tenant tenant, UUID targetId) {
         AwsDiscoveryTarget target = awsDiscoveryTargetService.requireTarget(tenant, targetId);
-        ClaimedRun claimed = transactionTemplate.execute(status -> claimRunForConfig(target.getConfig(), "manual-target", true));
+        ClaimedRun claimed = tenantSchemaExecutionService.run(
+                tenant,
+                () -> transactionTemplate.execute(status -> claimRunForConfig(target.getConfig(), "manual-target", true))
+        );
         if (!claimed.reusedActiveRun()) {
             integrationQueueExecutor.execute(() -> executeRun(tenant.getId(), claimed.configId(), claimed.runId(), "manual-target", targetId));
             return new SyncTriggerResponse(claimed.runId(), "queued", "AWS Cloud Discovery target sync queued");
@@ -110,15 +124,21 @@ public class AwsDiscoverySyncService {
 
     @Scheduled(cron = "0 */5 * * * *")
     public void runScheduledSyncs() {
-        List<ConfigRef> configs = new ArrayList<>();
-        for (Tenant tenant : tenantService.listActiveTenants()) {
-            tenantSchemaExecutionService.run(tenant, () -> {
-                awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
-                        .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
-                        .ifPresent(config -> configs.add(new ConfigRef(config.getId(), tenant.getId())));
-                return null;
-            });
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("aws-discovery.run-scheduled-syncs")) {
+            return;
         }
+        List<ConfigRef> configs = TenantContext.runAsPlatform(() -> {
+            List<ConfigRef> scheduledConfigs = new ArrayList<>();
+            for (Tenant tenant : tenantService.listActiveTenants()) {
+                tenantSchemaExecutionService.run(tenant, () -> {
+                    awsDiscoveryConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "aws")
+                            .filter(config -> config.isEnabled() && config.isAutoSyncEnabled())
+                            .ifPresent(config -> scheduledConfigs.add(new ConfigRef(config.getId(), tenant.getId())));
+                    return null;
+                });
+            }
+            return scheduledConfigs;
+        });
         for (ConfigRef configRef : configs) {
             ClaimedRun claimed = tenantSchemaExecutionService.run(configRef.tenantId(), () -> {
                 AwsDiscoveryConfig config = awsDiscoveryConfigRepository.findById(configRef.configId()).orElse(null);

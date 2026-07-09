@@ -58,7 +58,7 @@ Active when `APP_JWT_ISSUER_URI` is set. Token decoded by `JwtTenantAuthenticati
 | Path prefix | Required |
 |-------------|---------|
 | `OPTIONS /*` | Public |
-| `GET /actuator/health`, `GET /actuator/info` | Public |
+| `GET /actuator/health`, `GET /actuator/health/readiness`, `GET /actuator/health/liveness`, `GET /actuator/info` | Public |
 | `POST /api/auth/login`, `POST /api/auth/setup-password` | Public |
 | `POST /api/demo-requests` | Public |
 | `/api/demo-invites/**` | Public |
@@ -160,7 +160,7 @@ Backed by `vulnerability_intel_summary` + `vulnerability_intel_observations` pro
 | POST | `/api/cve-detail/{cveId}/suppress` | Suppress CVE org-wide |
 | POST | `/api/cve-detail/{cveId}/investigate` | Start investigation |
 | POST | `/api/cve-detail/{cveId}/ai-summary` | Generate AI investigation summary (OpenAI) |
-| POST | `/api/cve-detail/{cveId}/servicenow-incident` | Create ServiceNow incident for CVE |
+| POST | `/api/cve-detail/{cveId}/servicenow-incident` | Create ServiceNow incident for CVE. |
 
 `OrgCveRecord` entity stores per-tenant CVE state. `OrgCveAiArtifact` stores persisted AI outputs.
 
@@ -529,6 +529,7 @@ Suppression rules evaluated at finding creation and on the 15-minute reopen swee
 | `GET /actuator/health/readiness` | Readiness probe |
 | `GET /actuator/health/liveness` | Liveness probe (prod only) |
 | `GET /actuator/info` | Build info |
+| `GET /actuator/prometheus` | Micrometer/Prometheus scrape endpoint for explicitly enabled local or certification environments |
 
 ---
 

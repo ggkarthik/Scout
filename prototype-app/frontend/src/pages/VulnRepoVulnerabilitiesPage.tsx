@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CVEInvestigationSummary, type InvestigationSummaryInput } from '../components/CVEInvestigationSummary';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
+import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import { pathForPlatformVulnIntelDetail, pathForVulnRepoView } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { canAccessPlatformConsole } from '../features/auth/roles';
@@ -299,6 +300,7 @@ export function VulnRepoVulnerabilitiesPage() {
   const totalItems = vulnRepoQuery.data?.totalItems ?? 0;
   const totalPages = vulnRepoQuery.data?.totalPages ?? 0;
   const loading = vulnRepoQuery.isLoading || vulnRepoQuery.isFetching;
+  const refreshing = vulnRepoQuery.isFetching && items.length > 0;
   const error = vulnRepoQuery.error instanceof Error ? vulnRepoQuery.error.message : '';
   const softwareDetailQuery = useCveDetailQuery(selectedSoftwareRecord?.externalId ?? null);
   const savedSummaryQuery = useSavedInvestigationSummaryQuery(
@@ -996,6 +998,12 @@ export function VulnRepoVulnerabilitiesPage() {
 
   return (
     <section className="panel vuln-repo-vulnerabilities-shell">
+      <PageFreshnessStatus
+        updatedAt={vulnRepoQuery.dataUpdatedAt}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing vulnerability results while keeping current rows visible…"
+      />
+
       {error && <div className="notice error">Failed to load vuln repo vulnerabilities: {error}</div>}
 
       <div className="fpl-toolbar vuln-repo-intel-toolbar">

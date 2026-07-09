@@ -7,6 +7,7 @@ import {
   type DataTableRow
 } from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import {
   VulnRepoCveAssessmentWorkbench,
 } from '../components/VulnRepoCveAssessmentWorkbench';
@@ -184,11 +185,19 @@ export function VulnRepoOrgCvePage({
   const error = orgCveQuery.error instanceof Error ? orgCveQuery.error.message : null;
   const summary = orgCveQuery.data?.summary ?? null;
   const items = React.useMemo(() => orgCveQuery.data?.items ?? [], [orgCveQuery.data?.items]);
+  const refreshing = orgCveQuery.isFetching && items.length > 0;
   const totalPages = orgCveQuery.data?.totalPages ?? 0;
   const selectedDetail = detailQuery.data ?? null;
   const detailLoading = detailQuery.isLoading || detailQuery.isFetching;
   const detailError = detailQuery.error instanceof Error ? detailQuery.error.message : null;
   const canRefreshExposure = canRefreshTenantExposure(actor);
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    orgCveQuery.dataUpdatedAt,
+    automationStatusQuery.dataUpdatedAt,
+  ]), [
+    automationStatusQuery.dataUpdatedAt,
+    orgCveQuery.dataUpdatedAt,
+  ]);
   const refreshExposureMutation = useMutation({
     mutationFn: cveWorkbenchApi.refreshTenantExposure,
     onSuccess: async () => {
@@ -473,6 +482,12 @@ export function VulnRepoOrgCvePage({
 
   return (
     <section className="panel">
+        <PageFreshnessStatus
+          updatedAt={latestDataUpdate}
+          isRefreshing={refreshing}
+          refreshLabel="Refreshing investigation queue while keeping current rows visible…"
+        />
+
         <div className="panel-header">
           <div>
             {returnTo && (

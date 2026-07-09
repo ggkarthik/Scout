@@ -31,7 +31,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class FindingQueryService {
@@ -59,7 +58,6 @@ public class FindingQueryService {
         this.findingListProjectionService = findingListProjectionService;
     }
 
-    @Transactional(readOnly = true)
     public FindingPageResponse listByTenantPage(
             Tenant tenant,
             int page,
@@ -82,7 +80,6 @@ public class FindingQueryService {
         );
     }
 
-    @Transactional(readOnly = true)
     public FindingPageResponse listByTenantCursor(
             Tenant tenant,
             String cursor,
@@ -92,7 +89,8 @@ public class FindingQueryService {
         int safeLimit = Math.max(1, Math.min(200, limit));
         FindingListProjectionService.ProjectionPage projectionPage =
                 findingListProjectionService.queryPage(tenant, filter, cursor, safeLimit);
-        Map<UUID, Finding> findingsById = findingRepository.findAllById(projectionPage.findingIds()).stream()
+        Map<UUID, Finding> findingsById = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllById(projectionPage.findingIds()))
+                .stream()
                 .collect(Collectors.toMap(Finding::getId, finding -> finding, (left, right) -> left, LinkedHashMap::new));
         List<FindingResponse> items = projectionPage.findingIds().stream()
                 .map(findingsById::get)
@@ -112,7 +110,6 @@ public class FindingQueryService {
         );
     }
 
-    @Transactional(readOnly = true)
     public List<Finding> listEntitiesByTenantFilter(Tenant tenant, FindingsFilter filter) {
         Specification<Finding> specification = FindingFilterSpecifications.byFilter(tenant, filter);
         return tenantSchemaExecutionService.run(
@@ -121,26 +118,20 @@ public class FindingQueryService {
         );
     }
 
-    @Transactional(readOnly = true)
     public List<Finding> listEntitiesByTenantAndIds(Tenant tenant, List<UUID> findingIds) {
         if (findingIds == null || findingIds.isEmpty()) {
             return List.of();
         }
-        return findingRepository.findAllById(findingIds).stream()
-                .filter(finding -> finding.getTenant() != null
-                        && finding.getTenant().getId() != null
-                        && finding.getTenant().getId().equals(tenant.getId()))
+        return tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllById(findingIds)).stream()
                 .toList();
     }
 
-    @Transactional(readOnly = true)
     public List<FindingResponse> listByTenant(Tenant tenant) {
         return tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc()).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
     public FindingFilterValuesResponse listAvailableFilters(Tenant tenant) {
         LinkedHashSet<String> severities = new LinkedHashSet<>();
         tenantSchemaExecutionService.run(tenant, () -> findingRepository.findDistinctSeveritiesByTenant(tenant)).stream()
@@ -208,7 +199,6 @@ public class FindingQueryService {
         );
     }
 
-    @Transactional(readOnly = true)
     public List<FindingResponse> listLatestByTenant(Tenant tenant, int limit) {
         Pageable pageable = PageRequest.of(0, Math.max(1, Math.min(200, limit)), Sort.by(Sort.Direction.DESC, "updatedAt"));
         return tenantSchemaExecutionService.run(
@@ -219,12 +209,10 @@ public class FindingQueryService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
     public long countOpen(Tenant tenant) {
         return tenantSchemaExecutionService.run(tenant, () -> findingRepository.countByStatus(FindingStatus.OPEN));
     }
 
-    @Transactional(readOnly = true)
     public long countCritical(Tenant tenant) {
         return tenantSchemaExecutionService.run(
                 tenant,

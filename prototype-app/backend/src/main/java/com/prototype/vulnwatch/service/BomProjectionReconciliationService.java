@@ -35,6 +35,7 @@ public class BomProjectionReconciliationService {
     private final InventoryComponentRepository inventoryComponentRepository;
     private final AssetRepository assetRepository;
     private final AtomicInteger lastDriftCount = new AtomicInteger();
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public BomProjectionReconciliationService(
             TenantService tenantService,
@@ -59,16 +60,29 @@ public class BomProjectionReconciliationService {
         }
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     @Scheduled(fixedDelayString = "${app.bom.reconciliation.interval-ms:300000}")
     public void reconcileProjectionDrift() {
-        int driftCount = 0;
-        for (Tenant tenant : tenantService.listActiveTenants()) {
-            try {
-                driftCount += tenantSchemaExecutionService.run(tenant, reconcileTenant(tenant));
-            } catch (Exception ex) {
-                LOG.warn("Failed BOM projection reconciliation for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
-            }
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("bom-projection.reconcile-drift")) {
+            return;
         }
+        int driftCount = TenantContext.runAsPlatform(() -> {
+            int totalDriftCount = 0;
+            for (Tenant tenant : tenantService.listActiveTenants()) {
+                try {
+                    totalDriftCount += tenantSchemaExecutionService.run(tenant, reconcileTenant(tenant));
+                } catch (Exception ex) {
+                    LOG.warn("Failed BOM projection reconciliation for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
+                }
+            }
+            return totalDriftCount;
+        });
         lastDriftCount.set(driftCount);
     }
 

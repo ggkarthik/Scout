@@ -1,6 +1,7 @@
 import React from 'react';
 import '../styles/findings-list.css';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { DonutChart, HBarChart, WidgetCard } from '../features/widgets/FplWidgets';
 import { pathForInventoryHostAsset, pathForInventoryViewWithSearch, pathForSoftwareIdentityDetail } from '../app/routes';
@@ -455,6 +456,13 @@ export function SoftwareIdentitiesPage() {
 
   const totalIdentityCount = identitiesQuery.data?.totalElements ?? identities.length;
   const totalPages = identitiesQuery.data?.totalPages ?? 0;
+  const latestDataUpdate = React.useMemo(() => latestFreshnessValue([
+    identitiesQuery.dataUpdatedAt,
+    funnelQuery.dataUpdatedAt
+  ]), [
+    funnelQuery.dataUpdatedAt,
+    identitiesQuery.dataUpdatedAt
+  ]);
   const currentSoftwareStats = React.useMemo(() => {
     const sourceValues = new Set<string>();
     let softwareRows = 0;
@@ -654,6 +662,8 @@ export function SoftwareIdentitiesPage() {
   };
 
   const loading = identitiesQuery.isPending && identities.length === 0;
+  const refreshing = (identitiesQuery.isFetching || funnelQuery.isFetching)
+    && (identities.length > 0 || currentSoftwareStats.softwareRows > 0);
   const errorMessage = identitiesQuery.error instanceof Error ? identitiesQuery.error.message : null;
   const clearFilters = React.useCallback(() => {
     setQuery('');
@@ -675,6 +685,12 @@ export function SoftwareIdentitiesPage() {
       description="Distinct software products derived from inventory components, with deployment, coverage, and lifecycle posture."
       legacyClassName="inventory-page-shell"
     >
+      <PageFreshnessStatus
+        updatedAt={latestDataUpdate}
+        isRefreshing={refreshing}
+        refreshLabel="Refreshing software identities while keeping current results visible…"
+      />
+
       <div className="inventory-fpl-toolbar">
         <div className="findings-groupby-shell">
           <MultiGroupBy

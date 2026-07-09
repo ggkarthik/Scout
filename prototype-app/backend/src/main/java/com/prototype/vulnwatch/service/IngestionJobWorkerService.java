@@ -30,6 +30,7 @@ public class IngestionJobWorkerService {
     private final int pollBatchSize;
     private final int maxConcurrentPerTenant;
     private final long retryDelayMs;
+    private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public IngestionJobWorkerService(
             IngestionJobService ingestionJobService,
@@ -55,8 +56,18 @@ public class IngestionJobWorkerService {
         this.retryDelayMs = retryDelayMs;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy) {
+        this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
+                ? BackgroundTaskExecutionPolicy.allowAll()
+                : backgroundTaskExecutionPolicy;
+    }
+
     @PostConstruct
     public void recoverInterruptedJobs() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("ingestion-job-worker.recover-interrupted-jobs")) {
+            return;
+        }
         int recovered = ingestionJobService.recoverInterruptedRunningJobs();
         if (recovered > 0) {
             LOG.warn("Recovered {} interrupted ingestion jobs left RUNNING during the previous process lifetime", recovered);
@@ -65,36 +76,41 @@ public class IngestionJobWorkerService {
 
     @Scheduled(fixedDelayString = "${app.ingestion.jobs.poll-interval-ms:2000}")
     public void pollJobs() {
+        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("ingestion-job-worker.poll-jobs")) {
+            return;
+        }
         // This method MUST NOT let any exception escape. A periodic @Scheduled task that throws is
         // not rescheduled by Spring's ReschedulingRunnable, so a single transient failure (e.g. a DB
         // connection error after a host sleep/clock-leap exhausts the pool) would silently kill the
         // poller for the rest of the JVM's life and leave every ingestion job stuck in QUEUED. The
         // listActiveTenants() call below touches the database, so it has to be inside the guard too.
         try {
-            for (Tenant tenant : tenantService.listActiveTenants()) {
-                try {
-                    List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
-                            tenant,
-                            pollBatchSize,
-                            maxConcurrentPerTenant
-                    );
-                    for (IngestionJobService.ClaimedJobRef ref : claimed) {
-                        try {
-                            sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
-                        } catch (RejectedExecutionException ex) {
-                            ingestionJobService.markQueuedForRetry(
-                                    ref.tenantId(),
-                                    ref.jobId(),
-                                    "EXECUTOR_BUSY",
-                                    "SBOM job executor is at capacity",
-                                    Instant.now().plusMillis(retryDelayMs)
-                            );
+            TenantContext.runAsPlatform(() -> {
+                for (Tenant tenant : tenantService.listActiveTenants()) {
+                    try {
+                        List<IngestionJobService.ClaimedJobRef> claimed = ingestionJobService.claimPendingJobs(
+                                tenant,
+                                pollBatchSize,
+                                maxConcurrentPerTenant
+                        );
+                        for (IngestionJobService.ClaimedJobRef ref : claimed) {
+                            try {
+                                sbomJobExecutor.execute(() -> execute(ref.tenantId(), ref.jobId()));
+                            } catch (RejectedExecutionException ex) {
+                                ingestionJobService.markQueuedForRetry(
+                                        ref.tenantId(),
+                                        ref.jobId(),
+                                        "EXECUTOR_BUSY",
+                                        "SBOM job executor is at capacity",
+                                        Instant.now().plusMillis(retryDelayMs)
+                                );
+                            }
                         }
+                    } catch (Exception ex) {
+                        LOG.warn("Failed polling ingestion jobs for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
                     }
-                } catch (Exception ex) {
-                    LOG.warn("Failed polling ingestion jobs for tenant {}: {}", tenant.getId(), ex.getMessage(), ex);
                 }
-            }
+            });
         } catch (Exception ex) {
             LOG.warn("Ingestion job poll cycle failed before tenant iteration: {}", ex.getMessage(), ex);
         }

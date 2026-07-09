@@ -57,9 +57,16 @@ describe('VulnRepoOrgCvePage', () => {
     vi.spyOn(cveWorkbenchApi, 'getOrgSpecificCveAutomationStatus').mockResolvedValue({
       automationEnabled: true,
       pendingEventCount: 0,
+      processingEventCount: 0,
       pendingByType: {},
       staleEventCount: 0,
       failedEventCount: 0,
+      oldestPendingEventAgeSeconds: 0,
+      oldestProcessingEventAgeSeconds: 0,
+      ingestionQueuedJobCount: 0,
+      ingestionRunningJobCount: 0,
+      oldestQueuedIngestionAgeSeconds: 0,
+      oldestRunningIngestionAgeSeconds: 0,
     });
     vi.spyOn(cveWorkbenchApi, 'getCveDetail').mockResolvedValue({
       summary: {
@@ -109,6 +116,7 @@ describe('VulnRepoOrgCvePage', () => {
     });
 
     await screen.findByText('CVE-2026-1001');
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'CVE-2026-1001' }));
 
     await waitFor(() => {
