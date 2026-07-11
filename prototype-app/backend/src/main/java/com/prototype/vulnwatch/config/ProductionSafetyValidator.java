@@ -16,6 +16,8 @@ public class ProductionSafetyValidator {
     private final boolean allowApiKeyAuth;
     private final String jwtIssuerUri;
     private final String jwtJwkSetUri;
+    private final String legacyPlatformOwnerEmail;
+    private final String legacyPlatformOwnerPasswordHash;
     private final String credentialEncryptionKey;
     private final boolean allowHeaderTenantSelection;
     private final boolean requireTenantContext;
@@ -23,6 +25,7 @@ public class ProductionSafetyValidator {
     private final boolean testPersonasEnabled;
     private final JdbcTemplate platformJdbcTemplate;
     private final boolean validateRlsRuntimeRole;
+    private final PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -31,13 +34,16 @@ public class ProductionSafetyValidator {
             @Value("${app.security.allow-api-key-auth:true}") boolean allowApiKeyAuth,
             @Value("${app.security.jwt.issuer-uri:}") String jwtIssuerUri,
             @Value("${app.security.jwt.jwk-set-uri:}") String jwtJwkSetUri,
+            @Value("${app.security.platform-owner-email:}") String legacyPlatformOwnerEmail,
+            @Value("${app.security.platform-owner-password-hash:}") String legacyPlatformOwnerPasswordHash,
             @Value("${app.security.credential-encryption-key:}") String credentialEncryptionKey,
             @Value("${app.tenancy.allow-header-tenant-selection:false}") boolean allowHeaderTenantSelection,
             @Value("${app.tenancy.require-tenant-context:true}") boolean requireTenantContext,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins,
             @Value("${app.test-personas.enabled:false}") boolean testPersonasEnabled,
             @Value("${app.security.validate-rls-runtime-role:false}") boolean validateRlsRuntimeRole,
-            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate
+            @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate,
+            PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties
     ) {
         this.requireProductionSecrets = requireProductionSecrets;
         this.apiKey = apiKey;
@@ -45,6 +51,8 @@ public class ProductionSafetyValidator {
         this.allowApiKeyAuth = allowApiKeyAuth;
         this.jwtIssuerUri = jwtIssuerUri;
         this.jwtJwkSetUri = jwtJwkSetUri;
+        this.legacyPlatformOwnerEmail = legacyPlatformOwnerEmail;
+        this.legacyPlatformOwnerPasswordHash = legacyPlatformOwnerPasswordHash;
         this.credentialEncryptionKey = credentialEncryptionKey;
         this.allowHeaderTenantSelection = allowHeaderTenantSelection;
         this.requireTenantContext = requireTenantContext;
@@ -52,10 +60,13 @@ public class ProductionSafetyValidator {
         this.testPersonasEnabled = testPersonasEnabled;
         this.platformJdbcTemplate = platformJdbcTemplate;
         this.validateRlsRuntimeRole = validateRlsRuntimeRole;
+        this.platformOwnerBootstrapProperties = platformOwnerBootstrapProperties;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void validate() {
+        validateLegacyPlatformOwnerCredentialsAreUnused();
+        validatePlatformOwnerBootstrapConfiguration();
         if (!requireProductionSecrets) {
             return;
         }
@@ -86,6 +97,40 @@ public class ProductionSafetyValidator {
         }
         if (validateRlsRuntimeRole) {
             validateRuntimeRoleCannotBypassRls();
+        }
+    }
+
+    private void validatePlatformOwnerBootstrapConfiguration() {
+        if (platformOwnerBootstrapProperties == null || !platformOwnerBootstrapProperties.isEnabled()) {
+            return;
+        }
+        if (platformOwnerBootstrapProperties.getUsers() == null || platformOwnerBootstrapProperties.getUsers().isEmpty()) {
+            throw new IllegalStateException("APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED is true but no platform owner bootstrap users are configured.");
+        }
+        for (PlatformOwnerBootstrapProperties.PlatformOwnerSeed seed : platformOwnerBootstrapProperties.getUsers()) {
+            boolean hasSubject = hasText(seed.getExternalSubject());
+            boolean hasEmail = hasText(seed.getEmail());
+            if (!hasSubject && !hasEmail) {
+                throw new IllegalStateException("Each platform owner bootstrap user must include externalSubject or email.");
+            }
+            if (requireProductionSecrets) {
+                if (!hasEmail) {
+                    throw new IllegalStateException("Production platform owner bootstrap users must include email for password setup and login.");
+                }
+                String email = seed.getEmail().trim().toLowerCase();
+                if (email.endsWith("@localhost")) {
+                    throw new IllegalStateException("Production platform owner bootstrap users cannot use localhost email addresses.");
+                }
+            }
+        }
+    }
+
+    private void validateLegacyPlatformOwnerCredentialsAreUnused() {
+        if (hasText(legacyPlatformOwnerEmail) || hasText(legacyPlatformOwnerPasswordHash)) {
+            throw new IllegalStateException(
+                    "Legacy platform-owner credential properties are no longer supported. "
+                            + "Remove APP_PLATFORM_OWNER_EMAIL / APP_PLATFORM_OWNER_PASSWORD_HASH and use "
+                            + "platform-owner bootstrap users plus password setup instead.");
         }
     }
 

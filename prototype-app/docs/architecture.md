@@ -176,6 +176,9 @@ HTTP Request
 - `APP_CREDENTIAL_ENCRYPTION_KEY` is weak/default
 - `APP_CORS_ALLOWED_ORIGINS` is `*`
 - `APP_TEST_PERSONAS_ENABLED=true`
+- `APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED=true` with no bootstrap users
+- A production platform-owner bootstrap user omits email
+- A production platform-owner bootstrap user uses a localhost email
 
 ---
 

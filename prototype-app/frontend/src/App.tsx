@@ -454,6 +454,14 @@ function PlatformRoute() {
   return <PlatformConsolePage selectedView={normalizePlatformRouteView(params.platformView)} />;
 }
 
+function AdminRoute() {
+  const actor = useActor();
+  if (!canManageTenant(actor)) {
+    return <Navigate to="/exposure" replace />;
+  }
+  return <UserManagementPage />;
+}
+
 function routeLoadingFallback() {
   return (
     <div className="page-grid">
@@ -986,34 +994,34 @@ function AppShell() {
 
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
-                <Route path="/exposure" element={<ExposureDashboardRoute />} />
-                <Route path="/" element={<HomeRoute />} />
-                <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
-                <Route path="/findings" element={<FindingsRoute />} />
-                <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
-                <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
-                <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
-                <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
-                <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
-                <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
-                <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
-                <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
-                <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
-                <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
-                <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
-                <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
-                <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
-                <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
-                <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
-                <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
-                <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
-                <Route path="/end-of-life" element={<EndOfLifeRoute />} />
-                <Route path="/connect/:connectView?" element={<ConnectRoute />} />
-                <Route path="/admin/:adminView?" element={<UserManagementPage />} />
-                <Route path="/platform/:platformView?" element={<PlatformRoute />} />
-                <Route path="/configurations/:configView?" element={<ConfigurationsPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              <Route path="/exposure" element={<ExposureDashboardRoute />} />
+              <Route path="/" element={<HomeRoute />} />
+              <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
+              <Route path="/findings" element={<FindingsRoute />} />
+              <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
+              <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+              <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+              <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
+              <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
+              <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
+              <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
+              <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
+              <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
+              <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
+              <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
+              <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
+              <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
+              <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
+              <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
+              <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
+              <Route path="/end-of-life" element={<EndOfLifeRoute />} />
+              <Route path="/connect/:connectView?" element={<ConnectRoute />} />
+              <Route path="/admin/:adminView?" element={<AdminRoute />} />
+              <Route path="/platform/:platformView?" element={<PlatformRoute />} />
+              <Route path="/configurations/:configView?" element={<ConfigurationsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           </React.Suspense>
         </main>
 

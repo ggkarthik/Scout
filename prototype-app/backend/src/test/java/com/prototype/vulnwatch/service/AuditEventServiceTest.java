@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,5 +76,47 @@ class AuditEventServiceTest {
         assertTrue(event.getDetailsJson().contains("\"activeComponentCount\":4"));
         assertTrue(event.getDetailsJson().contains("\"stateRowsChanged\":2"));
         assertTrue(event.getDetailsJson().contains("\"openFindingsCount\":1"));
+    }
+
+    @Test
+    void listPlatformUserEventsReturnsPlatformScopedIdentityAuditOnly() {
+        AuditEvent event = new AuditEvent();
+        event.setAction("platform.user.setup_completed");
+        event.setTargetType("app_user");
+        event.setTargetId("user-1");
+        when(auditEventRepository.findByTenantIsNullAndTargetTypeAndActionInOrderByOccurredAtDesc(
+                "app_user",
+                AuditEventService.PLATFORM_USER_AUDIT_ACTIONS
+        )).thenReturn(java.util.List.of(event));
+
+        AuditEventService service = new AuditEventService(auditEventRepository, tenantRepository, requestActorService);
+
+        var events = service.listPlatformUserEvents();
+
+        assertEquals(1, events.size());
+        assertEquals("platform.user.setup_completed", events.get(0).getAction());
+    }
+
+    @Test
+    void platformUserAuditEventsRemainPlatformScopedEvenDuringTenantContext() {
+        UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "owner@example.com",
+                true,
+                tenantId,
+                "Acme",
+                Set.of("PLATFORM_OWNER")));
+
+        AuditEventService service = new AuditEventService(auditEventRepository, tenantRepository, requestActorService);
+
+        service.record("platform.user.setup_issued", "app_user", "user-1", null);
+
+        ArgumentCaptor<AuditEvent> eventCaptor = ArgumentCaptor.forClass(AuditEvent.class);
+        verify(auditEventRepository).save(eventCaptor.capture());
+        AuditEvent event = eventCaptor.getValue();
+        assertEquals("platform.user.setup_issued", event.getAction());
+        assertNull(event.getTenant());
     }
 }

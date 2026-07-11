@@ -17,6 +17,7 @@ public record DemoRequestResponse(
         Instant decidedAt,
         String decidedBy,
         String rejectionReason,
+        String bootstrapStatus,
         UUID tenantId,
         String provisionedPlanCode,
         DemoInviteResponse latestInvite

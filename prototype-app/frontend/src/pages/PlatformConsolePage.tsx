@@ -14,6 +14,7 @@ const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: stri
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and workspace metadata' },
   { key: 'operations', label: 'Operations', helper: 'Tenant experience operations ownerspace and frustration signals' },
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
+  { key: 'platform-audit', label: 'Platform Audit', helper: 'Review platform-user identity changes and setup history' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
 ];
@@ -26,7 +27,7 @@ const PLATFORM_TAB_GROUPS: Array<{
   {
     key: 'tenant-management',
     title: 'Tenant Management',
-    tabs: ['tenants', 'users', 'demo-requests']
+    tabs: ['tenants', 'users', 'platform-audit', 'demo-requests']
   }
 ];
 
@@ -132,6 +133,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
               />
             )}
             {selectedView === 'users' && <PlatformUsersPanel />}
+            {selectedView === 'platform-audit' && <PlatformUserAuditPanel />}
             {selectedView === 'demo-requests' && <DemoRequestsPanel />}
             {selectedView === 'eol' && <EolPage embedded mode="platform" />}
           </div>
@@ -862,6 +864,12 @@ function PlatformUsersPanel() {
       await queryClient.invalidateQueries({ queryKey: ['platform-users'] });
     }
   });
+  const issueSetup = useMutation({
+    mutationFn: api.issuePlatformUserSetupLink,
+    onSuccess: (response) => {
+      window.open(response.setupUrl, '_self');
+    }
+  });
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -887,6 +895,27 @@ function PlatformUsersPanel() {
   };
 
   const users = usersQuery.data ?? [];
+  const activationLabel = (user: (typeof users)[number]) => {
+    if (user.setupPending) {
+      return 'Setup issued';
+    }
+    if (user.passwordSet) {
+      return 'Activated';
+    }
+    return 'Needs setup';
+  };
+  const activationDetail = (user: (typeof users)[number]) => {
+    if (user.setupPending && user.lastSetupIssuedAt) {
+      return `issued ${new Date(user.lastSetupIssuedAt).toLocaleDateString()}`;
+    }
+    if (user.passwordSet && user.lastSetupCompletedAt) {
+      return `completed ${new Date(user.lastSetupCompletedAt).toLocaleDateString()}`;
+    }
+    if (user.passwordSetAt) {
+      return new Date(user.passwordSetAt).toLocaleDateString();
+    }
+    return '';
+  };
 
   return (
     <div className="section-block">
@@ -897,7 +926,7 @@ function PlatformUsersPanel() {
         </button>
       </div>
       <p className="panel-caption">
-        Provision platform access with the external subject emitted by your configured identity provider subject claim.
+        Provision platform access for the lean platform-owner flow. Keep email populated so the owner can complete password setup through the shared login screen.
       </p>
       <form className="platform-create-tenant-form" onSubmit={handleSubmit}>
         <input name="externalSubject" placeholder="External subject" aria-label="External subject" />
@@ -911,6 +940,11 @@ function PlatformUsersPanel() {
       {upsertPlatformUser.isError && (
         <div className="notice error" role="alert">
           {upsertPlatformUser.error instanceof Error ? upsertPlatformUser.error.message : 'Failed to save platform user'}
+        </div>
+      )}
+      {issueSetup.isError && (
+        <div className="notice error" role="alert">
+          {issueSetup.error instanceof Error ? issueSetup.error.message : 'Failed to issue platform user password setup'}
         </div>
       )}
       {usersQuery.isError ? (
@@ -931,6 +965,7 @@ function PlatformUsersPanel() {
                 <th>Email</th>
                 <th>Roles</th>
                 <th>Status</th>
+                <th>Activation</th>
                 <th>Last Seen</th>
                 <th>Actions</th>
               </tr>
@@ -943,19 +978,33 @@ function PlatformUsersPanel() {
                   <td>{user.email ?? '-'}</td>
                   <td>{user.globalRoles.join(', ') || '-'}</td>
                   <td>{user.status}</td>
+                  <td>
+                    {activationLabel(user)}
+                    {activationDetail(user) ? ` · ${activationDetail(user)}` : ''}
+                  </td>
                   <td>{user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleString() : '-'}</td>
                   <td>
-                    {user.globalRoles.length === 0 ? '-' : user.globalRoles.map((role) => (
+                    <div className="button-row compact">
                       <button
-                        key={`${user.userId}-${role}`}
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => revokeRole.mutate({ userId: user.userId, role })}
-                        disabled={revokeRole.isPending}
+                        onClick={() => issueSetup.mutate(user.userId)}
+                        disabled={issueSetup.isPending}
                       >
-                        Revoke {role}
+                        {user.passwordSet ? 'Reset Password' : 'Set Password'}
                       </button>
-                    ))}
+                      {user.globalRoles.length === 0 ? '-' : user.globalRoles.map((role) => (
+                        <button
+                          key={`${user.userId}-${role}`}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => revokeRole.mutate({ userId: user.userId, role })}
+                          disabled={revokeRole.isPending}
+                        >
+                          Revoke {role}
+                        </button>
+                      ))}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -966,6 +1015,101 @@ function PlatformUsersPanel() {
       {revokeRole.isError && (
         <div className="notice error" role="alert">
           {revokeRole.error instanceof Error ? revokeRole.error.message : 'Failed to revoke role'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlatformUserAuditPanel() {
+  const [search, setSearch] = React.useState('');
+  const [actionFilter, setActionFilter] = React.useState('ALL');
+  const auditQuery = useQuery({
+    queryKey: ['platform-user-audit-events'],
+    queryFn: api.listPlatformUserAuditEvents
+  });
+
+  const events = React.useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return (auditQuery.data ?? []).filter((event) => {
+      if (actionFilter !== 'ALL' && event.action !== actionFilter) {
+        return false;
+      }
+      if (!normalizedSearch) {
+        return true;
+      }
+      return [
+        event.actorSubject,
+        event.action,
+        event.targetId,
+        event.detailsJson
+      ].some((value) => String(value ?? '').toLowerCase().includes(normalizedSearch));
+    });
+  }, [actionFilter, auditQuery.data, search]);
+
+  const actions = React.useMemo(() => {
+    return Array.from(new Set((auditQuery.data ?? []).map((event) => event.action))).sort();
+  }, [auditQuery.data]);
+
+  return (
+    <div className="section-block">
+      <div className="section-title-row">
+        <h4 className="section-title">Platform User Audit</h4>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void auditQuery.refetch()}>
+          Refresh
+        </button>
+      </div>
+      <p className="panel-caption">
+        Review platform-owner identity changes, setup issuance, and setup completion events in one place.
+      </p>
+      <div className="platform-create-tenant-form">
+        <input
+          aria-label="Search audit events"
+          placeholder="Search subject, action, user id, or details"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <select aria-label="Filter audit action" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
+          <option value="ALL">All actions</option>
+          {actions.map((action) => (
+            <option key={action} value={action}>{action}</option>
+          ))}
+        </select>
+      </div>
+      {auditQuery.isError ? (
+        <div className="notice error" role="alert">
+          {auditQuery.error instanceof Error ? auditQuery.error.message : 'Failed to load platform user audit events'}
+        </div>
+      ) : auditQuery.isLoading ? (
+        <div className="empty-state"><p>Loading platform user audit events...</p></div>
+      ) : events.length === 0 ? (
+        <div className="empty-state"><p>No matching platform user audit events.</p></div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Occurred</th>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>User Id</th>
+                <th>Outcome</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((event) => (
+                <tr key={event.id}>
+                  <td>{new Date(event.occurredAt).toLocaleString()}</td>
+                  <td>{event.actorSubject ?? '-'}</td>
+                  <td><code>{event.action}</code></td>
+                  <td><code>{event.targetId ?? '-'}</code></td>
+                  <td>{event.outcome ?? '-'}</td>
+                  <td><code>{event.detailsJson ?? '-'}</code></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -1338,7 +1482,7 @@ function DemoRequestsPanel() {
         </button>
       </div>
       <p className="panel-caption">
-        Approved requests provision demo tenants with the standard access profile while retaining demo expiry, invite, and quota controls.
+        Approved requests provision demo tenants with the standard access profile while retaining demo expiry, invite, quota, and bootstrap-state controls.
       </p>
       {requestsQuery.isError ? (
         <div className="notice error">{requestsQuery.error instanceof Error ? requestsQuery.error.message : 'Failed to load demo requests'}</div>
@@ -1356,6 +1500,7 @@ function DemoRequestsPanel() {
                 <th>Access Profile</th>
                 <th>Use Case</th>
                 <th>Status</th>
+                <th>Bootstrap</th>
                 <th>Invite</th>
                 <th>Requested</th>
                 <th>Actions</th>
@@ -1372,6 +1517,7 @@ function DemoRequestsPanel() {
                   <td>{formatWorkspaceProfile(request.provisionedPlanCode)}</td>
                   <td>{request.useCase ?? '-'}</td>
                   <td>{request.status}</td>
+                  <td>{request.bootstrapStatus ?? '-'}</td>
                   <td>
                     {request.latestInvite ? (
                       <a href={request.latestInvite.inviteUrl}>{request.latestInvite.status}</a>

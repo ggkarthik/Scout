@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.DemoInvite;
 import com.prototype.vulnwatch.domain.DemoRequest;
+import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
@@ -27,6 +28,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DemoLifecycleService {
@@ -114,19 +116,25 @@ public class DemoLifecycleService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = DemoAccessException.class)
     public DemoRequestResponse approve(UUID requestId, String actor) {
         DemoRequest request = getRequest(requestId);
         Tenant tenant;
         if (request.getTenantId() != null) {
             tenant = tenantRepository.findById(request.getTenantId())
                     .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
+            assertBootstrapEligibility(request, actor, tenant.getId());
         } else {
             tenant = demoRequestRepository
                     .findFirstByEmailIgnoreCaseAndTenantIdIsNotNullOrderByRequestedAtAsc(request.getEmail())
                     .flatMap(prior -> tenantRepository.findById(prior.getTenantId()))
+                    .map(existingTenant -> {
+                        assertBootstrapEligibility(request, actor, existingTenant.getId());
+                        return existingTenant;
+                    })
                     .orElseGet(() -> provisionTenant(request, actor));
         }
+        request.setBootstrapStatus("CREATED");
 
         DemoInvite invite = latestInvite(requestId);
         if (invite == null) {
@@ -135,8 +143,12 @@ public class DemoLifecycleService {
         if (invite.getAcceptedAt() == null && !"ACCEPTED".equalsIgnoreCase(invite.getStatus())) {
             invite = deliverInvite(invite, request);
             request.setStatus(requestStatusForInvite(invite));
+            if ("SENT".equalsIgnoreCase(invite.getStatus())) {
+                request.setBootstrapStatus("INVITE_SENT");
+            }
         } else if (request.getStatus() == null || request.getStatus().isBlank() || "PENDING".equalsIgnoreCase(request.getStatus())) {
             request.setStatus("SENT");
+            request.setBootstrapStatus("INVITE_ACCEPTED");
         }
         request.setDecidedAt(Instant.now());
         request.setDecidedBy(trimToNull(actor));
@@ -151,6 +163,7 @@ public class DemoLifecycleService {
     public DemoRequestResponse reject(UUID requestId, String reason, String actor) {
         DemoRequest request = getRequest(requestId);
         request.setStatus("REJECTED");
+        request.setBootstrapStatus("REJECTED");
         request.setDecidedAt(Instant.now());
         request.setDecidedBy(trimToNull(actor));
         request.setRejectionReason(trimToNull(reason));
@@ -175,6 +188,7 @@ public class DemoLifecycleService {
         }
         invite = deliverInvite(invite, request);
         request.setStatus(requestStatusForInvite(invite));
+        request.setBootstrapStatus("SENT".equalsIgnoreCase(invite.getStatus()) ? "INVITE_SENT" : "CREATED");
         demoRequestRepository.save(request);
         auditEventService.record("demo.invite.resent", "demo_invite", invite.getId().toString(), null);
         return toInviteResponse(invite);
@@ -200,6 +214,8 @@ public class DemoLifecycleService {
         }
         invite.setStatus("ACCEPTED");
         invite = demoInviteRepository.save(invite);
+        request.setBootstrapStatus("INVITE_ACCEPTED");
+        demoRequestRepository.save(request);
 
         String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
         auditEventService.record(
@@ -248,6 +264,10 @@ public class DemoLifecycleService {
         invite.setStatus("ACCEPTED");
         invite.setAcceptedAt(Instant.now());
         demoInviteRepository.save(invite);
+        if (invite.getRequest() != null) {
+            invite.getRequest().setBootstrapStatus("INVITE_ACCEPTED");
+            demoRequestRepository.save(invite.getRequest());
+        }
         String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
         auditEventService.record("demo.invite.accepted", "demo_invite", invite.getId().toString(),
                 "{\"tenantId\":\"" + invite.getTenant().getId() + "\"}");
@@ -319,6 +339,7 @@ public class DemoLifecycleService {
     }
 
     private Tenant provisionTenant(DemoRequest request, String actor) {
+        AppUser bootstrapUser = assertBootstrapEligibility(request, actor, null);
         String baseName = requireText(request.getCompany(), "company");
         String nameCandidate = baseName;
         int nameSuffix = 2;
@@ -348,8 +369,34 @@ public class DemoLifecycleService {
         tenant.setMaxDailyExposureRefreshes(3);
         tenant.setMaxExportRows(1000);
         Tenant saved = tenantRepository.save(tenant);
+        identityAdministrationService.assertEligibleForTenantMembership(bootstrapUser, saved.getId());
         identityAdministrationService.addMember(saved.getId(), request.getEmail(), request.getEmail(), request.getFullName(), "TENANT_ADMIN");
         return saved;
+    }
+
+    private AppUser assertBootstrapEligibility(DemoRequest request, String actor, UUID tenantId) {
+        try {
+            AppUser user = identityAdministrationService.loadOrCreateLockedUser(
+                    request.getEmail(),
+                    request.getEmail(),
+                    request.getFullName());
+            identityAdministrationService.assertEligibleForTenantMembership(user, tenantId);
+            return user;
+        } catch (ResponseStatusException ex) {
+            if (ex.getStatusCode() == HttpStatus.CONFLICT) {
+                request.setStatus("ERROR");
+                request.setBootstrapStatus("BLOCKED_DUPLICATE_AFFILIATION");
+                request.setDecidedAt(Instant.now());
+                request.setDecidedBy(trimToNull(actor));
+                demoRequestRepository.save(request);
+                throw new DemoAccessException(
+                        "DEMO_BOOTSTRAP_DUPLICATE_AFFILIATION",
+                        "This email already has active access to another tenant",
+                        HttpStatus.CONFLICT
+                );
+            }
+            throw ex;
+        }
     }
 
     private DemoInvite createInvite(DemoRequest request, Tenant tenant) {
@@ -462,6 +509,7 @@ public class DemoLifecycleService {
                 request.getDecidedAt(),
                 request.getDecidedBy(),
                 request.getRejectionReason(),
+                request.getBootstrapStatus(),
                 request.getTenantId(),
                 provisionedPlanCode,
                 latestInviteResponse(request.getId())

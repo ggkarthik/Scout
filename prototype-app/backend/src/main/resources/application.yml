@@ -65,9 +65,10 @@ app:
       email-claim: ${APP_JWT_EMAIL_CLAIM:email}
       name-claim: ${APP_JWT_NAME_CLAIM:name}
       roles-claim: ${APP_JWT_ROLES_CLAIM:roles}
-    local-auth:
-      platform-owner-email: ${APP_PLATFORM_OWNER_EMAIL:}
-      platform-owner-password-hash: ${APP_PLATFORM_OWNER_PASSWORD_HASH:}
+    bootstrap:
+      platform-owners:
+        enabled: ${APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED:false}
+        users: []
     headers:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}

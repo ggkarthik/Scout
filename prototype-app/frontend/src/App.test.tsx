@@ -13,6 +13,35 @@ const TENANT_ADMIN: ActorContext = {
   roles: ['TENANT_ADMIN']
 };
 
+const PLATFORM_OWNER_PLATFORM_SCOPE: ActorContext = {
+  creator: true,
+  principal: 'owner@example.com',
+  userId: 'owner@example.com',
+  tenantId: null,
+  tenantName: null,
+  roles: ['PLATFORM_OWNER'],
+  platformScope: true
+};
+
+const PLATFORM_OWNER_TENANT_CONTEXT: ActorContext = {
+  creator: true,
+  principal: 'owner@example.com',
+  userId: 'owner@example.com',
+  tenantId: 'tenant-a',
+  tenantName: 'Customer A',
+  roles: ['PLATFORM_OWNER'],
+  platformScope: false,
+  actingAsPlatformOwner: true,
+  allowedTenants: [{
+    id: 'tenant-a',
+    name: 'Customer A',
+    slug: 'customer-a',
+    role: 'PLATFORM_OWNER',
+    accessMode: 'READ_ONLY',
+    expiresAt: '2026-12-31T00:00:00Z'
+  }]
+};
+
 describe('App test persona switcher', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -216,6 +245,39 @@ describe('App test persona switcher', () => {
     expect(screen.getByRole('button', { name: 'Administration' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Configurations' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End-of-Life' })).not.toBeInTheDocument();
+  });
+
+  it('redirects platform-scope owners away from tenant administration routes', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(PLATFORM_OWNER_PLATFORM_SCOPE);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/admin/users' });
+
+    expect(await screen.findByRole('heading', { name: 'Tenant Management' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Members and access scope/ })).not.toBeInTheDocument();
+  });
+
+  it('blocks tenant admins from platform-user management routes', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(TENANT_ADMIN);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/platform/users' });
+
+    expect(await screen.findByText(/Platform console access requires the Platform Owner role/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Platform User Directory' })).not.toBeInTheDocument();
+  });
+
+  it('keeps acting platform owners out of tenant user-management routes', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(PLATFORM_OWNER_TENANT_CONTEXT);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/admin/users' });
+
+    expect(await screen.findByText('Exposure Dashboard')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Members and access scope/ })).not.toBeInTheDocument();
   });
 
   it('redirects tenant-scoped users away from the legacy EOL URL', async () => {

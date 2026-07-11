@@ -15,6 +15,7 @@ import com.prototype.vulnwatch.dto.TenantMemberResponse;
 import com.prototype.vulnwatch.dto.TenantMemberUpdateRequest;
 import com.prototype.vulnwatch.dto.PlatformUserRequest;
 import com.prototype.vulnwatch.dto.PlatformUserResponse;
+import com.prototype.vulnwatch.dto.PlatformUserSetupLinkResponse;
 import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.dto.TenantResponse;
 import com.prototype.vulnwatch.dto.TenantStatusRequest;
@@ -177,8 +178,21 @@ public class TenantAdministrationController {
         );
     }
 
+    @PostMapping("/platform/users/{userId}/setup-link")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public PlatformUserSetupLinkResponse issuePlatformUserSetupLink(@PathVariable UUID userId) {
+        PlatformUserSetupLinkResponse response = identityAdministrationService.issuePlatformUserSetupLink(userId);
+        auditEventService.record(
+                "platform.user.setup_issued",
+                "app_user",
+                userId.toString(),
+                "{\"actor\":\"" + requestActorService.currentActor().userId() + "\"}"
+        );
+        return response;
+    }
+
     @GetMapping("/tenants/{tenantId}/members")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public List<TenantMemberResponse> listMembers(@PathVariable UUID tenantId) {
         assertSameTenantOrPlatformOwner(tenantId);
         return identityAdministrationService.listMembers(tenantId).stream()
@@ -242,7 +256,7 @@ public class TenantAdministrationController {
     }
 
     @GetMapping("/tenants/{tenantId}/invites")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public List<TenantInviteResponse> listInvites(@PathVariable UUID tenantId) {
         assertSameTenantOrPlatformOwner(tenantId);
         return tenantUserInviteService.listInvites(tenantId).stream()

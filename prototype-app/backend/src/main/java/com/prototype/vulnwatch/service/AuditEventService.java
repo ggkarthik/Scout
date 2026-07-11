@@ -17,6 +17,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuditEventService {
+    public static final List<String> PLATFORM_USER_AUDIT_ACTIONS = List.of(
+            "platform.user.role.granted",
+            "platform.user.role.revoked",
+            "platform.user.setup_issued",
+            "platform.user.setup_completed"
+    );
 
     private final AuditEventRepository auditEventRepository;
     private final TenantRepository tenantRepository;
@@ -40,12 +46,39 @@ public class AuditEventService {
     @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson, String outcome) {
         RequestActor actor = requestActorService.currentActor();
+        persistEvent(resolveTenantId(actor, action), actor.userId(), actor.roles().stream().findFirst().orElse(null), action, targetType, targetId, detailsJson, outcome);
+    }
+
+    @Transactional
+    public void recordExplicitActor(
+            UUID tenantId,
+            String actorSubject,
+            String actorRole,
+            String action,
+            String targetType,
+            String targetId,
+            String detailsJson,
+            String outcome
+    ) {
+        persistEvent(tenantId, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome);
+    }
+
+    private void persistEvent(
+            UUID tenantId,
+            String actorSubject,
+            String actorRole,
+            String action,
+            String targetType,
+            String targetId,
+            String detailsJson,
+            String outcome
+    ) {
         AuditEvent event = new AuditEvent();
-        if (actor.tenantId() != null) {
-            tenantRepository.findById(actor.tenantId()).ifPresent(event::setTenant);
+        if (tenantId != null) {
+            tenantRepository.findById(tenantId).ifPresent(event::setTenant);
         }
-        event.setActorSubject(actor.userId());
-        event.setActorRole(actor.roles().stream().findFirst().orElse(null));
+        event.setActorSubject(actorSubject);
+        event.setActorRole(actorRole);
         event.setAction(action);
         event.setTargetType(targetType);
         event.setTargetId(targetId);
@@ -53,6 +86,16 @@ public class AuditEventService {
         event.setOutcome(outcome);
         event.setRequestId(MDC.get("requestId"));
         auditEventRepository.save(event);
+    }
+
+    private UUID resolveTenantId(RequestActor actor, String action) {
+        if (actor == null) {
+            return null;
+        }
+        if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
+            return null;
+        }
+        return actor.tenantId();
     }
 
     @Transactional
@@ -83,6 +126,14 @@ public class AuditEventService {
     @Transactional(readOnly = true)
     public List<AuditEvent> listAllForTenant(UUID tenantId) {
         return auditEventRepository.findByTenantIdOrderByOccurredAtDesc(tenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AuditEvent> listPlatformUserEvents() {
+        return auditEventRepository.findByTenantIsNullAndTargetTypeAndActionInOrderByOccurredAtDesc(
+                "app_user",
+                PLATFORM_USER_AUDIT_ACTIONS
+        );
     }
 
     public String toCsv(List<AuditEvent> events) {

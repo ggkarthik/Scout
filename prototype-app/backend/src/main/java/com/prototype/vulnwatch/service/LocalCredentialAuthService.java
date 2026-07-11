@@ -41,8 +41,7 @@ public class LocalCredentialAuthService {
     private final TenantSupportGrantService tenantSupportGrantService;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
-    private final String platformOwnerEmail;
-    private final String platformOwnerPasswordHash;
+    private final AuditEventService auditEventService;
     private final boolean requireProductionSecrets;
     private final boolean sharedLocalhostLoginEnabled;
     private final String sharedLocalhostPlatformOwnerEmail;
@@ -59,9 +58,8 @@ public class LocalCredentialAuthService {
             TenantSupportGrantService tenantSupportGrantService,
             TenantLifecycleGuardService tenantLifecycleGuardService,
             AppUserGlobalRoleService appUserGlobalRoleService,
+            AuditEventService auditEventService,
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
-            @Value("${app.security.local-auth.platform-owner-email:${APP_PLATFORM_OWNER_EMAIL:}}") String platformOwnerEmail,
-            @Value("${app.security.local-auth.platform-owner-password-hash:${APP_PLATFORM_OWNER_PASSWORD_HASH:}}") String platformOwnerPasswordHash,
             @Value("${app.security.local-auth.shared-localhost-login-enabled:true}") boolean sharedLocalhostLoginEnabled,
             @Value("${app.security.local-auth.shared-localhost-platform-owner-email:}") String sharedLocalhostPlatformOwnerEmail,
             @Value("${app.security.local-auth.shared-localhost-platform-owner-password-hash:}") String sharedLocalhostPlatformOwnerPasswordHash,
@@ -76,9 +74,8 @@ public class LocalCredentialAuthService {
         this.tenantSupportGrantService = tenantSupportGrantService;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this.auditEventService = auditEventService;
         this.requireProductionSecrets = requireProductionSecrets;
-        this.platformOwnerEmail = platformOwnerEmail;
-        this.platformOwnerPasswordHash = platformOwnerPasswordHash;
         this.sharedLocalhostLoginEnabled = sharedLocalhostLoginEnabled;
         this.sharedLocalhostPlatformOwnerEmail = defaultIfBlank(
                 sharedLocalhostPlatformOwnerEmail,
@@ -103,14 +100,12 @@ public class LocalCredentialAuthService {
     public AuthTokenResponse login(String email, String password) {
         String normalizedEmail = normalizeEmail(email);
         String rawPassword = requirePassword(password);
-        if (matchesPlatformOwner(normalizedEmail)) {
-            verifyPassword(rawPassword, requirePlatformOwnerPasswordHash());
-            return loginPlatformOwner(normalizedEmail, "Platform Owner");
-        }
-
         AppUser user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
         if (user != null && hasText(user.getPasswordHash())) {
             verifyPassword(rawPassword, user.getPasswordHash());
+            if (user.isPlatformOwner()) {
+                return issuePlatformOwnerToken(user);
+            }
             return loginTenantScopedUser(user);
         }
 
@@ -168,11 +163,7 @@ public class LocalCredentialAuthService {
         user.setDisplayName(user.getDisplayName() == null || user.getDisplayName().isBlank() ? defaultDisplayName : user.getDisplayName());
         user.setPlatformOwner(true);
         user.setStatus("ACTIVE");
-        user.setLastSeenAt(Instant.now());
-        user.setUpdatedAt(Instant.now());
-        userRepository.save(user);
-        appUserGlobalRoleService.ensureRole(user, "PLATFORM_OWNER");
-        return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
+        return issuePlatformOwnerToken(user);
     }
 
     private AuthTokenResponse loginSharedLocalhostTenantAdmin(String normalizedEmail, String passwordHash) {
@@ -223,6 +214,19 @@ public class LocalCredentialAuthService {
         clearSetupToken(user);
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
+        if (user.isPlatformOwner()) {
+            auditEventService.recordExplicitActor(
+                    null,
+                    user.getExternalSubject(),
+                    "PLATFORM_OWNER",
+                    "platform.user.setup_completed",
+                    "app_user",
+                    user.getId().toString(),
+                    "{\"mode\":\"self_service\"}",
+                    "SUCCESS"
+            );
+            return issuePlatformOwnerToken(user);
+        }
 
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(user.getExternalSubject(), "ACTIVE");
@@ -275,22 +279,17 @@ public class LocalCredentialAuthService {
         return token;
     }
 
+    private AuthTokenResponse issuePlatformOwnerToken(AppUser user) {
+        user.setLastSeenAt(Instant.now());
+        user.setUpdatedAt(Instant.now());
+        userRepository.save(user);
+        appUserGlobalRoleService.ensureRole(user, "PLATFORM_OWNER");
+        return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
+    }
+
     private void clearSetupToken(AppUser user) {
         user.setPasswordSetupTokenHash(null);
         user.setPasswordSetupTokenExpiresAt(null);
-    }
-
-    private String requirePlatformOwnerPasswordHash() {
-        if (platformOwnerPasswordHash == null || platformOwnerPasswordHash.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Platform owner password hash is not configured");
-        }
-        return platformOwnerPasswordHash.trim();
-    }
-
-    private boolean matchesPlatformOwner(String email) {
-        return platformOwnerEmail != null
-                && !platformOwnerEmail.isBlank()
-                && platformOwnerEmail.trim().equalsIgnoreCase(email);
     }
 
     private boolean matchesSharedLocalhostPlatformOwner(String email) {

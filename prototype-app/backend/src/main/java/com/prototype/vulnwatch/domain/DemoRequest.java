@@ -52,6 +52,9 @@ public class DemoRequest {
     @Column(length = 255)
     private String rejectionReason;
 
+    @Column(length = 64)
+    private String bootstrapStatus;
+
     private UUID tenantId;
 
     public UUID getId() {
@@ -148,6 +151,14 @@ public class DemoRequest {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public String getBootstrapStatus() {
+        return bootstrapStatus;
+    }
+
+    public void setBootstrapStatus(String bootstrapStatus) {
+        this.bootstrapStatus = bootstrapStatus;
     }
 
     public UUID getTenantId() {

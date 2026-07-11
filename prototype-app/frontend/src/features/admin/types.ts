@@ -77,8 +77,19 @@ export type PlatformUser = {
   displayName: string | null;
   status: string;
   globalRoles: string[];
+  passwordSet: boolean;
+  setupPending: boolean;
+  passwordSetAt: string | null;
+  lastSetupIssuedAt: string | null;
+  lastSetupCompletedAt: string | null;
   lastSeenAt: string | null;
   createdAt: string;
+};
+
+export type PlatformUserSetupLink = {
+  userId: string;
+  email: string;
+  setupUrl: string;
 };
 
 export type PlatformUserRequest = {
@@ -227,6 +238,7 @@ export type DemoRequest = {
   decidedAt: string | null;
   decidedBy: string | null;
   rejectionReason: string | null;
+  bootstrapStatus: string | null;
   tenantId: string | null;
   provisionedPlanCode: string | null;
   latestInvite: DemoInvite | null;

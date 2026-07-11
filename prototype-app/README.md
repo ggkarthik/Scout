@@ -108,6 +108,30 @@ Localhost credential login is also available for convenience:
 
 These credentials are loopback-only and do not activate for non-localhost hosts.
 
+### Shared Environment Platform-Owner Bootstrap
+
+For lean shared environments, bootstrap the known platform owners as DB-backed `app_users` at startup:
+
+```yaml
+app:
+  security:
+    bootstrap:
+      platform-owners:
+        enabled: true
+        users:
+          - email: owner1@example.com
+            displayName: Owner One
+          - email: owner2@example.com
+            displayName: Owner Two
+```
+
+Notes:
+
+- `email` is required in production-like environments so the owner can use the shared password-setup and login flow.
+- `externalSubject` is optional; if omitted, the bootstrap uses the email as the subject.
+- The bootstrap is idempotent and safe to leave enabled for the same two owners across restarts.
+- After startup, use the Platform Console `Users` tab `Set Password` action to issue the initial setup link.
+
 ## Core Runtime Shape
 
 | Component | Stack |

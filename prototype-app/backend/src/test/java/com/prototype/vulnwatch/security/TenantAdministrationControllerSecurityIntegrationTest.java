@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
 import com.prototype.vulnwatch.config.RequestCorrelationFilter;
 import com.prototype.vulnwatch.config.SecurityConfig;
@@ -14,7 +13,9 @@ import com.prototype.vulnwatch.controller.TenantAdministrationController;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.AuditEventService;
+import com.prototype.vulnwatch.service.AuthenticatedTenantActor;
 import com.prototype.vulnwatch.service.IdentityAdministrationService;
+import com.prototype.vulnwatch.service.JwtTenantAuthenticationService;
 import com.prototype.vulnwatch.service.OperationalMetricsService;
 import com.prototype.vulnwatch.service.PlatformInventoryConnectorHealthService;
 import com.prototype.vulnwatch.service.RequestActorService;
@@ -24,6 +25,8 @@ import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +35,8 @@ import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServic
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
@@ -69,11 +74,16 @@ class TenantAdministrationControllerSecurityIntegrationTest {
     private TenantAccessControlService tenantAccessControlService;
     @MockBean
     private TenantSupportGrantService tenantSupportGrantService;
+    @MockBean
+    private JwtDecoder jwtDecoder;
+    @MockBean
+    private JwtTenantAuthenticationService jwtTenantAuthenticationService;
 
     @MockBean
     private OperationalMetricsService operationalMetricsService;
 
     private Tenant tenant;
+    private Jwt jwt;
 
     @BeforeEach
     void setUp() {
@@ -92,6 +102,12 @@ class TenantAdministrationControllerSecurityIntegrationTest {
         tenant.setMaxSbomJobsPerRateLimitWindow(12);
         tenant.setMaxActiveSbomJobs(3);
         when(workspaceService.getWorkspace()).thenReturn(tenant);
+        when(tenantRepository.findById(tenant.getId())).thenReturn(java.util.Optional.of(tenant));
+        jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .claim("sub", "test-user")
+                .build();
+        when(jwtDecoder.decode("test-token")).thenReturn(jwt);
     }
 
     @Test
@@ -151,5 +167,58 @@ class TenantAdministrationControllerSecurityIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void platformOwnerCannotReadTenantMembers() throws Exception {
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/tenants/" + tenant.getId() + "/members"))
+                .thenReturn(authenticatedActor(Set.of("PLATFORM_OWNER"), null, null));
+        mockMvc.perform(get("/api/tenants/{tenantId}/members", tenant.getId())
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void platformOwnerCannotReadTenantInvites() throws Exception {
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/tenants/" + tenant.getId() + "/invites"))
+                .thenReturn(authenticatedActor(Set.of("PLATFORM_OWNER"), null, null));
+        mockMvc.perform(get("/api/tenants/{tenantId}/invites", tenant.getId())
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void tenantAdminCanReadTenantMembersWhenAuthorized() throws Exception {
+        when(identityAdministrationService.listMembers(tenant.getId())).thenReturn(List.of());
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/tenants/" + tenant.getId() + "/members"))
+                .thenReturn(authenticatedActor(Set.of("TENANT_ADMIN"), tenant.getId(), tenant.getName()));
+
+        mockMvc.perform(get("/api/tenants/{tenantId}/members", tenant.getId())
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void tenantAdminCanReadTenantInvitesWhenAuthorized() throws Exception {
+        when(tenantUserInviteService.listInvites(tenant.getId())).thenReturn(List.of());
+        when(jwtTenantAuthenticationService.authenticate(jwt, "/api/tenants/" + tenant.getId() + "/invites"))
+                .thenReturn(authenticatedActor(Set.of("TENANT_ADMIN"), tenant.getId(), tenant.getName()));
+
+        mockMvc.perform(get("/api/tenants/{tenantId}/invites", tenant.getId())
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk());
+    }
+
+    private AuthenticatedTenantActor authenticatedActor(java.util.Set<String> roles, UUID tenantId, String tenantName) {
+        return new AuthenticatedTenantActor(
+                "test-user",
+                UUID.fromString("00000000-0000-0000-0000-000000000999"),
+                "test.user@example.com",
+                "Test User",
+                tenantId,
+                tenantName,
+                tenantId == null ? null : "tenant_test",
+                roles
+        );
     }
 }

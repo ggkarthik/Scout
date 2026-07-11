@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.client.ResendEmailClient;
+import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.DemoInvite;
 import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -35,7 +36,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class DemoLifecycleServiceTest {
@@ -95,6 +98,7 @@ class DemoLifecycleServiceTest {
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
         assertEquals("SENT", response.status());
+        assertEquals("INVITE_SENT", response.bootstrapStatus());
         assertNotNull(response.tenantId());
         assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
         assertEquals("SENT", response.latestInvite().status());
@@ -173,6 +177,7 @@ class DemoLifecycleServiceTest {
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
         assertEquals("SENT", response.status());
+        assertEquals("INVITE_SENT", response.bootstrapStatus());
         assertEquals("Example Co (2)", response.latestInvite().tenantName());
         assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
     }
@@ -207,6 +212,7 @@ class DemoLifecycleServiceTest {
         DemoRequestResponse response = service.approve(request.getId(), "platform-owner@example.com");
 
         assertEquals("ERROR", response.status());
+        assertEquals("CREATED", response.bootstrapStatus());
         assertEquals(TenantService.DEFAULT_PLAN_CODE, response.provisionedPlanCode());
         assertEquals("ERROR", response.latestInvite().status());
         assertNull(response.latestInvite().lastSentAt());
@@ -268,6 +274,60 @@ class DemoLifecycleServiceTest {
     }
 
     @Test
+    void approveBlocksDuplicateAffiliationBeforeProvisioning() {
+        DemoRequest request = pendingRequest();
+        AppUser lockedUser = new AppUser();
+        lockedUser.setExternalSubject(request.getEmail());
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(identityAdministrationService.loadOrCreateLockedUser(request.getEmail(), request.getEmail(), request.getFullName()))
+                .thenReturn(lockedUser);
+        doAnswer(invocation -> {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This user already has active access to another tenant");
+        }).when(identityAdministrationService).assertEligibleForTenantMembership(lockedUser, null);
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DemoLifecycleService service = service();
+
+        DemoAccessException error = assertThrows(
+                DemoAccessException.class,
+                () -> service.approve(request.getId(), "platform-owner@example.com")
+        );
+
+        assertEquals("DEMO_BOOTSTRAP_DUPLICATE_AFFILIATION", error.getCode());
+        assertEquals("BLOCKED_DUPLICATE_AFFILIATION", request.getBootstrapStatus());
+        assertEquals("ERROR", request.getStatus());
+    }
+
+    @Test
+    void approveBlocksDuplicateAffiliationWhenRequestAlreadyTargetsProvisionedTenant() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        AppUser lockedUser = new AppUser();
+        lockedUser.setExternalSubject(request.getEmail());
+        request.setTenantId(tenant.getId());
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(identityAdministrationService.loadOrCreateLockedUser(request.getEmail(), request.getEmail(), request.getFullName()))
+                .thenReturn(lockedUser);
+        doAnswer(invocation -> {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This user already has active access to another tenant");
+        }).when(identityAdministrationService).assertEligibleForTenantMembership(lockedUser, tenant.getId());
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DemoLifecycleService service = service();
+
+        DemoAccessException error = assertThrows(
+                DemoAccessException.class,
+                () -> service.approve(request.getId(), "platform-owner@example.com")
+        );
+
+        assertEquals("DEMO_BOOTSTRAP_DUPLICATE_AFFILIATION", error.getCode());
+        assertEquals("BLOCKED_DUPLICATE_AFFILIATION", request.getBootstrapStatus());
+        assertEquals("ERROR", request.getStatus());
+    }
+
+    @Test
     void approveRecoversPartiallyProvisionedRequestByCreatingInvite() {
         DemoRequest request = pendingRequest();
         request.setTenantId(UUID.randomUUID());
@@ -326,6 +386,7 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertNotNull(response.lastSentAt());
+        assertEquals("INVITE_SENT", request.getBootstrapStatus());
         verify(demoInviteEmailService).sendInvite(request, existingInvite);
         verify(demoRequestRepository).save(request);
     }
@@ -334,6 +395,7 @@ class DemoLifecycleServiceTest {
     void resendInviteRejectsAlreadyAcceptedInvite() {
         DemoRequest request = pendingRequest();
         request.setStatus("SENT");
+        request.setBootstrapStatus("INVITE_SENT");
         Tenant tenant = provisionedTenant();
         request.setTenantId(tenant.getId());
 
@@ -451,6 +513,14 @@ class DemoLifecycleServiceTest {
                 tenantSchemaExecutionService,
                 "https://app.example.com"
         );
+    }
+
+    private com.prototype.vulnwatch.domain.TenantMembership membershipFor(Tenant tenant) {
+        com.prototype.vulnwatch.domain.TenantMembership membership = new com.prototype.vulnwatch.domain.TenantMembership();
+        membership.setTenant(tenant);
+        membership.setRole("TENANT_ADMIN");
+        membership.setStatus("ACTIVE");
+        return membership;
     }
 
     private DemoRequest pendingRequest() {

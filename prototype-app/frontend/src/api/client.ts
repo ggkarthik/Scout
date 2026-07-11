@@ -92,6 +92,7 @@ import type {
   InventoryConnectorHealth,
   PlatformUser,
   PlatformUserRequest,
+  PlatformUserSetupLink,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -1450,6 +1451,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  issuePlatformUserSetupLink: (userId: string) =>
+    request<PlatformUserSetupLink>(`/platform/users/${encodeURIComponent(userId)}/setup-link`, {
+      method: 'POST'
+    }),
   revokePlatformUserRole: (userId: string, role: string) =>
     request<void>(`/platform/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`, {
       method: 'DELETE'
@@ -1505,6 +1510,7 @@ export const api = {
       method: 'DELETE'
     }),
   listAuditEvents: () => request<AuditEvent[]>('/audit-events'),
+  listPlatformUserAuditEvents: () => request<AuditEvent[]>('/audit-events/platform-users'),
   exportAuditEventsCsv: async (): Promise<{ filename: string; csv: string }> => {
     const headers = buildApiHeaders(undefined, false);
     const response = await fetch(`${API_BASE}/audit-events/export`, { headers });

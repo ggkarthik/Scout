@@ -33,6 +33,7 @@ describe('Demo public pages', () => {
       decidedAt: null,
       decidedBy: null,
       rejectionReason: null,
+      bootstrapStatus: null,
       tenantId: null,
       provisionedPlanCode: 'ENTERPRISE',
       latestInvite: null

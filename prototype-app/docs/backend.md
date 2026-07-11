@@ -483,8 +483,8 @@ Suppression rules evaluated at finding creation and on the 15-minute reopen swee
 | `app.test-personas.enabled` | `APP_TEST_PERSONAS_ENABLED` | `false` | Enable test persona endpoints |
 | `app.jwt.hmac-secret` | `APP_JWT_HMAC_SECRET` | — | HMAC secret for HS256 JWT signing |
 | `app.jwt.issuer-uri` | `APP_JWT_ISSUER_URI` | — | OIDC issuer for RS256 JWT validation |
-| `app.security.platform-owner-email` | `APP_PLATFORM_OWNER_EMAIL` | — | Platform owner email for credential login |
-| `app.security.platform-owner-password-hash` | `APP_PLATFORM_OWNER_PASSWORD_HASH` | — | Bcrypt hash for platform owner password |
+| `app.security.bootstrap.platform-owners.enabled` | `APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED` | `false` | Seed platform-owner identities from config at startup |
+| `app.security.bootstrap.platform-owners.users[n].email` | `APP_PLATFORM_OWNER_BOOTSTRAP_USERS_<N>_EMAIL` | — | Login email for a seeded platform owner |
 | `app.cors.allowed-origins` | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins |
 | `app.credential-encryption-key` | `APP_CREDENTIAL_ENCRYPTION_KEY` | — | AES-256 key (base64) for credential storage |
 | `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/vulnwatch` | Database URL |

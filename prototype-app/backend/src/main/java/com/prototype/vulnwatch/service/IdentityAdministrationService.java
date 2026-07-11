@@ -1,16 +1,21 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.AppUser;
+import com.prototype.vulnwatch.domain.AuditEvent;
 import com.prototype.vulnwatch.domain.ServiceAccount;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.TenantMembership;
 import com.prototype.vulnwatch.domain.TenantUserInvite;
 import com.prototype.vulnwatch.dto.PlatformUserResponse;
+import com.prototype.vulnwatch.dto.PlatformUserSetupLinkResponse;
+import com.prototype.vulnwatch.repo.AuditEventRepository;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.ServiceAccountRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.TenantUserInviteRepository;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -18,10 +23,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class IdentityAdministrationService {
@@ -34,6 +43,9 @@ public class IdentityAdministrationService {
     private final TenantQuotaService tenantQuotaService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
+    private final LocalCredentialAuthService localCredentialAuthService;
+    private final AuditEventRepository auditEventRepository;
+    private final String appBaseUrl;
     private TransactionTemplate readTransactionTemplate;
     private TransactionTemplate writeTransactionTemplate;
 
@@ -43,18 +55,24 @@ public class IdentityAdministrationService {
             TenantMembershipRepository membershipRepository,
             TenantUserInviteRepository tenantUserInviteRepository,
             ServiceAccountRepository serviceAccountRepository,
+            AuditEventRepository auditEventRepository,
             TenantQuotaService tenantQuotaService,
             TenantSchemaExecutionService tenantSchemaExecutionService,
-            AppUserGlobalRoleService appUserGlobalRoleService
+            AppUserGlobalRoleService appUserGlobalRoleService,
+            LocalCredentialAuthService localCredentialAuthService,
+            @Value("${app.demo.app-base-url:http://localhost:5173}") String appBaseUrl
     ) {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.tenantUserInviteRepository = tenantUserInviteRepository;
         this.serviceAccountRepository = serviceAccountRepository;
+        this.auditEventRepository = auditEventRepository;
         this.tenantQuotaService = tenantQuotaService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this.localCredentialAuthService = localCredentialAuthService;
+        this.appBaseUrl = appBaseUrl == null || appBaseUrl.isBlank() ? "http://localhost:5173" : appBaseUrl.replaceAll("/+$", "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -96,8 +114,7 @@ public class IdentityAdministrationService {
     public TenantMembership addMember(UUID tenantId, String subject, String email, String displayName, String role) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
-        AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
-                .orElseGet(() -> createUser(subject, email, displayName));
+        AppUser user = loadOrCreateEligibleLockedUser(tenantId, subject, email, displayName);
         user.setEmail(trimToNull(email));
         user.setDisplayName(trimToNull(displayName));
         user.setUpdatedAt(Instant.now());
@@ -134,11 +151,15 @@ public class IdentityAdministrationService {
         List<AppUser> users = userRepository.findAll().stream()
                 .filter(AppUser::isPlatformOwner)
                 .toList();
+        Map<String, PlatformUserAuditSummary> auditByTargetId = latestPlatformUserAuditByTargetId(users);
         Map<UUID, java.util.Set<String>> rolesByUserId = appUserGlobalRoleService.rolesByUserIds(
                 users.stream().map(AppUser::getId).toList()
         );
         return users.stream()
-                .map(user -> toPlatformUserResponse(user, rolesByUserId.getOrDefault(user.getId(), java.util.Set.of())))
+                .map(user -> toPlatformUserResponse(
+                        user,
+                        rolesByUserId.getOrDefault(user.getId(), java.util.Set.of()),
+                        auditByTargetId.getOrDefault(user.getId().toString(), PlatformUserAuditSummary.EMPTY)))
                 .sorted(Comparator.comparing(PlatformUserResponse::createdAt))
                 .toList();
     }
@@ -154,7 +175,11 @@ public class IdentityAdministrationService {
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
         appUserGlobalRoleService.ensureRole(user, normalizeRole(role));
-        return toPlatformUserResponse(user, appUserGlobalRoleService.rolesForUser(user.getId()));
+        return toPlatformUserResponse(
+                user,
+                appUserGlobalRoleService.rolesForUser(user.getId()),
+                latestPlatformUserAuditByTargetId(List.of(user)).getOrDefault(user.getId().toString(), PlatformUserAuditSummary.EMPTY)
+        );
     }
 
     @Transactional
@@ -162,6 +187,24 @@ public class IdentityAdministrationService {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown user: " + userId));
         appUserGlobalRoleService.revokeRole(user, normalizeRole(role));
+    }
+
+    @Transactional
+    public PlatformUserSetupLinkResponse issuePlatformUserSetupLink(UUID userId) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown user: " + userId));
+        if (!user.isPlatformOwner()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Password setup is only available for platform users");
+        }
+        if (!hasText(user.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Platform user must have an email before password setup can be issued");
+        }
+        String setupToken = localCredentialAuthService.issuePasswordSetupToken(user.getExternalSubject());
+        return new PlatformUserSetupLinkResponse(
+                user.getId(),
+                user.getEmail(),
+                appBaseUrl + "/login?setup=" + setupToken + "&email=" + URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8)
+        );
     }
 
     public List<ServiceAccount> listServiceAccounts(UUID tenantId) {
@@ -249,6 +292,38 @@ public class IdentityAdministrationService {
         ).isPresent();
     }
 
+    @Transactional(readOnly = true)
+    public List<TenantMembership> listActiveMemberships(String subject) {
+        return membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(
+                requireText(subject, "subject"),
+                "ACTIVE"
+        );
+    }
+
+    @Transactional
+    public AppUser loadOrCreateLockedUser(String subject, String email, String displayName) {
+        String normalizedSubject = requireText(subject, "subject");
+        AppUser existing = userRepository.findByExternalSubject(normalizedSubject).orElse(null);
+        if (existing == null) {
+            try {
+                existing = userRepository.saveAndFlush(createUser(normalizedSubject, email, displayName));
+            } catch (DataIntegrityViolationException conflict) {
+                existing = userRepository.findByExternalSubject(normalizedSubject)
+                        .orElseThrow(() -> conflict);
+            }
+        }
+        UUID userId = existing.getId();
+        return userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown user: " + userId));
+    }
+
+    @Transactional
+    public AppUser loadOrCreateEligibleLockedUser(UUID tenantId, String subject, String email, String displayName) {
+        AppUser user = loadOrCreateLockedUser(subject, email, displayName);
+        assertEligibleForTenantMembership(user, tenantId);
+        return user;
+    }
+
     @Transactional
     public TenantMembership activateInvitedMembership(
             UUID tenantId,
@@ -261,8 +336,7 @@ public class IdentityAdministrationService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
         String normalizedSubject = requireText(subject, "subject");
-        AppUser user = userRepository.findByExternalSubject(normalizedSubject)
-                .orElseGet(() -> createUser(normalizedSubject, email, displayName));
+        AppUser user = loadOrCreateEligibleLockedUser(tenantId, normalizedSubject, email, displayName);
         user.setEmail(trimToNull(email));
         user.setDisplayName(trimToNull(displayName));
         user.setStatus("ACTIVE");
@@ -287,6 +361,23 @@ public class IdentityAdministrationService {
         membership.setStatus("ACTIVE");
         membership.setUpdatedAt(Instant.now());
         return membershipRepository.save(membership);
+    }
+
+    public void assertEligibleForTenantMembership(AppUser user, UUID tenantId) {
+        if (user.isPlatformOwner()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Platform-owner identities cannot be added to tenant memberships");
+        }
+        List<TenantMembership> activeMemberships = listActiveMemberships(user.getExternalSubject());
+        boolean hasOtherTenantMembership = activeMemberships.stream()
+                .map(TenantMembership::getTenant)
+                .filter(java.util.Objects::nonNull)
+                .map(Tenant::getId)
+                .anyMatch(existingTenantId -> tenantId == null || !tenantId.equals(existingTenantId));
+        if (hasOtherTenantMembership) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This user already has active access to another tenant");
+        }
     }
 
     private AppUser createUser(String subject, String email, String displayName) {
@@ -335,7 +426,7 @@ public class IdentityAdministrationService {
         return writeTransactionTemplate.execute(status -> work.get());
     }
 
-    private PlatformUserResponse toPlatformUserResponse(AppUser user, java.util.Set<String> roles) {
+    private PlatformUserResponse toPlatformUserResponse(AppUser user, java.util.Set<String> roles, PlatformUserAuditSummary auditSummary) {
         return new PlatformUserResponse(
                 user.getId(),
                 user.getExternalSubject(),
@@ -343,8 +434,58 @@ public class IdentityAdministrationService {
                 user.getDisplayName(),
                 user.getStatus(),
                 roles.stream().sorted().toList(),
+                user.getPasswordSetAt() != null,
+                user.getPasswordSetupTokenHash() != null
+                        && user.getPasswordSetupTokenExpiresAt() != null
+                        && user.getPasswordSetupTokenExpiresAt().isAfter(Instant.now()),
+                user.getPasswordSetAt(),
+                auditSummary.lastSetupIssuedAt(),
+                auditSummary.lastSetupCompletedAt(),
                 user.getLastSeenAt(),
                 user.getCreatedAt()
         );
+    }
+
+    private Map<String, PlatformUserAuditSummary> latestPlatformUserAuditByTargetId(List<AppUser> users) {
+        if (users == null || users.isEmpty()) {
+            return java.util.Map.of();
+        }
+        List<String> targetIds = users.stream()
+                .map(AppUser::getId)
+                .map(UUID::toString)
+                .toList();
+        List<AuditEvent> events = auditEventRepository.findByTargetTypeAndTargetIdInAndActionInOrderByOccurredAtDesc(
+                "app_user",
+                targetIds,
+                List.of("platform.user.setup_issued", "platform.user.setup_completed")
+        );
+        java.util.Map<String, PlatformUserAuditSummary> summaries = new java.util.LinkedHashMap<>();
+        for (AuditEvent event : events) {
+            if (event.getTargetId() == null) {
+                continue;
+            }
+            PlatformUserAuditSummary current = summaries.getOrDefault(event.getTargetId(), PlatformUserAuditSummary.EMPTY);
+            if ("platform.user.setup_issued".equals(event.getAction()) && current.lastSetupIssuedAt() == null) {
+                summaries.put(event.getTargetId(), current.withLastSetupIssuedAt(event.getOccurredAt()));
+            } else if ("platform.user.setup_completed".equals(event.getAction()) && current.lastSetupCompletedAt() == null) {
+                summaries.put(event.getTargetId(), current.withLastSetupCompletedAt(event.getOccurredAt()));
+            }
+        }
+        return summaries;
+    }
+
+    private record PlatformUserAuditSummary(
+            Instant lastSetupIssuedAt,
+            Instant lastSetupCompletedAt
+    ) {
+        private static final PlatformUserAuditSummary EMPTY = new PlatformUserAuditSummary(null, null);
+
+        private PlatformUserAuditSummary withLastSetupIssuedAt(Instant occurredAt) {
+            return new PlatformUserAuditSummary(occurredAt, lastSetupCompletedAt);
+        }
+
+        private PlatformUserAuditSummary withLastSetupCompletedAt(Instant occurredAt) {
+            return new PlatformUserAuditSummary(lastSetupIssuedAt, occurredAt);
+        }
     }
 }

@@ -105,6 +105,44 @@ describe('PlatformConsolePage tenant context controls', () => {
     });
   });
 
+  it('shows a platform audit panel with filterable platform-user events', async () => {
+    vi.spyOn(api, 'listPlatformUserAuditEvents').mockResolvedValue([{
+      id: 'audit-1',
+      occurredAt: '2026-07-11T08:00:00Z',
+      tenantId: null,
+      actorSubject: 'owner@example.com',
+      actorRole: 'PLATFORM_OWNER',
+      action: 'platform.user.setup_completed',
+      targetType: 'app_user',
+      targetId: 'user-1',
+      outcome: 'SUCCESS',
+      detailsJson: '{"mode":"self_service"}'
+    }, {
+      id: 'audit-2',
+      occurredAt: '2026-07-10T08:00:00Z',
+      tenantId: null,
+      actorSubject: 'owner@example.com',
+      actorRole: 'PLATFORM_OWNER',
+      action: 'platform.user.role.granted',
+      targetType: 'app_user',
+      targetId: 'user-2',
+      outcome: 'SUCCESS',
+      detailsJson: '{"role":"PLATFORM_OWNER"}'
+    }]);
+
+    renderPlatformAudit();
+
+    expect(await screen.findByText('Platform User Audit')).toBeInTheDocument();
+    expect(await screen.findAllByText('platform.user.setup_completed')).toHaveLength(2);
+
+    fireEvent.change(screen.getByLabelText('Filter audit action'), {
+      target: { value: 'platform.user.role.granted' }
+    });
+
+    expect(screen.getAllByText('platform.user.role.granted')).toHaveLength(2);
+    expect(screen.queryByText('{"mode":"self_service"}')).not.toBeInTheDocument();
+  });
+
   it('renders backend-provided tenant attention and connector issue data in operations overview', async () => {
     mockOperationsApi({
       tenantAttention: [{
@@ -140,6 +178,83 @@ describe('PlatformConsolePage tenant context controls', () => {
 
     expect(await screen.findByText('No tenant currently requires attention')).toBeInTheDocument();
     expect(screen.getByText('No tenants currently impacted')).toBeInTheDocument();
+  });
+
+  it('issues a setup link for a platform user from the users panel', async () => {
+    vi.spyOn(api, 'listPlatformUsers').mockResolvedValue([{
+      userId: 'user-1',
+      externalSubject: 'owner-subject',
+      email: 'owner@example.com',
+      displayName: 'Owner',
+      status: 'ACTIVE',
+      globalRoles: ['PLATFORM_OWNER'],
+      passwordSet: false,
+      setupPending: false,
+      passwordSetAt: null,
+      lastSetupIssuedAt: null,
+      lastSetupCompletedAt: null,
+      lastSeenAt: null,
+      createdAt: '2026-06-01T00:00:00Z'
+    }]);
+    vi.spyOn(api, 'issuePlatformUserSetupLink').mockResolvedValue({
+      userId: 'user-1',
+      email: 'owner@example.com',
+      setupUrl: 'http://localhost:5173/login?setup=setup-token-123&email=owner%40example.com'
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPlatformUsers();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set Password' }));
+
+    await waitFor(() => {
+      expect(api.issuePlatformUserSetupLink).toHaveBeenCalled();
+      expect(vi.mocked(api.issuePlatformUserSetupLink).mock.calls[0]?.[0]).toBe('user-1');
+      expect(openSpy).toHaveBeenCalledWith(
+        'http://localhost:5173/login?setup=setup-token-123&email=owner%40example.com',
+        '_self'
+      );
+    });
+  });
+
+  it('shows platform user activation state in the users panel', async () => {
+    vi.spyOn(api, 'listPlatformUsers').mockResolvedValue([{
+      userId: 'user-1',
+      externalSubject: 'owner-subject',
+      email: 'owner@example.com',
+      displayName: 'Owner',
+      status: 'ACTIVE',
+      globalRoles: ['PLATFORM_OWNER'],
+      passwordSet: true,
+      setupPending: false,
+      passwordSetAt: '2026-07-11T08:00:00Z',
+      lastSetupIssuedAt: '2026-07-10T08:00:00Z',
+      lastSetupCompletedAt: '2026-07-11T08:00:00Z',
+      lastSeenAt: null,
+      createdAt: '2026-06-01T00:00:00Z'
+    }, {
+      userId: 'user-2',
+      externalSubject: 'pending-owner',
+      email: 'pending@example.com',
+      displayName: 'Pending Owner',
+      status: 'ACTIVE',
+      globalRoles: ['PLATFORM_OWNER'],
+      passwordSet: false,
+      setupPending: true,
+      passwordSetAt: null,
+      lastSetupIssuedAt: '2026-07-12T08:00:00Z',
+      lastSetupCompletedAt: null,
+      lastSeenAt: null,
+      createdAt: '2026-06-02T00:00:00Z'
+    }]);
+
+    renderPlatformUsers();
+
+    expect(await screen.findByText(/Activated/)).toBeInTheDocument();
+    expect(screen.getByText(/Setup issued/)).toBeInTheDocument();
+    expect(screen.getByText(/completed/)).toBeInTheDocument();
+    expect(screen.getByText(/issued/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset Password' })).toBeInTheDocument();
   });
 
   it('shows info-icon help text for the new operations overview metrics', async () => {
@@ -239,6 +354,36 @@ function renderPlatformOperations(initialEntry = '/platform/operations?ops=overv
         <Routes>
           <Route path="/platform/operations" element={<PlatformConsolePage selectedView="operations" />} />
         </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderPlatformUsers() {
+  const queryClient = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/platform/users']}>
+        <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
+          <Routes>
+            <Route path="/platform/users" element={<PlatformConsolePage selectedView="users" />} />
+          </Routes>
+        </ActorContextState.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderPlatformAudit() {
+  const queryClient = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/platform/platform-audit']}>
+        <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
+          <Routes>
+            <Route path="/platform/platform-audit" element={<PlatformConsolePage selectedView="platform-audit" />} />
+          </Routes>
+        </ActorContextState.Provider>
       </MemoryRouter>
     </QueryClientProvider>
   );

@@ -4,8 +4,10 @@ import com.prototype.vulnwatch.dto.AllowedTenantResponse;
 import java.util.Comparator;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AllowedTenantContextService {
@@ -41,7 +43,8 @@ public class AllowedTenantContextService {
                             grant.getExpiresAt()))
                     .toList();
         }
-        return tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
+        List<AllowedTenantResponse> allowedTenants = tenantMembershipRepository
+                .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
                 .filter(membership -> tenantLifecycleGuardService.isTenantAccessible(membership.getTenant()))
                 .map(membership -> new AllowedTenantResponse(
                         membership.getTenant().getId().toString(),
@@ -51,5 +54,10 @@ public class AllowedTenantContextService {
                         null,
                         null))
                 .toList();
+        if (allowedTenants.size() > 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Multiple active tenant memberships found. Contact support.");
+        }
+        return allowedTenants;
     }
 }

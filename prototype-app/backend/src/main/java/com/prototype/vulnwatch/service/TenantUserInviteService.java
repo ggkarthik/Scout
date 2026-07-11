@@ -56,10 +56,11 @@ public class TenantUserInviteService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
         String normalizedEmail = normalizeEmail(email);
+        String externalSubject = normalizeSubject(normalizedEmail);
+        identityAdministrationService.loadOrCreateEligibleLockedUser(tenantId, externalSubject, normalizedEmail, displayName);
         if (identityAdministrationService.hasOpenInvite(tenantId, normalizedEmail)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "An active invite already exists for this email");
         }
-        String externalSubject = normalizeSubject(normalizedEmail);
         if (identityAdministrationService.hasActiveMembership(tenantId, externalSubject)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This user already has active tenant access");
         }

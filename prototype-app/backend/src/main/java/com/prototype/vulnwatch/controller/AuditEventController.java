@@ -71,6 +71,14 @@ public class AuditEventController {
         return auditEventService.supportBundle(actor.tenantId());
     }
 
+    @GetMapping("/platform-users")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public List<AuditEventResponse> listPlatformUserEvents() {
+        return auditEventService.listPlatformUserEvents().stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private AuditEventResponse toResponse(AuditEvent event) {
         return new AuditEventResponse(
                 event.getId(),

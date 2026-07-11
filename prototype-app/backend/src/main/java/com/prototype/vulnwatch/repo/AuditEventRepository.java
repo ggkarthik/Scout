@@ -12,4 +12,15 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     List<AuditEvent> findByTenantIdOrderByOccurredAtDesc(UUID tenantId);
 
     long countByTenant_IdAndActionAndOccurredAtAfter(UUID tenantId, String action, Instant occurredAt);
+
+    List<AuditEvent> findByTargetTypeAndTargetIdInAndActionInOrderByOccurredAtDesc(
+            String targetType,
+            List<String> targetIds,
+            List<String> actions
+    );
+
+    List<AuditEvent> findByTenantIsNullAndTargetTypeAndActionInOrderByOccurredAtDesc(
+            String targetType,
+            List<String> actions
+    );
 }

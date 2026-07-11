@@ -11,6 +11,11 @@ public record PlatformUserResponse(
         String displayName,
         String status,
         List<String> globalRoles,
+        boolean passwordSet,
+        boolean setupPending,
+        Instant passwordSetAt,
+        Instant lastSetupIssuedAt,
+        Instant lastSetupCompletedAt,
         Instant lastSeenAt,
         Instant createdAt
 ) {

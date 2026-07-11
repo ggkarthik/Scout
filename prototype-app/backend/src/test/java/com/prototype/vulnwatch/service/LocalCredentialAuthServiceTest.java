@@ -53,14 +53,18 @@ class LocalCredentialAuthServiceTest {
     private TenantLifecycleGuardService tenantLifecycleGuardService;
     @Mock
     private AppUserGlobalRoleService appUserGlobalRoleService;
+    @Mock
+    private AuditEventService auditEventService;
 
     @Test
     void platformOwnerLoginReturnsPlatformScopeToken() {
         AppUser existingUser = new AppUser();
         existingUser.setExternalSubject("owner@example.com");
         existingUser.setEmail("owner@example.com");
+        existingUser.setPasswordHash(BCrypt.hashpw("password-123", BCrypt.gensalt(10)));
+        existingUser.setPlatformOwner(true);
 
-        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(existingUser));
+        when(userRepository.findByEmailIgnoreCase("owner@example.com")).thenReturn(Optional.of(existingUser));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
@@ -71,9 +75,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "owner@example.com",
-                BCrypt.hashpw("password-123", BCrypt.gensalt(10)),
                 true,
                 "",
                 "",
@@ -116,9 +119,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
                 true,
                 "",
                 "",
@@ -159,9 +161,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
                 true,
                 "",
                 "",
@@ -186,6 +187,56 @@ class LocalCredentialAuthServiceTest {
     }
 
     @Test
+    void platformOwnerPasswordSetupReturnsPlatformScopeToken() {
+        AppUser user = new AppUser();
+        user.setExternalSubject("owner@example.com");
+        user.setEmail("owner@example.com");
+        user.setPlatformOwner(true);
+        user.setPasswordSetupTokenHash(hashToken("setup-token-123"));
+        user.setPasswordSetupTokenExpiresAt(Instant.now().plusSeconds(3600));
+
+        when(userRepository.findByPasswordSetupTokenHash(hashToken("setup-token-123"))).thenReturn(Optional.of(user));
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                auditEventService,
+                false,
+                true,
+                "",
+                "",
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.setupPassword("setup-token-123", "password-123");
+        Jwt jwt = decode(response.token());
+
+        assertEquals("owner@example.com", jwt.getSubject());
+        assertNull(jwt.getClaimAsString("active_tenant_id"));
+        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+        assertTrue(BCrypt.checkpw("password-123", user.getPasswordHash()));
+        verify(auditEventService).recordExplicitActor(
+                null,
+                "owner@example.com",
+                "PLATFORM_OWNER",
+                "platform.user.setup_completed",
+                "app_user",
+                user.getId().toString(),
+                "{\"mode\":\"self_service\"}",
+                "SUCCESS"
+        );
+        verify(appUserGlobalRoleService).ensureRole(user, "PLATFORM_OWNER");
+    }
+
+    @Test
     void localhostSharedPlatformOwnerLoginWorksWithoutConfiguredPlatformOwner() {
         when(userRepository.findByExternalSubject("platform.owner@localhost")).thenReturn(Optional.empty());
         when(userRepository.findByEmailIgnoreCase("platform.owner@localhost")).thenReturn(Optional.empty());
@@ -199,9 +250,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "",
-                "",
                 true,
                 "",
                 "",
@@ -236,9 +286,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
                 true,
                 "",
                 "",
@@ -270,9 +319,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "owner@example.com",
-                BCrypt.hashpw("platform-password", BCrypt.gensalt(10)),
                 true,
                 "",
                 "",
@@ -314,9 +362,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "",
-                "",
                 true,
                 "",
                 "",
@@ -358,9 +405,8 @@ class LocalCredentialAuthServiceTest {
                 tenantSupportGrantService,
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
+                auditEventService,
                 false,
-                "",
-                "",
                 true,
                 "",
                 "",
