@@ -175,7 +175,7 @@ class ProductionSafetyValidatorTest {
         PlatformOwnerBootstrapProperties properties = new PlatformOwnerBootstrapProperties();
         properties.setEnabled(true);
         PlatformOwnerBootstrapProperties.PlatformOwnerSeed seed = new PlatformOwnerBootstrapProperties.PlatformOwnerSeed();
-        seed.setEmail("platform.owner@localhost");
+        seed.setEmail("owner@localhost");
         properties.setUsers(java.util.List.of(seed));
 
         ProductionSafetyValidator validator = validator(

@@ -131,8 +131,15 @@ public class TenantUserInviteService {
         invite.setAcceptedAt(Instant.now());
         identityAdministrationService.saveInvite(invite);
         String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getExternalSubject());
-        auditEventService.record("member.invite.accepted", "tenant_user_invite", invite.getId().toString(),
-                "{\"tenantId\":\"" + invite.getTenant().getId() + "\",\"membershipId\":\"" + membership.getId() + "\"}");
+        auditEventService.recordExplicitActor(
+                invite.getTenant().getId(),
+                invite.getExternalSubject(),
+                membership.getRole(),
+                "member.invite.accepted",
+                "tenant_user_invite",
+                invite.getId().toString(),
+                "{\"tenantId\":\"" + invite.getTenant().getId() + "\",\"membershipId\":\"" + membership.getId() + "\"}",
+                "SUCCESS");
         return toValidationResponse(invite, "Invite accepted", setupToken);
     }
 

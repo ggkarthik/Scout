@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +21,7 @@ import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.DemoInviteResponse;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
+import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoSetupLinkResponse;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.repo.DemoInviteRepository;
@@ -105,6 +107,49 @@ class DemoLifecycleServiceTest {
         assertNotNull(response.latestInvite().lastSentAt());
         assertEquals(TenantService.DEFAULT_PLAN_CODE, tenant.getPlanCode());
         verify(demoInviteEmailService).sendInvite(eq(request), any(DemoInvite.class));
+    }
+
+    @Test
+    void createRequestRecordsAnonymousAuditActor() {
+        DemoRequestCreateRequest request = new DemoRequestCreateRequest(
+                "Casey Example",
+                "Casey@example.com",
+                "Example Co",
+                "Security Lead",
+                "11-50",
+                "Product demo",
+                "Please follow up",
+                true
+        );
+        when(demoRequestRepository.findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(
+                eq("casey@example.com"),
+                eq(List.of("PENDING", "SENT", "ERROR"))))
+                .thenReturn(Optional.empty());
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> {
+            DemoRequest saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", UUID.randomUUID());
+            return saved;
+        });
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(any(UUID.class))).thenReturn(List.of());
+
+        DemoLifecycleService service = service();
+        DemoRequestResponse response = service.createRequest(request);
+
+        assertEquals("casey@example.com", response.email());
+        verify(auditEventService).recordExplicitActor(
+                eq(null),
+                eq("casey@example.com"),
+                eq("ANONYMOUS"),
+                eq("demo.request.created"),
+                eq("demo_request"),
+                eq(response.id().toString()),
+                eq("{\"email\":\"casey@example.com\"}"),
+                eq("SUCCESS"));
+        verify(auditEventService, never()).record(
+                eq("demo.request.created"),
+                eq("demo_request"),
+                any(),
+                any());
     }
 
     @Test

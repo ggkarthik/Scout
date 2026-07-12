@@ -105,7 +105,15 @@ public class DemoLifecycleService {
         demoRequest.setUseCase(trimToNull(request.useCase()));
         demoRequest.setNotes(trimToNull(request.notes()));
         DemoRequest saved = demoRequestRepository.save(demoRequest);
-        auditEventService.record("demo.request.created", "demo_request", saved.getId().toString(), "{\"email\":\"" + email + "\"}");
+        auditEventService.recordExplicitActor(
+                null,
+                email,
+                "ANONYMOUS",
+                "demo.request.created",
+                "demo_request",
+                saved.getId().toString(),
+                "{\"email\":\"" + email + "\"}",
+                "SUCCESS");
         return toRequestResponse(saved);
     }
 
@@ -269,8 +277,15 @@ public class DemoLifecycleService {
             demoRequestRepository.save(invite.getRequest());
         }
         String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
-        auditEventService.record("demo.invite.accepted", "demo_invite", invite.getId().toString(),
-                "{\"tenantId\":\"" + invite.getTenant().getId() + "\"}");
+        auditEventService.recordExplicitActor(
+                invite.getTenant().getId(),
+                invite.getEmail(),
+                "ANONYMOUS",
+                "demo.invite.accepted",
+                "demo_invite",
+                invite.getId().toString(),
+                "{\"tenantId\":\"" + invite.getTenant().getId() + "\"}",
+                "SUCCESS");
         return inviteValidationResponse(invite, "Invite accepted", setupToken);
     }
 

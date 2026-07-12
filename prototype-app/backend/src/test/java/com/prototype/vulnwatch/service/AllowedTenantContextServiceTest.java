@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
@@ -98,11 +99,13 @@ class AllowedTenantContextServiceTest {
     }
 
     @Test
-    void platformOwnersSurfaceOnlyActiveSupportGrantTenantsSortedByName() {
+    void platformOwnersSurfacePlaygroundMembershipsAndActiveSupportGrantsSortedByName() {
         Tenant zuluTenant = tenant("Zulu Labs", "zulu");
         Tenant alphaTenant = tenant("Alpha Labs", "alpha");
+        Tenant playgroundTenant = tenant("Default Workspace", "default-workspace");
         TenantSupportGrant zuluGrant = supportGrant(zuluTenant, "WRITE", Instant.parse("2026-08-01T00:00:00Z"));
         TenantSupportGrant alphaGrant = supportGrant(alphaTenant, "READ_ONLY", Instant.parse("2026-07-20T00:00:00Z"));
+        TenantMembership playgroundMembership = membership(playgroundTenant, "TENANT_ADMIN");
         RequestActor actor = new RequestActor(
                 "owner@example.com",
                 true,
@@ -111,6 +114,13 @@ class AllowedTenantContextServiceTest {
                 Set.of("PLATFORM_OWNER")
         );
 
+        when(tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(
+                actor.userId(),
+                "ACTIVE"
+        )).thenReturn(List.of(playgroundMembership));
+        when(tenantLifecycleGuardService.isTenantAccessible(playgroundTenant)).thenReturn(true);
+        when(tenantLifecycleGuardService.isTenantAccessible(zuluTenant)).thenReturn(true);
+        when(tenantLifecycleGuardService.isTenantAccessible(alphaTenant)).thenReturn(true);
         when(tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()))
                 .thenReturn(List.of(zuluGrant, alphaGrant));
 
@@ -122,15 +132,19 @@ class AllowedTenantContextServiceTest {
 
         List<AllowedTenantResponse> allowed = service.listAllowedTenants(actor);
 
-        assertEquals(2, allowed.size());
+        assertEquals(3, allowed.size());
         assertEquals("Alpha Labs", allowed.get(0).name());
         assertEquals("PLATFORM_OWNER", allowed.get(0).role());
         assertEquals("READ_ONLY", allowed.get(0).accessMode());
         assertEquals(Instant.parse("2026-07-20T00:00:00Z"), allowed.get(0).expiresAt());
-        assertEquals("Zulu Labs", allowed.get(1).name());
-        assertEquals("PLATFORM_OWNER", allowed.get(1).role());
-        assertEquals("WRITE", allowed.get(1).accessMode());
-        assertEquals(Instant.parse("2026-08-01T00:00:00Z"), allowed.get(1).expiresAt());
+        assertEquals("Default Workspace", allowed.get(1).name());
+        assertEquals("TENANT_ADMIN", allowed.get(1).role());
+        assertNull(allowed.get(1).accessMode());
+        assertNull(allowed.get(1).expiresAt());
+        assertEquals("Zulu Labs", allowed.get(2).name());
+        assertEquals("PLATFORM_OWNER", allowed.get(2).role());
+        assertEquals("WRITE", allowed.get(2).accessMode());
+        assertEquals(Instant.parse("2026-08-01T00:00:00Z"), allowed.get(2).expiresAt());
     }
 
     private Tenant tenant(String name, String slug) {

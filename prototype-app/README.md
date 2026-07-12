@@ -103,10 +103,9 @@ Localhost credential login is also available for convenience:
 
 | Account | Email | Password |
 |---------|-------|----------|
-| Platform owner | `platform.owner@localhost` | `LocalDevPlatform123!` |
 | Tenant admin | `tenant.admin@localhost` | `LocalDevTenant123!` |
 
-These credentials are loopback-only and do not activate for non-localhost hosts.
+These credentials are loopback-only and do not activate for non-localhost hosts. Platform owners should use bootstrap-seeded identities plus one-time password setup links instead of shared localhost credentials.
 
 ### Shared Environment Platform-Owner Bootstrap
 

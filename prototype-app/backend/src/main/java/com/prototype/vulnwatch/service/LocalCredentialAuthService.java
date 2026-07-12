@@ -27,8 +27,6 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class LocalCredentialAuthService {
 
-    private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_EMAIL = "platform.owner@localhost";
-    private static final String DEFAULT_LOCALHOST_PLATFORM_OWNER_PASSWORD_HASH = "$2a$10$awIpunHkac/hB/2JPslHL.KAAtdZ5.rmmkqVjxlHkmaPHXJ1OCKPO";
     private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "admin";
     private static final String LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL = "tenant.admin@localhost";
     private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$LSEEjYNaUt8ozIDh1DHRiO2syFb/bSAlCtQbe3gN3lYJMCjgOpJje";
@@ -44,8 +42,6 @@ public class LocalCredentialAuthService {
     private final AuditEventService auditEventService;
     private final boolean requireProductionSecrets;
     private final boolean sharedLocalhostLoginEnabled;
-    private final String sharedLocalhostPlatformOwnerEmail;
-    private final String sharedLocalhostPlatformOwnerPasswordHash;
     private final String sharedLocalhostTenantAdminEmail;
     private final String sharedLocalhostTenantAdminPasswordHash;
     private final boolean sharedLocalhostEnvironment;
@@ -61,8 +57,6 @@ public class LocalCredentialAuthService {
             AuditEventService auditEventService,
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
             @Value("${app.security.local-auth.shared-localhost-login-enabled:true}") boolean sharedLocalhostLoginEnabled,
-            @Value("${app.security.local-auth.shared-localhost-platform-owner-email:}") String sharedLocalhostPlatformOwnerEmail,
-            @Value("${app.security.local-auth.shared-localhost-platform-owner-password-hash:}") String sharedLocalhostPlatformOwnerPasswordHash,
             @Value("${app.security.local-auth.shared-localhost-tenant-admin-email:}") String sharedLocalhostTenantAdminEmail,
             @Value("${app.security.local-auth.shared-localhost-tenant-admin-password-hash:}") String sharedLocalhostTenantAdminPasswordHash,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins
@@ -77,14 +71,6 @@ public class LocalCredentialAuthService {
         this.auditEventService = auditEventService;
         this.requireProductionSecrets = requireProductionSecrets;
         this.sharedLocalhostLoginEnabled = sharedLocalhostLoginEnabled;
-        this.sharedLocalhostPlatformOwnerEmail = defaultIfBlank(
-                sharedLocalhostPlatformOwnerEmail,
-                DEFAULT_LOCALHOST_PLATFORM_OWNER_EMAIL
-        );
-        this.sharedLocalhostPlatformOwnerPasswordHash = defaultIfBlank(
-                sharedLocalhostPlatformOwnerPasswordHash,
-                DEFAULT_LOCALHOST_PLATFORM_OWNER_PASSWORD_HASH
-        );
         this.sharedLocalhostTenantAdminEmail = defaultIfBlank(
                 sharedLocalhostTenantAdminEmail,
                 DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL
@@ -107,11 +93,6 @@ public class LocalCredentialAuthService {
                 return issuePlatformOwnerToken(user);
             }
             return loginTenantScopedUser(user);
-        }
-
-        if (matchesSharedLocalhostPlatformOwner(normalizedEmail)) {
-            verifyPassword(rawPassword, sharedLocalhostPlatformOwnerPasswordHash);
-            return loginPlatformOwner(normalizedEmail, "Local Platform Owner");
         }
 
         if (matchesSharedLocalhostTenantAdmin(normalizedEmail)) {
@@ -153,17 +134,6 @@ public class LocalCredentialAuthService {
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
         return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant());
-    }
-
-    private AuthTokenResponse loginPlatformOwner(String normalizedEmail, String defaultDisplayName) {
-        AppUser user = userRepository.findByExternalSubject(normalizedEmail)
-                .or(() -> userRepository.findByEmailIgnoreCase(normalizedEmail))
-                .orElseGet(() -> createUser(normalizedEmail));
-        user.setEmail(normalizedEmail);
-        user.setDisplayName(user.getDisplayName() == null || user.getDisplayName().isBlank() ? defaultDisplayName : user.getDisplayName());
-        user.setPlatformOwner(true);
-        user.setStatus("ACTIVE");
-        return issuePlatformOwnerToken(user);
     }
 
     private AuthTokenResponse loginSharedLocalhostTenantAdmin(String normalizedEmail, String passwordHash) {
@@ -256,6 +226,15 @@ public class LocalCredentialAuthService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found"));
         tenantLifecycleGuardService.assertTenantAccessible(tenant);
+        TenantMembership membership = membershipRepository
+                .findFirstByUserExternalSubjectAndTenantIdAndStatus(user.getExternalSubject(), tenantId, "ACTIVE")
+                .orElse(null);
+        if (membership != null) {
+            return authTokenService.issueToken(
+                    user,
+                    Set.of("PLATFORM_OWNER", normalizeRole(membership.getRole())),
+                    tenant);
+        }
         tenantSupportGrantService.requireActiveGrant(user.getExternalSubject(), tenantId);
         return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), tenant);
     }
@@ -290,11 +269,6 @@ public class LocalCredentialAuthService {
     private void clearSetupToken(AppUser user) {
         user.setPasswordSetupTokenHash(null);
         user.setPasswordSetupTokenExpiresAt(null);
-    }
-
-    private boolean matchesSharedLocalhostPlatformOwner(String email) {
-        return sharedLocalhostEnvironment
-                && sharedLocalhostPlatformOwnerEmail.equalsIgnoreCase(email);
     }
 
     private boolean matchesSharedLocalhostTenantAdmin(String email) {

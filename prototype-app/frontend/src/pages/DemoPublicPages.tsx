@@ -589,8 +589,8 @@ export function LoginPage() {
         {!setupToken && SHARED_LOCALHOST_LOGIN_HINTS_ENABLED && (
           <div className="notice success" aria-label="Shared localhost credentials">
             Localhost shared login:
-            {' '}platform owner <strong>platform.owner@localhost</strong> / <strong>LocalDevPlatform123!</strong>
-            {' '}and tenant admin <strong>admin</strong> / <strong>admin</strong>.
+            {' '}tenant admin <strong>admin</strong> / <strong>admin</strong>.
+            {' '}Platform owners must use their email-specific password setup link first.
           </div>
         )}
         {setupToken && (

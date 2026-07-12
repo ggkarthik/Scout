@@ -2,6 +2,8 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.dto.AllowedTenantResponse;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -32,15 +34,31 @@ public class AllowedTenantContextService {
             return List.of();
         }
         if (actor.hasRole("PLATFORM_OWNER")) {
-            return tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()).stream()
-                    .sorted(Comparator.comparing(grant -> grant.getTenant().getName(), String.CASE_INSENSITIVE_ORDER))
-                    .map(grant -> new AllowedTenantResponse(
+            Map<String, AllowedTenantResponse> allowedTenants = new LinkedHashMap<>();
+            tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
+                    .filter(membership -> tenantLifecycleGuardService.isTenantAccessible(membership.getTenant()))
+                    .forEach(membership -> allowedTenants.put(
+                            membership.getTenant().getId().toString(),
+                            new AllowedTenantResponse(
+                                    membership.getTenant().getId().toString(),
+                                    membership.getTenant().getName(),
+                                    membership.getTenant().getSlug(),
+                                    membership.getRole(),
+                                    null,
+                                    null)));
+            tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()).stream()
+                    .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
+                    .forEach(grant -> allowedTenants.putIfAbsent(
                             grant.getTenant().getId().toString(),
-                            grant.getTenant().getName(),
-                            grant.getTenant().getSlug(),
-                            "PLATFORM_OWNER",
-                            grant.getAccessMode(),
-                            grant.getExpiresAt()))
+                            new AllowedTenantResponse(
+                                    grant.getTenant().getId().toString(),
+                                    grant.getTenant().getName(),
+                                    grant.getTenant().getSlug(),
+                                    "PLATFORM_OWNER",
+                                    grant.getAccessMode(),
+                                    grant.getExpiresAt())));
+            return allowedTenants.values().stream()
+                    .sorted(Comparator.comparing(AllowedTenantResponse::name, String.CASE_INSENSITIVE_ORDER))
                     .toList();
         }
         List<AllowedTenantResponse> allowedTenants = tenantMembershipRepository

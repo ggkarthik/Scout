@@ -80,8 +80,6 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
@@ -124,8 +122,6 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
@@ -164,8 +160,6 @@ class LocalCredentialAuthServiceTest {
                 auditEventService,
                 false,
                 true,
-                "",
-                "",
                 "",
                 "",
                 "http://localhost:5173,http://127.0.0.1:5173"
@@ -211,8 +205,6 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
@@ -237,10 +229,13 @@ class LocalCredentialAuthServiceTest {
     }
 
     @Test
-    void localhostSharedPlatformOwnerLoginWorksWithoutConfiguredPlatformOwner() {
-        when(userRepository.findByExternalSubject("platform.owner@localhost")).thenReturn(Optional.empty());
-        when(userRepository.findByEmailIgnoreCase("platform.owner@localhost")).thenReturn(Optional.empty());
-        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    void platformOwnerWithoutPasswordHashCannotUseRemovedSharedLocalhostFallback() {
+        AppUser user = new AppUser();
+        user.setExternalSubject("owner@example.com");
+        user.setEmail("owner@example.com");
+        user.setPlatformOwner(true);
+
+        when(userRepository.findByEmailIgnoreCase("owner@example.com")).thenReturn(Optional.of(user));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -255,17 +250,10 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
-        AuthTokenResponse response = service.login("platform.owner@localhost", "LocalDevPlatform123!");
-        Jwt jwt = decode(response.token());
-
-        assertEquals("platform.owner@localhost", jwt.getSubject());
-        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
-        verifyNoInteractions(tenantSupportGrantService);
+        assertThrows(ResponseStatusException.class, () -> service.login("owner@example.com", "password-123"));
     }
 
     @Test
@@ -291,8 +279,6 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
@@ -302,6 +288,48 @@ class LocalCredentialAuthServiceTest {
         verify(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenant.getId());
         assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
         assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+    }
+
+    @Test
+    void switchTenantContextUsesExplicitTenantMembershipForInternalPlaygroundAccess() {
+        AppUser platformOwner = new AppUser();
+        platformOwner.setExternalSubject("owner@example.com");
+        platformOwner.setEmail("owner@example.com");
+        platformOwner.setPlatformOwner(true);
+        Tenant tenant = tenant("Default Workspace");
+        TenantMembership membership = membership(platformOwner, tenant, "TENANT_ADMIN");
+
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "owner@example.com",
+                tenant.getId(),
+                "ACTIVE"
+        )).thenReturn(Optional.of(membership));
+
+        LocalCredentialAuthService service = new LocalCredentialAuthService(
+                userRepository,
+                tenantRepository,
+                membershipRepository,
+                authTokenService(),
+                tenantSupportGrantService,
+                tenantLifecycleGuardService,
+                appUserGlobalRoleService,
+                auditEventService,
+                false,
+                true,
+                "",
+                "",
+                "http://localhost:5173,http://127.0.0.1:5173"
+        );
+
+        AuthTokenResponse response = service.switchTenantContext("owner@example.com", tenant.getId());
+        Jwt jwt = decode(response.token());
+
+        assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
+        assertTrue(jwt.getClaimAsStringList("roles").contains("PLATFORM_OWNER"));
+        assertTrue(jwt.getClaimAsStringList("roles").contains("TENANT_ADMIN"));
+        verifyNoInteractions(tenantSupportGrantService);
     }
 
     @Test
@@ -322,8 +350,6 @@ class LocalCredentialAuthServiceTest {
                 auditEventService,
                 false,
                 true,
-                "",
-                "",
                 "",
                 "",
                 "http://localhost:5173,http://127.0.0.1:5173"
@@ -367,8 +393,6 @@ class LocalCredentialAuthServiceTest {
                 true,
                 "",
                 "",
-                "",
-                "",
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
@@ -408,8 +432,6 @@ class LocalCredentialAuthServiceTest {
                 auditEventService,
                 false,
                 true,
-                "",
-                "",
                 "",
                 "",
                 "http://localhost:5173,http://127.0.0.1:5173"

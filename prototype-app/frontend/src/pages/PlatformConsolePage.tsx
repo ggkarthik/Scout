@@ -1205,7 +1205,7 @@ function TenantLifecyclePanel() {
       </div>
       {actor?.platformScope ? (
         <div className="notice" role="status">
-          Enter a tenant workspace only through an active support grant. Platform-scope access no longer inherits a default tenant.
+          Enter a tenant workspace through an active support grant or an explicit internal playground membership. Platform-scope access no longer inherits a default tenant automatically.
         </div>
       ) : null}
       {actor?.actingAsPlatformOwner ? (
@@ -1293,7 +1293,7 @@ function TenantLifecyclePanel() {
                             onClick={() => switchTenantContext.mutate(tenant.id)}
                             title={accessibleTenantIds.has(tenant.id)
                               ? 'Switch into tenant workspace context'
-                              : 'Active support grant required'}
+                              : 'Active support grant or explicit playground membership required'}
                           >
                             {switchingTenantId === tenant.id && switchTenantContext.isPending ? 'Entering...' : 'Enter workspace'}
                           </button>
