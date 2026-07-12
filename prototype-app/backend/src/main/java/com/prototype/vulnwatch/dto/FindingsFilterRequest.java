@@ -25,6 +25,7 @@ public class FindingsFilterRequest {
     private String dueDateBand;
     private String assetName;
     private String supportGroup;
+    private List<String> assetType;
 
     public FindingsFilter toFilter() {
         return new FindingsFilter(
@@ -48,7 +49,8 @@ public class FindingsFilterRequest {
                 assetName,
                 supportGroup,
                 null,
-                null
+                null,
+                assetType
         );
     }
 
@@ -214,5 +216,13 @@ public class FindingsFilterRequest {
 
     public void setSupportGroup(String supportGroup) {
         this.supportGroup = supportGroup;
+    }
+
+    public List<String> getAssetType() {
+        return assetType;
+    }
+
+    public void setAssetType(List<String> assetType) {
+        this.assetType = assetType;
     }
 }

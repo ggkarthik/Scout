@@ -48,7 +48,12 @@ public class InventoryComponentCpeMappingService {
         }
         this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
         this.writeTransactionTemplate.setReadOnly(false);
-        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        // Must join the caller's transaction (default REQUIRED), not open a new one: callers such as
+        // SbomContentIngestionService insert brand-new InventoryComponent rows earlier in the SAME,
+        // still-open outer transaction. A separate REQUIRES_NEW transaction runs on its own connection,
+        // which cannot see that uncommitted row yet — the inventory_component_cpe_map insert below then
+        // fails its FK check against inventory_components for any component that is new in this request.
+        this.writeTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
     public void syncActiveComponentMappings(InventoryComponent component, Collection<String> rawCpes) {

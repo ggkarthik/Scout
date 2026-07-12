@@ -92,6 +92,7 @@ export type FindingsFilterModel = {
   supportGroup?: string;
   patchAvailable?: boolean;
   suppressedUntilBand?: 'expiring-soon' | 'expired';
+  assetType?: string[];
 };
 
 export type FindingQueueKind = 'BUILT_IN' | 'PERSONAL';

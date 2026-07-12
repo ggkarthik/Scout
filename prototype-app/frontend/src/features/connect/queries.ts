@@ -78,3 +78,18 @@ export function useAwsDiscoveryTargetsQuery(enabled = true) {
     enabled
   });
 }
+
+export function useAzureDiscoveryConfigQuery() {
+  return useQuery({
+    queryKey: ['azure-discovery-config'],
+    queryFn: api.getAzureDiscoveryConfig
+  });
+}
+
+export function useAzureDiscoveryTargetsQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['azure-discovery-targets'],
+    queryFn: api.listAzureDiscoveryTargets,
+    enabled
+  });
+}

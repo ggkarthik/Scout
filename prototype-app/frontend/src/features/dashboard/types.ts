@@ -137,3 +137,16 @@ export type DashboardCveInventoryMap = {
   topHighRisk: CveInventoryMappingRecord[];
   latest: CveInventoryMappingRecord[];
 };
+
+export type GridExposureRow = {
+  assetType: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  total: number;
+};
+
+export type GridExposure = {
+  rows: GridExposureRow[];
+};

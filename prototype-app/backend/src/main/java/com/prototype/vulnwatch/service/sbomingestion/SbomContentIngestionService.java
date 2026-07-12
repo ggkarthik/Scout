@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service.sbomingestion;
 
 import com.prototype.vulnwatch.domain.Asset;
+import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
@@ -13,7 +14,6 @@ import com.prototype.vulnwatch.dto.ParsedComponent;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
-import com.prototype.vulnwatch.service.AssetLifecycleService;
 import com.prototype.vulnwatch.service.FindingDeltaQueueService;
 import com.prototype.vulnwatch.service.IdentityGraphService;
 import com.prototype.vulnwatch.service.InventoryComponentCpeMappingService;
@@ -48,7 +48,6 @@ public class SbomContentIngestionService {
     private final InventoryComponentCpeMappingService inventoryComponentCpeMappingService;
     private final SoftwareInventorySyncService softwareInventorySyncService;
     private final FindingDeltaQueueService findingDeltaQueueService;
-    private final AssetLifecycleService assetLifecycleService;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final SbomUploadSupportService sbomUploadSupportService;
 
@@ -63,7 +62,6 @@ public class SbomContentIngestionService {
             InventoryComponentCpeMappingService inventoryComponentCpeMappingService,
             SoftwareInventorySyncService softwareInventorySyncService,
             FindingDeltaQueueService findingDeltaQueueService,
-            AssetLifecycleService assetLifecycleService,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
             SbomUploadSupportService sbomUploadSupportService
     ) {
@@ -74,7 +72,6 @@ public class SbomContentIngestionService {
         this.inventoryComponentCpeMappingService = inventoryComponentCpeMappingService;
         this.softwareInventorySyncService = softwareInventorySyncService;
         this.findingDeltaQueueService = findingDeltaQueueService;
-        this.assetLifecycleService = assetLifecycleService;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.sbomUploadSupportService = sbomUploadSupportService;
     }
@@ -95,8 +92,15 @@ public class SbomContentIngestionService {
         if (assetCustomizer != null) {
             assetCustomizer.accept(asset);
         }
+        // Set lifecycle fields in-line (same session/transaction) rather than routing through
+        // AssetLifecycleService.markInventoryIngested(), which opens a PROPAGATION_REQUIRES_NEW
+        // transaction on a separate connection. Doing that here deadlocked against this method's
+        // own still-open outer transaction for brand-new assets: the REQUIRES_NEW transaction's
+        // save() of the same not-yet-committed asset row blocks in Postgres waiting for this
+        // transaction to commit, while this transaction's thread is blocked waiting on it.
+        asset.setLastInventoryAt(Instant.now());
+        asset.setState(AssetState.ACTIVE);
         asset = sbomUploadSupportService.saveAsset(asset);
-        assetLifecycleService.markInventoryIngested(asset);
 
         SbomUpload upload = new SbomUpload();
         upload.setTenant(tenant);

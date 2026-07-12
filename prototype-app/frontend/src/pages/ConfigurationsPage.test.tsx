@@ -1,7 +1,9 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
+import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
+import { pathForConfigurationsView } from '../app/routes';
 import { ActorContextState } from '../features/auth/context';
 import type { ActorContext } from '../features/auth/types';
 import { defaultRiskPolicy } from '../test/fixtures';
@@ -32,10 +34,26 @@ describe('ConfigurationsPage', () => {
     vi.spyOn(api, 'listVulnerabilitySourceFilterConfigs').mockResolvedValue([]);
   }
 
-  function renderAsTenantAdmin(ui: ReactElement, options?: Parameters<typeof renderWithProviders>[1]) {
+  // ConfigurationsPage now reads its active section from the :configView route param
+  // (section navigation lives in the primary sidebar rail — see App.tsx), so tests must
+  // render it inside a matching <Routes><Route> for useParams() to resolve, and switch
+  // sections via navigation instead of clicking the (now-removed) internal sidebar buttons.
+  function withConfigRoute(ui: ReactElement) {
+    return (
+      <Routes>
+        <Route path="/configurations/:configView?" element={ui} />
+      </Routes>
+    );
+  }
+
+  function renderConfigPage(options?: Parameters<typeof renderWithProviders>[1]) {
+    return renderWithProviders(withConfigRoute(<ConfigurationsPage />), options);
+  }
+
+  function renderConfigPageAsTenantAdmin(options?: Parameters<typeof renderWithProviders>[1]) {
     return renderWithProviders(
       <ActorContextState.Provider value={TENANT_ADMIN_CONTEXT}>
-        {ui}
+        {withConfigRoute(<ConfigurationsPage />)}
       </ActorContextState.Provider>,
       options
     );
@@ -43,7 +61,7 @@ describe('ConfigurationsPage', () => {
 
   it('renders the SLA & Remediation tab by default', async () => {
     mockBaseApis();
-    renderWithProviders(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPage({ route: '/configurations' });
 
     expect((await screen.findAllByText(/SLA & Remediation/i)).length).toBeGreaterThan(0);
   });
@@ -54,29 +72,32 @@ describe('ConfigurationsPage', () => {
       defaultRiskPolicy({ criticalSlaDays: 7, highSlaDays: 14, mediumSlaDays: 30, lowSlaDays: 60 })
     );
 
-    renderWithProviders(<ConfigurationsPage />, {
-      initialEntries: [{ pathname: '/configurations', search: '?tab=sla' }],
-    });
+    renderConfigPage({ route: pathForConfigurationsView('sla') });
 
     await waitFor(() => {
       expect(api.getRiskPolicy).toHaveBeenCalled();
     });
   });
 
-  it('renders sidebar navigation items', async () => {
+  it('renders section content when navigated to each configuration route', async () => {
     mockBaseApis();
-    renderWithProviders(<ConfigurationsPage />, { route: '/configurations' });
 
+    const triage = renderConfigPage({ route: pathForConfigurationsView('triage') });
     expect((await screen.findAllByText(/S\.AI Prioritization/i)).length).toBeGreaterThan(0);
+    triage.unmount();
+
+    const automation = renderConfigPage({ route: pathForConfigurationsView('automation') });
     expect((await screen.findAllByText(/Workflow Automation/i)).length).toBeGreaterThan(0);
+    automation.unmount();
+
+    const suppress = renderConfigPage({ route: pathForConfigurationsView('suppress') });
     expect((await screen.findAllByText(/Suppression Rules/i)).length).toBeGreaterThan(0);
+    suppress.unmount();
   });
 
   it('renders triage tab content when navigated to', async () => {
     mockBaseApis();
-    renderWithProviders(<ConfigurationsPage />, {
-      initialEntries: [{ pathname: '/configurations', search: '?tab=triage' }],
-    });
+    renderConfigPage({ route: pathForConfigurationsView('triage') });
 
     expect((await screen.findAllByText(/S\.AI Prioritization/i)).length).toBeGreaterThan(0);
   });
@@ -84,28 +105,23 @@ describe('ConfigurationsPage', () => {
   it('renders execute now control in workflow automation', async () => {
     mockBaseApis();
     vi.spyOn(api, 'executeAutoCloseNow').mockResolvedValue({ updated: 0 });
-    renderWithProviders(<ConfigurationsPage />, {
-      route: '/configurations',
-    });
+    renderConfigPage({ route: pathForConfigurationsView('automation') });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Workflow Automation/i }));
     expect((await screen.findAllByText(/Execute now/i)).length).toBeGreaterThan(0);
   });
 
   it('renders default findings score rules out of the box', async () => {
     mockBaseApis();
-    renderAsTenantAdmin(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPageAsTenantAdmin({ route: pathForConfigurationsView('findings-score') });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Findings Score/i }));
     expect((await screen.findAllByText(/^Vulnerability$/i)).length).toBeGreaterThan(0);
     expect((await screen.findAllByText(/^CVSS Score$/i)).length).toBeGreaterThan(0);
   });
 
   it('renders the starter auto-finding rule out of the box', async () => {
     mockBaseApis();
-    renderAsTenantAdmin(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPageAsTenantAdmin({ route: pathForConfigurationsView('auto-findings') });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Auto Investigation & Findings/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Edit/i }));
     expect(await screen.findByText(/Critical and Applicable/i)).toBeInTheDocument();
     expect(await screen.findByRole('checkbox', { name: /Run investigation/i })).toBeInTheDocument();
@@ -116,9 +132,8 @@ describe('ConfigurationsPage', () => {
 
   it('hides software and asset scope when create findings is disabled', async () => {
     mockBaseApis();
-    renderAsTenantAdmin(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPageAsTenantAdmin({ route: pathForConfigurationsView('auto-findings') });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Auto Investigation & Findings/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Edit/i }));
     fireEvent.click(await screen.findByRole('checkbox', { name: /Create findings/i }));
 
@@ -284,9 +299,8 @@ describe('ConfigurationsPage', () => {
       alreadyOpenCount: 0,
     } as never);
 
-    renderAsTenantAdmin(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPageAsTenantAdmin({ route: pathForConfigurationsView('auto-findings') });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Auto Investigation & Findings/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Edit/i }));
     fireEvent.click(await screen.findByRole('checkbox', { name: /Create ServiceNow incident/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Save Changes/i }));
@@ -301,7 +315,7 @@ describe('ConfigurationsPage', () => {
 
   it('calls getRiskPolicy on mount', async () => {
     mockBaseApis();
-    renderWithProviders(<ConfigurationsPage />, { route: '/configurations' });
+    renderConfigPage({ route: '/configurations' });
 
     await waitFor(() => {
       expect(api.getRiskPolicy).toHaveBeenCalledTimes(1);

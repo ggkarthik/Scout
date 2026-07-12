@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import type { Finding } from '../features/findings/types';
 import { DataTable, type DataTableColumn, type DataTableRow } from '../components/DataTable';
-import { pathForInventoryHostAsset, pathForInventoryView, pathForVulnRepoView } from '../app/routes';
+import { pathForFindingDetail, pathForInventoryHostAsset, pathForInventoryView, pathForVulnRepoView } from '../app/routes';
 import { api } from '../api/client';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import type { FixRecord, OrgSpecificCveExposureRecord } from '../features/cve-workbench/types';
@@ -541,7 +541,19 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
     id: f.id,
     cells: {
       findingId: {
-        content: <span className="mono" style={{ fontSize: '0.8rem' }}>{f.displayId || f.id.slice(0, 8)}</span>
+        content: (
+          <button
+            type="button"
+            className="btn-link mono"
+            style={{ fontSize: '0.8rem' }}
+            onClick={() => navigate(
+              pathForFindingDetail(f.displayId || f.id, `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`),
+              { state: { finding: f } }
+            )}
+          >
+            {f.displayId || f.id.slice(0, 8)}
+          </button>
+        )
       },
       cve: {
         content: (
@@ -601,6 +613,46 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
   const eolVersionCount = detail.versions.filter((version) => version.isEol || (version.eolDaysRemaining != null && version.eolDaysRemaining <= 90)).length;
   const bomEvidence = detail.bomEvidence;
 
+  const needsAttention: { key: string; title: string; description: string; onClick: () => void }[] = [];
+  if (detail.openVulnerabilityCount > 0) {
+    needsAttention.push({
+      key: 'open-cves',
+      title: 'Review open CVEs',
+      description: `${detail.openVulnerabilityCount.toLocaleString()} open CVE${detail.openVulnerabilityCount !== 1 ? 's' : ''} matched to this software.`,
+      onClick: () => setActiveTab('vulnerabilities'),
+    });
+  }
+  if (detail.openFindingCount > 0) {
+    needsAttention.push({
+      key: 'open-findings',
+      title: 'Review open findings',
+      description: `${detail.openFindingCount.toLocaleString()} open finding${detail.openFindingCount !== 1 ? 's' : ''} tied to this software.`,
+      onClick: () => setActiveTab('findings'),
+    });
+  }
+  if (eolVersionCount > 0) {
+    needsAttention.push({
+      key: 'eol-versions',
+      title: 'Update EOL versions',
+      description: `${eolVersionCount.toLocaleString()} version${eolVersionCount !== 1 ? 's are' : ' is'} end-of-life or approaching EOL.`,
+      onClick: () => setActiveTab('versions'),
+    });
+  }
+  if (criticalAssets.length > 0 && vulnerabilities.length > 0) {
+    needsAttention.push({
+      key: 'critical-assets',
+      title: 'Critical assets affected',
+      description: `${criticalAssets.length.toLocaleString()} critical asset${criticalAssets.length !== 1 ? 's are' : ' is'} exposed · top: ${vulnerabilities[0].externalId}.`,
+      onClick: () => navigate(pathForVulnRepoView('org-cves', vulnerabilities[0].externalId)),
+    });
+  }
+
+  const tabLabel = activeTab === 'versions' ? 'Versions'
+    : activeTab === 'assets' ? 'Installed Assets'
+    : activeTab === 'vulnerabilities' ? 'CVEs'
+    : activeTab === 'findings' ? 'Findings'
+    : 'Fixes';
+
   return (
     <section className="inventory-page-shell software-detail-page">
       <PageFreshnessStatus
@@ -609,339 +661,60 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
         refreshLabel="Refreshing software identity details while keeping current context visible…"
       />
 
-      <div className="inventory-section-card sdi-page">
+      <button type="button" className="btn-link sdi-back-link" onClick={() => navigate(pathForInventoryView('software-identities'))}>
+        ← Back to Software Entities
+      </button>
 
-        {/* Hero */}
-        <div className="sdi-hero">
-          <button type="button" className="btn-link sdi-back-link" onClick={() => navigate(pathForInventoryView('software-identities'))}>
-            ← Back to Software Entities
-          </button>
-          <div className="sdi-hero-layout">
-            {/* Left — title + subtitle + pill row */}
-            <div className="sdi-title-block">
-              <h1 className="sdi-title">
-                {detail.vendor && detail.product && detail.vendor.toLowerCase() !== detail.product.toLowerCase() ? (
-                  <>
-                    <span className="sdi-title-vendor">{detail.vendor}</span>
-                    <span className="sdi-title-sep">/</span>
-                    <span className="sdi-title-product">{detail.product}</span>
-                  </>
-                ) : (
-                  <span className="sdi-title-product">{detail.displayName}</span>
-                )}
-              </h1>
-              <div className="sdi-subtitle">
-                <span>{detail.versionCount.toLocaleString()} {detail.versionCount === 1 ? 'version' : 'versions'} observed</span>
-                {detail.lastObservedAt ? (
-                  <>
-                    <span className="sdi-subtitle-sep">·</span>
-                    <span>last seen <strong>{timeAgo(detail.lastObservedAt)}</strong></span>
-                  </>
-                ) : null}
-                {detail.sourceSystems.length > 0 ? (
-                  <>
-                    <span className="sdi-subtitle-sep">·</span>
-                    <span>discovered via <strong>{detail.sourceSystems[0]}</strong></span>
-                  </>
-                ) : null}
-              </div>
-              {/* Signal pills */}
-              <div className="sdi-hero-pills">
-                {detail.ecosystems.map((v) => (
-                  <span key={v} className="sdi-hero-pill">{v}</span>
-                ))}
-                {detail.sourceSystems.map((v) => (
-                  <span key={v} className="sdi-hero-pill sdi-hero-pill--source">{v}</span>
-                ))}
-                <span className={`sdi-hero-pill ${eolVersionCount > 0 ? 'sdi-hero-pill--danger' : detail.nearEolComponentCount > 0 ? 'sdi-hero-pill--warn' : 'sdi-hero-pill--ok'}`}>
-                  {lifecycleLabel(detail.eolComponentCount, detail.nearEolComponentCount, detail.unknownEolComponentCount)}
-                </span>
-                {criticalAssets.length > 0 && vulnerabilities.length > 0 ? (
-                  <button
-                    type="button"
-                    className="sdi-hero-pill sdi-hero-pill--danger sdi-hero-pill--link"
-                    onClick={() => navigate(pathForVulnRepoView('org-cves', vulnerabilities[0].externalId))}
-                  >
-                    ⚠ {criticalAssets.length} critical asset{criticalAssets.length !== 1 ? 's' : ''} · top: {vulnerabilities[0].externalId}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Right — metric cards */}
-            <div className="sdi-hero-metrics">
-              <div className={`sdi-metric-card${detail.assetCount > 0 ? ' sdi-metric-card--accent' : ''}`}>
-                <div className="sdi-metric-value">{detail.assetCount.toLocaleString()}</div>
-                <div className="sdi-metric-label">Assets</div>
-              </div>
-              <div className={`sdi-metric-card${detail.openVulnerabilityCount > 0 ? ' sdi-metric-card--critical' : ''}`}>
-                <div className="sdi-metric-value">{detail.openVulnerabilityCount.toLocaleString()}</div>
-                <div className="sdi-metric-label">Open CVEs</div>
-              </div>
-              <div className={`sdi-metric-card${detail.openFindingCount > 0 ? ' sdi-metric-card--critical' : ''}`}>
-                <div className="sdi-metric-value">{detail.openFindingCount.toLocaleString()}</div>
-                <div className="sdi-metric-label">Open Findings</div>
-              </div>
-              <div className={`sdi-metric-card${criticalAssets.length > 0 ? ' sdi-metric-card--warn' : ''}`}>
-                <div className="sdi-metric-value">{criticalAssets.length.toLocaleString()}</div>
-                <div className="sdi-metric-label">Critical Assets</div>
-              </div>
-              <div className={`sdi-metric-card${eolVersionCount > 0 ? ' sdi-metric-card--warn' : ''}`}>
-                <div className="sdi-metric-value">{eolVersionCount.toLocaleString()}</div>
-                <div className="sdi-metric-label">EOL Versions</div>
-              </div>
-            </div>
-          </div>
+      <div className="fd3-topbar">
+        <span aria-hidden="true">📦</span>
+        <span className="fd3-finding-id mono">
+          {detail.vendor && detail.product && detail.vendor.toLowerCase() !== detail.product.toLowerCase() ? (
+            <>
+              <span className="sdi-title-vendor">{detail.vendor}</span>
+              <span className="sdi-title-sep">/</span>
+              <span className="sdi-title-product">{detail.product}</span>
+            </>
+          ) : (
+            <span className="sdi-title-product">{detail.displayName}</span>
+          )}
+        </span>
+        <span className="panel-caption">
+          {detail.versionCount.toLocaleString()} {detail.versionCount === 1 ? 'version' : 'versions'} observed
+          {detail.lastObservedAt ? <> · last seen <strong>{timeAgo(detail.lastObservedAt)}</strong></> : null}
+          {detail.sourceSystems.length > 0 ? <> · discovered via <strong>{detail.sourceSystems[0]}</strong></> : null}
+        </span>
+        <div style={{ flex: 1 }} />
+        <div className="fd3-actions">
+          {detail.ecosystems[0] ? <span className="cvd-signal-pill">{detail.ecosystems[0]}</span> : null}
+          <span className={`sdi-hero-pill ${eolVersionCount > 0 ? 'sdi-hero-pill--danger' : detail.nearEolComponentCount > 0 ? 'sdi-hero-pill--warn' : 'sdi-hero-pill--ok'}`}>
+            {lifecycleLabel(detail.eolComponentCount, detail.nearEolComponentCount, detail.unknownEolComponentCount)}
+          </span>
         </div>
-
-        {bomEvidence.documentCount > 0 ? (
-          <div className="sdi-section">
-            <div className="sdi-section-heading">
-              <span className="sdi-section-title">BOM evidence</span>
-              <span className="sdi-section-meta">
-                {bomEvidence.documentCount.toLocaleString()} documents · {bomEvidence.componentCount.toLocaleString()} matched components
-              </span>
-            </div>
-            <div className="sdi-table">
-              <div className="sdi-table-group">SUMMARY <span className="sdi-table-group-meta">SOURCE BOM CORRELATION</span></div>
-              <div className="sdi-table-group-rows">
-                <div className="sdi-table-row">
-                  <div className="sdi-table-label">BOM DOCUMENTS</div>
-                  <div className="sdi-table-value">{bomEvidence.documentCount.toLocaleString()}</div>
-                </div>
-                <div className="sdi-table-row">
-                  <div className="sdi-table-label">MATCHED COMPONENTS</div>
-                  <div className="sdi-table-value">{bomEvidence.componentCount.toLocaleString()}</div>
-                </div>
-                <div className="sdi-table-row">
-                  <div className="sdi-table-label">VULNERABILITY LINKS</div>
-                  <div className={`sdi-table-value${bomEvidence.vulnerabilityLinkCount > 0 ? ' text-critical' : ''}`}>{bomEvidence.vulnerabilityLinkCount.toLocaleString()}</div>
-                </div>
-                <div className="sdi-table-row">
-                  <div className="sdi-table-label">ACTIVE WORKFLOWS</div>
-                  <div className={`sdi-table-value${bomEvidence.componentsInWorkflow > 0 ? ' text-warning' : ''}`}>{bomEvidence.componentsInWorkflow.toLocaleString()}</div>
-                </div>
-              </div>
-              <div className="sdi-table-group">LATEST DOCUMENTS <span className="sdi-table-group-meta">UP TO 3</span></div>
-              <div className="sdi-table-group-rows">
-                {bomEvidence.documents.slice(0, 3).map((document) => (
-                  <div key={document.bomId} className="sdi-table-row">
-                    <div className="sdi-table-label">
-                      {document.documentName || document.sourceLabel || document.sourceReference || document.bomId.slice(0, 8)}
-                    </div>
-                    <div className="sdi-table-value">
-                      {formatBomLabel(document.specFamily)} · {formatBomLabel(document.documentFormat)} · {formatBomLabel(document.sourceSystem || document.sourceType)}
-                      <div className="panel-caption">
-                        {document.componentCount.toLocaleString()} components · {document.vulnerabilityLinkCount.toLocaleString()} vuln links · {formatDateTime(document.ingestedAt)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="sdi-table-group">MATCHED COMPONENTS <span className="sdi-table-group-meta">TOP 5</span></div>
-              <div className="sdi-table-group-rows">
-                {bomEvidence.components.slice(0, 5).map((component) => (
-                  <div key={component.componentId} className="sdi-table-row">
-                    <div className="sdi-table-label">{component.name}{component.version ? ` ${component.version}` : ''}</div>
-                    <div className="sdi-table-value">
-                      {component.vulnerabilityCount.toLocaleString()} vuln links · {component.evidenceCount.toLocaleString()} evidence rows
-                      <div className="panel-caption">
-                        {formatBomLabel(component.workflowStatus)}{component.sourceSystem ? ` · ${formatBomLabel(component.sourceSystem)}` : ''}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Section 01 — Entity detail */}
-        <div className="sdi-section">
-          <div className="sdi-section-heading">
-            <span className="sdi-section-title">Entity detail</span>
-            {metadata.updatedAt ? (
-              <span className="sdi-section-meta">LAST SAVE {new Date(metadata.updatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}</span>
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-primary sdi-save-btn"
-              onClick={() => saveMetadataMutation.mutate(draftMetadata)}
-            >
-              {saveMetadataMutation.isPending ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-          <div className="sdi-table">
-            <div className="sdi-table-group">POSTURE <span className="sdi-table-group-meta">LIVE SIGNALS FROM CDL</span></div>
-            <div className="sdi-table-group-rows">
-              <div className="sdi-table-row sdi-table-row--editable">
-                <div className="sdi-table-label">VENDOR / PUBLISHER</div>
-                <div className="sdi-table-value">
-                  <input className="sdi-table-input" value={draftVendor} onChange={(e) => setDraftVendor(e.target.value)} placeholder="Vendor or publisher name" />
-                </div>
-              </div>
-              <div className="sdi-table-row">
-                <div className="sdi-table-label">ASSETS</div>
-                <div className="sdi-table-value">{detail.assetCount.toLocaleString()}</div>
-              </div>
-              <div className="sdi-table-row">
-                <div className="sdi-table-label">OPEN CVES</div>
-                <div className={`sdi-table-value${detail.openVulnerabilityCount > 0 ? ' text-critical' : ''}`}>{detail.openVulnerabilityCount.toLocaleString()}</div>
-              </div>
-              <div className="sdi-table-row">
-                <div className="sdi-table-label">OPEN FINDINGS</div>
-                <div className={`sdi-table-value${detail.openFindingCount > 0 ? ' text-critical' : ''}`}>{detail.openFindingCount.toLocaleString()}</div>
-              </div>
-              <div className="sdi-table-row">
-                <div className="sdi-table-label">CRITICAL ASSETS</div>
-                <div className={`sdi-table-value${criticalAssets.length > 0 ? ' text-warning' : ''}`}>{criticalAssets.length.toLocaleString()}</div>
-              </div>
-              <div className="sdi-table-row">
-                <div className="sdi-table-label">EOL VERSIONS</div>
-                <div className={`sdi-table-value${eolVersionCount > 0 ? ' text-warning' : ''}`}>{eolVersionCount.toLocaleString()}</div>
-              </div>
-            </div>
-            <div className="sdi-table-group">OWNERSHIP <span className="sdi-table-group-meta">EDITABLE · SAVED ON DEMAND</span></div>
-            <div className="sdi-table-group-rows">
-              <div className="sdi-table-row sdi-table-row--editable">
-                <div className="sdi-table-label">OWNER</div>
-                <div className="sdi-table-value">
-                  <input className="sdi-table-input" value={draftMetadata.owner} onChange={(e) => setDraftMetadata({ ...draftMetadata, owner: e.target.value })} placeholder="Application owner or team" />
-                </div>
-              </div>
-              <div className="sdi-table-row sdi-table-row--editable">
-                <div className="sdi-table-label">SUPPORT GROUP</div>
-                <div className="sdi-table-value">
-                  <input className="sdi-table-input" value={draftMetadata.supportGroup} onChange={(e) => setDraftMetadata({ ...draftMetadata, supportGroup: e.target.value })} placeholder="Support / resolver group" />
-                </div>
-              </div>
-              <div className="sdi-table-row sdi-table-row--editable">
-                <div className="sdi-table-label">LICENSED</div>
-                <div className="sdi-table-value">
-                  <select className="sdi-table-input" value={draftMetadata.licensed} onChange={(e) => setDraftMetadata({ ...draftMetadata, licensed: e.target.value })}>
-                    <option value="Unknown">Unknown</option>
-                    <option value="Licensed">Licensed</option>
-                    <option value="Unlicensed">Unlicensed</option>
-                    <option value="Open source">Open source</option>
-                  </select>
-                </div>
-              </div>
-              <div className="sdi-table-row sdi-table-row--editable">
-                <div className="sdi-table-label">LICENSE TYPE</div>
-                <div className="sdi-table-value">
-                  <input className="sdi-table-input" value={draftMetadata.licenseType} onChange={(e) => setDraftMetadata({ ...draftMetadata, licenseType: e.target.value })} placeholder="Commercial, GPL, MIT..." />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 02 — Remediation recommendation */}
-        <div className="sdi-section">
-          <div className="sdi-section-heading">
-            <span className="sdi-section-title">Remediation recommendation</span>
-          </div>
-          <div className="sdi-briefing-card">
-            <div className="sdi-briefing-header">
-              <h3 className="sdi-briefing-title">What to do about this software</h3>
-            </div>
-            <div className="sdi-briefing-body">
-              {isEditingRec ? (
-                <textarea
-                  className="sdi-briefing-textarea"
-                  rows={6}
-                  value={draftMetadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities)}
-                  onChange={(e) => setDraftMetadata({ ...draftMetadata, recommendation: e.target.value })}
-                />
-              ) : (
-                <p className="sdi-briefing-text">
-                  {metadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities)}
-                </p>
-              )}
-            </div>
-            <div className="sdi-briefing-footer">
-              <div className="sdi-briefing-meta">
-                {metadata.recommendationUpdatedAt
-                  ? `UPDATED · ${new Date(metadata.recommendationUpdatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()}`
-                  : 'DRAFT · NOT YET SAVED'}
-              </div>
-              <div className="sdi-briefing-actions">
-                {isEditingRec ? (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={generateRecommendationMutation.isPending}
-                      title="Generate AI recommendation"
-                      onClick={() => generateRecommendationMutation.mutate()}
-                    >
-                      {generateRecommendationMutation.isPending ? 'Generating...' : 'AI Recommendation'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        setIsEditingRec(false);
-                        setDraftMetadata({ ...draftMetadata, recommendation: metadata.recommendation });
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={saveMetadataMutation.isPending}
-                      onClick={() => {
-                        const next = { ...draftMetadata, recommendationUpdatedAt: new Date().toISOString() };
-                        setMetadata(next);
-                        setIsEditingRec(false);
-                        saveMetadataMutation.mutate(next);
-                      }}
-                    >
-                      {saveMetadataMutation.isPending ? 'Saving...' : 'Save'}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      if (!draftMetadata.recommendation) {
-                        setDraftMetadata({ ...draftMetadata, recommendation: metadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities) });
-                      }
-                      setIsEditingRec(true);
-                    }}
-                  >
-                    Edit
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          {findingMessage ? (
-            <div className={`sdi-activity-log${findingMessage.startsWith('Failed') ? ' sdi-activity-log--error' : ' sdi-activity-log--ok'}`}>
-              {findingMessage}
-            </div>
-          ) : null}
-        </div>
-
       </div>
 
-      <div className="section-tab-row">
+      <div className="fd3-tab-bar" role="tablist" aria-label="Software identity sections">
         {(['versions', 'assets', 'vulnerabilities', 'findings', 'fixes'] as DetailTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
-            className={activeTab === tab ? 'section-tab-btn active' : 'section-tab-btn'}
+            className={`fd3-tab${activeTab === tab ? ' fd3-tab--active' : ''}`}
             onClick={() => setActiveTab(tab)}
           >
             {tab === 'versions' ? 'Versions'
               : tab === 'assets' ? 'Installed Assets'
               : tab === 'vulnerabilities' ? 'CVEs'
               : tab === 'findings' ? 'Findings'
-              : `Fixes${fixRecordsQuery.data && fixRecordsQuery.data.length > 0 ? ` · ${fixRecordsQuery.data.length}` : ''}`}
+              : 'Fixes'}
+            <span className="fd3-tab-count">
+              {tab === 'versions' ? versionRows.length
+                : tab === 'assets' ? assetRows.length
+                : tab === 'vulnerabilities' ? vulnerabilityRows.length
+                : tab === 'findings' ? findingRows.length
+                : fixRecordsQuery.data?.length ?? 0}
+            </span>
           </button>
         ))}
+        <div style={{ flex: 1 }} />
         <button
           type="button"
           className="btn btn-primary software-detail-create-findings-btn"
@@ -955,36 +728,229 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
         </button>
       </div>
 
-      <div className="inventory-section-card">
-        {activeTab === 'versions' ? (
-          <TableOrEmpty rows={versionRows} columns={VERSION_COLUMNS} storageKey={`software-identity-versions:v2:${softwareIdentityId}`} empty="No versions are currently associated with this software identity." />
-        ) : activeTab === 'assets' ? (
-          <TableOrEmpty rows={assetRows} columns={assetColumns} storageKey={`software-identity-assets:v5:${softwareIdentityId}`} empty="No assets are currently associated with this software identity." />
-        ) : activeTab === 'vulnerabilities' ? (
-          vulnerabilitiesQuery.isLoading ? (
-            <div className="notice">Loading CVEs...</div>
-          ) : vulnerabilitiesQuery.error instanceof Error ? (
-            <div className="notice error">{vulnerabilitiesQuery.error.message}</div>
-          ) : (
-            <TableOrEmpty rows={vulnerabilityRows} columns={VULNERABILITY_COLUMNS} storageKey={`software-identity-vulnerabilities:v2:${softwareIdentityId}`} empty="No CVEs are currently matched to this software identity." />
-          )
-        ) : activeTab === 'findings' ? (
-          findingsQuery.isLoading ? (
-            <div className="notice">Loading findings...</div>
-          ) : findingsQuery.error instanceof Error ? (
-            <div className="notice error">{findingsQuery.error.message}</div>
-          ) : (
-            <TableOrEmpty rows={findingRows} columns={FINDING_COLUMNS} storageKey={`software-identity-findings:v3:${softwareIdentityId}`} empty="No findings are currently tied to this software identity." />
-          )
-        ) : fixRecordsQuery.isLoading ? (
-          <div className="notice">Loading fixes...</div>
-        ) : fixRecordsQuery.error instanceof Error ? (
-          <div className="notice error">{fixRecordsQuery.error.message}</div>
-        ) : !fixRecordsQuery.data || fixRecordsQuery.data.length === 0 ? (
-          <div className="notice">No fix records have been generated for this software yet. Generate fixes from the CVE Assessment Workbench.</div>
-        ) : (
-          <SoftwareFixRecordsTable fixes={fixRecordsQuery.data} />
-        )}
+      <div className="fd3-body">
+        <div className="fd3-col fd3-col-right">
+          <Panel title={tabLabel}>
+            {activeTab === 'versions' ? (
+              <TableOrEmpty rows={versionRows} columns={VERSION_COLUMNS} storageKey={`software-identity-versions:v2:${softwareIdentityId}`} empty="No versions are currently associated with this software identity." />
+            ) : activeTab === 'assets' ? (
+              <TableOrEmpty rows={assetRows} columns={assetColumns} storageKey={`software-identity-assets:v5:${softwareIdentityId}`} empty="No assets are currently associated with this software identity." />
+            ) : activeTab === 'vulnerabilities' ? (
+              vulnerabilitiesQuery.isLoading ? (
+                <div className="notice">Loading CVEs...</div>
+              ) : vulnerabilitiesQuery.error instanceof Error ? (
+                <div className="notice error">{vulnerabilitiesQuery.error.message}</div>
+              ) : (
+                <TableOrEmpty rows={vulnerabilityRows} columns={VULNERABILITY_COLUMNS} storageKey={`software-identity-vulnerabilities:v2:${softwareIdentityId}`} empty="No CVEs are currently matched to this software identity." />
+              )
+            ) : activeTab === 'findings' ? (
+              findingsQuery.isLoading ? (
+                <div className="notice">Loading findings...</div>
+              ) : findingsQuery.error instanceof Error ? (
+                <div className="notice error">{findingsQuery.error.message}</div>
+              ) : (
+                <TableOrEmpty rows={findingRows} columns={FINDING_COLUMNS} storageKey={`software-identity-findings:v3:${softwareIdentityId}`} empty="No findings are currently tied to this software identity." />
+              )
+            ) : fixRecordsQuery.isLoading ? (
+              <div className="notice">Loading fixes...</div>
+            ) : fixRecordsQuery.error instanceof Error ? (
+              <div className="notice error">{fixRecordsQuery.error.message}</div>
+            ) : !fixRecordsQuery.data || fixRecordsQuery.data.length === 0 ? (
+              <div className="notice">No fix records have been generated for this software yet. Generate fixes from the CVE Assessment Workbench.</div>
+            ) : (
+              <SoftwareFixRecordsTable fixes={fixRecordsQuery.data} />
+            )}
+          </Panel>
+        </div>
+
+        <div className="fd3-col fd3-col-left">
+          {needsAttention.length > 0 && (
+            <div className="fd3-panel">
+              <div className="fd3-panel-title">Needs Attention</div>
+              <div className="cvd2-wf-cards">
+                {needsAttention.map((item, index) => (
+                  <button key={item.key} type="button" className="cvd2-wf-card" onClick={item.onClick}>
+                    <div className="cvd2-wf-card-num">{index + 1}</div>
+                    <div className="cvd2-wf-card-body">
+                      <div className="cvd2-wf-card-title-row">
+                        <span className="cvd2-wf-card-title">{item.title}</span>
+                      </div>
+                      <p className="cvd2-wf-card-sub">{item.description}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Panel title="Remediation recommendation">
+            <div className="sdi-briefing-card">
+              <div className="sdi-briefing-header">
+                <h3 className="sdi-briefing-title">What to do about this software</h3>
+              </div>
+              <div className="sdi-briefing-body">
+                {isEditingRec ? (
+                  <textarea
+                    className="sdi-briefing-textarea"
+                    rows={6}
+                    value={draftMetadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities)}
+                    onChange={(e) => setDraftMetadata({ ...draftMetadata, recommendation: e.target.value })}
+                  />
+                ) : (
+                  <p className="sdi-briefing-text">
+                    {metadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities)}
+                  </p>
+                )}
+              </div>
+              <div className="sdi-briefing-footer">
+                <div className="sdi-briefing-meta">
+                  {metadata.recommendationUpdatedAt
+                    ? `UPDATED · ${new Date(metadata.recommendationUpdatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()}`
+                    : 'DRAFT · NOT YET SAVED'}
+                </div>
+                <div className="sdi-briefing-actions">
+                  {isEditingRec ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={generateRecommendationMutation.isPending}
+                        title="Generate AI recommendation"
+                        onClick={() => generateRecommendationMutation.mutate()}
+                      >
+                        {generateRecommendationMutation.isPending ? 'Generating...' : 'AI Recommendation'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setIsEditingRec(false);
+                          setDraftMetadata({ ...draftMetadata, recommendation: metadata.recommendation });
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={saveMetadataMutation.isPending}
+                        onClick={() => {
+                          const next = { ...draftMetadata, recommendationUpdatedAt: new Date().toISOString() };
+                          setMetadata(next);
+                          setIsEditingRec(false);
+                          saveMetadataMutation.mutate(next);
+                        }}
+                      >
+                        {saveMetadataMutation.isPending ? 'Saving...' : 'Save'}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        if (!draftMetadata.recommendation) {
+                          setDraftMetadata({ ...draftMetadata, recommendation: metadata.recommendation || buildFallbackRecommendation(detail, vulnerabilities) });
+                        }
+                        setIsEditingRec(true);
+                      }}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {findingMessage ? (
+              <div className={`sdi-activity-log${findingMessage.startsWith('Failed') ? ' sdi-activity-log--error' : ' sdi-activity-log--ok'}`}>
+                {findingMessage}
+              </div>
+            ) : null}
+          </Panel>
+
+          <Panel title="Ownership and Publisher">
+            <div className="fd3-kv-table">
+              <KVRow label="Vendor / Publisher">
+                <input className="sdi-table-input" value={draftVendor} onChange={(e) => setDraftVendor(e.target.value)} placeholder="Vendor or publisher name" />
+              </KVRow>
+              <KVRow label="Owner">
+                <input className="sdi-table-input" value={draftMetadata.owner} onChange={(e) => setDraftMetadata({ ...draftMetadata, owner: e.target.value })} placeholder="Application owner or team" />
+              </KVRow>
+              <KVRow label="Support Group">
+                <input className="sdi-table-input" value={draftMetadata.supportGroup} onChange={(e) => setDraftMetadata({ ...draftMetadata, supportGroup: e.target.value })} placeholder="Support / resolver group" />
+              </KVRow>
+              <KVRow label="Licensed">
+                <select className="sdi-table-input" value={draftMetadata.licensed} onChange={(e) => setDraftMetadata({ ...draftMetadata, licensed: e.target.value })}>
+                  <option value="Unknown">Unknown</option>
+                  <option value="Licensed">Licensed</option>
+                  <option value="Unlicensed">Unlicensed</option>
+                  <option value="Open source">Open source</option>
+                </select>
+              </KVRow>
+              <KVRow label="License Type">
+                <input className="sdi-table-input" value={draftMetadata.licenseType} onChange={(e) => setDraftMetadata({ ...draftMetadata, licenseType: e.target.value })} placeholder="Commercial, GPL, MIT..." />
+              </KVRow>
+            </div>
+            <div className="button-row" style={{ marginTop: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary sdi-save-btn"
+                onClick={() => saveMetadataMutation.mutate(draftMetadata)}
+              >
+                {saveMetadataMutation.isPending ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </Panel>
+
+          {bomEvidence.documentCount > 0 && (
+            <Panel title="BOM Evidence">
+              <div className="fd3-kv-table">
+                <KVRow label="Documents">{bomEvidence.documentCount.toLocaleString()}</KVRow>
+                <KVRow label="Matched Components">{bomEvidence.componentCount.toLocaleString()}</KVRow>
+                <KVRow label="Vulnerability Links">
+                  <span className={bomEvidence.vulnerabilityLinkCount > 0 ? 'text-critical' : undefined}>{bomEvidence.vulnerabilityLinkCount.toLocaleString()}</span>
+                </KVRow>
+                <KVRow label="Active Workflows">
+                  <span className={bomEvidence.componentsInWorkflow > 0 ? 'text-warning' : undefined}>{bomEvidence.componentsInWorkflow.toLocaleString()}</span>
+                </KVRow>
+              </div>
+              {(bomEvidence.documents.length > 0 || bomEvidence.components.length > 0) && (
+                <div style={{ display: 'grid', gap: '0.75rem', marginTop: '0.75rem' }}>
+                  {bomEvidence.documents.length > 0 && (
+                    <div>
+                      <div className="panel-label">Latest BOM Documents</div>
+                      <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        {bomEvidence.documents.slice(0, 3).map((document) => (
+                          <div key={document.bomId} style={{ display: 'grid', gap: '0.15rem' }}>
+                            <strong>{document.documentName || document.sourceLabel || document.sourceReference || document.bomId.slice(0, 8)}</strong>
+                            <span className="panel-caption">
+                              {formatBomLabel(document.specFamily)} · {formatBomLabel(document.documentFormat)} · {formatBomLabel(document.sourceSystem || document.sourceType)} · {document.componentCount.toLocaleString()} components · {formatDateTime(document.ingestedAt)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {bomEvidence.components.length > 0 && (
+                    <div>
+                      <div className="panel-label">Matched BOM Components</div>
+                      <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        {bomEvidence.components.slice(0, 5).map((component) => (
+                          <div key={component.componentId} style={{ display: 'grid', gap: '0.15rem' }}>
+                            <strong>{component.name}{component.version ? ` ${component.version}` : ''}</strong>
+                            <span className="panel-caption">
+                              {component.vulnerabilityCount.toLocaleString()} vuln links · {component.evidenceCount.toLocaleString()} evidence rows · {formatBomLabel(component.workflowStatus)}{component.sourceSystem ? ` · ${formatBomLabel(component.sourceSystem)}` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Panel>
+          )}
+        </div>
       </div>
 
       {showFindingConfig ? (
@@ -1078,6 +1044,24 @@ export function SoftwareIdentityDetailPage({ softwareIdentityId }: Props) {
   );
 }
 
+
+function KVRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="fd3-kv-row">
+      <span className="fd3-kv-key">{label}</span>
+      <span className="fd3-kv-val">{children ?? <span className="fd3-empty">—</span>}</span>
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="fd3-panel">
+      <div className="fd3-panel-title">{title}</div>
+      <div className="fd3-panel-body">{children}</div>
+    </div>
+  );
+}
 
 function TableOrEmpty({ rows, columns, storageKey, empty }: { rows: DataTableRow[]; columns: DataTableColumn[]; storageKey: string; empty: string }) {
   if (rows.length === 0) {

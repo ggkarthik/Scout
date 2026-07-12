@@ -67,7 +67,7 @@ function smoothPath(pts: Array<{ x: number; y: number }>): string {
 
 const Y_LABELS = [10, 5, 0];
 
-/** S.AI risk score trend chart. Use mini=true for the compact card layout. */
+/** Scout risk score trend chart. Use mini=true for the compact card layout. */
 export function CveRiskScorePanel({ item, mini = false }: Props) {
   const [period, setPeriod] = React.useState<PeriodDays>(14);
   const policyQuery = useRiskPolicyQuery();
@@ -112,7 +112,7 @@ export function CveRiskScorePanel({ item, mini = false }: Props) {
       <div className="cvrs-mini-card">
         {/* Header: title + period selector */}
         <div className="cvrs-mini-header">
-          <span className="cvrs-mini-title">S.AI RISK SCORE</span>
+          <span className="cvrs-mini-title">SCOUT RISK SCORE</span>
           <div className="cvrs-period-btns">
             {([14, 30, 90] as PeriodDays[]).map(p => (
               <button key={p} type="button"
@@ -137,7 +137,7 @@ export function CveRiskScorePanel({ item, mini = false }: Props) {
           </div>
           {/* AI justification tooltip on hover */}
           <div className="cvrs-mini-tooltip" role="tooltip">
-            <div className="cvrs-mini-tooltip-heading">✦ S.AI Score Reasoning</div>
+            <div className="cvrs-mini-tooltip-heading">✦ Scout Score Reasoning</div>
             {journey.length > 0 && (
               <div className="cvd-score-tooltip-journey">
                 {journey.map((ev, i) => (
@@ -237,10 +237,10 @@ export function CveRiskScorePanel({ item, mini = false }: Props) {
       {/* Toolbar: title + legend + period selector */}
       <div className="cvrs-chart-toolbar">
         <div className="cvrs-legend">
-          <span className="cvrs-title">S.AI risk score trend</span>
+          <span className="cvrs-title">Scout risk score trend</span>
           <span className="cvrs-legend-item">
             <span className="cvrs-legend-line cvrs-legend-line--solid" />
-            S.AI score
+            Scout score
           </span>
           {cvssScore > 0 && (
             <span className="cvrs-legend-item">

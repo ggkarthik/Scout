@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import { renderWithProviders } from '../test/test-utils';
@@ -85,5 +85,78 @@ describe('HostAssetDetailPage', () => {
   it('does not show loading when no assetId is provided', () => {
     renderWithProviders(<HostAssetDetailPage />);
     expect(screen.queryByText('Loading host detail...')).not.toBeInTheDocument();
+  });
+
+  it('renders finding id, package, owner, and other detail columns on the Created findings tab', async () => {
+    vi.spyOn(api, 'getHostAssetDetail').mockResolvedValue({
+      ...buildHostDetail(),
+      findings: [
+        {
+          id: 'finding-1',
+          displayId: 'F-0C965093EDAE',
+          vulnerabilityId: 'CVE-2022-32114',
+          packageName: 'chrome',
+          packageVersion: '90.0.4430.212',
+          severity: 'CRITICAL',
+          status: 'OPEN',
+          decisionState: 'AFFECTED',
+          riskScore: 8.2,
+          confidenceScore: 0.9,
+          assignedTo: undefined,
+          ownerGroup: undefined,
+          creationSource: 'AUTOMATIC',
+          lastObservedAt: '2024-01-01T00:00:00Z',
+        },
+      ],
+    });
+    renderWithProviders(<HostAssetDetailPage assetId="asset-1" />);
+    await waitFor(() => expect(screen.getByText('web-prod-01')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Created findings/ }));
+
+    expect(await screen.findByText('F-0C965093EDAE')).toBeInTheDocument();
+    expect(screen.getByText('CVE-2022-32114')).toBeInTheDocument();
+    expect(screen.getByText('chrome')).toBeInTheDocument();
+    expect(screen.getByText('90.0.4430.212')).toBeInTheDocument();
+    expect(screen.getByText('Unassigned')).toBeInTheDocument();
+    expect(screen.getByText('No ownership source')).toBeInTheDocument();
+    expect(screen.getByText('Automatic')).toBeInTheDocument();
+  });
+
+  it('filters the Installed software tab to only records needing review when the attention card is clicked', async () => {
+    vi.spyOn(api, 'getHostAssetDetail').mockResolvedValue({
+      ...buildHostDetail({ unresolvedReviewCount: 1 }),
+      software: [
+        {
+          id: 'sw-clean',
+          displayName: 'Clean Package',
+          activeInstall: true,
+          unlicensedInstall: false,
+          needsVersionReview: false,
+          needsIdentityReview: false,
+          needsDiscoveryModelReview: false,
+        },
+        {
+          id: 'sw-needs-review',
+          displayName: 'Needs Review Package',
+          activeInstall: true,
+          unlicensedInstall: false,
+          needsVersionReview: true,
+          needsIdentityReview: false,
+          needsDiscoveryModelReview: false,
+        },
+      ],
+    });
+    renderWithProviders(<HostAssetDetailPage assetId="asset-1" />);
+    await waitFor(() => expect(screen.getByText('web-prod-01')).toBeInTheDocument());
+
+    expect(screen.getByText('Clean Package')).toBeInTheDocument();
+    expect(screen.getByText('Needs Review Package')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Inventory records need review/ }));
+
+    expect(screen.getByText('Showing software needing review only (1 item)')).toBeInTheDocument();
+    expect(screen.getByText('Needs Review Package')).toBeInTheDocument();
+    expect(screen.queryByText('Clean Package')).not.toBeInTheDocument();
   });
 });

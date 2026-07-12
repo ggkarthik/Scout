@@ -641,3 +641,78 @@
   border-top: 1px solid var(--border);
   font-size: 0.75rem;
 }
+
+.grid-exposure-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.grid-exposure-table th {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.grid-exposure-table th:first-child {
+  text-align: left;
+}
+
+.grid-exposure-row-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--title);
+  padding: 8px;
+  white-space: nowrap;
+}
+
+.grid-exposure-cell {
+  padding: 4px;
+  text-align: center;
+}
+
+.grid-exposure-cell-btn {
+  width: 100%;
+  min-width: 56px;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.grid-exposure-cell-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.grid-exposure-cell-btn:disabled {
+  cursor: default;
+}
+
+.grid-exposure-cell--low .grid-exposure-cell-btn {
+  background: color-mix(in srgb, var(--color-resolved, #22c55e) 22%, transparent);
+  color: var(--color-resolved, #22c55e);
+}
+
+.grid-exposure-cell--medium .grid-exposure-cell-btn {
+  background: color-mix(in srgb, var(--color-warn, #f59e0b) 26%, transparent);
+  color: var(--color-warn, #f59e0b);
+}
+
+.grid-exposure-cell--high .grid-exposure-cell-btn {
+  background: color-mix(in srgb, var(--color-critical, #ef4444) 28%, transparent);
+  color: var(--color-critical, #ef4444);
+}
+
+.grid-exposure-total {
+  text-align: center;
+  font-weight: 700;
+  color: var(--title);
+  padding: 8px;
+}

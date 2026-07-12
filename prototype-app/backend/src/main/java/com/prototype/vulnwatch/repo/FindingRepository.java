@@ -340,4 +340,22 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             GROUP BY lower(ic.ecosystem), lower(ic.package_name)
             """, nativeQuery = true)
     List<Object[]> countOpenByEcosystemPackageForTenant(@Param("tenantId") UUID tenantId);
+
+    /** Count open findings grouped by resolved asset type and severity, for the Grid Exposure widget.
+     *  Covers both direct asset findings (f.asset_id) and component-scoped findings
+     *  (f.component_id -> inventory_components.asset_id). */
+    @Query(value = """
+            SELECT COALESCE(a.type, ca.type) AS asset_type,
+                   upper(COALESCE(f.severity_override, v.severity)) AS severity,
+                   count(f.id)
+            FROM findings f
+            JOIN vulnerabilities v ON v.id = f.vulnerability_id
+            LEFT JOIN assets a ON a.id = f.asset_id
+            LEFT JOIN inventory_components ic ON ic.id = f.component_id
+            LEFT JOIN assets ca ON ca.id = ic.asset_id
+            WHERE f.tenant_id = :tenantId
+              AND f.status = 'OPEN'
+            GROUP BY COALESCE(a.type, ca.type), upper(COALESCE(f.severity_override, v.severity))
+            """, nativeQuery = true)
+    List<Object[]> countOpenByAssetTypeAndSeverityForTenant(@Param("tenantId") UUID tenantId);
 }

@@ -49,14 +49,6 @@ const ROLE_MATRIX = [
   { capability: 'View dashboards and reports', admin: true, analyst: true, viewer: true },
 ];
 
-const ADMIN_TABS: Array<{ key: AdminRouteView; label: string; helper: string }> = [
-  { key: 'users', label: 'Users', helper: 'Members and access scope' },
-  { key: 'invites', label: 'Invites', helper: 'Pending access requests' },
-  { key: 'roles', label: 'Roles & Permissions', helper: 'Role model and grants' },
-  { key: 'service-accounts', label: 'Service Accounts', helper: 'Machine identities' },
-  { key: 'audit', label: 'Audit', helper: 'Identity event trail' },
-];
-
 const STATUS_PILL_BY_API: Record<string, string> = {
   ACTIVE: 'status-pill status-open',
   INVITED: 'status-pill status-investigating',
@@ -551,22 +543,6 @@ export function UserManagementPage() {
         )}
 
         <div className="um-layout">
-          <nav className="um-side-nav" aria-label="User management sections">
-            <div className="um-side-nav-title">Settings</div>
-            {ADMIN_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                className={activeView === tab.key ? 'um-side-tab active' : 'um-side-tab'}
-                aria-current={activeView === tab.key ? 'page' : undefined}
-                onClick={() => setActiveView(tab.key)}
-              >
-                <span>{tab.label}</span>
-                <small>{tab.helper}</small>
-              </button>
-            ))}
-          </nav>
-
           <div className="um-content">
             {activeView === 'users' && (
               <>

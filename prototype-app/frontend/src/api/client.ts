@@ -24,6 +24,7 @@ import type {
   ApplicableSoftwarePage,
   Dashboard,
   DashboardCveInventoryMap,
+  GridExposure,
   ImpactedCvePage
 } from '../features/dashboard/types';
 import type {
@@ -48,6 +49,11 @@ import type {
   AwsDiscoveryConfigRequest,
   AwsDiscoveryTarget,
   AwsDiscoveryTargetRequest,
+  AzureConnectionTestResponse,
+  AzureDiscoveryConfig,
+  AzureDiscoveryConfigRequest,
+  AzureDiscoveryTarget,
+  AzureDiscoveryTargetRequest,
   CmdbAssetRecord,
   CmdbAssetSyncResponse,
   GithubSbomSource,
@@ -808,6 +814,7 @@ function buildFindingsSearchParams(params?: FindingsFilterModel): URLSearchParam
   if (params?.supportGroup && params.supportGroup.trim().length > 0) searchParams.set('supportGroup', params.supportGroup.trim());
   if (params?.patchAvailable != null) searchParams.set('patchAvailable', String(params.patchAvailable));
   if (params?.suppressedUntilBand) searchParams.set('suppressedUntilBand', params.suppressedUntilBand);
+  params?.assetType?.forEach((value) => searchParams.append('assetType', value));
   return searchParams;
 }
 
@@ -855,6 +862,7 @@ export const api = {
     return request<ImpactedCvePage>(`/dashboard/impacted-cves${suffix}`);
   },
   getCveInventoryMap: (limit = 5) => request<DashboardCveInventoryMap>(`/dashboard/cve-inventory-map?limit=${limit}`),
+  getGridExposure: () => request<GridExposure>('/dashboard/grid-exposure'),
   listFindings: (params?: FindingsFilterModel) => {
     const searchParams = buildFindingsSearchParams(params);
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
@@ -1118,6 +1126,35 @@ export const api = {
     method: 'POST'
   }),
   triggerAwsDiscoveryTargetSync: (targetId: string) => request<SyncTriggerResponse>(`/connectors/aws-discovery/targets/${encodeURIComponent(targetId)}/sync`, {
+    method: 'POST'
+  }),
+  getAzureDiscoveryConfig: () => request<AzureDiscoveryConfig>('/connectors/azure-discovery'),
+  saveAzureDiscoveryConfig: (payload: AzureDiscoveryConfigRequest) => request<AzureDiscoveryConfig>('/connectors/azure-discovery', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  testAzureDiscoveryConnection: () => request<AzureConnectionTestResponse>('/connectors/azure-discovery/test', {
+    method: 'POST'
+  }),
+  triggerAzureDiscoverySync: () => request<SyncTriggerResponse>('/connectors/azure-discovery/sync', {
+    method: 'POST'
+  }),
+  listAzureDiscoveryTargets: () => request<AzureDiscoveryTarget[]>('/connectors/azure-discovery/targets'),
+  createAzureDiscoveryTarget: (payload: AzureDiscoveryTargetRequest) => request<AzureDiscoveryTarget>('/connectors/azure-discovery/targets', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateAzureDiscoveryTarget: (targetId: string, payload: AzureDiscoveryTargetRequest) => request<AzureDiscoveryTarget>(`/connectors/azure-discovery/targets/${encodeURIComponent(targetId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  }),
+  deleteAzureDiscoveryTarget: (targetId: string) => request<void>(`/connectors/azure-discovery/targets/${encodeURIComponent(targetId)}`, {
+    method: 'DELETE'
+  }),
+  testAzureDiscoveryTarget: (targetId: string) => request<AzureConnectionTestResponse>(`/connectors/azure-discovery/targets/${encodeURIComponent(targetId)}/test`, {
+    method: 'POST'
+  }),
+  triggerAzureDiscoveryTargetSync: (targetId: string) => request<SyncTriggerResponse>(`/connectors/azure-discovery/targets/${encodeURIComponent(targetId)}/sync`, {
     method: 'POST'
   }),
   listGithubSbomSources: () => request<GithubSbomSource[]>('/github-sbom-sources'),

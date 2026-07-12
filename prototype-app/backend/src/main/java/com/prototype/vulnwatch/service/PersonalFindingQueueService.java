@@ -292,7 +292,8 @@ public class PersonalFindingQueueService {
                 trimToNull(filter.assetName()),
                 trimToNull(filter.supportGroup()),
                 filter.patchAvailable(),
-                trimToNull(filter.suppressedUntilBand())
+                trimToNull(filter.suppressedUntilBand()),
+                filter.assetType()
         );
     }
 

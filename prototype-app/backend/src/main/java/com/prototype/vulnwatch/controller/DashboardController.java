@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.ApplicableSoftwarePageResponse;
 import com.prototype.vulnwatch.dto.DashboardCveInventoryMapResponse;
 import com.prototype.vulnwatch.dto.DashboardResponse;
+import com.prototype.vulnwatch.dto.GridExposureResponse;
 import com.prototype.vulnwatch.dto.ImpactedCvePageResponse;
 import com.prototype.vulnwatch.service.DashboardService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -54,5 +55,11 @@ public class DashboardController {
     ) {
         Tenant tenant = workspaceService.getWorkspace();
         return dashboardService.getCveInventoryMap(tenant, limit);
+    }
+
+    @GetMapping("/grid-exposure")
+    public GridExposureResponse getGridExposure() {
+        Tenant tenant = workspaceService.getWorkspace();
+        return dashboardService.getGridExposure(tenant);
     }
 }

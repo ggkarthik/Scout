@@ -350,6 +350,71 @@ export type AwsConnectionTestResponse = {
   testedAt: string;
 };
 
+// ── Azure Cloud Discovery ───────────────────────────────────────────────────────
+
+export type AzureAuthType = 'CLIENT_SECRET' | 'MANAGED_IDENTITY';
+
+export type AzureDiscoveryConfig = {
+  id?: string;
+  sourceSystem: string;
+  configured: boolean;
+  authType: AzureAuthType;
+  azureTenantId: string;
+  clientId: string;
+  hasCredential: boolean;
+  subscriptionIdsJson: string;
+  regionsJson: string;
+  enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: number;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+  lastSyncAt?: string;
+};
+
+export type AzureDiscoveryConfigRequest = {
+  authType?: AzureAuthType;
+  azureTenantId?: string;
+  clientId?: string;
+  credentialSecret?: string;
+  subscriptionIdsJson?: string;
+  regionsJson?: string;
+  enabled?: boolean;
+  autoSyncEnabled?: boolean;
+  intervalMinutes?: number;
+};
+
+export type AzureDiscoveryTarget = {
+  id: string;
+  subscriptionId?: string;
+  subscriptionName?: string;
+  enabled: boolean;
+  regionsJson: string;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+  lastSyncAt?: string;
+  hostCount: number;
+};
+
+export type AzureDiscoveryTargetRequest = {
+  subscriptionId?: string;
+  subscriptionName?: string;
+  enabled?: boolean;
+  regionsJson?: string;
+};
+
+export type AzureConnectionTestResponse = {
+  status: 'SUCCESS' | 'SUCCESS_WITH_WARNINGS' | 'FAILED';
+  message: string;
+  resolvedTenantId?: string;
+  reachableSubscriptions: string[];
+  warnings: string[];
+  subscriptionErrors: Record<string, string>;
+  testedAt: string;
+};
+
 export type GithubSbomSource = {
   id: string;
   name: string;

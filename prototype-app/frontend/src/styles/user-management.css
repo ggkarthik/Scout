@@ -13,72 +13,16 @@
   flex: 0 0 auto;
 }
 
-/* Sidebar + content shell — mirrors .config-layout from ConfigurationsPage */
+/* Content shell — section navigation lives in the primary sidebar rail (see App.tsx) */
 
 .um-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
   min-height: 520px;
   margin-top: var(--space-2);
-}
-
-.um-side-nav {
-  background: var(--panel-solid);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-}
-
-.um-side-nav-title {
-  padding: 10px 14px 8px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-}
-
-.um-side-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 14px;
-  cursor: pointer;
-  border: none;
-  border-left: 2px solid transparent;
-  background: transparent;
-  text-align: left;
-  width: 100%;
-  transition: background 100ms ease, border-color 100ms ease;
-}
-
-.um-side-tab:hover {
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid));
-}
-
-.um-side-tab.active {
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel-solid));
-  border-left-color: var(--accent);
-}
-
-.um-side-tab span {
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--title);
-}
-
-.um-side-tab.active span {
-  color: var(--accent);
-}
-
-.um-side-tab small {
-  font-size: 0.73rem;
-  color: var(--muted);
-  line-height: 1.35;
 }
 
 .um-content {
@@ -538,11 +482,6 @@
 @media (max-width: 1080px) {
   .um-layout {
     grid-template-columns: 1fr;
-  }
-
-  .um-side-nav {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
   }
 }
 

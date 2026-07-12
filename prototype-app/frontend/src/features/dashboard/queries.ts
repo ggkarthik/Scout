@@ -17,3 +17,11 @@ export function useDashboardCveInventoryMapQuery(limit = 5) {
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS
   });
 }
+
+export function useGridExposureQuery() {
+  return useQuery({
+    queryKey: ['dashboard-grid-exposure'],
+    queryFn: api.getGridExposure,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS
+  });
+}

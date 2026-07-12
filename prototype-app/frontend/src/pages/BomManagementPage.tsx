@@ -491,7 +491,7 @@ export function BomManagementPage({
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div className="page-grid" style={{ gap: 16 }}>
 
       {/* ── BOM Type Selector ── */}
       <section className="panel">

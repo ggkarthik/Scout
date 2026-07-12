@@ -569,7 +569,7 @@ export function ApplicationDetailPanel({
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div className="page-grid" style={{ gap: 0 }}>
       {/* Back nav */}
       <div style={{ marginBottom: 16 }}>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onBack} style={{ fontSize: 12 }}>

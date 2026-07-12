@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.service;
 
+import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
@@ -7,6 +8,7 @@ import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.FixRecord;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.FindingsFilter;
+import jakarta.persistence.criteria.JoinType;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -45,7 +47,8 @@ public final class FindingFilterSpecifications {
                 .and(byAssetName(filter.assetName()))
                 .and(bySupportGroup(filter.supportGroup()))
                 .and(byPatchAvailable(filter.patchAvailable()))
-                .and(bySuppressedUntilBand(filter.suppressedUntilBand()));
+                .and(bySuppressedUntilBand(filter.suppressedUntilBand()))
+                .and(byAssetType(filter.assetType()));
     }
 
     public static Specification<Finding> statusEquals(FindingStatus status) {
@@ -329,6 +332,32 @@ public final class FindingFilterSpecifications {
         }
         String expected = "%" + assetName.trim().toLowerCase(Locale.ROOT) + "%";
         return (root, query, cb) -> cb.like(cb.lower(root.join("asset").get("name")), expected);
+    }
+
+    /**
+     * Findings link to an asset either directly ({@code f.asset}) or indirectly via
+     * {@code f.component.asset}; a finding matches if either resolved asset has the type.
+     */
+    private static Specification<Finding> byAssetType(List<String> assetTypes) {
+        Set<String> normalized = normalizeUpperFilterValues(assetTypes);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        Set<AssetType> types = new HashSet<>();
+        for (String value : normalized) {
+            try {
+                types.add(AssetType.valueOf(value));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (types.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            var directAsset = root.join("asset", JoinType.LEFT);
+            var componentAsset = root.join("component", JoinType.LEFT).join("asset", JoinType.LEFT);
+            return cb.or(directAsset.get("type").in(types), componentAsset.get("type").in(types));
+        };
     }
 
     private static Specification<Finding> bySupportGroup(String supportGroup) {

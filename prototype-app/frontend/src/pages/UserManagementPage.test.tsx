@@ -63,7 +63,7 @@ describe('UserManagementPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the five admin tabs and tenant caption when authed', async () => {
+  it('renders the default Users section and tenant caption when authed', async () => {
     vi.spyOn(api, 'getAuthContext').mockResolvedValue(AUTH_CONTEXT);
     vi.spyOn(api, 'listTenantMembers').mockResolvedValue([buildMember()]);
     vi.spyOn(api, 'listTenantInvites').mockResolvedValue([]);
@@ -72,13 +72,10 @@ describe('UserManagementPage', () => {
 
     renderWithProviders(<UserManagementPage />);
 
-    // All 5 admin tabs should render in the side nav. Match each tab by its
-    // helper sub-label so we don't collide with topbar buttons (e.g. "Audit log").
-    expect(await screen.findByRole('button', { name: /Members and access scope/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Pending access requests/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Role model and grants/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Machine identities/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Identity event trail/ })).toBeInTheDocument();
+    // Section navigation (Users/Invites/Roles & Permissions/Service Accounts/Audit) now lives
+    // in the primary sidebar rail (see App.tsx), not inside this page — this page renders only
+    // the active section's content, driven by the :adminView route param.
+    expect(await screen.findByRole('heading', { name: 'Members' })).toBeInTheDocument();
 
     // Caption shows tenant name + counts once auth + members resolve.
     // The caption is one concatenated string — match the whole expected shape.

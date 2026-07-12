@@ -21,12 +21,21 @@ export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'cam
 export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
 export type PlatformRouteView = 'tenants' | 'users' | 'demo-requests' | 'operations' | 'eol';
+export type ConfigurationsRouteView =
+  | 'sla'
+  | 'triage'
+  | 'automation'
+  | 'ownership'
+  | 'findings-score'
+  | 'suppress'
+  | 'auto-findings';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
 export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
 export const ADMIN_DEFAULT_VIEW: AdminRouteView = 'users';
 export const PLATFORM_DEFAULT_VIEW: PlatformRouteView = 'tenants';
+export const CONFIGURATIONS_DEFAULT_VIEW: ConfigurationsRouteView = 'sla';
 
 const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
   dashboard: 'pipeline',
@@ -77,6 +86,16 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
 ]);
 
 const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'demo-requests', 'operations', 'eol']);
+
+const CONFIGURATIONS_VIEWS = new Set<ConfigurationsRouteView>([
+  'sla',
+  'triage',
+  'automation',
+  'ownership',
+  'findings-score',
+  'suppress',
+  'auto-findings'
+]);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
   if (!value) {
@@ -144,6 +163,17 @@ export function pathForAdminView(view: AdminRouteView): string {
   return `/admin/${normalizeAdminRouteView(view)}`;
 }
 
+export function normalizeConfigurationsRouteView(value: string | null | undefined): ConfigurationsRouteView {
+  if (!value) {
+    return CONFIGURATIONS_DEFAULT_VIEW;
+  }
+  return CONFIGURATIONS_VIEWS.has(value as ConfigurationsRouteView) ? value as ConfigurationsRouteView : CONFIGURATIONS_DEFAULT_VIEW;
+}
+
+export function pathForConfigurationsView(view: ConfigurationsRouteView): string {
+  return `/configurations/${normalizeConfigurationsRouteView(view)}`;
+}
+
 export function pathForPlatformView(view: PlatformRouteView): string {
   return `/platform/${normalizePlatformRouteView(view)}`;
 }
@@ -173,7 +203,7 @@ export function pathForTab(tab: AppTab): string {
     case 'platform':
       return pathForPlatformView(PLATFORM_DEFAULT_VIEW);
     case 'configurations':
-      return '/configurations';
+      return pathForConfigurationsView(CONFIGURATIONS_DEFAULT_VIEW);
   }
 }
 
@@ -297,6 +327,7 @@ export type FindingsFilterParams = {
   status?: string[];
   packageName?: string;
   assetName?: string;
+  assetType?: string[];
 };
 
 export function pathForFindingsWithFilters(params?: FindingsFilterParams): string {
@@ -307,6 +338,7 @@ export function pathForFindingsWithFilters(params?: FindingsFilterParams): strin
   if (params.status?.length) values.status = params.status;
   if (params.packageName) values.packageName = params.packageName;
   if (params.assetName) values.assetName = params.assetName;
+  if (params.assetType?.length) values.assetType = params.assetType;
   return appendSearchToPath('/findings', values);
 }
 
@@ -412,7 +444,7 @@ export function buildLegacyCompatiblePath(search: string): string | null {
   } else if (tab === 'platform') {
     nextPath = pathForPlatformView(PLATFORM_DEFAULT_VIEW);
   } else if (tab === 'configurations') {
-    nextPath = '/configurations';
+    nextPath = pathForConfigurationsView(CONFIGURATIONS_DEFAULT_VIEW);
   } else if (tab === 'end-of-life') {
     nextPath = pathForPlatformView('eol');
   }

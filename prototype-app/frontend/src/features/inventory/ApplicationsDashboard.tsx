@@ -211,7 +211,7 @@ function AppCard({ app, onSelect }: { app: ApplicationRiskSummary; onSelect: (ap
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <RiskBadge level={app.riskLevel} score={app.riskScore} />
-          <span className="panel-caption" style={{ fontSize: 11 }}>S.AI Risk Score</span>
+          <span className="panel-caption" style={{ fontSize: 11 }}>Scout Risk Score</span>
         </div>
         <RiskBar score={app.riskScore} level={app.riskLevel} />
       </div>
@@ -263,7 +263,7 @@ function AllApplicationsListView({
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="page-grid" style={{ gap: 16 }}>
       {/* Back nav */}
       <div>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onBack} style={{ fontSize: 12 }}>
@@ -438,7 +438,7 @@ export function ApplicationsDashboard() {
   const top10 = [...apps].sort((a, b) => b.riskScore - a.riskScore).slice(0, 10);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div className="page-grid" style={{ gap: 0 }}>
       <SummaryWidgets apps={apps} />
 
       <div className="panel">

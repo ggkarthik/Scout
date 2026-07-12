@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingCreationSource;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
+import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.RiskPolicy;
@@ -291,6 +292,15 @@ public class FindingWorkflowFacade {
                         continue;
                     }
                     eligibleCount++;
+
+                    // Persist the analyst's manual applicability/impact confirmation as a
+                    // ComponentVulnerabilityState row so org_cve_records (which rolls up
+                    // exclusively from this table) reflects the CVE as Applicable/Impacted.
+                    // Without this, manually investigated software that resolves to real
+                    // impacted assets creates findings but never flips the CVE's applicability
+                    // state, leaving it stuck at "Not Applicable" in the CVE Assessment Workbench.
+                    upsertManualApplicabilityState(tenant, vulnerability, component, userId, normalizedJustification, now);
+
                     Finding existing = findingsByComponentId.get(component.getId());
                     double riskScore = findingsScoreService.computeFromParts(
                             policy.getFindingsScoreConfig(), vulnerability, component.getAsset(), component,
@@ -416,6 +426,95 @@ public class FindingWorkflowFacade {
                 severityOverride,
                 dueDateOverride
         );
+    }
+
+    /**
+     * Persists Applicable/Impacted ComponentVulnerabilityState rows for investigation-identified
+     * components (manually-added software confirmed against real inventory), independent of
+     * whether Create Findings has been run yet. Unlike
+     * {@link #createManualFindingsForVulnerability}, this does NOT create a Finding — Create
+     * Findings remains a distinct, explicit step.
+     */
+    public int confirmApplicabilityForComponents(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            Collection<UUID> componentIds,
+            String justification,
+            String userId
+    ) {
+        if (tenant == null || tenant.getId() == null || vulnerability == null || vulnerability.getId() == null
+                || componentIds == null || componentIds.isEmpty()) {
+            return 0;
+        }
+        return tenantSchemaExecutionService.run(
+                tenant,
+                () -> executeWrite(() -> confirmApplicabilityForComponentsInSchema(
+                        tenant, vulnerability, componentIds, justification, userId))
+        );
+    }
+
+    private int confirmApplicabilityForComponentsInSchema(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            Collection<UUID> componentIds,
+            String justification,
+            String userId
+    ) {
+        String normalizedJustification = justification == null ? "" : justification.trim();
+        Instant now = Instant.now();
+        List<UUID> ids = componentIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        List<InventoryComponent> components = inventoryComponentRepository.findAllById(ids);
+        int confirmedCount = 0;
+        for (InventoryComponent component : components) {
+            if (component.getAsset() == null || component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
+                continue;
+            }
+            upsertManualApplicabilityState(tenant, vulnerability, component, userId, normalizedJustification, now);
+            confirmedCount++;
+        }
+        if (confirmedCount > 0) {
+            orgCveRecordService.refreshForTenantAndVulnerabilities(tenant, List.of(vulnerability.getId()));
+        }
+        return confirmedCount;
+    }
+
+    private ComponentVulnerabilityState upsertManualApplicabilityState(
+            Tenant tenant,
+            Vulnerability vulnerability,
+            InventoryComponent component,
+            String userId,
+            String normalizedJustification,
+            Instant now
+    ) {
+        ComponentVulnerabilityState manualState = componentVulnerabilityStateRepository
+                .findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(
+                        tenant.getId(), vulnerability.getExternalId(), component.getId())
+                .orElseGet(() -> {
+                    ComponentVulnerabilityState created = new ComponentVulnerabilityState();
+                    created.setTenant(tenant);
+                    created.setComponent(component);
+                    created.setVulnerability(vulnerability);
+                    return created;
+                });
+        manualState.setApplicabilityState(ApplicabilityState.APPLICABLE);
+        manualState.setApplicabilityReason("manual_investigation_confirmed");
+        manualState.setImpactState(ImpactState.IMPACTED);
+        manualState.setImpactReason("manual_investigation_confirmed");
+        manualState.setEligibleForFinding(true);
+        manualState.setMatchedBy("manual-org-cve-review");
+        manualState.setAnalystDisposition(AnalystDisposition.IMPACTED);
+        manualState.setAnalystReason(normalizedJustification);
+        manualState.setAnalystUpdatedBy(userId);
+        manualState.setAnalystUpdatedAt(now);
+        manualState.setLastEvaluatedAt(now);
+        manualState.touch();
+        return componentVulnerabilityStateRepository.save(manualState);
     }
 
     public int suppressFindingsForVulnerability(

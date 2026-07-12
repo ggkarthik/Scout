@@ -9,10 +9,12 @@ import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
 import { AwsDiscoveryConnectorPage } from './AwsDiscoveryConnectorPage';
+import { AzureDiscoveryConnectorPage } from './AzureDiscoveryConnectorPage';
 import { api } from '../api/client';
 import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/client';
 import {
   useAwsDiscoveryConfigQuery,
+  useAzureDiscoveryConfigQuery,
   useSccmCmdbConfigQuery,
   useServiceNowCmdbConfigQuery
 } from '../features/connect/queries';
@@ -30,6 +32,7 @@ type ConnectorId =
   | 'servicenow-cmdb'
   | 'sccm-cmdb'
   | 'aws-discovery'
+  | 'azure-discovery'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -214,6 +217,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     icon: IconCloud
   },
   {
+    id: 'azure-discovery',
+    name: 'Azure Cloud Discovery',
+    summary: 'Discover Azure compute and platform resources across subscriptions and ingest into Host/Cloud Inventory.',
+    icon: IconCloud
+  },
+  {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
     summary: '',
@@ -286,7 +295,8 @@ const CMDB_CONNECTOR_IDS: ConnectorId[] = [
 ];
 
 const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
-  'aws-discovery'
+  'aws-discovery',
+  'azure-discovery'
 ];
 
 function formatInstantConnect(iso?: string): string {
@@ -611,6 +621,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   if (connectorId === 'aws-discovery') {
     return <AwsDiscoveryConnectorPage />;
   }
+  if (connectorId === 'azure-discovery') {
+    return <AzureDiscoveryConnectorPage />;
+  }
 
   return (
     <section className="panel">
@@ -640,9 +653,11 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const serviceNowConfigQuery = useServiceNowCmdbConfigQuery();
   const sccmConfigQuery = useSccmCmdbConfigQuery();
   const awsConfigQuery = useAwsDiscoveryConfigQuery();
+  const azureConfigQuery = useAzureDiscoveryConfigQuery();
   const snConfig = serviceNowConfigQuery.data ?? null;
   const sccmConfig = sccmConfigQuery.data ?? null;
   const awsConfig = awsConfigQuery.data ?? null;
+  const azureConfig = azureConfigQuery.data ?? null;
 
   React.useEffect(() => {
     setActiveView(initialView);
@@ -715,7 +730,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       key: 'cloud-sources' as const,
       title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
-      caption: 'Cloud hyperscaler discovery — AWS, and future Azure/GCP integrations.',
+      caption: 'Cloud hyperscaler discovery — AWS and Azure, with future GCP integration.',
     }
   ];
 
@@ -762,6 +777,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                           connector.id === 'servicenow-cmdb' ? buildInventoryConnectorStatus(snConfig, inventoryConnectorsDisabledForDemo) :
                           connector.id === 'sccm-cmdb' ? buildInventoryConnectorStatus(sccmConfig, inventoryConnectorsDisabledForDemo) :
                           connector.id === 'aws-discovery' ? buildInventoryConnectorStatus(awsConfig, inventoryConnectorsDisabledForDemo) :
+                          connector.id === 'azure-discovery' ? buildInventoryConnectorStatus(azureConfig, inventoryConnectorsDisabledForDemo) :
                           buildInventoryConnectorStatus(null, inventoryConnectorsDisabledForDemo);
                         const lastSync = timeAgo(status.lastSyncAt);
 

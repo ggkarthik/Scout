@@ -82,13 +82,20 @@ export type HostSoftwareInstanceRecord = {
 
 export type HostFindingRecord = {
   id: string;
+  displayId?: string;
   vulnerabilityId?: string;
+  packageName?: string;
+  packageVersion?: string;
   severity?: string;
   status?: string;
   decisionState?: string;
   riskScore?: number;
   confidenceScore?: number;
   matchedBy?: string;
+  assignedTo?: string;
+  ownerGroup?: string;
+  creationSource?: 'MANUAL' | 'AUTOMATIC';
+  dueAt?: string;
   firstObservedAt?: string;
   lastObservedAt?: string;
 };

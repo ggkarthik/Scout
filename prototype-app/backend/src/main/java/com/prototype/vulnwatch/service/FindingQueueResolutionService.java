@@ -56,6 +56,7 @@ public class FindingQueueResolutionService {
         requireSubset("vexStatus", queueFilter.vexStatus(), adHocFilter.vexStatus(), queueTitle);
         requireSubset("vexFreshness", queueFilter.vexFreshness(), adHocFilter.vexFreshness(), queueTitle);
         requireSubset("vexProvider", queueFilter.vexProvider(), adHocFilter.vexProvider(), queueTitle);
+        requireSubset("assetType", queueFilter.assetType(), adHocFilter.assetType(), queueTitle);
         requireExact("vulnerabilityId", queueFilter.vulnerabilityId(), adHocFilter.vulnerabilityId(), queueTitle);
         requireExact("packageName", queueFilter.packageName(), adHocFilter.packageName(), queueTitle);
         requireExact("ecosystem", queueFilter.ecosystem(), adHocFilter.ecosystem(), queueTitle);
@@ -97,7 +98,8 @@ public class FindingQueueResolutionService {
                 coalesceText(adHocFilter.assetName(), queueFilter.assetName()),
                 coalesceText(adHocFilter.supportGroup(), queueFilter.supportGroup()),
                 adHocFilter.patchAvailable() != null ? adHocFilter.patchAvailable() : queueFilter.patchAvailable(),
-                coalesceText(adHocFilter.suppressedUntilBand(), queueFilter.suppressedUntilBand())
+                coalesceText(adHocFilter.suppressedUntilBand(), queueFilter.suppressedUntilBand()),
+                coalesceList(adHocFilter.assetType(), queueFilter.assetType())
         );
     }
 

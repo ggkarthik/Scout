@@ -3,14 +3,18 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { PerformanceInstrumentation } from './lib/performanceMonitoring';
 import type { InventoryViewKey } from './features/inventory/types';
-import type { AppTab, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
+import type { AdminRouteView, AppTab, ConfigurationsRouteView, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
   activeTabForPath,
   buildLegacyCompatiblePath,
+  normalizeAdminRouteView,
+  normalizeConfigurationsRouteView,
   normalizeConnectRouteView,
   normalizeInventoryRouteView,
   normalizeOperationsRouteView,
   normalizePlatformRouteView,
+  pathForAdminView,
+  pathForConfigurationsView,
   pathForConnectView,
   pathForInventoryView,
   pathForPlatformView,
@@ -183,6 +187,22 @@ const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: stri
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'vulnerabilities', label: 'Intelligence' },
 ];
+const ADMIN_PILL_ORDER: Array<{ key: AdminRouteView; label: string }> = [
+  { key: 'users', label: 'Users' },
+  { key: 'invites', label: 'Invites' },
+  { key: 'roles', label: 'Roles & Permissions' },
+  { key: 'service-accounts', label: 'Service Accounts' },
+  { key: 'audit', label: 'Audit' }
+];
+const CONFIGURATIONS_PILL_ORDER: Array<{ key: ConfigurationsRouteView; label: string }> = [
+  { key: 'sla', label: 'SLA & Remediation' },
+  { key: 'triage', label: 'S.AI Prioritization' },
+  { key: 'automation', label: 'Workflow Automation' },
+  { key: 'ownership', label: 'Ownership' },
+  { key: 'findings-score', label: 'Findings Score' },
+  { key: 'suppress', label: 'Suppression Rules' },
+  { key: 'auto-findings', label: 'Auto Investigation & Findings' }
+];
 
 function getInitialTheme(): Theme {
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -190,114 +210,6 @@ function getInitialTheme(): Theme {
     return saved;
   }
   return 'dark';
-}
-
-function TabIcon({ tab }: { tab: AppTab }) {
-  if (tab === 'exposure') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" />
-        <circle cx="12" cy="12" r="5.5" />
-        <circle cx="12" cy="12" r="2" fill="currentColor" />
-        <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21" />
-      </svg>
-    );
-  }
-  if (tab === 'dashboard') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="5" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="10" width="7" height="11" rx="1.5" />
-      </svg>
-    );
-  }
-  if (tab === 'vuln-repo') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M6 4.5h9.8L19.5 8v11.5H6z" />
-        <path d="M15.8 4.5V8h3.7" />
-        <path d="M9 12h7M9 15.5h7" />
-      </svg>
-    );
-  }
-  if (tab === 'campaigns') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 6h16M4 12h10M4 18h7" strokeLinecap="round" />
-        <path d="M17 14l3-2-3-2v4z" />
-      </svg>
-    );
-  }
-  if (tab === 'findings') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 5h14v14H5z" />
-        <path d="M8 9h8M8 12h8M8 15h5" />
-      </svg>
-    );
-  }
-  if (tab === 'inventory') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="4" y="4" width="16" height="6" rx="1.5" />
-        <rect x="4" y="14" width="16" height="6" rx="1.5" />
-        <path d="M7.5 7h.01M7.5 17h.01" />
-        <path d="M11 7h6M11 17h6" />
-      </svg>
-    );
-  }
-  if (tab === 'end-of-life') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 7v5" />
-        <circle cx="12" cy="16" r="0.8" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (tab === 'configurations') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5v3" />
-        <path d="M12 17.5v3" />
-        <path d="M3.5 12h3" />
-        <path d="M17.5 12h3" />
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="m5.6 5.6 2.1 2.1" />
-        <path d="m16.3 16.3 2.1 2.1" />
-        <path d="m18.4 5.6-2.1 2.1" />
-        <path d="m7.7 16.3-2.1 2.1" />
-      </svg>
-    );
-  }
-  if (tab === 'platform') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3 4.5 6.8v5.6c0 4 3 6.8 7.5 8.6 4.5-1.8 7.5-4.6 7.5-8.6V6.8z" />
-        <path d="M9 12h6" />
-        <path d="M12 9v6" />
-      </svg>
-    );
-  }
-  if (tab === 'admin') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M16.5 8.5a4.5 4.5 0 0 1-9 0 4.5 4.5 0 0 1 9 0Z" />
-        <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-        <path d="M18.5 4.5 20 6l2.2-2.5" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3.5v9.2" />
-      <path d="m8 9 4 4 4-4" />
-      <path d="M6 15.8v3A1.2 1.2 0 0 0 7.2 20h9.6a1.2 1.2 0 0 0 1.2-1.2v-3" />
-      <path d="M4 20h16" />
-    </svg>
-  );
 }
 
 function SunIcon() {
@@ -688,10 +600,15 @@ function AppShell() {
   const [navOpen, setNavOpen] = React.useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
+  const [inventoryNavExpanded, setInventoryNavExpanded] = React.useState(true);
+  const [adminNavExpanded, setAdminNavExpanded] = React.useState(true);
+  const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(true);
 
   const activeTab = activeTabForPath(location.pathname);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
+  const activeAdminView = normalizeAdminRouteView(pathSegments[1]);
+  const activeConfigurationsView = normalizeConfigurationsRouteView(pathSegments[1]);
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
@@ -850,11 +767,61 @@ function AppShell() {
       className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
       onClick={() => navigateToTab(tab)}
     >
-      <span className="nav-icon">
-        <TabIcon tab={tab} />
-      </span>
       <span className="nav-label">{titleForTab(tab)}</span>
     </button>
+  );
+
+  const renderExpandableNavButton = (
+    tab: AppTab,
+    expanded: boolean,
+    onToggleExpanded: () => void,
+    subItems: Array<{ key: string; label: string }>,
+    isSubItemActive: (key: string) => boolean,
+    onSubItemClick: (key: string) => void
+  ): React.ReactNode => (
+    <React.Fragment key={tab}>
+      <button
+        className={activeTab === tab ? 'nav-btn active' : 'nav-btn'}
+        onClick={() => navigateToTab(tab)}
+      >
+        <span className="nav-label">{titleForTab(tab)}</span>
+        <span
+          className="nav-expand-toggle"
+          role="button"
+          tabIndex={0}
+          aria-label={expanded ? `Collapse ${titleForTab(tab)} sections` : `Expand ${titleForTab(tab)} sections`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleExpanded();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleExpanded();
+            }
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {expanded ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
+          </svg>
+        </span>
+      </button>
+      {expanded && (
+        <div className="nav-sub-list">
+          {subItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={isSubItemActive(item.key) ? 'nav-sub-btn active' : 'nav-sub-btn'}
+              onClick={() => onSubItemClick(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </React.Fragment>
   );
 
   return (
@@ -863,12 +830,42 @@ function AppShell() {
       <div className="app-shell">
         <aside className={navOpen ? 'sidebar open' : 'sidebar'}>
           <div className="brand-block compact">
-            <div className="brand-mark">SA</div>
-            <div className="brand">Scout.ai</div>
+            <div className="brand-mark">S</div>
+            <div className="brand">Scout</div>
           </div>
 
           <div className="nav-main-section">
             {visiblePrimaryNavTabs.map((tab) => {
+              if (tab === 'inventory') {
+                return renderExpandableNavButton(
+                  tab,
+                  inventoryNavExpanded,
+                  () => setInventoryNavExpanded((current) => !current),
+                  visibleInventoryPills,
+                  (key) => activeTab === 'inventory' && activeInventoryView === key,
+                  (key) => navigate(pathForInventoryView(key as InventoryViewKey))
+                );
+              }
+              if (tab === 'admin') {
+                return renderExpandableNavButton(
+                  tab,
+                  adminNavExpanded,
+                  () => setAdminNavExpanded((current) => !current),
+                  ADMIN_PILL_ORDER,
+                  (key) => activeTab === 'admin' && activeAdminView === key,
+                  (key) => navigate(pathForAdminView(key as AdminRouteView))
+                );
+              }
+              if (tab === 'configurations') {
+                return renderExpandableNavButton(
+                  tab,
+                  configurationsNavExpanded,
+                  () => setConfigurationsNavExpanded((current) => !current),
+                  CONFIGURATIONS_PILL_ORDER,
+                  (key) => activeTab === 'configurations' && activeConfigurationsView === key,
+                  (key) => navigate(pathForConfigurationsView(key as ConfigurationsRouteView))
+                );
+              }
               return renderNavButton(tab);
             })}
           </div>
@@ -879,9 +876,6 @@ function AppShell() {
                 className={location.pathname.startsWith('/platform/operations') ? 'nav-btn active' : 'nav-btn'}
                 onClick={() => navigate(pathForPlatformView('operations'))}
               >
-                <span className="nav-icon">
-                  <TabIcon tab="operations" />
-                </span>
                 <span className="nav-label">Operations</span>
               </button>
             </div>
@@ -939,7 +933,7 @@ function AppShell() {
                 {settingsMenuOpen && (
                   <div className="settings-menu" role="menu">
                     <div className="settings-menu-header">
-                      <div className="brand-mark settings-menu-mark">SA</div>
+                      <div className="brand-mark settings-menu-mark">S</div>
                       <strong>Settings</strong>
                     </div>
                     {testPersonas.enabled && (
@@ -990,51 +984,36 @@ function AppShell() {
             </div>
           )}
 
-          {activeTab === 'inventory' && (
-            <div className="section-tab-row">
-              {visibleInventoryPills.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={activeInventoryView === item.key ? 'section-tab-btn active' : 'section-tab-btn'}
-                  onClick={() => navigate(pathForInventoryView(item.key))}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-
           <React.Suspense fallback={routeLoadingFallback()}>
             <Routes>
-              <Route path="/exposure" element={<ExposureDashboardRoute />} />
-              <Route path="/" element={<HomeRoute />} />
-              <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
-              <Route path="/findings" element={<FindingsRoute />} />
-              <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
-              <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
-              <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
-              <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
-              <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
-              <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
-              <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
-              <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
-              <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
-              <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
-              <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
-              <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
-              <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
-              <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
-              <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
-              <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
-              <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
-              <Route path="/end-of-life" element={<EndOfLifeRoute />} />
-              <Route path="/connect/:connectView?" element={<ConnectRoute />} />
-              <Route path="/admin/:adminView?" element={<UserManagementPage />} />
-              <Route path="/platform/:platformView?" element={<PlatformRoute />} />
-              <Route path="/configurations" element={<ConfigurationsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                <Route path="/exposure" element={<ExposureDashboardRoute />} />
+                <Route path="/" element={<HomeRoute />} />
+                <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
+                <Route path="/findings" element={<FindingsRoute />} />
+                <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
+                <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+                <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
+                <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
+                <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
+                <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
+                <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
+                <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />
+                <Route path="/vuln-repo/campaigns/:id" element={<CampaignDetailPage />} />
+                <Route path="/vuln-repo/software-assets" element={<VulnRepoSoftwareAssetsPage />} />
+                <Route path="/vuln-repo/host-assets/:assetId" element={<VulnRepoHostAssetRoute />} />
+                <Route path="/vuln-repo/org-cves/:cveId/assets" element={<VulnRepoCveAssetsPage />} />
+                <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
+                <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
+                <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+                <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
+                <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
+                <Route path="/end-of-life" element={<EndOfLifeRoute />} />
+                <Route path="/connect/:connectView?" element={<ConnectRoute />} />
+                <Route path="/admin/:adminView?" element={<UserManagementPage />} />
+                <Route path="/platform/:platformView?" element={<PlatformRoute />} />
+                <Route path="/configurations/:configView?" element={<ConfigurationsPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
           </React.Suspense>
         </main>
 

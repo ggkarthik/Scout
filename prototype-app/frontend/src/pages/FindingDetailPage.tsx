@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Finding } from '../features/findings/types';
-import { pathForVulnRepoView, pathForInventoryHostAsset, type VulnerabilityIntelRouteView } from '../app/routes';
+import { pathForVulnRepoView, pathForInventoryHostAsset, pathForInventoryViewWithSearch, type VulnerabilityIntelRouteView } from '../app/routes';
 import { apiRequest, api } from '../api/client';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
@@ -735,7 +735,17 @@ export function FindingDetailPage() {
               <div className="fd3-panel-sub-title">IMPACTED SOFTWARE</div>
               <div className="fd3-kv-table">
                 <KVRow label="Package">
-                  <span className="mono">{currentFinding.packageName || '—'}</span>
+                  {currentFinding.packageName ? (
+                    <button
+                      type="button"
+                      className="btn-link mono"
+                      onClick={() => navigate(pathForInventoryViewWithSearch('software-identities', { query: currentFinding.packageName }))}
+                    >
+                      {currentFinding.packageName}
+                    </button>
+                  ) : (
+                    <span className="mono">—</span>
+                  )}
                 </KVRow>
                 <KVRow label="Version">
                   <span className="mono">{currentFinding.packageVersion || '—'}</span>

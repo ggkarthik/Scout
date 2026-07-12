@@ -14,7 +14,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
+import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.dto.DashboardNoiseReductionResponse;
+import com.prototype.vulnwatch.dto.GridExposureResponse;
+import com.prototype.vulnwatch.dto.GridExposureRowResponse;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingEventRepository;
@@ -124,5 +127,60 @@ class DashboardServiceTest {
 
         verify(dashboardNoiseReductionProjectionService).getTenantProjection(tenant);
         verifyNoInteractions(findingQueryService);
+    }
+
+    @Test
+    void getGridExposureGroupsOpenFindingsByAssetTypeAndSeverityAndSeedsAllAssetTypes() {
+        DashboardService service = new DashboardService(
+                assetRepository,
+                inventoryComponentRepository,
+                inventoryComponentCpeMapRepository,
+                componentVulnerabilityStateRepository,
+                findingRepository,
+                findingEventRepository,
+                findingQueryService,
+                dashboardNoiseReductionProjectionService,
+                syncRunRepository,
+                new ObjectMapper(),
+                tenantSchemaExecutionService
+        );
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService)
+                .run(org.mockito.ArgumentMatchers.nullable(Tenant.class), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
+        Tenant tenant = new Tenant();
+        UUID tenantId = UUID.randomUUID();
+        tenant.setId(tenantId);
+
+        when(findingRepository.countOpenByAssetTypeAndSeverityForTenant(tenantId)).thenReturn(List.of(
+                new Object[]{"HOST", "CRITICAL", 3L},
+                new Object[]{"HOST", "HIGH", 2L},
+                new Object[]{"APPLICATION", "medium", 5L},
+                new Object[]{null, "LOW", 1L}
+        ));
+
+        GridExposureResponse response = service.getGridExposure(tenant);
+
+        assertEquals(AssetType.values().length, response.rows().size());
+        GridExposureRowResponse hostRow = response.rows().stream()
+                .filter(row -> "HOST".equals(row.assetType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(3L, hostRow.critical());
+        assertEquals(2L, hostRow.high());
+        assertEquals(0L, hostRow.medium());
+        assertEquals(5L, hostRow.total());
+
+        GridExposureRowResponse applicationRow = response.rows().stream()
+                .filter(row -> "APPLICATION".equals(row.assetType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(5L, applicationRow.medium());
+        assertEquals(5L, applicationRow.total());
+
+        GridExposureRowResponse containerRow = response.rows().stream()
+                .filter(row -> "CONTAINER_IMAGE".equals(row.assetType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(0L, containerRow.total());
     }
 }

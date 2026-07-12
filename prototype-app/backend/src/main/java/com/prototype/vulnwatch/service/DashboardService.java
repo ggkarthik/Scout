@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
+import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
@@ -22,6 +23,8 @@ import com.prototype.vulnwatch.dto.DashboardCorrelationEfficiencyResponse;
 import com.prototype.vulnwatch.dto.DashboardNoiseReductionResponse;
 import com.prototype.vulnwatch.dto.DashboardResponse;
 import com.prototype.vulnwatch.dto.FindingResponse;
+import com.prototype.vulnwatch.dto.GridExposureResponse;
+import com.prototype.vulnwatch.dto.GridExposureRowResponse;
 import com.prototype.vulnwatch.dto.ImpactedCvePageResponse;
 import com.prototype.vulnwatch.dto.ImpactedCveRecordResponse;
 import com.prototype.vulnwatch.dto.TopFindingMetricResponse;
@@ -339,6 +342,51 @@ public class DashboardService {
         );
 
         return new DashboardCveInventoryMapResponse(highRisk, latest);
+    }
+
+    /** Scout Grid exposure narrative: open findings by asset domain x severity.
+     *  Rows are seeded from every {@link AssetType} value so the grid is extensible —
+     *  a future asset domain appears automatically with zero code changes here. */
+    public GridExposureResponse getGridExposure(Tenant tenant) {
+        List<Object[]> rows = tenantSchemaExecutionService.run(
+                tenant,
+                () -> findingRepository.countOpenByAssetTypeAndSeverityForTenant(tenant.getId())
+        );
+
+        Map<String, long[]> countsByAssetType = new LinkedHashMap<>();
+        for (AssetType type : AssetType.values()) {
+            countsByAssetType.put(type.name(), new long[4]);
+        }
+        for (Object[] row : rows) {
+            if (row[0] == null || row[1] == null) {
+                continue;
+            }
+            String assetType = row[0].toString();
+            int severityIndex = gridExposureSeverityIndex(row[1].toString());
+            if (severityIndex < 0) {
+                continue;
+            }
+            long count = ((Number) row[2]).longValue();
+            countsByAssetType.computeIfAbsent(assetType, ignored -> new long[4])[severityIndex] += count;
+        }
+
+        List<GridExposureRowResponse> gridRows = new ArrayList<>();
+        for (Map.Entry<String, long[]> entry : countsByAssetType.entrySet()) {
+            long[] counts = entry.getValue();
+            long total = counts[0] + counts[1] + counts[2] + counts[3];
+            gridRows.add(new GridExposureRowResponse(entry.getKey(), counts[0], counts[1], counts[2], counts[3], total));
+        }
+        return new GridExposureResponse(gridRows);
+    }
+
+    private static int gridExposureSeverityIndex(String severity) {
+        return switch (severity.toUpperCase(Locale.ROOT)) {
+            case "CRITICAL" -> 0;
+            case "HIGH" -> 1;
+            case "MEDIUM" -> 2;
+            case "LOW" -> 3;
+            default -> -1;
+        };
     }
 
     private ImpactedCveRecordResponse toImpactedCveRecord(

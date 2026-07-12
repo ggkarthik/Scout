@@ -74,28 +74,28 @@ function WidgetRow({
   const licenses = new Set(items.map((c) => c.license).filter(Boolean)).size;
   const apps = new Set(items.map((c) => c.assetName)).size;
 
-  const stats: { key: WidgetFilter; label: string; value: React.ReactNode; sub: string; color: string }[] = [
-    { key: 'all',        label: 'Inventory Components', value: items.length.toLocaleString(), sub: `across ${apps} applications`,                                       color: 'var(--title)' },
-    { key: 'bom_mapped', label: 'BOM-mapped Components', value: bomMapped.toLocaleString(),   sub: 'linked to active BOM records',                                      color: '#2563eb' },
-    { key: 'unmapped',   label: 'Unmapped Inventory',    value: unmapped.toLocaleString(),     sub: 'active rows without BOM type',                                      color: '#d88f3d' },
-    { key: 'vulnerable', label: 'Vulnerable',            value: vulnerable,                    sub: `${items.filter(c => c.criticalCveCount > 0).length} with critical CVEs`, color: 'var(--critical)' },
-    { key: 'eol',        label: 'EOL Components',        value: eol,                           sub: 'past end-of-life',                                                  color: '#d88f3d' },
-    { key: 'ai_bom',     label: 'AI/ML Libraries',       value: aiBom,                         sub: 'from AI BOMs',                                                      color: '#7c3aed' },
-    { key: 'cbom',       label: 'Crypto Libraries',      value: cbom,                          sub: 'from CBOMs',                                                        color: '#0891b2' },
-    { key: 'all',        label: 'Licenses',              value: licenses,                       sub: 'unique licenses',                                                   color: 'var(--muted)' },
+  const stats: { key: WidgetFilter; label: string; value: React.ReactNode; sub: string; color: string; clickable: boolean }[] = [
+    { key: 'all',        label: 'Inventory Components', value: items.length.toLocaleString(), sub: `across ${apps} applications`,                                       color: 'var(--title)', clickable: true },
+    { key: 'bom_mapped', label: 'BOM-mapped Components', value: bomMapped.toLocaleString(),   sub: 'linked to active BOM records',                                      color: '#2563eb', clickable: true },
+    { key: 'unmapped',   label: 'Unmapped Inventory',    value: unmapped.toLocaleString(),     sub: 'active rows without BOM type',                                      color: '#d88f3d', clickable: true },
+    { key: 'vulnerable', label: 'Vulnerable',            value: vulnerable,                    sub: `${items.filter(c => c.criticalCveCount > 0).length} with critical CVEs`, color: 'var(--critical)', clickable: true },
+    { key: 'eol',        label: 'EOL Components',        value: eol,                           sub: 'past end-of-life',                                                  color: '#d88f3d', clickable: true },
+    { key: 'ai_bom',     label: 'AI/ML Libraries',       value: aiBom,                         sub: 'from AI BOMs',                                                      color: '#7c3aed', clickable: true },
+    { key: 'cbom',       label: 'Crypto Libraries',      value: cbom,                          sub: 'from CBOMs',                                                        color: '#0891b2', clickable: true },
+    { key: 'all',        label: 'Licenses',              value: licenses,                       sub: 'unique licenses',                                                   color: 'var(--muted)', clickable: true },
   ];
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 20 }}>
-      {stats.map(({ key, label, value, sub, color }, idx) => {
+      {stats.map(({ key, label, value, sub, color, clickable }, idx) => {
         const isActive = activeFilter === key && key !== 'all';
         return (
           <div
             key={`${label}-${idx}`}
             className="panel"
-            onClick={() => onFilter(activeFilter === key && key !== 'all' ? 'all' : key)}
+            onClick={clickable ? () => onFilter(activeFilter === key && key !== 'all' ? 'all' : key) : undefined}
             style={{
-              padding: '14px 16px', cursor: 'pointer',
+              padding: '14px 16px', cursor: clickable ? 'pointer' : 'default',
               outline: isActive ? `2px solid ${color}` : 'none',
               outlineOffset: -2,
             }}
@@ -325,8 +325,22 @@ export function BomComponents() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <WidgetRow items={items} activeFilter={widgetFilter} onFilter={(f) => { setWidgetFilter(f); resetPage(); }} />
+    <div className="page-grid" style={{ gap: 0 }}>
+      <WidgetRow
+        items={items}
+        activeFilter={widgetFilter}
+        onFilter={(f) => {
+          // Widget cards are authoritative "jump to this view" actions — clear the secondary
+          // facet filters (ecosystem/risk/BOM-type/search) so a stale facet selection can't
+          // silently intersect with the widget's filter and make the click look like a no-op.
+          setWidgetFilter(f);
+          setEcosystemFilter('');
+          setRiskFilter('');
+          setBomTypeFilter('');
+          setQuery('');
+          resetPage();
+        }}
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
         <EcosystemBreakdown

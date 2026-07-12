@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
-import { useDashboardSummaryQuery } from '../features/dashboard/queries';
+import { useDashboardSummaryQuery, useGridExposureQuery } from '../features/dashboard/queries';
+import type { GridExposureRow } from '../features/dashboard/types';
 import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import { useEolSummaryQuery } from '../features/eol/queries';
 import {
@@ -166,6 +167,86 @@ function ExposureFunnelWidget({
   );
 }
 
+const ASSET_TYPE_LABELS: Record<string, string> = {
+  HOST: 'Infrastructure (Hosts)',
+  CLOUD_RESOURCE: 'Cloud Resources',
+  APPLICATION: 'Applications',
+  CONTAINER_IMAGE: 'Container Images',
+};
+
+const GRID_SEVERITY_COLUMNS: Array<{ key: 'critical' | 'high' | 'medium' | 'low'; label: string }> = [
+  { key: 'critical', label: 'Critical' },
+  { key: 'high', label: 'High' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'low', label: 'Low' },
+];
+
+function gridCellBand(count: number, max: number): 'low' | 'medium' | 'high' {
+  if (max <= 0 || count <= 0) return 'low';
+  const ratio = count / max;
+  if (ratio >= 0.66) return 'high';
+  if (ratio >= 0.33) return 'medium';
+  return 'low';
+}
+
+function GridExposureWidget({
+  rows,
+  onNavigate,
+}: {
+  rows: GridExposureRow[];
+  onNavigate: (path: string) => void;
+}) {
+  const max = Math.max(1, ...rows.flatMap((row) => [row.critical, row.high, row.medium, row.low]));
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h3>Grid Exposure</h3>
+        <span className="panel-caption">Open findings across your Scout Grid, by asset domain and severity</span>
+      </div>
+      <table className="grid-exposure-table">
+        <thead>
+          <tr>
+            <th>Asset Domain</th>
+            {GRID_SEVERITY_COLUMNS.map((col) => (
+              <th key={col.key}>{col.label}</th>
+            ))}
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.assetType}>
+              <td className="grid-exposure-row-label">{ASSET_TYPE_LABELS[row.assetType] ?? row.assetType}</td>
+              {GRID_SEVERITY_COLUMNS.map((col) => {
+                const count = row[col.key];
+                const band = gridCellBand(count, max);
+                return (
+                  <td key={col.key} className={`grid-exposure-cell grid-exposure-cell--${band}`}>
+                    <button
+                      type="button"
+                      className="grid-exposure-cell-btn"
+                      disabled={count === 0}
+                      onClick={() => onNavigate(pathForFindingsWithFilters({
+                        assetType: [row.assetType],
+                        severity: [col.key.toUpperCase()],
+                        status: ['OPEN'],
+                      }))}
+                    >
+                      {fmt(count)}
+                    </button>
+                  </td>
+                );
+              })}
+              <td className="grid-exposure-total">{fmt(row.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 type InsightLevel = 'critical' | 'warn' | 'info';
 
 type Insight = {
@@ -180,6 +261,7 @@ export function ExposureDashboardPage() {
   const dashQ = useDashboardSummaryQuery();
   const vulnQ = useVulnRepoDashboardQuery();
   const eolQ = useEolSummaryQuery();
+  const gridExposureQ = useGridExposureQuery();
 
   const dash = dashQ.data;
   const vuln = vulnQ.data;
@@ -376,6 +458,11 @@ export function ExposureDashboardPage() {
           <div className="exec-kpi-sub">{nearEolCount > 0 ? `${fmt(nearEolCount)} nearing EOL` : 'No patch available'}</div>
         </button>
       </div>
+
+      {/* ── Row 1b: Grid Exposure ── */}
+      {gridExposureQ.data && gridExposureQ.data.rows.length > 0 && (
+        <GridExposureWidget rows={gridExposureQ.data.rows} onNavigate={navigate} />
+      )}
 
       {/* ── Row 2: CVE Trends + Remediation Progress ── */}
       <div className="exec-two-col">

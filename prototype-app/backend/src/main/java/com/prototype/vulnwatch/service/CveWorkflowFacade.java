@@ -243,6 +243,37 @@ public class CveWorkflowFacade {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/confirm-applicability
+     * Persists Applicable/Impacted state for investigation-identified components (manually-added
+     * software confirmed against real inventory) as soon as Investigation confirms impacted
+     * assets, independent of whether Create Findings has been run yet.
+     */
+    public ResponseEntity<CveDetailController.ConfirmApplicabilityResponse> confirmApplicability(
+            String cveId,
+            CveDetailController.ConfirmApplicabilityRequest request
+    ) {
+        RequestActor actor = requestActorService.currentActor();
+        Vulnerability vulnerability = vulnerabilityRepository.findByExternalId(cveId)
+                .orElseThrow(() -> new IllegalArgumentException("CVE not found: " + cveId));
+        Tenant tenant = tenantService.resolveTenantUuid(actor.tenantId());
+
+        int confirmedCount = findingWorkflowFacade.confirmApplicabilityForComponents(
+                tenant,
+                vulnerability,
+                parseComponentIds(request.componentIds),
+                request.justification,
+                actor.userId());
+
+        CveDetailController.ConfirmApplicabilityResponse response = new CveDetailController.ConfirmApplicabilityResponse();
+        response.cveId = cveId;
+        response.confirmedCount = confirmedCount;
+        response.message = confirmedCount > 0
+                ? "CVE marked Applicable based on confirmed investigation impact."
+                : "No eligible components found to confirm.";
+        return ResponseEntity.ok(response);
+    }
+
     private CveDetailController.InvestigationDto toInvestigationDto(Investigation investigation) {
         CveDetailController.InvestigationDto dto = new CveDetailController.InvestigationDto();
         dto.id = investigation.getId();

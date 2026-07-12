@@ -244,13 +244,20 @@ public class HostInventoryReadService {
     private HostFindingResponse toFindingResponse(Finding finding) {
         return new HostFindingResponse(
                 finding.getId(),
+                finding.getDisplayId(),
                 finding.getVulnerability() == null ? null : finding.getVulnerability().getExternalId(),
+                finding.getComponent() == null ? null : finding.getComponent().getPackageName(),
+                finding.getComponent() == null ? null : finding.getComponent().getVersion(),
                 finding.getVulnerability() == null ? null : finding.getVulnerability().getSeverity(),
                 finding.getStatus() == null ? null : finding.getStatus().name(),
                 finding.getDecisionState() == null ? null : finding.getDecisionState().name(),
                 finding.getRiskScore(),
                 finding.getConfidenceScore(),
                 finding.getMatchedBy(),
+                finding.getAssignedTo(),
+                finding.getOwnerGroup(),
+                finding.getCreationSource() == null ? null : finding.getCreationSource().name(),
+                finding.getDueAt(),
                 finding.getFirstObservedAt(),
                 finding.getLastObservedAt()
         );

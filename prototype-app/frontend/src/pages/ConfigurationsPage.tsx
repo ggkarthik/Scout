@@ -1,5 +1,7 @@
 import React from 'react';
+import { useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { normalizeConfigurationsRouteView, type ConfigurationsRouteView } from '../app/routes';
 import { api } from '../api/client';
 import { useActor } from '../features/auth/context';
 import { canManageRiskPolicy, canManageSourceFilters } from '../features/auth/roles';
@@ -29,53 +31,7 @@ import type {
   RunbookTaskStateRecord,
 } from '../features/cve-workbench/types';
 
-type ConfigNavKey = 'triage' | 'sla' | 'automation' | 'ownership' | 'findings-score' | 'suppress' | 'auto-findings';
-
-interface ConfigNavItem {
-  key: ConfigNavKey;
-  label: string;
-  description: string;
-  badge?: string;
-}
-
-const CONFIG_NAV: ConfigNavItem[] = [
-  {
-    key: 'sla',
-    label: 'SLA & Remediation',
-    description: 'Remediation deadlines per risk tier',
-  },
-  {
-    key: 'triage',
-    label: 'S.AI Prioritization',
-    description: 'AI urgency signal weights for risk ranking',
-    badge: 'AI',
-  },
-  {
-    key: 'automation',
-    label: 'Workflow Automation',
-    description: 'Auto-close stale findings',
-  },
-  {
-    key: 'ownership',
-    label: 'Ownership',
-    description: 'Rule-based user group assignment',
-  },
-  {
-    key: 'findings-score',
-    label: 'Findings Score',
-    description: 'Custom scoring rules by attribute value and weight',
-  },
-  {
-    key: 'suppress',
-    label: 'Suppression Rules',
-    description: 'Suppress CVEs or findings matching conditions',
-  },
-  {
-    key: 'auto-findings',
-    label: 'Auto Investigation & Findings',
-    description: 'Automatically investigate CVEs and optionally create findings',
-  },
-];
+type ConfigNavKey = ConfigurationsRouteView;
 
 const AUTO_INVESTIGATION_RUNBOOK_TASK_IDS = [
   'review-asset-inventory',
@@ -528,12 +484,18 @@ function fmt2(n: number): string {
 export function ConfigurationsPage() {
   const actor = useActor();
   const queryClient = useQueryClient();
+  const params = useParams<{ configView?: string }>();
   const riskPolicyQuery = useRiskPolicyQuery();
   const [policy, setPolicy] = React.useState<RiskPolicy | null>(null);
   const [policyMessage, setPolicyMessage] = React.useState('');
   const [policySaving, setPolicySaving] = React.useState(false);
   const [autoCloseExecuting, setAutoCloseExecuting] = React.useState(false);
-  const [activeSection, setActiveSection] = React.useState<ConfigNavKey>('sla');
+  const activeSection = normalizeConfigurationsRouteView(params.configView);
+
+  React.useEffect(() => {
+    setPolicyMessage('');
+  }, [activeSection]);
+
   const canEditRiskPolicy = canManageRiskPolicy(actor);
   const [ownershipRules, setOwnershipRules] = React.useState<OwnershipRule[]>([]);
   const [ownershipGroups, setOwnershipGroups] = React.useState<string[]>([]);
@@ -2115,31 +2077,6 @@ export function ConfigurationsPage() {
       </div>
 
       <div className="config-layout">
-        {/* Sidebar */}
-        <nav className="config-sidebar" aria-label="Configuration sections">
-          <div className="config-sidebar-title">Settings</div>
-          {CONFIG_NAV.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`config-nav-item${activeSection === item.key ? ' active' : ''}`}
-              onClick={() => {
-                setActiveSection(item.key);
-                setPolicyMessage('');
-              }}
-              aria-current={activeSection === item.key ? 'page' : undefined}
-            >
-              <span className="config-nav-item-label">
-                {item.label}
-                {item.badge && (
-                  <span className="config-nav-badge">{item.badge}</span>
-                )}
-              </span>
-              <span className="config-nav-item-desc">{item.description}</span>
-            </button>
-          ))}
-        </nav>
-
         {/* Content */}
         <div className="config-content">
           <div className="config-section-head">

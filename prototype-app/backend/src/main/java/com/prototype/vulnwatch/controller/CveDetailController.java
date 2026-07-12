@@ -622,6 +622,19 @@ public class CveDetailController {
     }
 
     @Data
+    public static class ConfirmApplicabilityRequest {
+        public String justification;
+        public List<String> componentIds;
+    }
+
+    @Data
+    public static class ConfirmApplicabilityResponse {
+        public String cveId;
+        public int confirmedCount;
+        public String message;
+    }
+
+    @Data
     public static class CompleteAssessmentRequest {
         public ApplicabilityAssessment.AssessmentResult result;
         public ApplicabilityAssessment.ConfidenceLevel confidence;
@@ -727,6 +740,22 @@ public class CveDetailController {
             @RequestBody com.prototype.vulnwatch.dto.InventoryResolutionRequest request) {
         return ResponseEntity.ok(
                 inventoryResolutionService.resolveInventory(request.criteria()));
+    }
+
+    /**
+     * POST /api/cve-detail/{cveId}/investigation/confirm-applicability
+     * Persists Applicable/Impacted ComponentVulnerabilityState for investigation-identified
+     * components (manually-added software confirmed against real inventory) as soon as
+     * Investigation confirms impacted assets — independent of whether Create Findings has
+     * been run yet.
+     */
+    @PostMapping("/{cveId}/investigation/confirm-applicability")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','SECURITY_ANALYST')")
+    @SensitiveTenantAction("cve_detail.investigation.applicability_confirmed")
+    public ResponseEntity<ConfirmApplicabilityResponse> confirmApplicability(
+            @PathVariable String cveId,
+            @RequestBody ConfirmApplicabilityRequest request) {
+        return workflowFacade.confirmApplicability(cveId, request);
     }
 
     /**

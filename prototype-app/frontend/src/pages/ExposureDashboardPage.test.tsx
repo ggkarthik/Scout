@@ -1,11 +1,30 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
-import type { Dashboard } from '../features/dashboard/types';
+import type { Dashboard, GridExposure } from '../features/dashboard/types';
 import type { EolSummary } from '../features/eol/types';
 import type { VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
 import { renderWithProviders } from '../test/test-utils';
 import { ExposureDashboardPage } from './ExposureDashboardPage';
+
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => navigateMock };
+});
+
+function buildGridExposure(overrides: Partial<GridExposure> = {}): GridExposure {
+  return {
+    rows: [
+      { assetType: 'HOST', critical: 3, high: 2, medium: 0, low: 0, total: 5 },
+      { assetType: 'APPLICATION', critical: 0, high: 0, medium: 0, low: 0, total: 0 },
+      { assetType: 'CONTAINER_IMAGE', critical: 0, high: 0, medium: 0, low: 0, total: 0 },
+      { assetType: 'CLOUD_RESOURCE', critical: 0, high: 0, medium: 0, low: 0, total: 0 },
+    ],
+    ...overrides,
+  };
+}
 
 function buildDashboard(overrides: Partial<Dashboard> = {}): Dashboard {
   return {
@@ -124,12 +143,14 @@ function buildVulnRepoDashboard(overrides: Partial<VulnRepoDashboard> = {}): Vul
 describe('ExposureDashboardPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    navigateMock.mockClear();
   });
 
   it('renders loading state while dashboard data is pending', () => {
     vi.spyOn(api, 'getDashboard').mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, 'getVulnRepoDashboard').mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, 'getEolSummary').mockReturnValue(new Promise(() => {}));
+    vi.spyOn(api, 'getGridExposure').mockReturnValue(new Promise(() => {}));
 
     renderWithProviders(<ExposureDashboardPage />);
 
@@ -140,6 +161,7 @@ describe('ExposureDashboardPage', () => {
     vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ openFindings: 17 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
 
     renderWithProviders(<ExposureDashboardPage />);
 
@@ -151,6 +173,7 @@ describe('ExposureDashboardPage', () => {
     vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ criticalFindings: 23, openCritical: 0 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
 
     renderWithProviders(<ExposureDashboardPage />);
 
@@ -161,6 +184,7 @@ describe('ExposureDashboardPage', () => {
     vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ openHigh: 77 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
 
     renderWithProviders(<ExposureDashboardPage />);
 
@@ -171,9 +195,48 @@ describe('ExposureDashboardPage', () => {
     vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary({ eolCount: 12 }));
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
 
     renderWithProviders(<ExposureDashboardPage />);
 
     expect(await screen.findByText('12')).toBeInTheDocument();
+  });
+
+  it('renders Grid Exposure rows for every asset type and omits AI assets', async () => {
+    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
+    vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
+
+    renderWithProviders(<ExposureDashboardPage />);
+
+    expect(await screen.findByText('Grid Exposure')).toBeInTheDocument();
+    expect(screen.getByText('Infrastructure (Hosts)')).toBeInTheDocument();
+    expect(screen.getByText('Applications')).toBeInTheDocument();
+    expect(screen.queryByText(/AI Assets/i)).not.toBeInTheDocument();
+  });
+
+  it('navigates to the filtered findings list when a Grid Exposure cell is clicked', async () => {
+    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
+    vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
+    vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
+
+    renderWithProviders(<ExposureDashboardPage />);
+
+    await screen.findByText('Grid Exposure');
+    const hostRow = screen.getByText('Infrastructure (Hosts)').closest('tr');
+    expect(hostRow).not.toBeNull();
+    const criticalCell = hostRow!.querySelector('.grid-exposure-cell--high .grid-exposure-cell-btn');
+    expect(criticalCell).not.toBeNull();
+    fireEvent.click(criticalCell!);
+
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+    const [navigatedPath] = navigateMock.mock.calls[0] as [string];
+    expect(navigatedPath.startsWith('/findings?')).toBe(true);
+    const navigatedParams = new URLSearchParams(navigatedPath.split('?')[1]);
+    expect(navigatedParams.getAll('assetType')).toEqual(['HOST']);
+    expect(navigatedParams.getAll('severity')).toEqual(['CRITICAL']);
+    expect(navigatedParams.getAll('status')).toEqual(['OPEN']);
   });
 });

@@ -861,7 +861,7 @@ export function VulnRepoVulnerabilitiesPage() {
       chips.push({ label: `EPSS ≥ ${colFilters.epss}%`, onRemove: () => { setColFilters((f) => ({ ...f, epss: '' })); setPage(0); } });
     }
     colFilters.cveRisk.forEach((tier) => {
-      chips.push({ label: `S.AI Risk: ${formatLabel(tier)}`, onRemove: () => { setColFilters((f) => ({ ...f, cveRisk: f.cveRisk.filter((x) => x !== tier) })); setPage(0); } });
+      chips.push({ label: `Scout Risk: ${formatLabel(tier)}`, onRemove: () => { setColFilters((f) => ({ ...f, cveRisk: f.cveRisk.filter((x) => x !== tier) })); setPage(0); } });
     });
     if (colFilters.applicable) {
       chips.push({ label: `Applicable: ${colFilters.applicable === 'YES' ? 'Yes' : 'No'}`, onRemove: () => { setColFilters((f) => ({ ...f, applicable: '' })); setPage(0); } });
@@ -953,7 +953,7 @@ export function VulnRepoVulnerabilitiesPage() {
     }
     const baseColumns: DataTableColumn[] = [
       cveCol, titleCol, severityCol, cvssCol, epssCol,
-      { id: 'cveRisk', label: 'S.AI Risk', initialSize: 100, headerProps: { style: relStyle }, header: filterable('cveRisk', 'S.AI Risk') },
+      { id: 'cveRisk', label: 'Scout Risk', initialSize: 100, headerProps: { style: relStyle }, header: filterable('cveRisk', 'Scout Risk') },
       { id: 'orgImpact', label: 'Impact', initialSize: 110, headerProps: { style: relStyle }, header: filterable('orgImpact', 'Impact') },
       sourcesCol,
       { id: 'openFindings', label: 'Open Findings', initialSize: 120, headerProps: { style: relStyle }, header: filterable('openFindings', 'Open Findings') },

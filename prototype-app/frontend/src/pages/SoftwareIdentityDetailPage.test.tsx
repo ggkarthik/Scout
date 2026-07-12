@@ -126,12 +126,12 @@ describe('SoftwareIdentityDetailPage', () => {
     );
   });
 
-  it('renders the Entity detail section heading', async () => {
+  it('renders the Ownership and Publisher section heading', async () => {
     vi.spyOn(api, 'getSoftwareIdentityDetail').mockResolvedValue(buildDetail());
     mockSupportingQueries();
     renderWithProviders(<SoftwareIdentityDetailPage softwareIdentityId="si-1" />);
     await waitFor(() =>
-      expect(screen.getByText('Entity detail')).toBeInTheDocument()
+      expect(screen.getByText('Ownership and Publisher')).toBeInTheDocument()
     );
   });
 });

@@ -37,7 +37,7 @@ const ORG_CVE_COLUMNS: DataTableColumn[] = [
   { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
   { id: 'cvss', label: 'CVSS', header: 'CVSS', initialSize: 100 },
   { id: 'epss', label: 'EPSS', header: 'EPSS', initialSize: 100 },
-  { id: 'cveRisk', label: 'S.AI Risk', header: 'S.AI Risk', initialSize: 110 },
+  { id: 'cveRisk', label: 'Scout Risk', header: 'Scout Risk', initialSize: 110 },
   { id: 'applicability', label: 'Applicability', header: 'Applicability', initialSize: 160 },
   { id: 'orgImpact', label: 'Impact', header: 'Impact', initialSize: 130 },
   { id: 'matched', label: 'Matched Software / Assets', header: 'Matched Software / Assets', initialSize: 200 },

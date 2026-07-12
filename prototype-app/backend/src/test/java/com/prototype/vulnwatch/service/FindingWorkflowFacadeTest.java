@@ -25,6 +25,7 @@ import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
+import com.prototype.vulnwatch.domain.ImpactState;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.RiskPolicy;
@@ -40,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -377,6 +379,156 @@ class FindingWorkflowFacadeTest {
     }
 
     // -------------------------------------------------------------------------
+    // Phase 2 — manually-added / uncorrelated components (no existing
+    // ComponentVulnerabilityState) confirmed Applicable+Impacted via Investigation.
+    // Regression coverage: this path must persist a ComponentVulnerabilityState so
+    // org_cve_records (rolled up exclusively from that table) reflects the CVE as
+    // Applicable, not just create a Finding.
+    // -------------------------------------------------------------------------
+
+    @Test
+    void createManual_uncorrelatedComponentConfirmedApplicableAndImpacted_persistsComponentVulnerabilityState() {
+        vulnerability.setExternalId("CVE-2099-0001");
+        InventoryComponent component = uncorrelatedComponent();
+        UUID componentId = component.getId();
+
+        wireForCreate(List.of(), List.of());
+        when(inventoryComponentRepository.findAllById(List.of(componentId))).thenReturn(List.of(component));
+        when(componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(
+                tenantId, vulnerability.getExternalId(), componentId))
+                .thenReturn(Optional.empty());
+
+        ManualFindingCreationResult r = facade.createManualFindingsForVulnerability(
+                tenant, vulnerability, "investigation confirmed impact", "analyst1",
+                List.of(componentId),
+                Map.of(componentId, ApplicabilityState.APPLICABLE),
+                Map.of(componentId, AnalystDisposition.IMPACTED));
+
+        assertResult(r, 1, 1, 0, 0);
+
+        ArgumentCaptor<ComponentVulnerabilityState> cvsCaptor = ArgumentCaptor.forClass(ComponentVulnerabilityState.class);
+        verify(componentVulnerabilityStateRepository).save(cvsCaptor.capture());
+        ComponentVulnerabilityState saved = cvsCaptor.getValue();
+        assertEquals(ApplicabilityState.APPLICABLE, saved.getApplicabilityState());
+        assertEquals(ImpactState.IMPACTED, saved.getImpactState());
+        assertTrue(saved.isEligibleForFinding());
+        assertEquals("manual-org-cve-review", saved.getMatchedBy());
+        assertEquals(AnalystDisposition.IMPACTED, saved.getAnalystDisposition());
+        assertEquals("analyst1", saved.getAnalystUpdatedBy());
+        assertEquals(component, saved.getComponent());
+        assertEquals(tenant, saved.getTenant());
+
+        ArgumentCaptor<Finding> findingCaptor = ArgumentCaptor.forClass(Finding.class);
+        verify(findingRepository).saveAndFlush(findingCaptor.capture());
+        assertEquals(FindingStatus.OPEN, findingCaptor.getValue().getStatus());
+        assertEquals("manual-org-cve-review", findingCaptor.getValue().getMatchedBy());
+
+        verify(orgCveRecordService).refreshForTenantAndVulnerabilities(eq(tenant), eq(List.of(vulnerabilityId)));
+    }
+
+    @Test
+    void createManual_uncorrelatedComponentWithExistingState_updatesInPlaceRatherThanDuplicating() {
+        vulnerability.setExternalId("CVE-2099-0002");
+        InventoryComponent component = uncorrelatedComponent();
+        UUID componentId = component.getId();
+        ComponentVulnerabilityState existingState = new ComponentVulnerabilityState();
+        existingState.setComponent(component);
+        existingState.setVulnerability(vulnerability);
+        existingState.setTenant(tenant);
+        existingState.setApplicabilityState(ApplicabilityState.UNKNOWN);
+        existingState.setEligibleForFinding(false);
+
+        // No CVS rows are returned by the bulk lookup (this component is uncorrelated for
+        // Phase 1 purposes), but a prior manual-review row already exists for this exact
+        // tenant/CVE/component tuple — re-running "Create Findings" must update it in place.
+        wireForCreate(List.of(), List.of());
+        when(inventoryComponentRepository.findAllById(List.of(componentId))).thenReturn(List.of(component));
+        when(componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(
+                tenantId, vulnerability.getExternalId(), componentId))
+                .thenReturn(Optional.of(existingState));
+
+        facade.createManualFindingsForVulnerability(
+                tenant, vulnerability, "re-confirmed", "analyst1",
+                List.of(componentId),
+                Map.of(componentId, ApplicabilityState.APPLICABLE),
+                Map.of(componentId, AnalystDisposition.IMPACTED));
+
+        ArgumentCaptor<ComponentVulnerabilityState> cvsCaptor = ArgumentCaptor.forClass(ComponentVulnerabilityState.class);
+        verify(componentVulnerabilityStateRepository).save(cvsCaptor.capture());
+        assertEquals(existingState, cvsCaptor.getValue(), "must reuse and update the existing row, not create a duplicate");
+        assertEquals(ApplicabilityState.APPLICABLE, existingState.getApplicabilityState());
+        assertEquals(ImpactState.IMPACTED, existingState.getImpactState());
+        assertTrue(existingState.isEligibleForFinding());
+    }
+
+    // -------------------------------------------------------------------------
+    // confirmApplicabilityForComponents — Investigation-time applicability flip
+    // (persists ComponentVulnerabilityState only; does NOT create a Finding, since
+    // Create Findings remains a distinct, explicit step).
+    // -------------------------------------------------------------------------
+
+    @Test
+    void confirmApplicability_realImpactedComponent_persistsApplicableStateWithoutCreatingFinding() {
+        vulnerability.setExternalId("CVE-2099-0003");
+        InventoryComponent component = uncorrelatedComponent();
+        UUID componentId = component.getId();
+
+        when(inventoryComponentRepository.findAllById(List.of(componentId))).thenReturn(List.of(component));
+        when(componentVulnerabilityStateRepository.findByTenant_IdAndVulnerability_ExternalIdAndComponent_Id(
+                tenantId, vulnerability.getExternalId(), componentId))
+                .thenReturn(Optional.empty());
+
+        int confirmedCount = facade.confirmApplicabilityForComponents(
+                tenant, vulnerability, List.of(componentId), "investigation confirmed impact", "analyst1");
+
+        assertEquals(1, confirmedCount);
+
+        ArgumentCaptor<ComponentVulnerabilityState> cvsCaptor = ArgumentCaptor.forClass(ComponentVulnerabilityState.class);
+        verify(componentVulnerabilityStateRepository).save(cvsCaptor.capture());
+        ComponentVulnerabilityState saved = cvsCaptor.getValue();
+        assertEquals(ApplicabilityState.APPLICABLE, saved.getApplicabilityState());
+        assertEquals(ImpactState.IMPACTED, saved.getImpactState());
+        assertTrue(saved.isEligibleForFinding());
+        assertEquals("manual-org-cve-review", saved.getMatchedBy());
+        assertEquals(AnalystDisposition.IMPACTED, saved.getAnalystDisposition());
+        assertEquals("analyst1", saved.getAnalystUpdatedBy());
+        assertEquals(component, saved.getComponent());
+        assertEquals(tenant, saved.getTenant());
+
+        verify(findingRepository, never()).saveAndFlush(any(Finding.class));
+        verify(orgCveRecordService).refreshForTenantAndVulnerabilities(eq(tenant), eq(List.of(vulnerabilityId)));
+    }
+
+    @Test
+    void confirmApplicability_inactiveComponent_isSkipped() {
+        InventoryComponent component = uncorrelatedComponent();
+        component.setComponentStatus(InventoryComponentStatus.RETIRED);
+        UUID componentId = component.getId();
+        when(inventoryComponentRepository.findAllById(List.of(componentId))).thenReturn(List.of(component));
+
+        int confirmedCount = facade.confirmApplicabilityForComponents(
+                tenant, vulnerability, List.of(componentId), "j", "u");
+
+        assertEquals(0, confirmedCount);
+        verify(componentVulnerabilityStateRepository, never()).save(any(ComponentVulnerabilityState.class));
+        verifyNoInteractions(orgCveRecordService);
+    }
+
+    @Test
+    void confirmApplicability_emptyComponentIds_isNoOp() {
+        int confirmedCount = facade.confirmApplicabilityForComponents(tenant, vulnerability, List.of(), "j", "u");
+        assertEquals(0, confirmedCount);
+        verifyNoInteractions(componentVulnerabilityStateRepository, orgCveRecordService);
+    }
+
+    @Test
+    void confirmApplicability_nullTenant_isNoOp() {
+        int confirmedCount = facade.confirmApplicabilityForComponents(null, vulnerability, List.of(UUID.randomUUID()), "j", "u");
+        assertEquals(0, confirmedCount);
+        verifyNoInteractions(inventoryComponentRepository, componentVulnerabilityStateRepository, orgCveRecordService);
+    }
+
+    // -------------------------------------------------------------------------
     // suppressFindingsForVulnerability — guards and reason normalization
     // -------------------------------------------------------------------------
 
@@ -605,6 +757,18 @@ class FindingWorkflowFacadeTest {
         state.setMatchedBy("cpe");
         state.setConfidenceScore(1.0);
         return state;
+    }
+
+    private InventoryComponent uncorrelatedComponent() {
+        Asset asset = new Asset();
+        asset.setName("manual-asset");
+        InventoryComponent component = new InventoryComponent();
+        setField(component, "id", UUID.randomUUID());
+        component.setAsset(asset);
+        component.setPackageName("manual-pkg");
+        component.setVersion("2.0.0");
+        component.setComponentStatus(InventoryComponentStatus.ACTIVE);
+        return component;
     }
 
     private Finding newFinding(InventoryComponent component, FindingStatus status) {

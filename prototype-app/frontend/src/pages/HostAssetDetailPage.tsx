@@ -1,6 +1,6 @@
 import React from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { pathForVulnRepoView, pathForFindingsWithFilters } from '../app/routes';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { pathForVulnRepoView, pathForFindingsWithFilters, pathForFindingDetail } from '../app/routes';
 import { api } from '../api/client';
 import {
   DataTable,
@@ -9,6 +9,7 @@ import {
 } from '../components/DataTable';
 import { EolBadge } from '../components/EolBadge';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
+import { severityClassName } from '../features/cve-workbench/formatting';
 import type { HostAssetDetail } from '../features/inventory/api-types';
 import { useHostAssetDetailQuery } from '../features/inventory/queries';
 import { readHostAssetIdFromSearch } from '../features/inventory/searchState';
@@ -48,11 +49,13 @@ const SERVICE_COLUMNS: DataTableColumn[] = [
 ];
 
 const FINDING_COLUMNS: DataTableColumn[] = [
-  { id: 'vulnerability', label: 'Vulnerability', header: 'Vulnerability', initialSize: 180 },
+  { id: 'findingId', label: 'Finding ID', header: 'Finding ID', initialSize: 160 },
+  { id: 'cveId', label: 'CVE ID', header: 'CVE ID', initialSize: 140 },
+  { id: 'package', label: 'Package', header: 'Package', initialSize: 200 },
+  { id: 'owner', label: 'Owner', header: 'Owner', initialSize: 200 },
   { id: 'severity', label: 'Severity', header: 'Severity', initialSize: 120 },
   { id: 'status', label: 'Status', header: 'Status', initialSize: 140 },
-  { id: 'decision', label: 'Decision', header: 'Decision', initialSize: 140 },
-  { id: 'risk', label: 'Risk', header: 'Risk', initialSize: 120 },
+  { id: 'creationSource', label: 'Created By', header: 'Created By', initialSize: 140 },
   { id: 'lastObserved', label: 'Last Observed', header: 'Last Observed', initialSize: 180 }
 ];
 
@@ -260,7 +263,7 @@ function RecommendationCell({
 
   return (
     <button type="button" className="upgrade-rec-btn" onClick={handleFetch}>
-      Suggest upgrade
+      Suggest
     </button>
   );
 }
@@ -347,6 +350,10 @@ function buildSoftwareRows(
   });
 }
 
+function softwareNeedsReview(software: HostAssetDetail['software'][number]): boolean {
+  return software.needsVersionReview || software.needsIdentityReview || software.needsDiscoveryModelReview;
+}
+
 function buildServiceRows(software: HostAssetDetail['software']): DataTableRow[] {
   return software
     .filter(s => s.activeInstall)
@@ -376,23 +383,55 @@ function buildServiceRows(software: HostAssetDetail['software']): DataTableRow[]
     }));
 }
 
-function buildFindingRows(findings: HostAssetDetail['findings']): DataTableRow[] {
-  return findings.map((finding) => ({
-    id: finding.id,
-    cells: {
-      vulnerability: {
-        content: finding.vulnerabilityId ?? '-',
-        props: { className: 'mono' }
-      },
-      severity: { content: finding.severity ?? '-' },
-      status: {
-        content: <span className={statusClass(finding.status)}>{finding.status ?? 'UNKNOWN'}</span>
-      },
-      decision: { content: finding.decisionState ?? '-' },
-      risk: { content: finding.riskScore?.toFixed(2) ?? '-' },
-      lastObserved: { content: formatTimestamp(finding.lastObservedAt) }
-    }
-  }));
+function buildFindingRows(findings: HostAssetDetail['findings'], returnTo: string): DataTableRow[] {
+  return findings.map((finding) => {
+    const findingId = finding.displayId || finding.id;
+    return {
+      id: finding.id,
+      cells: {
+        findingId: {
+          content: (
+            <Link to={pathForFindingDetail(findingId, returnTo)} className="finding-id-link mono">
+              {findingId}
+            </Link>
+          )
+        },
+        cveId: {
+          content: finding.vulnerabilityId
+            ? <span className="mono fpl-cve-text">{finding.vulnerabilityId}</span>
+            : '-'
+        },
+        package: {
+          content: (
+            <>
+              <div className="fpl-cell-main">{finding.packageName ?? '-'}</div>
+              <div className="fpl-cell-sub mono">{finding.packageVersion ?? ''}</div>
+            </>
+          )
+        },
+        owner: {
+          content: (
+            <>
+              <div className="fpl-cell-main">{finding.assignedTo ?? 'Unassigned'}</div>
+              <div className="fpl-cell-sub">{finding.ownerGroup ?? 'No ownership source'}</div>
+            </>
+          )
+        },
+        severity: {
+          content: finding.severity ? (
+            <span className={severityClassName(finding.severity)}>{finding.severity}</span>
+          ) : '-'
+        },
+        status: {
+          content: <span className={statusClass(finding.status)}>{finding.status ?? 'UNKNOWN'}</span>
+        },
+        creationSource: {
+          content: <span className="fpl-assigned">{finding.creationSource === 'MANUAL' ? 'Manual' : 'Automatic'}</span>
+        },
+        lastObserved: { content: formatTimestamp(finding.lastObservedAt) }
+      }
+    };
+  });
 }
 
 function formatPercent(value?: number): string {
@@ -436,6 +475,31 @@ function buildApplicableCveRows(
   });
 }
 
+function KVRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="fd3-kv-row">
+      <span className="fd3-kv-key">{label}</span>
+      <span className="fd3-kv-val">{children ?? <span className="fd3-empty">—</span>}</span>
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="fd3-panel">
+      <div className="fd3-panel-title">{title}</div>
+      <div className="fd3-panel-body">{children}</div>
+    </div>
+  );
+}
+
+type AttentionItem = {
+  key: string;
+  title: string;
+  description: string;
+  onClick: () => void;
+};
+
 type HostDetailSectionsProps = {
   assetId: string | null;
   hostDetail: HostAssetDetail | null;
@@ -447,6 +511,7 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<HostDetailTab>('software');
   const [eolFilterActive, setEolFilterActive] = React.useState(false);
+  const [reviewFilterActive, setReviewFilterActive] = React.useState(false);
 
   const handleCveClick = React.useCallback((cveId: string) => {
     navigate(pathForVulnRepoView('org-cves', cveId), {
@@ -468,12 +533,12 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
     [hostDetail?.software]
   );
 
-  const visibleSoftware = React.useMemo(
-    () => eolFilterActive
-      ? (hostDetail?.software ?? []).filter(s => s.isEol === true)
-      : (hostDetail?.software ?? []),
-    [hostDetail?.software, eolFilterActive]
-  );
+  const visibleSoftware = React.useMemo(() => {
+    const software = hostDetail?.software ?? [];
+    if (eolFilterActive) return software.filter(s => s.isEol === true);
+    if (reviewFilterActive) return software.filter(softwareNeedsReview);
+    return software;
+  }, [hostDetail?.software, eolFilterActive, reviewFilterActive]);
 
   const aliasRows = React.useMemo(() => buildAliasRows(hostDetail?.aliases ?? []), [hostDetail]);
   const softwareRows = React.useMemo(
@@ -481,11 +546,55 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
     [visibleSoftware, hostDetail?.applicableCves, swCallbacks]
   );
   const serviceRows = React.useMemo(() => buildServiceRows(hostDetail?.software ?? []), [hostDetail]);
-  const findingRows = React.useMemo(() => buildFindingRows(hostDetail?.findings ?? []), [hostDetail]);
+  const findingsReturnTo = location.pathname + location.search;
+  const findingRows = React.useMemo(
+    () => buildFindingRows(hostDetail?.findings ?? [], findingsReturnTo),
+    [hostDetail, findingsReturnTo]
+  );
   const applicableCveRows = React.useMemo(
     () => buildApplicableCveRows(hostDetail?.applicableCves ?? [], handleCveClick),
     [hostDetail?.applicableCves, handleCveClick]
   );
+
+  const needsAttention = React.useMemo<AttentionItem[]>(() => {
+    if (!hostDetail) return [];
+    const items: AttentionItem[] = [];
+    const openFindings = hostDetail.host.openFindingCount ?? 0;
+    if (openFindings > 0) {
+      items.push({
+        key: 'open-findings',
+        title: 'Review open findings',
+        description: `${openFindings} open finding${openFindings !== 1 ? 's' : ''} on this host need${openFindings === 1 ? 's' : ''} triage.`,
+        onClick: () => setActiveTab('findings')
+      });
+    }
+    if (eolSoftwareCount > 0) {
+      items.push({
+        key: 'eol-software',
+        title: 'Update EOL software',
+        description: `${eolSoftwareCount} installed package${eolSoftwareCount !== 1 ? 's are' : ' is'} end-of-life.`,
+        onClick: () => {
+          setActiveTab('software');
+          setReviewFilterActive(false);
+          setEolFilterActive(true);
+        }
+      });
+    }
+    const unresolvedReviews = hostDetail.host.unresolvedReviewCount ?? 0;
+    if (unresolvedReviews > 0) {
+      items.push({
+        key: 'unresolved-reviews',
+        title: 'Inventory records need review',
+        description: `${unresolvedReviews} record${unresolvedReviews !== 1 ? 's are' : ' is'} missing version, identity, or discovery-model data.`,
+        onClick: () => {
+          setActiveTab('software');
+          setEolFilterActive(false);
+          setReviewFilterActive(true);
+        }
+      });
+    }
+    return items;
+  }, [hostDetail, eolSoftwareCount]);
 
   React.useEffect(() => {
     if (!hostDetail || !location.hash) return;
@@ -511,191 +620,116 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
     return <div className="empty-state"><p>No host detail is available for the selected asset.</p></div>;
   }
 
-  const handleEolCardClick = () => {
-    setActiveTab('software');
-    setEolFilterActive(true);
-  };
-
   return (
     <>
-      <div className="host-hero">
-        <div className="host-hero-ident">
-          <div className="host-hero-icon" aria-hidden="true">🖥</div>
-          <div>
-            <h2 className="host-hero-title">{hostDetail.host.name}</h2>
-            <div className="host-hero-subtitle mono">{hostDetail.host.identifier}</div>
-          </div>
-        </div>
-        <div className="host-hero-actions">
-          <button type="button" className="btn btn-secondary">Refresh host</button>
-          <button type="button" className="btn btn-secondary">Edit asset</button>
-        </div>
-      </div>
-
-      <div className="host-summary-strip">
-        <div className="host-stat-card">
-          <span className="host-stat-label">Criticality</span>
-          <span className="host-stat-pill host-stat-pill-warning">{hostDetail.host.businessCriticality ?? '-'}</span>
-        </div>
-        <div className="host-stat-card">
-          <span className="host-stat-label">Asset State</span>
-          <span className="host-stat-pill host-stat-pill-success">{hostDetail.host.state ?? 'Active'}</span>
-        </div>
-        <div className="host-stat-card">
-          <span className="host-stat-label">Environment</span>
-          <span className="host-stat-value">{hostDetail.host.environment ?? '—'}</span>
-        </div>
-        <div className="host-stat-card">
-          <span className="host-stat-label">Open Findings</span>
-          <span className="host-stat-number host-stat-number-danger">
-            {formatCount(hostDetail.host.openFindingCount)}
+      <div className="fd3-topbar">
+        <span aria-hidden="true">🖥</span>
+        <span className="fd3-finding-id mono">{hostDetail.host.name}</span>
+        <span className="panel-caption mono">{hostDetail.host.identifier}</span>
+        <div style={{ flex: 1 }} />
+        <div className="fd3-actions">
+          <span className={severityClassName(hostDetail.host.businessCriticality)}>
+            {hostDetail.host.businessCriticality ?? 'Unknown'} criticality
           </span>
-        </div>
-        <div
-          className={`host-stat-card host-stat-card-clickable${eolFilterActive ? ' host-stat-card-eol-active' : ''}`}
-          role="button"
-          tabIndex={0}
-          aria-label={`EOL Entities: ${eolSoftwareCount}. Click to filter installed software to EOL items.`}
-          onClick={handleEolCardClick}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') handleEolCardClick();
-          }}
-        >
-          <span className="host-stat-label">EOL Entities</span>
-          <span className={`host-stat-number ${eolSoftwareCount > 0 ? 'host-stat-number-warning' : ''}`}>
-            {formatCount(eolSoftwareCount)}
-          </span>
+          <span className={statusClass(hostDetail.host.state ?? 'ACTIVE')}>{hostDetail.host.state ?? 'Active'}</span>
+          {hostDetail.host.environment && <span className="cvd-signal-pill">{hostDetail.host.environment}</span>}
         </div>
       </div>
 
-      <div className="host-ownership-bar">
-        <span className="host-ownership-bar-title">Ownership</span>
-        <div className="host-ownership-bar-fields">
-          <div className="host-ownership-bar-field">
-            <span className="host-ownership-bar-label">Owner</span>
-            <span className="host-ownership-bar-value">{hostDetail.host.ownerEmail ?? '—'}</span>
-          </div>
-          <div className="host-ownership-bar-divider" />
-          <div className="host-ownership-bar-field">
-            <span className="host-ownership-bar-label">Managed By</span>
-            <span className="host-ownership-bar-value">{hostDetail.host.managedBy ?? '—'}</span>
-          </div>
-          <div className="host-ownership-bar-divider" />
-          <div className="host-ownership-bar-field">
-            <span className="host-ownership-bar-label">Department</span>
-            <span className="host-ownership-bar-value">{hostDetail.host.department ?? '—'}</span>
-          </div>
-          <div className="host-ownership-bar-divider" />
-          <div className="host-ownership-bar-field">
-            <span className="host-ownership-bar-label">Support Group</span>
-            <span className="host-ownership-bar-value">{hostDetail.host.supportGroup ?? '—'}</span>
-          </div>
-          <div className="host-ownership-bar-divider" />
-          <div className="host-ownership-bar-field">
-            <span className="host-ownership-bar-label">Assigned To</span>
-            <span className="host-ownership-bar-value">{hostDetail.host.assignedTo ?? '—'}</span>
-          </div>
-        </div>
-      </div>
-
-      {(hostDetail.host.ssmManaged !== undefined || hostDetail.host.missingIamInstanceProfile !== undefined) && (
-        <div className="host-ownership-bar">
-          <span className="host-ownership-bar-title">SSM</span>
-          <div className="host-ownership-bar-fields">
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Managed</span>
-              <span className="host-ownership-bar-value">{hostDetail.host.ssmManaged ? 'Yes' : 'No'}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Ping</span>
-              <span className="host-ownership-bar-value">{hostDetail.host.ssmPingStatus ?? '—'}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Last Ping</span>
-              <span className="host-ownership-bar-value">{formatTimestamp(hostDetail.host.ssmLastPingAt)}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Software Inventory</span>
-              <span className="host-ownership-bar-value">{hostDetail.host.ssmInventoryAvailable ? 'Available' : 'Not available'}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">IAM Profile</span>
-              <span className="host-ownership-bar-value">{hostDetail.host.missingIamInstanceProfile ? 'Missing' : 'Present'}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {hostDetail.bomEvidence.documentCount > 0 && (
-        <div className="host-ownership-bar">
-          <span className="host-ownership-bar-title">BOM Evidence</span>
-          <div className="host-ownership-bar-fields">
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Documents</span>
-              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.documentCount)}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Matched Components</span>
-              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.componentCount)}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Vulnerability Links</span>
-              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.vulnerabilityLinkCount)}</span>
-            </div>
-            <div className="host-ownership-bar-divider" />
-            <div className="host-ownership-bar-field">
-              <span className="host-ownership-bar-label">Workflows</span>
-              <span className="host-ownership-bar-value">{formatCount(hostDetail.bomEvidence.componentsInWorkflow)}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="host-detail-tabs" role="tablist" aria-label="Host detail sections">
+      <div className="fd3-tab-bar" role="tablist" aria-label="Host detail sections">
         <button
           type="button"
-          className={`host-detail-tab ${activeTab === 'software' ? 'active' : ''}`}
+          className={`fd3-tab${activeTab === 'software' ? ' fd3-tab--active' : ''}`}
           onClick={() => setActiveTab('software')}
         >
-          Installed software
+          Installed software<span className="fd3-tab-count">{hostDetail.software.length}</span>
         </button>
         <button
           type="button"
-          className={`host-detail-tab ${activeTab === 'services' ? 'active' : ''}`}
+          className={`fd3-tab${activeTab === 'services' ? ' fd3-tab--active' : ''}`}
           onClick={() => setActiveTab('services')}
         >
-          Services
+          Services<span className="fd3-tab-count">{serviceRows.length}</span>
         </button>
         <button
           type="button"
-          className={`host-detail-tab ${activeTab === 'applicable-cves' ? 'active' : ''}`}
+          className={`fd3-tab${activeTab === 'applicable-cves' ? ' fd3-tab--active' : ''}`}
           onClick={() => setActiveTab('applicable-cves')}
         >
-          Applicable CVEs
+          Applicable CVEs<span className="fd3-tab-count">{applicableCveRows.length}</span>
         </button>
         <button
           type="button"
-          className={`host-detail-tab ${activeTab === 'findings' ? 'active' : ''}`}
+          className={`fd3-tab${activeTab === 'findings' ? ' fd3-tab--active' : ''}`}
           onClick={() => setActiveTab('findings')}
         >
-          Created findings
+          Created findings<span className="fd3-tab-count">{findingRows.length}</span>
         </button>
         <button
           type="button"
-          className={`host-detail-tab ${activeTab === 'aliases' ? 'active' : ''}`}
+          className={`fd3-tab${activeTab === 'aliases' ? ' fd3-tab--active' : ''}`}
           onClick={() => setActiveTab('aliases')}
         >
-          Host aliases
+          Host aliases<span className="fd3-tab-count">{aliasRows.length}</span>
         </button>
       </div>
 
-      <div className="host-detail-surface">
+      <div className="fd3-body">
+        <div className="fd3-col fd3-col-left">
+          {needsAttention.length > 0 && (
+            <div className="fd3-panel">
+              <div className="fd3-panel-title">Needs Attention</div>
+              <div className="cvd2-wf-cards">
+                {needsAttention.map((item, index) => (
+                  <button key={item.key} type="button" className="cvd2-wf-card" onClick={item.onClick}>
+                    <div className="cvd2-wf-card-num">{index + 1}</div>
+                    <div className="cvd2-wf-card-body">
+                      <div className="cvd2-wf-card-title-row">
+                        <span className="cvd2-wf-card-title">{item.title}</span>
+                      </div>
+                      <p className="cvd2-wf-card-sub">{item.description}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Panel title="Ownership">
+            <div className="fd3-kv-table">
+              <KVRow label="Owner">{hostDetail.host.ownerEmail}</KVRow>
+              <KVRow label="Managed By">{hostDetail.host.managedBy}</KVRow>
+              <KVRow label="Department">{hostDetail.host.department}</KVRow>
+              <KVRow label="Support Group">{hostDetail.host.supportGroup}</KVRow>
+              <KVRow label="Assigned To">{hostDetail.host.assignedTo}</KVRow>
+            </div>
+          </Panel>
+
+          {(hostDetail.host.ssmManaged !== undefined || hostDetail.host.missingIamInstanceProfile !== undefined) && (
+            <Panel title="SSM">
+              <div className="fd3-kv-table">
+                <KVRow label="Managed">{hostDetail.host.ssmManaged ? 'Yes' : 'No'}</KVRow>
+                <KVRow label="Ping">{hostDetail.host.ssmPingStatus}</KVRow>
+                <KVRow label="Last Ping">{formatTimestamp(hostDetail.host.ssmLastPingAt)}</KVRow>
+                <KVRow label="Software Inventory">{hostDetail.host.ssmInventoryAvailable ? 'Available' : 'Not available'}</KVRow>
+                <KVRow label="IAM Profile">{hostDetail.host.missingIamInstanceProfile ? 'Missing' : 'Present'}</KVRow>
+              </div>
+            </Panel>
+          )}
+
+          {hostDetail.bomEvidence.documentCount > 0 && (
+            <Panel title="BOM Evidence">
+              <div className="fd3-kv-table">
+                <KVRow label="Documents">{formatCount(hostDetail.bomEvidence.documentCount)}</KVRow>
+                <KVRow label="Matched Components">{formatCount(hostDetail.bomEvidence.componentCount)}</KVRow>
+                <KVRow label="Vulnerability Links">{formatCount(hostDetail.bomEvidence.vulnerabilityLinkCount)}</KVRow>
+                <KVRow label="Workflows">{formatCount(hostDetail.bomEvidence.componentsInWorkflow)}</KVRow>
+              </div>
+            </Panel>
+          )}
+        </div>
+
+        <div className="fd3-col fd3-col-right">
         {hostDetail.bomEvidence.documentCount > 0 ? (
           <div className="inventory-section-card" style={{ marginBottom: '1rem' }}>
             <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -731,13 +765,20 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
 
         {activeTab === 'software' ? (
           <>
-            {eolFilterActive && (
+            {(eolFilterActive || reviewFilterActive) && (
               <div className="host-eol-filter-banner">
-                <span>Showing EOL software only ({visibleSoftware.length} item{visibleSoftware.length !== 1 ? 's' : ''})</span>
+                <span>
+                  {eolFilterActive
+                    ? `Showing EOL software only (${visibleSoftware.length} item${visibleSoftware.length !== 1 ? 's' : ''})`
+                    : `Showing software needing review only (${visibleSoftware.length} item${visibleSoftware.length !== 1 ? 's' : ''})`}
+                </span>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setEolFilterActive(false)}
+                  onClick={() => {
+                    setEolFilterActive(false);
+                    setReviewFilterActive(false);
+                  }}
                 >
                   Clear filter
                 </button>
@@ -748,7 +789,9 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
                 <p>
                   {eolFilterActive
                     ? 'No EOL software found on this host.'
-                    : 'No host software has been materialized for this host yet.'}
+                    : reviewFilterActive
+                      ? 'No software needing review was found on this host.'
+                      : 'No host software has been materialized for this host yet.'}
                 </p>
               </div>
             ) : (
@@ -835,7 +878,7 @@ function HostDetailSections({ assetId, hostDetail, loadingDetail }: HostDetailSe
             </div>
           )
         ) : null}
-
+        </div>
       </div>
     </>
   );

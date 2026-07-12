@@ -269,7 +269,7 @@ function AppCard({ app }: { app: AppRiskRecord }) {
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <RiskBadge level={app.riskLevel} score={app.riskScore} />
-          <span className="panel-caption" style={{ fontSize: 11 }}>S.AI Risk Score</span>
+          <span className="panel-caption" style={{ fontSize: 11 }}>Scout Risk Score</span>
         </div>
         <RiskBar score={app.riskScore} level={app.riskLevel} />
       </div>

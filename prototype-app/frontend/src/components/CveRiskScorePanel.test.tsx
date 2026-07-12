@@ -52,14 +52,14 @@ describe('CveRiskScorePanel', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders S.AI RISK SCORE header in mini mode when journey has multiple stages', async () => {
+  it('renders SCOUT RISK SCORE header in mini mode when journey has multiple stages', async () => {
     // cvssScore=7.5 + inKev=true → "CVE Published" + "In CISA KEV" → 2 stages
     vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(defaultRiskPolicy());
     renderWithProviders(
       <CveRiskScorePanel item={buildCveRecord({ cvssScore: 7.5, inKev: true })} mini />
     );
     await waitFor(() =>
-      expect(screen.getByText('S.AI RISK SCORE')).toBeInTheDocument()
+      expect(screen.getByText('SCOUT RISK SCORE')).toBeInTheDocument()
     );
   });
 

@@ -640,7 +640,7 @@ body {
 .app-shell {
   position: relative;
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -675,35 +675,37 @@ body {
 }
 
 .brand-block.compact {
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   margin-bottom: var(--space-2);
+  padding-left: 4px;
 }
 
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8b5cf6));
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: none;
+  background: #e0332a;
   color: #ffffff;
-  font-weight: 700;
+  font-weight: 800;
   font-family: var(--font-display);
-  font-size: 0.88rem;
-  letter-spacing: 0.03em;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  font-size: 1.05rem;
+  letter-spacing: 0;
+  box-shadow: 0 2px 8px color-mix(in srgb, #e0332a 35%, transparent);
 }
 
 .brand {
   font-family: var(--font-display);
-  font-size: 0.66rem;
-  color: var(--sidebar-muted);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.13em;
+  font-size: 1.1rem;
+  color: var(--title);
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 
 .subtitle {
@@ -739,46 +741,23 @@ body {
 }
 
 .nav-btn {
+  position: relative;
   width: 100%;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  text-align: center;
+  text-align: left;
   color: var(--sidebar-muted);
   background: transparent;
-  padding: 6px 2px 7px;
+  padding: 10px 14px;
   margin-bottom: 0;
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   font-weight: 600;
-  line-height: 1.25;
-  display: grid;
-  gap: 4px;
-  justify-items: center;
-  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
-}
-
-.nav-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  border: 1px solid color-mix(in srgb, var(--sidebar-border) 75%, transparent);
-  display: inline-flex;
+  line-height: 1.3;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--sidebar-muted);
-  background: color-mix(in srgb, var(--panel-solid) 6%, transparent);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
-}
-
-.nav-icon svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
 .nav-label {
@@ -792,11 +771,6 @@ body {
   color: var(--title);
 }
 
-.nav-btn:hover .nav-icon {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  color: var(--title);
-}
-
 .nav-btn.active {
   border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -804,10 +778,57 @@ body {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.nav-btn.active .nav-icon {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  color: #ddecff;
+.nav-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.nav-expand-toggle svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-sub-list {
+  display: grid;
+  gap: 2px;
+  padding-left: 22px;
+  margin-bottom: 4px;
+}
+
+.nav-sub-btn {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--sidebar-muted);
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.nav-sub-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--title);
+}
+
+.nav-sub-btn.active {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, white);
 }
 
 .operations-nav-wrap,
@@ -1885,10 +1906,30 @@ a.btn {
 .page-grid {
   display: grid;
   gap: var(--space-3);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-solid) 88%, transparent),
+    color-mix(in srgb, var(--panel-muted) 36%, var(--panel-solid))
+  );
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
 }
 
 .page-grid > * {
   min-width: 0;
+}
+
+/* Nested page-grids (used for inner sub-view layouts) should not double up
+   the outer page card - only the outermost .page-grid per route gets the
+   background/border/shadow/padding treatment. */
+.page-grid .page-grid {
+  background: none;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 .dashboard-grid {
@@ -2936,15 +2977,16 @@ label {
 }
 
 .host-detail-page {
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 8%, transparent), transparent 36%),
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-muted) 84%, transparent), var(--panel-solid));
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  box-shadow: var(--shadow-lg);
   min-height: calc(100vh - 180px);
-  padding: 22px;
+}
+
+.host-detail-page .fd3-col-left {
+  order: 2;
+}
+
+.host-detail-page .fd3-col-right {
+  order: 1;
 }
 
 .host-detail-page .table-scroll,
@@ -5530,82 +5572,12 @@ label {
 
 .config-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
   min-height: 580px;
   margin-top: var(--space-2);
-}
-
-.config-sidebar {
-  background: var(--panel-solid);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-}
-
-.config-sidebar-title {
-  padding: 10px 14px 8px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-}
-
-.config-nav-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 14px;
-  cursor: pointer;
-  border: none;
-  border-left: 2px solid transparent;
-  background: transparent;
-  text-align: left;
-  width: 100%;
-  transition: background 100ms ease, border-color 100ms ease;
-}
-
-.config-nav-item:hover {
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid));
-}
-
-.config-nav-item.active {
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel-solid));
-  border-left-color: var(--accent);
-}
-
-.config-nav-item-label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--title);
-}
-
-.config-nav-item.active .config-nav-item-label {
-  color: var(--accent);
-}
-
-.config-nav-item-desc {
-  font-size: 0.73rem;
-  color: var(--muted);
-  line-height: 1.35;
-}
-
-.config-nav-badge {
-  font-size: 0.66rem;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  border-radius: 3px;
-  padding: 1px 4px;
-  letter-spacing: 0.02em;
 }
 
 .config-content {
@@ -5813,10 +5785,6 @@ label {
   }
   .config-layout {
     grid-template-columns: 1fr;
-  }
-  .config-sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
   }
 }
 
@@ -6304,6 +6272,27 @@ label {
    ID + S.AI score badge (hover tooltip) + signal pills
 ───────────────────────────────────────────────────────────────────────────── */
 
+.app-page,
+.cve-assessment-page,
+.host-detail-page,
+.bom-inventory-page,
+.campaigns-page,
+.fpl-root,
+.inventory-shell,
+.inventory-page-shell,
+.inventory-overview-shell,
+.fd3-page {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-solid) 88%, transparent),
+    color-mix(in srgb, var(--panel-muted) 36%, var(--panel-solid))
+  );
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
 .cvd-headline {
   display: flex;
   align-items: center;
@@ -6735,9 +6724,9 @@ label {
 
 .cvrs-mini-title {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.07em;
-  color: var(--muted);
+  color: #e0332a;
   text-transform: uppercase;
 }
 
@@ -7694,7 +7683,14 @@ label {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: var(--bg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-solid) 88%, transparent),
+    color-mix(in srgb, var(--panel-muted) 36%, var(--panel-solid))
+  );
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ── Topbar ──────────────────────────────────────────────────────────────── */

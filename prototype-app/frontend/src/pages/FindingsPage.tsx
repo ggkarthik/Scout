@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
 import '../styles/findings-list.css';
 import { Link, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForConnectView } from '../app/routes';
@@ -227,7 +228,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     asset:    searchParams.get('assetName') ?? '',
   }));
   const [dueDateBand, setDueDateBand] = React.useState<DueDateBand>(null);
+  const [assetTypeFilter, setAssetTypeFilter] = React.useState<string[]>(() => searchParams.getAll('assetType'));
   const [openColFilter, setOpenColFilter] = React.useState<ColKey | null>(null);
+  const [filterAnchorPos, setFilterAnchorPos] = React.useState<{ top: number; left: number } | null>(null);
   const colFilterRef = React.useRef<HTMLDivElement | null>(null);
 
   // ── ui state ───────────────────────────────────────────────────────────────
@@ -279,7 +282,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     assetName: colFilters.asset.trim() || undefined,
     supportGroup: colFilters.supportGroup.trim() || undefined,
     incidentLinked: colFilters.incidentId.trim().length > 0 ? true : undefined,
-  }), [colFilters, dueDateBand]);
+    assetType: assetTypeFilter.length > 0 ? assetTypeFilter : undefined,
+  }), [colFilters, dueDateBand, assetTypeFilter]);
 
   const availableQueues = queuesQuery.data ?? [];
   const {
@@ -385,7 +389,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   // ── outside click ──────────────────────────────────────────────────────────
   React.useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node)) setOpenColFilter(null);
+      if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node)) { setOpenColFilter(null); setFilterAnchorPos(null); }
       if (colVisRef.current && !colVisRef.current.contains(e.target as Node)) setShowColVis(false);
       if (moreActionsRef.current && !moreActionsRef.current.contains(e.target as Node)) setShowMoreActions(false);
     }
@@ -628,6 +632,7 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   if (colFilters.supportGroup) activeChips.push({ label:`Support Group: ${colFilters.supportGroup}`, onRemove:()=>setColFilter('supportGroup','') });
   if (colFilters.assignedTo) activeChips.push({ label:`Assigned: ${colFilters.assignedTo}`, onRemove:()=>setColFilter('assignedTo','') });
   if (dueDateBand)         activeChips.push({ label:`SLA: ${fmt(dueDateBand)}`, onRemove:()=>setDueDateBand(null) });
+  if (assetTypeFilter.length>0) activeChips.push({ label:`Asset Type: ${assetTypeFilter.map(fmt).join(', ')}`, onRemove:()=>setAssetTypeFilter([]) });
 
   // ── selection ──────────────────────────────────────────────────────────────
   function toggleSelect(id: string) {
@@ -735,12 +740,18 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     if (openColFilter!==colKey) return null;
     const severities = filterValues?.severities ?? ['CRITICAL','HIGH','MEDIUM','LOW','NONE','UNKNOWN'];
     const statuses   = filterValues?.statuses   ?? ['OPEN','RESOLVED','SUPPRESSED','AUTO_CLOSED'];
-    return (
-      <div className="fpl-col-filter-popover" ref={colFilterRef}>
-        <div className="fpl-col-filter-header">
-          <span>{ALL_COLUMNS.find(c=>c.key===colKey)?.label}</span>
-          {hasColFilter(colKey) && <button className="fpl-col-filter-clear" onClick={()=>clearColFilter(colKey)}>Clear</button>}
-        </div>
+    const style: React.CSSProperties = {
+      position: 'fixed',
+      top: filterAnchorPos?.top ?? 100,
+      left: filterAnchorPos?.left ?? 200,
+    };
+    return ReactDOM.createPortal(
+      <div className="fpl-col-filter-popover" ref={colFilterRef} style={style}>
+        {hasColFilter(colKey) && (
+          <div className="fpl-col-filter-clear-row">
+            <button type="button" className="fpl-col-filter-clear" onClick={()=>clearColFilter(colKey)}>Clear filter</button>
+          </div>
+        )}
         {colKey==='severity' && (
           <div className="fpl-col-filter-checks">
             {severities.map(v=>(
@@ -792,7 +803,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             ))}
           </div>
         )}
-      </div>
+      </div>,
+      document.body
     );
   }
 
@@ -807,13 +819,22 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
             <span className="fpl-th-info" title="Scout AI-computed priority score (0\u201310) based on exploitability, SLA proximity, EOL risk, and blast radius">&#9432;</span>
           )}
           <button className="fpl-filter-btn" title={`Filter ${label}`}
-            onClick={e=>{e.stopPropagation();setOpenColFilter(p=>p===colKey?null:colKey);setShowColVis(false);}}>
+            onClick={e=>{
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setOpenColFilter(p=>{
+                if (p===colKey) { setFilterAnchorPos(null); return null; }
+                setFilterAnchorPos({ top: rect.bottom + 4, left: Math.min(rect.left, window.innerWidth - 280) });
+                return colKey;
+              });
+              setShowColVis(false);
+            }}>
             <svg viewBox="0 0 12 12" width="11" height="11" fill={active?'var(--accent,#3b82f6)':'currentColor'} aria-hidden>
               <path d="M1 2h10l-4 5v3l-2-1V7z"/>
             </svg>
           </button>
         </div>
-        <div style={{position:'relative'}}>{renderColFilterPopover(colKey)}</div>
+        {renderColFilterPopover(colKey)}
       </th>
     );
   }
