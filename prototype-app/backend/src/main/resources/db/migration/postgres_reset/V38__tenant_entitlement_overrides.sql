@@ -1,3 +1,4 @@
+-- migration-guard: flyway-per-schema
 -- platform.tenant_entitlement_overrides is queried by TenantEntitlementService (loadTenantOverrides,
 -- listOverrides, upsertOverride, deleteOverride, existingOverrideId) but was never created by a
 -- migration, causing a BadSqlGrammarException (surfaced to callers as a generic 500) on any endpoint
