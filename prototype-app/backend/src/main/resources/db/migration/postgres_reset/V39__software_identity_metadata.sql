@@ -15,11 +15,11 @@ BEGIN
         ORDER BY table_schema
     LOOP
         EXECUTE format(
-                'CREATE TABLE IF NOT EXISTS %I.software_identity_metadata (
+                $ddl$CREATE TABLE IF NOT EXISTS %I.software_identity_metadata (
                     tenant_id uuid NOT NULL,
                     software_identity_id uuid NOT NULL,
                     owner text,
-                    licensed text NOT NULL DEFAULT ''''Unknown'''',
+                    licensed text NOT NULL DEFAULT 'Unknown',
                     license_type text,
                     support_group text,
                     recommendation text,
@@ -28,7 +28,7 @@ BEGIN
                     PRIMARY KEY (tenant_id, software_identity_id),
                     CONSTRAINT fk_software_identity_metadata_tenant FOREIGN KEY (tenant_id) REFERENCES platform.tenants (id),
                     CONSTRAINT fk_software_identity_metadata_identity FOREIGN KEY (software_identity_id) REFERENCES platform.software_identities (id)
-                )',
+                )$ddl$,
                 target_schema.table_schema
         );
     END LOOP;
