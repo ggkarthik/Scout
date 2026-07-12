@@ -135,6 +135,7 @@ describe('HostAssetDetailPage', () => {
           needsVersionReview: false,
           needsIdentityReview: false,
           needsDiscoveryModelReview: false,
+          sourceSystem: 'sbom',
         },
         {
           id: 'sw-needs-review',
@@ -144,6 +145,7 @@ describe('HostAssetDetailPage', () => {
           needsVersionReview: true,
           needsIdentityReview: false,
           needsDiscoveryModelReview: false,
+          sourceSystem: 'sbom',
         },
       ],
     });
