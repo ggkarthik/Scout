@@ -521,6 +521,7 @@ function restorePreviousAuthTokenForPersona(): void {
 }
 
 function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const actorQuery = useActorQuery();
   const [personas, setPersonas] = React.useState<TestPersona[]>([]);
   const [personaLoading, setPersonaLoading] = React.useState(false);
@@ -586,6 +587,9 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   }
 
   if (actorQuery.isError || !actorQuery.data) {
+    if (location.pathname === '/') {
+      return <DemoLandingPage />;
+    }
     return <Navigate to="/login" replace />;
   }
 

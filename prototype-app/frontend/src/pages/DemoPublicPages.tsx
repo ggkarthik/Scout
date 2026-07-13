@@ -10,240 +10,488 @@ const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'tru
 const SHARED_LOCALHOST_LOGIN_HINTS_ENABLED = typeof window !== 'undefined'
   && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
+const GRID_CARDS: Array<{
+  id: string;
+  variant: 'blue' | 'cyan' | 'purple' | 'orange';
+  icon: string;
+  title: string;
+  desc: string;
+  chips: string[];
+  linkLabel?: string;
+  comingSoon?: boolean;
+}> = [
+  {
+    id: 'infra-grid',
+    variant: 'blue',
+    icon: '🖥️',
+    title: 'Infrastructure Grid',
+    desc: 'Full-spectrum vulnerability assessment across your on-premises and data-center footprint. Scout fingerprints every host, OS, and running service — no agent installation, no network disruption, no credentials required.',
+    chips: ['Host Discovery', 'OS / Application Fingerprinting', 'Agentless', 'SLA Enforcement'],
+    linkLabel: 'Explore Infrastructure Risk'
+  },
+  {
+    id: 'cloud-grid',
+    variant: 'cyan',
+    icon: '☁️',
+    title: 'Cloud Grid',
+    desc: 'Discover and assess every cloud workload — EC2, containers, serverless, and managed services. Scout maps cloud-native attack paths and correlates findings with your live SBOM inventory, giving you context no cloud-native tool can match.',
+    chips: ['Cloud Resources', 'Container Images', 'Critical prioritization'],
+    linkLabel: 'Explore Cloud Security'
+  },
+  {
+    id: 'bom-grid',
+    variant: 'purple',
+    icon: '📦',
+    title: 'BOM Grid',
+    desc: 'BOM Grid gives security teams a unified BOM control plane for applications, cloud workloads, and AI systems. Suppress false positives for organizations and prioritize real risk across applications, cloud, and AI.',
+    chips: ['CycloneDX / SPDX', 'GitHub SBOM', 'EOL Tracking', 'Vendor Assertions'],
+    linkLabel: 'Explore BOM Security Grid'
+  },
+  {
+    id: 'ai-grid-card',
+    variant: 'orange',
+    icon: '🤖',
+    title: 'AI Grid',
+    desc: 'Discover, inventory, and secure every AI asset in your environment — LLM deployments, AI agents, MCP servers, vector databases, and fine-tuned models. Identify prompt injection risk, data leakage exposure, and over-privileged agent capabilities.',
+    chips: ['AI Model Discovery', 'Agent Risk Scoring', 'MCP Surface Mapping', 'AI-BOM', 'LLM CVE Coverage'],
+    comingSoon: true
+  }
+];
+
+const INTEL_FEEDS: Array<{ icon: string; name: string; desc: string }> = [
+  { icon: '🏛️', name: 'National Vulnerability Databases', desc: 'Continuously track CVEs, severity, weaknesses, and affected software.' },
+  { icon: '🔥', name: 'Active Exploitation Catalogs', desc: 'Identify vulnerabilities confirmed to be exploited in the wild.' },
+  { icon: '🐙', name: 'Open Source Ecosystem Advisories', desc: 'Monitor package-level advisories across major open source ecosystems.' },
+  { icon: '📊', name: 'Exploit Likelihood Models', desc: 'Score CVEs by real-world weaponization probability.' },
+  { icon: '📋', name: 'Vendor Applicability Guidance', desc: 'Use vendor guidance to suppress non-applicable findings with precision.' },
+  { icon: '📅', name: 'Product Lifecycle Intelligence', desc: 'Track end-of-life and end-of-support timelines across your software inventory.' }
+];
+
+const AI_CAPABILITIES: Array<{ icon: string; name: string; desc: string }> = [
+  { icon: '🤖', name: 'AI Model Discovery', desc: 'Discover every LLM, ML model, and fine-tuned deployment across cloud, code, and APIs.' },
+  { icon: '🕸️', name: 'Agent Risk Mapping', desc: 'Map agent access, internet reach, and code execution risk before abuse.' },
+  { icon: '🔌', name: 'MCP Surface Analysis', desc: 'Identify exposed MCP servers, tools, and sensitive system access.' },
+  { icon: '🗄️', name: 'Vector DB Risk Scoring', desc: 'Assess RAG and vector data stores for sensitivity and access risk.' },
+  { icon: '💉', name: 'Prompt Injection Detection', desc: 'Detect prompt injection, jailbreak, and indirect injection exposure.' },
+  { icon: '📋', name: 'AI-BOM Generation', desc: 'Generate a complete AI inventory of models, frameworks, datasets, and dependencies.' }
+];
+
+function VisualPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="visual-panel">
+      <div className="panel-header">
+        <span className="panel-dot panel-dot--red" />
+        <span className="panel-dot panel-dot--amber" />
+        <span className="panel-dot panel-dot--green" />
+        <span className="panel-title">{title}</span>
+      </div>
+      <div className="panel-body">{children}</div>
+    </div>
+  );
+}
+
+function FeatureList({ items }: { items: Array<{ title: string; body: string }> }) {
+  return (
+    <ul className="feature-list">
+      {items.map((item) => (
+        <li key={item.title} className="feature-item">
+          <span className="feature-dot" aria-hidden="true" />
+          <div>
+            <div className="feature-item-title">{item.title}</div>
+            <div className="feature-item-desc">{item.body}</div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function DemoLandingPage() {
   return (
     <PublicDemoShell>
-      <section className="sg-hero">
-        <div className="sg-hero-copy">
-          <span className="demo-kicker">securityGrid product portfolio</span>
-          <h1>NoScan gives customers a working risk operations stack, not just another dashboard.</h1>
+      <section className="scout-hero">
+        <div className="scout-hero-grid" aria-hidden="true" />
+        <div className="scout-hero-glow scout-hero-glow--red" aria-hidden="true" />
+        <div className="scout-hero-glow scout-hero-glow--cyan" aria-hidden="true" />
+        <div className="scout-hero-content">
+          <span className="scout-eyebrow">✦ Exposure Management Platform</span>
+          <h1>See every threat. Secure every <span className="hero-accent">surface.</span></h1>
           <p>
-            securityGrid combines infrastructure inventory, SBOM intelligence, cloud posture, vulnerability evidence,
-            and workflow-driven remediation into one operating model. The portfolio is organized into focused product
-            grids so buyers can understand where to start and how the platform expands.
+            Scout delivers agentless vulnerability assessment across your entire infrastructure — Infra, Cloud,
+            BOM, and AI. Powered by real-time intelligence feeds, AI-driven prioritization, and precision noise
+            reduction for every security alert in your stack.
           </p>
-          <div className="button-row">
-            <a className="btn btn-primary" href="#products">Explore products</a>
-            <Link className="btn btn-secondary" to="/demo/request">Request customer briefing</Link>
+          <div className="hero-actions">
+            <Link className="btn btn-primary" to="/demo/request">Get a demo</Link>
+            <a className="btn btn-outline" href="#platform">Explore the platform</a>
           </div>
-          <div className="sg-hero-metrics" aria-label="Portfolio signals">
+          <div className="scout-stats" aria-label="Portfolio signals">
             {[
-              ['Products', 'InfraGrid, SBOM Grid, Cloud Grid, AI Grid'],
-              ['Core workflows', 'Inventory, correlation, findings, remediation'],
-              ['Buyer outcome', 'Faster exposure triage with evidence-backed action']
+              ['4×', 'Faster Triage'],
+              ['0', 'Agents Required'],
+              ['< 24h', '0-Day Response']
             ].map(([label, value]) => (
-              <div key={label} className="sg-hero-metric">
+              <div key={value} className="scout-stat">
                 <strong>{label}</strong>
                 <span>{value}</span>
               </div>
             ))}
           </div>
         </div>
-        <div className="sg-hero-visual" aria-label="NoScan product preview">
-          <article className="sg-preview-panel sg-preview-panel--primary">
-            <header>
-              <strong>NoScan Command View</strong>
-              <span>Unified vulnerability, asset, and software posture</span>
-            </header>
-            <div className="sg-preview-grid">
-              <div className="sg-preview-stat">
-                <span>Assets mapped</span>
-                <strong>1,181</strong>
+      </section>
+
+      <section id="platform" className="sg-section">
+        <div className="sg-section-heading centered">
+          <span className="sg-eyebrow">The Platform</span>
+          <h2>One platform. Four grids. Every attack surface covered.</h2>
+          <p>
+            Scout is an exposure management platform built on four grids — covering every attack surface from
+            on-premises infrastructure to cloud workloads, open-source dependencies, and AI models — without a
+            single agent deployed.
+          </p>
+        </div>
+        <div className="grid-cards">
+          {GRID_CARDS.map((card) => (
+            <article key={card.id} id={card.id} className={`grid-card grid-card--${card.variant}`}>
+              <div className="grid-card-icon" aria-hidden="true">{card.icon}</div>
+              <span className={`badge badge--${card.variant}`}>{card.title.replace('Infrastructure', 'Infra')}</span>
+              <h3 className="grid-card-title">{card.title}</h3>
+              <p className="grid-card-desc">{card.desc}</p>
+              <div className="grid-card-chips">
+                {card.chips.map((chip) => <span key={chip} className="chip">{chip}</span>)}
               </div>
-              <div className="sg-preview-stat">
-                <span>Applicable CVEs</span>
-                <strong>38</strong>
+              {card.comingSoon ? (
+                <div className="coming-soon-overlay">
+                  <span className="coming-soon-tag">Coming Soon</span>
+                  <p className="coming-soon-text">AI Grid is in active development.<br />Join the early access program.</p>
+                  <Link className="btn btn-outline" to="/demo/request">Request early access</Link>
+                </div>
+              ) : (
+                <a className="grid-card-link" href="#solutions">{card.linkLabel} →</a>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="intelligence" className="sg-section">
+        <div className="sg-section-heading centered">
+          <span className="sg-eyebrow">Vuln Intelligence Layer</span>
+          <h2>One intelligence layer. Every source that matters.</h2>
+        </div>
+        <div className="intel-feeds">
+          {INTEL_FEEDS.map((feed) => (
+            <article key={feed.name} className="feed-card">
+              <div className="feed-icon" aria-hidden="true">{feed.icon}</div>
+              <div>
+                <div className="feed-name">{feed.name}</div>
+                <div className="feed-desc">{feed.desc}</div>
               </div>
-              <div className="sg-preview-stat">
-                <span>Open findings</span>
-                <strong>9</strong>
-              </div>
-              <div className="sg-preview-stat">
-                <span>SBOM components</span>
-                <strong>8,319</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="solutions" className="sg-section feature-section">
+        <div className="feature-grid">
+          <div className="feature-content">
+            <span className="sg-eyebrow">Agentless Assessment</span>
+            <h2>Agentless. No blind spots. Actionable.</h2>
+            <FeatureList
+              items={[
+                { title: 'Zero deployment friction', body: 'No agent packages to maintain, no OS compatibility matrix to manage. Assessment begins the moment you connect to Scout.' },
+                { title: 'OT and legacy safe', body: 'Passive fingerprinting protects fragile industrial and legacy systems that cannot tolerate agent installation or active scanning.' },
+                { title: 'Continuous, not point-in-time', body: 'Scout maintains a live asset inventory that updates as your environment changes — new workloads are assessed automatically.' },
+                { title: 'Prioritized, not just detected', body: 'Every finding arrives ranked by real-world exploitability and business impact, so teams fix what matters first instead of drowning in raw results.' }
+              ]}
+            />
+          </div>
+          <VisualPanel title="Scout — Asset Discovery">
+            <div className="panel-body-header">
+              <span className="panel-body-label">Live Inventory</span>
+              <span className="badge badge--green">● Active</span>
+            </div>
+            <div className="risk-rows">
+              {[
+                ['🖥️', 'prod-web-01.corp', 'Host', 'blue'],
+                ['☁️', 'i-0a3f8c29d41e', 'EC2', 'cyan'],
+                ['📦', 'payment-service:v2.1', 'Container', 'purple'],
+                ['🔧', 'legacy-erp-03', 'Legacy', 'orange'],
+                ['☁️', 'api-gateway-prod', 'Lambda', 'cyan']
+              ].map(([icon, name, tag, variant]) => (
+                <div key={name} className="risk-row">
+                  <span aria-hidden="true">{icon}</span>
+                  <span className="risk-name">{name}</span>
+                  <span className={`badge badge--${variant}`}>{tag}</span>
+                  <span className="risk-status">✓ Assessed</span>
+                </div>
+              ))}
+            </div>
+            <div className="panel-summary">
+              <span className="panel-summary-label">Coverage Summary</span>
+              <div className="panel-summary-row">
+                <span>1,247 assets discovered</span>
+                <span className="panel-summary-good">100% agentless</span>
               </div>
             </div>
-          </article>
-          <article className="sg-preview-panel">
-            <header>
-              <strong>AI Grid mock</strong>
-              <span>Analyst copilots, guided triage, and remediation drafts</span>
-            </header>
-            <ul className="sg-preview-list">
-              <li>Impact-aware CVE assessment summaries</li>
-              <li>Recommended workflow branching by evidence state</li>
-              <li>Draft remediation narratives for operations teams</li>
-            </ul>
-          </article>
-          <article className="sg-preview-panel">
-            <header>
-              <strong>Customer operating model</strong>
-              <span>Connectors, correlation, investigations, findings, reporting</span>
-            </header>
-            <div className="sg-preview-flow">
-              <span>Connect</span>
-              <span>Correlate</span>
-              <span>Investigate</span>
-              <span>Remediate</span>
+          </VisualPanel>
+        </div>
+      </section>
+
+      <section id="ai-prioritization" className="sg-section feature-section alt">
+        <div className="feature-grid reverse">
+          <div className="feature-content">
+            <span className="sg-eyebrow">AI-Powered Prioritization</span>
+            <h2>Fix what matters. Ignore the rest.</h2>
+            <FeatureList
+              items={[
+                { title: 'Contextual remediation guidance', body: 'AI-generated fix recommendations surfaced alongside each finding — patch version, workaround steps, and affected component context.' },
+                { title: 'Single prioritized action queue', body: 'Every finding across infra, cloud, BOM, and AI collapses into one ranked queue, so teams always know what to fix next.' },
+                { title: 'Scored beyond CVSS', body: 'The Scout Score weighs real-world exploitability, asset criticality, and business context — not just raw severity.' }
+              ]}
+            />
+          </div>
+          <VisualPanel title="Scout — AI Priority Queue">
+            <div className="priority-header">
+              <span>CVE</span>
+              <span>CVSS</span>
+              <span>EPSS</span>
+              <span className="priority-header-score">Scout Score</span>
             </div>
-          </article>
+            {[
+              { cve: 'CVE-2024-3094', label: 'XZ Utils · RCE', cvss: '9.8', epss: '0.94', score: '9.4', highlight: true },
+              { cve: 'CVE-2021-44228', label: 'Log4Shell · RCE', cvss: '10.0', epss: '0.97', score: '9.1', highlight: false },
+              { cve: 'CVE-2023-44487', label: 'HTTP/2 Rapid Reset · DoS', cvss: '7.5', epss: '0.88', score: '8.2', highlight: false },
+              { cve: 'CVE-2024-21626', label: 'runc · Container Escape', cvss: '8.6', epss: '0.76', score: '7.8', highlight: false },
+              { cve: 'CVE-2022-22965', label: 'Spring4Shell · RCE', cvss: '9.8', epss: '0.61', score: '7.3', highlight: false }
+            ].map(({ cve, label, cvss, epss, score, highlight }) => (
+              <div key={cve} className={highlight ? 'priority-row priority-row--highlight' : 'priority-row'}>
+                <div>
+                  <div className="priority-cve">{cve}</div>
+                  <div className="priority-label">{label}</div>
+                </div>
+                <span className="priority-metric">{cvss}</span>
+                <span className="priority-metric">{epss}</span>
+                <span className="priority-score">{score}</span>
+              </div>
+            ))}
+            <div className="panel-summary-row panel-footer-row">
+              <span>Scout Score weighs real-world context beyond CVSS</span>
+              <span className="badge badge--red">● Live</span>
+            </div>
+          </VisualPanel>
         </div>
       </section>
 
-      <section id="products" className="sg-section">
-        <div className="sg-section-heading">
-          <span className="demo-kicker">Products</span>
-          <h2>Purpose-built grids for each part of the exposure problem</h2>
-          <p>Each grid can stand on its own, but the value compounds when they share the same evidence model.</p>
-        </div>
-        <div className="sg-product-grid">
-          {[
-            {
-              name: 'InfraGrid',
-              body: 'Build a normalized host and software inventory, map vulnerabilities to deployed software, and drive evidence-backed findings from infrastructure records.',
-              bullets: ['Host inventory and ownership signals', 'Applicable CVE correlation', 'Finding workflow and SLA routing']
-            },
-            {
-              name: 'SBOM Grid',
-              body: 'Ingest application and component BOM data, correlate packages to advisories, and expose software supply chain risk at product, version, and asset levels.',
-              bullets: ['SBOM import and component normalization', 'Package-to-advisory matching', 'Application and component drilldowns']
-            },
-            {
-              name: 'Cloud Grid',
-              body: 'Connect cloud accounts and runtime inventory so cloud assets, external exposure, and software evidence are visible in the same risk model.',
-              bullets: ['Account and region onboarding', 'Runtime inventory alignment', 'Exposure-driven cloud prioritization']
-            },
-            {
-              name: 'AI Grid',
-              body: 'Mocked in this site as the orchestration layer for analyst assistance, workflow recommendations, remediation drafting, and reporting acceleration.',
-              bullets: ['Investigation copilots', 'Recommendation generation', 'Executive and operator narratives']
-            }
-          ].map((product) => (
-            <article key={product.name} className="sg-product-card">
-              <div className="sg-product-badge">{product.name}</div>
-              <p>{product.body}</p>
-              <ul>
-                {product.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
-              </ul>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section id="solutions" className="sg-section">
-        <div className="sg-section-heading">
-          <span className="demo-kicker">Solutions</span>
-          <h2>What customers can solve with the portfolio</h2>
-        </div>
-        <div className="sg-solution-grid">
-          {[
-            ['Exposure operations', 'Run a repeatable process from CVE intake to impacted asset evidence, ownership routing, and finding generation.'],
-            ['Application supply chain visibility', 'Correlate SBOM components with advisories, EOL signals, and software identity metadata.'],
-            ['Cloud-first remediation', 'Prioritize external-facing and internet-reachable assets with contextual software risk.'],
-            ['Executive reporting', 'Give security and IT leaders a single narrative for what is affected, what is exploitable, and what action is underway.']
-          ].map(([title, body]) => (
-            <article key={title} className="sg-solution-card">
-              <h3>{title}</h3>
-              <p>{body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section id="use-cases" className="sg-section">
-        <div className="sg-section-heading">
-          <span className="demo-kicker">Use cases</span>
-          <h2>Concrete buyer journeys</h2>
-        </div>
-        <div className="sg-usecase-grid">
-          {[
-            ['Vulnerability management teams', 'Correlate NVD, KEV, EUVD, and vendor intelligence with real software evidence before opening tickets.'],
-            ['Infrastructure operations', 'See exactly which hosts, software versions, and owners are affected before remediation windows are committed.'],
-            ['Application security', 'Use SBOM Grid to map open source and third-party components to advisory feeds and EOL coverage gaps.'],
-            ['Cloud engineering', 'Use Cloud Grid to focus on internet-facing and high-blast-radius assets instead of flat CVE counts.']
-          ].map(([title, body]) => (
-            <article key={title} className="sg-usecase-card">
-              <h3>{title}</h3>
-              <p>{body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section id="workflows" className="sg-section">
-        <div className="sg-section-heading">
-          <span className="demo-kicker">Workflow narratives</span>
-          <h2>How the portfolio works in practice</h2>
-        </div>
-        <div className="sg-workflow-stack">
-          {[
-            {
-              title: 'InfraGrid workflow',
-              steps: [
-                'Connect host and software inventory from existing enterprise systems.',
-                'Correlate deployed software to vulnerability intelligence and EOL signals.',
-                'Assess applicability and impact, then open findings only where evidence supports action.'
-              ]
-            },
-            {
-              title: 'SBOM Grid workflow',
-              steps: [
-                'Import BOMs for applications or products and normalize component identities.',
-                'Link packages to advisory feeds, vulnerabilities, and lifecycle coverage.',
-                'Surface risky components, missing metadata, and remediation candidates per application.'
-              ]
-            },
-            {
-              title: 'Cloud Grid workflow',
-              steps: [
-                'Onboard cloud accounts, regions, and instance-level inventory.',
-                'Identify externally exposed compute and software hotspots across runtime assets.',
-                'Push prioritized findings into remediation queues with ownership and SLA context.'
-              ]
-            },
-            {
-              title: 'AI Grid workflow mock',
-              steps: [
-                'Generate investigation summaries and remediation narratives from the same evidence model.',
-                'Recommend next workflow steps based on exploitability, impact, and asset criticality.',
-                'Draft operator-ready actions while preserving analyst approval checkpoints.'
-              ]
-            }
-          ].map((workflow) => (
-            <article key={workflow.title} className="sg-workflow-card">
-              <h3>{workflow.title}</h3>
-              <ol>
-                {workflow.steps.map((step) => <li key={step}>{step}</li>)}
-              </ol>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="sg-section">
-        <div className="sg-section-heading">
-          <span className="demo-kicker">Portfolio map</span>
-          <h2>How the grids fit together</h2>
-        </div>
-        <div className="sg-portfolio-band">
-          <div className="sg-portfolio-step">
-            <strong>Connectors</strong>
-            <span>ServiceNow, SBOM uploads, cloud accounts, vulnerability feeds</span>
+      <section id="noise-reduction" className="sg-section feature-section">
+        <div className="feature-grid">
+          <div className="feature-content">
+            <span className="sg-eyebrow">Noise Reduction</span>
+            <h2>Fewer findings. No worries. Surface real risk.</h2>
+            <FeatureList
+              items={[
+                { title: 'Accurate applicability assessment', body: "Confirms whether a vulnerability actually affects your environment — eliminating alerts that don't apply to you." },
+                { title: 'Flexible suppression controls', body: 'Define rules to suppress known-safe findings with built-in expiration and audit trails.' },
+                { title: 'Deduplication & auto-close', body: 'Findings are consolidated into a single actionable record and automatically closed when risk is resolved.' }
+              ]}
+            />
           </div>
-          <div className="sg-portfolio-step">
-            <strong>Correlation</strong>
-            <span>Hosts, software identities, packages, CVEs, advisories, lifecycle data</span>
+          <VisualPanel title="Scout — Noise Reduction Engine">
+            <div className="noise-comparison">
+              <div>
+                <div className="noise-col-label noise-col-label--bad">Before Scout</div>
+                {['CVE-2023-44487 · HTTP/2', 'CVE-2023-2976 · Guava', 'CVE-2022-1471 · SnakeYAML', 'CVE-2023-34453 · snappy', 'CVE-2021-37136 · Netty'].map((item) => (
+                  <div key={item} className="noise-item noise-item--bad">{item}</div>
+                ))}
+                <div className="noise-total noise-total--bad">4,812 raw findings</div>
+              </div>
+              <div>
+                <div className="noise-col-label noise-col-label--good">After Scout</div>
+                <div className="noise-item noise-item--good">CVE-2023-44487 · HTTP/2</div>
+                {['CVE-2023-2976 — vendor: not affected', 'CVE-2022-1471 — version patched', 'CVE-2023-34453 — suppressed', 'CVE-2021-37136 — not applicable'].map((item) => (
+                  <div key={item} className="noise-item noise-item--suppressed">{item}</div>
+                ))}
+                <div className="noise-total noise-total--good">187 actionable findings</div>
+              </div>
+            </div>
+          </VisualPanel>
+        </div>
+      </section>
+
+      <section id="zero-day" className="sg-section feature-section alt">
+        <div className="feature-grid reverse">
+          <div className="feature-content">
+            <span className="sg-eyebrow">Zero-Day Management</span>
+            <h2>When the world learns about it — you already know your exposure.</h2>
+            <FeatureList
+              items={[
+                { title: 'Real-time KEV and NVD watch', body: 'The moment CISA adds a CVE to the KEV catalog or NVD publishes a new record, Scout re-scores every correlated finding in your environment.' },
+                { title: 'Instant blast-radius analysis', body: 'Within minutes of disclosure, see every affected host, container, and cloud workload of a new 0-day disclosure — with asset criticality context included.' },
+                { title: 'Automatic SLA escalation', body: 'KEV-listed CVEs automatically inherit critical SLA timelines and trigger immediate findings even outside scheduled scan windows.' },
+                { title: 'EPSS-guided urgency scoring', body: 'EPSS scores refreshed daily separate the theoretical 0-days from those with active weaponization — so you respond to the right threat first.' }
+              ]}
+            />
           </div>
-          <div className="sg-portfolio-step">
-            <strong>Workflow</strong>
-            <span>Investigation, findings, ownership, SLA, reporting</span>
+          <VisualPanel title="Scout — 0-Day Response Timeline">
+            <div className="zeroday-timeline">
+              {[
+                ['T+0h', 'red', 'NVD publishes CVE-2024-XXXX', 'CVSS 9.8 · CRITICAL · RCE in widely-used library'],
+                ['T+2m', 'orange', 'Scout ingests and correlates', '147 affected components matched across 3 grids'],
+                ['T+4m', 'cyan', 'Blast radius computed', '89 hosts · 34 containers · 24 cloud workloads'],
+                ['T+6m', 'purple', 'Findings created & SLAs set', 'Teams notified · ServiceNow incidents opened'],
+                ['T+1h', 'green', 'CISA adds to KEV catalog', 'Scout auto-escalates priority · SLA shrinks to 24h']
+              ].map(([time, color, title, sub]) => (
+                <div key={time} className="zd-event">
+                  <div className="zd-time">{time}</div>
+                  <div className={`zd-dot zd-dot--${color}`} />
+                  <div className="zd-info">
+                    <div className="zd-title">{title}</div>
+                    <div className="zd-sub">{sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </VisualPanel>
+        </div>
+      </section>
+
+      <div className="callout-strip">
+        <div className="callout-inner">
+          <div className="callout-text">
+            <div className="callout-title">Your scanners find everything.<br />Scout tells you what to fix first.</div>
+            <div className="callout-sub">One platform. Every grid. Zero agents required.</div>
           </div>
-          <div className="sg-portfolio-step">
-            <strong>AI Grid mock</strong>
-            <span>Recommendations, summaries, narratives, next-step guidance</span>
+          <Link className="btn btn-primary" to="/demo/request">Get a demo →</Link>
+        </div>
+      </div>
+
+      <section id="app-risk" className="sg-section feature-section alt">
+        <div className="feature-grid">
+          <div className="feature-content">
+            <span className="sg-eyebrow">Application Risk Intelligence</span>
+            <h2>Know which apps are one CVE away from a breach.</h2>
+            <FeatureList
+              items={[
+                { title: 'Composite application risk score', body: 'Per-application risk score combining open critical findings, KEV exposure, owner assignment gaps, and EOL component density.' },
+                { title: 'Owner-aware triage queues', body: 'Findings automatically routed to application owners via ownership rules — with escalation paths when ownership is undefined.' },
+                { title: 'Executive risk register', body: 'Board-ready risk summaries with application-level exposure ranking, SLA compliance rates, and remediation velocity trends.' }
+              ]}
+            />
+          </div>
+          <VisualPanel title="Scout — Application Risk Register">
+            <div className="panel-body-label">Highest Risk Applications</div>
+            <div className="app-risk-rows">
+              {[
+                ['payment-processor', 9.5],
+                ['auth-service', 8.7],
+                ['order-api', 7.2],
+                ['public-portal', 6.5],
+                ['analytics-pipeline', 4.8]
+              ].map(([name, score]) => (
+                <div key={name} className="app-risk-row">
+                  <span className="app-risk-name">{name}</span>
+                  <div className="app-risk-bar-wrap">
+                    <div className="app-risk-bar" style={{ width: `${(Number(score) / 10) * 100}%` }} />
+                  </div>
+                  <span className="app-risk-score">{score}</span>
+                </div>
+              ))}
+            </div>
+            <div className="panel-summary-row panel-footer-row">
+              <span>14 Critical CVEs</span>
+              <span>3 SLA Breached</span>
+            </div>
+          </VisualPanel>
+        </div>
+      </section>
+
+      <section id="ai-grid" className="ai-teaser">
+        <div className="ai-teaser-card">
+          <div className="ai-teaser-badges">
+            <span className="badge badge--orange">Coming Soon</span>
+            <span className="ai-teaser-meta">Early Access Q3 2026</span>
+          </div>
+          <h2 className="ai-teaser-title">AI Grid</h2>
+          <p className="ai-teaser-copy">
+            AI is your fastest-growing attack surface — and your least visible. Scout&rsquo;s AI Grid discovers,
+            inventories, and secures every AI asset — from LLM APIs and autonomous agents to vector databases —
+            bringing the rigor of the Infra, Cloud, and BOM Grids to a surface traditional tools can&rsquo;t see.
+          </p>
+          <div className="ai-capabilities">
+            {AI_CAPABILITIES.map((cap) => (
+              <div key={cap.name} className="ai-cap">
+                <div className="ai-cap-icon" aria-hidden="true">{cap.icon}</div>
+                <div className="ai-cap-name">{cap.name}</div>
+                <div className="ai-cap-desc">{cap.desc}</div>
+              </div>
+            ))}
+          </div>
+          <div className="ai-teaser-cta">
+            <Link className="btn btn-primary" to="/demo/request">Request early access</Link>
+            <span>Be among the first to secure your AI attack surface.</span>
           </div>
         </div>
       </section>
+
+      <section id="cta" className="sg-section cta-section">
+        <div className="cta-box">
+          <span className="badge badge--red">Ready to see Scout?</span>
+          <h2>Eliminate blind trust in your security posture.</h2>
+          <p>
+            See how Scout maps your full attack surface, prioritizes what actually matters, and cuts vulnerability
+            noise — in a live demo tailored to your environment.
+          </p>
+          <div className="cta-actions">
+            <Link className="btn btn-primary" to="/demo/request">Schedule a demo</Link>
+            <Link className="btn btn-outline" to="/login">Talk to an expert</Link>
+          </div>
+          <div className="cta-trust">
+            <span>✓ No agents required</span>
+            <span>✓ Up and running in minutes</span>
+            <span>✓ Works with your existing scanners</span>
+          </div>
+        </div>
+      </section>
+
+      <footer className="scout-footer">
+        <div className="footer-grid">
+          <div className="footer-brand">
+            <div className="footer-brand-name">
+              <span className="brand-mark">S</span>
+              Scout
+            </div>
+            <p className="footer-tagline">
+              See every threat. Secure every surface. Agentless vulnerability intelligence across Infra, Cloud,
+              BOM, and AI.
+            </p>
+          </div>
+          <div className="footer-col">
+            <div className="footer-col-title">Platform</div>
+            <a href="#infra-grid">Infra Grid</a>
+            <a href="#cloud-grid">Cloud Grid</a>
+            <a href="#bom-grid">BOM Grid</a>
+            <a href="#ai-grid">AI Grid</a>
+            <a href="#intelligence">Vuln Intelligence</a>
+          </div>
+          <div className="footer-col">
+            <div className="footer-col-title">Solutions</div>
+            <a href="#solutions">Agentless Assessment</a>
+            <a href="#zero-day">0-Day Response</a>
+            <a href="#noise-reduction">Noise Reduction</a>
+            <a href="#ai-prioritization">AI Prioritization</a>
+            <a href="#app-risk">Executive Reporting</a>
+          </div>
+          <div className="footer-col">
+            <div className="footer-col-title">Get started</div>
+            <Link to="/demo/request">Request a demo</Link>
+            <Link to="/login">Log in</Link>
+          </div>
+        </div>
+        <div className="footer-bottom">
+          <span>© 2026 Scout Security, Inc. All rights reserved.</span>
+          <span>Built for the AI-attack era.</span>
+        </div>
+      </footer>
     </PublicDemoShell>
   );
 }
@@ -284,6 +532,10 @@ export function DemoRequestPage() {
           <div>
             <h1>Request a NoScan product demo</h1>
             <div className="panel-caption">We review requests before provisioning an isolated 7-day workspace with the full guided product experience.</div>
+          </div>
+          <div className="panel-actions">
+            <Link to="/demo">Back to overview</Link>
+            <Link to="/login">Already have access? Log in</Link>
           </div>
         </div>
         <form className="demo-request-form" onSubmit={submit}>
@@ -572,6 +824,10 @@ export function LoginPage() {
             ? 'Set a password for your tenant workspace. After saving it, return to the login screen and sign in with your email and new password.'
             : 'Use your email and password to access your tenant workspace or the platform console.'}
         </p>
+        <div className="panel-actions panel-actions--stacked">
+          <Link to="/demo">Back to overview</Link>
+          <Link to="/demo/request">Need access? Request a demo</Link>
+        </div>
         {!setupToken && activationComplete && (
           <div className="notice success" role="status">
             Password created successfully. Sign in with your email and new password to continue.
@@ -666,19 +922,24 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
   return (
     <main className={compact ? 'public-demo-shell compact' : 'public-demo-shell'}>
       <nav className="public-demo-nav">
-        <Link to="/demo" className="public-demo-brand"><span className="brand-mark">SG</span><strong>securityGrid</strong></Link>
-        <div className="public-demo-links">
-          <a href="/demo#products">Products</a>
-          <a href="/demo#solutions">Solutions</a>
-          <a href="/demo#use-cases">Use cases</a>
-          <a href="/demo#workflows">Workflows</a>
-          <Link to="/demo/request">Request demo</Link>
-          <Link to="/login">Log in</Link>
-          {hasStoredToken && (
-            <button className="btn btn-secondary" type="button" onClick={logout}>
-              Log out
-            </button>
-          )}
+        <div className="public-demo-nav-inner">
+          <Link to="/demo" className="public-demo-brand">
+            <span className="brand-mark">S</span>
+            <strong>Scout</strong>
+          </Link>
+          <div className="public-demo-links">
+            <a href="/demo#platform">Platform</a>
+            <a href="/demo#intelligence">Intelligence</a>
+            <a href="/demo#solutions">Solutions</a>
+            <a href="/demo#ai-grid">AI Grid</a>
+            <Link className="nav-link-cta" to="/demo/request">Request demo</Link>
+            <Link className="nav-link-outline" to="/login">Log in</Link>
+            {hasStoredToken && (
+              <button className="btn btn-secondary" type="button" onClick={logout}>
+                Log out
+              </button>
+            )}
+          </div>
         </div>
       </nav>
       {children}

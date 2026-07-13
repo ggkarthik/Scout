@@ -5,7 +5,7 @@ import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } fro
 import { authApi } from '../features/auth/api';
 import { useActorQuery } from '../features/auth/queries';
 import { createTestQueryClient, renderWithProviders } from '../test/test-utils';
-import { DemoInvitePage, DemoRequestPage, LoginPage } from './DemoPublicPages';
+import { DemoInvitePage, DemoLandingPage, DemoRequestPage, LoginPage } from './DemoPublicPages';
 
 function ExposureActorProbe() {
   const actorQuery = useActorQuery();
@@ -16,6 +16,19 @@ describe('Demo public pages', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     clearStoredAuthToken();
+  });
+
+  it('renders the landing screen at the index route with login and request-demo access', async () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<DemoLandingPage />} />
+      </Routes>,
+      { route: '/' }
+    );
+
+    expect(screen.getByRole('heading', { name: /See every threat\. Secure every surface\./i })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /Request demo/i })[0]).toHaveAttribute('href', '/demo/request');
+    expect(screen.getAllByRole('link', { name: /Log in/i })[0]).toHaveAttribute('href', '/login');
   });
 
   it('submits a demo request with customer details', async () => {
@@ -40,6 +53,9 @@ describe('Demo public pages', () => {
     });
 
     renderWithProviders(<DemoRequestPage />, { route: '/demo/request' });
+
+    expect(screen.getByRole('link', { name: /Back to overview/i })).toHaveAttribute('href', '/demo');
+    expect(screen.getByRole('link', { name: /Already have access\? Log in/i })).toHaveAttribute('href', '/login');
 
     fireEvent.change(screen.getByLabelText(/Full name/i), { target: { value: 'Alex Rivera' } });
     fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@example.com' } });
@@ -289,6 +305,8 @@ describe('Demo public pages', () => {
       </Routes>,
       { route: '/login' }
     );
+
+    expect(screen.getByRole('link', { name: /Need access\? Request a demo/i })).toHaveAttribute('href', '/demo/request');
 
     fireEvent.change(screen.getByLabelText(/Email or username/i), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
