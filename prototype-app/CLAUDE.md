@@ -69,23 +69,26 @@ See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for directory-specific runtime 
 
 | Package | Contents |
 |---|---|
-| `controller/` | 37 REST controllers under `/api/**` |
-| `service/` | 180 business-logic services |
-| `domain/` | 80 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS) |
-| `dto/` | 172 API request/response objects |
-| `repo/` | 54 Spring Data JPA repositories |
-| `client/` | 19 external API clients (NVD, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, OpenAI) |
-| `config/` | Spring beans and security configuration |
+| `controller/` | 41 REST controllers under `/api/**` |
+| `service/` | 236 business-logic services |
+| `domain/` | 121 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS/Azure discovery, campaigns, BOM/CBOM) |
+| `dto/` | 257 API request/response objects |
+| `repo/` | 77 Spring Data JPA repositories |
+| `client/` | 21 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, Azure, OpenAI, Resend) |
+| `config/` | Spring beans and security configuration (`SecurityConfig`, `ApiKeyAuthenticationFilter`, `TenantAwareDataSource`, `ProductionSafetyValidator`) |
 | `security/` | `SensitiveTenantAction` annotation and interceptor for sensitive cross-tenant operations |
 | `util/` | CPE handling, version comparison, SBOM parsing |
 
+Two controllers are new and undocumented until now: `CampaignController` (`/api/campaigns` — remediation campaign lifecycle, see below) and `CbomController` (`/api/bom/cbom` — cloud bill-of-materials posture), alongside `BomController` (`/api/bom`) for general BOM ingestion and `AzureDiscoveryController` (`/api/connectors/azure-discovery`).
+
 ### Core Data Flow
 
-1. **Inventory in** — SBOMs (upload, endpoint fetch, GitHub repo/GHCR) or ServiceNow/SCCM CMDB sync write `assets`, `inventory_components`, `software_identities`, `software_instances`, and normalize CPEs into `cpe_dim` + `inventory_component_cpe_map`.
-2. **Vulnerability intel in** — NVD, KEV, GHSA, Microsoft/Red Hat CSAF/VEX, advisory imports populate `vulnerabilities`, `vulnerability_targets`, and read-model projections.
+1. **Inventory in** — SBOMs (upload, endpoint fetch, GitHub repo/GHCR), BOM/CBOM uploads, or ServiceNow/SCCM CMDB sync write `assets`, `inventory_components`, `software_identities`, `software_instances`, and normalize CPEs into `cpe_dim` + `inventory_component_cpe_map`. AWS and Azure Discovery connectors add cloud-resource assets via SSM / subscription APIs respectively.
+2. **Vulnerability intel in** — NVD, KEV, GHSA, Microsoft/Red Hat CSAF/VEX, EUVD, JVN, advisory imports populate `vulnerabilities`, `vulnerability_targets`, and read-model projections.
 3. **Correlation** — CPE joins between `inventory_component_cpe_map` and `vulnerability_targets`, version-checked by `ApplicabilityDecisionService`, write `component_vulnerability_states`.
 4. **Projection** — States roll up to `org_cve_records` (one row per CVE per tenant). `FindingService` drives finding create/reopen/resolve.
 5. **EOL pipeline** — 4-stage async job: catalog refresh → release cycles → slug resolution → denormalization into `inventory_components.is_eol / eol_days_remaining`.
+6. **Remediation Campaigns** — `CampaignController`/`CampaignService` group findings/CVEs into a tracked remediation effort with lifecycle states (DRAFT, ACTIVE, PAUSED, BLOCKED, IN_REVIEW, CLOSED, CANCELLED), per-item exceptions, notify groups, and a watchlist. Frontend at `/vuln-repo/campaigns`.
 
 ### Projection Tables (Central to Read Performance)
 
@@ -111,36 +114,49 @@ Two authentication paths, handled by `ApiKeyAuthenticationFilter`:
 - Token decoded and passed to `JwtTenantAuthenticationService`, which resolves roles from the configured claim (default `roles`; namespaced claims ending in `/roles` also work).
 - Roles from JWT are mapped to Spring `GrantedAuthority` values.
 
-Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. All other `/api/**` require authentication. Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/demo-requests`, `/api/demo-invites/**`.
+Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. `/api/operations/quality/**` also permits `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`, `ROLE_SECURITY_ANALYST`, and `ROLE_READ_ONLY_AUDITOR`. All other `/api/**` require authentication. Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/demo-requests`, `/api/demo-invites/**`.
 
 `APP_ALLOW_HEADER_TENANT_SELECTION=true` enables local header-based tenant selection via `X-Tenant-ID`; must be disabled in production.
 
+### Multi-Tenancy Status
+
+Schema-per-tenant isolation is fully implemented, not aspirational: `TenantAwareDataSource` sets `search_path` + `app.current_tenant_id` per connection checkout (reset on return), `TenantSchemaService` clones `tenant_default` (tables, sequences, defaults, FKs, and RLS policies) to provision new tenant schemas, and `ProductionSafetyValidator` runs 11+ startup checks gating unsafe config in production. `TenantService.getDefaultTenant()` is no longer called from any controller or service — that single-tenant fallback pattern has been removed. Row-level security policies are created on each tenant schema at provisioning time, but full RLS *enforcement* rollout across existing production tenants is intentionally gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.
+
 ### Frontend Navigation
 
-`src/App.tsx` uses **React Router v6** with path-based routing. `src/app/routes.ts` owns all typed path-builder helpers. Legacy query-param URLs (e.g. `?tab=inventory`) are redirected via `buildLegacyCompatiblePath()` on first render.
+`src/App.tsx` uses **React Router v7** (`react-router-dom` 7.x) with path-based routing. `src/app/routes.ts` owns all typed path-builder helpers. Legacy query-param URLs (e.g. `?tab=inventory`) and the older `/vulnerability-intelligence/*` paths are redirected to their current equivalents on first render.
 
 Top-level routes and their paths:
 
 | Path | Component | Purpose |
 |------|-----------|---------|
-| `/` | → `/exposure` redirect | |
+| `/` | Role-based redirect | → `/exposure`, `/configurations`, or `/platform/tenants` depending on actor role |
 | `/exposure` | `ExposureDashboardPage` | Risk-focused overview (Overview) |
 | `/findings` | `FindingsPage` | Active findings |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding detail |
-| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `quality`, `pipeline`, `platform-health` |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `pipeline`, `platform-health` (`quality` and older keys alias to `pipeline`) |
 | `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
 | `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | **Unified Records** — org-correlated CVEs (CVE Assessment Workbench) |
 | `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | **Intelligence** — all ingested CVEs (global feed) |
 | `/vuln-repo/org-cves/:cveId/assets` | `VulnRepoCveAssetsPage` | Per-CVE affected asset breakdown |
 | `/vuln-repo/org-cves/:cveId/software` | `VulnRepoCveSoftwarePage` | Per-CVE affected software breakdown |
-| `/inventory/:inventoryView?` | varies | Default `overview` |
-| `/end-of-life` | `EolPage` | EOL status and lifecycle filters |
-| `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `integration-run-queue`, `processing-jobs` |
-| `/admin/:adminView?` | `UserManagementPage` | Tenant + service-account administration |
-| `/platform/:platformView?` | `PlatformConsolePage` | Platform-owner console; sub-views `tenants`, `demo-requests`, `support` |
-| `/configurations` | `ConfigurationsPage` | Risk policy, SLA, scoring, automation, dev tools |
+| `/vuln-repo/campaigns` | `CampaignsPage` | Remediation campaign list |
+| `/vuln-repo/campaigns/:id` | `CampaignDetailPage` | Campaign detail — lifecycle, exceptions, notify groups, watchlist |
+| `/vuln-repo/software-assets` | `VulnRepoSoftwareAssetsPage` | Software-centric asset breakdown |
+| `/vuln-repo/host-assets/:assetId` | `VulnRepoHostAssetRoute` | Host asset detail from vuln-repo context |
+| `/vuln-repo/intel/:externalId` | `PlatformVulnIntelDetailPage` | Platform-scoped intel detail |
+| `/inventory/:inventoryView?` | `InventoryPage` (dispatches sub-views) | Default `overview` |
+| `/inventory/hosts/:assetId` | `InventoryHostAssetRoute` | Host asset detail |
+| `/inventory/software-identities/:softwareIdentityId` | `SoftwareIdentityDetailRoute` | Software identity detail |
+| `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `connectors`, `run-history`, `processing-jobs` |
+| `/admin/:adminView?` | `UserManagementPage` | Default `users`; tenant + service-account administration |
+| `/platform/:platformView?` | `PlatformConsolePage` | Default `tenants`; platform-owner console |
+| `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; risk policy, SLA, scoring, automation |
+| `/login` | `LoginPage` | Credential login |
 
-Demo/public routes (outside auth boundary): `/demo`, `/demo/request`, `/demo/request/success`, `/demo/expired`, `/invite/:token`.
+**`/end-of-life` no longer renders a dedicated EOL page** — it redirects to `/platform/eol` for platform-scope owners, or `/exposure` otherwise. **Legacy redirects:** `/vulnerability-intelligence*` paths redirect to their `/vuln-repo/*` equivalents.
+
+Demo/public routes (outside auth boundary): `/demo`, `/demo/request`, `/demo/request/success`, `/demo/expired`, `/invite/:token`, `/tenant-invite/:token`.
 
 Overview (`/exposure`) is reserved for risk metrics and risk-focused summaries only. Do not place operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels on Overview; those belong under Operational Dashboard.
 Correlation Efficiency and CSAF/VEX Quality Analytics live under Operations → Pipeline.
@@ -209,32 +225,33 @@ Sidebar-nav layout. Sections in order (leftmost first):
 | 1 | `sla` | **SLA & Remediation** | Risk score thresholds (critical/high), remediation deadlines per severity, asset criticality SLA multipliers |
 | 2 | `triage` | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
 | 3 | `automation` | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
-| 4 | `ownership` | **Ownership** | Rule-based user/group assignment; conditions stored in `ownership_rules` table (V1094) |
-| 5 | `vulnerability-sources` | **Vulnerability Sources** | Per-tenant feed filter rules; which sources participate in tenant correlation (V1095) |
+| 4 | `ownership` | **Ownership** | Rule-based user/group assignment; conditions stored in `ownership_rules` table (V1 baseline) |
+| 5 | `vulnerability-sources` | **Vulnerability Sources** | Per-tenant feed filter rules; which sources participate in tenant correlation (`vulnerability_source_filter_configs`, V1 baseline) |
 | 6 | `findings-score` | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
 | 7 | `suppress` | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
 | 8 | `auto-findings` | **Auto-Finding Rules** | Automatically create findings based on CVE, software, and asset criteria |
 
 All sections except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
-`applyTriageDefaults()` normalises API responses for backends that predate the V1062 migration
+`applyTriageDefaults()` normalises API responses for older backends that predate the 6 triage weight fields
 (fills missing triage fields with sensible defaults rather than crashing).
 
 ### Connect Page Architecture
 
-`ConnectPage` (`/connect/:connectView?`) is a two-category connector catalog with three views:
-`sources` (default), `integration-run-queue`, and `processing-jobs`.
+`ConnectPage` (`/connect/:connectView?`) is a multi-category connector catalog with views:
+`sources` (default), `connectors`, `run-history`, and `processing-jobs`.
 
 **Connector categories:**
 
-- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`, `endoflife-date`
-- **CMDB / Inventory Sources** — `sbom-endpoint`, `sbom-github`, `servicenow-cmdb`, `sccm-cmdb`
-- **Cloud Discovery** — `aws-discovery`
+- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`, `endoflife-date`, `euvd-feed` (ENISA EU Vulnerability Database), `jvn-feed` (Japan Vulnerability Notes)
+- **CMDB / Inventory Sources** — `sbom-endpoint`, `sbom-github`, `bom-management` (SBOM/AI-BOM/CBOM/Vendor-BOM via URL or upload), `servicenow-cmdb`, `sccm-cmdb`
+- **Cloud Discovery** — `aws-discovery`, `azure-discovery`
 
 Clicking a connector card renders `ConnectorDetailContent` which delegates to a focused component per connector. Adding a new connector requires: add to `ConnectorId` union, `CONNECTORS` array, the appropriate category list, and a `ConnectorDetailContent` case.
 
 Key connector components:
 - `SccmConnectorPage` — SCCM/MECM CMDB sync (discovery, auth, field mapping, sync schedule)
-- `AwsDiscoveryConnectorPage` — AWS EC2 discovery via SSM (regions, auth, scoped to EC2 in V1069)
+- `AwsDiscoveryConnectorPage` — AWS EC2 discovery via SSM, multi-account via `aws_discovery_targets`
+- `AzureDiscoveryConnectorPage` — Azure compute/platform resource discovery across subscriptions (mirrors the AWS connector; `CLIENT_SECRET` or `MANAGED_IDENTITY` auth)
 - `VulnIntelConnectorPage` / `VulnIntelConfigPage` — NVD, GHSA, KEV, CSAF source configuration
 - `NvdConnectorPage`, `KevConnectorPage`, `GhsaConnectorPage`, `MicrosoftCsafConnectorPage`, `RedhatCsafConnectorPage`, `AdvisoryConnectorPage` — per-feed configuration pages
 - `IntegrationRunQueuePage` / `InventoryRunQueuePage` — live run queue surfaces
@@ -245,7 +262,7 @@ Key connector components:
 
 Create `backend/src/main/resources/db/migration/postgres_reset/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
 
-The migration directory is `postgres_reset/` (configured in `application.yml` as `classpath:db/migration/postgres_reset`). The baseline migration is `V1__platform_and_default_tenant_schemas.sql`. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql.
+The migration directory is `postgres_reset/` (configured in `application.yml` as `classpath:db/migration/postgres_reset`). The baseline migration is `V1__platform_and_default_tenant_schemas.sql` — a large consolidated baseline (60+ tables) created when a prior drift-repair effort reset and renumbered the whole migration line; do not expect V1 to look like a "day one" schema. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql. The current latest migration is `V41__azure_discovery_targets.sql`.
 
 ### Scheduled Jobs
 
@@ -264,22 +281,28 @@ The migration directory is `postgres_reset/` (configured in `application.yml` as
 | `03:30` Sunday | EOL slug resolution (stage 3) |
 | `04:00` Sunday | EOL denormalization (stage 4) |
 | Every 5 min | Run enabled GitHub SBOM sources |
-| Every 5 min | Run enabled ServiceNow / SCCM / AWS Discovery scheduled syncs |
+| Every 5 min | Run enabled ServiceNow / SCCM / AWS Discovery / Azure Discovery scheduled syncs |
 | Every 15 min | Reopen expired suppressions |
 | Every 2 sec | Drain `finding_delta_queue` (batches of 100) |
 | Hourly | Policy-based auto-close findings |
+| Hourly | Demo tenant expiry check |
+| Midnight | Nightly re-run of all approved suppression rules |
+
+A handful of additional infra-level jobs also run (ingestion job polling every 2s, finding-projection maintenance and BOM-projection reconciliation every 5 min, vulnerability queued-run polling every 5s, performance telemetry snapshot every 30s) — see `docs/backend.md` for the full list.
 
 ### Known Limitations
 
 - `POST /api/cve-detail/{cveId}/suppress` persists suppression state via `OrgCveRecordService.suppress()` and returns a `SuppressionResponse`. Suppression expiry is handled by the 15-minute reopen job.
-- Schema is tenant-aware but runtime is effectively single-tenant; most controllers call `TenantService.getDefaultTenant()`. Multi-tenant hardening is in progress (V1094–V1097).
+- Multi-tenant schema-per-tenant isolation is implemented (see "Multi-Tenancy Status" above); `TenantService.getDefaultTenant()` is no longer used. Full RLS enforcement across production tenants remains gated behind `V29__tenant_rls_rollout_gate.sql`.
 - The live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves`. `CveDetailPage.tsx` exists but is not mounted in the router.
 - GHCR attestation ingestion does not yet perform cryptographic signature verification.
-- AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` (see V1047, V1052, V1053) so subsequent reads do not re-call the API.
-- ServiceNow incident creation (`POST /api/cve-detail/{cveId}/servicenow-incident`) writes `incident_id` / `incident_status` onto findings (V1054). The `FindingIncidentSyncService` daily 07:00 job pulls incident state changes back, so the integration is no longer fully one-way — but it is read-only on the ServiceNow side.
+- AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` / `org_cve_ai_artifacts` so subsequent reads do not re-call the API.
+- ServiceNow incident creation (`POST /api/cve-detail/{cveId}/servicenow-incident`) writes `incident_id` / `incident_status` onto findings. The `FindingIncidentSyncService` daily 07:00 job pulls incident state changes back, so the integration is no longer fully one-way — but it is read-only on the ServiceNow side.
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser from existing API data — they are not stored in the database and recalculate on every render.
 - SCCM sync (`SccmCmdbSyncService`) performs asset discovery and field mapping but does not yet support incremental delta sync — each run is a full sweep.
-- AWS Discovery (`aws-discovery` connector, V1063/V1067/V1069) is currently scoped to EC2 instances only via SSM. Multi-account is supported via `aws_discovery_targets` with cross-account role ARN + external ID. RDS/Lambda/S3/ECS/EKS were dropped in V1069.
+- AWS Discovery (`aws-discovery` connector) is scoped to EC2 instances via SSM; multi-account/region support via `aws_discovery_targets` with cross-account role ARN + external ID.
+- Azure Discovery (`azure-discovery` connector, `V40`/`V41`) mirrors the AWS Discovery architecture (config + per-subscription targets, `CLIENT_SECRET` or `MANAGED_IDENTITY` auth) but is newer and less exercised in production than AWS Discovery.
+- Remediation Campaigns (`CampaignController`, `/vuln-repo/campaigns`) and CBOM/cloud-posture tracking (`CbomController`, `/api/bom/cbom`) are shipped but not yet covered by `docs/business-logic-guide.md` in the same depth as the core finding/CVE workflow — read the controllers/DTOs directly for full field-level detail.
 
 ### GitHub Token
 
@@ -336,7 +359,7 @@ A change is done when **all** of these are true:
 
 ### Things that get rejected on sight
 
-- Edits to applied migrations (re-edit V1042 instead of writing V1098).
+- Edits to applied migrations (re-edit V21 instead of writing V42).
 - New `console.log` / `System.out.println` left in shipped code.
 - `// TODO` comments without an owner or linked issue.
 - Mocking the database in integration tests instead of using `@PostgresIntegrationTest`.

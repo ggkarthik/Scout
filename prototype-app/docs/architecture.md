@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-05-27
+Last updated: 2026-07-13
 
 ---
 
@@ -18,7 +18,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 │  Spring Boot 3.3.2 — Java 17 (port 8080)                            │
 │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐ │
 │  │ Controllers  │  │   Services     │  │  Scheduled Jobs          │ │
-│  │ (37 REST)    │  │   (180+)       │  │  (daily + hourly + 2s)   │ │
+│  │ (41 REST)    │  │   (236)        │  │  (daily + hourly + 2s)   │ │
 │  └──────┬───────┘  └───────┬────────┘  └──────────────────────────┘ │
 │         │                  │                                         │
 │  ┌──────▼──────────────────▼──────┐   ┌────────────────────────────┐│
@@ -30,9 +30,9 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 ┌─────────────────▼──────────────────┐  ┌───────────▼────────────────┐
 │  PostgreSQL — schema-per-tenant    │  │  External APIs             │
 │  platform schema (shared)          │  │  NVD, KEV, GHSA, CSAF      │
-│  tenant_<id> schema (per tenant)   │  │  EPSS, EOL, GitHub         │
-│  Flyway migrations (postgres_reset)│  │  ServiceNow, SCCM, AWS     │
-└────────────────────────────────────┘  │  OpenAI, Resend            │
+│  tenant_<id> schema (per tenant)   │  │  EPSS, EUVD, JVN, EOL      │
+│  Flyway migrations (postgres_reset)│  │  GitHub, ServiceNow, SCCM  │
+└────────────────────────────────────┘  │  AWS, Azure, OpenAI, Resend│
                                         └────────────────────────────┘
 ```
 
@@ -58,6 +58,15 @@ Three ingestion paths populate the inventory:
 - `AwsDiscoveryClient` → SSM `DescribeInstanceInformation` → EC2 instances → `Asset`, `DiscoveryModel`
 - Runs every 5 minutes for configured targets
 
+**Azure Discovery** (newer, mirrors AWS):
+- `AzureDiscoveryController` (`/api/connectors/azure-discovery`) + sync service → subscription-scoped resource discovery
+- `CLIENT_SECRET` or `MANAGED_IDENTITY` auth; multi-subscription via `azure_discovery_targets`
+- Runs every 5 minutes for configured targets
+
+**BOM / CBOM:**
+- `BomController` (`/api/bom`) handles general Bill-of-Materials ingestion; `CbomController` (`/api/bom/cbom`) tracks cloud-posture BOM data
+- Connect page's `bom-management` connector supports SBOM, AI-BOM, CBOM, and Vendor-BOM ingestion via URL or upload
+
 All paths normalize software identities into `software_identities` and `software_instances`, and resolve CPEs into `cpe_dim` + `inventory_component_cpe_map`.
 
 ### 2. Vulnerability Intelligence In
@@ -70,6 +79,8 @@ Daily scheduled jobs pull from external feeds:
 | GHSA | 01:15 | `vulnerabilities`, `vulnerability_targets` |
 | Microsoft + Red Hat CSAF/VEX | 01:45 | `vex_assertions`, `vulnerability_intel_relations` |
 | EPSS | 03:15 | `vulnerability_intel_observations` |
+
+`EuvdApiClient` (EU Vulnerability Database) and `JvnApiClient` (Japan Vulnerability Notes) provide additional on-demand CVE sources, not on the daily schedule above.
 
 The `vulnerability_intel_summary` table is a read-model projection aggregating all intel signals per CVE.
 
@@ -102,6 +113,10 @@ Runs weekly (Sunday), 4 stages:
 
 Daily sweep (00:15) catches components that crossed their EOL date between weekly runs.
 
+### 6. Remediation Campaigns
+
+`CampaignController` (`/api/campaigns`) groups findings/CVEs into a tracked remediation effort with a lifecycle (`DRAFT` → `ACTIVE` → `PAUSED`/`BLOCKED`/`IN_REVIEW` → `CLOSED`/`CANCELLED`), per-item exceptions, notify groups, and a watchlist. Frontend at `/vuln-repo/campaigns` (`CampaignsPage`, `CampaignDetailPage`) includes AI-assisted insights gated the same way as CVE investigation summaries.
+
 ---
 
 ## Multi-Tenant Architecture
@@ -132,7 +147,9 @@ HTTP Request
 
 ### New Tenant Bootstrap
 
-`TenantSchemaService` creates new tenant schemas by cloning `tenant_default` (tables, sequences, defaults, foreign keys). This happens on `Tenant` creation.
+`TenantSchemaService` creates new tenant schemas by cloning `tenant_default` (tables, sequences, defaults, foreign keys, and row-level security policies). This happens on `Tenant` creation.
+
+**RLS rollout status:** row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants is intentionally gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS` — see `ProductionSafetyValidator`.
 
 ---
 
@@ -157,6 +174,8 @@ HTTP Request
 | `READ_ONLY_AUDITOR` | Read-only across all tenant data |
 | `OPERATOR` | API key default — read/write operations, no admin |
 | `CREATOR` | Creator key default — includes all platform-level operations |
+
+These are role string constants checked across `SecurityConfig` authorization rules and various filters — there is no single formal role-hierarchy enum/service enforcing precedence between them; treat this table as the authoritative reference, not a class in the codebase.
 
 ### Security Filters (in order)
 
@@ -217,7 +236,7 @@ All external HTTP calls use `OutboundHttpClient` (wraps Spring `RestClient`):
 
 ### Tech Stack
 
-React 18 + TypeScript + Vite + React Router v6 + TanStack Query (React Query).
+React 18 + TypeScript + Vite + React Router v7 + TanStack Query (React Query).
 
 ### Routing
 
@@ -263,4 +282,4 @@ For deployment-facing environment variables and operational endpoints, see [Back
 
 5. **Delta queue over synchronous writes** — `finding_delta_queue` decouples correlation (high-write bursts) from finding creation (requires policy evaluation, suppression checks). The 2-second drain window batches work and avoids thundering-herd under large SBOM ingestion events.
 
-6. **`ddl-auto=update` (temporary)** — Hibernate currently creates tenant schema tables via schema validation/update mode. The goal is to switch to `validate` once the reset-line DDL explicitly creates all tables. Don't add logic that depends on `update` behavior; it will be removed.
+6. **`ddl-auto=none`** — Flyway migrations own all DDL; Hibernate never creates or alters tables. New tenant schemas are provisioned by `TenantSchemaService`, which clones `tenant_default` (tables, sequences, defaults, foreign keys, RLS policies) rather than relying on Hibernate schema generation.

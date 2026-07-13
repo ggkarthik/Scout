@@ -1,6 +1,6 @@
 # VulnWatch — End-to-End Business Logic Guide
 
-Last updated: 2026-05-27
+Last updated: 2026-07-13
 
 **Audience:** Engineers and product stakeholders who need to understand how the platform works end-to-end.
 
@@ -102,6 +102,16 @@ SBOMs arrive via three paths:
 3. Multi-account supported via cross-account role ARN + external ID
 
 **Auth types** (`AwsAuthType` enum): `IAM_ROLE`, `ACCESS_KEY`, `INSTANCE_PROFILE`.
+
+### Azure Discovery
+
+`AzureDiscoveryController` (`/api/connectors/azure-discovery`) mirrors the AWS Discovery architecture for Azure subscriptions (added in migrations V40/V41, newer and less battle-tested than AWS Discovery).
+
+**Flow:**
+1. Resolve credentials via `CLIENT_SECRET` or `MANAGED_IDENTITY` auth
+2. For each configured `AzureDiscoveryTarget` (per-subscription scope):
+   - Discover compute/platform resources within the subscription
+   - Map resource metadata to Scout `Asset` records
 
 ---
 
@@ -290,6 +300,23 @@ The `VulnerabilityIntelSummary` entity stores `aiSummary` and `aiSummaryGenerate
 
 ---
 
+## Remediation Campaigns
+
+`CampaignController` (`/api/campaigns`) — undocumented in earlier drafts of this guide, but a fully shipped feature (frontend at `/vuln-repo/campaigns`, `CampaignsPage`/`CampaignDetailPage`).
+
+A **Campaign** groups findings/CVEs into a tracked remediation effort:
+
+- **Lifecycle:** `DRAFT` → `ACTIVE` → `PAUSED` / `BLOCKED` / `IN_REVIEW` → `CLOSED` / `CANCELLED`.
+- **Exceptions:** individual findings/CVEs within a campaign can be marked exempt from the campaign's remediation requirement, with their own status workflow.
+- **Notify groups:** teams/individuals subscribed to campaign status changes.
+- **Watchlist:** entries tracked for visibility without being formally part of the remediation scope.
+- **Notes:** free-form campaign annotations.
+- The frontend detail page includes AI-assisted insights (OpenAI-backed, same `OPENAI_ENABLED` gate as CVE investigation summaries) and can bulk-add assets, CVEs, or software to a campaign.
+
+## Cloud/Container BOM (CBOM)
+
+`BomController` (`/api/bom`) handles general Bill-of-Materials ingestion (fetch by URL or file upload), with dashboard, support-matrix, and lineage views per BOM. `CbomController` (`/api/bom/cbom`) is a specialized branch tracking cloud/container posture: per-asset CBOM posture summaries, components, and risk findings with an analyst accept-finding workflow. The Connect page's `bom-management` connector exposes SBOM, AI-BOM, CBOM, and Vendor-BOM ingestion in one place.
+
 ## Audit Trail
 
 `AuditEvent` records capture state-changing operations:
@@ -304,7 +331,8 @@ The `VulnerabilityIntelSummary` entity stores `aiSummary` and `aiSummaryGenerate
 
 - GHCR attestation ingestion does not perform cryptographic signature verification.
 - SCCM sync is a full sweep on every run — no incremental delta sync.
-- AWS Discovery is scoped to EC2 instances via SSM only (RDS, Lambda, S3, ECS, EKS were removed in V1069).
+- AWS Discovery is scoped to EC2 instances via SSM only.
+- Azure Discovery mirrors the AWS Discovery architecture but is newer (V40/V41) and less exercised in production.
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser — not stored in the database.
 - ServiceNow integration is read-heavy (finding → incident creation, then status polling) but not event-driven.
-- Multi-tenant hardening is in progress; most controllers currently resolve to a single default tenant. Full multi-tenant operation requires complete resolution of the `tenant_id` compatibility tail.
+- Multi-tenant schema-per-tenant isolation is implemented (`TenantAwareDataSource`, `TenantSchemaService`, `ProductionSafetyValidator`) and `TenantService.getDefaultTenant()` is no longer used by controllers or services. Row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants remains gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.

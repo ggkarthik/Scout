@@ -70,6 +70,7 @@ src/
     software-identities/
     eol/
     admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent
+    campaigns/         # Remediation campaign types + CampaignDetailPage; API calls inlined (no queries.ts)
     widgets/           # Shared chart/widget components
   hooks/
     useDebouncedValue.ts  # Generic debounce hook

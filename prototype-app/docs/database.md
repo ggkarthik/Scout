@@ -1,8 +1,8 @@
 # VulnWatch Database
 
-Last updated: 2026-05-27
+Last updated: 2026-07-13
 
-The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line. H2 is retained only as an offline archive format for legacy data snapshots.
+The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest is `V41__azure_discovery_targets.sql`. H2 is retained only as an offline archive format for legacy data snapshots.
 
 ---
 
@@ -13,7 +13,7 @@ The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap und
 - **Migration directory:** `backend/src/main/resources/db/migration/postgres_reset/`
 - **Flyway baseline migration:** `V1__platform_and_default_tenant_schemas.sql`
 - **All statements:** `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` (idempotent replay via psql is safe)
-- **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate is `update` temporarily until reset-line DDL is complete for all tenant tables)
+- **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate never creates or alters tables)
 
 ---
 
@@ -138,6 +138,26 @@ Platform-owner support access grants with expiry and audit trail.
 | `accepted_at` / `revoked_at` / `updated_at` | `timestamptz` | |
 
 Indexes: `idx_tenant_support_grants_subject_status_expires` on `(invited_platform_subject, status, expires_at)`, `idx_tenant_support_grants_tenant_requested` on `(tenant_id, requested_at)`.
+
+---
+
+### `platform.tenant_entitlement_overrides`
+
+Per-tenant overrides of default entitlements (e.g. enable a beta feature, adjust a plan limit). Added in V38.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | NOT NULL; FK → `platform.tenants(id)` |
+| `entitlement_key` | `varchar(128)` | NOT NULL |
+| `enabled` | `boolean` | NOT NULL |
+| `config_json` | `jsonb` | Feature-specific configuration |
+| `reason` | `varchar(500)` | Admin note explaining the override |
+| `expires_at` | `timestamptz` | NULL = permanent |
+| `created_by` | `uuid` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique: `(tenant_id, entitlement_key)`. Index: `(tenant_id)`.
 
 ---
 
@@ -850,6 +870,33 @@ AWS EC2 discovery connector configuration and multi-account targets.
 
 ---
 
+### `azure_discovery_configs` / `azure_discovery_targets`
+
+Azure cloud discovery connector configuration and multi-subscription targets. Added in V40/V41 — mirrors the AWS discovery tables; newer and less exercised in production.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | NOT NULL; FK → `platform.tenants(id)` |
+| `source_system` | `varchar(80)` | NOT NULL; default `'azure'` |
+| `auth_type` | `varchar(32)` | NOT NULL; CHECK IN (`CLIENT_SECRET`, `MANAGED_IDENTITY`) |
+| `azure_tenant_id` | `varchar(128)` | Azure AD tenant ID |
+| `client_id` | `varchar(255)` | Service principal client ID |
+| `client_secret` | `text` | Encrypted service principal secret |
+| `subscription_ids_json` | `text` | NOT NULL; default `'[]'` |
+| `regions_json` | `text` | NOT NULL; default `'["eastus2"]'` |
+| `enabled` / `auto_sync_enabled` | `boolean` | NOT NULL |
+| `interval_minutes` | `integer` | NOT NULL; default `1440` |
+| `last_test_status` / `last_test_message` | various | |
+| `last_tested_at` / `last_sync_at` | `timestamptz` | |
+| `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+`azure_discovery_targets`: per-subscription sub-entries. Fields: `config_id` (FK), `subscription_id`, `subscription_name`, `enabled`, `regions_json`, `last_test_status`/`message`/`tested_at`, `last_sync_at`.
+
+Unique: `azure_discovery_configs(tenant_id, source_system)`; `azure_discovery_targets(config_id, subscription_id)`.
+
+---
+
 ### `sccm_cmdb_configs`
 
 SCCM/MECM CMDB connector configuration.
@@ -888,6 +935,26 @@ Software installed on a CI (from ServiceNow/SCCM discovery). Links CI → Softwa
 
 ---
 
+### `software_identity_metadata`
+
+Custom per-tenant metadata attached to a software identity (owner, licensing, support group, recommendation). Added in V39.
+
+| Column | Type | Notes |
+|---|---|---|
+| `tenant_id` | `uuid` | NOT NULL; part of composite PK; FK → `platform.tenants(id)` |
+| `software_identity_id` | `uuid` | NOT NULL; part of composite PK; FK → `platform.software_identities(id)` |
+| `owner` | `text` | Software owner/team |
+| `licensed` | `text` | NOT NULL; default `'Unknown'` |
+| `license_type` | `text` | e.g. `MIT`, `Commercial` |
+| `support_group` | `text` | Internal support/SRE group |
+| `recommendation` | `text` | Custom recommendation text |
+| `recommendation_updated_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | NOT NULL |
+
+PK: `(tenant_id, software_identity_id)`.
+
+---
+
 ### `discovery_models`
 
 Software discovery model records from SCCM/ServiceNow. Fields: `primary_key` (unique with `tenant_id`), `normalized_product` / `publisher` / `version`, `ml_model_version`, `normalization_status`, `product_hash` / `version_hash`, `approved`.
@@ -904,7 +971,32 @@ Flattened inventory view for reporting. One row per unique component per asset. 
 
 Audit log for all sync job executions.
 
-Fields: `sync_type`, `run_scope`, `status`, `records_fetched` / `inserted` / `updated` / `failed`, `started_at`, `completed_at`, `error_message`, `metadata_json`.
+Fields: `sync_type`, `run_scope`, `status`, `records_fetched` / `inserted` / `updated` / `failed`, `started_at`, `completed_at`, `error_message`, `metadata_json`. Moved to the `platform` schema in a later migration (`move_sync_runs_to_platform`) — despite living alongside tenant tables in this doc for grouping purposes, confirm current schema location before writing cross-schema queries.
+
+---
+
+### `ingestion_jobs`
+
+Tracks asynchronous ingestion job status (SBOM uploads, config imports, asset discovery runs). Backs `IngestionJobController` (`/api/ingestion-jobs`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `tenant_id` | `uuid` | NOT NULL; FK → `platform.tenants(id)` |
+| `job_type` | `varchar(80)` | NOT NULL; e.g. `SBOM_INGESTION`, `CONFIG_IMPORT` |
+| `source_type` | `varchar(80)` | NOT NULL; e.g. `GITHUB`, `ARTIFACTORY` |
+| `asset_identifier` | `varchar(500)` | NOT NULL |
+| `status` | `varchar(32)` | NOT NULL; CHECK IN (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`) |
+| `requested_by` | `varchar(255)` | |
+| `requested_at` / `started_at` / `completed_at` | `timestamptz` | |
+| `attempt_count` | `integer` | NOT NULL; default `0` |
+| `dedupe_key` | `varchar(700)` | NOT NULL |
+| `payload_json` / `result_json` | `text` | |
+| `failure_code` / `failure_message` | various | |
+| `visible_at` | `timestamptz` | NOT NULL; default `now()` |
+| `sbom_upload_id` | `uuid` | FK → `sbom_uploads(id)` if SBOM-related |
+
+Unique (partial): `dedupe_key` WHERE `status IN ('QUEUED','RUNNING')`. Indexes: `(status, visible_at, id)`, `(requested_at DESC, id DESC)`, `(asset_identifier, status)`.
 
 ---
 
@@ -929,6 +1021,44 @@ Fields: `actor_user_id`, `occurred_at`, `actor_subject`, `actor_role`, `action`,
 AI-generated or analyst-authored remediation recommendations for a CVE.
 
 Fields: `cve_id`, `fix_type`, `recommendation_source`, `summary`, `description`, `os_hint`, `related_cve_ids` / `software_entities` / `source_urls` (jsonb), `generated_at`.
+
+---
+
+### Remediation Campaigns
+
+Backs `CampaignController` (`/api/campaigns`) and the `/vuln-repo/campaigns` frontend. Not covered in earlier drafts of this doc.
+
+**`campaigns`** — one row per campaign. Fields: `tenant_id`, `name`, `summary`, `status` (DRAFT/ACTIVE/PAUSED/BLOCKED/IN_REVIEW/CLOSED/CANCELLED), `created_by`, `due_at`, `started_at`, `paused_at`, `closed_at`, `created_at`/`updated_at`. Index: `(tenant_id, status, updated_at DESC)`.
+
+**`campaign_vulnerabilities`** — CVEs linked to a campaign. FK `campaign_id` → `campaigns(id)` ON DELETE CASCADE, FK `vulnerability_id` → `platform.vulnerabilities(id)`, `external_id`, `title`, `severity` snapshot. Unique: `(campaign_id, external_id)`.
+
+**`campaign_exceptions`** — per-finding/asset exception requests within a campaign. Fields: `campaign_id` (FK, cascade), `finding_display_id`, `asset_name`, `package_name`, `title`, `reason`, `status` (PENDING/APPROVED/REJECTED), `requested_by`/`requested_at`, `decision_due_at`, `decisioned_by`/`decisioned_at`.
+
+**`campaign_notify_groups`** — notification subscriptions. Fields: `campaign_id` (FK, cascade), `group_name`, `role_label`, `trigger_summary`, `group_email`, `notifications_paused`.
+
+**`campaign_watchlist_entries`** — manual watchlist subscribers. Fields: `campaign_id` (FK, cascade), `entry_type` (INDIVIDUAL/GROUP/POLICY), `label`, `email`, `trigger_policy`, `active`.
+
+**`campaign_notes`** — free-form discussion notes. Fields: `campaign_id` (FK, cascade), `author`, `body`, `created_at`.
+
+**`campaign_activities`** — system-generated activity log. Fields: `campaign_id` (FK, cascade), `activity_type`, `actor`, `body`, `metadata_json`, `created_at`.
+
+**`campaign_delivery_attempts`** — notification delivery audit log. Fields: `campaign_id` (FK, cascade), `target_type`, `target_label`/`target_address`, `subject`, `delivery_state` (QUEUED/SENT/FAILED/BOUNCED), `provider_message_id`, `detail`.
+
+---
+
+### BOM / CBOM
+
+Backs `BomController` (`/api/bom`) and `CbomController` (`/api/bom/cbom`). Not covered in earlier drafts of this doc.
+
+**`bom_ingestion_records`** — one row per ingested BOM document. Key fields: `tenant_id`, `sbom_upload_id`/`asset_id` (optional links), `bom_type` (SBOM/CBOM/HBOM), `format`/`format_version`/`spec_family`, `serial_number`, `supplier`, `source_type` (URL/UPLOAD/API)/`source_system`/`source_reference`, `component_count`, `status` (ACTIVE/SUPERSEDED/ARCHIVED), `superseded_by`/`previous_bom_id` (self-referencing), `checksum_sha256`, `ingested_at`/`ingested_by`. Indexes on `(tenant_id, bom_type, status)`, `(tenant_id, ingested_at DESC)`, `(tenant_id, source_system)`.
+
+**`bom_components`** — components extracted from a BOM. Fields: `bom_id` (FK), `tenant_id`, `name`/`version`/`purl`/`cpe`/`license`/`supplier`, `component_type`, `category` (MATCHED/UNMATCHED), `is_active`, `bom_ref`, `group_name`, `hashes`/`properties`/`external_references` (jsonb), `workflow_status` (DISCOVERED/INVESTIGATING/RESOLVED). Indexes on `purl` and `cpe` (partial, WHERE NOT NULL).
+
+**`bom_component_evidence`** — provenance for a component's presence. Fields: `bom_component_id`/`bom_id` (FK, cascade), `evidence_type` (MANIFEST/SCAN/DECLARATION), `evidence_key`/`evidence_value`, `source_system`/`source_reference`.
+
+**`bom_component_vulnerability_links`** — matches a BOM component to a known vulnerability. Fields: `bom_component_id`/`bom_id` (FK, cascade), `vulnerability_key` (CVE/GHSA ID), `vulnerability_source`, `relation_type`, `match_source`, `match_confidence` (0–100), `direct_match`, `correlation_evidence_json`.
+
+**`bom_component_workflows`** — remediation/investigation workflow per component-vulnerability pair. Fields: `bom_component_id`/`vulnerability_link_id` (FK, cascade), `workflow_type` (INVESTIGATION/REMEDIATION), `workflow_status` (DISCOVERED/IN_PROGRESS/RESOLVED/REJECTED), `workflow_reason`, `investigation_key`, `finding_id`, `started_at`/`updated_at`/`closed_at`.
 
 ---
 
@@ -978,9 +1108,12 @@ mvn -q \
   -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
   -Dflyway.user="$USER" \
   -Dflyway.password= \
+  -Dflyway.schemas=tenant_default \
   -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
   flyway:repair
 ```
+
+`-Dflyway.schemas=tenant_default` is required — `flyway_schema_history` lives in `tenant_default`, not `public`. Omitting it silently repairs the wrong table.
 
 ---
 

@@ -2,6 +2,8 @@
 
 This document describes the React/TypeScript frontend for VulnWatch (package name `vulnwatch-frontend`). It is derived entirely from reading the source code in `frontend/src/`.
 
+Last updated: 2026-07-13
+
 ---
 
 ## 1. Tech Stack
@@ -52,6 +54,7 @@ frontend/src/
     software-identities/    SoftwareIdentitySummary, detail, funnel queries
     eol/                    EolSummary, PackageEolStatus, catalog queries
     admin/                  Tenant, PlatformUser, ServiceAccount, AuditEvent, admin queries
+    campaigns/              Remediation campaign types + CampaignDetailPage; API calls inlined (no queries.ts)
     widgets/                DonutChart, HBarChart, WidgetCard SVG components
   lib/
     riskScoring.ts          Pure TS: computeCveRiskScore, computeFindingPriorityScore
@@ -87,30 +90,40 @@ All routes are registered in `src/App.tsx` using React Router v7 nested routes. 
 
 | Path | Page Component | Purpose |
 |---|---|---|
-| `/` | Redirect | Redirects to `/exposure` |
+| `/` | `HomeRoute` (role-based redirect) | → `/exposure`, `/configurations`, or `/platform/tenants` depending on actor role |
 | `/exposure` | `ExposureDashboardPage` | Risk-focused exec overview (Overview tab) |
 | `/findings` | `FindingsPage` | Active findings list with server+client-side filters |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding detail, workflow, and AI remediation |
-| `/operations/:operationsView?` | `OperationalDashboardPage` | Pipeline, Platform Health sub-views (default: `pipeline`) |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; also `platform-health` (older/`quality` keys alias to `pipeline`) |
 | `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
-| `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | Unified Vulnerability Records — CVE Assessment Workbench |
+| `/vuln-repo/org-cves/:cveId?` | `VulnRepoWorkbenchRoute` (`VulnRepoOrgCvePage`) | Unified Vulnerability Records — CVE Assessment Workbench |
 | `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | Vulnerability Intelligence — global CVE feed |
+| `/vuln-repo/intel/:externalId` | `PlatformVulnIntelDetailPage` | Platform-scoped intel detail |
+| `/vuln-repo/campaigns` | `CampaignsPage` | Remediation campaign list |
+| `/vuln-repo/campaigns/:id` | `CampaignDetailPage` | Campaign detail — lifecycle, exceptions, notify groups, watchlist |
+| `/vuln-repo/software-assets` | `VulnRepoSoftwareAssetsPage` | Software-centric asset breakdown |
+| `/vuln-repo/host-assets/:assetId` | `VulnRepoHostAssetRoute` | Host asset detail (vuln-repo context) |
 | `/vuln-repo/org-cves/:cveId/assets` | `VulnRepoCveAssetsPage` | Per-CVE affected asset breakdown |
 | `/vuln-repo/org-cves/:cveId/software` | `VulnRepoCveSoftwarePage` | Per-CVE affected software breakdown |
-| `/inventory/:inventoryView?` | `InventoryPage` (dispatches sub-views) | Default `overview`; also `hosts`, `software-identities`, `container-images`, `sbom` |
-| `/end-of-life` | `EolPage` | EOL status — At Risk tab and Catalog tab |
-| `/connect/:connectView?` | `ConnectPage` | Default `sources`; also `connectors`, `run-history`, `processing-jobs` |
-| `/admin/:adminView?` | `UserManagementPage` | Users, Invites, Support Access, Roles, Service Accounts, Audit |
-| `/platform/:platformView?` | `PlatformConsolePage` | Platform owner console — Tenants, Users, Demo Requests, Support |
-| `/configurations` | `ConfigurationsPage` | SLA, Triage, Automation, Ownership, Vuln Sources, Findings Score, Suppression, Auto-Finding |
-| `/demo` | `DemoPublicPages` | Public demo landing |
-| `/demo/request` | `DemoPublicPages` | Demo request form |
-| `/demo/request/success` | `DemoPublicPages` | Demo request success |
-| `/demo/expired` | `DemoPublicPages` | Demo expiry notice |
-| `/invite/:token` | (public) | Invite accept flow |
+| `/inventory/:inventoryView?` | `InventoryRoute` (dispatches sub-views) | Default `overview` |
+| `/inventory/hosts/:assetId` | `InventoryHostAssetRoute` | Host asset detail |
+| `/inventory/software-identities/:softwareIdentityId` | `SoftwareIdentityDetailRoute` | Software identity detail |
+| `/connect/:connectView?` | `ConnectRoute` (`ConnectPage`) | Default `sources`; also `connectors`, `run-history`, `processing-jobs` |
+| `/admin/:adminView?` | `AdminRoute` (`UserManagementPage`) | Default `users`; Invites, Support Access, Roles, Service Accounts, Audit |
+| `/platform/:platformView?` | `PlatformRoute` (`PlatformConsolePage`) | Default `tenants`; platform owner console |
+| `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; SLA, Triage, Automation, Ownership, Vuln Sources, Findings Score, Suppression, Auto-Finding |
+| `/demo` | `DemoLandingPage` | Public demo landing |
+| `/demo/request` | `DemoRequestPage` | Demo request form |
+| `/demo/request/success` | `DemoRequestSuccessPage` | Demo request success |
+| `/demo/expired` | `DemoExpiredPage` | Demo expiry notice |
+| `/invite/:token` | `DemoInvitePage` (public) | Demo invite accept flow |
+| `/tenant-invite/:token` | `TenantInvitePage` (public) | Tenant invite accept flow |
 | `/login` | `LoginPage` | Login |
+| `*` | Redirect to `/` | Catch-all fallback |
 
-**Legacy redirect:** `LegacyQueryRedirect` in `App.tsx` intercepts old `?tab=inventory&inventoryView=hosts` style URLs and converts them to the equivalent path-based URL via `buildLegacyCompatiblePath()` in `src/app/routes.ts`.
+**`/end-of-life` no longer renders a dedicated `EolPage`.** `EndOfLifeRoute` redirects to `/platform/eol` for platform-scope owners, or `/exposure` otherwise.
+
+**Legacy redirects:** `LegacyQueryRedirect` in `App.tsx` intercepts old `?tab=inventory&inventoryView=hosts` style URLs and converts them via `buildLegacyCompatiblePath()` in `src/app/routes.ts`. Separately, `/vulnerability-intelligence`, `/vulnerability-intelligence/vulnerabilities`, and `/vulnerability-intelligence/org-cves/:cveId?` redirect to their `/vuln-repo/*` equivalents.
 
 ---
 
@@ -309,6 +322,16 @@ Files: `types.ts`, `queries.ts`
 **Types:** `Tenant`, `TenantMember`, `PlatformUser`, `ServiceAccount`, `AuditEvent`, `AuthContext`, `DemoRequest`, `DemoInvite`, `AuthTokenResponse`, `TenantSupportGrant`, `InventoryConnectorHealth`
 
 **Queries and mutations:** `useAuthContextQuery()`, `useTenantMembersQuery()`, `useAddTenantMemberMutation()`, `useTenantSupportGrantsQuery()`, `useCreateTenantSupportGrantMutation()`, `useRevokeTenantSupportGrantMutation()`, `useServiceAccountsQuery()`, `useCreateServiceAccountMutation()`, `useAuditEventsQuery()`, `usePlatformSupportGrantsQuery()`, `useAcceptPlatformSupportGrantMutation()`, `usePlatformInventoryConnectorHealthQuery()`
+
+### campaigns (`src/features/campaigns/`)
+
+Files: `types.ts`, `CampaignDetailPage.tsx` — undocumented until now; a fully shipped feature, not scaffolding.
+
+**Types:** Campaign lifecycle types covering status (`DRAFT`/`ACTIVE`/`PAUSED`/`BLOCKED`/`IN_REVIEW`/`CLOSED`/`CANCELLED`), exceptions, notifications, linked assets/findings, and evidence rows.
+
+**No separate `queries.ts`** — API calls are inlined directly via `api.getCampaign()`, etc., calling `/campaigns`, `/campaigns/{campaignId}`, `/campaigns/{campaignId}/status`, `/campaigns/{campaignId}/exceptions/{exceptionId}/status`, `/campaigns/{campaignId}/notes`, `/campaigns/{campaignId}/notify-groups`, `/campaigns/{campaignId}/watchlist`, and bulk-add endpoints for assets/CVEs/software.
+
+`CampaignDetailPage.tsx` is large (2000+ lines) — lifecycle stage UI, KPI tiles, severity/team accountability breakdowns, AI-powered insights (OpenAI-gated), advisory fetch, and add-assets/add-CVE modals. Routed at `/vuln-repo/campaigns` and `/vuln-repo/campaigns/:id`.
 
 ### widgets (`src/features/widgets/`)
 
@@ -817,7 +840,7 @@ These are different pages backed by different API endpoints — do not confuse t
 
 ### Configurations page sections
 
-8 sections in sidebar order: SLA & Remediation -> S.AI Prioritization (AI badge) -> Workflow Automation -> Ownership -> Vulnerability Sources -> Findings Score -> Suppression Rules -> Auto-Finding Rules. All except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`. Call `applyTriageDefaults()` on API responses to fill missing triage fields for backends that predate the V1062 migration.
+8 sections in sidebar order: SLA & Remediation -> S.AI Prioritization (AI badge) -> Workflow Automation -> Ownership -> Vulnerability Sources -> Findings Score -> Suppression Rules -> Auto-Finding Rules. All except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`. Call `applyTriageDefaults()` on API responses to fill missing triage fields for older backends that predate the 6 triage weight fields.
 
 ### Test infrastructure
 

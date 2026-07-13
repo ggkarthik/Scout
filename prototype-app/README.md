@@ -1,6 +1,6 @@
 # VulnWatch Prototype
 
-Last updated: 2026-07-07
+Last updated: 2026-07-13
 
 VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability intelligence ingestion, deterministic CPE-based correlation, and tenant-scoped finding projection and workflow.
 
@@ -13,7 +13,6 @@ VulnWatch is a Spring Boot + React prototype for SBOM ingestion, vulnerability i
 | [Business Logic Guide](docs/business-logic-guide.md) | Domain concepts, pipeline flows, finding lifecycle, EOL tracking |
 | [Database](docs/database.md) | Schema design, table inventory, migration strategy |
 | [Frontend](docs/frontend.md) | React app structure, routes, components, state management |
-| [Performance Governance Runbook](docs/runbooks/performance-governance.md) | CI/nightly certification flow, runtime roles, rollback gates |
 
 ## Quick Start
 
@@ -76,17 +75,7 @@ sh ./scripts/run-performance-governance.sh
 
 ## Performance Governance
 
-The repository now includes a dedicated GitHub Actions workflow:
-
-- `.github/workflows/performance-governance.yml`
-
-It runs:
-
-- nightly on a schedule
-- on pull requests that touch backend, script, docs, and workflow changes
-- on demand through `workflow_dispatch`
-
-The workflow boots the backend against a Postgres service using the `local` profile, runs the full enterprise certification pass, and uploads the resulting artifacts for review. Demo seeding is off by default and only enabled through explicit manual dispatch input.
+The certification scripts above (`scripts/enterprise-performance-certification.sh`, `scripts/run-performance-governance.sh`, etc.) are runnable locally today. There is **no CI automation for them yet** — no `.github/workflows/` directory exists in this repository, so nightly/PR-triggered governance runs described in earlier drafts of this doc are aspirational, not shipped. Wiring a GitHub Actions workflow around these scripts (nightly schedule + `workflow_dispatch`) is open work, not a documentation gap.
 
 ### Default Local Auth
 
@@ -142,7 +131,7 @@ Notes:
 
 ## Database Setup
 
-The reset-line migration at `backend/src/main/resources/db/migration/postgres_reset/V1__platform_and_default_tenant_schemas.sql` creates the `platform` schema and `tenant_default` schema. Hibernate (in `update` mode, temporary) materializes the full table structure on first start.
+The reset-line migrations (V1 through the current latest, `V41__azure_discovery_targets.sql`) under `backend/src/main/resources/db/migration/postgres_reset/` create the `platform` schema and `tenant_default` schema and own all DDL. `ddl-auto` is `none` — Hibernate does not create or alter tables; new tenant schemas are provisioned by `TenantSchemaService` cloning `tenant_default` (tables, sequences, defaults, foreign keys, and row-level security policies).
 
 If your local `vulnwatch` database has the old shared-schema layout, drop and recreate it before running the reset-line migrations:
 
