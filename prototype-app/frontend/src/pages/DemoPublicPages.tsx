@@ -7,8 +7,6 @@ import { getAuthContextQueryKey } from '../features/auth/queries';
 import { canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
-const SHARED_LOCALHOST_LOGIN_HINTS_ENABLED = typeof window !== 'undefined'
-  && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
 const GRID_CARDS: Array<{
   id: string;
@@ -835,19 +833,12 @@ export function LoginPage() {
         )}
         {!setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
-            <label>Email or username<input type="text" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <label>Email<input type="text" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
             <button className="btn btn-primary" type="submit" disabled={loginMutation.isPending || !email.trim() || !password.trim()}>
               {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
-        )}
-        {!setupToken && SHARED_LOCALHOST_LOGIN_HINTS_ENABLED && (
-          <div className="notice success" aria-label="Shared localhost credentials">
-            Localhost shared login:
-            {' '}tenant admin <strong>admin</strong> / <strong>admin</strong>.
-            {' '}Platform owners must use their email-specific password setup link first.
-          </div>
         )}
         {setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
