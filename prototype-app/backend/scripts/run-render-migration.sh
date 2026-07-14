@@ -19,7 +19,8 @@ export APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED=false
 export APP_TEST_PERSONAS_ENABLED=false
 
 java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
-  --spring.main.web-application-type=none
+  --spring.main.web-application-type=none \
+  --spring.main.lazy-initialization=true
 
 PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
   --host "$MIGRATION_DB_HOST" \
