@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import java.util.List;
+import java.util.Map;
 
 @Component
 public class ProductionSafetyValidator {
@@ -68,6 +70,9 @@ public class ProductionSafetyValidator {
         validateLegacyPlatformOwnerCredentialsAreUnused();
         validatePlatformOwnerBootstrapConfiguration();
         if (!requireProductionSecrets) {
+            if (validateRlsRuntimeRole) {
+                validateRuntimeRoleCannotBypassRls();
+            }
             return;
         }
         if (allowApiKeyAuth) {
@@ -95,9 +100,7 @@ public class ProductionSafetyValidator {
         if (testPersonasEnabled) {
             throw new IllegalStateException("APP_TEST_PERSONAS_ENABLED must be false for production startup.");
         }
-        if (validateRlsRuntimeRole) {
-            validateRuntimeRoleCannotBypassRls();
-        }
+        validateRuntimeRoleCannotBypassRls();
     }
 
     private void validatePlatformOwnerBootstrapConfiguration() {
@@ -164,7 +167,7 @@ public class ProductionSafetyValidator {
                     from pg_class c
                     join pg_namespace n on n.oid = c.relnamespace
                     join pg_roles r on r.oid = c.relowner
-                    where n.nspname in ('tenant_default', 'platform')
+                    where (n.nspname = 'platform' or n.nspname = 'tenant_default' or n.nspname ~ '^tenant_')
                       and c.relkind in ('r', 'p')
                       and r.rolname = current_user
                 )
@@ -172,6 +175,102 @@ public class ProductionSafetyValidator {
         if (Boolean.TRUE.equals(ownsTenantTables)) {
             throw new IllegalStateException("Production DB runtime role must not own tenant/platform tables protected by RLS.");
         }
+        Boolean canCreateInProtectedSchemas = platformJdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from pg_namespace n
+                    where (n.nspname = 'platform' or n.nspname = 'tenant_default' or n.nspname ~ '^tenant_')
+                      and has_schema_privilege(current_user, n.oid, 'CREATE')
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(canCreateInProtectedSchemas)) {
+            throw new IllegalStateException("Production DB runtime role must not have CREATE on platform or tenant schemas.");
+        }
+        Boolean canAssumeUnsafeRole = platformJdbcTemplate.queryForObject("""
+                with recursive memberships(roleid) as (
+                    select m.roleid
+                    from pg_auth_members m
+                    join pg_roles me on me.oid = m.member
+                    where me.rolname = current_user
+                    union
+                    select m.roleid
+                    from pg_auth_members m
+                    join memberships inherited on inherited.roleid = m.member
+                )
+                select exists (
+                    select 1 from memberships m
+                    join pg_roles r on r.oid = m.roleid
+                    where r.rolsuper or r.rolbypassrls
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(canAssumeUnsafeRole)) {
+            throw new IllegalStateException("Production DB runtime role must not inherit or assume a superuser/BYPASSRLS role.");
+        }
+        Boolean incompleteRls = platformJdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from platform.tenants t
+                    join pg_namespace n on n.nspname = t.schema_name
+                    join pg_class c on c.relnamespace = n.oid and c.relkind in ('r', 'p')
+                    where c.relname not in ('tenant_schema_history', 'flyway_schema_history')
+                      and (
+                          not c.relrowsecurity
+                          or not c.relforcerowsecurity
+                          or not exists (
+                              select 1 from pg_policy p
+                              where p.polrelid = c.oid and p.polname = 'tenant_isolation'
+                          )
+                      )
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(incompleteRls)) {
+            throw new IllegalStateException("Production startup rejected: tenant RLS coverage is incomplete.");
+        }
+        Boolean conflictingRows = platformJdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from platform.tenants t
+                    left join platform.tenant_schema_versions v on v.tenant_id = t.id
+                    where t.status = 'ACTIVE'
+                      and (v.tenant_id is null or v.status <> 'CURRENT' or v.current_version < 42)
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(conflictingRows)) {
+            throw new IllegalStateException("Production startup rejected: one or more tenant schemas are not current.");
+        }
+        validateRegisteredTenantRows();
+    }
+
+    private void validateRegisteredTenantRows() {
+        List<Map<String, Object>> schemas = platformJdbcTemplate.queryForList("""
+                select id, schema_name from platform.tenants where status = 'ACTIVE'
+                """);
+        for (Map<String, Object> tenant : schemas) {
+            String schema = String.valueOf(tenant.get("schema_name"));
+            String tenantId = String.valueOf(tenant.get("id"));
+            List<String> tables = platformJdbcTemplate.queryForList("""
+                    select table_name
+                    from information_schema.columns
+                    where table_schema = ? and column_name = 'tenant_id'
+                      and table_name not in ('tenant_schema_history', 'flyway_schema_history')
+                    order by table_name
+                    """, String.class, schema);
+            for (String table : tables) {
+                Long conflicts = platformJdbcTemplate.queryForObject(
+                        "select count(*) from " + quoteIdentifier(schema) + "." + quoteIdentifier(table)
+                                + " where tenant_id is not null and tenant_id <> ?::uuid",
+                        Long.class,
+                        tenantId);
+                if (conflicts != null && conflicts > 0) {
+                    throw new IllegalStateException(
+                            "Production startup rejected: conflicting tenant rows in " + schema + "." + table);
+                }
+            }
+        }
+    }
+
+    private String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     private boolean hasStrongValue(String value) {

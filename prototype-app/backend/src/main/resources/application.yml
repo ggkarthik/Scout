@@ -2,7 +2,7 @@ spring:
   application:
     name: vulnwatch-backend
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/vulnwatch}
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:vulnwatch}}
     username: ${DB_USERNAME:${USER:postgres}}
     password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
@@ -39,6 +39,9 @@ spring:
       max-request-size: 50MB
 
 app:
+  schema-migration:
+    enabled: ${APP_SCHEMA_MIGRATION_ENABLED:false}
+    report-only: ${APP_SCHEMA_MIGRATION_REPORT_ONLY:false}
   features:
     vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
     vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
@@ -46,10 +49,10 @@ app:
     vex-rollout-backfill-enabled: ${FEATURE_VEX_ROLLOUT_BACKFILL_ENABLED:true}
     software-model-enabled: ${FEATURE_SOFTWARE_MODEL_ENABLED:false}
   security:
-    api-key: ${APP_API_KEY:change-me-in-prod}
+    api-key: ${APP_API_KEY:}
     creator-key: ${APP_CREATOR_KEY:}
     allow-api-key-auth: ${APP_ALLOW_API_KEY_AUTH:true}
-    credential-encryption-key: ${APP_CREDENTIAL_ENCRYPTION_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+    credential-encryption-key: ${APP_CREDENTIAL_ENCRYPTION_KEY:}
     default-user-id: ${APP_DEFAULT_USER_ID:local-analyst}
     require-production-secrets: ${APP_REQUIRE_PRODUCTION_SECRETS:false}
     jwt:
@@ -69,6 +72,10 @@ app:
       platform-owners:
         enabled: ${APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED:false}
         users: []
+    local-auth:
+      shared-localhost-login-enabled: ${APP_SHARED_LOCALHOST_LOGIN_ENABLED:false}
+      shared-localhost-tenant-admin-email: ${APP_SHARED_LOCALHOST_TENANT_ADMIN_EMAIL:}
+      shared-localhost-tenant-admin-password-hash: ${APP_SHARED_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH:}
     headers:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}
@@ -76,6 +83,8 @@ app:
     allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:false}
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
+    enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:42}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}

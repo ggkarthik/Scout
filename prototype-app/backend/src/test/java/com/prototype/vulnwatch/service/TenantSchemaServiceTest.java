@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,11 +31,13 @@ class TenantSchemaServiceTest {
     void ensureSchemaExistsProvisionsEachSchemaOnlyOncePerProcess() {
         when(platformJdbcTemplate.queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString()))
                 .thenReturn(List.of());
+        when(platformJdbcTemplate.queryForObject(anyString(), eq(Boolean.class), anyString()))
+                .thenReturn(false, true, true);
 
         service.ensureSchemaExists("tenant_acme");
         service.ensureSchemaExists("tenant_acme");
 
-        verify(platformJdbcTemplate, times(1)).execute("CREATE SCHEMA IF NOT EXISTS \"tenant_acme\"");
+        verify(platformJdbcTemplate, times(1)).execute("CREATE SCHEMA \"tenant_acme\"");
         verify(platformJdbcTemplate, times(1))
                 .queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString());
     }

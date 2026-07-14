@@ -61,8 +61,8 @@ class TenantBootstrapServiceTest {
 
         service.ensureBootstrapTenant();
 
-        verify(tenantSchemaService, times(2)).ensureSchemaExists("tenant_default");
+        verify(tenantSchemaService, times(2)).assertSchemaReady("tenant_default");
         verify(tenantRepository, times(2)).save(any(Tenant.class));
-        verify(tenantSchemaService).ensureSchemaExists("tenant_gm_test_platform");
+        verify(tenantSchemaService).assertSchemaReady("tenant_gm_test_platform");
     }
 }

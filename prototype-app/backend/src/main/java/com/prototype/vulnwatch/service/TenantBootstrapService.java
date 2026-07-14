@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,9 +23,10 @@ public class TenantBootstrapService {
     }
 
     @EventListener(ApplicationReadyEvent.class)
+    @Order(0)
     public void ensureBootstrapTenant() {
         TenantContext.runAsPlatform(() -> {
-            tenantSchemaService.ensureSchemaExists(tenantSchemaService.defaultSchemaName());
+            tenantSchemaService.assertSchemaReady(tenantSchemaService.defaultSchemaName());
 
             Tenant defaultTenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
                     .orElseGet(() -> {
@@ -52,7 +54,7 @@ public class TenantBootstrapService {
                     tenant.setUpdatedAt(Instant.now());
                     tenantRepository.save(tenant);
                 }
-                tenantSchemaService.ensureSchemaExists(tenant.getSchemaName());
+                tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
             }
 
             if (changed) {
