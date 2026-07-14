@@ -5,3 +5,19 @@ useDefault = true
 
 # Exceptions must be path-and-rule scoped and documented in the pull request.
 # Do not suppress a detected secret by value.
+
+[[allowlists]]
+description = "Public Auth0 client identifiers in checked-in MCP and frontend documentation"
+rules = ["generic-api-key"]
+paths = [
+  '''^\.mcp\.json$''',
+  '''^prototype-app/docs/frontend\.md$'''
+]
+
+[[allowlists]]
+description = "Synthetic JWT fixtures used only by isolated automated tests"
+rules = ["generic-api-key"]
+paths = [
+  '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/controller/TenantDeletionPostgresIntegrationTest\.java$''',
+  '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/service/TestPersonaServiceTest\.java$'''
+]
