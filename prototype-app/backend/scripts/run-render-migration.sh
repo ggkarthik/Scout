@@ -38,19 +38,38 @@ trap 'kill "$maintenance_listener_pid" 2>/dev/null || true' EXIT
 
 success_file=/tmp/scout-schema-migration-success
 rm -f "$success_file"
-set +e
-java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
-  --spring.main.web-application-type=none \
-  --spring.main.lazy-initialization=true
-java_status=$?
-set -e
+if PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
+  --host "$MIGRATION_DB_HOST" \
+  --port "$MIGRATION_DB_PORT" \
+  --dbname "$MIGRATION_DB_NAME" \
+  --username "$MIGRATION_DB_USERNAME" \
+  --set ON_ERROR_STOP=1 \
+  --file /app/scripts/verify-tenant-migration.sql; then
+  echo "migration_resume_status=verified"
+else
+  echo "migration_resume_status=not_verified action=run_migrator"
+  set +e
+  java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
+    --spring.main.web-application-type=none \
+    --spring.main.lazy-initialization=true
+  java_status=$?
+  set -e
 
-if [ ! -s "$success_file" ]; then
-  if [ "$java_status" -eq 0 ]; then
-    java_status=1
+  if [ ! -s "$success_file" ]; then
+    if [ "$java_status" -eq 0 ]; then
+      java_status=1
+    fi
+    echo "migration_job_status=failed phase=tenant_migration java_status=${java_status}" >&2
+    exit "$java_status"
   fi
-  echo "migration_job_status=failed phase=tenant_migration java_status=${java_status}" >&2
-  exit "$java_status"
+
+  PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
+    --host "$MIGRATION_DB_HOST" \
+    --port "$MIGRATION_DB_PORT" \
+    --dbname "$MIGRATION_DB_NAME" \
+    --username "$MIGRATION_DB_USERNAME" \
+    --set ON_ERROR_STOP=1 \
+    --file /app/scripts/verify-tenant-migration.sql
 fi
 
 PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
