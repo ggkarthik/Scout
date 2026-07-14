@@ -2,7 +2,7 @@ spring:
   application:
     name: vulnwatch-backend
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/vulnwatch}
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:vulnwatch}}
     username: ${DB_USERNAME:${USER:postgres}}
     password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
