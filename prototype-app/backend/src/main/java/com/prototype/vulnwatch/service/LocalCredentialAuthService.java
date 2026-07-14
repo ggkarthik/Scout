@@ -27,11 +27,6 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class LocalCredentialAuthService {
 
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL = "admin";
-    private static final String LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL = "tenant.admin@localhost";
-    private static final String DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$LSEEjYNaUt8ozIDh1DHRiO2syFb/bSAlCtQbe3gN3lYJMCjgOpJje";
-    private static final String LEGACY_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH = "$2a$10$6cfZYpOkQxrSl3.YCGYTPutGAORvx.ywRJmp7EkD9SYO5LLvqrhaO";
-
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
@@ -56,7 +51,7 @@ public class LocalCredentialAuthService {
             AppUserGlobalRoleService appUserGlobalRoleService,
             AuditEventService auditEventService,
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
-            @Value("${app.security.local-auth.shared-localhost-login-enabled:true}") boolean sharedLocalhostLoginEnabled,
+            @Value("${app.security.local-auth.shared-localhost-login-enabled:false}") boolean sharedLocalhostLoginEnabled,
             @Value("${app.security.local-auth.shared-localhost-tenant-admin-email:}") String sharedLocalhostTenantAdminEmail,
             @Value("${app.security.local-auth.shared-localhost-tenant-admin-password-hash:}") String sharedLocalhostTenantAdminPasswordHash,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins
@@ -71,14 +66,10 @@ public class LocalCredentialAuthService {
         this.auditEventService = auditEventService;
         this.requireProductionSecrets = requireProductionSecrets;
         this.sharedLocalhostLoginEnabled = sharedLocalhostLoginEnabled;
-        this.sharedLocalhostTenantAdminEmail = defaultIfBlank(
-                sharedLocalhostTenantAdminEmail,
-                DEFAULT_LOCALHOST_TENANT_ADMIN_EMAIL
-        );
-        this.sharedLocalhostTenantAdminPasswordHash = defaultIfBlank(
-                sharedLocalhostTenantAdminPasswordHash,
-                DEFAULT_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH
-        );
+        this.sharedLocalhostTenantAdminEmail = sharedLocalhostTenantAdminEmail == null
+                ? "" : sharedLocalhostTenantAdminEmail.trim();
+        this.sharedLocalhostTenantAdminPasswordHash = sharedLocalhostTenantAdminPasswordHash == null
+                ? "" : sharedLocalhostTenantAdminPasswordHash.trim();
         this.sharedLocalhostEnvironment = detectSharedLocalhostEnvironment(corsAllowedOrigins);
     }
 
@@ -96,9 +87,8 @@ public class LocalCredentialAuthService {
         }
 
         if (matchesSharedLocalhostTenantAdmin(normalizedEmail)) {
-            String passwordHash = resolveSharedLocalhostTenantAdminPasswordHash(normalizedEmail);
-            verifyPassword(rawPassword, passwordHash);
-            return loginSharedLocalhostTenantAdmin(normalizedEmail, passwordHash);
+            verifyPassword(rawPassword, sharedLocalhostTenantAdminPasswordHash);
+            return loginSharedLocalhostTenantAdmin(normalizedEmail, sharedLocalhostTenantAdminPasswordHash);
         }
 
         if (user == null) {
@@ -273,15 +263,9 @@ public class LocalCredentialAuthService {
 
     private boolean matchesSharedLocalhostTenantAdmin(String email) {
         return sharedLocalhostEnvironment
-                && (sharedLocalhostTenantAdminEmail.equalsIgnoreCase(email)
-                || LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL.equalsIgnoreCase(email));
-    }
-
-    private String resolveSharedLocalhostTenantAdminPasswordHash(String email) {
-        if (LEGACY_LOCALHOST_TENANT_ADMIN_EMAIL.equalsIgnoreCase(email)) {
-            return LEGACY_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH;
-        }
-        return sharedLocalhostTenantAdminPasswordHash;
+                && hasText(sharedLocalhostTenantAdminEmail)
+                && hasText(sharedLocalhostTenantAdminPasswordHash)
+                && sharedLocalhostTenantAdminEmail.equalsIgnoreCase(email);
     }
 
     private boolean detectSharedLocalhostEnvironment(String corsAllowedOrigins) {
@@ -328,10 +312,6 @@ public class LocalCredentialAuthService {
         AppUser user = new AppUser();
         user.setExternalSubject(externalSubject);
         return user;
-    }
-
-    private String defaultIfBlank(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value.trim();
     }
 
     private boolean hasText(String value) {

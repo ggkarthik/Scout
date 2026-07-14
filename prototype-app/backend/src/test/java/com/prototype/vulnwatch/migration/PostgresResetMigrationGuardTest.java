@@ -37,7 +37,7 @@ class PostgresResetMigrationGuardTest {
     }
 
     private boolean isDriftProne(Path path, String sql) {
-        if (usesAllSchemaLoop(sql) || approvedFlywayPerSchema(sql)) {
+        if (usesAllSchemaLoop(sql) || approvedFlywayPerSchema(sql) || platformOnly(sql)) {
             return false;
         }
         return TENANT_DEFAULT_DDL.matcher(sql).find() || UNQUALIFIED_TENANT_DDL.matcher(sql).find();
@@ -52,6 +52,10 @@ class PostgresResetMigrationGuardTest {
 
     private boolean approvedFlywayPerSchema(String sql) {
         return sql.contains("migration-guard: flyway-per-schema");
+    }
+
+    private boolean platformOnly(String sql) {
+        return sql.contains("migration-guard: platform-only") && !sql.contains("tenant_default.");
     }
 
     private int migrationVersion(Path path) {

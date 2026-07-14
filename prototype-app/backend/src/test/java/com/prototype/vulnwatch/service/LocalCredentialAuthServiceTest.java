@@ -364,6 +364,7 @@ class LocalCredentialAuthServiceTest {
 
     @Test
     void localhostSharedTenantAdminLoginBootstrapsDefaultWorkspaceMembership() {
+        String configuredPasswordHash = BCrypt.hashpw("LocalDevTenant123!", BCrypt.gensalt(10));
         Tenant tenant = tenant("Default Workspace");
         AppUser user = new AppUser();
         user.setExternalSubject("tenant.admin@localhost");
@@ -391,8 +392,8 @@ class LocalCredentialAuthServiceTest {
                 auditEventService,
                 false,
                 true,
-                "",
-                "",
+                "tenant.admin@localhost",
+                configuredPasswordHash,
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 

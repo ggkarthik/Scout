@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.support;
 
+import java.util.Base64;
 import org.springframework.test.context.DynamicPropertyRegistry;
 
 /**
@@ -38,5 +39,7 @@ public final class PostgresITSupport {
         registry.add("DB_URL", database::url);
         registry.add("DB_USERNAME", database::username);
         registry.add("DB_PASSWORD", database::password);
+        registry.add("APP_CREDENTIAL_ENCRYPTION_KEY",
+                () -> Base64.getEncoder().encodeToString(new byte[32]));
     }
 }

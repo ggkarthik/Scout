@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import java.sql.ResultSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +22,12 @@ public class TenantSchemaService {
     private final String defaultSchemaName;
     private final ConcurrentMap<String, Object> schemaProvisionLocks = new ConcurrentHashMap<>();
     private final Set<String> provisionedSchemas = ConcurrentHashMap.newKeySet();
+
+    @Value("${app.tenancy.enforce-schema-version:false}")
+    private boolean enforceSchemaVersion;
+
+    @Value("${app.tenancy.minimum-compatible-schema-version:42}")
+    private int minimumCompatibleSchemaVersion;
 
     public TenantSchemaService(
             @Qualifier("platformJdbcTemplate") JdbcTemplate platformJdbcTemplate,
@@ -53,6 +60,7 @@ public class TenantSchemaService {
     public void ensureSchemaExists(String schemaName) {
         String normalized = sanitizeSchemaName(schemaName);
         if (provisionedSchemas.contains(normalized)) {
+            assertSchemaReady(normalized);
             return;
         }
         Object lock = schemaProvisionLocks.computeIfAbsent(normalized, ignored -> new Object());
@@ -60,10 +68,109 @@ public class TenantSchemaService {
             if (provisionedSchemas.contains(normalized)) {
                 return;
             }
-            platformJdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS " + quotedIdentifier(normalized));
-            provisionTenantSchema(normalized);
+            if (!schemaExists(normalized)) {
+                platformJdbcTemplate.execute("CREATE SCHEMA " + quotedIdentifier(normalized));
+                provisionTenantSchema(normalized);
+            }
+            assertSchemaReady(normalized);
             provisionedSchemas.add(normalized);
         }
+    }
+
+    public boolean schemaExists(String schemaName) {
+        Boolean exists = platformJdbcTemplate.queryForObject(
+                "select exists (select 1 from pg_namespace where nspname = ?)",
+                Boolean.class,
+                sanitizeSchemaName(schemaName));
+        return Boolean.TRUE.equals(exists);
+    }
+
+    /** Verifies availability only. Ordinary request paths must never perform tenant DDL. */
+    public void assertSchemaReady(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (!schemaExists(normalized)) {
+            throw new IllegalStateException("Tenant schema is not provisioned: " + normalized);
+        }
+        if (!enforceSchemaVersion) {
+            return;
+        }
+        Integer currentVersion = platformJdbcTemplate.queryForObject("""
+                select current_version
+                from platform.tenant_schema_versions
+                where schema_name = ? and status = 'CURRENT'
+                """, Integer.class, normalized);
+        if (currentVersion == null || currentVersion < minimumCompatibleSchemaVersion) {
+            throw new IllegalStateException("Tenant schema is not at the minimum compatible version: " + normalized);
+        }
+    }
+
+    /**
+     * Repairs additive drift only. Incompatible type/nullability/default changes are
+     * detected by the control plane fingerprint and require an operator decision.
+     */
+    public void reconcileSafeDifferences(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (defaultSchemaName.equals(normalized)) {
+            return;
+        }
+        platformJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            try (var statement = connection.createStatement()) {
+                for (String tableName : tenantTableNames(defaultSchemaName)) {
+                    statement.execute("""
+                            CREATE TABLE IF NOT EXISTS %s.%s
+                            (LIKE %s.%s INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING INDEXES INCLUDING STORAGE INCLUDING COMMENTS)
+                            """.formatted(
+                            quotedIdentifier(normalized), quotedIdentifier(tableName),
+                            quotedIdentifier(defaultSchemaName), quotedIdentifier(tableName)));
+                }
+                for (SequenceDefinition sequence : tenantSequenceDefinitions(defaultSchemaName)) {
+                    statement.execute(createSequenceSql(normalized, sequence));
+                }
+            }
+            return null;
+        });
+        List<MissingColumnDefinition> missingColumns = platformJdbcTemplate.query("""
+                select source.table_name,
+                       source.column_name,
+                       source.data_type,
+                       source.column_default,
+                       source.is_nullable
+                from (
+                    select c.table_name,
+                           c.column_name,
+                           format_type(a.atttypid, a.atttypmod) as data_type,
+                           c.column_default,
+                           c.is_nullable
+                    from information_schema.columns c
+                    join pg_namespace n on n.nspname = c.table_schema
+                    join pg_class cl on cl.relnamespace = n.oid and cl.relname = c.table_name
+                    join pg_attribute a on a.attrelid = cl.oid and a.attname = c.column_name
+                    where c.table_schema = ? and a.attnum > 0 and not a.attisdropped
+                ) source
+                left join information_schema.columns target
+                  on target.table_schema = ?
+                 and target.table_name = source.table_name
+                 and target.column_name = source.column_name
+                where target.column_name is null
+                  and source.table_name not in ('tenant_schema_history', 'flyway_schema_history')
+                order by source.table_name, source.column_name
+                """, (rs, rowNum) -> new MissingColumnDefinition(
+                rs.getString("table_name"),
+                rs.getString("column_name"),
+                rs.getString("data_type"),
+                rs.getString("column_default"),
+                "YES".equalsIgnoreCase(rs.getString("is_nullable"))
+        ), defaultSchemaName, normalized);
+        for (MissingColumnDefinition column : missingColumns) {
+            String defaultClause = column.defaultExpression() == null ? ""
+                    : " DEFAULT " + rewrittenDefaultExpression(normalized, column.defaultExpression());
+            String nullClause = column.nullable() ? "" : " NOT NULL";
+            platformJdbcTemplate.execute("ALTER TABLE " + quotedIdentifier(normalized) + "."
+                    + quotedIdentifier(column.tableName()) + " ADD COLUMN IF NOT EXISTS "
+                    + quotedIdentifier(column.columnName()) + " " + column.dataType()
+                    + defaultClause + nullClause);
+        }
+        provisionTenantSchema(normalized);
     }
 
     public void resetTenantSchema(String schemaName) {
@@ -73,6 +180,31 @@ public class TenantSchemaService {
         }
         dropTenantSchema(normalized);
         ensureSchemaExists(normalized);
+    }
+
+    public void provisionSchemaFromTemplate(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (schemaExists(normalized)) {
+            throw new IllegalStateException("Tenant schema already exists: " + normalized);
+        }
+        platformJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            try (var lock = connection.prepareStatement("select pg_advisory_lock(hashtext(?))")) {
+                lock.setString(1, "tenant-provision:" + normalized);
+                lock.execute();
+            }
+            try {
+                if (!schemaExists(normalized)) {
+                    platformJdbcTemplate.execute("CREATE SCHEMA " + quotedIdentifier(normalized));
+                    provisionTenantSchema(normalized);
+                }
+            } finally {
+                try (var unlock = connection.prepareStatement("select pg_advisory_unlock(hashtext(?))")) {
+                    unlock.setString(1, "tenant-provision:" + normalized);
+                    unlock.execute();
+                }
+            }
+            return null;
+        });
     }
 
     public void dropTenantSchema(String schemaName) {
@@ -104,8 +236,17 @@ public class TenantSchemaService {
         List<SequenceDefinition> sourceSequences = tenantSequenceDefinitions(defaultSchemaName);
         List<ColumnDefaultDefinition> sourceDefaults = columnDefaults(defaultSchemaName);
         List<ForeignKeyDefinition> sourceForeignKeys = foreignKeys(defaultSchemaName);
+        List<TableConstraintDefinition> sourceTableConstraints = tableConstraints(defaultSchemaName);
+        List<IndexDefinition> sourceIndexes = standaloneIndexes(defaultSchemaName);
+        Set<String> existingTargetTables = new HashSet<>(tenantTableNames(targetSchema));
         Set<String> targetForeignKeyNames = foreignKeys(targetSchema).stream()
                 .map(ForeignKeyDefinition::constraintName)
+                .collect(Collectors.toSet());
+        Set<String> targetConstraintDefinitions = tableConstraints(targetSchema).stream()
+                .map(constraint -> constraint.tableName() + "|" + constraint.definition())
+                .collect(Collectors.toSet());
+        Set<String> targetIndexNames = standaloneIndexes(targetSchema).stream()
+                .map(IndexDefinition::indexName)
                 .collect(Collectors.toSet());
 
         platformJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
@@ -158,6 +299,31 @@ public class TenantSchemaService {
                     ));
                 }
 
+                for (TableConstraintDefinition constraint : sourceTableConstraints) {
+                    // CREATE TABLE LIKE already copied constraints for tables created above.
+                    // Only reconcile constraints on tables that existed before this pass.
+                    if (!existingTargetTables.contains(constraint.tableName())) {
+                        continue;
+                    }
+                    if (targetConstraintDefinitions.contains(constraint.tableName() + "|" + constraint.definition())) {
+                        continue;
+                    }
+                    statement.execute("ALTER TABLE " + quotedIdentifier(targetSchema) + "."
+                            + quotedIdentifier(constraint.tableName()) + " ADD CONSTRAINT "
+                            + quotedIdentifier(constraint.constraintName()) + " " + constraint.definition());
+                }
+
+                for (IndexDefinition index : sourceIndexes) {
+                    // CREATE TABLE LIKE INCLUDING INDEXES already copied indexes for new tables.
+                    if (!existingTargetTables.contains(index.tableName())) {
+                        continue;
+                    }
+                    if (targetIndexNames.contains(index.indexName())) {
+                        continue;
+                    }
+                    statement.execute(rewriteIndexDefinition(targetSchema, index.definition()));
+                }
+
                 for (String tableName : rlsProtectedTenantTableNames(defaultSchemaName)) {
                     statement.execute("""
                             ALTER TABLE %s.%s ENABLE ROW LEVEL SECURITY
@@ -196,7 +362,7 @@ public class TenantSchemaService {
                 SELECT tablename
                 FROM pg_tables
                 WHERE schemaname = ?
-                  AND tablename NOT IN ('flyway_schema_history', 'sync_runs')
+                  AND tablename NOT IN ('flyway_schema_history', 'tenant_schema_history', 'sync_runs')
                 ORDER BY tablename
                 """, String.class, schemaName);
     }
@@ -241,6 +407,42 @@ public class TenantSchemaService {
                   AND con.contype = 'f'
                 ORDER BY rel.relname, con.conname
                 """, foreignKeyMapper(), schemaName);
+    }
+
+    private List<TableConstraintDefinition> tableConstraints(String schemaName) {
+        return platformJdbcTemplate.query("""
+                SELECT rel.relname AS table_name,
+                       con.conname AS constraint_name,
+                       pg_get_constraintdef(con.oid) AS definition
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                WHERE nsp.nspname = ? AND con.contype IN ('p', 'u')
+                ORDER BY rel.relname, con.conname
+                """, (rs, rowNum) -> new TableConstraintDefinition(
+                rs.getString("table_name"),
+                rs.getString("constraint_name"),
+                rs.getString("definition")
+        ), schemaName);
+    }
+
+    private List<IndexDefinition> standaloneIndexes(String schemaName) {
+        return platformJdbcTemplate.query("""
+                SELECT tab.relname AS table_name,
+                       idx.relname AS index_name,
+                       pg_get_indexdef(idx.oid) AS definition
+                FROM pg_index i
+                JOIN pg_class idx ON idx.oid = i.indexrelid
+                JOIN pg_class tab ON tab.oid = i.indrelid
+                JOIN pg_namespace nsp ON nsp.oid = tab.relnamespace
+                WHERE nsp.nspname = ?
+                  AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = idx.oid)
+                ORDER BY idx.relname
+                """, (rs, rowNum) -> new IndexDefinition(
+                rs.getString("table_name"),
+                rs.getString("index_name"),
+                rs.getString("definition")
+        ), schemaName);
     }
 
     private RowMapper<SequenceDefinition> sequenceDefinitionMapper() {
@@ -306,6 +508,12 @@ public class TenantSchemaService {
                         "REFERENCES " + quotedIdentifier(targetSchema) + ".");
     }
 
+    private String rewriteIndexDefinition(String targetSchema, String definition) {
+        return definition
+                .replace(" ON " + defaultSchemaName + ".", " ON " + quotedIdentifier(targetSchema) + ".")
+                .replace(" ON " + quotedIdentifier(defaultSchemaName) + ".", " ON " + quotedIdentifier(targetSchema) + ".");
+    }
+
     private String quotedIdentifier(String value) {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
@@ -325,5 +533,20 @@ public class TenantSchemaService {
     }
 
     private record ForeignKeyDefinition(String tableName, String constraintName, String definition) {
+    }
+
+    private record TableConstraintDefinition(String tableName, String constraintName, String definition) {
+    }
+
+    private record IndexDefinition(String tableName, String indexName, String definition) {
+    }
+
+    private record MissingColumnDefinition(
+            String tableName,
+            String columnName,
+            String dataType,
+            String defaultExpression,
+            boolean nullable
+    ) {
     }
 }

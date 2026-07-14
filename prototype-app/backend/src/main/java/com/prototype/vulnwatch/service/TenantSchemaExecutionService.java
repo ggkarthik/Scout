@@ -52,7 +52,7 @@ public class TenantSchemaExecutionService {
             resolved = tenantService.resolveTenantUuid(tenant.getId());
         }
         String schemaName = tenantSchemaService.schemaNameForTenant(resolved);
-        tenantSchemaService.ensureSchemaExists(schemaName);
+        tenantSchemaService.assertSchemaReady(schemaName);
         return run(tenant.getId(), schemaName, supplier);
     }
 
@@ -63,7 +63,7 @@ public class TenantSchemaExecutionService {
         }
         Tenant tenant = tenantService.resolveTenantUuid(tenantId);
         String schemaName = tenantSchemaService.schemaNameForTenant(tenant);
-        tenantSchemaService.ensureSchemaExists(schemaName);
+        tenantSchemaService.assertSchemaReady(schemaName);
         return run(tenantId, schemaName, supplier);
     }
 

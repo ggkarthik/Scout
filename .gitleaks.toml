@@ -1,0 +1,7 @@
+title = "Scout secret scanning"
+
+[extend]
+useDefault = true
+
+# Exceptions must be path-and-rule scoped and documented in the pull request.
+# Do not suppress a detected secret by value.

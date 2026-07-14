@@ -6,6 +6,7 @@ prototype-app/backend/data/
 prototype-app/backend/secrets/
 prototype-app/backend/.env
 prototype-app/backend/.env.*
+!prototype-app/backend/.env.example
 prototype-app/backend/src/main/resources/application-local.yml
 prototype-app/frontend/.env
 prototype-app/frontend/.env.*

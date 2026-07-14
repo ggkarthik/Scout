@@ -8,6 +8,16 @@ on:
       - master
 
 jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -40,6 +50,37 @@ jobs:
           cache: maven
       - run: mvn -q verify
 
+  backend-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: prototype-app/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - run: >-
+          mvn -q -Ppostgres-it
+          -Dpostgres.test.username=postgres
+          -Dpostgres.test.password=postgres
+          verify
+
   docs-check:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -62,6 +103,7 @@ jobs:
     needs:
       - frontend
       - backend
+      - backend-postgres
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image

@@ -26,8 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthTokenService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String LOCALHOST_FALLBACK_HMAC_SECRET = "localhost-dev-hmac-secret-32-bytes";
-
     private final String hmacSecret;
     private final long tokenTtlMinutes;
     private final String activeTenantIdClaim;
@@ -41,7 +39,7 @@ public class AuthTokenService {
             @Value("${app.security.jwt.token-ttl-minutes:480}") long tokenTtlMinutes,
             @Value("${app.security.jwt.active-tenant-id-claim:active_tenant_id}") String activeTenantIdClaim,
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
-            @Value("${app.security.local-auth.shared-localhost-login-enabled:true}") boolean sharedLocalhostLoginEnabled,
+            @Value("${app.security.local-auth.shared-localhost-login-enabled:false}") boolean sharedLocalhostLoginEnabled,
             @Value("${app.cors.allowed-origins:}") String corsAllowedOrigins
     ) {
         this.hmacSecret = hmacSecret;
@@ -121,7 +119,7 @@ public class AuthTokenService {
         if (hmacSecret != null && !hmacSecret.isBlank()) {
             return hmacSecret;
         }
-        return isSharedLocalhostEnvironment() ? LOCALHOST_FALLBACK_HMAC_SECRET : "";
+        return "";
     }
 
     private boolean isSharedLocalhostEnvironment() {

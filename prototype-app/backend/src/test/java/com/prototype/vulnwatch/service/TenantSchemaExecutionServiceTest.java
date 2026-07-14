@@ -56,7 +56,7 @@ class TenantSchemaExecutionServiceTest {
 
         assertThat(result).isEqualTo("ok");
         verify(tenantSchemaService).schemaNameForTenant(tenant);
-        verify(tenantSchemaService).ensureSchemaExists("tenant_acme");
+        verify(tenantSchemaService).assertSchemaReady("tenant_acme");
         verify(tenantService, never()).resolveTenantUuid(tenantId);
     }
 
@@ -79,7 +79,7 @@ class TenantSchemaExecutionServiceTest {
         assertThat(result).isEqualTo("ok");
         verify(tenantService).resolveTenantUuid(tenantId);
         verify(tenantSchemaService).schemaNameForTenant(tenant);
-        verify(tenantSchemaService).ensureSchemaExists("tenant_acme");
+        verify(tenantSchemaService).assertSchemaReady("tenant_acme");
     }
 
     @Test
