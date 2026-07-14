@@ -2,6 +2,10 @@ package com.prototype.vulnwatch.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +22,7 @@ import org.springframework.stereotype.Component;
 public class TenantSchemaMigratorRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(TenantSchemaMigratorRunner.class);
+    private static final Path SUCCESS_FILE = Path.of("/tmp/scout-schema-migration-success");
 
     private final TenantSchemaMigrationService migrationService;
     private final ObjectMapper objectMapper;
@@ -48,6 +53,7 @@ public class TenantSchemaMigratorRunner {
             throw new IllegalStateException("Tenant schema migration failed: " + report.failureCode());
         }
         if (exitAfterRun) {
+            writeSuccessMarker(report.runId().toString());
             LOG.info("Tenant schema migration completed; scheduling migration-job application context shutdown");
             Thread shutdownThread = new Thread(() -> {
                 try {
@@ -56,7 +62,7 @@ public class TenantSchemaMigratorRunner {
                     // listener makes the remaining listeners fail against an
                     // already-closed context and turns a successful migration
                     // into a non-zero process exit.
-                    Thread.sleep(250);
+                    Thread.sleep(5_000);
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                 }
@@ -64,6 +70,20 @@ public class TenantSchemaMigratorRunner {
             }, "schema-migrator-shutdown");
             shutdownThread.setDaemon(false);
             shutdownThread.start();
+        }
+    }
+
+    private void writeSuccessMarker(String runId) {
+        try {
+            Files.writeString(
+                    SUCCESS_FILE,
+                    runId,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+            );
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to persist the schema migration success marker", ex);
         }
     }
 }

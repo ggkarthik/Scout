@@ -36,9 +36,22 @@ busybox httpd -f -p "0.0.0.0:${PORT:-10000}" -h /app/scripts/maintenance >/dev/n
 maintenance_listener_pid=$!
 trap 'kill "$maintenance_listener_pid" 2>/dev/null || true' EXIT
 
+success_file=/tmp/scout-schema-migration-success
+rm -f "$success_file"
+set +e
 java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
   --spring.main.web-application-type=none \
   --spring.main.lazy-initialization=true
+java_status=$?
+set -e
+
+if [ ! -s "$success_file" ]; then
+  if [ "$java_status" -eq 0 ]; then
+    java_status=1
+  fi
+  echo "migration_job_status=failed phase=tenant_migration java_status=${java_status}" >&2
+  exit "$java_status"
+fi
 
 PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
   --host "$MIGRATION_DB_HOST" \
