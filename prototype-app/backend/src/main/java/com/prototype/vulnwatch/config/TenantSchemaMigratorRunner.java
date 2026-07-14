@@ -48,8 +48,22 @@ public class TenantSchemaMigratorRunner {
             throw new IllegalStateException("Tenant schema migration failed: " + report.failureCode());
         }
         if (exitAfterRun) {
-            LOG.info("Tenant schema migration completed; closing migration-job application context");
-            SpringApplication.exit(applicationContext, () -> 0);
+            LOG.info("Tenant schema migration completed; scheduling migration-job application context shutdown");
+            Thread shutdownThread = new Thread(() -> {
+                try {
+                    // Let Spring finish publishing ApplicationReadyEvent before
+                    // closing its bean factory. Closing synchronously from this
+                    // listener makes the remaining listeners fail against an
+                    // already-closed context and turns a successful migration
+                    // into a non-zero process exit.
+                    Thread.sleep(250);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                SpringApplication.exit(applicationContext, () -> 0);
+            }, "schema-migrator-shutdown");
+            shutdownThread.setDaemon(false);
+            shutdownThread.start();
         }
     }
 }
