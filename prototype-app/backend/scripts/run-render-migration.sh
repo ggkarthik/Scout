@@ -18,6 +18,15 @@ export APP_SCHEMA_MIGRATION_EXIT_AFTER_RUN=true
 export APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED=false
 export APP_TEST_PERSONAS_ENABLED=false
 
+# Connector services are instantiated by the Spring context even though the
+# schema-migrator role prevents their jobs from running. Supply a process-only
+# key so the privileged migration service never needs the production
+# credential-encryption secret.
+if [ -z "${APP_CREDENTIAL_ENCRYPTION_KEY:-}" ]; then
+  APP_CREDENTIAL_ENCRYPTION_KEY="$(head -c 32 /dev/urandom | base64)"
+  export APP_CREDENTIAL_ENCRYPTION_KEY
+fi
+
 java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
   --spring.main.web-application-type=none \
   --spring.main.lazy-initialization=true

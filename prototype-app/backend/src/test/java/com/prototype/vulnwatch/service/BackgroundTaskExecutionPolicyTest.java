@@ -14,8 +14,10 @@ class BackgroundTaskExecutionPolicyTest {
     }
 
     @Test
-    void blocksBackgroundTasksOnlyForApiRole() {
+    void blocksBackgroundTasksForApiAndSchemaMigratorRoles() {
         assertThat(BackgroundTaskExecutionPolicy.forRole("api").allowsBackgroundTask("queue.poll")).isFalse();
+        assertThat(BackgroundTaskExecutionPolicy.forRole("schema-migrator").allowsBackgroundTask("queue.poll"))
+                .isFalse();
         assertThat(BackgroundTaskExecutionPolicy.forRole("worker").allowsBackgroundTask("queue.poll")).isTrue();
         assertThat(BackgroundTaskExecutionPolicy.allowAll().allowsBackgroundTask("queue.poll")).isTrue();
     }
