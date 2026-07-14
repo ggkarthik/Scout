@@ -21,4 +21,4 @@ USER vulnwatch:vulnwatch
 EXPOSE 8080
 ENV JAVA_TOOL_OPTIONS=""
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError"
-ENTRYPOINT ["sh", "-c", "java $JAVA_TOOL_OPTIONS $JAVA_OPTS -jar /app/vulnwatch-backend.jar"]
+CMD ["sh", "-c", "java $JAVA_TOOL_OPTIONS $JAVA_OPTS -jar /app/vulnwatch-backend.jar"]
