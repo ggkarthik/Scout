@@ -29,10 +29,10 @@ if [ -z "${APP_CREDENTIAL_ENCRYPTION_KEY:-}" ]; then
 fi
 
 # Render's free tier only supports a web service for this temporary job and
-# terminates processes that do not bind a port. Keep a maintenance-only socket
-# open while the one-shot migration runs; the temporary service is deleted as
-# soon as the completion marker is verified.
-nc -lk -p "${PORT:-10000}" >/dev/null 2>&1 &
+# terminates processes that do not serve HTTP. Keep a maintenance-only static
+# endpoint available while the one-shot migration runs; the temporary service
+# is deleted as soon as the completion marker is verified.
+busybox httpd -f -p "0.0.0.0:${PORT:-10000}" -h /app/scripts/maintenance >/dev/null 2>&1 &
 maintenance_listener_pid=$!
 trap 'kill "$maintenance_listener_pid" 2>/dev/null || true' EXIT
 
