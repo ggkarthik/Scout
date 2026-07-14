@@ -7,8 +7,16 @@ RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
-RUN addgroup --system vulnwatch && adduser --system --ingroup vulnwatch vulnwatch
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system vulnwatch \
+    && adduser --system --ingroup vulnwatch vulnwatch
 COPY --from=build /workspace/target/vulnwatch-backend-*.jar /app/vulnwatch-backend.jar
+COPY scripts /app/scripts
+RUN chmod 500 /app/scripts/run-render-migration.sh \
+    && chmod 400 /app/scripts/provision-runtime-role.sql \
+    && chown -R vulnwatch:vulnwatch /app/scripts
 USER vulnwatch:vulnwatch
 EXPOSE 8080
 ENV JAVA_TOOL_OPTIONS=""

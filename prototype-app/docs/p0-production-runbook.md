@@ -10,7 +10,21 @@
 6. Force-push branches and tags during a maintenance window. Rebase/close open pull requests, invalidate stale CI artifacts, and require fresh clones.
 7. Run `gitleaks git --config .gitleaks.toml --log-opts=--all` and keep the merge freeze until it passes.
 
-Use Render environment groups/secret files or Railway sealed variables. Production secrets must not be shared with previews, and migration-role credentials must not be attached to the web service.
+Use Render environment groups and secret files. Production secrets must not be shared with previews, and migration-role credentials must not be attached to the web service.
+
+## Customer-validation data waiver
+
+The backup/restore acceptance gate may be waived only for an explicitly non-production
+customer-validation database when all data is synthetic and disposable, no production
+connector credentials are stored, and complete database recreation is the agreed recovery
+strategy. Record the waiver before migration and keep the environment labelled preproduction.
+
+This waiver applies to the initial ScoutGrid Render database created on 2026-07-14. The
+database contains demo/test data only, and the owner has accepted rebuild-and-reseed as the
+recovery objective. It does not waive schema migration, role separation, RLS, secret handling,
+or cross-tenant denial tests. The waiver expires before the first real customer dataset or
+production credential is accepted; at that point a paid persistent database, automated
+backup/PITR, and a tested restore are mandatory.
 
 ## Tenant migration commands
 

@@ -42,6 +42,7 @@ app:
   schema-migration:
     enabled: ${APP_SCHEMA_MIGRATION_ENABLED:false}
     report-only: ${APP_SCHEMA_MIGRATION_REPORT_ONLY:false}
+    exit-after-run: ${APP_SCHEMA_MIGRATION_EXIT_AFTER_RUN:false}
   features:
     vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
     vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
