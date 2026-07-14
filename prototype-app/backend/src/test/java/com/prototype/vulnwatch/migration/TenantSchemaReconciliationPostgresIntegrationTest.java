@@ -57,7 +57,7 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                        or not exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'tenant_isolation'))
                 """, Integer.class, schemaName);
 
-        assertEquals(42, version);
+        assertEquals(43, version);
         assertNotNull(checksum);
         assertEquals(0, incompleteRls);
 

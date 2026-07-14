@@ -18,7 +18,7 @@ BEGIN
       FROM public.flyway_schema_history
      WHERE version ~ '^[0-9]+$';
 
-    IF history_version < 42 OR failed_migrations > 0 THEN
+    IF history_version < 43 OR failed_migrations > 0 THEN
         RAISE EXCEPTION 'Platform migration state is unsafe (version %, failed rows %)',
             history_version, failed_migrations;
     END IF;
@@ -44,7 +44,7 @@ BEGIN
             tenant_record.schema_name
         ) INTO history_version, failed_migrations;
 
-        IF history_version < 42 OR failed_migrations > 0 THEN
+        IF history_version < 43 OR failed_migrations > 0 THEN
             RAISE EXCEPTION 'Tenant migration state is unsafe for % (version %, failed rows %)',
                 tenant_record.schema_name, history_version, failed_migrations;
         END IF;
@@ -55,8 +55,9 @@ BEGIN
              WHERE v.tenant_id = tenant_record.id
                AND v.schema_name = tenant_record.schema_name
                AND v.status = 'CURRENT'
-               AND v.current_version >= 42
-               AND v.last_successful_version >= 42
+               AND v.current_version >= 43
+               AND v.target_version >= 43
+               AND v.last_successful_version >= 43
                AND nullif(btrim(v.structural_checksum), '') IS NOT NULL
         ) THEN
             RAISE EXCEPTION 'Control-plane migration state is not current for %', tenant_record.schema_name;
