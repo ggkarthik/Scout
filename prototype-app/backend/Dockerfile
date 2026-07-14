@@ -8,7 +8,7 @@ RUN mvn -q -DskipTests package
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
+    && apt-get install -y --no-install-recommends netcat-openbsd postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && addgroup --system vulnwatch \
     && adduser --system --ingroup vulnwatch vulnwatch

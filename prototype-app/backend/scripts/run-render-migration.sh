@@ -17,6 +17,7 @@ export APP_SCHEMA_MIGRATION_REPORT_ONLY=false
 export APP_SCHEMA_MIGRATION_EXIT_AFTER_RUN=true
 export APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED=false
 export APP_TEST_PERSONAS_ENABLED=false
+export APP_SCHEDULING_ENABLED=false
 
 # Connector services are instantiated by the Spring context even though the
 # schema-migrator role prevents their jobs from running. Supply a process-only
@@ -26,6 +27,14 @@ if [ -z "${APP_CREDENTIAL_ENCRYPTION_KEY:-}" ]; then
   APP_CREDENTIAL_ENCRYPTION_KEY="$(head -c 32 /dev/urandom | base64)"
   export APP_CREDENTIAL_ENCRYPTION_KEY
 fi
+
+# Render's free tier only supports a web service for this temporary job and
+# terminates processes that do not bind a port. Keep a maintenance-only socket
+# open while the one-shot migration runs; the temporary service is deleted as
+# soon as the completion marker is verified.
+nc -lk -p "${PORT:-10000}" >/dev/null 2>&1 &
+maintenance_listener_pid=$!
+trap 'kill "$maintenance_listener_pid" 2>/dev/null || true' EXIT
 
 java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
   --spring.main.web-application-type=none \
