@@ -49,19 +49,18 @@ if PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
 else
   echo "migration_resume_status=not_verified action=run_migrator"
   set +e
-  java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} -jar /app/vulnwatch-backend.jar \
-    --spring.main.web-application-type=none \
-    --spring.main.lazy-initialization=true
+  java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} \
+    -Dloader.main=com.prototype.vulnwatch.migration.TenantSchemaMigrationCli \
+    -cp /app/vulnwatch-backend.jar \
+    org.springframework.boot.loader.launch.PropertiesLauncher
   java_status=$?
   set -e
 
-  if [ ! -s "$success_file" ]; then
-    if [ "$java_status" -eq 0 ]; then
-      java_status=1
-    fi
+  if [ "$java_status" -ne 0 ]; then
     echo "migration_job_status=failed phase=tenant_migration java_status=${java_status}" >&2
     exit "$java_status"
   fi
+  printf 'success\n' > "$success_file"
 
   PGPASSWORD="$MIGRATION_DB_PASSWORD" psql \
     --host "$MIGRATION_DB_HOST" \
