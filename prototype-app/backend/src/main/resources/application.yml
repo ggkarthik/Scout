@@ -59,6 +59,7 @@ app:
       issuer-uri: ${APP_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_JWT_JWK_SET_URI:}
       hmac-secret: ${APP_JWT_HMAC_SECRET:}
+      allow-hmac-in-production: ${APP_ALLOW_HMAC_IN_PRODUCTION:false}
       audience: ${APP_SECURITY_JWT_AUDIENCE:}
       token-ttl-minutes: ${APP_JWT_TOKEN_TTL_MINUTES:480}
       subject-claim: ${APP_SECURITY_JWT_SUBJECT_CLAIM:sub}

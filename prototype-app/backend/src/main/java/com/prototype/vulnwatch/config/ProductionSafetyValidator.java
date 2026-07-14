@@ -18,6 +18,8 @@ public class ProductionSafetyValidator {
     private final boolean allowApiKeyAuth;
     private final String jwtIssuerUri;
     private final String jwtJwkSetUri;
+    private final String jwtHmacSecret;
+    private final boolean allowHmacInProduction;
     private final String legacyPlatformOwnerEmail;
     private final String legacyPlatformOwnerPasswordHash;
     private final String credentialEncryptionKey;
@@ -36,6 +38,8 @@ public class ProductionSafetyValidator {
             @Value("${app.security.allow-api-key-auth:true}") boolean allowApiKeyAuth,
             @Value("${app.security.jwt.issuer-uri:}") String jwtIssuerUri,
             @Value("${app.security.jwt.jwk-set-uri:}") String jwtJwkSetUri,
+            @Value("${app.security.jwt.hmac-secret:}") String jwtHmacSecret,
+            @Value("${app.security.jwt.allow-hmac-in-production:false}") boolean allowHmacInProduction,
             @Value("${app.security.platform-owner-email:}") String legacyPlatformOwnerEmail,
             @Value("${app.security.platform-owner-password-hash:}") String legacyPlatformOwnerPasswordHash,
             @Value("${app.security.credential-encryption-key:}") String credentialEncryptionKey,
@@ -53,6 +57,8 @@ public class ProductionSafetyValidator {
         this.allowApiKeyAuth = allowApiKeyAuth;
         this.jwtIssuerUri = jwtIssuerUri;
         this.jwtJwkSetUri = jwtJwkSetUri;
+        this.jwtHmacSecret = jwtHmacSecret;
+        this.allowHmacInProduction = allowHmacInProduction;
         this.legacyPlatformOwnerEmail = legacyPlatformOwnerEmail;
         this.legacyPlatformOwnerPasswordHash = legacyPlatformOwnerPasswordHash;
         this.credentialEncryptionKey = credentialEncryptionKey;
@@ -82,7 +88,17 @@ public class ProductionSafetyValidator {
             throw new IllegalStateException("APP_CREATOR_KEY must be unset for production startup.");
         }
         if (!hasText(jwtIssuerUri) && !hasText(jwtJwkSetUri)) {
-            throw new IllegalStateException("APP_JWT_ISSUER_URI or APP_JWT_JWK_SET_URI must be set for production startup.");
+            if (!allowHmacInProduction) {
+                throw new IllegalStateException(
+                        "APP_JWT_ISSUER_URI or APP_JWT_JWK_SET_URI must be set for production startup; "
+                                + "preproduction HMAC requires APP_ALLOW_HMAC_IN_PRODUCTION=true."
+                );
+            }
+            if (!hasStrongValue(jwtHmacSecret) || isPlaceholder(jwtHmacSecret)) {
+                throw new IllegalStateException(
+                        "APP_JWT_HMAC_SECRET must be a non-placeholder value of at least 32 characters when HMAC is enabled."
+                );
+            }
         }
         if (allowHeaderTenantSelection) {
             throw new IllegalStateException("APP_ALLOW_HEADER_TENANT_SELECTION must be false for production startup.");
