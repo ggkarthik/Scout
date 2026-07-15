@@ -112,9 +112,6 @@ public final class TenantSchemaMigrationCli {
                 tenants.add(new TenantSchema(result.getObject(1, UUID.class), result.getString(2)));
             }
         }
-        if (tenants.isEmpty()) {
-            throw new IllegalStateException("No registered tenant schemas found");
-        }
         return tenants;
     }
 

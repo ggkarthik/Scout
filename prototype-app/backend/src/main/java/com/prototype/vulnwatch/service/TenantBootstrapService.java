@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
+import java.util.UUID;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
@@ -13,21 +14,22 @@ public class TenantBootstrapService {
 
     private final TenantRepository tenantRepository;
     private final TenantSchemaService tenantSchemaService;
+    private final TenantSchemaStatusService tenantSchemaStatusService;
 
     public TenantBootstrapService(
             TenantRepository tenantRepository,
-            TenantSchemaService tenantSchemaService
+            TenantSchemaService tenantSchemaService,
+            TenantSchemaStatusService tenantSchemaStatusService
     ) {
         this.tenantRepository = tenantRepository;
         this.tenantSchemaService = tenantSchemaService;
+        this.tenantSchemaStatusService = tenantSchemaStatusService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     @Order(0)
     public void ensureBootstrapTenant() {
         TenantContext.runAsPlatform(() -> {
-            tenantSchemaService.assertSchemaReady(tenantSchemaService.defaultSchemaName());
-
             Tenant defaultTenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
                     .orElseGet(() -> {
                         Tenant tenant = new Tenant();
@@ -44,6 +46,11 @@ public class TenantBootstrapService {
                 defaultTenant.setUpdatedAt(Instant.now());
                 changed = true;
             }
+            if (!tenantSchemaStatusService.hasProjection(defaultTenant.getId())) {
+                tenantSchemaStatusService.markCurrent(defaultTenant.getId(), normalizedDefaultSchema,
+                        TenantSchemaStatusService.TARGET_VERSION, null, UUID.randomUUID());
+            }
+            tenantSchemaService.assertSchemaReady(normalizedDefaultSchema);
 
             for (Tenant tenant : tenantRepository.findAll()) {
                 String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()

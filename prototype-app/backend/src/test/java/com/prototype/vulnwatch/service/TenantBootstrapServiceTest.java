@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -24,12 +25,14 @@ class TenantBootstrapServiceTest {
     private TenantRepository tenantRepository;
     @Mock
     private TenantSchemaService tenantSchemaService;
+    @Mock
+    private TenantSchemaStatusService tenantSchemaStatusService;
 
     private TenantBootstrapService service;
 
     @BeforeEach
     void setUp() {
-        service = new TenantBootstrapService(tenantRepository, tenantSchemaService);
+        service = new TenantBootstrapService(tenantRepository, tenantSchemaService, tenantSchemaStatusService);
     }
 
     @Test
@@ -58,11 +61,37 @@ class TenantBootstrapServiceTest {
         when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)).thenReturn(Optional.of(defaultTenant));
         when(tenantRepository.findAll()).thenReturn(List.of(defaultTenant, customerTenant));
         when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(tenantSchemaStatusService.hasProjection(defaultTenant.getId())).thenReturn(true);
 
         service.ensureBootstrapTenant();
 
         verify(tenantSchemaService, times(2)).assertSchemaReady("tenant_default");
         verify(tenantRepository, times(2)).save(any(Tenant.class));
         verify(tenantSchemaService).assertSchemaReady("tenant_gm_test_platform");
+    }
+
+    @Test
+    void ensureBootstrapTenantMarksFreshDefaultSchemaCurrentBeforeReadinessCheck() {
+        Tenant defaultTenant = new Tenant();
+        defaultTenant.setId(UUID.randomUUID());
+        defaultTenant.setName(TenantService.DEFAULT_TENANT_NAME);
+        defaultTenant.setSlug("default-workspace");
+        defaultTenant.setSchemaName("tenant_default");
+
+        when(tenantSchemaService.defaultSchemaName()).thenReturn("tenant_default");
+        when(tenantSchemaService.normalizeSchemaName("tenant_default")).thenReturn("tenant_default");
+        when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)).thenReturn(Optional.of(defaultTenant));
+        when(tenantRepository.findAll()).thenReturn(List.of(defaultTenant));
+        when(tenantSchemaStatusService.hasProjection(defaultTenant.getId())).thenReturn(false);
+
+        service.ensureBootstrapTenant();
+
+        verify(tenantSchemaStatusService).markCurrent(
+                any(UUID.class),
+                anyString(),
+                anyInt(),
+                any(),
+                any(UUID.class));
+        verify(tenantSchemaService, times(2)).assertSchemaReady("tenant_default");
     }
 }

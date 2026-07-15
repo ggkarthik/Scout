@@ -63,6 +63,15 @@ public class TenantSchemaStatusService {
         return count == null ? 0 : count;
     }
 
+    public boolean hasProjection(UUID tenantId) {
+        Long count = jdbc.queryForObject("""
+                select count(*)
+                from platform.tenant_schema_versions
+                where tenant_id = ?
+                """, Long.class, tenantId);
+        return count != null && count > 0;
+    }
+
     public void markMigrating(UUID tenantId, String schemaName, UUID runId) {
         upsert(tenantId, schemaName, 0, "MIGRATING", null, null, null, runId, true);
     }
