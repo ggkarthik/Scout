@@ -34,9 +34,8 @@ class SchemaUpgradePathPostgresIntegrationTest {
     }
 
     private Flyway configuredFlyway(MigrationVersion target) {
-        String migrationUrl = DATABASE.url() + "?currentSchema=tenant_default,platform,public";
         var config = Flyway.configure()
-                .dataSource(migrationUrl, DATABASE.username(), DATABASE.password())
+                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
                 .defaultSchema("public")
                 .locations("filesystem:src/main/resources/db/migration/postgres_reset")
                 .baselineOnMigrate(false)
