@@ -56,10 +56,24 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                   and (not c.relrowsecurity or not c.relforcerowsecurity
                        or not exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'tenant_isolation'))
                 """, Integer.class, schemaName);
+        Boolean demoRlsEnabled = platformJdbcTemplate.queryForObject("""
+                select c.relrowsecurity or c.relforcerowsecurity
+                from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = ? and c.relname = 'demo_requests'
+                """, Boolean.class, schemaName);
+        Boolean auditAllowsPlatformEvents = platformJdbcTemplate.queryForObject("""
+                select c.is_nullable = 'YES' and rel.relrowsecurity and rel.relforcerowsecurity
+                from information_schema.columns c
+                join pg_namespace n on n.nspname = c.table_schema
+                join pg_class rel on rel.relnamespace = n.oid and rel.relname = c.table_name
+                where c.table_schema = ? and c.table_name = 'audit_events' and c.column_name = 'tenant_id'
+                """, Boolean.class, schemaName);
 
         assertEquals(44, version);
         assertNotNull(checksum);
         assertEquals(0, incompleteRls);
+        assertEquals(false, demoRlsEnabled);
+        assertEquals(true, auditAllowsPlatformEvents);
 
         platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets ADD COLUMN reconciliation_probe text");
         assertColumnCount(schemaName, "assets", "reconciliation_probe", 0);

@@ -228,7 +228,7 @@ public class ProductionSafetyValidator {
                     from platform.tenants t
                     join pg_namespace n on n.nspname = t.schema_name
                     join pg_class c on c.relnamespace = n.oid and c.relkind in ('r', 'p')
-                    where c.relname not in ('tenant_schema_history', 'flyway_schema_history')
+                    where c.relname not in ('tenant_schema_history', 'flyway_schema_history', 'demo_requests')
                       and (
                           not c.relrowsecurity
                           or not c.relforcerowsecurity

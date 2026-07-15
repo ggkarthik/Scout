@@ -18,7 +18,7 @@ BEGIN
       FROM public.flyway_schema_history
      WHERE version ~ '^[0-9]+$';
 
-    IF history_version < 43 OR failed_migrations > 0 THEN
+    IF history_version < 44 OR failed_migrations > 0 THEN
         RAISE EXCEPTION 'Platform migration state is unsafe (version %, failed rows %)',
             history_version, failed_migrations;
     END IF;
@@ -44,7 +44,7 @@ BEGIN
             tenant_record.schema_name
         ) INTO history_version, failed_migrations;
 
-        IF history_version < 43 OR failed_migrations > 0 THEN
+        IF history_version < 44 OR failed_migrations > 0 THEN
             RAISE EXCEPTION 'Tenant migration state is unsafe for % (version %, failed rows %)',
                 tenant_record.schema_name, history_version, failed_migrations;
         END IF;
@@ -55,9 +55,9 @@ BEGIN
              WHERE v.tenant_id = tenant_record.id
                AND v.schema_name = tenant_record.schema_name
                AND v.status = 'CURRENT'
-               AND v.current_version >= 43
-               AND v.target_version >= 43
-               AND v.last_successful_version >= 43
+               AND v.current_version >= 44
+               AND v.target_version >= 44
+               AND v.last_successful_version >= 44
                AND nullif(btrim(v.structural_checksum), '') IS NOT NULL
         ) THEN
             RAISE EXCEPTION 'Control-plane migration state is not current for %', tenant_record.schema_name;
@@ -70,7 +70,7 @@ BEGIN
               JOIN pg_namespace n ON n.oid = c.relnamespace
              WHERE n.nspname = tenant_record.schema_name
                AND c.relkind IN ('r', 'p')
-               AND c.relname NOT IN ('tenant_schema_history', 'flyway_schema_history')
+               AND c.relname NOT IN ('tenant_schema_history', 'flyway_schema_history', 'demo_requests')
              ORDER BY c.relname
         LOOP
             IF NOT table_record.relrowsecurity OR NOT table_record.relforcerowsecurity THEN
@@ -85,6 +85,20 @@ BEGIN
             ) THEN
                 RAISE EXCEPTION 'tenant_isolation policy is missing on %.%',
                     tenant_record.schema_name, table_record.table_name;
+            END IF;
+
+            -- audit_events intentionally permits null-tenant platform/pre-auth events.
+            -- Tenant-attributed rows must still match the schema registration.
+            IF table_record.table_name = 'audit_events' THEN
+                EXECUTE format(
+                    'SELECT count(*) FROM %I.%I WHERE tenant_id IS NOT NULL AND tenant_id <> $1',
+                    tenant_record.schema_name, table_record.table_name
+                ) INTO conflict_count USING tenant_record.id;
+                IF conflict_count > 0 THEN
+                    RAISE EXCEPTION 'Conflicting tenant rows in %.% (% rows)',
+                        tenant_record.schema_name, table_record.table_name, conflict_count;
+                END IF;
+                CONTINUE;
             END IF;
 
             IF NOT EXISTS (
