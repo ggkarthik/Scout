@@ -48,6 +48,7 @@ jobs:
       APP_API_KEY: change-me-in-prod
       APP_CREATOR_KEY: local-creator
       APP_ALLOW_API_KEY_AUTH: "true"
+      APP_REQUIRE_TENANT_CONTEXT: "false"
       DB_URL: jdbc:postgresql://127.0.0.1:5432/vulnwatch
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
