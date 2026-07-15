@@ -43,14 +43,14 @@ public class FindingProjectionRefreshService {
             return 0;
         }
         return tenantSchemaExecutionService.run(tenant, () -> {
-            Integer refreshed = writeTransactionTemplate.execute(status -> refreshTenantInCurrentTenantSchema());
+            Integer refreshed = writeTransactionTemplate.execute(status -> refreshTenantInCurrentTenantSchema(tenant));
             return refreshed == null ? 0 : refreshed;
         });
     }
 
-    long countProjectedRows() {
+    long countProjectedRows(Tenant tenant) {
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM finding_list_projection",
+                "SELECT COUNT(*) FROM " + qualifiedTenantTable(tenant, "finding_list_projection"),
                 new MapSqlParameterSource(),
                 Long.class
         );
@@ -61,14 +61,16 @@ public class FindingProjectionRefreshService {
         return findingRepository.count();
     }
 
-    private int refreshTenantInCurrentTenantSchema() {
+    private int refreshTenantInCurrentTenantSchema(Tenant tenant) {
+        String projectionTable = qualifiedTenantTable(tenant, "finding_list_projection");
+        String statusTable = qualifiedTenantTable(tenant, "finding_workspace_projection_status");
         long startedAtNs = System.nanoTime();
         int statusCode = 200;
         try {
-            jdbcTemplate.getJdbcTemplate().execute("LOCK TABLE finding_list_projection IN EXCLUSIVE MODE");
-            jdbcTemplate.update("DELETE FROM finding_list_projection", new MapSqlParameterSource());
+            jdbcTemplate.getJdbcTemplate().execute("LOCK TABLE " + projectionTable + " IN EXCLUSIVE MODE");
+            jdbcTemplate.update("DELETE FROM " + projectionTable, new MapSqlParameterSource());
             jdbcTemplate.update("""
-                    INSERT INTO finding_list_projection (
+                    INSERT INTO %s (
                         finding_id,
                         tenant_id,
                         display_id,
@@ -135,9 +137,9 @@ public class FindingProjectionRefreshService {
                         WHERE upper(fix_record.fix_type) <> 'NO_FIX'
                     ) patchable_cves
                       ON patchable_cves.external_id_upper = upper(vulnerability.external_id)
-                    """,
+                    """.formatted(projectionTable),
                     new MapSqlParameterSource());
-            long findingCount = countProjectedRows();
+            long findingCount = countProjectedRows(tenant);
             long sourceFindingCount = countSourceFindings();
             long rebuildDurationMs = (System.nanoTime() - startedAtNs) / 1_000_000L;
             MapSqlParameterSource params = new MapSqlParameterSource()
@@ -147,7 +149,7 @@ public class FindingProjectionRefreshService {
                     .addValue("sourceFindingCount", sourceFindingCount)
                     .addValue("lastRebuildDurationMs", rebuildDurationMs);
             jdbcTemplate.update("""
-                    INSERT INTO finding_workspace_projection_status (
+                    INSERT INTO %s (
                         projection_key,
                         tenant_id,
                         last_computed_at,
@@ -169,7 +171,7 @@ public class FindingProjectionRefreshService {
                         finding_count = EXCLUDED.finding_count,
                         source_finding_count = EXCLUDED.source_finding_count,
                         last_rebuild_duration_ms = EXCLUDED.last_rebuild_duration_ms
-                    """, params.addValue("tenantId", TenantContext.getCurrentTenantId()));
+                    """.formatted(statusTable), params.addValue("tenantId", TenantContext.getCurrentTenantId()));
             return Math.toIntExact(findingCount);
         } catch (RuntimeException ex) {
             statusCode = 500;
@@ -181,5 +183,13 @@ public class FindingProjectionRefreshService {
                     statusCode
             );
         }
+    }
+
+    private String qualifiedTenantTable(Tenant tenant, String tableName) {
+        String schema = tenant == null ? null : tenant.getSchemaName();
+        if (schema == null || !schema.matches("[a-z][a-z0-9_]*")) {
+            throw new IllegalArgumentException("Invalid tenant schema name");
+        }
+        return '"' + schema + '"' + "." + '"' + tableName + '"';
     }
 }

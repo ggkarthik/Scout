@@ -54,7 +54,7 @@ public class FindingProjectionStatusService {
         String statusTable = qualifiedTenantTable(tenant, "finding_workspace_projection_status");
         return tenantSchemaExecutionService.run(tenant, () -> {
             FindingListProjectionService.ProjectionStatus status = readTransactionTemplate.execute(transactionStatus -> {
-                long currentProjectedCount = findingProjectionRefreshService.countProjectedRows();
+                long currentProjectedCount = findingProjectionRefreshService.countProjectedRows(tenant);
                 long sourceFindingCount = findingProjectionRefreshService.countSourceFindings();
                 return jdbcTemplate.query("""
                         SELECT last_computed_at, last_rebuild_duration_ms
