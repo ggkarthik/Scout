@@ -55,6 +55,7 @@ class PlatformContextPostgresIntegrationTest {
 
             assertThatThrownBy(() -> jdbcTemplate.queryForObject("select count(*) from assets", Long.class))
                     .isInstanceOf(BadSqlGrammarException.class)
+                    .rootCause()
                     .hasMessageContaining("relation \"assets\" does not exist");
         });
     }

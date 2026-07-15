@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
         "app.security.creator-key=test-creator-key",
+        "app.tenancy.require-tenant-context=false",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @AutoConfigureMockMvc
@@ -38,21 +39,33 @@ class OperationalDashboardPostgresIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private TenantService tenantService;
+
     @Test
     void operationsDashboardExposesEndpointTimingMetricsOnPostgres() throws Exception {
+        String tenantId = tenantService.getDefaultTenant().getId().toString();
         mockMvc.perform(get("/api/vulnerability-intelligence?page=0&size=5")
-                        .header("X-API-Key", "test-api-key"))
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Tenant-ID", tenantId)
+                        .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/vulnerability-intelligence/filters")
-                        .header("X-API-Key", "test-api-key"))
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Tenant-ID", tenantId)
+                        .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/dashboard")
-                        .header("X-API-Key", "test-api-key"))
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Tenant-ID", tenantId)
+                        .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/operations/dashboard")
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key"))
+                        .header("X-Creator-Key", "test-creator-key")
+                        .header("X-Tenant-ID", tenantId)
+                        .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.executiveHealth.ingestionSuccessRateLast24h").isNumber())
                 .andExpect(jsonPath("$.normalizationQuality.activeComponents").isNumber())

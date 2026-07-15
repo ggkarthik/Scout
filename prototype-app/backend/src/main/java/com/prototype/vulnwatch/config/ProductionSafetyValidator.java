@@ -248,7 +248,7 @@ public class ProductionSafetyValidator {
                     from platform.tenants t
                     left join platform.tenant_schema_versions v on v.tenant_id = t.id
                     where t.status = 'ACTIVE'
-                      and (v.tenant_id is null or v.status <> 'CURRENT' or v.current_version < 43)
+                      and (v.tenant_id is null or v.status <> 'CURRENT' or v.current_version < 44)
                 )
                 """, Boolean.class);
         if (Boolean.TRUE.equals(conflictingRows)) {

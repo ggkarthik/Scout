@@ -14,7 +14,6 @@ import com.prototype.vulnwatch.domain.TenantMembership;
 import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.TenantSupportGrantRepository;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
@@ -58,9 +57,6 @@ class AuthContextControllerPostgresIntegrationTest {
 
     @Autowired
     private AppUserRepository appUserRepository;
-
-    @Autowired
-    private TenantRepository tenantRepository;
 
     @Autowired
     private TenantMembershipRepository tenantMembershipRepository;
@@ -117,7 +113,8 @@ class AuthContextControllerPostgresIntegrationTest {
     @Test
     void platformOwnerContextSwitchSurfacesGrantScopedTenantAccess() throws Exception {
         AppUser owner = saveUser("platform.owner.auth-context@example.com", true, "password-123");
-        Tenant supportTenant = saveTenant("Support Customer", "support-customer", "tenant_support_customer");
+        Tenant supportTenant = tenantService.createTenant(
+                "Support Customer", "support-customer", "ENTERPRISE", null);
         tenantSupportGrantRepository.save(activeGrant(owner, supportTenant, "READ_ONLY"));
 
         String platformToken = login("platform.owner.auth-context@example.com", "password-123");
@@ -232,13 +229,4 @@ class AuthContextControllerPostgresIntegrationTest {
         return grant;
     }
 
-    private Tenant saveTenant(String name, String slug, String schemaName) {
-        Tenant tenant = new Tenant();
-        tenant.setName(name);
-        tenant.setSlug(slug);
-        tenant.setSchemaName(schemaName);
-        tenant.setStatus("ACTIVE");
-        tenant.setPlanCode("ENTERPRISE");
-        return tenantRepository.save(tenant);
-    }
 }

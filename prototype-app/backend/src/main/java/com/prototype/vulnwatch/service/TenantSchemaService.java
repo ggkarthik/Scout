@@ -26,7 +26,7 @@ public class TenantSchemaService {
     @Value("${app.tenancy.enforce-schema-version:false}")
     private boolean enforceSchemaVersion;
 
-    @Value("${app.tenancy.minimum-compatible-schema-version:43}")
+    @Value("${app.tenancy.minimum-compatible-schema-version:44}")
     private int minimumCompatibleSchemaVersion;
 
     public TenantSchemaService(
@@ -390,7 +390,7 @@ public class TenantSchemaService {
                 FROM information_schema.columns
                 WHERE table_schema = ?
                   AND column_default IS NOT NULL
-                  AND table_name NOT IN ('flyway_schema_history', 'sync_runs')
+                  AND table_name NOT IN ('flyway_schema_history', 'tenant_schema_history', 'sync_runs')
                 ORDER BY table_name, ordinal_position
                 """, columnDefaultMapper(), schemaName);
     }
@@ -405,6 +405,7 @@ public class TenantSchemaService {
                 JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
                 WHERE nsp.nspname = ?
                   AND con.contype = 'f'
+                  AND rel.relname NOT IN ('flyway_schema_history', 'tenant_schema_history')
                 ORDER BY rel.relname, con.conname
                 """, foreignKeyMapper(), schemaName);
     }
@@ -417,7 +418,9 @@ public class TenantSchemaService {
                 FROM pg_constraint con
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-                WHERE nsp.nspname = ? AND con.contype IN ('p', 'u')
+                WHERE nsp.nspname = ?
+                  AND con.contype IN ('p', 'u')
+                  AND rel.relname NOT IN ('flyway_schema_history', 'tenant_schema_history')
                 ORDER BY rel.relname, con.conname
                 """, (rs, rowNum) -> new TableConstraintDefinition(
                 rs.getString("table_name"),
@@ -436,6 +439,7 @@ public class TenantSchemaService {
                 JOIN pg_class tab ON tab.oid = i.indrelid
                 JOIN pg_namespace nsp ON nsp.oid = tab.relnamespace
                 WHERE nsp.nspname = ?
+                  AND tab.relname NOT IN ('flyway_schema_history', 'tenant_schema_history')
                   AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = idx.oid)
                 ORDER BY idx.relname
                 """, (rs, rowNum) -> new IndexDefinition(

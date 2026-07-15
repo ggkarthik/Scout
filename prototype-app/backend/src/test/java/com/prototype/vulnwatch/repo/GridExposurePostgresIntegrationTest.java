@@ -9,11 +9,14 @@ import com.prototype.vulnwatch.domain.FindingDecisionState;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
+import com.prototype.vulnwatch.domain.SbomFormat;
+import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.service.FindingFilterSpecifications;
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
@@ -24,7 +27,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Covers the two new Grid Exposure query paths added to {@link FindingRepository} and
@@ -35,7 +37,6 @@ import org.springframework.transaction.annotation.Transactional;
  * ({@code finding.component.asset}).
  */
 @PostgresIntegrationTest
-@Transactional
 class GridExposurePostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
@@ -59,6 +60,9 @@ class GridExposurePostgresIntegrationTest {
     private InventoryComponentRepository inventoryComponentRepository;
 
     @Autowired
+    private SbomUploadRepository sbomUploadRepository;
+
+    @Autowired
     private VulnerabilityRepository vulnerabilityRepository;
 
     @Autowired
@@ -68,6 +72,9 @@ class GridExposurePostgresIntegrationTest {
     void countsAndFiltersOpenFindingsByDirectAndComponentResolvedAssetType() {
         ensureDefaultTenant();
         Tenant tenant = tenantService.getDefaultTenant();
+        TenantContext.setCurrentTenantId(tenant.getId());
+        TenantContext.setCurrentSchemaName(tenant.getSchemaName());
+        try {
 
         Asset host = createAsset(tenant, AssetType.HOST, "grid-exposure-host");
         Asset application = createAsset(tenant, AssetType.APPLICATION, "grid-exposure-app");
@@ -80,6 +87,12 @@ class GridExposurePostgresIntegrationTest {
         InventoryComponent component = new InventoryComponent();
         component.setTenant(tenant);
         component.setAsset(application);
+        SbomUpload upload = new SbomUpload();
+        upload.setTenant(tenant);
+        upload.setAsset(application);
+        upload.setFormat(SbomFormat.CYCLONEDX);
+        upload.setOriginalFilename("grid-exposure.json");
+        component.setSbomUpload(sbomUploadRepository.save(upload));
         component.setEcosystem("npm");
         component.setPackageName("grid-exposure-pkg");
         component.setVersion("1.0.0");
@@ -111,6 +124,9 @@ class GridExposurePostgresIntegrationTest {
                 findingRepository.findAll(FindingFilterSpecifications.byFilter(tenant, applicationFilter));
         assertTrue(applicationResults.stream().anyMatch(f -> f.getId().equals(componentAppFinding.getId())));
         assertTrue(applicationResults.stream().noneMatch(f -> f.getId().equals(directHostFinding.getId())));
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     private Asset createAsset(Tenant tenant, AssetType type, String name) {

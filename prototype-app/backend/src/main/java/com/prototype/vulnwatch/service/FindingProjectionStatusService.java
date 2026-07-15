@@ -51,15 +51,16 @@ public class FindingProjectionStatusService {
         if (tenant == null || tenant.getId() == null) {
             return FindingListProjectionService.ProjectionStatus.empty();
         }
+        String statusTable = qualifiedTenantTable(tenant, "finding_workspace_projection_status");
         return tenantSchemaExecutionService.run(tenant, () -> {
             FindingListProjectionService.ProjectionStatus status = readTransactionTemplate.execute(transactionStatus -> {
                 long currentProjectedCount = findingProjectionRefreshService.countProjectedRows();
                 long sourceFindingCount = findingProjectionRefreshService.countSourceFindings();
                 return jdbcTemplate.query("""
                         SELECT last_computed_at, last_rebuild_duration_ms
-                        FROM finding_workspace_projection_status
+                        FROM %s
                         WHERE projection_key = :projectionKey
-                        """,
+                        """.formatted(statusTable),
                         new MapSqlParameterSource().addValue("projectionKey", STATUS_KEY),
                         rs -> rs.next()
                                 ? new FindingListProjectionService.ProjectionStatus(
@@ -79,6 +80,14 @@ public class FindingProjectionStatusService {
             });
             return status == null ? FindingListProjectionService.ProjectionStatus.empty() : status;
         });
+    }
+
+    private String qualifiedTenantTable(Tenant tenant, String tableName) {
+        String schema = tenant == null ? null : tenant.getSchemaName();
+        if (schema == null || !schema.matches("[a-z][a-z0-9_]*")) {
+            throw new IllegalArgumentException("Invalid tenant schema name");
+        }
+        return '"' + schema + '"' + "." + '"' + tableName + '"';
     }
 
     private Long coalesceNullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {

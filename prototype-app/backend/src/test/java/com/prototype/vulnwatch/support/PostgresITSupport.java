@@ -39,7 +39,13 @@ public final class PostgresITSupport {
         registry.add("DB_URL", database::url);
         registry.add("DB_USERNAME", database::username);
         registry.add("DB_PASSWORD", database::password);
-        registry.add("APP_CREDENTIAL_ENCRYPTION_KEY",
+        // The integration suite caches many application contexts. Keep each test
+        // pool deliberately small so the suite cannot exhaust PostgreSQL clients.
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
+        registry.add("spring.datasource.hikari.minimum-idle", () -> "0");
+        registry.add("app.scheduling.enabled", () -> "false");
+        registry.add("app.schema-migration.enabled", () -> "true");
+        registry.add("app.security.credential-encryption-key",
                 () -> Base64.getEncoder().encodeToString(new byte[32]));
     }
 }

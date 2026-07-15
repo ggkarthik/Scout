@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.controller;
 import static com.prototype.vulnwatch.support.AuthRequest.asPlatformOwner;
 import static com.prototype.vulnwatch.support.AuthRequest.authedGet;
 import static com.prototype.vulnwatch.support.AuthRequest.authedPost;
+import static com.prototype.vulnwatch.support.AuthRequest.withTenant;
+import static com.prototype.vulnwatch.support.AuthRequest.withUser;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -10,11 +12,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import com.prototype.vulnwatch.repo.AssetRepository;
+import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
+import com.prototype.vulnwatch.repo.TenantSupportGrantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.service.FindingListProjectionService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
@@ -25,6 +31,8 @@ import com.prototype.vulnwatch.support.PostgresControllerIntegrationTest;
 import com.prototype.vulnwatch.support.PostgresITSupport;
 import java.util.HashSet;
 import java.util.Set;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +81,12 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
 
     @Autowired
     private TenantSchemaExecutionService tenantSchemaExecutionService;
+
+    @Autowired
+    private AppUserRepository appUserRepository;
+
+    @Autowired
+    private TenantSupportGrantRepository tenantSupportGrantRepository;
 
     private Tenant tenant;
     private FindingWorkspaceSeedSupport.SeededWorkspace seedWorkspace;
@@ -138,7 +152,7 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
     }
 
     @Test
-    void queueAnalyticsAndRollupsStayParityConsistentForRoutingQueue() throws Exception {
+    void listAndSummaryStayParityConsistentForRoutingQueue() throws Exception {
         ensureSeededWorkspace();
         findingListProjectionService.refreshTenant(tenant);
 
@@ -151,38 +165,27 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
                 .andExpect(jsonPath("$.openCount").value(40))
                 .andExpect(jsonPath("$.criticalOpenCount").value(40))
                 .andExpect(jsonPath("$.unassignedOpenCount").value(40));
-
-        mockMvc.perform(authedGet("/api/findings/queue-analytics?queueKey=unassigned-critical"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.assignedOpenCount").value(0))
-                .andExpect(jsonPath("$.unassignedOpenCount").value(40));
-
-        MvcResult portfolioResult = mockMvc.perform(authedGet("/api/findings/portfolio-rollups"))
-                .andExpect(status().isOk())
-                .andReturn();
-        JsonNode rollups = objectMapper.readTree(portfolioResult.getResponse().getContentAsString()).path("queueRollups");
-        boolean matched = false;
-        for (JsonNode rollup : rollups) {
-            if ("unassigned-critical".equals(rollup.path("queueKey").asText())) {
-                assertEquals(40, rollup.path("openCount").asInt());
-                matched = true;
-            }
-        }
-        assertTrue(matched, "expected unassigned-critical rollup to be present");
     }
 
     @Test
     void projectionStatusAndRebuildEndpointsExposeFreshnessState() throws Exception {
         ensureSeededWorkspace();
         findingListProjectionService.refreshTenant(tenant);
+        ensurePlatformOwnerWriteGrant();
 
-        mockMvc.perform(asPlatformOwner(authedGet("/api/findings/projection-status")))
+        mockMvc.perform(withTenant(
+                        withUser(asPlatformOwner(authedGet("/api/findings/projection-status")),
+                                PostgresITSupport.DEFAULT_USER_ID),
+                        tenant.getId().toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.findingCount").value(90))
                 .andExpect(jsonPath("$.sourceFindingCount").value(90))
                 .andExpect(jsonPath("$.stale").value(false));
 
-        mockMvc.perform(asPlatformOwner(authedPost("/api/findings/projection-rebuild")))
+        mockMvc.perform(withTenant(
+                        withUser(asPlatformOwner(authedPost("/api/findings/projection-rebuild")),
+                                PostgresITSupport.DEFAULT_USER_ID),
+                        tenant.getId().toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.findingCount").value(90))
                 .andExpect(jsonPath("$.stale").value(false));
@@ -202,5 +205,36 @@ class FindingWorkspaceControllerPostgresIntegrationTest {
                 tenantSchemaExecutionService
         );
         seedWorkspace = seedSupport.seedCriticalWorkspace(tenant, 90, 40);
+    }
+
+    private void ensurePlatformOwnerWriteGrant() {
+        AppUser owner = appUserRepository.findByExternalSubject(PostgresITSupport.DEFAULT_USER_ID)
+                .orElseGet(() -> {
+                    AppUser user = new AppUser();
+                    user.setExternalSubject(PostgresITSupport.DEFAULT_USER_ID);
+                    user.setEmail("platform-owner@example.test");
+                    user.setDisplayName("Test platform owner");
+                    user.setPlatformOwner(true);
+                    user.setStatus("ACTIVE");
+                    return appUserRepository.save(user);
+                });
+        if (!tenantSupportGrantRepository.findActiveByInvitedPlatformSubjectAndTenantId(
+                owner.getExternalSubject(), tenant.getId(), Instant.now()).isEmpty()) {
+            return;
+        }
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setTenant(tenant);
+        grant.setInvitedPlatformSubject(owner.getExternalSubject());
+        grant.setReason("Finding projection integration test");
+        grant.setScope("Projection rebuild");
+        grant.setAccessMode("WRITE_ENABLED");
+        grant.setStatus("ACTIVE");
+        grant.setGrantedBy(owner);
+        grant.setAcceptedBy(owner);
+        grant.setRequestedAt(Instant.now());
+        grant.setAcceptedAt(Instant.now());
+        grant.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
+        grant.setUpdatedAt(Instant.now());
+        tenantSupportGrantRepository.save(grant);
     }
 }

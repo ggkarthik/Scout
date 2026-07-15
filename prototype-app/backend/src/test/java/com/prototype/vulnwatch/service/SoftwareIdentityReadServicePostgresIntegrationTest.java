@@ -21,7 +21,6 @@ import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
 import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
-import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.time.Instant;
@@ -31,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -56,7 +57,10 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
     }
 
     @Autowired
-    private TenantRepository tenantRepository;
+    private TenantService tenantService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private SoftwareIdentityRepository softwareIdentityRepository;
@@ -78,6 +82,12 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
 
     @Autowired
     private SoftwareIdentityReadService softwareIdentityReadService;
+
+    @BeforeEach
+    void clearFunnelFixtures() {
+        jdbcTemplate.execute("TRUNCATE TABLE tenant_default.assets CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE platform.software_identities, platform.vulnerabilities CASCADE");
+    }
 
     @Test
     void funnelDoesNotCountOpenFindingWithoutApplicableComponentVulnerabilityState() {
@@ -127,12 +137,7 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
     }
 
     private Tenant createTenant(String suffix) {
-        Tenant tenant = new Tenant();
-        tenant.setName("Funnel IT Tenant " + suffix);
-        tenant.setSlug("funnel-it-" + suffix);
-        tenant.setStatus("ACTIVE");
-        tenant.setPlanCode("pilot");
-        return tenantRepository.save(tenant);
+        return tenantService.getDefaultTenant();
     }
 
     private SoftwareIdentity createIdentity(String suffix) {

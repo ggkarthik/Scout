@@ -52,12 +52,12 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                 from pg_class c
                 join pg_namespace n on n.oid = c.relnamespace
                 where n.nspname = ? and c.relkind in ('r', 'p')
-                  and c.relname not in ('tenant_schema_history', 'flyway_schema_history')
+                  and c.relname not in ('tenant_schema_history', 'flyway_schema_history', 'demo_requests')
                   and (not c.relrowsecurity or not c.relforcerowsecurity
                        or not exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'tenant_isolation'))
                 """, Integer.class, schemaName);
 
-        assertEquals(43, version);
+        assertEquals(44, version);
         assertNotNull(checksum);
         assertEquals(0, incompleteRls);
 

@@ -18,6 +18,8 @@ import org.flywaydb.core.api.MigrationVersion;
 /** Minimal migration entry point that intentionally does not initialize Spring or JPA. */
 public final class TenantSchemaMigrationCli {
 
+    private static final int TARGET_VERSION = 44;
+
     private static final Pattern UUID_VALUE = Pattern.compile(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
 
@@ -52,10 +54,11 @@ public final class TenantSchemaMigrationCli {
                     String checksum = fingerprint(lockConnection, tenant.schemaName());
                     markCurrent(lockConnection, tenant, checksum);
                     System.out.printf(
-                            "tenant_migration_status=current tenant_id=%s schema=%s version=43 checksum=%s%n",
-                            tenant.tenantId(), tenant.schemaName(), checksum);
+                            "tenant_migration_status=current tenant_id=%s schema=%s version=%d checksum=%s%n",
+                            tenant.tenantId(), tenant.schemaName(), TARGET_VERSION, checksum);
                 }
-                System.out.printf("tenant_migration_report=complete target_version=43 tenant_count=%d%n", tenants.size());
+                System.out.printf("tenant_migration_report=complete target_version=%d tenant_count=%d%n",
+                        TARGET_VERSION, tenants.size());
             } finally {
                 try (PreparedStatement statement = lockConnection.prepareStatement(
                         "select pg_advisory_unlock(hashtext('scout-tenant-schema-migrator'))")) {
@@ -121,15 +124,15 @@ public final class TenantSchemaMigrationCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 43, 43, 'CURRENT', ?, now(), now(), 43, null, null, now(), ?)
+                ) values (?, ?, 44, 44, 'CURRENT', ?, now(), now(), 44, null, null, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
-                    current_version = 43,
-                    target_version = 43,
+                    current_version = 44,
+                    target_version = 44,
                     status = 'CURRENT',
                     structural_checksum = excluded.structural_checksum,
                     migration_completed_at = now(),
-                    last_successful_version = 43,
+                    last_successful_version = 44,
                     failure_code = null,
                     failure_message = null,
                     updated_at = now(),

@@ -50,7 +50,9 @@ public interface FindingDeltaQueueEntryRepository extends JpaRepository<FindingD
                 (event_type, tenant_id, component_id, vulnerability_id,
                  source_key, source_tag, dedupe_key)
             VALUES
-                (:eventType, :tenantId, :componentId, :vulnerabilityId,
+                (:eventType, COALESCE(:tenantId, (
+                    SELECT id FROM platform.tenants WHERE schema_name = current_schema()
+                 )), :componentId, :vulnerabilityId,
                  :sourceKey, :sourceTag, :dedupeKey)
             ON CONFLICT (dedupe_key) WHERE status = 'PENDING' DO NOTHING
             """, nativeQuery = true)

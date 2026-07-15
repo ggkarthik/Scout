@@ -17,6 +17,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
+    private static final String CURRENT_SCHEMA_VERSION = "44";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
 
@@ -26,15 +27,17 @@ class SchemaUpgradePathPostgresIntegrationTest {
         flyway.migrate();
 
         assertNotNull(flyway.info().current());
-        assertEquals("1", flyway.info().current().getVersion().getVersion());
+        assertEquals(CURRENT_SCHEMA_VERSION, flyway.info().current().getVersion().getVersion());
         assertEquals(0, flyway.info().pending().length);
         assertEquals(0, failedCount());
         assertEquals(1, historyCount("1"));
     }
 
     private Flyway configuredFlyway(MigrationVersion target) {
+        String migrationUrl = DATABASE.url() + "?currentSchema=tenant_default,platform,public";
         var config = Flyway.configure()
-                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
+                .dataSource(migrationUrl, DATABASE.username(), DATABASE.password())
+                .defaultSchema("public")
                 .locations("filesystem:src/main/resources/db/migration/postgres_reset")
                 .baselineOnMigrate(false)
                 .baselineVersion("1")

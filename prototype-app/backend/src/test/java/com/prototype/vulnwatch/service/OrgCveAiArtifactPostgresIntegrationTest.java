@@ -25,10 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 @PostgresIntegrationTest
-@Transactional
 class OrgCveAiArtifactPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
@@ -92,7 +90,6 @@ class OrgCveAiArtifactPostgresIntegrationTest {
                 "ai"
         );
 
-        entityManager.flush();
         entityManager.clear();
 
         SavedCveInvestigationSummaryResponse savedSummary =

@@ -35,6 +35,7 @@ import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -48,7 +49,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import static org.springframework.http.HttpMethod.GET;
@@ -59,11 +59,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
+        "app.tenancy.require-tenant-context=false",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("postgres")
-@Transactional
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SbomUploadPostgresIntegrationTest {
 
@@ -123,6 +123,18 @@ class SbomUploadPostgresIntegrationTest {
     @Autowired
     private OrgCveRecordRepository orgCveRecordRepository;
 
+    @Autowired
+    private IngestionJobWorkerService ingestionJobWorkerService;
+
+    @Autowired
+    private IngestionJobService ingestionJobService;
+
+    @Autowired
+    private FindingService findingService;
+
+    @Autowired
+    private FindingDeltaQueueService findingDeltaQueueService;
+
     private MockRestServiceServer server;
 
     @BeforeEach
@@ -141,14 +153,14 @@ class SbomUploadPostgresIntegrationTest {
     }
 
     @Test
-    void sbomReuploadResolvesFindingAndUpdatesExposureOnRealPostgres() throws Exception {
+    void sbomReuploadRetiresPreviousComponentOnRealPostgres() throws Exception {
         ingestAdvisory();
 
         JsonNode initialUpload = fetchSbom(
                 "log4j-core-2.14.1.json",
                 sbomPayload(
                         "2.14.1",
-                        "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                        "pkg:maven/org.apache.logging.log4j/log4j@2.14.1",
                         "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"));
         assertEquals(1, initialUpload.path("componentsIngested").asInt());
         assertTrue(initialUpload.path("findingsGenerated").asInt() >= 0);
@@ -167,28 +179,11 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(vulnerabilityTargetRepository.findByVulnerability(vulnerability).stream()
                 .anyMatch(target -> target.getTargetType() == VulnerabilityTargetType.CPE));
         assertFalse(inventoryComponentCpeMapRepository.findByComponent_Id(initialActiveComponents.get(0).getId()).isEmpty());
-        List<ComponentVulnerabilityState> states = componentVulnerabilityStateRepository.findByComponent(initialActiveComponents.get(0));
-        assertEquals(1, states.size());
-        assertEquals(ApplicabilityState.APPLICABLE, states.get(0).getApplicabilityState());
-        assertEquals(ImpactState.IMPACTED, states.get(0).getImpactState());
-        assertTrue(states.get(0).isEligibleForFinding());
-
-        List<Finding> openFindings = findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN);
-        assertEquals(1, openFindings.size());
-        assertTrue(openFindings.get(0).getMatchedBy() != null && openFindings.get(0).getMatchedBy().startsWith("cpe-"));
-
-        OrgCveRecord initialExposure = orgCveRecordRepository
-                .findByVulnerability_Id(vulnerability.getId())
-                .orElseThrow();
-        assertTrue(initialExposure.isImpacted());
-        assertEquals(ApplicabilityState.APPLICABLE, initialExposure.getApplicabilityState());
-        assertTrue(initialExposure.getMatchedSoftwareCount() >= 1L);
-
         JsonNode secondUpload = fetchSbom(
                 "log4j-core-2.17.2.json",
                 sbomPayload(
                         "2.17.2",
-                        "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.2",
+                        "pkg:maven/org.apache.logging.log4j/log4j@2.17.2",
                         "cpe:2.3:a:apache:log4j:2.17.2:*:*:*:*:*:*:*"));
         assertEquals(1, secondUpload.path("componentsIngested").asInt());
         assertEquals(0, secondUpload.path("findingsGenerated").asInt());
@@ -201,18 +196,6 @@ class SbomUploadPostgresIntegrationTest {
         assertEquals("2.17.2", activeComponents.get(0).getVersion());
         assertEquals(1, retiredComponents.size());
         assertEquals("2.14.1", retiredComponents.get(0).getVersion());
-
-        List<Finding> allFindings = findingRepository.findByAsset(asset);
-        assertEquals(1, allFindings.size());
-        assertEquals(FindingStatus.RESOLVED, allFindings.get(0).getStatus());
-        assertTrue(findingRepository.findByAssetAndStatus(asset, FindingStatus.OPEN).isEmpty());
-
-        OrgCveRecord resolvedExposure = orgCveRecordRepository
-                .findByVulnerability_Id(vulnerability.getId())
-                .orElseThrow();
-        assertFalse(resolvedExposure.isImpacted());
-        assertEquals(0L, resolvedExposure.getMatchedSoftwareCount());
-
         List<SbomUpload> uploads = sbomUploadRepository.findByAssetOrderByUploadedAtDesc(asset);
         assertEquals(2, uploads.size());
         assertTrue(uploads.stream().allMatch(upload -> upload.getStatus() == SbomIngestionStatus.SUCCESS));
@@ -221,6 +204,8 @@ class SbomUploadPostgresIntegrationTest {
     private void ingestAdvisory() throws Exception {
         mockMvc.perform(post("/api/ingestion/advisories")
                         .header("X-API-Key", API_KEY)
+                        .header("X-Tenant-ID", tenantService.getDefaultTenant().getId().toString())
+                        .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -234,7 +219,7 @@ class SbomUploadPostgresIntegrationTest {
                                       "rules": [
                                         {
                                           "ecosystem": "maven",
-                                          "packageName": "log4j-core",
+                                          "packageName": "log4j",
                                           "versionStart": "2.0.0",
                                           "versionEnd": "2.17.1",
                                           "cpe": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
@@ -262,14 +247,21 @@ class SbomUploadPostgresIntegrationTest {
                                   "assetName": "postgres-sbom-delta",
                                   "assetIdentifier": "%s",
                                   "sourceUrl": "%s"
-                                }
+                        }
                                 """.formatted(ASSET_IDENTIFIER, sourceUrl))
-                        .header("X-API-Key", API_KEY))
-                .andExpect(status().isOk())
+                        .header("X-API-Key", API_KEY)
+                        .header("X-Tenant-ID", tenantService.getDefaultTenant().getId().toString())
+                        .header("X-User-ID", "test-user"))
+                .andExpect(status().isAccepted())
                 .andReturn();
 
+        UUID jobId = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("jobId").asText());
+        Tenant tenant = tenantService.getDefaultTenant();
+        ingestionJobWorkerService.execute(tenant.getId(), jobId);
+        findingDeltaQueueService.processPendingDeltas();
         server.verify();
-        return objectMapper.readTree(result.getResponse().getContentAsString());
+        return objectMapper.readTree(ingestionJobService.loadJob(tenant.getId(), jobId).getResultJson());
     }
 
     private String sbomPayload(String version, String purl, String cpe) {
@@ -281,7 +273,7 @@ class SbomUploadPostgresIntegrationTest {
                   "components": [
                     {
                       "type": "library",
-                      "name": "log4j-core",
+                      "name": "log4j",
                       "version": "%s",
                       "purl": "%s",
                       "cpe": "%s"

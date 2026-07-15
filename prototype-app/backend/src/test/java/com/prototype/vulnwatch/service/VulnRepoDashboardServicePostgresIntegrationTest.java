@@ -32,10 +32,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 @PostgresIntegrationTest
-@Transactional
 class VulnRepoDashboardServicePostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
@@ -73,6 +71,9 @@ class VulnRepoDashboardServicePostgresIntegrationTest {
     @Test
     void dashboardSummaryCardsRemainConsistentWithSetBasedAggregateQuery() {
         Tenant tenant = tenantService.getDefaultTenant();
+        TenantContext.setCurrentTenantId(tenant.getId());
+        TenantContext.setCurrentSchemaName(tenant.getSchemaName());
+        try {
         Vulnerability kevImpacted = createVulnerability("CVE-2099-5101", "CRITICAL", 0.45, true);
         Vulnerability epssPriority = createVulnerability("CVE-2099-5102", "HIGH", 0.95, false);
         Vulnerability resolved = createVulnerability("CVE-2099-5103", "MEDIUM", 0.10, false);
@@ -120,6 +121,9 @@ class VulnRepoDashboardServicePostgresIntegrationTest {
         assertEquals(1L, response.resolutionStatus().resolvedCount());
         assertEquals(0L, response.resolutionStatus().inProgressCount());
         assertEquals(1L, response.resolutionStatus().acceptedRiskCount());
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     private Vulnerability createVulnerability(String externalId, String severity, double epssScore, boolean inKev) {
