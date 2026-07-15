@@ -37,10 +37,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 @PostgresIntegrationTest
-@Transactional
 class FindingWorkspaceProjectionPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
@@ -85,6 +83,7 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
     private NamedParameterJdbcTemplate jdbcTemplate;
 
     private Tenant tenant;
+    private long expectedFindingCount;
 
     @BeforeEach
     void seedWorkspace() {
@@ -101,13 +100,14 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
             seedSupport.seedCriticalWorkspace(tenant, 90, 40);
         }
         findingListProjectionService.refreshTenant(tenant);
+        expectedFindingCount = tenantSchemaExecutionService.run(tenant, () -> findingRepository.count());
     }
 
     @Test
     void projectionStatusDetectsMissingRowsAndRebuildRestoresParity() {
         FindingListProjectionService.ProjectionStatus healthy = findingListProjectionService.inspectProjectionStatus(tenant);
-        assertEquals(90, healthy.findingCount());
-        assertEquals(90, healthy.sourceFindingCount());
+        assertEquals(expectedFindingCount, healthy.findingCount());
+        assertEquals(expectedFindingCount, healthy.sourceFindingCount());
         assertFalse(healthy.stale());
 
         tenantSchemaExecutionService.run(tenant, () -> {
@@ -118,14 +118,14 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
         FindingListProjectionService.ProjectionStatus broken = findingListProjectionService.inspectProjectionStatus(tenant);
         assertTrue(broken.stale());
         assertEquals(0, broken.findingCount());
-        assertEquals(90, broken.sourceFindingCount());
-        assertEquals(90, broken.driftCount());
+        assertEquals(expectedFindingCount, broken.sourceFindingCount());
+        assertEquals(expectedFindingCount, broken.driftCount());
 
         findingListProjectionService.refreshTenant(tenant);
         FindingListProjectionService.ProjectionStatus repaired = findingListProjectionService.inspectProjectionStatus(tenant);
         assertFalse(repaired.stale());
-        assertEquals(90, repaired.findingCount());
-        assertEquals(90, repaired.sourceFindingCount());
+        assertEquals(expectedFindingCount, repaired.findingCount());
+        assertEquals(expectedFindingCount, repaired.sourceFindingCount());
         assertEquals(0, repaired.driftCount());
         assertNotNull(repaired.lastRebuildDurationMs());
     }

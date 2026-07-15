@@ -1,0 +1,16 @@
+app:
+  scheduling:
+    enabled: false
+  schema-migration:
+    # Legacy repository tests exercise the platform reset line. P0 migration/RLS
+    # tests opt in explicitly through PostgresITSupport.
+    enabled: false
+  security:
+    # Deterministic test-only AES-256 key; never used by a deployed profile.
+    credential-encryption-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 0

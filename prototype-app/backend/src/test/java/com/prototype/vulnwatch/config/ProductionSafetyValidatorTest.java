@@ -77,6 +77,22 @@ class ProductionSafetyValidatorTest {
     }
 
     @Test
+    void validateAllowsExplicitStrongHmacForPreproduction() {
+        ProductionSafetyValidator validator = hmacValidator(
+                "0123456789abcdef0123456789abcdef",
+                true);
+
+        assertDoesNotThrow(validator::validate);
+    }
+
+    @Test
+    void validateRejectsWeakHmacForPreproduction() {
+        ProductionSafetyValidator validator = hmacValidator("too-short", true);
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
+
+    @Test
     void validateRejectsMissingTenantContextRequirement() {
         ProductionSafetyValidator validator = validator(
                 "",
@@ -281,6 +297,8 @@ class ProductionSafetyValidatorTest {
                 jwtIssuerUri,
                 jwtJwkSetUri,
                 "",
+                false,
+                "",
                 "",
                 credentialEncryptionKey,
                 allowHeaderTenantSelection,
@@ -378,6 +396,8 @@ class ProductionSafetyValidatorTest {
                 allowApiKeyAuth,
                 jwtIssuerUri,
                 jwtJwkSetUri,
+                "",
+                false,
                 legacyPlatformOwnerEmail,
                 legacyPlatformOwnerPasswordHash,
                 credentialEncryptionKey,
@@ -394,6 +414,28 @@ class ProductionSafetyValidatorTest {
         PlatformOwnerBootstrapProperties properties = new PlatformOwnerBootstrapProperties();
         properties.setEnabled(false);
         return properties;
+    }
+
+    private ProductionSafetyValidator hmacValidator(String hmacSecret, boolean allowHmacInProduction) {
+        return new ProductionSafetyValidator(
+                true,
+                "",
+                "",
+                false,
+                "",
+                "",
+                hmacSecret,
+                allowHmacInProduction,
+                "",
+                "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                false,
+                true,
+                "https://app.example.com",
+                false,
+                false,
+                safeRoleJdbcTemplate(),
+                disabledBootstrap());
     }
 
     private PlatformOwnerBootstrapProperties enabledBootstrap() {

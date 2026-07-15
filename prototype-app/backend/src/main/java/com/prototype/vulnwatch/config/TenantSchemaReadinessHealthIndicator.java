@@ -16,7 +16,7 @@ public class TenantSchemaReadinessHealthIndicator implements HealthIndicator {
 
     public TenantSchemaReadinessHealthIndicator(
             TenantSchemaStatusService service,
-            @Value("${app.tenancy.minimum-compatible-schema-version:42}") int minimumVersion
+            @Value("${app.tenancy.minimum-compatible-schema-version:44}") int minimumVersion
     ) {
         this.service = service;
         this.minimumVersion = minimumVersion;

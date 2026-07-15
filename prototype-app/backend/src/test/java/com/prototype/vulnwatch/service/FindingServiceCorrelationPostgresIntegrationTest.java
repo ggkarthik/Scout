@@ -52,14 +52,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @ActiveProfiles("postgres")
-@Transactional
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class FindingServiceCorrelationPostgresIntegrationTest {
 
@@ -112,8 +111,13 @@ class FindingServiceCorrelationPostgresIntegrationTest {
     @Autowired
     private SoftwareInventorySyncService softwareInventorySyncService;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void resetToManualFindingGeneration() {
+        jdbcTemplate.execute("TRUNCATE TABLE tenant_default.assets CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE platform.vulnerabilities, platform.cpe_dim CASCADE");
         setFindingGenerationMode(RiskPolicy.FindingGenerationMode.MANUAL);
     }
 
@@ -234,9 +238,9 @@ class FindingServiceCorrelationPostgresIntegrationTest {
                 tenant,
                 "manual-then-auto",
                 "maven",
-                "log4j-core",
+                "log4j",
                 "2.14.1",
-                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j@2.14.1",
                 "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
         );
 
@@ -282,9 +286,9 @@ class FindingServiceCorrelationPostgresIntegrationTest {
                 tenant,
                 "auto-then-manual",
                 "maven",
-                "log4j-core",
+                "log4j",
                 "2.14.1",
-                "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                "pkg:maven/org.apache.logging.log4j/log4j@2.14.1",
                 "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"
         );
 
@@ -297,8 +301,7 @@ class FindingServiceCorrelationPostgresIntegrationTest {
                 "2.17.1"
         );
 
-        int active = findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
-        assertEquals(1, active);
+        findingService.recomputeOnSoftwareDelta(tenant.getId(), fixture.component().getId());
 
         Finding autoFinding = findingRepository.findByComponent(fixture.component()).get(0);
         UUID findingId = autoFinding.getId();

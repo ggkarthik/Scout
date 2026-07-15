@@ -77,7 +77,7 @@ capture_prometheus() {
   outfile="$1"
   error_file="${outfile}.err"
 
-  if ! curl -fsS "$BASE_URL/actuator/prometheus" >"$outfile" 2>"$error_file"; then
+  if ! curl -fsS -H "X-API-Key: $API_KEY" "$BASE_URL/actuator/prometheus" >"$outfile" 2>"$error_file"; then
     echo "Failed to fetch Prometheus metrics from $BASE_URL/actuator/prometheus" >&2
     echo "$prometheus_exposure_hint" >&2
     cat "$error_file" >&2 2>/dev/null || true

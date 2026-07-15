@@ -59,6 +59,7 @@ public class FindingProjectionQueryService {
     public FindingListProjectionService.ProjectionPage queryPage(Tenant tenant, FindingsFilter filter, String cursor, int limit) {
         ensureTenantProjection(tenant);
         int safeLimit = Math.max(1, Math.min(200, limit));
+        String projectionTable = qualifiedTenantTable(tenant, "finding_list_projection");
         return tenantSchemaExecutionService.run(tenant, () -> {
             FindingListProjectionService.ProjectionPage page = readTransactionTemplate.execute(transactionStatus -> {
                 SqlFilter sqlFilter = buildSqlFilter(filter);
@@ -72,7 +73,7 @@ public class FindingProjectionQueryService {
                             .addValue("cursorFindingId", cursorState.findingId());
                 }
                 long totalItems = jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM finding_list_projection WHERE 1=1 " + sqlFilter.whereClause(),
+                        "SELECT COUNT(*) FROM " + projectionTable + " WHERE 1=1 " + sqlFilter.whereClause(),
                         params,
                         Long.class
                 );
@@ -89,9 +90,9 @@ public class FindingProjectionQueryService {
                 params.addValue("limit", safeLimit + 1);
                 List<PageRow> rows = jdbcTemplate.query("""
                         SELECT finding_id, risk_score, due_at, updated_at
-                        FROM finding_list_projection
+                        FROM %s
                         WHERE 1=1
-                        """ + sqlFilter.whereClause() + cursorClause + """
+                        """.formatted(projectionTable) + sqlFilter.whereClause() + cursorClause + """
                         
                         ORDER BY risk_score DESC, coalesce(due_at, :maxDueAt) ASC, updated_at DESC, finding_id ASC
                         LIMIT :limit
@@ -118,6 +119,7 @@ public class FindingProjectionQueryService {
 
     public List<FindingListProjectionService.ProjectionRecord> loadRows(Tenant tenant, FindingsFilter filter) {
         ensureTenantProjection(tenant);
+        String projectionTable = qualifiedTenantTable(tenant, "finding_list_projection");
         return tenantSchemaExecutionService.run(tenant, () -> {
             List<FindingListProjectionService.ProjectionRecord> rows = readTransactionTemplate.execute(transactionStatus -> {
                 SqlFilter sqlFilter = buildSqlFilter(filter);
@@ -127,15 +129,23 @@ public class FindingProjectionQueryService {
                                package_name, ecosystem, owner_group, assigned_to, incident_id, due_at,
                                asset_name, support_group, patch_available, suppressed_until, risk_score,
                                updated_at, created_at, first_observed_at
-                        FROM finding_list_projection
+                        FROM %s
                         WHERE 1=1
-                        """ + sqlFilter.whereClause(),
+                        """.formatted(projectionTable) + sqlFilter.whereClause(),
                         sqlFilter.params(),
                         (rs, rowNum) -> mapProjectionRecord(rs)
                 );
             });
             return rows == null ? List.of() : rows;
         });
+    }
+
+    private String qualifiedTenantTable(Tenant tenant, String tableName) {
+        String schema = tenant == null ? null : tenant.getSchemaName();
+        if (schema == null || !schema.matches("[a-z][a-z0-9_]*")) {
+            throw new IllegalArgumentException("Invalid tenant schema name");
+        }
+        return '"' + schema + '"' + "." + '"' + tableName + '"';
     }
 
     private SqlFilter buildSqlFilter(FindingsFilter filter) {
@@ -267,7 +277,13 @@ public class FindingProjectionQueryService {
         if (!FindingFilterSpecifications.hasText(value)) {
             return;
         }
-        where.append(" AND ").append(column).append(" = :").append(paramKey);
+        where.append(" AND ");
+        if (upper) {
+            where.append("upper(").append(column).append(")");
+        } else {
+            where.append("lower(").append(column).append(")");
+        }
+        where.append(" = :").append(paramKey);
         params.addValue(paramKey, upper ? value.trim().toUpperCase(Locale.ROOT) : value.trim().toLowerCase(Locale.ROOT));
     }
 

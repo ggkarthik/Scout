@@ -55,16 +55,17 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
         "app.security.creator-key=test-creator-key",
+        "app.tenancy.require-tenant-context=false",
+        "app.schema-migration.enabled=true",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("postgres")
-@Transactional
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class CveDetailControllerPostgresIntegrationTest {
 
@@ -123,6 +124,9 @@ class CveDetailControllerPostgresIntegrationTest {
     @Autowired
     private TenantRepository tenantRepository;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
     @Test
     void proTenantCanGenerateAiSolution() throws Exception {
         Tenant tenant = tenantService.getDefaultTenant();
@@ -133,8 +137,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/ai-solution", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -154,8 +156,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/ai-solution", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -177,8 +177,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/cve-detail/{cveId}/ai-solution", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").exists());
@@ -196,8 +194,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/cve-detail/{cveId}/ai-actions", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk());
     }
@@ -214,8 +210,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/cve-detail/{cveId}/saved-investigation-summary", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk());
     }
@@ -227,8 +221,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/investigation/submit", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -245,8 +237,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/investigation/submit", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -263,8 +253,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/assessment/submit", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -286,8 +274,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/cve-detail/{cveId}", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.summary.externalId").value(cveId))
@@ -321,7 +307,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/cve-detail/{cveId}", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.investigations[0].status").value("PENDING_REVIEW"))
@@ -339,7 +324,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/investigation/submit", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -366,8 +350,6 @@ class CveDetailControllerPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/cve-detail/{cveId}/suppress", cveId)
                         .header("X-API-Key", "test-api-key")
-                        .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -429,7 +411,6 @@ class CveDetailControllerPostgresIntegrationTest {
         mockMvc.perform(get("/api/cve-detail/{cveId}", cveId)
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.summary.externalId").value(cveId))
@@ -492,7 +473,6 @@ class CveDetailControllerPostgresIntegrationTest {
                         .param("componentId", component.getId().toString())
                         .header("X-API-Key", "test-api-key")
                         .header("X-Creator-Key", "test-creator-key")
-                        .header("X-Tenant-ID", "1")
                         .header("X-User-ID", "test-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.matchedVexAssertionId").value(assertion.getId().toString()))
@@ -543,18 +523,15 @@ class CveDetailControllerPostgresIntegrationTest {
     }
 
     private Tenant createTenant(String name) {
-        return tenantRepository.findByNameIgnoreCase(name).orElseGet(() -> {
-            Tenant tenant = new Tenant();
-            tenant.setName(name);
-            return tenantRepository.save(tenant);
-        });
+        return tenantService.getDefaultTenant();
     }
 
     private Tenant createTenantWithId(String name, UUID id) {
-        return tenantRepository.findById(id).orElseGet(() -> {
+        return tenantRepository.findByNameIgnoreCase(name).orElseGet(() -> {
             Tenant tenant = new Tenant();
             tenant.setId(id);
             tenant.setName(name);
+            tenant.setSchemaName("tenant_legacy_shadow");
             return tenantRepository.save(tenant);
         });
     }
@@ -620,6 +597,7 @@ class CveDetailControllerPostgresIntegrationTest {
             boolean includeAiActions,
             boolean includeAiSummary
     ) {
+        transactionTemplate.executeWithoutResult(status -> {
         OrgCveRecord record = new OrgCveRecord();
         record.setTenant(tenant);
         record.setVulnerability(vulnerability);
@@ -648,12 +626,13 @@ class CveDetailControllerPostgresIntegrationTest {
                     {"summary":{"cveId":"%s"}}
                     """.formatted(vulnerability.getExternalId()));
             artifact.setInvestigationSummaryOutputJson("""
-                    {"generatedAt":"2099-01-01T00:00:00Z","executiveSummary":"AI summary","riskAnalysis":[],"impactAnalysis":[],"remediationPlan":[],"keyFindings":[],"metrics":[],"markdown":"AI summary"}
+                    {"generatedAt":"2099-01-01T00:00:00Z","executiveSummary":"AI summary","riskAnalysis":{"level":"HIGH","score":8,"rationale":"test"},"impactAnalysis":{"externalFacingCount":0,"internalAssetCount":0,"falsePositiveSummary":"none","eolRiskSummary":"none","patchGapSummary":"none"},"remediationPlan":[],"keyFindings":[],"metrics":{"totalAffected":0,"truePositives":0,"falsePositives":0,"externalFacing":0,"unpatchedVulnerable":0,"eolCount":0},"markdownReport":"AI summary"}
                     """);
             artifact.setInvestigationSummaryMode("ai");
             artifact.setInvestigationSummaryGeneratedAt(Instant.now());
         }
         artifact.touch();
         orgCveAiArtifactRepository.save(artifact);
+        });
     }
 }

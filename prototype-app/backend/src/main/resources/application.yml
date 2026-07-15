@@ -15,6 +15,11 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration/postgres_reset
+    # Platform migrations must never inherit the tenant-aware connection's
+    # request schema. Per-tenant migrations use their own Flyway instances and
+    # tenant_schema_history tables.
+    default-schema: ${FLYWAY_DEFAULT_SCHEMA:public}
+    schemas: ${FLYWAY_SCHEMAS:public}
     baseline-on-migrate: false
     baseline-version: 1
     validate-on-migrate: true
@@ -42,6 +47,7 @@ app:
   schema-migration:
     enabled: ${APP_SCHEMA_MIGRATION_ENABLED:false}
     report-only: ${APP_SCHEMA_MIGRATION_REPORT_ONLY:false}
+    exit-after-run: ${APP_SCHEMA_MIGRATION_EXIT_AFTER_RUN:false}
   features:
     vex-policy-enabled: ${FEATURE_VEX_POLICY_ENABLED:true}
     vex-risk-modifiers-enabled: ${FEATURE_VEX_RISK_MODIFIERS_ENABLED:true}
@@ -59,6 +65,7 @@ app:
       issuer-uri: ${APP_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_JWT_JWK_SET_URI:}
       hmac-secret: ${APP_JWT_HMAC_SECRET:}
+      allow-hmac-in-production: ${APP_ALLOW_HMAC_IN_PRODUCTION:false}
       audience: ${APP_SECURITY_JWT_AUDIENCE:}
       token-ttl-minutes: ${APP_JWT_TOKEN_TTL_MINUTES:480}
       subject-claim: ${APP_SECURITY_JWT_SUBJECT_CLAIM:sub}
@@ -84,7 +91,7 @@ app:
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
     enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
-    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:42}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:44}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}

@@ -51,14 +51,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @ActiveProfiles("postgres")
-@Transactional
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class CorrelationDeterminismPostgresIntegrationTest {
 

@@ -45,9 +45,15 @@ jobs:
       BASE_URL: http://127.0.0.1:8080
       API_KEY: change-me-in-prod
       CREATOR_KEY: local-creator
+      APP_API_KEY: change-me-in-prod
+      APP_CREATOR_KEY: local-creator
+      APP_ALLOW_API_KEY_AUTH: "true"
+      APP_REQUIRE_TENANT_CONTEXT: "false"
+      APP_SCHEMA_MIGRATION_ENABLED: "true"
       DB_URL: jdbc:postgresql://127.0.0.1:5432/vulnwatch
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
+      APP_CREDENTIAL_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       START_BACKEND: "true"
       SPRING_PROFILES_ACTIVE: local
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
@@ -55,7 +61,6 @@ jobs:
       BASELINE_ITERATIONS: ${{ inputs.baseline_iterations || '3' }}
       FAIL_ON_NONCOMPLIANT: "true"
       FAIL_ON_AUTH_SKIPS: "true"
-      OUT_DIR: ${{ runner.temp }}/performance-governance
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +71,8 @@ jobs:
           cache: maven
 
       - name: Run performance governance certification
+        env:
+          OUT_DIR: ${{ runner.temp }}/performance-governance
         run: sh ./scripts/run-performance-governance.sh
 
       - name: Upload performance governance artifacts

@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
  * <p>Default role {@code all} preserves current single-node behavior. Deployments that split API
  * and worker responsibilities can set {@code app.runtime.role=api} on interactive nodes to keep
  * schedulers and queue pollers off those instances without changing API contracts or page behavior.
+ * The one-shot {@code schema-migrator} role also disables background work so privileged migration
+ * credentials are never used by ordinary application jobs.
  */
 @Component
 public class BackgroundTaskExecutionPolicy {
@@ -36,7 +38,7 @@ public class BackgroundTaskExecutionPolicy {
     }
 
     public boolean allowsBackgroundTask(String taskName) {
-        if (runtimeRole != RuntimeRole.API) {
+        if (runtimeRole != RuntimeRole.API && runtimeRole != RuntimeRole.SCHEMA_MIGRATOR) {
             return true;
         }
         if (loggedSkips.add(taskName)) {
@@ -59,6 +61,7 @@ public class BackgroundTaskExecutionPolicy {
             case "", "all" -> RuntimeRole.ALL;
             case "api" -> RuntimeRole.API;
             case "worker" -> RuntimeRole.WORKER;
+            case "schema-migrator" -> RuntimeRole.SCHEMA_MIGRATOR;
             default -> {
                 LOG.warn("Unknown app.runtime.role value '{}' ; defaulting to 'all'", configuredRole);
                 yield RuntimeRole.ALL;
@@ -69,7 +72,8 @@ public class BackgroundTaskExecutionPolicy {
     private enum RuntimeRole {
         ALL("all"),
         API("api"),
-        WORKER("worker");
+        WORKER("worker"),
+        SCHEMA_MIGRATOR("schema-migrator");
 
         private final String configValue;
 

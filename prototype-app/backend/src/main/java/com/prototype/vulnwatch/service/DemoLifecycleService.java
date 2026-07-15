@@ -27,6 +27,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -124,7 +125,9 @@ public class DemoLifecycleService {
                 .toList();
     }
 
-    @Transactional(noRollbackFor = DemoAccessException.class)
+    // Tenant provisioning performs DDL on a separate connection. Do not keep platform-row
+    // locks open around it or PostgreSQL can wait on this request's own transaction.
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DemoRequestResponse approve(UUID requestId, String actor) {
         DemoRequest request = getRequest(requestId);
         Tenant tenant;

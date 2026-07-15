@@ -6,6 +6,8 @@ app:
   security:
     require-production-secrets: true
     allow-api-key-auth: false
+    jwt:
+      allow-hmac-in-production: true
   tenancy:
     allow-header-tenant-selection: false
     require-tenant-context: true

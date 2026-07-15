@@ -197,6 +197,7 @@
                     </excludes>
                     <systemPropertyVariables>
                         <run.postgres.it>${run.postgres.it}</run.postgres.it>
+                        <spring.test.context.cache.maxSize>12</spring.test.context.cache.maxSize>
                         <postgres.test.admin-url>${postgres.test.admin-url}</postgres.test.admin-url>
                         <postgres.test.username>${postgres.test.username}</postgres.test.username>
                         <postgres.test.password>${postgres.test.password}</postgres.test.password>
@@ -212,6 +213,7 @@
                     </includes>
                     <systemPropertyVariables>
                         <run.postgres.it>${run.postgres.it}</run.postgres.it>
+                        <spring.test.context.cache.maxSize>12</spring.test.context.cache.maxSize>
                         <postgres.test.admin-url>${postgres.test.admin-url}</postgres.test.admin-url>
                         <postgres.test.username>${postgres.test.username}</postgres.test.username>
                         <postgres.test.password>${postgres.test.password}</postgres.test.password>

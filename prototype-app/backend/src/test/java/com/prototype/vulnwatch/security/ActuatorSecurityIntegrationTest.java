@@ -93,7 +93,14 @@ class ActuatorSecurityIntegrationTest {
     @Test
     void prometheusEndpointIsNotPublic() throws Exception {
         mockMvc.perform(get("/actuator/prometheus"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void prometheusEndpointAcceptsConfiguredApiKey() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus")
+                        .header("X-API-Key", "test-api-key"))
+                .andExpect(status().isOk());
     }
 
     @Test

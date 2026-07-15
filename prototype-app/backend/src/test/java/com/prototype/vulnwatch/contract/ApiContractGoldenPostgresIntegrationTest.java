@@ -9,7 +9,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
+import com.prototype.vulnwatch.service.SbomIngestionService;
+import com.prototype.vulnwatch.service.WorkspaceService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
+import com.prototype.vulnwatch.support.PostgresITSupport;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +50,8 @@ import static org.springframework.http.HttpMethod.GET;
 
 @SpringBootTest(properties = {
         "app.security.api-key=test-api-key",
-        "app.correlation.backfill-targets-on-startup=false"
+        "app.correlation.backfill-targets-on-startup=false",
+        "app.tenancy.require-tenant-context=false"
 })
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -59,9 +65,7 @@ class ApiContractGoldenPostgresIntegrationTest {
 
     @DynamicPropertySource
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
-        registry.add("DB_URL", DATABASE::url);
-        registry.add("DB_USERNAME", DATABASE::username);
-        registry.add("DB_PASSWORD", DATABASE::password);
+        PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
     }
 
     @Autowired
@@ -72,6 +76,12 @@ class ApiContractGoldenPostgresIntegrationTest {
 
     @Autowired
     private RestTemplate restTemplate;
+
+    @Autowired
+    private SbomIngestionService sbomIngestionService;
+
+    @Autowired
+    private WorkspaceService workspaceService;
 
     private MockRestServiceServer server;
 
@@ -88,18 +98,17 @@ class ApiContractGoldenPostgresIntegrationTest {
                 .andExpect(method(GET))
                 .andRespond(withSuccess(sbomBytes, MediaType.APPLICATION_JSON));
 
-        mockMvc.perform(post("/api/sbom-fetch")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "assetType": "APPLICATION",
-                                  "assetName": "demo-app",
-                                  "assetIdentifier": "app:demo",
-                                  "sourceUrl": "%s"
-                                }
-                                """.formatted(sourceUrl))
-                        .header("X-API-Key", API_KEY))
-                .andExpect(status().isOk());
+        sbomIngestionService.ingestFromEndpoint(
+                workspaceService.getWorkspace(),
+                new SbomEndpointIngestionRequest(
+                        AssetType.APPLICATION,
+                        "demo-app",
+                        "app:demo",
+                        sourceUrl,
+                        null,
+                        null
+                )
+        );
         server.verify();
     }
 

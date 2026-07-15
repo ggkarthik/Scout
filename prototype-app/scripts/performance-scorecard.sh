@@ -31,6 +31,23 @@ capture_public_endpoint() {
   fi
 }
 
+capture_authenticated_endpoint() {
+  path="$1"
+  outfile="$2"
+  label="$3"
+  hint="${4:-}"
+  error_file="$OUT_DIR/$(basename "$outfile").err"
+
+  if ! curl -fsS -H "X-API-Key: $API_KEY" "$BASE_URL$path" >"$outfile" 2>"$error_file"; then
+    echo "Failed to fetch $label from $BASE_URL$path" >&2
+    if [ -n "$hint" ]; then
+      echo "$hint" >&2
+    fi
+    cat "$error_file" >&2 2>/dev/null || true
+    exit 1
+  fi
+}
+
 json_scalar() {
   file="$1"
   field="$2"
@@ -42,7 +59,7 @@ json_scalar() {
 echo "Collecting readiness, Prometheus, and performance scorecard data from $BASE_URL"
 
 capture_public_endpoint "/actuator/health/readiness" "$readiness_file" "readiness probe"
-capture_public_endpoint "/actuator/prometheus" "$prometheus_file" "Prometheus metrics" "$prometheus_exposure_hint"
+capture_authenticated_endpoint "/actuator/prometheus" "$prometheus_file" "Prometheus metrics" "$prometheus_exposure_hint"
 
 if [ -n "$CREATOR_KEY" ]; then
   curl -fsS \

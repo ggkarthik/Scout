@@ -8,6 +8,13 @@ on:
       - master
 
 jobs:
+  migration-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce tenant migration ownership
+        run: python3 .github/scripts/check-tenant-ddl.py
+
   secrets:
     runs-on: ubuntu-latest
     steps:
