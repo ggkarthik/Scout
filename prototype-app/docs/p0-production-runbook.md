@@ -59,6 +59,11 @@ configure these setup-link variables on the permanent web service. If the platfo
 already has a password, the operation fails unless the separately approved
 `PLATFORM_OWNER_SETUP_ALLOW_REISSUE=true` override is supplied.
 
+The production bootstrap also reconciles the configured platform-owner identity and
+`PLATFORM_OWNER` global role before issuing the link. This makes a clean database
+bootstrappable without relying on the permanent runtime service to create the first
+operator identity.
+
 The migrator uses a 30-second advisory-lock timeout, a five-minute statement timeout, migrates the template first, then one canary, then batches of ten, and stops at the first failure. Preserve version-42 additions on application rollback; do not run a destructive down migration.
 
 Before production, restore and verify a PostgreSQL backup, clear all reported drift on a production clone, validate row counts and foreign keys, run cross-tenant denial tests with the real runtime role, then monitor authentication failures, RLS denials, schema status, and tenant error rates for 24 hours.

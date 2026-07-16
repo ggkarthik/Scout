@@ -21,6 +21,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             LocalPostgresTestDatabase.provision("production_bootstrap_cli_final");
     private static final String RUNTIME_USERNAME = "scout_runtime_bootstrap_it";
     private static final String RUNTIME_PASSWORD = "scout-runtime-bootstrap-it-" + UUID.randomUUID();
+    private static final String PLATFORM_OWNER_EMAIL = "bootstrap-owner@example.test";
 
     @Test
     void cleanDatabaseBootstrapsProvisionsTenantAndRerunsIdempotently() throws Exception {
@@ -59,6 +60,16 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                   and last_successful_version = 44
                   and nullif(structural_checksum, '') is not null
                 """));
+        assertEquals(1, queryInt("""
+                select count(*)
+                from platform.app_users u
+                join platform.app_user_global_roles r on r.app_user_id = u.id
+                where lower(u.email) = lower(?)
+                  and u.external_subject = ?
+                  and u.platform_owner
+                  and u.status = 'ACTIVE'
+                  and r.role = 'PLATFORM_OWNER'
+                """, PLATFORM_OWNER_EMAIL, PLATFORM_OWNER_EMAIL));
         assertEquals(1, queryInt("""
                 select count(*)
                 from tenant_default.tenant_schema_history
@@ -129,6 +140,9 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         set("DB_PASSWORD", DATABASE.password());
         set("RUNTIME_DB_USERNAME", RUNTIME_USERNAME);
         set("RUNTIME_DB_PASSWORD", RUNTIME_PASSWORD);
+        set("APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED", "true");
+        set("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL", PLATFORM_OWNER_EMAIL);
+        set("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_DISPLAY_NAME", "Bootstrap Owner");
         try {
             runnable.run();
         } finally {
@@ -137,6 +151,9 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             clear("DB_PASSWORD");
             clear("RUNTIME_DB_USERNAME");
             clear("RUNTIME_DB_PASSWORD");
+            clear("APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED");
+            clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL");
+            clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_DISPLAY_NAME");
             clear("BOOTSTRAP_REPORT_ONLY");
         }
     }
