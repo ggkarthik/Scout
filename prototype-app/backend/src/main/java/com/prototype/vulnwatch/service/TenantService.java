@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -23,21 +22,13 @@ public class TenantService {
 
     private final TenantRepository tenantRepository;
     private final TenantSchemaService tenantSchemaService;
-    private final TenantSchemaMigrationService tenantSchemaMigrationService;
 
-    public TenantService(TenantRepository tenantRepository, TenantSchemaService tenantSchemaService) {
-        this(tenantRepository, tenantSchemaService, null);
-    }
-
-    @Autowired
     public TenantService(
             TenantRepository tenantRepository,
-            TenantSchemaService tenantSchemaService,
-            TenantSchemaMigrationService tenantSchemaMigrationService
+            TenantSchemaService tenantSchemaService
     ) {
         this.tenantRepository = tenantRepository;
         this.tenantSchemaService = tenantSchemaService;
-        this.tenantSchemaMigrationService = tenantSchemaMigrationService;
     }
 
     @Transactional
@@ -94,22 +85,19 @@ public class TenantService {
         tenant.setPlanCode(normalizePlanCode(planCode));
         tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
         tenant.setStatus("PROVISIONING");
-        Tenant saved = tenantRepository.save(tenant);
-        try {
-            if (tenantSchemaMigrationService == null) {
-                tenantSchemaService.ensureSchemaExists(saved.getSchemaName());
-            } else {
-                tenantSchemaMigrationService.provisionNewTenant(saved);
-            }
-            saved.setStatus("ACTIVE");
-            saved.setUpdatedAt(Instant.now());
-            return tenantRepository.save(saved);
-        } catch (RuntimeException ex) {
-            saved.setStatus("PROVISIONING_FAILED");
-            saved.setUpdatedAt(Instant.now());
-            tenantRepository.save(saved);
-            throw ex;
+        return tenantRepository.save(tenant);
+    }
+
+    @Transactional
+    public Tenant retryProvisioning(UUID tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        if (!"PROVISIONING_FAILED".equalsIgnoreCase(tenant.getStatus())) {
+            throw new IllegalArgumentException("Only PROVISIONING_FAILED tenants can be retried");
         }
+        tenant.setStatus("PROVISIONING");
+        tenant.setUpdatedAt(Instant.now());
+        return tenantRepository.save(tenant);
     }
 
     @Transactional

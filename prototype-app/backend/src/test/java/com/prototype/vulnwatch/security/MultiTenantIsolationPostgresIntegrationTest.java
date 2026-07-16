@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.service.FindingDeltaQueueService;
 import com.prototype.vulnwatch.service.FixRecordService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
@@ -44,6 +45,9 @@ class MultiTenantIsolationPostgresIntegrationTest {
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Autowired
     private FixRecordRepository fixRecordRepository;
 
     @Autowired
@@ -60,6 +64,8 @@ class MultiTenantIsolationPostgresIntegrationTest {
     void createsTenantSchemasAndKeepsTenantLocalRecordsIsolated() {
         Tenant tenantA = tenantService.createTenant("Customer A", "customer-a", "pilot", null);
         Tenant tenantB = tenantService.createTenant("Customer B", "customer-b", "pilot", null);
+        tenantSchemaMigrationService.provisionNewTenant(tenantA);
+        tenantSchemaMigrationService.provisionNewTenant(tenantB);
 
         assertTenantSchemaProvisioned(tenantA.getSchemaName());
         assertTenantSchemaProvisioned(tenantB.getSchemaName());

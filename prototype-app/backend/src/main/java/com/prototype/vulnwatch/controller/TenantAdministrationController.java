@@ -89,10 +89,18 @@ public class TenantAdministrationController {
 
     @PostMapping("/platform/tenants")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
-    public TenantResponse createTenant(@RequestBody TenantCreateRequest request) {
+    public ResponseEntity<TenantResponse> createTenant(@RequestBody TenantCreateRequest request) {
         Tenant tenant = tenantAdministrationService.createTenant(request.name(), request.slug(), request.planCode(), request.billingRef());
-        auditEventService.record("tenant.created", "tenant", tenant.getId().toString(), null);
-        return toTenantResponse(tenant);
+        auditEventService.record("tenant.provisioning.requested", "tenant", tenant.getId().toString(), null);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(toTenantResponse(tenant));
+    }
+
+    @PostMapping("/platform/tenants/{tenantId}/provisioning-retry")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public ResponseEntity<TenantResponse> retryTenantProvisioning(@PathVariable UUID tenantId) {
+        Tenant tenant = tenantAdministrationService.retryProvisioning(tenantId);
+        auditEventService.record("tenant.provisioning.retry_requested", "tenant", tenant.getId().toString(), null);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(toTenantResponse(tenant));
     }
 
     @GetMapping("/platform/tenants/{tenantId}")

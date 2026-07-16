@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.repo.FixRecordRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.prototype.vulnwatch.service.FindingDeltaQueueService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
 import com.prototype.vulnwatch.service.TenantSchemaService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
@@ -48,6 +49,9 @@ class TenantSchemaResetPostgresIntegrationTest {
     private TenantSchemaService tenantSchemaService;
 
     @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Autowired
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Autowired
@@ -63,6 +67,7 @@ class TenantSchemaResetPostgresIntegrationTest {
     @Test
     void resetTenantSchemaClearsTenantOwnedDataAndLeavesTenantRegistryIntact() {
         Tenant tenant = tenantService.createTenant("Reset Customer", "reset-customer", "pilot", null);
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
 
         tenantSchemaExecutionService.run(tenant, () -> {
             fixRecordRepository.saveAndFlush(buildFixRecord(tenant, "CVE-2099-4001", "openssl"));
@@ -93,6 +98,7 @@ class TenantSchemaResetPostgresIntegrationTest {
     @Test
     void dropTenantSchemaRemovesTenantSchemaPermanently() {
         Tenant tenant = tenantService.createTenant("Drop Customer", "drop-customer", "pilot", null);
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
 
         assertSchemaExists(tenant.getSchemaName());
 

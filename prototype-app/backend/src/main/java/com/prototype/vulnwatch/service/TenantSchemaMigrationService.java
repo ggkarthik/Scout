@@ -125,9 +125,15 @@ public class TenantSchemaMigrationService {
             if (result.failed()) {
                 throw new IllegalStateException(result.failureMessage());
             }
+            tenant.setStatus("ACTIVE");
+            tenant.setUpdatedAt(Instant.now());
+            tenantRepository.save(tenant);
         } catch (RuntimeException ex) {
             statusService.markFailure(tenant.getId(), tenant.getSchemaName(), "PROVISIONING_FAILED",
                     "PROVISIONING_FAILED", ex.getMessage(), runId);
+            tenant.setStatus("PROVISIONING_FAILED");
+            tenant.setUpdatedAt(Instant.now());
+            tenantRepository.save(tenant);
             throw ex;
         }
     }
