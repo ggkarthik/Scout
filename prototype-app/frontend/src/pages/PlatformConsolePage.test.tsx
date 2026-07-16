@@ -34,6 +34,7 @@ describe('PlatformConsolePage tenant context controls', () => {
   });
 
   it('switches into tenant context with a fresh token', async () => {
+    mockTenantSchemaStatus();
     vi.spyOn(api, 'listTenants').mockResolvedValue([{
       id: 'tenant-a',
       name: 'Tenant A',
@@ -67,6 +68,7 @@ describe('PlatformConsolePage tenant context controls', () => {
   });
 
   it('returns an acting platform owner back to platform scope', async () => {
+    mockTenantSchemaStatus();
     vi.spyOn(api, 'listTenants').mockResolvedValue([{
       id: 'tenant-a',
       name: 'Tenant A',
@@ -269,6 +271,106 @@ describe('PlatformConsolePage tenant context controls', () => {
     expect(screen.getByRole('button', {
       name: /Affected Tenants: The tenants currently impacted by this connector problem\./
     })).toBeInTheDocument();
+  });
+
+  it('blocks workspace access while provisioning and offers a retry after failure', async () => {
+    vi.spyOn(api, 'listTenants').mockResolvedValue([{
+      id: 'tenant-pending',
+      name: 'Pending Tenant',
+      slug: 'pending-tenant',
+      status: 'PROVISIONING',
+      planCode: 'ENTERPRISE',
+      billingRef: null,
+      maxConnectorCount: null,
+      maxServiceAccountCount: null,
+      maxDailySbomUploads: null,
+      maxExportRows: null,
+      maxDailyExposureRefreshes: null,
+      createdAt: '2026-07-15T00:00:00Z',
+      updatedAt: null
+    }, {
+      id: 'tenant-failed',
+      name: 'Failed Tenant',
+      slug: 'failed-tenant',
+      status: 'PROVISIONING_FAILED',
+      planCode: 'ENTERPRISE',
+      billingRef: null,
+      maxConnectorCount: null,
+      maxServiceAccountCount: null,
+      maxDailySbomUploads: null,
+      maxExportRows: null,
+      maxDailyExposureRefreshes: null,
+      createdAt: '2026-07-15T00:00:00Z',
+      updatedAt: null
+    }]);
+    vi.spyOn(api, 'listInventoryConnectorHealth').mockResolvedValue([]);
+    mockTenantSchemaStatus([{
+      tenantId: 'tenant-pending',
+      tenantName: 'Pending Tenant',
+      tenantStatus: 'PROVISIONING',
+      schemaName: 'tenant_pending_tenant',
+      currentVersion: 0,
+      targetVersion: 44,
+      status: 'PENDING',
+      structuralChecksum: null,
+      lastSuccessfulVersion: 0,
+      failureCode: null,
+      failureMessage: null,
+      migrationStartedAt: null,
+      migrationCompletedAt: null,
+      updatedAt: null,
+      migrationRunId: null
+    }, {
+      tenantId: 'tenant-failed',
+      tenantName: 'Failed Tenant',
+      tenantStatus: 'PROVISIONING_FAILED',
+      schemaName: 'tenant_failed_tenant',
+      currentVersion: 0,
+      targetVersion: 44,
+      status: 'PROVISIONING_FAILED',
+      structuralChecksum: null,
+      lastSuccessfulVersion: 0,
+      failureCode: 'tenant_schema_drift',
+      failureMessage: 'Tenant schema does not match the migrated template',
+      migrationStartedAt: null,
+      migrationCompletedAt: null,
+      updatedAt: null,
+      migrationRunId: null
+    }]);
+    vi.spyOn(api, 'retryTenantProvisioning').mockResolvedValue({
+      id: 'tenant-failed',
+      name: 'Failed Tenant',
+      slug: 'failed-tenant',
+      status: 'PROVISIONING',
+      planCode: 'ENTERPRISE',
+      billingRef: null,
+      maxConnectorCount: null,
+      maxServiceAccountCount: null,
+      maxDailySbomUploads: null,
+      maxExportRows: null,
+      maxDailyExposureRefreshes: null,
+      createdAt: '2026-07-15T00:00:00Z',
+      updatedAt: null
+    });
+
+    const queryClient = createTestQueryClient();
+    renderPlatformTenants({
+      ...PLATFORM_SCOPE_OWNER,
+      allowedTenants: [
+        ...(PLATFORM_SCOPE_OWNER.allowedTenants ?? []),
+        { id: 'tenant-pending', name: 'Pending Tenant', slug: 'pending-tenant', role: 'PLATFORM_OWNER' },
+        { id: 'tenant-failed', name: 'Failed Tenant', slug: 'failed-tenant', role: 'PLATFORM_OWNER' }
+      ]
+    }, queryClient);
+
+    const enterButtons = await screen.findAllByRole('button', { name: 'Enter workspace' });
+    expect(enterButtons).toHaveLength(2);
+    expect(enterButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(screen.getByText('Awaiting controlled bootstrap')).toBeInTheDocument();
+    expect(screen.getByText('Tenant schema does not match the migrated template')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry provisioning' }));
+    await waitFor(() => expect(vi.mocked(api.retryTenantProvisioning).mock.calls[0]?.[0]).toBe('tenant-failed'));
   });
 
   it('renders enterprise performance guardrails in reliability view', async () => {
@@ -478,4 +580,13 @@ function mockOperationsApi({
   vi.spyOn(api, 'listInventoryConnectorHealth').mockResolvedValue([]);
   vi.spyOn(api, 'getOperationalTenantAttention').mockResolvedValue(tenantAttention);
   vi.spyOn(api, 'getOperationalConnectorIssues').mockResolvedValue(connectorIssues);
+}
+
+function mockTenantSchemaStatus(items: Awaited<ReturnType<typeof api.getTenantSchemaStatus>>['items'] = []) {
+  vi.spyOn(api, 'getTenantSchemaStatus').mockResolvedValue({
+    items,
+    page: 0,
+    size: 200,
+    total: items.length
+  });
 }

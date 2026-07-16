@@ -53,7 +53,9 @@ public class TenantBootstrapService {
                     tenant.setUpdatedAt(Instant.now());
                     tenantRepository.save(tenant);
                 }
-                tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
+                if ("ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+                    tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
+                }
             }
 
             if (changed) {

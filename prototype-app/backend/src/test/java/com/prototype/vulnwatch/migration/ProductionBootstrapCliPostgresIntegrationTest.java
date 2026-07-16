@@ -1,12 +1,14 @@
 package com.prototype.vulnwatch.migration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -16,13 +18,24 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 class ProductionBootstrapCliPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
-            LocalPostgresTestDatabase.provision("production_bootstrap_cli");
+            LocalPostgresTestDatabase.provision("production_bootstrap_cli_final");
+    private static final String RUNTIME_USERNAME = "scout_runtime_bootstrap_it";
+    private static final String RUNTIME_PASSWORD = "scout-runtime-bootstrap-it-" + UUID.randomUUID();
 
     @Test
-    void cleanDatabaseBootstrapsAndRerunsIdempotently() throws Exception {
+    void cleanDatabaseBootstrapsProvisionsTenantAndRerunsIdempotently() throws Exception {
+        UUID tenantId = UUID.randomUUID();
         withBootstrapProperties(() -> {
             ProductionBootstrapCli.main(new String[0]);
+            insertProvisioningTenant(tenantId, "tenant_bootstrap_customer");
             ProductionBootstrapCli.main(new String[0]);
+            ProductionBootstrapCli.main(new String[0]);
+            set("BOOTSTRAP_REPORT_ONLY", "true");
+            try {
+                ProductionBootstrapCli.main(new String[0]);
+            } finally {
+                clear("BOOTSTRAP_REPORT_ONLY");
+            }
         });
 
         assertEquals(44, queryInt("""
@@ -56,19 +69,66 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                 from pg_roles
                 where rolname = 'scout_runtime_bootstrap_it'
                   and rolcanlogin
+                  and not rolinherit
                   and not rolsuper
                   and not rolcreatedb
                   and not rolcreaterole
                   and not rolbypassrls
                 """) >= 1);
+        assertEquals(1, queryInt("""
+                select count(*)
+                from platform.tenants
+                where id = '%s'::uuid and status = 'ACTIVE'
+                """.formatted(tenantId)));
+        assertEquals(1, queryInt("""
+                select count(*)
+                from platform.tenant_schema_versions customer
+                join platform.tenant_schema_versions template
+                  on template.schema_name = 'tenant_default'
+                where customer.tenant_id = '%s'::uuid
+                  and customer.status = 'CURRENT'
+                  and customer.current_version = 44
+                  and customer.structural_checksum = template.structural_checksum
+                """.formatted(tenantId)));
+        assertEquals(0, queryInt("""
+                select count(*)
+                from pg_constraint con
+                join pg_class rel on rel.oid = con.conrelid
+                join pg_namespace source_ns on source_ns.oid = rel.relnamespace
+                join pg_class referenced on referenced.oid = con.confrelid
+                join pg_namespace referenced_ns on referenced_ns.oid = referenced.relnamespace
+                where source_ns.nspname = 'tenant_bootstrap_customer'
+                  and referenced_ns.nspname = 'tenant_default'
+                """));
+        assertEquals(0, queryInt("""
+                select count(*)
+                from information_schema.columns
+                where table_schema = 'tenant_bootstrap_customer'
+                  and column_default like '%tenant_default.%'
+                """));
+        assertEquals(0, queryInt("""
+                select count(*)
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'tenant_bootstrap_customer'
+                  and c.relkind in ('r', 'p')
+                  and c.relname not in ('tenant_schema_history', 'flyway_schema_history', 'demo_requests')
+                  and (not c.relrowsecurity or not c.relforcerowsecurity
+                       or not exists (
+                           select 1 from pg_policy p
+                           where p.polrelid = c.oid and p.polname = 'tenant_isolation'
+                       ))
+                """));
+
+        verifyRuntimeIsolation(tenantId);
     }
 
     private void withBootstrapProperties(ThrowingRunnable runnable) throws Exception {
         set("DB_URL", DATABASE.url());
         set("DB_USERNAME", DATABASE.username());
         set("DB_PASSWORD", DATABASE.password());
-        set("RUNTIME_DB_USERNAME", "scout_runtime_bootstrap_it");
-        set("RUNTIME_DB_PASSWORD", "scout-runtime-bootstrap-it-" + UUID.randomUUID());
+        set("RUNTIME_DB_USERNAME", RUNTIME_USERNAME);
+        set("RUNTIME_DB_PASSWORD", RUNTIME_PASSWORD);
         try {
             runnable.run();
         } finally {
@@ -77,6 +137,62 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             clear("DB_PASSWORD");
             clear("RUNTIME_DB_USERNAME");
             clear("RUNTIME_DB_PASSWORD");
+            clear("BOOTSTRAP_REPORT_ONLY");
+        }
+    }
+
+    private void insertProvisioningTenant(UUID tenantId, String schemaName) throws Exception {
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             var statement = connection.prepareStatement("""
+                     insert into platform.tenants (
+                         id, name, slug, schema_name, status, plan_code,
+                         created_at, updated_at, max_connector_count,
+                         max_service_account_count, max_daily_sbom_uploads,
+                         max_export_rows, max_daily_exposure_refreshes
+                     ) values (?, 'Bootstrap Customer', 'bootstrap-customer', ?, 'PROVISIONING',
+                               'ENTERPRISE', now(), now(), 10, 25, 100, 50000, 25)
+                     """)) {
+            statement.setObject(1, tenantId);
+            statement.setString(2, schemaName);
+            statement.executeUpdate();
+        }
+    }
+
+    private void verifyRuntimeIsolation(UUID tenantId) throws Exception {
+        UUID assetId = UUID.randomUUID();
+        try (Connection owner = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             Statement statement = owner.createStatement()) {
+            statement.execute("select set_config('app.current_tenant_id', '" + tenantId + "', false)");
+            statement.execute("""
+                    insert into tenant_bootstrap_customer.assets (
+                        id, business_criticality, created_at, identifier, name, state, type, tenant_id
+                    ) values ('%s'::uuid, 'HIGH', now(), 'bootstrap-asset', 'Bootstrap Asset',
+                              'ACTIVE', 'HOST', '%s'::uuid)
+                    """.formatted(assetId, tenantId));
+        }
+
+        try (Connection runtime = DriverManager.getConnection(DATABASE.url(), RUNTIME_USERNAME, RUNTIME_PASSWORD);
+             Statement statement = runtime.createStatement()) {
+            statement.execute("select set_config('search_path', 'tenant_bootstrap_customer,platform', false)");
+            statement.execute("select set_config('app.current_tenant_id', '" + tenantId + "', false)");
+            assertEquals(1, scalar(statement, "select count(*) from assets where id = '" + assetId + "'::uuid"));
+
+            statement.execute("select set_config('app.current_tenant_id', '" + UUID.randomUUID() + "', false)");
+            assertEquals(0, scalar(statement, "select count(*) from assets where id = '" + assetId + "'::uuid"));
+            SQLException crossTenantWrite = assertThrows(SQLException.class, () -> statement.execute("""
+                    insert into assets (
+                        id, business_criticality, created_at, identifier, name, state, type, tenant_id
+                    ) values ('%s'::uuid, 'HIGH', now(), 'cross-tenant', 'Cross Tenant',
+                              'ACTIVE', 'HOST', '%s'::uuid)
+                    """.formatted(UUID.randomUUID(), tenantId)));
+            assertEquals("42501", crossTenantWrite.getSQLState());
+        }
+    }
+
+    private int scalar(Statement statement, String sql) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            resultSet.next();
+            return resultSet.getInt(1);
         }
     }
 

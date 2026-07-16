@@ -101,6 +101,7 @@ import type {
   TenantInviteRequest,
   TenantInviteValidationResponse,
   TenantCreateRequest,
+  TenantSchemaStatusPage,
   TenantMember,
   TenantMemberRequest,
   TenantMemberUpdateRequest
@@ -1440,6 +1441,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  retryTenantProvisioning: (tenantId: string) =>
+    request<Tenant>(`/platform/tenants/${encodeURIComponent(tenantId)}/provisioning-retry`, {
+      method: 'POST'
+    }),
+  getTenantSchemaStatus: () =>
+    request<TenantSchemaStatusPage>('/platform/tenant-schema-status?page=0&size=200'),
   deleteTenant: (tenantId: string) =>
     request<void>(`/platform/tenants/${encodeURIComponent(tenantId)}`, {
       method: 'DELETE'

@@ -1135,11 +1135,23 @@ function TenantLifecyclePanel() {
     queryKey: ['platform-inventory-connector-health'],
     queryFn: api.listInventoryConnectorHealth
   });
+  const tenantSchemaStatusQuery = useQuery({
+    queryKey: ['platform-tenant-schema-status'],
+    queryFn: api.getTenantSchemaStatus
+  });
   const createTenant = useMutation({
     mutationFn: api.createTenant,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
+    }
+  });
+  const retryProvisioning = useMutation({
+    mutationFn: api.retryTenantProvisioning,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
     }
   });
   const deleteTenant = useMutation({
@@ -1148,6 +1160,7 @@ function TenantLifecyclePanel() {
       setTenantPendingDelete(null);
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
     }
   });
   const switchTenantContext = useMutation({
@@ -1175,6 +1188,10 @@ function TenantLifecyclePanel() {
 
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
   const inventoryConnectorHealth = inventoryConnectorHealthQuery.data ?? [];
+  const schemaStatusByTenantId = React.useMemo(
+    () => new Map((tenantSchemaStatusQuery.data?.items ?? []).map((item) => [item.tenantId, item])),
+    [tenantSchemaStatusQuery.data]
+  );
   const accessibleTenantIds = React.useMemo(
     () => new Set((actor?.allowedTenants ?? []).map((tenant) => tenant.id)),
     [actor?.allowedTenants]
@@ -1230,6 +1247,10 @@ function TenantLifecyclePanel() {
           {createTenant.isPending ? 'Creating...' : 'Create Tenant'}
         </button>
       </form>
+      <div className="notice" role="status">
+        New tenants remain in <strong>PROVISIONING</strong> until the controlled production bootstrap runs.
+        Workspace access and tenant operations are enabled only after verification changes the tenant to <strong>ACTIVE</strong>.
+      </div>
       {createTenant.isError && (
         <div className="notice error" role="alert">
           {createTenant.error instanceof Error ? createTenant.error.message : 'Tenant creation failed'}
@@ -1258,18 +1279,38 @@ function TenantLifecyclePanel() {
               </tr>
             </thead>
             <tbody>
-              {tenants.map((tenant) => (
-                <tr key={tenant.id}>
-                  <td>{tenant.name}</td>
-                  <td>{tenant.demoOwnerEmail ?? '-'}</td>
-                  <td><code>{tenant.slug}</code></td>
-                  <td>{tenant.status}</td>
-                  <td>{formatWorkspaceProfile(tenant.planCode)}</td>
-                  <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
-                  <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
-                  <td>{new Date(tenant.createdAt).toLocaleString()}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {tenants.map((tenant) => {
+                const normalizedStatus = tenant.status.toUpperCase();
+                const schemaStatus = schemaStatusByTenantId.get(tenant.id);
+                const provisioningFailure = normalizedStatus === 'PROVISIONING_FAILED'
+                  ? schemaStatus?.failureMessage ?? schemaStatus?.failureCode ?? 'Provisioning failed. Review the bootstrap report.'
+                  : null;
+                return (
+                  <tr key={tenant.id}>
+                    <td>{tenant.name}</td>
+                    <td>{tenant.demoOwnerEmail ?? '-'}</td>
+                    <td><code>{tenant.slug}</code></td>
+                    <td>
+                      <div>{tenant.status}</div>
+                      {normalizedStatus === 'PROVISIONING' ? (
+                        <small>Awaiting controlled bootstrap</small>
+                      ) : null}
+                      {provisioningFailure ? (
+                        <small className="text-danger">{provisioningFailure}</small>
+                      ) : null}
+                      {schemaStatus ? (
+                        <small>
+                          Schema {schemaStatus.currentVersion}/{schemaStatus.targetVersion}
+                          {schemaStatus.migrationRunId ? ` · Run ${schemaStatus.migrationRunId.slice(0, 8)}` : ''}
+                        </small>
+                      ) : null}
+                    </td>
+                    <td>{formatWorkspaceProfile(tenant.planCode)}</td>
+                    <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>
+                    <td>{tenant.demoExpiresAt ? new Date(tenant.demoExpiresAt).toLocaleDateString() : '-'}</td>
+                    <td>{new Date(tenant.createdAt).toLocaleString()}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {actor?.roles.includes('PLATFORM_OWNER') ? (
                         actingTenantId === tenant.id ? (
                           <button
@@ -1287,17 +1328,30 @@ function TenantLifecyclePanel() {
                             disabled={
                               switchTenantContext.isPending
                               || !accessibleTenantIds.has(tenant.id)
-                              || tenant.status.toUpperCase() === 'PURGING'
-                              || tenant.status.toUpperCase() === 'DELETED'
+                              || normalizedStatus !== 'ACTIVE'
                             }
                             onClick={() => switchTenantContext.mutate(tenant.id)}
-                            title={accessibleTenantIds.has(tenant.id)
-                              ? 'Switch into tenant workspace context'
+                            title={normalizedStatus !== 'ACTIVE'
+                              ? 'Workspace access is available only after tenant provisioning completes'
+                              : accessibleTenantIds.has(tenant.id)
+                                ? 'Switch into tenant workspace context'
                               : 'Active support grant or explicit playground membership required'}
                           >
                             {switchingTenantId === tenant.id && switchTenantContext.isPending ? 'Entering...' : 'Enter workspace'}
                           </button>
                         )
+                      ) : null}
+                      {normalizedStatus === 'PROVISIONING_FAILED' ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={retryProvisioning.isPending}
+                          onClick={() => retryProvisioning.mutate(tenant.id)}
+                        >
+                          {retryProvisioning.isPending && retryProvisioning.variables === tenant.id
+                            ? 'Retrying...'
+                            : 'Retry provisioning'}
+                        </button>
                       ) : null}
                       {tenant.slug === 'default-workspace' ? null : (
                         <button
@@ -1316,10 +1370,11 @@ function TenantLifecyclePanel() {
                           Delete
                         </button>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1337,6 +1392,13 @@ function TenantLifecyclePanel() {
       {deleteTenant.isError && (
         <div className="notice error" role="alert">
           {deleteTenant.error instanceof Error ? deleteTenant.error.message : 'Failed to delete tenant'}
+        </div>
+      )}
+      {retryProvisioning.isError && (
+        <div className="notice error" role="alert">
+          {retryProvisioning.error instanceof Error
+            ? retryProvisioning.error.message
+            : 'Failed to request tenant provisioning retry'}
         </div>
       )}
       <ConfirmDialog

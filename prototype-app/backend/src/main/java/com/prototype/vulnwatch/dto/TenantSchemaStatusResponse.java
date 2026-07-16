@@ -12,6 +12,8 @@ public record TenantSchemaStatusResponse(
 ) {
     public record Item(
             UUID tenantId,
+            String tenantName,
+            String tenantStatus,
             String schemaName,
             int currentVersion,
             int targetVersion,

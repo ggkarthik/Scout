@@ -1,12 +1,12 @@
 package com.prototype.vulnwatch.service;
 
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,17 +28,12 @@ class TenantSchemaServiceTest {
     }
 
     @Test
-    void ensureSchemaExistsProvisionsEachSchemaOnlyOncePerProcess() {
-        when(platformJdbcTemplate.queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString()))
-                .thenReturn(List.of());
+    void ensureSchemaExistsFailsClosedWithoutExecutingDdl() {
         when(platformJdbcTemplate.queryForObject(anyString(), eq(Boolean.class), anyString()))
-                .thenReturn(false, true, true);
+                .thenReturn(false);
 
-        service.ensureSchemaExists("tenant_acme");
-        service.ensureSchemaExists("tenant_acme");
+        assertThrows(IllegalStateException.class, () -> service.ensureSchemaExists("tenant_acme"));
 
-        verify(platformJdbcTemplate, times(1)).execute("CREATE SCHEMA \"tenant_acme\"");
-        verify(platformJdbcTemplate, times(1))
-                .queryForList(anyString(), org.mockito.ArgumentMatchers.eq(String.class), anyString());
+        verify(platformJdbcTemplate, never()).execute(anyString());
     }
 }

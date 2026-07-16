@@ -45,6 +45,7 @@ class TenantBootstrapServiceTest {
         customerTenant.setName("GM Test");
         customerTenant.setSlug("gm-test");
         customerTenant.setSchemaName("tenant_gm_test,platform");
+        customerTenant.setStatus("PROVISIONING");
 
         when(tenantSchemaService.defaultSchemaName()).thenReturn("tenant_default");
         when(tenantSchemaService.normalizeSchemaName(anyString())).thenAnswer(invocation -> {
@@ -63,6 +64,6 @@ class TenantBootstrapServiceTest {
 
         verify(tenantSchemaService, times(2)).assertSchemaReady("tenant_default");
         verify(tenantRepository, times(2)).save(any(Tenant.class));
-        verify(tenantSchemaService).assertSchemaReady("tenant_gm_test_platform");
+        verify(tenantSchemaService, times(0)).assertSchemaReady("tenant_gm_test_platform");
     }
 }

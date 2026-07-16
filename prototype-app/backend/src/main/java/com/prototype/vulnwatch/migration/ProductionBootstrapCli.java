@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.migration;
 
+import com.prototype.vulnwatch.service.TenantSchemaService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
@@ -16,6 +17,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
@@ -46,22 +49,29 @@ public final class ProductionBootstrapCli {
                     config.dbUrl(), config.dbUsername(), config.dbPassword())) {
                 acquireLock(connection);
                 try {
-                    runPlatformMigrations(config);
-                    phases.add(Phase.success("platform_migrations", "version=" + platformVersion(connection)));
-                    TenantSchema defaultTenant = ensureDefaultTenant(connection);
-                    phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
-                    migrateTenant(config, defaultTenant);
-                    markCurrent(connection, defaultTenant, fingerprint(connection, defaultTenant.schemaName()), runId);
-                    phases.add(Phase.success("default_tenant_migration", "version=" + TARGET_VERSION));
-                    BootstrapResult tenantResult = migrateExistingAndProvisioningTenants(connection, config, defaultTenant, runId);
-                    phases.addAll(tenantResult.phases());
-                    if (!tenantResult.success()) {
-                        throw new BootstrapFailure("tenant_provisioning_failed", "Tenant provisioning failed");
+                    if (config.reportOnly()) {
+                        verifyControlPlane(connection, config.runtimeDbUsername());
+                        phases.add(Phase.success("report_only_owner_verification", "complete"));
+                    } else {
+                        runPlatformMigrations(config);
+                        phases.add(Phase.success("platform_migrations", "version=" + platformVersion(connection)));
+                        TenantSchema defaultTenant = ensureDefaultTenant(connection);
+                        phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
+                        migrateTenant(config, defaultTenant);
+                        String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
+                        markCurrent(connection, defaultTenant, templateChecksum, runId);
+                        phases.add(Phase.success("default_tenant_migration", "version=" + TARGET_VERSION));
+                        BootstrapResult tenantResult = migrateExistingAndProvisioningTenants(
+                                connection, config, defaultTenant, templateChecksum, runId);
+                        phases.addAll(tenantResult.phases());
+                        if (!tenantResult.success()) {
+                            throw new BootstrapFailure("tenant_provisioning_failed", "Tenant provisioning failed");
+                        }
+                        provisionRuntimeRole(connection, config.runtimeDbUsername(), config.runtimeDbPassword());
+                        phases.add(Phase.success("runtime_role_provisioning", config.runtimeDbUsername()));
+                        verifyControlPlane(connection, config.runtimeDbUsername());
+                        phases.add(Phase.success("owner_verification", "complete"));
                     }
-                    provisionRuntimeRole(connection, config.runtimeDbUsername(), config.runtimeDbPassword());
-                    phases.add(Phase.success("runtime_role_provisioning", config.runtimeDbUsername()));
-                    verifyControlPlane(connection, config.runtimeDbUsername());
-                    phases.add(Phase.success("owner_verification", "complete"));
                 } finally {
                     releaseLock(connection);
                 }
@@ -149,6 +159,7 @@ public final class ProductionBootstrapCli {
             Connection connection,
             Config config,
             TenantSchema defaultTenant,
+            String templateChecksum,
             UUID runId
     ) throws Exception {
         List<Phase> phases = new ArrayList<>();
@@ -157,13 +168,13 @@ public final class ProductionBootstrapCli {
                 .toList();
         if (!activeTenants.isEmpty()) {
             TenantSchema canary = activeTenants.get(0);
-            migrateAndMark(connection, config, canary, runId);
+            migrateAndMark(connection, config, canary, templateChecksum, runId);
             phases.add(Phase.success("tenant_canary_migration", canary.schemaName()));
         }
         for (int offset = 1; offset < activeTenants.size(); offset += 10) {
             List<TenantSchema> batch = activeTenants.subList(offset, Math.min(offset + 10, activeTenants.size()));
             for (TenantSchema tenant : batch) {
-                migrateAndMark(connection, config, tenant, runId);
+                migrateAndMark(connection, config, tenant, templateChecksum, runId);
             }
             phases.add(Phase.success("tenant_batch_migration", "count=" + batch.size()));
         }
@@ -172,22 +183,37 @@ public final class ProductionBootstrapCli {
         for (TenantSchema tenant : pending) {
             try {
                 provisionTenantSchema(connection, tenant.schemaName());
-                migrateAndMark(connection, config, tenant, runId);
+                migrateAndMark(connection, config, tenant, templateChecksum, runId);
                 setTenantStatus(connection, tenant.tenantId(), "ACTIVE");
                 phases.add(Phase.success("tenant_provisioning", tenant.schemaName()));
             } catch (Exception ex) {
-                markFailure(connection, tenant, "PROVISIONING_FAILED", "PROVISIONING_FAILED", ex.getMessage(), runId);
+                markFailure(connection, tenant, "PROVISIONING_FAILED", "PROVISIONING_FAILED", rootMessage(ex), runId);
                 setTenantStatus(connection, tenant.tenantId(), "PROVISIONING_FAILED");
-                phases.add(Phase.failed("tenant_provisioning_failed", tenant.schemaName() + ": " + sanitize(ex.getMessage())));
+                phases.add(Phase.failed(
+                        "tenant_provisioning_failed",
+                        tenant.schemaName() + ": " + sanitize(rootMessage(ex))));
                 return new BootstrapResult(false, phases);
             }
         }
         return new BootstrapResult(true, phases);
     }
 
-    private static void migrateAndMark(Connection connection, Config config, TenantSchema tenant, UUID runId) throws Exception {
+    private static void migrateAndMark(
+            Connection connection,
+            Config config,
+            TenantSchema tenant,
+            String templateChecksum,
+            UUID runId
+    ) throws Exception {
         migrateTenant(config, tenant);
-        markCurrent(connection, tenant, fingerprint(connection, tenant.schemaName()), runId);
+        String tenantChecksum = fingerprint(connection, tenant.schemaName());
+        if (!templateChecksum.equals(tenantChecksum)) {
+            throw new BootstrapFailure(
+                    "tenant_schema_drift",
+                    "Tenant schema does not match the migrated template: " + tenant.schemaName()
+                            + " expected=" + templateChecksum + " actual=" + tenantChecksum);
+        }
+        markCurrent(connection, tenant, tenantChecksum, runId);
     }
 
     private static void migrateTenant(Config config, TenantSchema tenant) {
@@ -215,33 +241,12 @@ public final class ProductionBootstrapCli {
             throw new IllegalArgumentException("Refusing to provision protected schema: " + schemaName);
         }
         try (Statement statement = connection.createStatement()) {
-            statement.execute("create schema if not exists " + quotedIdentifier(schemaName));
+            statement.execute("drop schema if exists " + quotedIdentifier(schemaName) + " cascade");
         }
-        List<String> tables = new ArrayList<>();
-        try (PreparedStatement select = connection.prepareStatement("""
-                select tablename
-                from pg_tables
-                where schemaname = ?
-                  and tablename not in ('tenant_schema_history', 'flyway_schema_history')
-                order by tablename
-                """)) {
-            select.setString(1, DEFAULT_TENANT_SCHEMA);
-            try (ResultSet result = select.executeQuery()) {
-                while (result.next()) {
-                    tables.add(result.getString(1));
-                }
-            }
-        }
-        try (Statement statement = connection.createStatement()) {
-            for (String table : tables) {
-                statement.execute("""
-                        create table if not exists %s.%s
-                        (like %s.%s including constraints including generated including identity including indexes including storage including comments)
-                        """.formatted(
-                        quotedIdentifier(schemaName), quotedIdentifier(table),
-                        quotedIdentifier(DEFAULT_TENANT_SCHEMA), quotedIdentifier(table)));
-            }
-        }
+        SingleConnectionDataSource dataSource = new SingleConnectionDataSource(connection, true);
+        TenantSchemaService schemaService = new TenantSchemaService(
+                new JdbcTemplate(dataSource), DEFAULT_TENANT_SCHEMA);
+        schemaService.provisionOrReconcileSchemaFromTemplate(schemaName);
     }
 
     private static List<TenantSchema> tenants(Connection connection, String status) throws SQLException {
@@ -375,7 +380,7 @@ public final class ProductionBootstrapCli {
         }
     }
 
-    private static void verifyControlPlane(Connection connection, String runtimeRole) throws SQLException {
+    private static void verifyControlPlane(Connection connection, String runtimeRole) throws Exception {
         requireZero(connection, """
                 select count(*)
                 from public.flyway_schema_history
@@ -390,8 +395,24 @@ public final class ProductionBootstrapCli {
                 select count(*)
                 from pg_roles
                 where rolname = ?
-                  and (rolsuper or rolcreaterole or rolcreatedb or rolreplication or rolbypassrls)
+                  and (rolsuper or rolinherit or rolcreaterole or rolcreatedb or rolreplication or rolbypassrls)
                 """, "unsafe runtime role attributes", runtimeRole);
+        requireZero(connection, """
+                with recursive memberships(roleid) as (
+                    select m.roleid
+                    from pg_auth_members m
+                    join pg_roles me on me.oid = m.member
+                    where me.rolname = ?
+                    union
+                    select m.roleid
+                    from pg_auth_members m
+                    join memberships inherited on inherited.roleid = m.member
+                )
+                select count(*)
+                from memberships m
+                join pg_roles r on r.oid = m.roleid
+                where r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb
+                """, "runtime role can assume an unsafe role", runtimeRole);
         requireZero(connection, """
                 select count(*)
                 from pg_class c
@@ -403,6 +424,60 @@ public final class ProductionBootstrapCli {
                 """, "runtime role owns protected tables", runtimeRole);
         requireZero(connection, """
                 select count(*)
+                from pg_namespace n
+                where (n.nspname in ('platform', 'tenant_default') or n.nspname ~ '^tenant_')
+                  and has_schema_privilege(?, n.oid, 'CREATE')
+                """, "runtime role has protected-schema DDL privileges", runtimeRole);
+        requireZero(connection, """
+                select case when has_database_privilege(?, current_database(), 'CREATE') then 1 else 0 end
+                """, "runtime role has database CREATE privilege", runtimeRole);
+        requireZero(connection, """
+                select count(*)
+                from platform.tenants t
+                join pg_namespace n on n.nspname = t.schema_name
+                join pg_class c on c.relnamespace = n.oid and c.relkind in ('r', 'p')
+                where t.deleted_at is null
+                  and upper(t.status) = 'ACTIVE'
+                  and c.relname not in ('tenant_schema_history', 'flyway_schema_history', 'demo_requests')
+                  and (
+                      not c.relrowsecurity
+                      or not c.relforcerowsecurity
+                      or not exists (
+                          select 1 from pg_policy p
+                          where p.polrelid = c.oid
+                            and p.polname = 'tenant_isolation'
+                            and pg_get_expr(p.polqual, p.polrelid) like '%app.current_tenant_id%'
+                            and pg_get_expr(p.polwithcheck, p.polrelid) like '%app.current_tenant_id%'
+                      )
+                  )
+                """, "active tenant tables have incomplete RLS coverage");
+        requireZero(connection, """
+                select count(*)
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where (n.nspname in ('platform', 'tenant_default') or n.nspname ~ '^tenant_')
+                  and c.relkind in ('r', 'p')
+                  and not (
+                      has_table_privilege(?, c.oid, 'SELECT')
+                      and has_table_privilege(?, c.oid, 'INSERT')
+                      and has_table_privilege(?, c.oid, 'UPDATE')
+                      and has_table_privilege(?, c.oid, 'DELETE')
+                  )
+                """, "runtime role is missing required table DML privileges",
+                runtimeRole, runtimeRole, runtimeRole, runtimeRole);
+        requireZero(connection, """
+                select count(*)
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where (n.nspname in ('platform', 'tenant_default') or n.nspname ~ '^tenant_')
+                  and c.relkind = 'S'
+                  and not (
+                      has_sequence_privilege(?, c.oid, 'USAGE')
+                      and has_sequence_privilege(?, c.oid, 'SELECT')
+                  )
+                """, "runtime role is missing required sequence privileges", runtimeRole, runtimeRole);
+        requireZero(connection, """
+                select count(*)
                 from platform.tenants t
                 left join platform.tenant_schema_versions v on v.tenant_id = t.id
                 where t.deleted_at is null
@@ -410,19 +485,74 @@ public final class ProductionBootstrapCli {
                   and (v.tenant_id is null or v.status <> 'CURRENT'
                        or v.current_version < 44 or v.last_successful_version < 44)
                 """, "active tenants missing current schema projection");
+        verifyActiveTenantSchemaState(connection);
+    }
+
+    private static void verifyActiveTenantSchemaState(Connection connection) throws Exception {
+        String templateChecksum = fingerprint(connection, DEFAULT_TENANT_SCHEMA);
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select t.schema_name, v.structural_checksum
+                from platform.tenants t
+                join platform.tenant_schema_versions v on v.tenant_id = t.id
+                where t.deleted_at is null
+                  and upper(t.status) = 'ACTIVE'
+                order by t.schema_name
+                """);
+             ResultSet result = statement.executeQuery()) {
+            while (result.next()) {
+                String schemaName = result.getString("schema_name");
+                String recordedChecksum = result.getString("structural_checksum");
+                requireMinimum(connection, """
+                        select count(*)
+                        from %s.tenant_schema_history
+                        where version = '44' and success
+                        """.formatted(quotedIdentifier(schemaName)), 1, schemaName + " tenant migration version");
+                String actualChecksum = fingerprint(connection, schemaName);
+                if (recordedChecksum == null
+                        || !recordedChecksum.equals(actualChecksum)
+                        || !templateChecksum.equals(actualChecksum)) {
+                    throw new BootstrapFailure(
+                            "verification_failed",
+                            "active tenant schema checksum mismatch: " + schemaName);
+                }
+            }
+        }
     }
 
     private static void verifyRuntimeConnection(Config config) throws SQLException {
         try (Connection connection = DriverManager.getConnection(
                 config.dbUrl(), config.runtimeDbUsername(), config.runtimeDbPassword())) {
+            if (!connection.getCatalog().equals(config.expectedDatabase())) {
+                throw new BootstrapFailure("verification_failed", "runtime connection targets an unexpected database");
+            }
             requireZero(connection, "select case when current_user = ? then 0 else 1 end",
                     "runtime role mismatch", config.runtimeDbUsername());
             requireZero(connection, """
                     select count(*)
                     from pg_roles
                     where rolname = current_user
-                      and (rolsuper or rolcreaterole or rolcreatedb or rolreplication or rolbypassrls)
+                      and (rolsuper or rolinherit or rolcreaterole or rolcreatedb or rolreplication or rolbypassrls)
                     """, "runtime role is unsafe");
+            verifyRuntimeDdlDenied(connection);
+        }
+    }
+
+    private static void verifyRuntimeDdlDenied(Connection connection) throws SQLException {
+        String tableName = "bootstrap_ddl_probe_" + UUID.randomUUID().toString().replace("-", "");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("create table platform." + quotedIdentifier(tableName) + " (id integer)");
+            try (Connection cleanup = DriverManager.getConnection(
+                    connection.getMetaData().getURL(),
+                    required("DB_USERNAME"),
+                    required("DB_PASSWORD"));
+                 Statement cleanupStatement = cleanup.createStatement()) {
+                cleanupStatement.execute("drop table if exists platform." + quotedIdentifier(tableName));
+            }
+            throw new BootstrapFailure("verification_failed", "runtime role can create protected tables");
+        } catch (SQLException ex) {
+            if (!"42501".equals(ex.getSQLState())) {
+                throw ex;
+            }
         }
     }
 
@@ -504,7 +634,17 @@ public final class ProductionBootstrapCli {
                     join pg_namespace n on n.oid = cl.relnamespace
                     where n.nspname = ?
                     union all
-                    select concat_ws('|', 'index', tab.relname::text, pg_get_indexdef(idx.oid))::text
+                    select concat_ws('|', 'index', tab.relname::text, idx.relname::text,
+                           i.indisunique::text, i.indisprimary::text, i.indkey::text,
+                           i.indclass::text, i.indcollation::text, i.indoption::text,
+                           regexp_replace(
+                               regexp_replace(coalesce(pg_get_expr(i.indexprs, i.indrelid), ''),
+                                   '::(character varying|text)(\\[\\])?', '', 'g'),
+                               '[()[:space:]]', '', 'g'),
+                           regexp_replace(
+                               regexp_replace(coalesce(pg_get_expr(i.indpred, i.indrelid), ''),
+                                   '::(character varying|text)(\\[\\])?', '', 'g'),
+                               '[()[:space:]]', '', 'g'))::text
                     from pg_index i
                     join pg_class idx on idx.oid = i.indexrelid
                     join pg_class tab on tab.oid = i.indrelid
@@ -528,14 +668,32 @@ public final class ProductionBootstrapCli {
                 select definition from objects order by definition
                 """;
         List<String> definitions = new ArrayList<>();
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            for (int index = 1; index <= 5; index++) {
-                statement.setString(index, schemaName);
+        String originalSearchPath;
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SHOW search_path")) {
+            result.next();
+            originalSearchPath = result.getString(1);
+        }
+        try {
+            try (PreparedStatement setSearchPath = connection.prepareStatement(
+                    "select set_config('search_path', 'pg_catalog', false)")) {
+                setSearchPath.execute();
             }
-            try (ResultSet result = statement.executeQuery()) {
-                while (result.next()) {
-                    definitions.add(result.getString(1));
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                for (int index = 1; index <= 5; index++) {
+                    statement.setString(index, schemaName);
                 }
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        definitions.add(result.getString(1));
+                    }
+                }
+            }
+        } finally {
+            try (PreparedStatement restoreSearchPath = connection.prepareStatement(
+                    "select set_config('search_path', ?, false)")) {
+                restoreSearchPath.setString(1, originalSearchPath);
+                restoreSearchPath.execute();
             }
         }
         String normalized = String.join("\n", definitions).replace(schemaName, "<tenant_schema>");
@@ -596,6 +754,14 @@ public final class ProductionBootstrapCli {
         return sanitized.substring(0, Math.min(1000, sanitized.length()));
     }
 
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
+    }
+
     private static String report(
             UUID runId,
             Instant startedAt,
@@ -642,16 +808,33 @@ public final class ProductionBootstrapCli {
             String dbUsername,
             String dbPassword,
             String runtimeDbUsername,
-            String runtimeDbPassword
+            String runtimeDbPassword,
+            String expectedDatabase,
+            boolean reportOnly
     ) {
         static Config fromEnvironment() {
+            String dbUrl = required("DB_URL");
             return new Config(
-                    required("DB_URL"),
+                    dbUrl,
                     required("DB_USERNAME"),
                     required("DB_PASSWORD"),
                     env("RUNTIME_DB_USERNAME", "scout_runtime"),
-                    required("RUNTIME_DB_PASSWORD"));
+                    required("RUNTIME_DB_PASSWORD"),
+                    env("EXPECTED_DB_NAME", databaseName(dbUrl)),
+                    Boolean.parseBoolean(env(
+                            "BOOTSTRAP_REPORT_ONLY",
+                            env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))));
         }
+    }
+
+    private static String databaseName(String jdbcUrl) {
+        int queryIndex = jdbcUrl.indexOf('?');
+        String withoutQuery = queryIndex >= 0 ? jdbcUrl.substring(0, queryIndex) : jdbcUrl;
+        int slashIndex = withoutQuery.lastIndexOf('/');
+        if (slashIndex < 0 || slashIndex == withoutQuery.length() - 1) {
+            throw new IllegalArgumentException("DB_URL must include a database name");
+        }
+        return withoutQuery.substring(slashIndex + 1);
     }
 
     private record TenantSchema(UUID tenantId, String schemaName, String status) {

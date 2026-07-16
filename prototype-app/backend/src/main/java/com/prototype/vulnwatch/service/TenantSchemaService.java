@@ -2,11 +2,8 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import java.sql.ResultSet;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,8 +17,6 @@ public class TenantSchemaService {
 
     private final JdbcTemplate platformJdbcTemplate;
     private final String defaultSchemaName;
-    private final ConcurrentMap<String, Object> schemaProvisionLocks = new ConcurrentHashMap<>();
-    private final Set<String> provisionedSchemas = ConcurrentHashMap.newKeySet();
 
     @Value("${app.tenancy.enforce-schema-version:false}")
     private boolean enforceSchemaVersion;
@@ -58,23 +53,7 @@ public class TenantSchemaService {
     }
 
     public void ensureSchemaExists(String schemaName) {
-        String normalized = sanitizeSchemaName(schemaName);
-        if (provisionedSchemas.contains(normalized)) {
-            assertSchemaReady(normalized);
-            return;
-        }
-        Object lock = schemaProvisionLocks.computeIfAbsent(normalized, ignored -> new Object());
-        synchronized (lock) {
-            if (provisionedSchemas.contains(normalized)) {
-                return;
-            }
-            if (!schemaExists(normalized)) {
-                platformJdbcTemplate.execute("CREATE SCHEMA " + quotedIdentifier(normalized));
-                provisionTenantSchema(normalized);
-            }
-            assertSchemaReady(normalized);
-            provisionedSchemas.add(normalized);
-        }
+        assertSchemaReady(schemaName);
     }
 
     public boolean schemaExists(String schemaName) {
@@ -118,7 +97,7 @@ public class TenantSchemaService {
                 for (String tableName : tenantTableNames(defaultSchemaName)) {
                     statement.execute("""
                             CREATE TABLE IF NOT EXISTS %s.%s
-                            (LIKE %s.%s INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING INDEXES INCLUDING STORAGE INCLUDING COMMENTS)
+                            (LIKE %s.%s INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING STORAGE INCLUDING COMMENTS)
                             """.formatted(
                             quotedIdentifier(normalized), quotedIdentifier(tableName),
                             quotedIdentifier(defaultSchemaName), quotedIdentifier(tableName)));
@@ -179,7 +158,7 @@ public class TenantSchemaService {
             return;
         }
         dropTenantSchema(normalized);
-        ensureSchemaExists(normalized);
+        provisionSchemaFromTemplate(normalized);
     }
 
     public void provisionSchemaFromTemplate(String schemaName) {
@@ -187,7 +166,16 @@ public class TenantSchemaService {
         if (schemaExists(normalized)) {
             throw new IllegalStateException("Tenant schema already exists: " + normalized);
         }
+        provisionOrReconcileSchemaFromTemplate(normalized);
+    }
+
+    public void provisionOrReconcileSchemaFromTemplate(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {
+            throw new IllegalArgumentException("Refusing to provision protected schema: " + normalized);
+        }
         platformJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            assertPrivilegedProvisioningRole();
             try (var lock = connection.prepareStatement("select pg_advisory_lock(hashtext(?))")) {
                 lock.setString(1, "tenant-provision:" + normalized);
                 lock.execute();
@@ -195,8 +183,8 @@ public class TenantSchemaService {
             try {
                 if (!schemaExists(normalized)) {
                     platformJdbcTemplate.execute("CREATE SCHEMA " + quotedIdentifier(normalized));
-                    provisionTenantSchema(normalized);
                 }
+                reconcileSafeDifferences(normalized);
             } finally {
                 try (var unlock = connection.prepareStatement("select pg_advisory_unlock(hashtext(?))")) {
                     unlock.setString(1, "tenant-provision:" + normalized);
@@ -207,13 +195,29 @@ public class TenantSchemaService {
         });
     }
 
+    private void assertPrivilegedProvisioningRole() {
+        Boolean ownsTemplateOrIsSuperuser = platformJdbcTemplate.queryForObject("""
+                select current_setting('is_superuser') = 'on'
+                    or exists (
+                        select 1
+                        from pg_namespace n
+                        join pg_roles r on r.oid = n.nspowner
+                        where n.nspname = ?
+                          and r.rolname = current_user
+                    )
+                """, Boolean.class, defaultSchemaName);
+        if (!Boolean.TRUE.equals(ownsTemplateOrIsSuperuser)) {
+            throw new IllegalStateException(
+                    "Tenant schema provisioning requires the migration owner role; runtime roles may not execute DDL");
+        }
+    }
+
     public void dropTenantSchema(String schemaName) {
         String normalized = sanitizeSchemaName(schemaName);
         if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {
             return;
         }
         platformJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + quotedIdentifier(normalized) + " CASCADE");
-        provisionedSchemas.remove(normalized);
     }
 
     private String sanitizeSchemaName(String schemaName) {
@@ -238,7 +242,6 @@ public class TenantSchemaService {
         List<ForeignKeyDefinition> sourceForeignKeys = foreignKeys(defaultSchemaName);
         List<TableConstraintDefinition> sourceTableConstraints = tableConstraints(defaultSchemaName);
         List<IndexDefinition> sourceIndexes = standaloneIndexes(defaultSchemaName);
-        Set<String> existingTargetTables = new HashSet<>(tenantTableNames(targetSchema));
         Set<String> targetForeignKeyNames = foreignKeys(targetSchema).stream()
                 .map(ForeignKeyDefinition::constraintName)
                 .collect(Collectors.toSet());
@@ -250,6 +253,12 @@ public class TenantSchemaService {
                 .collect(Collectors.toSet());
 
         platformJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            String originalSearchPath;
+            try (var currentSearchPath = connection.createStatement();
+                 var result = currentSearchPath.executeQuery("SHOW search_path")) {
+                result.next();
+                originalSearchPath = result.getString(1);
+            }
             try (var searchPath = connection.prepareStatement("SELECT set_config('search_path', ?, FALSE)")) {
                 searchPath.setString(1, targetSchema + ",platform");
                 searchPath.execute();
@@ -259,7 +268,7 @@ public class TenantSchemaService {
                 for (String tableName : sourceTables) {
                     statement.execute("""
                             CREATE TABLE IF NOT EXISTS %s.%s
-                            (LIKE %s.%s INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING INDEXES INCLUDING STORAGE INCLUDING COMMENTS)
+                            (LIKE %s.%s INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING STORAGE INCLUDING COMMENTS)
                             """.formatted(
                             quotedIdentifier(targetSchema),
                             quotedIdentifier(tableName),
@@ -284,6 +293,15 @@ public class TenantSchemaService {
                     ));
                 }
 
+                for (TableConstraintDefinition constraint : sourceTableConstraints) {
+                    if (targetConstraintDefinitions.contains(constraint.tableName() + "|" + constraint.definition())) {
+                        continue;
+                    }
+                    statement.execute("ALTER TABLE " + quotedIdentifier(targetSchema) + "."
+                            + quotedIdentifier(constraint.tableName()) + " ADD CONSTRAINT "
+                            + quotedIdentifier(constraint.constraintName()) + " " + constraint.definition());
+                }
+
                 for (ForeignKeyDefinition foreignKey : sourceForeignKeys) {
                     if (targetForeignKeyNames.contains(foreignKey.constraintName())) {
                         continue;
@@ -299,25 +317,7 @@ public class TenantSchemaService {
                     ));
                 }
 
-                for (TableConstraintDefinition constraint : sourceTableConstraints) {
-                    // CREATE TABLE LIKE already copied constraints for tables created above.
-                    // Only reconcile constraints on tables that existed before this pass.
-                    if (!existingTargetTables.contains(constraint.tableName())) {
-                        continue;
-                    }
-                    if (targetConstraintDefinitions.contains(constraint.tableName() + "|" + constraint.definition())) {
-                        continue;
-                    }
-                    statement.execute("ALTER TABLE " + quotedIdentifier(targetSchema) + "."
-                            + quotedIdentifier(constraint.tableName()) + " ADD CONSTRAINT "
-                            + quotedIdentifier(constraint.constraintName()) + " " + constraint.definition());
-                }
-
                 for (IndexDefinition index : sourceIndexes) {
-                    // CREATE TABLE LIKE INCLUDING INDEXES already copied indexes for new tables.
-                    if (!existingTargetTables.contains(index.tableName())) {
-                        continue;
-                    }
                     if (targetIndexNames.contains(index.indexName())) {
                         continue;
                     }
@@ -339,6 +339,11 @@ public class TenantSchemaService {
                             USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
                             WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
                             """.formatted(quotedIdentifier(targetSchema), quotedIdentifier(tableName)));
+                }
+            } finally {
+                try (var restoreSearchPath = connection.prepareStatement("SELECT set_config('search_path', ?, FALSE)")) {
+                    restoreSearchPath.setString(1, originalSearchPath);
+                    restoreSearchPath.execute();
                 }
             }
             return null;
