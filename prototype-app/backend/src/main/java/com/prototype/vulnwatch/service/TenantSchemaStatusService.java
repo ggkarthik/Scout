@@ -23,16 +23,32 @@ public class TenantSchemaStatusService {
     public TenantSchemaStatusResponse list(int requestedPage, int requestedSize) {
         int page = Math.max(0, requestedPage);
         int size = Math.min(200, Math.max(1, requestedSize));
-        Long total = jdbc.queryForObject("select count(*) from platform.tenant_schema_versions", Long.class);
+        Long total = jdbc.queryForObject("""
+                select count(*)
+                from platform.tenants
+                where deleted_at is null and purged_at is null
+                """, Long.class);
         List<TenantSchemaStatusResponse.Item> items = jdbc.query("""
-                select tenant_id, schema_name, current_version, target_version, status,
-                       structural_checksum, last_successful_version, failure_code, failure_message,
-                       migration_started_at, migration_completed_at, updated_at, migration_run_id
-                from platform.tenant_schema_versions
-                order by schema_name
+                select t.id as tenant_id, t.name as tenant_name, t.status as tenant_status, t.schema_name,
+                       coalesce(v.current_version, 0) as current_version,
+                       coalesce(v.target_version, ?) as target_version,
+                       coalesce(v.status, case
+                           when upper(t.status) = 'PROVISIONING_FAILED' then 'PROVISIONING_FAILED'
+                           else 'PENDING'
+                       end) as status,
+                       v.structural_checksum, coalesce(v.last_successful_version, 0) as last_successful_version,
+                       v.failure_code, v.failure_message, v.migration_started_at,
+                       v.migration_completed_at, coalesce(v.updated_at, t.updated_at) as updated_at,
+                       v.migration_run_id
+                from platform.tenants t
+                left join platform.tenant_schema_versions v on v.tenant_id = t.id
+                where t.deleted_at is null and t.purged_at is null
+                order by t.schema_name
                 limit ? offset ?
                 """, (rs, rowNum) -> new TenantSchemaStatusResponse.Item(
                 rs.getObject("tenant_id", UUID.class),
+                rs.getString("tenant_name"),
+                rs.getString("tenant_status"),
                 rs.getString("schema_name"),
                 rs.getInt("current_version"),
                 rs.getInt("target_version"),
@@ -45,7 +61,7 @@ public class TenantSchemaStatusService {
                 instant(rs.getTimestamp("migration_completed_at")),
                 instant(rs.getTimestamp("updated_at")),
                 rs.getObject("migration_run_id", UUID.class)
-        ), size, page * size);
+        ), TARGET_VERSION, size, page * size);
         return new TenantSchemaStatusResponse(items, page, size, total == null ? 0 : total);
     }
 
@@ -61,6 +77,15 @@ public class TenantSchemaStatusService {
                        or v.current_version < ?)
                 """, Long.class, minimumVersion);
         return count == null ? 0 : count;
+    }
+
+    public boolean hasProjection(UUID tenantId) {
+        Long count = jdbc.queryForObject("""
+                select count(*)
+                from platform.tenant_schema_versions
+                where tenant_id = ?
+                """, Long.class, tenantId);
+        return count != null && count > 0;
     }
 
     public void markMigrating(UUID tenantId, String schemaName, UUID runId) {

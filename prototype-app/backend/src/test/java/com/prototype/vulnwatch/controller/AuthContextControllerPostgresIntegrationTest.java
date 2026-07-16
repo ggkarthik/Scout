@@ -15,6 +15,7 @@ import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import com.prototype.vulnwatch.repo.TenantSupportGrantRepository;
+import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresControllerIntegrationTest;
@@ -67,6 +68,9 @@ class AuthContextControllerPostgresIntegrationTest {
     @Autowired
     private TenantService tenantService;
 
+    @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
     @Test
     void authContextRequiresApiKey() throws Exception {
         mockMvc.perform(get("/api/auth/context"))
@@ -115,6 +119,7 @@ class AuthContextControllerPostgresIntegrationTest {
         AppUser owner = saveUser("platform.owner.auth-context@example.com", true, "password-123");
         Tenant supportTenant = tenantService.createTenant(
                 "Support Customer", "support-customer", "ENTERPRISE", null);
+        tenantSchemaMigrationService.provisionNewTenant(supportTenant);
         tenantSupportGrantRepository.save(activeGrant(owner, supportTenant, "READ_ONLY"));
 
         String platformToken = login("platform.owner.auth-context@example.com", "password-123");

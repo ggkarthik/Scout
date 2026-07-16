@@ -47,6 +47,9 @@ class IngestionJobTenantScopingPostgresIntegrationTest {
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Autowired
     private IngestionJobRepository ingestionJobRepository;
 
     @Autowired
@@ -61,6 +64,7 @@ class IngestionJobTenantScopingPostgresIntegrationTest {
     @Test
     void claimsQueuedJobInNonDefaultTenantSchema() {
         Tenant tenant = tenantService.createTenant("Scoping Co", "scoping-co", "pilot", null);
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
 
         UUID jobId = tenantSchemaExecutionService.run(tenant, () -> {
             IngestionJob job = new IngestionJob();

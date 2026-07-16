@@ -10,6 +10,7 @@ START_BACKEND="${START_BACKEND:-false}"
 BACKEND_STARTUP_TIMEOUT_SECONDS="${BACKEND_STARTUP_TIMEOUT_SECONDS:-180}"
 BACKEND_HEALTH_PATH="${BACKEND_HEALTH_PATH:-/actuator/health/readiness}"
 BACKEND_LOG_FILE="${BACKEND_LOG_FILE:-$OUT_DIR/backend.log}"
+BOOTSTRAP_LOG_FILE="${BOOTSTRAP_LOG_FILE:-$OUT_DIR/production-bootstrap.log}"
 SPRING_PROFILES_ACTIVE_VALUE="${SPRING_PROFILES_ACTIVE:-local}"
 MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE_VALUE="${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:-health,info,prometheus}"
 SEED_DEMO_DATA="${SEED_DEMO_DATA:-false}"
@@ -56,6 +57,28 @@ wait_for_backend() {
   return 1
 }
 
+run_production_bootstrap() {
+  if [ "$START_BACKEND" != "true" ]; then
+    return 0
+  fi
+
+  echo "Running production bootstrap before performance governance backend startup"
+  (
+    cd "$BACKEND_DIR"
+    mvn -q -DskipTests package
+    BACKEND_JAR="$(find target -maxdepth 1 -name 'vulnwatch-backend-*.jar' ! -name '*.original' | head -n 1)"
+    java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} \
+      -Dloader.main=com.prototype.vulnwatch.migration.ProductionBootstrapCli \
+      -cp "$BACKEND_JAR" \
+      org.springframework.boot.loader.launch.PropertiesLauncher
+  ) >"$BOOTSTRAP_LOG_FILE" 2>&1 || {
+    echo "Production bootstrap failed before performance governance." >&2
+    echo "--- production bootstrap log ---" >&2
+    tail -n 200 "$BOOTSTRAP_LOG_FILE" >&2 || true
+    return 1
+  }
+}
+
 start_backend_if_requested() {
   if [ "$START_BACKEND" != "true" ]; then
     return 0
@@ -72,6 +95,7 @@ start_backend_if_requested() {
   wait_for_backend
 }
 
+run_production_bootstrap
 start_backend_if_requested
 
 CERT_OUT_DIR="$OUT_DIR/certification"

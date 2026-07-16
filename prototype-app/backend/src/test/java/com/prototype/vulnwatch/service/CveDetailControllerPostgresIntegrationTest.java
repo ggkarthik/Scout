@@ -61,7 +61,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         "app.security.api-key=test-api-key",
         "app.security.creator-key=test-creator-key",
         "app.tenancy.require-tenant-context=false",
-        "app.schema-migration.enabled=true",
+        "app.schema-migration.legacy-test-runner-enabled=true",
         "app.correlation.backfill-targets-on-startup=false"
 })
 @AutoConfigureMockMvc

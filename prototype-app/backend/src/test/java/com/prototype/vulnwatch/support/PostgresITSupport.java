@@ -44,7 +44,7 @@ public final class PostgresITSupport {
         registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
         registry.add("spring.datasource.hikari.minimum-idle", () -> "0");
         registry.add("app.scheduling.enabled", () -> "false");
-        registry.add("app.schema-migration.enabled", () -> "true");
+        registry.add("app.schema-migration.legacy-test-runner-enabled", () -> "true");
         registry.add("app.security.credential-encryption-key",
                 () -> Base64.getEncoder().encodeToString(new byte[32]));
     }

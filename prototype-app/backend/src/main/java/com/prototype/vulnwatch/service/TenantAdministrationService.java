@@ -30,6 +30,10 @@ public class TenantAdministrationService {
         return tenantService.createTenant(name, slug, planCode, billingRef);
     }
 
+    public Tenant retryProvisioning(UUID tenantId) {
+        return tenantService.retryProvisioning(tenantId);
+    }
+
     public Tenant updateStatus(UUID tenantId, String status) {
         return tenantService.updateStatus(tenantId, status);
     }

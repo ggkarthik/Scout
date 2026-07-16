@@ -26,14 +26,7 @@ public class TenantLifecycleGuardService {
         if (tenant == null) {
             return false;
         }
-        String status = tenant.getStatus();
-        if ("DELETED".equalsIgnoreCase(status) || "PURGING".equalsIgnoreCase(status)) {
-            return false;
-        }
-        if (isExpiredDemoTenant(tenant)) {
-            return false;
-        }
-        return !"EXPIRED".equalsIgnoreCase(status);
+        return "ACTIVE".equalsIgnoreCase(tenant.getStatus()) && !isExpiredDemoTenant(tenant);
     }
 
     public void assertTenantAccessible(Tenant tenant) {
@@ -48,6 +41,11 @@ public class TenantLifecycleGuardService {
         }
         if ("EXPIRED".equalsIgnoreCase(tenant.getStatus()) || isExpiredDemoTenant(tenant)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This demo tenant has expired and is no longer accessible");
+        }
+        if (!"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This tenant is not active. Complete provisioning before entering the workspace");
         }
     }
 }

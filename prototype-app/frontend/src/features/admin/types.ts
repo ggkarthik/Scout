@@ -138,6 +138,31 @@ export type TenantCreateRequest = {
   billingRef?: string;
 };
 
+export type TenantSchemaStatusItem = {
+  tenantId: string;
+  tenantName: string;
+  tenantStatus: string;
+  schemaName: string;
+  currentVersion: number;
+  targetVersion: number;
+  status: string;
+  structuralChecksum: string | null;
+  lastSuccessfulVersion: number;
+  failureCode: string | null;
+  failureMessage: string | null;
+  migrationStartedAt: string | null;
+  migrationCompletedAt: string | null;
+  updatedAt: string | null;
+  migrationRunId: string | null;
+};
+
+export type TenantSchemaStatusPage = {
+  items: TenantSchemaStatusItem[];
+  page: number;
+  size: number;
+  total: number;
+};
+
 export type ServiceAccount = {
   id: string;
   tenantId: string | null;

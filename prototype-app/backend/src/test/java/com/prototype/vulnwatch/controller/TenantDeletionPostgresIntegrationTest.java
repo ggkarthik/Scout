@@ -17,6 +17,7 @@ import com.prototype.vulnwatch.domain.TenantMembership;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresControllerIntegrationTest;
@@ -53,6 +54,9 @@ class TenantDeletionPostgresIntegrationTest {
     private TenantService tenantService;
 
     @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Autowired
     private TenantRepository tenantRepository;
 
     @Autowired
@@ -73,6 +77,7 @@ class TenantDeletionPostgresIntegrationTest {
                 "ENTERPRISE",
                 null
         );
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
 
         String subject = "tenant-owner-" + UUID.randomUUID();
         String email = "tenant.owner+" + UUID.randomUUID() + "@example.com";

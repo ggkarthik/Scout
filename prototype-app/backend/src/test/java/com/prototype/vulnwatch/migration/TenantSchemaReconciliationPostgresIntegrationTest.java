@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.service.TenantSchemaMigrationService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
@@ -33,12 +34,16 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
     private TenantService tenantService;
 
     @Autowired
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Autowired
     @Qualifier("platformJdbcTemplate")
     private JdbcTemplate platformJdbcTemplate;
 
     @Test
     void reconciliationAddsDefaultSchemaColumnsMissingFromExistingTenantSchemas() throws IOException {
         Tenant tenant = tenantService.createTenant("Drift Customer", "drift-customer", "pilot", null);
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
         String schemaName = tenant.getSchemaName();
 
         Integer version = platformJdbcTemplate.queryForObject("""

@@ -26,8 +26,6 @@ public class TenantBootstrapService {
     @Order(0)
     public void ensureBootstrapTenant() {
         TenantContext.runAsPlatform(() -> {
-            tenantSchemaService.assertSchemaReady(tenantSchemaService.defaultSchemaName());
-
             Tenant defaultTenant = tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME)
                     .orElseGet(() -> {
                         Tenant tenant = new Tenant();
@@ -44,6 +42,7 @@ public class TenantBootstrapService {
                 defaultTenant.setUpdatedAt(Instant.now());
                 changed = true;
             }
+            tenantSchemaService.assertSchemaReady(normalizedDefaultSchema);
 
             for (Tenant tenant : tenantRepository.findAll()) {
                 String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()
@@ -54,7 +53,9 @@ public class TenantBootstrapService {
                     tenant.setUpdatedAt(Instant.now());
                     tenantRepository.save(tenant);
                 }
-                tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
+                if ("ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+                    tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
+                }
             }
 
             if (changed) {

@@ -31,13 +31,13 @@ backup/PITR, and a tested restore are mandatory.
 Report only against a restored production clone:
 
 ```sh
-APP_SCHEMA_MIGRATION_ENABLED=true APP_SCHEMA_MIGRATION_REPORT_ONLY=true java -jar app.jar
+BOOTSTRAP_REPORT_ONLY=true ./backend/scripts/run-render-migration.sh
 ```
 
 Execute the migration job with migration-role database credentials:
 
 ```sh
-APP_SCHEMA_MIGRATION_ENABLED=true APP_SCHEMA_MIGRATION_REPORT_ONLY=false java -jar app.jar
+BOOTSTRAP_REPORT_ONLY=false ./backend/scripts/run-render-migration.sh
 ```
 
 The migrator uses a 30-second advisory-lock timeout, a five-minute statement timeout, migrates the template first, then one canary, then batches of ten, and stops at the first failure. Preserve version-42 additions on application rollback; do not run a destructive down migration.
