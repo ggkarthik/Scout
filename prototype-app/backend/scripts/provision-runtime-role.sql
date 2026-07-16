@@ -7,6 +7,18 @@ SELECT format(
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'runtime_role')
 \gexec
 
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = :'runtime_role'
+      AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+) AS immutable_unsafe_role
+\gset
+\if :immutable_unsafe_role
+    \echo 'Runtime role has unsafe attributes that require a database superuser to remove'
+    \quit 1
+\endif
+
 SELECT format(
     'ALTER ROLE %I WITH LOGIN NOINHERIT PASSWORD %L',
     :'runtime_role', :'runtime_password'

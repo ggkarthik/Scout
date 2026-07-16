@@ -356,8 +356,14 @@ public final class ProductionBootstrapCli {
                     end
                     $$
                     """.formatted(quotedLiteral(role), quotedLiteral(quotedRole)));
+            requireZero(connection, """
+                    select count(*)
+                    from pg_roles
+                    where rolname = ?
+                      and (rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls)
+                    """, "runtime role has immutable unsafe attributes", role);
             statement.execute("alter role " + quotedRole
-                    + " with login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls password "
+                    + " with login noinherit password "
                     + quotedLiteral(password));
             statement.execute("grant connect on database " + quotedIdentifier(connection.getCatalog()) + " to " + quotedRole);
             statement.execute("revoke create on database " + quotedIdentifier(connection.getCatalog()) + " from " + quotedRole);
