@@ -40,6 +40,25 @@ Execute the migration job with migration-role database credentials:
 BOOTSTRAP_REPORT_ONLY=false ./backend/scripts/run-render-migration.sh
 ```
 
+For the first production platform-owner login, enable one-time setup-link delivery only on
+the temporary migrator:
+
+```sh
+PLATFORM_OWNER_SETUP_LINK_ENABLED=true \
+PLATFORM_OWNER_SETUP_EMAIL=owner@example.com \
+PLATFORM_OWNER_SETUP_APP_BASE_URL=https://scoutgrid.io \
+PLATFORM_OWNER_SETUP_TOKEN_TTL_MINUTES=30 \
+BOOTSTRAP_REPORT_ONLY=false \
+./backend/scripts/run-render-migration.sh
+```
+
+The migrator also requires `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and
+`RESEND_FROM_DOMAIN`. It stores only the setup-token hash and commits it only after Resend
+accepts delivery. The raw token and URL are never included in the bootstrap report. Do not
+configure these setup-link variables on the permanent web service. If the platform owner
+already has a password, the operation fails unless the separately approved
+`PLATFORM_OWNER_SETUP_ALLOW_REISSUE=true` override is supplied.
+
 The migrator uses a 30-second advisory-lock timeout, a five-minute statement timeout, migrates the template first, then one canary, then batches of ten, and stops at the first failure. Preserve version-42 additions on application rollback; do not run a destructive down migration.
 
 Before production, restore and verify a PostgreSQL backup, clear all reported drift on a production clone, validate row counts and foreign keys, run cross-tenant denial tests with the real runtime role, then monitor authentication failures, RLS denials, schema status, and tenant error rates for 24 hours.
