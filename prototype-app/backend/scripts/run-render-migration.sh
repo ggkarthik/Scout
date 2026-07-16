@@ -33,7 +33,11 @@ mkdir -p /tmp/scout-maintenance
 printf 'schema bootstrap running\n' > /tmp/scout-maintenance/index.txt
 busybox httpd -f -p "0.0.0.0:${PORT:-10000}" -h /tmp/scout-maintenance >/dev/null 2>&1 &
 maintenance_listener_pid=$!
-trap 'kill "$maintenance_listener_pid" 2>/dev/null || true' EXIT
+cleanup() {
+  kill "$maintenance_listener_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 success_file=/tmp/scout-schema-migration-success
 rm -f "$success_file"
@@ -44,4 +48,11 @@ java ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} \
   org.springframework.boot.loader.launch.PropertiesLauncher
 
 printf 'success\n' > "$success_file"
+printf 'schema bootstrap complete; privileged service awaiting deletion\n' > /tmp/scout-maintenance/index.txt
 echo "migration_job_status=complete runtime_role=${RUNTIME_DB_USERNAME}"
+
+# A Render web service is supervised and automatically restarted when its
+# process exits. Keep the successful maintenance container alive so the
+# privileged bootstrap cannot run repeatedly while the operator verifies the
+# report and deletes the temporary service.
+wait "$maintenance_listener_pid"
