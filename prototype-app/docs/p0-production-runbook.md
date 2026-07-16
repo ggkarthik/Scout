@@ -64,6 +64,6 @@ The production bootstrap also reconciles the configured platform-owner identity 
 bootstrappable without relying on the permanent runtime service to create the first
 operator identity.
 
-The migrator uses a 30-second advisory-lock timeout, a five-minute statement timeout, migrates the template first, then one canary, then batches of ten, and stops at the first failure. Preserve version-42 additions on application rollback; do not run a destructive down migration.
+The migrator uses a 30-second advisory-lock timeout, a five-minute statement timeout, migrates the template first, then one canary, then batches of ten, and stops at the first failure. After a successful run, the temporary Render web service stays in a completion-only maintenance state until it is deleted; this prevents Render's supervisor from restarting the container and executing the privileged bootstrap again. Preserve version-42 additions on application rollback; do not run a destructive down migration.
 
 Before production, restore and verify a PostgreSQL backup, clear all reported drift on a production clone, validate row counts and foreign keys, run cross-tenant denial tests with the real runtime role, then monitor authentication failures, RLS denials, schema status, and tenant error rates for 24 hours.
