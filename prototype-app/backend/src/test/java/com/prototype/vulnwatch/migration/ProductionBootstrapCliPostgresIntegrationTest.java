@@ -78,18 +78,18 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         assertEquals(1, queryInt("""
                 select count(*)
                 from platform.tenants
-                where id = '%s'::uuid and status = 'ACTIVE'
-                """.formatted(tenantId)));
+                where id = ? and status = 'ACTIVE'
+                """, tenantId));
         assertEquals(1, queryInt("""
                 select count(*)
                 from platform.tenant_schema_versions customer
                 join platform.tenant_schema_versions template
                   on template.schema_name = 'tenant_default'
-                where customer.tenant_id = '%s'::uuid
+                where customer.tenant_id = ?
                   and customer.status = 'CURRENT'
                   and customer.current_version = 44
                   and customer.structural_checksum = template.structural_checksum
-                """.formatted(tenantId)));
+                """, tenantId));
         assertEquals(0, queryInt("""
                 select count(*)
                 from pg_constraint con
@@ -160,48 +160,72 @@ class ProductionBootstrapCliPostgresIntegrationTest {
 
     private void verifyRuntimeIsolation(UUID tenantId) throws Exception {
         UUID assetId = UUID.randomUUID();
-        try (Connection owner = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
-             Statement statement = owner.createStatement()) {
-            statement.execute("select set_config('app.current_tenant_id', '" + tenantId + "', false)");
-            statement.execute("""
+        try (Connection owner = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password())) {
+            setTenantContext(owner, tenantId);
+            try (var statement = owner.prepareStatement("""
                     insert into tenant_bootstrap_customer.assets (
                         id, business_criticality, created_at, identifier, name, state, type, tenant_id
-                    ) values ('%s'::uuid, 'HIGH', now(), 'bootstrap-asset', 'Bootstrap Asset',
-                              'ACTIVE', 'HOST', '%s'::uuid)
-                    """.formatted(assetId, tenantId));
+                    ) values (?, 'HIGH', now(), 'bootstrap-asset', 'Bootstrap Asset',
+                              'ACTIVE', 'HOST', ?)
+                    """)) {
+                statement.setObject(1, assetId);
+                statement.setObject(2, tenantId);
+                statement.executeUpdate();
+            }
         }
 
         try (Connection runtime = DriverManager.getConnection(DATABASE.url(), RUNTIME_USERNAME, RUNTIME_PASSWORD);
              Statement statement = runtime.createStatement()) {
             statement.execute("select set_config('search_path', 'tenant_bootstrap_customer,platform', false)");
-            statement.execute("select set_config('app.current_tenant_id', '" + tenantId + "', false)");
-            assertEquals(1, scalar(statement, "select count(*) from assets where id = '" + assetId + "'::uuid"));
+            setTenantContext(runtime, tenantId);
+            assertEquals(1, countAsset(runtime, assetId));
 
-            statement.execute("select set_config('app.current_tenant_id', '" + UUID.randomUUID() + "', false)");
-            assertEquals(0, scalar(statement, "select count(*) from assets where id = '" + assetId + "'::uuid"));
-            SQLException crossTenantWrite = assertThrows(SQLException.class, () -> statement.execute("""
+            setTenantContext(runtime, UUID.randomUUID());
+            assertEquals(0, countAsset(runtime, assetId));
+            SQLException crossTenantWrite = assertThrows(SQLException.class, () -> {
+                try (var insert = runtime.prepareStatement("""
                     insert into assets (
                         id, business_criticality, created_at, identifier, name, state, type, tenant_id
-                    ) values ('%s'::uuid, 'HIGH', now(), 'cross-tenant', 'Cross Tenant',
-                              'ACTIVE', 'HOST', '%s'::uuid)
-                    """.formatted(UUID.randomUUID(), tenantId)));
+                    ) values (?, 'HIGH', now(), 'cross-tenant', 'Cross Tenant',
+                              'ACTIVE', 'HOST', ?)
+                    """)) {
+                    insert.setObject(1, UUID.randomUUID());
+                    insert.setObject(2, tenantId);
+                    insert.executeUpdate();
+                }
+            });
             assertEquals("42501", crossTenantWrite.getSQLState());
         }
     }
 
-    private int scalar(Statement statement, String sql) throws Exception {
-        try (ResultSet resultSet = statement.executeQuery(sql)) {
-            resultSet.next();
-            return resultSet.getInt(1);
+    private void setTenantContext(Connection connection, UUID tenantId) throws SQLException {
+        try (var statement = connection.prepareStatement(
+                "select set_config('app.current_tenant_id', ?, false)")) {
+            statement.setString(1, tenantId.toString());
+            statement.execute();
         }
     }
 
-    private int queryInt(String sql) throws Exception {
+    private int countAsset(Connection connection, UUID assetId) throws SQLException {
+        try (var statement = connection.prepareStatement("select count(*) from assets where id = ?")) {
+            statement.setObject(1, assetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getInt(1);
+            }
+        }
+    }
+
+    private int queryInt(String sql, Object... params) throws Exception {
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(sql)) {
-            resultSet.next();
-            return resultSet.getInt(1);
+             var statement = connection.prepareStatement(sql)) {
+            for (int index = 0; index < params.length; index++) {
+                statement.setObject(index + 1, params[index]);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getInt(1);
+            }
         }
     }
 
