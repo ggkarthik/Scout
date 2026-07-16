@@ -118,7 +118,11 @@ Notes:
 - `email` is required in production-like environments so the owner can use the shared password-setup and login flow.
 - `externalSubject` is optional; if omitted, the bootstrap uses the email as the subject.
 - The bootstrap is idempotent and safe to leave enabled for the same two owners across restarts.
-- After startup, use the Platform Console `Users` tab `Set Password` action to issue the initial setup link.
+- For the first platform-owner login in production, use the temporary migrator's
+  `PLATFORM_OWNER_SETUP_LINK_ENABLED=true` operation so the setup link is delivered through
+  Resend without exposing it through an unauthenticated or operator-facing HTTP response.
+- After a platform owner can authenticate, the Platform Console `Users` tab `Set Password`
+  action remains available for controlled user setup and recovery.
 
 ## Core Runtime Shape
 

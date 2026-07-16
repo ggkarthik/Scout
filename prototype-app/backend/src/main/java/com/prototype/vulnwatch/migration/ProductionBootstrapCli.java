@@ -1,5 +1,7 @@
 package com.prototype.vulnwatch.migration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.service.TenantSchemaService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -71,6 +73,19 @@ public final class ProductionBootstrapCli {
                         phases.add(Phase.success("runtime_role_provisioning", config.runtimeDbUsername()));
                         verifyControlPlane(connection, config.runtimeDbUsername());
                         phases.add(Phase.success("owner_verification", "complete"));
+                        if (config.platformOwnerSetupLinkEnabled()) {
+                            PlatformOwnerSetupLinkIssuer.DeliverySummary delivery =
+                                    platformOwnerSetupLinkIssuer(config).issue(
+                                            connection,
+                                            config.platformOwnerSetupEmail(),
+                                            config.platformOwnerSetupAppBaseUrl(),
+                                            config.platformOwnerSetupTokenTtlMinutes(),
+                                            config.platformOwnerSetupAllowReissue(),
+                                            runId);
+                            phases.add(Phase.success(
+                                    "platform_owner_setup_email",
+                                    "delivered; expiresAt=" + delivery.expiresAt()));
+                        }
                     }
                 } finally {
                     releaseLock(connection);
@@ -107,6 +122,16 @@ public final class ProductionBootstrapCli {
                 .outOfOrder(false)
                 .load()
                 .migrate();
+    }
+
+    private static PlatformOwnerSetupLinkIssuer platformOwnerSetupLinkIssuer(Config config) {
+        ResendEmailClient emailClient = new ResendEmailClient(
+                new ObjectMapper(),
+                config.resendBaseUrl(),
+                config.resendApiKey(),
+                config.resendFromEmail(),
+                config.resendFromDomain());
+        return new PlatformOwnerSetupLinkIssuer(emailClient);
     }
 
     private static TenantSchema ensureDefaultTenant(Connection connection) throws SQLException {
@@ -816,10 +841,21 @@ public final class ProductionBootstrapCli {
             String runtimeDbUsername,
             String runtimeDbPassword,
             String expectedDatabase,
-            boolean reportOnly
+            boolean reportOnly,
+            boolean platformOwnerSetupLinkEnabled,
+            String platformOwnerSetupEmail,
+            String platformOwnerSetupAppBaseUrl,
+            int platformOwnerSetupTokenTtlMinutes,
+            boolean platformOwnerSetupAllowReissue,
+            String resendBaseUrl,
+            String resendApiKey,
+            String resendFromEmail,
+            String resendFromDomain
     ) {
         static Config fromEnvironment() {
             String dbUrl = required("DB_URL");
+            boolean setupLinkEnabled = Boolean.parseBoolean(env("PLATFORM_OWNER_SETUP_LINK_ENABLED", "false"));
+            int setupTokenTtlMinutes = integerEnv("PLATFORM_OWNER_SETUP_TOKEN_TTL_MINUTES", 30, 5, 1440);
             return new Config(
                     dbUrl,
                     required("DB_USERNAME"),
@@ -829,7 +865,20 @@ public final class ProductionBootstrapCli {
                     env("EXPECTED_DB_NAME", databaseName(dbUrl)),
                     Boolean.parseBoolean(env(
                             "BOOTSTRAP_REPORT_ONLY",
-                            env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))));
+                            env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))),
+                    setupLinkEnabled,
+                    setupLinkEnabled
+                            ? requiredWithFallback(
+                                    "PLATFORM_OWNER_SETUP_EMAIL",
+                                    "APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL")
+                            : "",
+                    env("PLATFORM_OWNER_SETUP_APP_BASE_URL", env("APP_DEMO_APP_BASE_URL", "https://scoutgrid.io")),
+                    setupTokenTtlMinutes,
+                    Boolean.parseBoolean(env("PLATFORM_OWNER_SETUP_ALLOW_REISSUE", "false")),
+                    env("RESEND_BASE_URL", "https://api.resend.com"),
+                    setupLinkEnabled ? required("RESEND_API_KEY") : "",
+                    setupLinkEnabled ? required("RESEND_FROM_EMAIL") : "",
+                    setupLinkEnabled ? required("RESEND_FROM_DOMAIN") : "");
         }
     }
 
@@ -889,5 +938,27 @@ public final class ProductionBootstrapCli {
             value = System.getenv(name);
         }
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static String requiredWithFallback(String name, String fallbackName) {
+        String value = env(name, "");
+        if (!value.isBlank()) {
+            return value;
+        }
+        return required(fallbackName);
+    }
+
+    private static int integerEnv(String name, int defaultValue, int minimum, int maximum) {
+        String rawValue = env(name, Integer.toString(defaultValue));
+        try {
+            int value = Integer.parseInt(rawValue);
+            if (value < minimum || value > maximum) {
+                throw new IllegalStateException(
+                        name + " must be between " + minimum + " and " + maximum);
+            }
+            return value;
+        } catch (NumberFormatException ex) {
+            throw new IllegalStateException(name + " must be an integer", ex);
+        }
     }
 }

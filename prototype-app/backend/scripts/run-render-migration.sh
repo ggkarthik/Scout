@@ -9,6 +9,15 @@ set -eu
 : "${RUNTIME_DB_USERNAME:=scout_runtime}"
 : "${RUNTIME_DB_PASSWORD:?RUNTIME_DB_PASSWORD is required}"
 
+if [ "${PLATFORM_OWNER_SETUP_LINK_ENABLED:-false}" = "true" ]; then
+  : "${PLATFORM_OWNER_SETUP_EMAIL:=${APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL:-}}"
+  : "${PLATFORM_OWNER_SETUP_EMAIL:?PLATFORM_OWNER_SETUP_EMAIL is required when setup-link delivery is enabled}"
+  : "${RESEND_API_KEY:?RESEND_API_KEY is required when setup-link delivery is enabled}"
+  : "${RESEND_FROM_EMAIL:?RESEND_FROM_EMAIL is required when setup-link delivery is enabled}"
+  : "${RESEND_FROM_DOMAIN:?RESEND_FROM_DOMAIN is required when setup-link delivery is enabled}"
+  export PLATFORM_OWNER_SETUP_EMAIL
+fi
+
 export DB_URL="jdbc:postgresql://${MIGRATION_DB_HOST}:${MIGRATION_DB_PORT}/${MIGRATION_DB_NAME}"
 export DB_USERNAME="$MIGRATION_DB_USERNAME"
 export DB_PASSWORD="$MIGRATION_DB_PASSWORD"
