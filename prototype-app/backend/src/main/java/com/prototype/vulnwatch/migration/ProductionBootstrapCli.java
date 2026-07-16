@@ -57,6 +57,10 @@ public final class ProductionBootstrapCli {
                     } else {
                         runPlatformMigrations(config);
                         phases.add(Phase.success("platform_migrations", "version=" + platformVersion(connection)));
+                        if (config.platformOwnerBootstrapEnabled()) {
+                            reconcilePlatformOwner(connection, config);
+                            phases.add(Phase.success("platform_owner_identity", "configured"));
+                        }
                         TenantSchema defaultTenant = ensureDefaultTenant(connection);
                         phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
                         migrateTenant(config, defaultTenant);
@@ -132,6 +136,107 @@ public final class ProductionBootstrapCli {
                 config.resendFromEmail(),
                 config.resendFromDomain());
         return new PlatformOwnerSetupLinkIssuer(emailClient);
+    }
+
+    private static void reconcilePlatformOwner(Connection connection, Config config) throws SQLException {
+        String email = config.platformOwnerBootstrapEmail().trim().toLowerCase();
+        String externalSubject = config.platformOwnerBootstrapExternalSubject().isBlank()
+                ? email
+                : config.platformOwnerBootstrapExternalSubject().trim();
+        UUID subjectMatch = findUserBySubject(connection, externalSubject);
+        UUID emailMatch = findUserByEmail(connection, email);
+        if (subjectMatch != null && emailMatch != null && !subjectMatch.equals(emailMatch)) {
+            throw new BootstrapFailure(
+                    "platform_owner_identity_conflict",
+                    "Platform owner subject and email match different users");
+        }
+        UUID userId = subjectMatch != null ? subjectMatch : emailMatch;
+        if (userId == null) {
+            userId = UUID.randomUUID();
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    insert into platform.app_users (
+                        id, created_at, display_name, email, external_subject,
+                        platform_owner, status, updated_at
+                    ) values (?, now(), ?, ?, ?, true, 'ACTIVE', now())
+                    """)) {
+                insert.setObject(1, userId);
+                insert.setString(2, config.platformOwnerBootstrapDisplayName());
+                insert.setString(3, email);
+                insert.setString(4, externalSubject);
+                insert.executeUpdate();
+            }
+        } else {
+            try (PreparedStatement update = connection.prepareStatement("""
+                    update platform.app_users
+                    set display_name = ?,
+                        email = ?,
+                        external_subject = ?,
+                        platform_owner = true,
+                        status = 'ACTIVE',
+                        updated_at = now()
+                    where id = ?
+                    """)) {
+                update.setString(1, config.platformOwnerBootstrapDisplayName());
+                update.setString(2, email);
+                update.setString(3, externalSubject);
+                update.setObject(4, userId);
+                if (update.executeUpdate() != 1) {
+                    throw new BootstrapFailure(
+                            "platform_owner_identity_update_failed",
+                            "Platform owner identity update did not affect one row");
+                }
+            }
+        }
+        try (PreparedStatement role = connection.prepareStatement("""
+                insert into platform.app_user_global_roles (id, app_user_id, role, created_at)
+                values (?, ?, 'PLATFORM_OWNER', now())
+                on conflict (app_user_id, role) do nothing
+                """)) {
+            role.setObject(1, UUID.randomUUID());
+            role.setObject(2, userId);
+            role.executeUpdate();
+        }
+    }
+
+    private static UUID findUserBySubject(Connection connection, String externalSubject) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select id
+                from platform.app_users
+                where external_subject = ?
+                order by created_at
+                limit 2
+                """)) {
+            statement.setString(1, externalSubject);
+            return singleUserId(statement);
+        }
+    }
+
+    private static UUID findUserByEmail(Connection connection, String email) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select id
+                from platform.app_users
+                where lower(email) = ?
+                order by created_at
+                limit 2
+                """)) {
+            statement.setString(1, email);
+            return singleUserId(statement);
+        }
+    }
+
+    private static UUID singleUserId(PreparedStatement statement) throws SQLException {
+        try (ResultSet result = statement.executeQuery()) {
+            if (!result.next()) {
+                return null;
+            }
+            UUID userId = result.getObject("id", UUID.class);
+            if (result.next()) {
+                throw new BootstrapFailure(
+                        "platform_owner_identity_duplicate",
+                        "Multiple users match the configured platform owner identity");
+            }
+            return userId;
+        }
     }
 
     private static TenantSchema ensureDefaultTenant(Connection connection) throws SQLException {
@@ -842,6 +947,10 @@ public final class ProductionBootstrapCli {
             String runtimeDbPassword,
             String expectedDatabase,
             boolean reportOnly,
+            boolean platformOwnerBootstrapEnabled,
+            String platformOwnerBootstrapEmail,
+            String platformOwnerBootstrapExternalSubject,
+            String platformOwnerBootstrapDisplayName,
             boolean platformOwnerSetupLinkEnabled,
             String platformOwnerSetupEmail,
             String platformOwnerSetupAppBaseUrl,
@@ -855,6 +964,13 @@ public final class ProductionBootstrapCli {
         static Config fromEnvironment() {
             String dbUrl = required("DB_URL");
             boolean setupLinkEnabled = Boolean.parseBoolean(env("PLATFORM_OWNER_SETUP_LINK_ENABLED", "false"));
+            boolean ownerBootstrapEnabled = Boolean.parseBoolean(
+                    env("APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED", "false")) || setupLinkEnabled;
+            String ownerBootstrapEmail = ownerBootstrapEnabled
+                    ? requiredWithFallback(
+                            "PLATFORM_OWNER_SETUP_EMAIL",
+                            "APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL")
+                    : "";
             int setupTokenTtlMinutes = integerEnv("PLATFORM_OWNER_SETUP_TOKEN_TTL_MINUTES", 30, 5, 1440);
             return new Config(
                     dbUrl,
@@ -866,12 +982,12 @@ public final class ProductionBootstrapCli {
                     Boolean.parseBoolean(env(
                             "BOOTSTRAP_REPORT_ONLY",
                             env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))),
+                    ownerBootstrapEnabled,
+                    ownerBootstrapEmail,
+                    env("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EXTERNAL_SUBJECT", ownerBootstrapEmail),
+                    env("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_DISPLAY_NAME", ownerBootstrapEmail),
                     setupLinkEnabled,
-                    setupLinkEnabled
-                            ? requiredWithFallback(
-                                    "PLATFORM_OWNER_SETUP_EMAIL",
-                                    "APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL")
-                            : "",
+                    setupLinkEnabled ? ownerBootstrapEmail : "",
                     env("PLATFORM_OWNER_SETUP_APP_BASE_URL", env("APP_DEMO_APP_BASE_URL", "https://scoutgrid.io")),
                     setupTokenTtlMinutes,
                     Boolean.parseBoolean(env("PLATFORM_OWNER_SETUP_ALLOW_REISSUE", "false")),
