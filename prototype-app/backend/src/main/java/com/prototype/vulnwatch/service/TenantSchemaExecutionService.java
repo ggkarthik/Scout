@@ -71,7 +71,7 @@ public class TenantSchemaExecutionService {
         TenantContext.Snapshot previous = TenantContext.capture();
         guardTenantSwitchInsideActiveTransaction(tenantId, schemaName, previous.tenantId(), previous.schemaName());
         try {
-            TenantContext.restore(new TenantContext.Snapshot(tenantId, schemaName, false));
+            TenantContext.restore(new TenantContext.Snapshot(tenantId, schemaName, false, false));
             return supplier.get();
         } finally {
             TenantContext.restore(previous);

@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.dto.AuthSetupPasswordRequest;
 import com.prototype.vulnwatch.dto.AuthTenantContextRequest;
 import com.prototype.vulnwatch.dto.AuthTokenResponse;
 import com.prototype.vulnwatch.service.LocalCredentialAuthService;
+import com.prototype.vulnwatch.service.TenantContext;
 import jakarta.validation.Valid;
 import java.security.Principal;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,7 +34,8 @@ public class LocalAuthController {
 
     @PostMapping("/setup-password")
     public AuthTokenResponse setupPassword(@Valid @RequestBody AuthSetupPasswordRequest request) {
-        return localCredentialAuthService.setupPassword(request.setupToken(), request.password());
+        return TenantContext.runAsPreAuthentication(
+                () -> localCredentialAuthService.setupPassword(request.setupToken(), request.password()));
     }
 
     @PostMapping("/tenant-context")

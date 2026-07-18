@@ -87,9 +87,12 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     private void applyTenantContext(Connection conn) throws SQLException {
         UUID tenantId = TenantContext.getCurrentTenantId();
         boolean platformContext = TenantContext.isPlatformContext();
+        boolean preAuthenticationContext = TenantContext.isPreAuthenticationContext();
         String schemaName = platformContext ? "platform" : normalizeSchemaName(TenantContext.getCurrentSchemaName());
         recordTenantContextState(tenantId);
-        String value = tenantId != null ? tenantId.toString() : requireTenantContext && !platformContext ? NO_TENANT_SENTINEL : "";
+        String value = tenantId != null
+                ? tenantId.toString()
+                : requireTenantContext && !platformContext && !preAuthenticationContext ? NO_TENANT_SENTINEL : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT set_config('app.current_tenant_id', ?, FALSE)")) {
             ps.setString(1, value);
@@ -146,6 +149,8 @@ public class TenantAwareDataSource extends DelegatingDataSource {
             classification = "tenant";
         } else if (TenantContext.isPlatformContext()) {
             classification = "platform";
+        } else if (TenantContext.isPreAuthenticationContext()) {
+            classification = "pre_authentication";
         } else if (!applicationReadySupplier.getAsBoolean()) {
             classification = "bootstrap_default_tenant";
         } else {

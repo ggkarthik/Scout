@@ -108,6 +108,34 @@ class TenantAwareDataSourceTest {
     }
 
     @Test
+    void preAuthenticationContextUsesNullTenantInDefaultSchema() throws Exception {
+        DataSource target = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        Statement resetStatement = mock(Statement.class);
+        when(target.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(statement);
+        when(connection.createStatement()).thenReturn(resetStatement);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TenantAwareDataSource dataSource = new TenantAwareDataSource(target, true, "tenant_default", registry);
+
+        TenantContext.runAsPreAuthentication(() -> {
+            try {
+                dataSource.getConnection().close();
+            } catch (SQLException ex) {
+                throw new IllegalStateException(ex);
+            }
+        });
+
+        ArgumentCaptor<String> values = ArgumentCaptor.forClass(String.class);
+        verify(statement, times(2)).setString(org.mockito.ArgumentMatchers.eq(1), values.capture());
+        assertThat(values.getAllValues()).containsExactly("", "tenant_default,platform");
+        assertThat(registry.counter("tenant.context.missing", "classification", "pre_authentication").count())
+                .isEqualTo(1.0);
+        assertThat(TenantContext.isPreAuthenticationContext()).isFalse();
+    }
+
+    @Test
     void closesBorrowedConnectionWhenApplyingContextFails() throws Exception {
         DataSource target = mock(DataSource.class);
         Connection connection = mock(Connection.class);
