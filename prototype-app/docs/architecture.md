@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-07-13
+Last updated: 2026-07-17
 
 ---
 
@@ -18,7 +18,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 │  Spring Boot 3.3.2 — Java 17 (port 8080)                            │
 │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐ │
 │  │ Controllers  │  │   Services     │  │  Scheduled Jobs          │ │
-│  │ (41 REST)    │  │   (236)        │  │  (daily + hourly + 2s)   │ │
+│  │ (42 REST)    │  │   (238)        │  │  (daily + hourly + 2s)   │ │
 │  └──────┬───────┘  └───────┬────────┘  └──────────────────────────┘ │
 │         │                  │                                         │
 │  ┌──────▼──────────────────▼──────┐   ┌────────────────────────────┐│
@@ -147,9 +147,17 @@ HTTP Request
 
 ### New Tenant Bootstrap
 
-`TenantSchemaService` creates new tenant schemas by cloning `tenant_default` (tables, sequences, defaults, foreign keys, and row-level security policies). This happens on `Tenant` creation.
+`TenantSchemaService` creates new tenant schemas by cloning `tenant_default` (tables, sequences, defaults, foreign keys, and row-level security policies). Tenant creation is asynchronous: `TenantService.createTenant()` (called from `POST /api/platform/tenants`, which now returns 202) saves the tenant with status `PROVISIONING` and returns immediately — the schema clone and per-tenant migration happen the next time the tenant schema control plane runs (`TenantSchemaMigrationService.provisionNewTenant()` or `ProductionBootstrapCli`). `TenantLifecycleGuardService.isTenantAccessible()` only allows `ACTIVE` tenants into the workspace, so `PROVISIONING`/`PROVISIONING_FAILED` tenants are blocked until that run completes; `POST /api/platform/tenants/{tenantId}/provisioning-retry` re-queues a failed one.
 
-**RLS rollout status:** row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants is intentionally gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS` — see `ProductionSafetyValidator`.
+### Tenant Schema Control Plane
+
+Per-tenant DDL is no longer applied by the application's own startup Flyway run. A second, independent Flyway migration line lives under `backend/src/main/resources/db/migration/tenant/` (its own `<schema>.tenant_schema_history` table per tenant, baselined at version 41), separate from the platform-only `postgres_reset/` line (each file there must start with a `-- migration-guard: platform-only` comment, enforced by `PostgresResetMigrationGuardTest`).
+
+`TenantSchemaMigrationService` drives the rollout: hold a Postgres advisory lock → migrate the `tenant_default` template and compute a SHA-256 **structural fingerprint** (normalized dump of every column/constraint/index/sequence/RLS policy) → migrate one canary tenant → migrate the rest in batches of 10, comparing each tenant's post-migration fingerprint against the template and failing (`DRIFTED`) rather than silently diverging. Every step is recorded in `platform.tenant_schema_versions`, surfaced by `TenantSchemaStatusService`/`TenantSchemaStatusController` (`GET /api/platform/tenant-schema-status`, shown in the Platform Console) and by `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`).
+
+For production, the same rollout runs from `ProductionBootstrapCli` — a standalone `main()` that skips Spring/JPA entirely — invoked by a temporary Render "migrator" web service (`backend/scripts/run-render-migration.sh`) rather than the long-running API service. See [Deployment](#deployment) and `docs/p0-production-runbook.md`.
+
+**RLS rollout status:** row-level security policies are created on every provisioned tenant schema at provisioning time, and `tenant/V42__enforce_tenant_rls.sql` is the mechanism that retroactively backfills a `tenant_id` column (if missing) and turns on `FORCE ROW LEVEL SECURITY` per table, per tenant schema, as each tenant is carried through the control-plane rollout above. `V29__tenant_rls_rollout_gate.sql` (platform line) remains the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this enforcement is allowed to proceed — see `ProductionSafetyValidator`.
 
 ---
 
@@ -260,11 +268,12 @@ All API calls go through `src/api/client.ts`. Base URL: `VITE_API_BASE` (default
 
 ---
 
-## Deployment (Validation Environment)
+## Deployment
 
 - **Backend container:** `eclipse-temurin:17-jre`, non-root user, port 8080, JVM flags: `-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError`
 - **Frontend container:** `nginx:1.27-alpine`, port 8080, `try_files $uri $uri/ /index.html` for SPA routing
-- **AWS (validation):** ECS Fargate (public subnet, assign_public_ip=true), ALB, RDS PostgreSQL db.t4g.small (private subnet), S3 + CloudFront OAC for frontend
+- **AWS (validation environment):** ECS Fargate (public subnet, assign_public_ip=true), ALB, RDS PostgreSQL db.t4g.small (private subnet), S3 + CloudFront OAC for frontend
+- **Render (preprod / customer-validation environment):** `render.yaml` (repo root) defines `scout-backend`, a Docker web service built from `prototype-app/backend`, running `SPRING_PROFILES_ACTIVE=preprod` (which enables `require-production-secrets`, disables API-key auth, and — atypically — allows HMAC JWT signing in production via `APP_ALLOW_HMAC_IN_PRODUCTION=true`, for the credential-login flow used before full OIDC is wired up). The permanent web service is only ever given the restricted `scout_runtime` Postgres role (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` are `sync: false` — set manually in the Render dashboard) and never the owner/migration role. Schema bootstrap and migration run separately: see "Tenant Schema Control Plane" above and `docs/p0-production-runbook.md` for the temporary-migrator-service procedure (`backend/scripts/run-render-migration.sh` running `ProductionBootstrapCli`, plus `backend/scripts/provision-runtime-role.sql` / `docs/production-database-roles.sql` for the least-privilege role grants). After a successful run the migrator service is held open in a completion-only maintenance state rather than exiting, so Render's process supervisor doesn't restart it and re-run the privileged bootstrap.
 
 For deployment-facing environment variables and operational endpoints, see [Backend](backend.md).
 

@@ -69,7 +69,7 @@ src/
     vuln-repo-dashboard/
     software-identities/
     eol/
-    admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent
+    admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent, TenantSchemaStatusItem
     campaigns/         # Remediation campaign types + CampaignDetailPage; API calls inlined (no queries.ts)
     widgets/           # Shared chart/widget components
   hooks/

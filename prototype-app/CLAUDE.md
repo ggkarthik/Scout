@@ -50,7 +50,7 @@ npx vitest run src/pages/FindingsPage.test.tsx  # run a single test file
 
 Frontend CI gates: `npm run lint` → `npm run typecheck` → `npm run build` → `npm run test:coverage` (vitest with coverage thresholds enforced).
 
-Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs.
+Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs. Repo-wide, `gitleaks` (config: `.gitleaks.toml`, also wired as a `pre-commit` hook via `.pre-commit-config.yaml`) scans for committed secrets — see the credential-incident-gate procedure in `docs/p0-production-runbook.md` if it ever finds one in history.
 
 ## Architecture
 
@@ -69,17 +69,18 @@ See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for directory-specific runtime 
 
 | Package | Contents |
 |---|---|
-| `controller/` | 41 REST controllers under `/api/**` |
-| `service/` | 236 business-logic services |
+| `controller/` | 42 REST controllers under `/api/**` |
+| `service/` | 238 business-logic services |
 | `domain/` | 121 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS/Azure discovery, campaigns, BOM/CBOM) |
-| `dto/` | 257 API request/response objects |
+| `dto/` | 258 API request/response objects |
 | `repo/` | 77 Spring Data JPA repositories |
 | `client/` | 21 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, Azure, OpenAI, Resend) |
 | `config/` | Spring beans and security configuration (`SecurityConfig`, `ApiKeyAuthenticationFilter`, `TenantAwareDataSource`, `ProductionSafetyValidator`) |
 | `security/` | `SensitiveTenantAction` annotation and interceptor for sensitive cross-tenant operations |
 | `util/` | CPE handling, version comparison, SBOM parsing |
+| `migration/` | Standalone (non-Spring) production bootstrap: `ProductionBootstrapCli` (platform + tenant schema migration, runtime-role provisioning, control-plane verification, optional platform-owner setup-link email), `PlatformOwnerSetupLinkIssuer`, `TenantSchemaMigrationCli` (compatibility shim delegating to `ProductionBootstrapCli`) |
 
-Two controllers are new and undocumented until now: `CampaignController` (`/api/campaigns` — remediation campaign lifecycle, see below) and `CbomController` (`/api/bom/cbom` — cloud bill-of-materials posture), alongside `BomController` (`/api/bom`) for general BOM ingestion and `AzureDiscoveryController` (`/api/connectors/azure-discovery`).
+Two controllers are new and undocumented until now: `CampaignController` (`/api/campaigns` — remediation campaign lifecycle, see below) and `CbomController` (`/api/bom/cbom` — cloud bill-of-materials posture), alongside `BomController` (`/api/bom`) for general BOM ingestion and `AzureDiscoveryController` (`/api/connectors/azure-discovery`). `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status) is also new; see "Tenant Schema Control Plane" in `docs/backend.md`.
 
 ### Core Data Flow
 
@@ -120,7 +121,9 @@ Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_P
 
 ### Multi-Tenancy Status
 
-Schema-per-tenant isolation is fully implemented, not aspirational: `TenantAwareDataSource` sets `search_path` + `app.current_tenant_id` per connection checkout (reset on return), `TenantSchemaService` clones `tenant_default` (tables, sequences, defaults, FKs, and RLS policies) to provision new tenant schemas, and `ProductionSafetyValidator` runs 11+ startup checks gating unsafe config in production. `TenantService.getDefaultTenant()` is no longer called from any controller or service — that single-tenant fallback pattern has been removed. Row-level security policies are created on each tenant schema at provisioning time, but full RLS *enforcement* rollout across existing production tenants is intentionally gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.
+Schema-per-tenant isolation is fully implemented, not aspirational: `TenantAwareDataSource` sets `search_path` + `app.current_tenant_id` per connection checkout (reset on return), `TenantSchemaService` clones `tenant_default` (tables, sequences, defaults, FKs, and RLS policies) to provision new tenant schemas, and `ProductionSafetyValidator` runs 11+ startup checks gating unsafe config in production. `TenantService.getDefaultTenant()` is no longer called from any controller or service — that single-tenant fallback pattern has been removed. Tenant creation is now asynchronous: `POST /api/platform/tenants` returns 202 and the tenant sits in `PROVISIONING` status until the tenant schema control plane (below) actually creates and migrates its schema; `TenantLifecycleGuardService` denies workspace entry to anything other than `ACTIVE`.
+
+Row-level security policies are created on each tenant schema at provisioning time. Full RLS *enforcement* is rolled out per-tenant by the **tenant schema control plane**: a second Flyway migration line under `backend/src/main/resources/db/migration/tenant/` (separate from `postgres_reset/`, its own `tenant_schema_history` table per schema), applied by `TenantSchemaMigrationService` (dev) or the standalone `ProductionBootstrapCli` (production) — never by the application's own startup Flyway run. `tenant/V42__enforce_tenant_rls.sql` backfills `tenant_id` and turns on `FORCE ROW LEVEL SECURITY` per table as each tenant is migrated (template → canary → batches of 10, verified by comparing a structural SHA-256 fingerprint against the template). `V29__tenant_rls_rollout_gate.sql` (platform line) remains the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this rollout is allowed to run. See `docs/database.md#tenant-schema-control-plane` and `docs/p0-production-runbook.md` for the full mechanics and the Render deployment procedure.
 
 ### Frontend Navigation
 
@@ -260,9 +263,14 @@ Key connector components:
 
 ### Adding a Database Migration
 
-Create `backend/src/main/resources/db/migration/postgres_reset/V{next}__description.sql`. Flyway applies migrations in version order on startup. Never edit an already-applied migration file.
+There are now **two independent Flyway migration lines** — pick the right one:
 
-The migration directory is `postgres_reset/` (configured in `application.yml` as `classpath:db/migration/postgres_reset`). The baseline migration is `V1__platform_and_default_tenant_schemas.sql` — a large consolidated baseline (60+ tables) created when a prior drift-repair effort reset and renumbered the whole migration line; do not expect V1 to look like a "day one" schema. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql. The current latest migration is `V41__azure_discovery_targets.sql`.
+- **Platform/`public` schema** (tenants, users, global vuln intel, the `tenant_default` template, and cross-tenant control-plane tables): create `backend/src/main/resources/db/migration/postgres_reset/V{next}__description.sql`. Configured in `application.yml` as `classpath:db/migration/postgres_reset`, applied on application startup against `public`. Every file must open with a `-- migration-guard: platform-only` comment (enforced by `PostgresResetMigrationGuardTest`) — this line must never contain per-tenant DDL. Current latest: `V44__advance_projection_schema_target.sql`.
+- **Per-tenant schema DDL** (every table that lives inside `tenant_default`/`tenant_<id>`, including RLS policy changes): create `backend/src/main/resources/db/migration/tenant/V{next}__description.sql`. This line is **not** run by the application's startup Flyway — it is applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or `ProductionBootstrapCli` (production), which migrate the `tenant_default` template first, verify a structural fingerprint, then roll out to a canary tenant and the rest in batches of 10. Files may use the `${tenantId}`/`${tenantSchema}` Flyway placeholders. Current latest: `V44__tenant_finding_workspace_projection.sql`. See `docs/database.md#tenant-schema-control-plane` for the full mechanics.
+
+Never edit an already-applied migration file — with one narrow, already-made exception: `V14__github_sbom_source_token.sql` and `V23__default_risk_policy_presets.sql` were later edited to be schema-qualified/search-path-independent (a correctness fix required once tenant migrations stopped inheriting the request's `search_path`), not to change schema. Don't treat that as license to edit other applied migrations — it was a deliberate, reviewed exception for a specific search-path-safety bug, not a new norm.
+
+The baseline migration is `V1__platform_and_default_tenant_schemas.sql` — a large consolidated baseline (60+ tables) created when a prior drift-repair effort reset and renumbered the whole migration line; do not expect V1 to look like a "day one" schema. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql.
 
 ### Scheduled Jobs
 

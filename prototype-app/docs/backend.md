@@ -1,6 +1,6 @@
 # VulnWatch Backend
 
-Last updated: 2026-07-13
+Last updated: 2026-07-17
 
 ## Tech Stack
 
@@ -10,7 +10,7 @@ Last updated: 2026-07-13
 | Spring Boot | 3.3.2 |
 | Spring Security | JWT Bearer + API key dual-auth |
 | Spring Data JPA | PostgreSQL via HikariCP |
-| Database | PostgreSQL (Flyway migrations in `postgres_reset/`) |
+| Database | PostgreSQL (Flyway migrations in `postgres_reset/` for the platform schema; a second `tenant/` line, applied once per tenant schema by the tenant schema control plane, owns per-tenant DDL) |
 | Build | Maven, JaCoCo coverage, SpotBugs, Failsafe ITs |
 | External HTTP | Custom `OutboundHttpClient` with circuit-breaker + retry |
 
@@ -59,6 +59,7 @@ Active when `APP_JWT_ISSUER_URI` is set. Token decoded by `JwtTenantAuthenticati
 |-------------|---------|
 | `OPTIONS /*` | Public |
 | `GET /actuator/health`, `GET /actuator/health/readiness`, `GET /actuator/health/liveness`, `GET /actuator/info` | Public |
+| Any other `/actuator/**` (e.g. `/actuator/prometheus`) | Authenticated |
 | `POST /api/auth/login`, `POST /api/auth/setup-password` | Public |
 | `POST /api/demo-requests` | Public |
 | `/api/demo-invites/**` | Public |
@@ -70,7 +71,7 @@ Active when `APP_JWT_ISSUER_URI` is set. Token decoded by `JwtTenantAuthenticati
 
 ## REST Controllers
 
-41 controllers total, verified against `@RequestMapping`/`@GetMapping`/etc. annotations directly (several base paths below differ from older drafts of this doc — connector controllers moved under a shared `/api/connectors/` prefix at some point, and quite a few controllers have grown far beyond simple CRUD).
+42 controllers total, verified against `@RequestMapping`/`@GetMapping`/etc. annotations directly (several base paths below differ from older drafts of this doc — connector controllers moved under a shared `/api/connectors/` prefix at some point, and quite a few controllers have grown far beyond simple CRUD).
 
 ### Assets / Ingestion
 
@@ -504,7 +505,8 @@ Only registered when `app.test-personas.enabled=true`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/tenants` | List tenants accessible to the caller |
-| POST | `/platform/tenants` | Create tenant (`PLATFORM_OWNER`) |
+| POST | `/platform/tenants` | Create tenant (`PLATFORM_OWNER`) — returns **202 Accepted**, not 200 |
+| POST | `/platform/tenants/{tenantId}/provisioning-retry` | Retry a `PROVISIONING_FAILED` tenant (`PLATFORM_OWNER`) — returns 202 |
 | GET | `/platform/tenants/{tenantId}` | Get tenant (`PLATFORM_OWNER`) |
 | PATCH | `/platform/tenants/{tenantId}/status` | Update tenant status |
 | PATCH | `/platform/tenants/{tenantId}/quotas` | Update entitlement quotas |
@@ -523,6 +525,8 @@ Only registered when `app.test-personas.enabled=true`.
 | POST | `/tenants/{tenantId}/invites/bulk` | Bulk invite |
 | POST | `/tenants/{tenantId}/invites/{inviteId}/resend` | Resend invite |
 | DELETE | `/tenants/{tenantId}/invites/{inviteId}` | Cancel invite |
+
+`TenantService.createTenant()` no longer provisions the tenant schema synchronously — it saves the tenant with status `PROVISIONING` and returns immediately; the schema is actually created and migrated the next time the tenant schema control plane runs (`TenantSchemaMigrationService.provisionNewTenant`/`ProductionBootstrapCli`). `TenantLifecycleGuardService.isTenantAccessible()` now allow-lists only `ACTIVE` tenants (previously a deny-list of `DELETED`/`PURGING`/expired-demo), so `PROVISIONING` and `PROVISIONING_FAILED` tenants cannot be entered until provisioning completes — the Platform Console's "Enter workspace" action reflects this, and surfaces a "Retry provisioning" action for `PROVISIONING_FAILED` tenants.
 
 **TenantInviteController — `/api/tenant-invites`**
 
@@ -573,6 +577,14 @@ Only registered when `app.test-personas.enabled=true`.
 | GET | `/vulnerabilities` | List all vulnerabilities, platform-wide |
 | GET | `/source-stats` | Source statistics |
 | GET | `/intel/{externalId}` | Vulnerability intel detail |
+
+**TenantSchemaStatusController — `/api/platform/tenant-schema-status`** *(undocumented until now)*
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Paginated per-tenant schema migration status (`PLATFORM_OWNER`) — current/target version, structural checksum, failure code/message, migration timestamps |
+
+Backed by `platform.tenant_schema_versions` via `TenantSchemaStatusService`. Shown in the Platform Console. See "Tenant Schema Control Plane" below.
 
 **OperationsOverrideController — `/api/operations`**
 
@@ -711,6 +723,17 @@ Suppression rules evaluated at finding creation and on the 15-minute reopen swee
 
 `BomController` (`/api/bom`) handles general Bill-of-Materials ingestion (fetch by URL or upload) with dashboard/support/lineage views. `CbomController` (`/api/bom/cbom`) tracks cloud/container BOM posture and risk findings per asset, with an accept-finding workflow.
 
+### Tenant Schema Control Plane *(new)*
+
+Per-tenant DDL now runs on its own Flyway line, separate from the platform's startup migration:
+
+- **`TenantSchemaMigrationService`** — drives the rollout: acquire a Postgres advisory lock (`scout-tenant-schema-migrator`) → migrate the `tenant_default` template and compute a SHA-256 structural fingerprint (normalized column/constraint/index/sequence/RLS-policy dump) → migrate a canary tenant → migrate remaining tenants in batches of 10, comparing each tenant's fingerprint against the template and halting the batch on drift. Runs against `classpath:db/migration/tenant`, its own `tenant_schema_history` table per schema, baselined at version 41. Also drives `provisionNewTenant(tenant)` for on-demand provisioning of a single new tenant.
+- **`TenantSchemaStatusService`** — reads/writes `platform.tenant_schema_versions` (list for the Platform Console, `readinessFailures(minVersion)` for the health indicator, `markMigrating`/`markCurrent`/`markFailure` called by the migration service).
+- **`TenantSchemaReadinessHealthIndicator`** — actuator `HealthIndicator`, only registered when `app.tenancy.enforce-schema-version=true`; reports `DOWN` with an `unreadyTenantCount` detail if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version` (default 44).
+- **`TenantSchemaMigratorRunner`** — a legacy/test-only `ApplicationReadyEvent` listener, gated behind `app.schema-migration.legacy-test-runner-enabled=true` (off by default); superseded in production by `ProductionBootstrapCli` below but still used by some integration tests.
+- **`ProductionBootstrapCli`** (`com.prototype.vulnwatch.migration`) — standalone production bootstrap entry point; does **not** start Spring/JPA. Runs platform migrations, optionally reconciles the configured platform-owner identity (`APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED`), registers/migrates the default tenant, migrates every other tenant (canary + batches of 10, same drift-checking as above), provisions/rotates the least-privilege `scout_runtime` Postgres role, verifies the full control-plane invariants (RLS coverage on every active tenant table, no unsafe role attributes, runtime role actually denied DDL at runtime), and — when `PLATFORM_OWNER_SETUP_LINK_ENABLED=true` — emails a one-time password-setup link via `ResendEmailClient`. Prints a single-line `production_bootstrap_report=<json>` summary and exits non-zero on any phase failure. Invoked via `backend/scripts/run-render-migration.sh` from a temporary Render web service (see `docs/p0-production-runbook.md`); `backend/scripts/provision-runtime-role.sql` and `docs/production-database-roles.sql` are the equivalent manual-DBA scripts.
+- **`TenantLifecycleGuardService`** — centralizes tenant-accessibility checks (demo-tenant detection/expiry, `DELETED`/`PURGING`/`EXPIRED`/non-`ACTIVE` status → `ResponseStatusException` with the appropriate HTTP status) previously duplicated across tenant-status filtering call sites.
+
 ---
 
 ## Configuration Properties
@@ -727,8 +750,14 @@ Suppression rules evaluated at finding creation and on the 15-minute reopen swee
 | `app.jwt.issuer-uri` | `APP_JWT_ISSUER_URI` | — | OIDC issuer for RS256 JWT validation |
 | `app.security.bootstrap.platform-owners.enabled` | `APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED` | `false` | Seed platform-owner identities from config at startup |
 | `app.security.bootstrap.platform-owners.users[n].email` | `APP_PLATFORM_OWNER_BOOTSTRAP_USERS_<N>_EMAIL` | — | Login email for a seeded platform owner |
+| `app.security.jwt.allow-hmac-in-production` | `APP_ALLOW_HMAC_IN_PRODUCTION` | `false` | Permits HS256 JWT signing (`APP_JWT_HMAC_SECRET`) when `require-production-secrets=true` — used by the Render preprod profile ahead of full OIDC |
 | `app.cors.allowed-origins` | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins |
 | `app.credential-encryption-key` | `APP_CREDENTIAL_ENCRYPTION_KEY` | — | AES-256 key (base64) for credential storage |
+| `app.schema-migration.enabled` | `APP_SCHEMA_MIGRATION_ENABLED` | `false` | Enables the legacy in-process tenant schema migrator (`TenantSchemaMigratorRunner`); disabled on the permanent Render web service, which relies on the separate migrator job instead |
+| `app.schema-migration.report-only` | `APP_SCHEMA_MIGRATION_REPORT_ONLY` | `false` | Runs the tenant schema rollout in read-only drift-report mode |
+| `app.schema-migration.legacy-test-runner-enabled` | — | `false` | Gates `TenantSchemaMigratorRunner` registration (legacy/test path; production uses `ProductionBootstrapCli`) |
+| `app.tenancy.enforce-schema-version` | `APP_ENFORCE_TENANT_SCHEMA_VERSION` | `false` | Registers `TenantSchemaReadinessHealthIndicator` on `/actuator/health` |
+| `app.tenancy.minimum-compatible-schema-version` | `APP_MINIMUM_TENANT_SCHEMA_VERSION` | `44` | Minimum per-tenant schema version required for the readiness health check to report `UP` |
 | `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/vulnwatch` | Database URL |
 | `openai.enabled` | `OPENAI_ENABLED` | `false` | Enable OpenAI integration |
 | `openai.api-key` | `OPENAI_API_KEY` | — | OpenAI API key |

@@ -319,9 +319,11 @@ Files: `types.ts`, `queries.ts`
 
 Files: `types.ts`, `queries.ts`
 
-**Types:** `Tenant`, `TenantMember`, `PlatformUser`, `ServiceAccount`, `AuditEvent`, `AuthContext`, `DemoRequest`, `DemoInvite`, `AuthTokenResponse`, `TenantSupportGrant`, `InventoryConnectorHealth`
+**Types:** `Tenant`, `TenantMember`, `PlatformUser`, `ServiceAccount`, `AuditEvent`, `AuthContext`, `DemoRequest`, `DemoInvite`, `AuthTokenResponse`, `TenantSupportGrant`, `InventoryConnectorHealth`, `TenantSchemaStatusItem`, `TenantSchemaStatusPage` *(new — tenant, schema, current/target version, structural checksum, failure code/message, migration timestamps)*
 
 **Queries and mutations:** `useAuthContextQuery()`, `useTenantMembersQuery()`, `useAddTenantMemberMutation()`, `useTenantSupportGrantsQuery()`, `useCreateTenantSupportGrantMutation()`, `useRevokeTenantSupportGrantMutation()`, `useServiceAccountsQuery()`, `useCreateServiceAccountMutation()`, `useAuditEventsQuery()`, `usePlatformSupportGrantsQuery()`, `useAcceptPlatformSupportGrantMutation()`, `usePlatformInventoryConnectorHealthQuery()`
+
+**Tenant schema status (new):** `api.getTenantSchemaStatus()` (`GET /platform/tenant-schema-status?page=0&size=200`) and `api.retryTenantProvisioning(tenantId)` (`POST /platform/tenants/{tenantId}/provisioning-retry`) are called directly from `PlatformConsolePage` (not via a `queries.ts` hook). The tenant lifecycle panel there joins each tenant row against its schema-status entry, disables "Enter workspace" for any tenant not `ACTIVE` (previously only `PURGING`/`DELETED` were blocked — tenant creation is asynchronous now, so a freshly-created tenant sits in `PROVISIONING` until the backend's tenant schema control plane actually migrates its schema), and shows a "Retry provisioning" action for tenants in `PROVISIONING_FAILED`.
 
 ### campaigns (`src/features/campaigns/`)
 

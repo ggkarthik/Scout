@@ -1,8 +1,8 @@
 # VulnWatch Database
 
-Last updated: 2026-07-13
+Last updated: 2026-07-17
 
-The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest is `V41__azure_discovery_targets.sql`. H2 is retained only as an offline archive format for legacy data snapshots.
+The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest platform-line migration is `V44__advance_projection_schema_target.sql`. As of V42, per-tenant schema DDL (including RLS enforcement) has moved to a second, independent Flyway line under `db/migration/tenant/`, applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli` rather than by the application's own startup Flyway run — see [Tenant Schema Control Plane](#tenant-schema-control-plane). H2 is retained only as an offline archive format for legacy data snapshots.
 
 ---
 
@@ -10,7 +10,7 @@ The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap und
 
 - **Database name (local):** `vulnwatch`
 - **JDBC URL default:** `jdbc:postgresql://localhost:5432/vulnwatch`
-- **Migration directory:** `backend/src/main/resources/db/migration/postgres_reset/`
+- **Migration directories:** `backend/src/main/resources/db/migration/postgres_reset/` (platform/`public` schema) and `backend/src/main/resources/db/migration/tenant/` (per-tenant schema, applied by the tenant schema control plane, not by the application's own startup Flyway run)
 - **Flyway baseline migration:** `V1__platform_and_default_tenant_schemas.sql`
 - **All statements:** `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` (idempotent replay via psql is safe)
 - **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate never creates or alters tables)
@@ -158,6 +158,27 @@ Per-tenant overrides of default entitlements (e.g. enable a beta feature, adjust
 | `created_at` / `updated_at` | `timestamptz` | NOT NULL |
 
 Unique: `(tenant_id, entitlement_key)`. Index: `(tenant_id)`.
+
+---
+
+### `platform.tenant_schema_versions`
+
+Operational projection of each tenant's per-schema Flyway state, populated by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. The `tenant` migration line's own `<schema>.tenant_schema_history` table (one per tenant schema) remains the authoritative Flyway record; this table is a queryable rollup across all tenants for the platform console and the readiness health indicator. Added in V42, target-version default advanced in V43/V44.
+
+| Column | Type | Notes |
+|---|---|---|
+| `tenant_id` | `uuid` | PK; FK → `platform.tenants(id)` ON DELETE CASCADE |
+| `schema_name` | `varchar(120)` | NOT NULL, UNIQUE |
+| `current_version` | `integer` | NOT NULL DEFAULT 0 |
+| `target_version` | `integer` | NOT NULL; advanced by each new control-plane migration (44 as of V44) |
+| `status` | `varchar(24)` | `PENDING`, `MIGRATING`, `CURRENT`, `FAILED`, `DRIFTED`, `PROVISIONING_FAILED` |
+| `structural_checksum` | `varchar(64)` | SHA-256 of the schema's normalized column/constraint/index/sequence/RLS-policy fingerprint |
+| `migration_started_at` / `migration_completed_at` | `timestamptz` | |
+| `last_successful_version` | `integer` | NOT NULL DEFAULT 0; never regresses |
+| `failure_code` / `failure_message` | `varchar` | Set on `FAILED`/`DRIFTED`/`PROVISIONING_FAILED`; message is sanitized (secrets redacted, truncated to 1000 chars) |
+| `migration_run_id` | `uuid` | Correlates rows written by the same migration run |
+
+Index: `(status, current_version)`. See [Tenant Schema Control Plane](#tenant-schema-control-plane) below.
 
 ---
 
@@ -660,8 +681,8 @@ Analyst-visible finding records. One row per `(component, vulnerability)` pair t
 |---|---|---|
 | `id` | `uuid` | PK |
 | `tenant_id` | `uuid` | FK |
-| `asset_id` | `uuid` | FK → `assets(id)` |
-| `component_id` | `uuid` | FK → `inventory_components(id)` |
+| `asset_id` | `uuid` | FK → `assets(id)`; nullable as of V44 — a finding may link a component without a resolved asset |
+| `component_id` | `uuid` | FK → `inventory_components(id)`; nullable as of V44 — supports findings linked directly to an asset with no component |
 | `vulnerability_id` | `uuid` | FK → `platform.vulnerabilities(id)` |
 | `display_id` | `varchar(16)` | NOT NULL (e.g. `F-001234`) |
 | `status` | `varchar(255)` | CHECK IN (`OPEN`, `RESOLVED`, `SUPPRESSED`, `AUTO_CLOSED`) |
@@ -685,6 +706,27 @@ Analyst-visible finding records. One row per `(component, vulnerability)` pair t
 | `created_at` / `updated_at` | `timestamptz` | NOT NULL |
 
 Unique: `(component_id, vulnerability_id)`. Indexes: `idx_findings_tenant_status_updated`, `idx_findings_tenant_component_vuln`, `idx_findings_asset_id`, `idx_findings_vulnerability_id`, `idx_findings_vulnerability_status`.
+
+---
+
+### `finding_list_projection` / `finding_workspace_projection_status`
+
+Added in V44 (tenant migration line). Legacy migrations V3/V4 had created equivalent projection tables in the shared `public` schema; V44 repairs that by giving every tenant its own schema-local, RLS-protected copy (`FORCE ROW LEVEL SECURITY` + a `tenant_isolation` policy on `tenant_id`), rebuildable from `findings` at any time. `finding_list_projection` is a flattened, index-heavy read model of open/tracked findings (severity, status, owner, SLA due date, VEX status, incident linkage) built for the Findings table UI; `finding_workspace_projection_status` tracks the last rebuild (timestamp, row counts, duration) per tenant.
+
+| Column (`finding_list_projection`) | Type | Notes |
+|---|---|---|
+| `finding_id` | `uuid` | PK |
+| `display_id`, `severity`, `status`, `decision_state`, `creation_source`, `match_method` | `varchar` | |
+| `vex_status` / `vex_freshness` / `vex_provider` | `varchar` | |
+| `confidence_score` / `risk_score` | `double precision` | `risk_score` NOT NULL |
+| `vulnerability_id`, `package_name`, `ecosystem` | `varchar` | |
+| `owner_group`, `assigned_to`, `incident_id`, `asset_name`, `support_group` | `varchar` | |
+| `due_at`, `suppressed_until` | `timestamptz` | |
+| `patch_available` | `boolean` | NOT NULL |
+| `created_at` / `updated_at` / `first_observed_at` | `timestamptz` | |
+| `tenant_id` | `uuid` | NOT NULL; FK → `platform.tenants(id)` |
+
+Indexes cover `(status, due_at)`, `(assigned_to, status)`, `(owner_group, status)`, `(incident_id, status)`, `(suppressed_until, status)`, `(updated_at, finding_id)`, `(severity, status)`, `(support_group, status)`, `(patch_available, status)`.
 
 ---
 
@@ -1095,8 +1137,8 @@ Investigation lifecycle for a CVE within a tenant. Activities are append-only ev
 
 ## Migration Conventions
 
-- File pattern: `V{next}__short_snake_case.sql` in `backend/src/main/resources/db/migration/postgres_reset/`
-- **Never edit an already-applied migration file.** Add a new migration instead.
+- File pattern: `V{next}__short_snake_case.sql` in `backend/src/main/resources/db/migration/postgres_reset/` (platform line) or `backend/src/main/resources/db/migration/tenant/` (per-tenant line — see below)
+- **Never edit an already-applied migration file.** Add a new migration instead. The one existing exception: `V14__github_sbom_source_token.sql` and `V23__default_risk_policy_presets.sql` were later edited to be schema-qualified/search-path-independent, a correctness fix required once tenant migrations stopped implicitly inheriting the request's `search_path` — a deliberate, reviewed exception for a search-path-safety bug, not precedent for editing applied migrations generally.
 - All DDL uses `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` — idempotent when replayed via psql.
 - `flyway.validate-on-migrate: true` in all profiles; `out-of-order: false`.
 - `flyway.baseline-on-migrate: true` only in the `local` profile; `false` in production.
@@ -1114,6 +1156,30 @@ mvn -q \
 ```
 
 `-Dflyway.schemas=tenant_default` is required — `flyway_schema_history` lives in `tenant_default`, not `public`. Omitting it silently repairs the wrong table.
+
+---
+
+## Tenant Schema Control Plane
+
+As of V42, there are **two independent Flyway migration lines**, never applied by the same Flyway instance:
+
+| Line | Location | Applies to | History table | Notes |
+|---|---|---|---|---|
+| Platform/reset | `postgres_reset/` | `public` schema only (plus the `tenant_default` template, which lives under `public` for baselining purposes) | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
+| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Files may reference `${tenantId}` / `${tenantSchema}` Flyway placeholders, validated by `TenantSchemaMigrationService`/`ProductionBootstrapCli` before substitution. Baselined at version 41 (the version at which the tenant line was split out) so pre-existing tenant schemas don't try to replay history that predates the split. |
+
+Current latest: `postgres_reset/V44__advance_projection_schema_target.sql` and `tenant/V44__tenant_finding_workspace_projection.sql`.
+
+**Rollout mechanics** (`TenantSchemaMigrationService.migrateAll()`, mirrored by `ProductionBootstrapCli` for the standalone production bootstrap path):
+1. Hold a Postgres advisory lock (`scout-tenant-schema-migrator` / `scout-production-bootstrap`, 30s timeout) so only one migration run proceeds at a time.
+2. Migrate the `tenant_default` template schema first and compute its **structural fingerprint** — a SHA-256 hash over a normalized, schema-name-and-tenant-id-scrubbed dump of every column, constraint, index, sequence, and RLS policy definition (`information_schema` + `pg_catalog` introspection).
+3. Migrate one canary tenant, then remaining tenants in batches of 10; each tenant's post-migration fingerprint is compared against the template's — any mismatch fails that tenant as `DRIFTED` and halts the batch rather than silently diverging.
+4. Every step (start, success, failure) is recorded to `platform.tenant_schema_versions` via `TenantSchemaStatusService`, which also serves `GET /api/platform/tenant-schema-status` (backing the Platform Console's tenant schema status view) and `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`, `/actuator/health` reports `DOWN` if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version`, default 44).
+5. A `report-only` mode (`reportOnly=true` / `BOOTSTRAP_REPORT_ONLY=true`) runs the same fingerprint comparison read-only, for verifying a restored production clone before committing to a real migration.
+
+**RLS enforcement is driven from the tenant line, not the platform line.** `tenant/V42__enforce_tenant_rls.sql` runs once per tenant schema (via the rollout above) and, for every table in that schema: adds a `tenant_id` column if missing (backfilled to the tenant's own id, `NOT NULL` with a per-tenant default), fails loudly if it finds rows with a *conflicting* `tenant_id`, and enables `FORCE ROW LEVEL SECURITY` with a `tenant_isolation` policy pinned to `app.current_tenant_id`. `tenant/V43__repair_tenant_id_nullability.sql` and `tenant/V44__tenant_finding_workspace_projection.sql` carry follow-up fixes (e.g. `demo_requests` and `audit_events` are explicitly exempted/given nullable-tenant policies because they hold pre-tenant-existence rows). This is the mechanism referenced by "RLS rollout status" in `architecture.md` — `V29__tenant_rls_rollout_gate.sql` (platform line) remains the pre-flight gate confirming the runtime DB role is non-superuser/non-BYPASSRLS before this per-tenant enforcement is allowed to run in production.
+
+**Standalone production bootstrap:** `ProductionBootstrapCli` (`com.prototype.vulnwatch.migration`) is a `main()` entry point that does **not** start Spring/JPA — it runs platform migrations, reconciles the platform-owner identity, registers/migrates the default tenant, migrates all other tenants (canary + batches of 10, drift-checked the same way), provisions/rotates the least-privilege `scout_runtime` Postgres role, verifies the full control-plane invariants (RLS coverage, role privileges, no unsafe attributes, DDL actually denied at runtime), and optionally emails a platform-owner password-setup link via Resend. See `docs/p0-production-runbook.md` for the operational procedure and `backend/scripts/run-render-migration.sh` / `backend/scripts/provision-runtime-role.sql` for the scripts that wrap it in a temporary Render deploy.
 
 ---
 

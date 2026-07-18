@@ -105,13 +105,17 @@ A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding
 
 ## Database migrations
 
-Migration SQL lives in `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`).
+There are **two independent Flyway migration lines** as of V42 — do not mix them up:
 
-- `V1__platform_and_default_tenant_schemas.sql` is a large consolidated baseline (60+ tables) — a prior drift-repair effort reset and renumbered the whole migration line into it, so it is not a "day one" schema. Current latest is `V41__azure_discovery_targets.sql`.
+- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. Current latest: `V44__advance_projection_schema_target.sql`.
+- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant (baselined at version 41), applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. Current latest: `V44__tenant_finding_workspace_projection.sql`. This is also where RLS enforcement now actually happens per tenant (`V42__enforce_tenant_rls.sql`) — see `docs/database.md#tenant-schema-control-plane` for the rollout mechanics (advisory lock, structural-fingerprint drift check, template → canary → batches of 10).
+
+- `V1__platform_and_default_tenant_schemas.sql` is a large consolidated baseline (60+ tables) — a prior drift-repair effort reset and renumbered the whole migration line into it, so it is not a "day one" schema.
 - `baseline-on-migrate` is `false` in `application.yml` (default) and `true` in `application-local.yml`.
 - All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making every migration idempotent to replay.
 - If `platform.app_user_global_roles` or other platform tables are missing, run the V1 SQL directly via psql: it will only create what is absent.
-- Notable recent migrations: `V29__tenant_rls_rollout_gate.sql` (defers full RLS enforcement to a later rollout phase), `V38__tenant_entitlement_overrides.sql`, `V39__software_identity_metadata.sql`, `V40`/`V41` (Azure Discovery configs/targets).
+- Notable recent migrations (platform line): `V29__tenant_rls_rollout_gate.sql` (pre-flight gate for the RLS enforcement rollout — confirms the runtime DB role is non-superuser/non-BYPASSRLS), `V38__tenant_entitlement_overrides.sql`, `V39__software_identity_metadata.sql`, `V40`/`V41` (Azure Discovery configs/targets), `V42__tenant_schema_control_plane.sql` (adds `platform.tenant_schema_versions`, the operational rollup of per-tenant migration state).
+- Never edit an already-applied migration, with one narrow, already-made exception: `V14__github_sbom_source_token.sql` and `V23__default_risk_policy_presets.sql` were later edited to be schema-qualified/search-path-independent (a correctness fix, not a schema change) — don't treat that as a new norm.
 
 ## Key env vars for local dev
 
@@ -155,18 +159,21 @@ Do not add `@Transactional` to controller ITs. Mock outbound HTTP with `MockRest
 com.prototype.vulnwatch/
   config/      # Spring beans: SecurityConfig, ApiKeyAuthenticationFilter,
                # JwtDecoderConfig, TenantAwareDataSource, ProductionSafetyValidator,
-               # TenantResolutionFilter, WebConfig (16 files)
-  controller/  # 41 REST controllers under /api/**
-  service/     # 236 business-logic services
+               # TenantResolutionFilter, WebConfig, TenantSchemaReadinessHealthIndicator,
+               # TenantSchemaMigratorRunner (18 files)
+  controller/  # 42 REST controllers under /api/**
+  service/     # 238 business-logic services
   domain/      # 121 JPA entities
-  dto/         # 257 API request/response objects
+  dto/         # 258 API request/response objects
   repo/        # 77 Spring Data JPA repositories
   client/      # 21 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, AWS, Azure…)
   security/    # SensitiveTenantAction annotation + interceptor (2 files)
   util/        # CPE handling, version comparison, SBOM parsing (6 files)
+  migration/   # Standalone (non-Spring) production bootstrap: ProductionBootstrapCli,
+               # PlatformOwnerSetupLinkIssuer, TenantSchemaMigrationCli (3 files)
 ```
 
-Newer, less-obvious controllers worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaigns), `CbomController` (`/api/bom/cbom` — cloud BOM posture), `BomController` (`/api/bom`), `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `IngestionJobController` (`/api/ingestion-jobs`).
+Newer, less-obvious controllers worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaigns), `CbomController` (`/api/bom/cbom` — cloud BOM posture), `BomController` (`/api/bom`), `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `IngestionJobController` (`/api/ingestion-jobs`), `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status).
 
 ## Docker build
 
@@ -176,3 +183,7 @@ docker run -e DB_URL=... -e APP_JWT_ISSUER_URI=... -p 8080:8080 vulnwatch-backen
 ```
 
 JVM flags in the image: `-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError`.
+
+## Production bootstrap (Render)
+
+The permanent `scout-backend` web service (`render.yaml`, repo root) never runs schema migrations itself (`APP_SCHEMA_MIGRATION_ENABLED=false`) and is only ever given the restricted `scout_runtime` Postgres role — never the owner/migration role. Schema bootstrap (platform + tenant migrations, runtime-role provisioning, control-plane verification, optional platform-owner setup-link email) runs from a **separate, temporary** Render web service via `backend/scripts/run-render-migration.sh`, which execs `com.prototype.vulnwatch.migration.ProductionBootstrapCli` (a standalone `main()`, no Spring context) and then holds the container open in a completion-only maintenance state so Render's process supervisor doesn't restart it and re-run the privileged bootstrap. Full operational procedure, required env vars, and the pre-production checklist live in `docs/p0-production-runbook.md`; the SQL-level role provisioning is `backend/scripts/provision-runtime-role.sql` (automated, self-verifying) / `docs/production-database-roles.sql` (manual DBA reference).
