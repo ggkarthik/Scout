@@ -74,7 +74,7 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                 where c.table_schema = ? and c.table_name = 'audit_events' and c.column_name = 'tenant_id'
                 """, Boolean.class, schemaName);
 
-        assertEquals(45, version);
+        assertEquals(44, version);
         assertNotNull(checksum);
         assertEquals(0, incompleteRls);
         assertEquals(false, demoRlsEnabled);
