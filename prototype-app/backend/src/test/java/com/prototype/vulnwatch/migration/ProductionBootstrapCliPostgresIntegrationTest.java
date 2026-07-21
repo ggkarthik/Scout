@@ -39,7 +39,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             }
         });
 
-        assertEquals(44, queryInt("""
+        assertEquals(45, queryInt("""
                 select max(version::integer)
                 from public.flyway_schema_history
                 where version ~ '^[0-9]+$' and success
@@ -56,8 +56,8 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                 from platform.tenant_schema_versions
                 where schema_name = 'tenant_default'
                   and status = 'CURRENT'
-                  and current_version = 44
-                  and last_successful_version = 44
+                  and current_version = 45
+                  and last_successful_version = 45
                   and nullif(structural_checksum, '') is not null
                 """));
         assertEquals(1, queryInt("""
@@ -73,7 +73,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         assertEquals(1, queryInt("""
                 select count(*)
                 from tenant_default.tenant_schema_history
-                where version = '44' and success
+                where version = '45' and success
                 """));
         assertTrue(queryInt("""
                 select count(*)
@@ -98,7 +98,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                   on template.schema_name = 'tenant_default'
                 where customer.tenant_id = ?
                   and customer.status = 'CURRENT'
-                  and customer.current_version = 44
+                  and customer.current_version = 45
                   and customer.structural_checksum = template.structural_checksum
                 """, tenantId));
         assertEquals(0, queryInt("""
