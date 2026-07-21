@@ -41,7 +41,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
                 Integer.class
         );
         Integer latest = jdbcTemplate.queryForObject(
-                "select count(*) from public.flyway_schema_history where version = '45' and success = true",
+                "select count(*) from public.flyway_schema_history where version = '44' and success = true",
                 Integer.class
         );
 
