@@ -13,6 +13,8 @@ import java.util.Optional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import com.prototype.vulnwatch.dto.AllowedTenantResponse;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api")
@@ -46,6 +48,7 @@ public class AuthContextController {
         var allowedTenants = allowedTenantContextService.listAllowedTenants(actor);
         Optional<com.prototype.vulnwatch.domain.TenantSupportGrant> activeSupportGrant =
                 actor.actingAsPlatformOwner() && actor.tenantId() != null
+                        && actor.accessMode() != null && actor.accessMode().isSupport()
                         ? tenantSupportGrantService.findActiveGrant(actor.userId(), actor.tenantId())
                         : Optional.empty();
         String tenantId = actor.tenantId() == null ? null : actor.tenantId().toString();
@@ -61,6 +64,8 @@ public class AuthContextController {
                 actor.platformScope(),
                 actor.actingAsPlatformOwner(),
                 false,
+                actor.accessMode() == null ? null : actor.accessMode().name(),
+                actor.accessReferenceId() == null ? null : actor.accessReferenceId().toString(),
                 activeSupportGrant.map(com.prototype.vulnwatch.domain.TenantSupportGrant::getAccessMode).orElse(null),
                 activeSupportGrant.map(com.prototype.vulnwatch.domain.TenantSupportGrant::getExpiresAt).orElse(null),
                 workspace == null ? null : workspace.getPlanCode(),
@@ -70,5 +75,10 @@ public class AuthContextController {
                 demoStatus == null ? null : demoStatus.demoCapabilities(),
                 demoStatus == null ? null : demoStatus.demoUsage()
         );
+    }
+
+    @GetMapping("/auth/authorized-workspaces")
+    public List<AllowedTenantResponse> authorizedWorkspaces() {
+        return allowedTenantContextService.listAllowedTenants(requestActorService.currentActor());
     }
 }

@@ -4,7 +4,9 @@ export type AllowedTenant = {
   slug: string | null;
   role: string;
   accessMode?: string | null;
+  accessReferenceId?: string | null;
   expiresAt?: string | null;
+  revocable?: boolean;
 };
 
 export type ActorContext = {
@@ -17,6 +19,8 @@ export type ActorContext = {
   allowedTenants?: AllowedTenant[];
   platformScope?: boolean;
   actingAsPlatformOwner?: boolean;
+  tenantAccessMode?: string | null;
+  tenantAccessReferenceId?: string | null;
   sensitiveActionConfirmationRequired?: boolean;
   supportAccessMode?: string | null;
   supportGrantExpiresAt?: string | null;

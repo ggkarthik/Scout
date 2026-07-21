@@ -37,15 +37,23 @@ public class AllowedTenantContextService {
             Map<String, AllowedTenantResponse> allowedTenants = new LinkedHashMap<>();
             tenantMembershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(actor.userId(), "ACTIVE").stream()
                     .filter(membership -> tenantLifecycleGuardService.isTenantAccessible(membership.getTenant()))
-                    .forEach(membership -> allowedTenants.put(
-                            membership.getTenant().getId().toString(),
-                            new AllowedTenantResponse(
+                    .forEach(membership -> {
+                        boolean bootstrapPlayground = TenantAccessResolutionService.PLAYGROUND_SLUG
+                                .equalsIgnoreCase(membership.getTenant().getSlug())
+                                && TenantAccessResolutionService.PLAYGROUND_PROVENANCE
+                                .equalsIgnoreCase(membership.getProvenance());
+                        allowedTenants.put(membership.getTenant().getId().toString(), new AllowedTenantResponse(
                                     membership.getTenant().getId().toString(),
                                     membership.getTenant().getName(),
                                     membership.getTenant().getSlug(),
                                     membership.getRole(),
+                                    bootstrapPlayground
+                                            ? TenantAccessMode.DIRECT_PLAYGROUND_MEMBERSHIP.name()
+                                            : TenantAccessMode.TENANT_MEMBERSHIP.name(),
+                                    membership.getId(),
                                     null,
-                                    null)));
+                                    !bootstrapPlayground));
+                    });
             tenantSupportGrantService.listActiveGrantsForPlatformOwner(actor.userId()).stream()
                     .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
                     .forEach(grant -> allowedTenants.putIfAbsent(
@@ -55,8 +63,12 @@ public class AllowedTenantContextService {
                                     grant.getTenant().getName(),
                                     grant.getTenant().getSlug(),
                                     "PLATFORM_OWNER",
-                                    grant.getAccessMode(),
-                                    grant.getExpiresAt())));
+                                    TenantSupportGrantService.ACCESS_MODE_WRITE_ENABLED.equalsIgnoreCase(grant.getAccessMode())
+                                            ? TenantAccessMode.SUPPORT_WRITE_ENABLED.name()
+                                            : TenantAccessMode.SUPPORT_READ_ONLY.name(),
+                                    grant.getId(),
+                                    grant.getExpiresAt(),
+                                    true)));
             return allowedTenants.values().stream()
                     .sorted(Comparator.comparing(AllowedTenantResponse::name, String.CASE_INSENSITIVE_ORDER))
                     .toList();
@@ -69,8 +81,10 @@ public class AllowedTenantContextService {
                         membership.getTenant().getName(),
                         membership.getTenant().getSlug(),
                         membership.getRole(),
+                        TenantAccessMode.TENANT_MEMBERSHIP.name(),
+                        membership.getId(),
                         null,
-                        null))
+                        true))
                 .toList();
         if (allowedTenants.size() > 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

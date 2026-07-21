@@ -415,7 +415,7 @@ describe('FindingsPage', () => {
         workflowStatus: 'SUPPRESSED',
         suppressionReason: 'PENDING_PATCH',
         suppressedUntil: '2026-06-30T00:00:00.000Z',
-        actor: 'local-analyst',
+        actor: 'analyst@example.com',
       }));
     });
 

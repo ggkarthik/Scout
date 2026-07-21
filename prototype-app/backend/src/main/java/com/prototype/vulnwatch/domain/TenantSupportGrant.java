@@ -27,6 +27,10 @@ public class TenantSupportGrant {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
     @ManyToOne(optional = false)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
@@ -64,7 +68,7 @@ public class TenantSupportGrant {
     @Column(name = "accepted_at")
     private Instant acceptedAt;
 
-    @Column(name = "expires_at", nullable = false)
+    @Column(name = "expires_at")
     private Instant expiresAt;
 
     @Column(name = "revoked_at")

@@ -4,12 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
@@ -212,11 +212,17 @@ class JwtTenantAuthenticationServiceTest {
         tenant.setId(tenantId);
         tenant.setName("Acme");
         tenant.setSchemaName("tenant_acme");
+        UUID grantId = UUID.randomUUID();
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setId(grantId);
+        grant.setTenant(tenant);
+        grant.setAccessMode("WRITE_ENABLED");
 
         when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(user));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of("PLATFORM_OWNER"));
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(tenantSupportGrantService.findActiveGrant("owner@example.com", tenantId)).thenReturn(Optional.of(grant));
 
         JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
                 userRepository,
@@ -240,6 +246,8 @@ class JwtTenantAuthenticationServiceTest {
                         .claim("email", "owner@example.com")
                         .claim("roles", List.of("PLATFORM_OWNER"))
                         .claim("active_tenant_id", tenantId.toString())
+                        .claim("tenant_access_mode", "SUPPORT_WRITE_ENABLED")
+                        .claim("tenant_access_ref", grantId.toString())
                         .issuedAt(Instant.now())
                         .expiresAt(Instant.now().plusSeconds(3600))
                         .build(),
@@ -247,7 +255,7 @@ class JwtTenantAuthenticationServiceTest {
 
         assertEquals(tenantId, actor.tenantId());
         assertEquals("Acme", actor.tenantName());
-        verify(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenantId);
+        assertEquals(TenantAccessMode.SUPPORT_WRITE_ENABLED, actor.accessMode());
     }
 
     @Test
@@ -264,9 +272,6 @@ class JwtTenantAuthenticationServiceTest {
         when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(user));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(appUserGlobalRoleService.rolesForUser(user.getId())).thenReturn(Set.of("PLATFORM_OWNER"));
-        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "no grant"))
-                .when(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenantId);
 
         JwtTenantAuthenticationService service = new JwtTenantAuthenticationService(
                 userRepository,

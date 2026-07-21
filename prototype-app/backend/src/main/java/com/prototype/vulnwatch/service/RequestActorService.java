@@ -34,14 +34,20 @@ public class RequestActorService {
                         platformOwner || details.roles().contains("CREATOR"),
                         details.tenantId(),
                         details.tenantName(),
-                        details.roles());
+                        details.roles(),
+                        details.accessMode(),
+                        details.accessReferenceId(),
+                        details.accessExpiresAt());
             }
             return new RequestActor(
                     details.userId(),
                     platformOwner || details.roles().contains("CREATOR"),
                     null,
                     null,
-                    details.roles());
+                    details.roles(),
+                    null,
+                    null,
+                    null);
         }
         String principal = resolvePrincipal(authentication);
         Set<String> roles = authentication == null ? Set.of() : authentication.getAuthorities().stream()

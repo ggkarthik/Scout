@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,6 +35,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class IdentityAdministrationService {
+
+    private static final Set<String> TENANT_ROLES = Set.of(
+            "TENANT_ADMIN", "INVENTORY_ADMIN", "SECURITY_ANALYST", "READ_ONLY_AUDITOR");
 
     private final AppUserRepository userRepository;
     private final TenantRepository tenantRepository;
@@ -124,6 +128,40 @@ public class IdentityAdministrationService {
         membership.setTenant(tenant);
         membership.setUser(user);
         membership.setRole(normalizeRole(role));
+        return membershipRepository.save(membership);
+    }
+
+    @Transactional
+    public TenantMembership grantPlatformOwnerMembership(UUID tenantId, String subject, String role, String grantedBySubject) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
+                .or(() -> userRepository.findByEmailIgnoreCase(subject))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Platform owner is not registered"));
+        if (!appUserGlobalRoleService.rolesForUser(user.getId()).contains("PLATFORM_OWNER")
+                || !"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Subject is not an active platform owner");
+        }
+        String normalizedRole = normalizeRole(role);
+        if (!TENANT_ROLES.contains(normalizedRole)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported tenant role");
+        }
+        AppUser grantedBy = userRepository.findByExternalSubject(requireText(grantedBySubject, "grantedBySubject"))
+                .orElseThrow(() -> new IllegalStateException("Authenticated tenant administrator is not registered"));
+        TenantMembership membership = membershipRepository
+                .findFirstByUserExternalSubjectAndTenantId(user.getExternalSubject(), tenantId)
+                .orElseGet(TenantMembership::new);
+        if (TenantAccessResolutionService.PLAYGROUND_PROVENANCE.equalsIgnoreCase(membership.getProvenance())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Bootstrap-managed playground membership must be changed through configuration");
+        }
+        membership.setTenant(tenant);
+        membership.setUser(user);
+        membership.setInvitedBy(grantedBy);
+        membership.setRole(normalizedRole);
+        membership.setStatus("ACTIVE");
+        membership.setProvenance("MANUAL");
+        membership.setUpdatedAt(Instant.now());
         return membershipRepository.save(membership);
     }
 

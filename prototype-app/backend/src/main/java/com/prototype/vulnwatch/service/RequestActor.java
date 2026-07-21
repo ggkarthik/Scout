@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import java.util.Set;
+import java.time.Instant;
 import java.util.UUID;
 
 public record RequestActor(
@@ -8,10 +9,17 @@ public record RequestActor(
         boolean creator,
         UUID tenantId,
         String tenantName,
-        Set<String> roles
+        Set<String> roles,
+        TenantAccessMode accessMode,
+        UUID accessReferenceId,
+        Instant accessExpiresAt
 ) {
+    public RequestActor(String userId, boolean creator, UUID tenantId, String tenantName, Set<String> roles) {
+        this(userId, creator, tenantId, tenantName, roles, null, null, null);
+    }
+
     public RequestActor(String userId, boolean creator, UUID tenantId, String tenantName) {
-        this(userId, creator, tenantId, tenantName, Set.of());
+        this(userId, creator, tenantId, tenantName, Set.of(), null, null, null);
     }
 
     public boolean hasRole(String role) {
@@ -24,5 +32,10 @@ public record RequestActor(
 
     public boolean actingAsPlatformOwner() {
         return hasRole("PLATFORM_OWNER") && tenantId != null;
+    }
+
+    public boolean hasDirectTenantMembership() {
+        return accessMode == TenantAccessMode.DIRECT_PLAYGROUND_MEMBERSHIP
+                || accessMode == TenantAccessMode.TENANT_MEMBERSHIP;
     }
 }

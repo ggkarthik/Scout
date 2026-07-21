@@ -35,6 +35,7 @@ public class LocalCredentialAuthService {
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
     private final AuditEventService auditEventService;
+    private final TenantAccessResolutionService accessResolutionService;
     private final boolean requireProductionSecrets;
     private final boolean sharedLocalhostLoginEnabled;
     private final String sharedLocalhostTenantAdminEmail;
@@ -64,6 +65,11 @@ public class LocalCredentialAuthService {
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
         this.auditEventService = auditEventService;
+        this.accessResolutionService = new TenantAccessResolutionService(
+                tenantRepository,
+                membershipRepository,
+                tenantSupportGrantService,
+                tenantLifecycleGuardService);
         this.requireProductionSecrets = requireProductionSecrets;
         this.sharedLocalhostLoginEnabled = sharedLocalhostLoginEnabled;
         this.sharedLocalhostTenantAdminEmail = sharedLocalhostTenantAdminEmail == null
@@ -123,7 +129,8 @@ public class LocalCredentialAuthService {
         user.setLastSeenAt(Instant.now());
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
-        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant());
+        TenantAccessResolution access = accessResolutionService.resolve(user.getExternalSubject(), membership.getTenant().getId());
+        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant(), access);
     }
 
     private AuthTokenResponse loginSharedLocalhostTenantAdmin(String normalizedEmail, String passwordHash) {
@@ -157,7 +164,8 @@ public class LocalCredentialAuthService {
                     created.setRole("TENANT_ADMIN");
                     return membershipRepository.save(created);
                 });
-        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), tenant);
+        TenantAccessResolution access = accessResolutionService.resolve(user.getExternalSubject(), tenant.getId());
+        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), tenant, access);
     }
 
     @Transactional
@@ -206,33 +214,43 @@ public class LocalCredentialAuthService {
         }
         TenantMembership membership = memberships.get(0);
         tenantLifecycleGuardService.assertTenantAccessible(membership.getTenant());
-        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant());
+        TenantAccessResolution access = accessResolutionService.resolve(user.getExternalSubject(), membership.getTenant().getId());
+        return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant(), access);
     }
 
     @Transactional
     public AuthTokenResponse switchTenantContext(String subject, UUID tenantId) {
         AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
-        Tenant tenant = tenantRepository.findById(tenantId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found"));
-        tenantLifecycleGuardService.assertTenantAccessible(tenant);
-        TenantMembership membership = membershipRepository
-                .findFirstByUserExternalSubjectAndTenantIdAndStatus(user.getExternalSubject(), tenantId, "ACTIVE")
-                .orElse(null);
-        if (membership != null) {
-            return authTokenService.issueToken(
-                    user,
-                    Set.of("PLATFORM_OWNER", normalizeRole(membership.getRole())),
-                    tenant);
-        }
-        tenantSupportGrantService.requireActiveGrant(user.getExternalSubject(), tenantId);
-        return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), tenant);
+        TenantAccessResolution access = accessResolutionService.resolve(user.getExternalSubject(), tenantId);
+        Set<String> roles = access.mode().isSupport()
+                ? Set.of("PLATFORM_OWNER")
+                : Set.of("PLATFORM_OWNER", normalizeRole(access.role()));
+        auditEventService.recordExplicitActor(
+                tenantId,
+                user.getExternalSubject(),
+                "PLATFORM_OWNER",
+                "tenant.context.entered",
+                "tenant_access",
+                access.referenceId().toString(),
+                "{\"mode\":\"" + access.mode().name() + "\"}",
+                "SUCCESS");
+        return authTokenService.issueToken(user, roles, access.tenant(), access);
     }
 
     @Transactional
     public AuthTokenResponse clearTenantContext(String subject) {
         AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
+        auditEventService.recordExplicitActor(
+                null,
+                user.getExternalSubject(),
+                "PLATFORM_OWNER",
+                "tenant.context.exited",
+                "app_user",
+                user.getId().toString(),
+                null,
+                "SUCCESS");
         return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
     }
 

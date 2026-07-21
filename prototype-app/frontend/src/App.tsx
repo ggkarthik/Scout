@@ -117,6 +117,9 @@ const UserManagementPage = React.lazy(async () => ({
 const PlatformConsolePage = React.lazy(async () => ({
   default: (await import('./pages/PlatformConsolePage')).PlatformConsolePage
 }));
+const AuthorizedWorkspacesPage = React.lazy(async () => ({
+  default: (await import('./pages/AuthorizedWorkspacesPage')).AuthorizedWorkspacesPage
+}));
 const DemoLandingPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).DemoLandingPage
 }));
@@ -452,6 +455,14 @@ function PlatformRoute() {
     );
   }
   return <PlatformConsolePage selectedView={normalizePlatformRouteView(params.platformView)} />;
+}
+
+function AuthorizedWorkspacesRoute() {
+  const actor = useActor();
+  if (!actor?.roles.includes('PLATFORM_OWNER')) {
+    return <Navigate to="/exposure" replace />;
+  }
+  return <AuthorizedWorkspacesPage />;
 }
 
 function AdminRoute() {
@@ -959,6 +970,20 @@ function AppShell() {
                         <small>Open non-production test personas</small>
                       </button>
                     )}
+                    {actor?.roles.includes('PLATFORM_OWNER') && (
+                      <button
+                        type="button"
+                        className="settings-menu-item"
+                        role="menuitem"
+                        onClick={() => {
+                          setSettingsMenuOpen(false);
+                          navigate('/authorized-workspaces');
+                        }}
+                      >
+                        <span>Authorized Workspaces</span>
+                        <small>Open only tenant-approved access</small>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="settings-menu-item settings-menu-item-logout"
@@ -1023,6 +1048,7 @@ function AppShell() {
               <Route path="/connect/:connectView?" element={<ConnectRoute />} />
               <Route path="/admin/:adminView?" element={<AdminRoute />} />
               <Route path="/platform/:platformView?" element={<PlatformRoute />} />
+              <Route path="/authorized-workspaces" element={<AuthorizedWorkspacesRoute />} />
               <Route path="/configurations/:configView?" element={<ConfigurationsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.dto;
 
 import java.time.Instant;
+import java.util.UUID;
 
 public record AllowedTenantResponse(
         String id,
@@ -8,6 +9,8 @@ public record AllowedTenantResponse(
         String slug,
         String role,
         String accessMode,
-        Instant expiresAt
+        UUID accessReferenceId,
+        Instant expiresAt,
+        boolean revocable
 ) {
 }

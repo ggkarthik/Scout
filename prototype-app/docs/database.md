@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest platform-line migration is `V44__advance_projection_schema_target.sql`. As of V42, per-tenant schema DDL (including RLS enforcement) has moved to a second, independent Flyway line under `db/migration/tenant/`, applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli` rather than by the application's own startup Flyway run — see [Tenant Schema Control Plane](#tenant-schema-control-plane). H2 is retained only as an offline archive format for legacy data snapshots.
+The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest platform-line migration is `V45__tenant_access_membership_provenance.sql`. As of V42, per-tenant schema DDL (including RLS enforcement) has moved to a second, independent Flyway line under `db/migration/tenant/`, applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli` rather than by the application's own startup Flyway run — see [Tenant Schema Control Plane](#tenant-schema-control-plane). H2 is retained only as an offline archive format for legacy data snapshots.
 
 ---
 
@@ -100,7 +100,10 @@ Links users to tenants with a role.
 | `invited_by` | `uuid` | FK → `platform.app_users(id)` |
 | `role` | `varchar(255)` | NOT NULL |
 | `status` | `varchar(255)` | NOT NULL |
+| `provenance` | `varchar(32)` | NOT NULL; `MANUAL`, `TENANT_INVITE`, or `PLAYGROUND_BOOTSTRAP` |
 | `created_at` / `updated_at` | `timestamptz` | NOT NULL |
+
+Unique index: `(user_id, tenant_id)`.
 
 ---
 
@@ -133,7 +136,7 @@ Platform-owner support access grants with expiry and audit trail.
 | `access_mode` | `varchar(255)` | NOT NULL |
 | `scope` / `reason` | `varchar(255)` | |
 | `status` | `varchar(255)` | NOT NULL |
-| `expires_at` | `timestamptz` | NOT NULL |
+| `expires_at` | `timestamptz` | NULL only when non-expiring support access is explicitly enabled |
 | `requested_at` | `timestamptz` | NOT NULL |
 | `accepted_at` / `revoked_at` / `updated_at` | `timestamptz` | |
 
@@ -1168,7 +1171,7 @@ As of V42, there are **two independent Flyway migration lines**, never applied b
 | Platform/reset | `postgres_reset/` | `public` schema only (plus the `tenant_default` template, which lives under `public` for baselining purposes) | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
 | Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Files may reference `${tenantId}` / `${tenantSchema}` Flyway placeholders, validated by `TenantSchemaMigrationService`/`ProductionBootstrapCli` before substitution. Baselined at version 41 (the version at which the tenant line was split out) so pre-existing tenant schemas don't try to replay history that predates the split. |
 
-Current latest: `postgres_reset/V44__advance_projection_schema_target.sql` and `tenant/V44__tenant_finding_workspace_projection.sql`.
+Current latest: `postgres_reset/V45__tenant_access_membership_provenance.sql` and `tenant/V44__tenant_finding_workspace_projection.sql`.
 
 **Rollout mechanics** (`TenantSchemaMigrationService.migrateAll()`, mirrored by `ProductionBootstrapCli` for the standalone production bootstrap path):
 1. Hold a Postgres advisory lock (`scout-tenant-schema-migrator` / `scout-production-bootstrap`, 30s timeout) so only one migration run proceeds at a time.

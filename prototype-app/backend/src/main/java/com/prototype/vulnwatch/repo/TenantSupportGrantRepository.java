@@ -22,8 +22,8 @@ public interface TenantSupportGrantRepository extends JpaRepository<TenantSuppor
             where lower(g.invitedPlatformSubject) = lower(:subject)
               and upper(g.status) = 'ACTIVE'
               and g.revokedAt is null
-              and g.expiresAt > :now
-            order by g.expiresAt asc, g.requestedAt desc
+              and (g.expiresAt is null or g.expiresAt > :now)
+            order by g.expiresAt asc nulls last, g.requestedAt desc
             """)
     List<TenantSupportGrant> findActiveByInvitedPlatformSubject(@Param("subject") String subject, @Param("now") Instant now);
 
@@ -35,8 +35,8 @@ public interface TenantSupportGrantRepository extends JpaRepository<TenantSuppor
               and t.id = :tenantId
               and upper(g.status) = 'ACTIVE'
               and g.revokedAt is null
-              and g.expiresAt > :now
-            order by g.expiresAt desc, g.requestedAt desc
+              and (g.expiresAt is null or g.expiresAt > :now)
+            order by g.expiresAt desc nulls first, g.requestedAt desc
             """)
     List<TenantSupportGrant> findActiveByInvitedPlatformSubjectAndTenantId(
             @Param("subject") String subject,

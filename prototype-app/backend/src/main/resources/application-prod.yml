@@ -20,6 +20,7 @@ app:
   security:
     require-production-secrets: true
     allow-api-key-auth: false
+    default-user-id: ${APP_DEFAULT_USER_ID:}
     validate-rls-runtime-role: true
   tenancy:
     allow-header-tenant-selection: false

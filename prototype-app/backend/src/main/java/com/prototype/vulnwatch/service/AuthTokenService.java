@@ -62,11 +62,20 @@ public class AuthTokenService {
     }
 
     public AuthTokenResponse issueToken(AppUser user, Set<String> roles, Tenant activeTenant) {
+        return issueToken(user, roles, activeTenant, null);
+    }
+
+    public AuthTokenResponse issueToken(
+            AppUser user,
+            Set<String> roles,
+            Tenant activeTenant,
+            TenantAccessResolution access
+    ) {
         requireIssuerConfigured();
         Instant now = Instant.now();
         Instant expiresAt = now.plus(Math.max(1, tokenTtlMinutes), ChronoUnit.MINUTES);
         return new AuthTokenResponse(
-                signToken(user, roles, activeTenant, now, expiresAt),
+                signToken(user, roles, activeTenant, access, now, expiresAt),
                 "Bearer",
                 expiresAt);
     }
@@ -77,7 +86,14 @@ public class AuthTokenService {
         }
     }
 
-    private String signToken(AppUser user, Set<String> roles, Tenant activeTenant, Instant issuedAt, Instant expiresAt) {
+    private String signToken(
+            AppUser user,
+            Set<String> roles,
+            Tenant activeTenant,
+            TenantAccessResolution access,
+            Instant issuedAt,
+            Instant expiresAt
+    ) {
         try {
             String header = json(Map.of("alg", "HS256", "typ", "JWT"));
             Map<String, Object> claims = new LinkedHashMap<>();
@@ -93,6 +109,14 @@ public class AuthTokenService {
             claims.put("exp", expiresAt.getEpochSecond());
             if (activeTenant != null) {
                 claims.put(activeTenantIdClaim, activeTenant.getId().toString());
+                if (access == null) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant-bound tokens require resolved authorization");
+                }
+                claims.put("tenant_access_mode", access.mode().name());
+                claims.put("tenant_access_ref", access.referenceId().toString());
+                if (access.expiresAt() != null) {
+                    claims.put("tenant_access_expires_at", access.expiresAt().toString());
+                }
             }
             String unsigned = base64Url(header.getBytes(StandardCharsets.UTF_8))
                     + "."
