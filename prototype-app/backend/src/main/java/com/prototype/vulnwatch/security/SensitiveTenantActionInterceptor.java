@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.security;
 
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantAccessMode;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -34,13 +35,14 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
             return true;
         }
         RequestActor actor = requestActorService.currentActor();
-        if (!actor.actingAsPlatformOwner() || actor.hasDirectTenantMembership()) {
+        TenantAccessMode accessMode = actor.accessMode();
+        if (accessMode == null || actor.hasDirectTenantMembership()) {
             return true;
         }
         if (actor.tenantId() == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owner tenant context is required");
         }
-        if (actor.accessMode() != com.prototype.vulnwatch.service.TenantAccessMode.SUPPORT_WRITE_ENABLED) {
+        if (accessMode != TenantAccessMode.SUPPORT_WRITE_ENABLED) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This support session is read-only");
         }
         var grant = tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());

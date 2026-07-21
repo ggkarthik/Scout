@@ -50,6 +50,24 @@ class SensitiveTenantActionInterceptorTest {
     }
 
     @Test
+    void legacyApiKeyActorWithoutExplicitAccessModeIsNotTreatedAsSupport() throws Exception {
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "local-api-user",
+                true,
+                UUID.randomUUID(),
+                "Default Workspace",
+                Set.of("PLATFORM_OWNER", "TENANT_ADMIN")));
+
+        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
+                requestActorService,
+                tenantSupportGrantService
+        );
+
+        assertTrue(interceptor.preHandle(request(), new MockHttpServletResponse(), sensitiveMethod()));
+        verifyNoInteractions(tenantSupportGrantService);
+    }
+
+    @Test
     void platformOwnersNeedWriteGrantForTenantScopedActions() throws Exception {
         UUID tenantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(

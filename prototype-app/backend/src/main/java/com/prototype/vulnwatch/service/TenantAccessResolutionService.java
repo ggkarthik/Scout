@@ -39,7 +39,9 @@ public class TenantAccessResolutionService {
     @Transactional(readOnly = true)
     public TenantAccessResolution resolve(String subject, UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found"));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "No active tenant-authorized access exists for this workspace"));
         lifecycleGuardService.assertTenantAccessible(tenant);
 
         TenantMembership membership = membershipRepository

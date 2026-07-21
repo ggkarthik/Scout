@@ -100,6 +100,18 @@ class TenantAccessResolutionServiceTest {
                         TenantAccessMode.TENANT_MEMBERSHIP, UUID.randomUUID())).getStatusCode().value());
     }
 
+    @Test
+    void unknownOrDeletedTenantIsRejectedWithoutRevealingExistence() {
+        UUID tenantId = UUID.randomUUID();
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+
+        ResponseStatusException error = assertThrows(
+                ResponseStatusException.class,
+                () -> service.resolve("owner@example.com", tenantId));
+
+        assertEquals(403, error.getStatusCode().value());
+    }
+
     private Tenant tenant(String slug) {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
