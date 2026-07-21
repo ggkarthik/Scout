@@ -37,8 +37,8 @@ const COLORS = {
 };
 
 const API_BASE = resolveApiBase();
-const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
-const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
+const API_KEY = import.meta.env.VITE_API_KEY ?? (import.meta.env.DEV ? 'change-me-in-prod' : '');
+const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? (import.meta.env.DEV ? 'local-creator' : '');
 
 const LOADING_STEPS = [
   'Analyzing 4 runbook results...',
@@ -301,7 +301,7 @@ async function generateSummaryRequest(
 
   const headers = new Headers();
   headers.set('Content-Type', 'application/json');
-  headers.set('X-API-Key', API_KEY);
+  if (API_KEY.trim().length > 0) headers.set('X-API-Key', API_KEY.trim());
   if (CREATOR_KEY.trim().length > 0) headers.set('X-Creator-Key', CREATOR_KEY);
 
   try {

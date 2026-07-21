@@ -200,7 +200,9 @@ export type AllowedTenant = {
   slug: string | null;
   role: string;
   accessMode?: string | null;
+  accessReferenceId?: string | null;
   expiresAt?: string | null;
+  revocable?: boolean;
 };
 
 export type AuthContext = {
@@ -213,6 +215,8 @@ export type AuthContext = {
   allowedTenants?: AllowedTenant[];
   platformScope?: boolean;
   actingAsPlatformOwner?: boolean;
+  tenantAccessMode?: string | null;
+  tenantAccessReferenceId?: string | null;
   sensitiveActionConfirmationRequired?: boolean;
   supportAccessMode?: string | null;
   supportGrantExpiresAt?: string | null;
@@ -231,7 +235,7 @@ export type DemoInvite = {
   tenantName: string;
   email: string;
   status: string;
-  expiresAt: string;
+  expiresAt: string | null;
   acceptedAt: string | null;
   lastSentAt: string | null;
   inviteUrl: string;
@@ -296,7 +300,12 @@ export type DemoInviteValidationResponse = {
 export type AuthTokenResponse = {
   token: string;
   tokenType: 'Bearer';
-  expiresAt: string;
+  expiresAt?: string | null;
+};
+
+export type PlatformOwnerTenantMembershipRequest = {
+  subject: string;
+  role: string;
 };
 
 export type DemoStatus = {

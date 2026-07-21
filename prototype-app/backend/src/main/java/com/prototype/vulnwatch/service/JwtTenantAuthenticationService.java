@@ -32,6 +32,7 @@ public class JwtTenantAuthenticationService {
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
     private final TenantSupportGrantService tenantSupportGrantService;
+    private final TenantAccessResolutionService accessResolutionService;
     private final String subjectClaim;
     private final String tenantIdClaim;
     private final String activeTenantIdClaim;
@@ -63,6 +64,11 @@ public class JwtTenantAuthenticationService {
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
         this.tenantSupportGrantService = tenantSupportGrantService;
+        this.accessResolutionService = new TenantAccessResolutionService(
+                tenantRepository,
+                membershipRepository,
+                tenantSupportGrantService,
+                tenantLifecycleGuardService);
         this.subjectClaim = subjectClaim;
         this.tenantIdClaim = tenantIdClaim;
         this.activeTenantIdClaim = activeTenantIdClaim;
@@ -100,7 +106,8 @@ public class JwtTenantAuthenticationService {
             user.setUpdatedAt(Instant.now());
             userRepository.save(user);
         }
-        Tenant tenant = resolveTenant(jwt, subject, roles, requestUri);
+        TenantAccessResolution access = resolveTenantAccess(jwt, subject, roles, requestUri);
+        Tenant tenant = access == null ? null : access.tenant();
 
         if (tenant != null) {
             TenantMembership membership = membershipRepository
@@ -123,30 +130,29 @@ public class JwtTenantAuthenticationService {
                 tenant == null ? null : tenant.getId(),
                 tenant == null ? null : tenant.getName(),
                 tenant == null ? null : tenant.getSchemaName(),
-                Set.copyOf(roles));
+                Set.copyOf(roles),
+                access == null ? null : access.mode(),
+                access == null ? null : access.referenceId(),
+                access == null ? null : access.expiresAt());
     }
 
-    private Tenant resolveTenant(Jwt jwt, String subject, Set<String> roles, String requestUri) {
+    private TenantAccessResolution resolveTenantAccess(Jwt jwt, String subject, Set<String> roles, String requestUri) {
         String activeTenantId = claimAsString(jwt, activeTenantIdClaim);
         if (activeTenantId != null) {
             UUID tenantId = parseUuid(activeTenantId);
-            Tenant tenant = tenantRepository.findById(tenantId)
-                    .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT active_tenant_id is not registered"));
-            return requireSelectedTenantAccess(tenant, subject, roles);
+            return requireSelectedTenantAccess(jwt, tenantId, subject, roles);
         }
 
         String tenantId = claimAsString(jwt, tenantIdClaim);
         if (tenantId != null) {
-            Tenant tenant = tenantRepository.findById(parseUuid(tenantId))
-                    .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_id is not registered"));
-            return requireSelectedTenantAccess(tenant, subject, roles);
+            return requireSelectedTenantAccess(jwt, parseUuid(tenantId), subject, roles);
         }
 
         String tenantSlug = claimAsString(jwt, tenantSlugClaim);
         if (tenantSlug != null) {
             Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
                     .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "JWT tenant_slug is not registered"));
-            return requireSelectedTenantAccess(tenant, subject, roles);
+            return requireSelectedTenantAccess(jwt, tenant.getId(), subject, roles);
         }
 
         if (roles.contains("PLATFORM_OWNER")) {
@@ -156,9 +162,7 @@ public class JwtTenantAuthenticationService {
         List<TenantMembership> memberships = membershipRepository
                 .findByUserExternalSubjectAndStatusOrderByCreatedAtAsc(subject, "ACTIVE");
         if (memberships.size() == 1) {
-            Tenant tenant = memberships.get(0).getTenant();
-            tenantLifecycleGuardService.assertTenantAccessible(tenant);
-            return tenant;
+            return accessResolutionService.resolve(subject, memberships.get(0).getTenant().getId());
         }
         if (memberships.size() > 1) {
             throw new ResponseStatusException(FORBIDDEN, "JWT user has multiple active tenant memberships");
@@ -166,16 +170,32 @@ public class JwtTenantAuthenticationService {
         throw new ResponseStatusException(FORBIDDEN, "JWT user does not have an active tenant membership");
     }
 
-    private Tenant requireSelectedTenantAccess(Tenant tenant, String subject, Set<String> roles) {
-        tenantLifecycleGuardService.assertTenantAccessible(tenant);
-        if (roles.contains("PLATFORM_OWNER")) {
-            tenantSupportGrantService.requireActiveGrant(subject, tenant.getId());
-            return tenant;
+    private TenantAccessResolution requireSelectedTenantAccess(
+            Jwt jwt,
+            UUID tenantId,
+            String subject,
+            Set<String> roles
+    ) {
+        String modeClaim = claimAsString(jwt, "tenant_access_mode");
+        String referenceClaim = claimAsString(jwt, "tenant_access_ref");
+        if (roles.contains("PLATFORM_OWNER") && (!hasText(modeClaim) || !hasText(referenceClaim))) {
+            throw new ResponseStatusException(FORBIDDEN, "Platform-owner tenant tokens require explicit authorized access");
         }
-        TenantMembership membership = membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(subject, tenant.getId(), "ACTIVE")
-                .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "User is not an active member of the selected tenant"));
-        roles.add(membership.getRole());
-        return tenant;
+        TenantAccessResolution access = hasText(modeClaim) && hasText(referenceClaim)
+                ? accessResolutionService.revalidate(subject, tenantId, parseAccessMode(modeClaim), parseUuid(referenceClaim))
+                : accessResolutionService.resolve(subject, tenantId);
+        if (!access.mode().isSupport()) {
+            roles.add(access.role());
+        }
+        return access;
+    }
+
+    private TenantAccessMode parseAccessMode(String value) {
+        try {
+            return TenantAccessMode.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(UNAUTHORIZED, "JWT tenant_access_mode is invalid");
+        }
     }
 
     private AppUser createUser(String subject) {

@@ -10,6 +10,7 @@ import type { CveDetail, ServiceNowIncidentResponse, CreateServiceNowIncidentReq
 import type { HostAssetSummary } from '../features/inventory/api-types';
 import { useRiskPolicyQuery } from '../features/cve-workbench/queries';
 import { computeFindingPriorityScore, riskScoreLabel } from '../lib/riskScoring';
+import { useActor } from '../features/auth/context';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ function FixDescriptionDetail({ description }: { description: string }) {
 type ActionType = 'create-incident' | 'defer' | 'resolve' | 'under-investigation' | 'false-positive' | 'reopen';
 
 export function FindingDetailPage() {
+  const actor = useActor();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -292,7 +294,7 @@ export function FindingDetailPage() {
   async function saveAssignee() {
     setAssigneeSaving(true);
     try {
-      await updateWorkflow(currentFinding!.id, { assignedTo: assignedTo.trim() || null, actor: 'local-analyst' });
+      await updateWorkflow(currentFinding!.id, { assignedTo: assignedTo.trim() || null, actor: actor?.principal });
       setCurrentFinding(f => f ? { ...f, assignedTo: assignedTo.trim() || undefined } : f);
       setEditingAssignee(false);
     } catch { /**/ }
@@ -302,7 +304,7 @@ export function FindingDetailPage() {
   async function saveAssignmentGroup() {
     setGroupSaving(true);
     try {
-      await updateWorkflow(currentFinding!.id, { ownerGroup: assignmentGroup.trim() || null, actor: 'local-analyst' });
+      await updateWorkflow(currentFinding!.id, { ownerGroup: assignmentGroup.trim() || null, actor: actor?.principal });
       setCurrentFinding(f => f ? { ...f, ownerGroup: assignmentGroup.trim() || undefined } : f);
       setEditingGroup(false);
     } catch { /**/ }
@@ -344,28 +346,28 @@ export function FindingDetailPage() {
   }
 
   async function handleResolve() {
-    await applyWorkflow({ status: 'RESOLVED', actor: 'local-analyst' }, 'Finding marked as Resolved.');
+    await applyWorkflow({ status: 'RESOLVED', actor: actor?.principal }, 'Finding marked as Resolved.');
   }
   async function handleDefer() {
     await applyWorkflow({
       status: 'SUPPRESSED',
       suppressionReason: deferReason || 'DEFERRED',
       suppressedUntil: deferExpiry ? new Date(deferExpiry).toISOString() : undefined,
-      actor: 'local-analyst',
+      actor: actor?.principal,
     }, 'Finding deferred successfully.');
   }
   async function handleFalsePositive() {
     await applyWorkflow({
       status: 'SUPPRESSED',
       suppressionReason: `FALSE_POSITIVE${fpJustification ? ': ' + fpJustification : ''}`,
-      actor: 'local-analyst',
+      actor: actor?.principal,
     }, 'Finding marked as False Positive.');
   }
   async function handleUnderInvestigation() {
-    await applyWorkflow({ status: 'OPEN', decisionState: 'UNDER_INVESTIGATION', actor: 'local-analyst' }, 'Status updated to Under Investigation.');
+    await applyWorkflow({ status: 'OPEN', decisionState: 'UNDER_INVESTIGATION', actor: actor?.principal }, 'Status updated to Under Investigation.');
   }
   async function handleReopen() {
-    await applyWorkflow({ status: 'OPEN', actor: 'local-analyst' }, 'Finding re-opened successfully.');
+    await applyWorkflow({ status: 'OPEN', actor: actor?.principal }, 'Finding re-opened successfully.');
   }
   async function handleCreateIncident() {
     setActionLoading(true); setActionError('');

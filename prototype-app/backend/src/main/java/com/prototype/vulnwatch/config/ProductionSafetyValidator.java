@@ -4,10 +4,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 @Component
 public class ProductionSafetyValidator {
@@ -30,6 +32,9 @@ public class ProductionSafetyValidator {
     private final JdbcTemplate platformJdbcTemplate;
     private final boolean validateRlsRuntimeRole;
     private final PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties;
+
+    @Value("${app.security.production-forbidden-identity-subjects:}")
+    private String forbiddenIdentitySubjects = "";
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -72,6 +77,7 @@ public class ProductionSafetyValidator {
     }
 
     @EventListener(ApplicationReadyEvent.class)
+    @Order(0)
     public void validate() {
         validateLegacyPlatformOwnerCredentialsAreUnused();
         validatePlatformOwnerBootstrapConfiguration();
@@ -116,7 +122,39 @@ public class ProductionSafetyValidator {
         if (testPersonasEnabled) {
             throw new IllegalStateException("APP_TEST_PERSONAS_ENABLED must be false for production startup.");
         }
+        validateForbiddenProductionIdentities();
         validateRuntimeRoleCannotBypassRls();
+    }
+
+    private void validateForbiddenProductionIdentities() {
+        List<String> configured = java.util.Arrays.stream(
+                        forbiddenIdentitySubjects == null ? new String[0] : forbiddenIdentitySubjects.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .toList();
+        List<Map<String, Object>> unsafeCandidates = platformJdbcTemplate.queryForList("""
+                select distinct u.external_subject, u.email
+                from platform.app_users u
+                left join platform.app_user_global_roles r on r.app_user_id = u.id
+                left join platform.tenant_memberships m on m.user_id = u.id and upper(m.status) = 'ACTIVE'
+                where
+                    upper(u.status) = 'ACTIVE'
+                    or u.password_hash is not null
+                    or u.password_setup_token_hash is not null
+                    or r.id is not null
+                    or m.id is not null
+                """);
+        boolean unsafe = unsafeCandidates.stream().anyMatch(row -> {
+            String subject = String.valueOf(row.getOrDefault("external_subject", "")).toLowerCase(Locale.ROOT);
+            String email = String.valueOf(row.getOrDefault("email", "")).toLowerCase(Locale.ROOT);
+            return subject.startsWith("persona-") || email.endsWith("@localhost")
+                    || configured.contains(subject) || configured.contains(email);
+        });
+        if (unsafe) {
+            throw new IllegalStateException(
+                    "Production contains active local/test identities. Run cleanup-production-identities.sh before startup.");
+        }
     }
 
     private void validatePlatformOwnerBootstrapConfiguration() {

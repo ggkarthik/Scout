@@ -19,11 +19,15 @@ public class TenantAccessControlService {
         if (actor == null) {
             throw new ResponseStatusException(FORBIDDEN, "Authenticated actor is required");
         }
-        if (actor.hasRole("PLATFORM_OWNER")) {
-            throw new ResponseStatusException(FORBIDDEN, "Platform owners cannot access tenant-scoped administration");
-        }
         if (actor.tenantId() == null || !actor.tenantId().equals(tenantId)) {
             throw new ResponseStatusException(FORBIDDEN, "Cannot access another tenant");
+        }
+        if (actor.accessMode() == null) {
+            throw new ResponseStatusException(FORBIDDEN, "Resolved tenant authorization is required");
+        }
+        if (actor.hasRole("PLATFORM_OWNER") && !actor.hasDirectTenantMembership()) {
+            throw new ResponseStatusException(FORBIDDEN,
+                    "Support access does not grant tenant-administration membership");
         }
     }
 }

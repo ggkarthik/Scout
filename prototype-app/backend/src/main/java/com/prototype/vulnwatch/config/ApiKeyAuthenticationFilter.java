@@ -164,7 +164,10 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                     actor.subject(),
                     actor.email(),
                     actor.displayName(),
-                    Set.copyOf(actor.roles())));
+                    Set.copyOf(actor.roles()),
+                    actor.accessMode(),
+                    actor.accessReferenceId(),
+                    actor.accessExpiresAt()));
             SecurityContextHolder.getContext().setAuthentication(authentication);
             TenantContext.setCurrentTenantId(actor.tenantId());
             TenantContext.setCurrentSchemaName(actor.tenantSchemaName());

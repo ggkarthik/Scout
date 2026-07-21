@@ -79,6 +79,16 @@ app:
       platform-owners:
         enabled: ${APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED:false}
         users: []
+    playground:
+      memberships:
+        enabled: ${APP_PLAYGROUND_MEMBERSHIPS_ENABLED:false}
+        subjects: ${APP_PLAYGROUND_MEMBERSHIP_SUBJECTS:}
+        role: ${APP_PLAYGROUND_MEMBERSHIP_ROLE:TENANT_ADMIN}
+    support-access:
+      default-hours: ${APP_SUPPORT_ACCESS_DEFAULT_HOURS:24}
+      maximum-days: ${APP_SUPPORT_ACCESS_MAXIMUM_DAYS:30}
+      allow-non-expiring: ${APP_SUPPORT_ACCESS_ALLOW_NON_EXPIRING:false}
+    production-forbidden-identity-subjects: ${APP_PRODUCTION_FORBIDDEN_IDENTITY_SUBJECTS:}
     local-auth:
       shared-localhost-login-enabled: ${APP_SHARED_LOCALHOST_LOGIN_ENABLED:false}
       shared-localhost-tenant-admin-email: ${APP_SHARED_LOCALHOST_TENANT_ADMIN_EMAIL:}

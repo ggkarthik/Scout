@@ -110,7 +110,7 @@ class AuthContextControllerPostgresIntegrationTest {
                 .andExpect(jsonPath("$.allowedTenants.length()").value(1))
                 .andExpect(jsonPath("$.allowedTenants[0].id").value(tenant.getId().toString()))
                 .andExpect(jsonPath("$.allowedTenants[0].role").value("TENANT_ADMIN"))
-                .andExpect(jsonPath("$.allowedTenants[0].accessMode").doesNotExist())
+                .andExpect(jsonPath("$.allowedTenants[0].accessMode").value("TENANT_MEMBERSHIP"))
                 .andExpect(jsonPath("$.supportAccessMode").doesNotExist());
     }
 
@@ -133,7 +133,7 @@ class AuthContextControllerPostgresIntegrationTest {
                 .andExpect(jsonPath("$.allowedTenants.length()").value(1))
                 .andExpect(jsonPath("$.allowedTenants[0].id").value(supportTenant.getId().toString()))
                 .andExpect(jsonPath("$.allowedTenants[0].role").value("PLATFORM_OWNER"))
-                .andExpect(jsonPath("$.allowedTenants[0].accessMode").value("READ_ONLY"));
+                .andExpect(jsonPath("$.allowedTenants[0].accessMode").value("SUPPORT_READ_ONLY"));
 
         String tenantToken = switchTenantContext(platformToken, supportTenant.getId());
 
@@ -147,7 +147,7 @@ class AuthContextControllerPostgresIntegrationTest {
                 .andExpect(jsonPath("$.supportAccessMode").value("READ_ONLY"))
                 .andExpect(jsonPath("$.allowedTenants.length()").value(1))
                 .andExpect(jsonPath("$.allowedTenants[0].id").value(supportTenant.getId().toString()))
-                .andExpect(jsonPath("$.allowedTenants[0].accessMode").value("READ_ONLY"));
+                .andExpect(jsonPath("$.allowedTenants[0].accessMode").value("SUPPORT_READ_ONLY"));
 
         String clearedToken = clearTenantContext(tenantToken);
 

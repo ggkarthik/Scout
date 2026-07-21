@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.security;
 
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantAccessMode;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,26 +28,28 @@ public class SensitiveTenantActionInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!(handler instanceof HandlerMethod handlerMethod) || !requiresConfirmation(handlerMethod, request.getMethod())) {
+        if ("/api/auth/tenant-context".equals(request.getRequestURI())) {
+            return true;
+        }
+        if (!(handler instanceof HandlerMethod) || !isWriteMethod(request.getMethod())) {
             return true;
         }
         RequestActor actor = requestActorService.currentActor();
-        if (!actor.actingAsPlatformOwner()) {
+        TenantAccessMode accessMode = actor.accessMode();
+        if (accessMode == null || actor.hasDirectTenantMembership()) {
             return true;
         }
         if (actor.tenantId() == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform owner tenant context is required");
         }
-        tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());
-        return true;
-    }
-
-    private boolean requiresConfirmation(HandlerMethod handlerMethod, String method) {
-        if (!isWriteMethod(method)) {
-            return false;
+        if (accessMode != TenantAccessMode.SUPPORT_WRITE_ENABLED) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This support session is read-only");
         }
-        return handlerMethod.hasMethodAnnotation(SensitiveTenantAction.class)
-                || handlerMethod.getBeanType().isAnnotationPresent(SensitiveTenantAction.class);
+        var grant = tenantSupportGrantService.requireActiveGrantForWrite(actor.userId(), actor.tenantId());
+        if (actor.accessReferenceId() == null || !actor.accessReferenceId().equals(grant.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Support authorization changed; sign in again");
+        }
+        return true;
     }
 
     private boolean isWriteMethod(String method) {

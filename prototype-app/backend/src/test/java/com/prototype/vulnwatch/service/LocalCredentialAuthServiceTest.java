@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.TenantMembership;
+import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import com.prototype.vulnwatch.dto.AuthTokenResponse;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantMembershipRepository;
@@ -23,6 +24,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -108,6 +110,9 @@ class LocalCredentialAuthServiceTest {
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc("tenant.owner@example.com", "ACTIVE"))
                 .thenReturn(List.of(membership));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "tenant.owner@example.com", tenant.getId(), "ACTIVE")).thenReturn(Optional.of(membership));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -148,6 +153,9 @@ class LocalCredentialAuthServiceTest {
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc("tenant.owner@example.com", "ACTIVE"))
                 .thenReturn(List.of(membership));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "tenant.owner@example.com", tenant.getId(), "ACTIVE")).thenReturn(Optional.of(membership));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -265,6 +273,12 @@ class LocalCredentialAuthServiceTest {
 
         when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setId(UUID.randomUUID());
+        grant.setTenant(tenant);
+        grant.setAccessMode("WRITE_ENABLED");
+        when(tenantSupportGrantService.findActiveGrant("owner@example.com", tenant.getId()))
+                .thenReturn(Optional.of(grant));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -285,7 +299,7 @@ class LocalCredentialAuthServiceTest {
         AuthTokenResponse response = service.switchTenantContext("owner@example.com", tenant.getId());
         Jwt jwt = decode(response.token());
 
-        verify(tenantSupportGrantService).requireActiveGrant("owner@example.com", tenant.getId());
+        assertEquals("SUPPORT_WRITE_ENABLED", jwt.getClaimAsString("tenant_access_mode"));
         assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
         assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
     }
@@ -371,15 +385,22 @@ class LocalCredentialAuthServiceTest {
         user.setEmail("tenant.admin@localhost");
 
         when(tenantRepository.findByNameIgnoreCase("Default Workspace")).thenReturn(Optional.of(tenant));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(userRepository.findByEmailIgnoreCase("tenant.admin@localhost")).thenReturn(Optional.empty());
         when(userRepository.findByExternalSubject("tenant.admin@localhost")).thenReturn(Optional.of(user));
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AtomicReference<TenantMembership> savedMembership = new AtomicReference<>();
         when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
                 "tenant.admin@localhost",
                 tenant.getId(),
                 "ACTIVE"
-        )).thenReturn(Optional.empty());
-        when(membershipRepository.save(any(TenantMembership.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        )).thenAnswer(invocation -> Optional.ofNullable(savedMembership.get()));
+        when(membershipRepository.save(any(TenantMembership.class))).thenAnswer(invocation -> {
+            TenantMembership saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(UUID.randomUUID());
+            savedMembership.set(saved);
+            return saved;
+        });
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -421,6 +442,9 @@ class LocalCredentialAuthServiceTest {
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(membershipRepository.findByUserExternalSubjectAndStatusOrderByCreatedAtAsc("tenant.admin@localhost", "ACTIVE"))
                 .thenReturn(List.of(membership));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(membershipRepository.findFirstByUserExternalSubjectAndTenantIdAndStatus(
+                "tenant.admin@localhost", tenant.getId(), "ACTIVE")).thenReturn(Optional.of(membership));
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -442,7 +466,7 @@ class LocalCredentialAuthServiceTest {
         Jwt jwt = decode(response.token());
 
         assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
-        verifyNoInteractions(tenantRepository);
+        verify(tenantRepository).findById(tenant.getId());
     }
 
     private AuthTokenService authTokenService() {
@@ -465,6 +489,7 @@ class LocalCredentialAuthServiceTest {
 
     private TenantMembership membership(AppUser user, Tenant tenant, String role) {
         TenantMembership membership = new TenantMembership();
+        membership.setId(UUID.randomUUID());
         membership.setTenant(tenant);
         membership.setUser(user);
         membership.setRole(role);

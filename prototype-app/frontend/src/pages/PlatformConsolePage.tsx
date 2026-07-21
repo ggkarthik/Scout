@@ -1,13 +1,12 @@
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, setStoredAuthToken } from '../api/client';
+import { api } from '../api/client';
 import type { PlatformRouteView } from '../app/routes';
-import { pathForPlatformView, pathForTab } from '../app/routes';
+import { pathForPlatformView } from '../app/routes';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
-import { useActor } from '../features/auth/context';
 import { EolPage } from './EolPage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
@@ -1117,8 +1116,6 @@ function PlatformUserAuditPanel() {
 }
 
 function TenantLifecyclePanel() {
-  const actor = useActor();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [tenantPendingDelete, setTenantPendingDelete] = React.useState<{
     id: string;
@@ -1163,42 +1160,12 @@ function TenantLifecyclePanel() {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
     }
   });
-  const switchTenantContext = useMutation({
-    mutationFn: api.selectTenantContext,
-    onSuccess: async (response, tenantId) => {
-      setStoredAuthToken(response.token);
-      queryClient.clear();
-      navigate(pathForTab('dashboard'), {
-        replace: true,
-        state: { platformMessage: `Entered tenant workspace ${tenantId}.` }
-      });
-    }
-  });
-  const clearTenantContext = useMutation({
-    mutationFn: api.clearTenantContext,
-    onSuccess: async (response) => {
-      setStoredAuthToken(response.token);
-      queryClient.clear();
-      navigate(pathForPlatformView('tenants'), {
-        replace: true,
-        state: { platformMessage: 'Returned to platform scope.' }
-      });
-    }
-  });
-
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
   const inventoryConnectorHealth = inventoryConnectorHealthQuery.data ?? [];
   const schemaStatusByTenantId = React.useMemo(
     () => new Map((tenantSchemaStatusQuery.data?.items ?? []).map((item) => [item.tenantId, item])),
     [tenantSchemaStatusQuery.data]
   );
-  const accessibleTenantIds = React.useMemo(
-    () => new Set((actor?.allowedTenants ?? []).map((tenant) => tenant.id)),
-    [actor?.allowedTenants]
-  );
-  const actingTenantId = actor?.actingAsPlatformOwner ? actor.tenantId : null;
-  const switchingTenantId = switchTenantContext.variables ?? null;
-
   const handleCreateTenant = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -1220,25 +1187,6 @@ function TenantLifecyclePanel() {
           Refresh
         </button>
       </div>
-      {actor?.platformScope ? (
-        <div className="notice" role="status">
-          Enter a tenant workspace through an active support grant or an explicit internal playground membership. Platform-scope access no longer inherits a default tenant automatically.
-        </div>
-      ) : null}
-      {actor?.actingAsPlatformOwner ? (
-        <div className="notice" role="status">
-          You are acting inside <strong>{actor.tenantName ?? 'the selected tenant'}</strong>.
-          {' '}
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => clearTenantContext.mutate()}
-            disabled={clearTenantContext.isPending}
-          >
-            {clearTenantContext.isPending ? 'Returning...' : 'Return to platform scope'}
-          </button>
-        </div>
-      ) : null}
       <form className="platform-create-tenant-form" onSubmit={handleCreateTenant}>
         <input name="name" placeholder="Tenant name" aria-label="Tenant name" />
         <input name="slug" placeholder="tenant-slug" aria-label="Tenant slug" />
@@ -1311,36 +1259,6 @@ function TenantLifecyclePanel() {
                     <td>{new Date(tenant.createdAt).toLocaleString()}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {actor?.roles.includes('PLATFORM_OWNER') ? (
-                        actingTenantId === tenant.id ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => clearTenantContext.mutate()}
-                            disabled={clearTenantContext.isPending}
-                          >
-                            {clearTenantContext.isPending ? 'Returning...' : 'Exit workspace'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            disabled={
-                              switchTenantContext.isPending
-                              || !accessibleTenantIds.has(tenant.id)
-                              || normalizedStatus !== 'ACTIVE'
-                            }
-                            onClick={() => switchTenantContext.mutate(tenant.id)}
-                            title={normalizedStatus !== 'ACTIVE'
-                              ? 'Workspace access is available only after tenant provisioning completes'
-                              : accessibleTenantIds.has(tenant.id)
-                                ? 'Switch into tenant workspace context'
-                              : 'Active support grant or explicit playground membership required'}
-                          >
-                            {switchingTenantId === tenant.id && switchTenantContext.isPending ? 'Entering...' : 'Enter workspace'}
-                          </button>
-                        )
-                      ) : null}
                       {normalizedStatus === 'PROVISIONING_FAILED' ? (
                         <button
                           type="button"
@@ -1377,16 +1295,6 @@ function TenantLifecyclePanel() {
               })}
             </tbody>
           </table>
-        </div>
-      )}
-      {switchTenantContext.isError && (
-        <div className="notice error" role="alert">
-          {switchTenantContext.error instanceof Error ? switchTenantContext.error.message : 'Failed to enter tenant workspace'}
-        </div>
-      )}
-      {clearTenantContext.isError && (
-        <div className="notice error" role="alert">
-          {clearTenantContext.error instanceof Error ? clearTenantContext.error.message : 'Failed to return to platform scope'}
         </div>
       )}
       {deleteTenant.isError && (

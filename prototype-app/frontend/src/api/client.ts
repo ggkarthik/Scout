@@ -81,6 +81,7 @@ import type {
 import type { PlatformVulnIntelDetail, PlatformVulnSourceStats, VulnRepoDashboard } from '../features/vuln-repo-dashboard/types';
 import type {
   AuditEvent,
+  AllowedTenant,
   AuthContext,
   DemoInvite,
   DemoInviteValidationResponse,
@@ -93,6 +94,7 @@ import type {
   PlatformUser,
   PlatformUserRequest,
   PlatformUserSetupLink,
+  PlatformOwnerTenantMembershipRequest,
   ServiceAccount,
   ServiceAccountRequest,
   Tenant,
@@ -104,7 +106,9 @@ import type {
   TenantSchemaStatusPage,
   TenantMember,
   TenantMemberRequest,
-  TenantMemberUpdateRequest
+  TenantMemberUpdateRequest,
+  TenantSupportGrant,
+  TenantSupportGrantRequest
 } from '../features/admin/types';
 
 export type BomType = 'SBOM' | 'AI_BOM' | 'CBOM' | 'VENDOR';
@@ -478,10 +482,10 @@ import type {
 import { resolveApiBase } from './base';
 
 const API_BASE = resolveApiBase();
-const API_KEY = import.meta.env.VITE_API_KEY ?? 'change-me-in-prod';
-const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? 'local-creator';
-const DEFAULT_TENANT_ID = import.meta.env.VITE_TENANT_ID ?? '1';
-const DEFAULT_USER_ID = import.meta.env.VITE_USER_ID ?? 'local-analyst';
+const API_KEY = import.meta.env.VITE_API_KEY ?? (import.meta.env.DEV ? 'change-me-in-prod' : '');
+const CREATOR_KEY = import.meta.env.VITE_CREATOR_KEY ?? (import.meta.env.DEV ? 'local-creator' : '');
+const DEFAULT_TENANT_ID = import.meta.env.VITE_TENANT_ID ?? (import.meta.env.DEV ? '1' : '');
+const DEFAULT_USER_ID = import.meta.env.VITE_USER_ID ?? (import.meta.env.DEV ? 'local-analyst' : '');
 const STATIC_AUTH_TOKEN = import.meta.env.VITE_AUTH_TOKEN ?? '';
 const AUTH_TOKEN_STORAGE_KEY = 'vulnwatch.authToken';
 
@@ -608,7 +612,9 @@ function applyAuthHeaders(headers: Headers): void {
     headers.set('Authorization', `Bearer ${authToken}`);
     return;
   }
-  headers.set('X-API-Key', API_KEY);
+  if (API_KEY.trim().length > 0) {
+    headers.set('X-API-Key', API_KEY.trim());
+  }
   if (CREATOR_KEY.trim().length > 0) {
     headers.set('X-Creator-Key', CREATOR_KEY);
   }
@@ -1426,6 +1432,12 @@ export const api = {
   clearTenantContext: () => request<AuthTokenResponse>('/auth/tenant-context', {
     method: 'DELETE'
   }),
+  listAuthorizedWorkspaces: () => request<AllowedTenant[]>('/auth/authorized-workspaces'),
+  listInvitedSupportGrants: () => request<TenantSupportGrant[]>('/auth/support-grants'),
+  acceptSupportGrant: (grantId: string) =>
+    request<TenantSupportGrant>(`/auth/support-grants/${encodeURIComponent(grantId)}/accept`, {
+      method: 'POST'
+    }),
   setupPassword: (setupToken: string, password: string) => publicRequest<AuthTokenResponse>('/auth/setup-password', {
     method: 'POST',
     body: JSON.stringify({ setupToken, password })
@@ -1481,6 +1493,22 @@ export const api = {
   deleteTenantMember: (tenantId: string, memberId: string) =>
     request<void>(`/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`, {
       method: 'DELETE'
+    }),
+  listTenantSupportGrants: (tenantId: string) =>
+    request<TenantSupportGrant[]>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`),
+  createTenantSupportGrant: (tenantId: string, payload: TenantSupportGrantRequest) =>
+    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  revokeTenantSupportGrant: (tenantId: string, grantId: string) =>
+    request<TenantSupportGrant>(`/tenants/${encodeURIComponent(tenantId)}/support-grants/${encodeURIComponent(grantId)}`, {
+      method: 'DELETE'
+    }),
+  grantPlatformOwnerMembership: (tenantId: string, payload: PlatformOwnerTenantMembershipRequest) =>
+    request<TenantMember>(`/tenants/${encodeURIComponent(tenantId)}/platform-memberships`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
     }),
   listTenantInvites: (tenantId: string) =>
     request<TenantInvite[]>(`/tenants/${encodeURIComponent(tenantId)}/invites`),

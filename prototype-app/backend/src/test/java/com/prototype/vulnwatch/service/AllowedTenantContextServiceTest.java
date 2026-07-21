@@ -1,7 +1,6 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -62,8 +61,8 @@ class AllowedTenantContextServiceTest {
         assertEquals("Customer A", allowed.get(0).name());
         assertEquals("customer-a", allowed.get(0).slug());
         assertEquals("TENANT_ADMIN", allowed.get(0).role());
-        assertNull(allowed.get(0).accessMode());
-        assertNull(allowed.get(0).expiresAt());
+        assertEquals("TENANT_MEMBERSHIP", allowed.get(0).accessMode());
+        assertEquals(null, allowed.get(0).expiresAt());
     }
 
     @Test
@@ -103,9 +102,10 @@ class AllowedTenantContextServiceTest {
         Tenant zuluTenant = tenant("Zulu Labs", "zulu");
         Tenant alphaTenant = tenant("Alpha Labs", "alpha");
         Tenant playgroundTenant = tenant("Default Workspace", "default-workspace");
-        TenantSupportGrant zuluGrant = supportGrant(zuluTenant, "WRITE", Instant.parse("2026-08-01T00:00:00Z"));
+        TenantSupportGrant zuluGrant = supportGrant(zuluTenant, "WRITE_ENABLED", Instant.parse("2026-08-01T00:00:00Z"));
         TenantSupportGrant alphaGrant = supportGrant(alphaTenant, "READ_ONLY", Instant.parse("2026-07-20T00:00:00Z"));
         TenantMembership playgroundMembership = membership(playgroundTenant, "TENANT_ADMIN");
+        playgroundMembership.setProvenance("PLAYGROUND_BOOTSTRAP");
         RequestActor actor = new RequestActor(
                 "owner@example.com",
                 true,
@@ -135,15 +135,15 @@ class AllowedTenantContextServiceTest {
         assertEquals(3, allowed.size());
         assertEquals("Alpha Labs", allowed.get(0).name());
         assertEquals("PLATFORM_OWNER", allowed.get(0).role());
-        assertEquals("READ_ONLY", allowed.get(0).accessMode());
+        assertEquals("SUPPORT_READ_ONLY", allowed.get(0).accessMode());
         assertEquals(Instant.parse("2026-07-20T00:00:00Z"), allowed.get(0).expiresAt());
         assertEquals("Default Workspace", allowed.get(1).name());
         assertEquals("TENANT_ADMIN", allowed.get(1).role());
-        assertNull(allowed.get(1).accessMode());
-        assertNull(allowed.get(1).expiresAt());
+        assertEquals("DIRECT_PLAYGROUND_MEMBERSHIP", allowed.get(1).accessMode());
+        assertEquals(null, allowed.get(1).expiresAt());
         assertEquals("Zulu Labs", allowed.get(2).name());
         assertEquals("PLATFORM_OWNER", allowed.get(2).role());
-        assertEquals("WRITE", allowed.get(2).accessMode());
+        assertEquals("SUPPORT_WRITE_ENABLED", allowed.get(2).accessMode());
         assertEquals(Instant.parse("2026-08-01T00:00:00Z"), allowed.get(2).expiresAt());
     }
 
@@ -158,6 +158,7 @@ class AllowedTenantContextServiceTest {
 
     private TenantMembership membership(Tenant tenant, String role) {
         TenantMembership membership = new TenantMembership();
+        membership.setId(UUID.randomUUID());
         membership.setTenant(tenant);
         membership.setRole(role);
         membership.setStatus("ACTIVE");
@@ -166,6 +167,7 @@ class AllowedTenantContextServiceTest {
 
     private TenantSupportGrant supportGrant(Tenant tenant, String accessMode, Instant expiresAt) {
         TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setId(UUID.randomUUID());
         grant.setTenant(tenant);
         grant.setAccessMode(accessMode);
         grant.setExpiresAt(expiresAt);

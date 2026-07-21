@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -33,17 +34,29 @@ public class TenantSupportGrantService {
     private final TenantRepository tenantRepository;
     private final AppUserRepository appUserRepository;
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
+    private final AppUserGlobalRoleService globalRoleService;
+
+    @Value("${app.security.support-access.default-hours:24}")
+    private long defaultHours = 24;
+
+    @Value("${app.security.support-access.maximum-days:30}")
+    private long maximumDays = 30;
+
+    @Value("${app.security.support-access.allow-non-expiring:false}")
+    private boolean allowNonExpiring;
 
     public TenantSupportGrantService(
             TenantSupportGrantRepository tenantSupportGrantRepository,
             TenantRepository tenantRepository,
             AppUserRepository appUserRepository,
-            TenantLifecycleGuardService tenantLifecycleGuardService
+            TenantLifecycleGuardService tenantLifecycleGuardService,
+            AppUserGlobalRoleService globalRoleService
     ) {
         this.tenantSupportGrantRepository = tenantSupportGrantRepository;
         this.tenantRepository = tenantRepository;
         this.appUserRepository = appUserRepository;
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
+        this.globalRoleService = globalRoleService;
     }
 
     @Transactional(readOnly = true)
@@ -68,17 +81,38 @@ public class TenantSupportGrantService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Tenant not found"));
         AppUser grantedBy = appUserRepository.findByExternalSubject(requireText(grantedBySubject, "grantedBySubject"))
                 .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authenticated user is not registered"));
+        String invitedSubject = normalizeSubject(request.invitedPlatformSubject());
+        AppUser invitedOwner = appUserRepository.findByExternalSubject(invitedSubject)
+                .or(() -> appUserRepository.findByEmailIgnoreCase(invitedSubject))
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Invited platform owner is not registered"));
+        if (!globalRoleService.rolesForUser(invitedOwner.getId()).contains("PLATFORM_OWNER")
+                || !"ACTIVE".equalsIgnoreCase(invitedOwner.getStatus())) {
+            throw new ResponseStatusException(FORBIDDEN, "Support access may be granted only to an active platform owner");
+        }
+
+        Instant expiresAt = request.expiresAt();
+        if (expiresAt == null && !allowNonExpiring) {
+            expiresAt = Instant.now().plus(Math.max(1, defaultHours), ChronoUnit.HOURS);
+        }
+        if (expiresAt != null) {
+            if (!expiresAt.isAfter(Instant.now())) {
+                throw new ResponseStatusException(FORBIDDEN, "Support access expiry must be in the future");
+            }
+            if (expiresAt.isAfter(Instant.now().plus(Math.max(1, maximumDays), ChronoUnit.DAYS))) {
+                throw new ResponseStatusException(FORBIDDEN, "Support access exceeds the configured maximum duration");
+            }
+        }
 
         TenantSupportGrant grant = new TenantSupportGrant();
         grant.setTenant(tenant);
         grant.setGrantedBy(grantedBy);
-        grant.setInvitedPlatformSubject(normalizeSubject(request.invitedPlatformSubject()));
+        grant.setInvitedPlatformSubject(invitedOwner.getExternalSubject().toLowerCase(Locale.ROOT));
         grant.setReason(requireText(request.reason(), "reason"));
         grant.setScope(blankToNull(request.scope()));
         grant.setAccessMode(normalizeAccessMode(request.accessMode()));
         grant.setStatus("PENDING");
         grant.setRequestedAt(Instant.now());
-        grant.setExpiresAt(request.expiresAt());
+        grant.setExpiresAt(expiresAt);
         grant.setUpdatedAt(Instant.now());
         return toResponse(tenantSupportGrantRepository.save(grant));
     }
@@ -95,7 +129,7 @@ public class TenantSupportGrantService {
         if (!"PENDING".equalsIgnoreCase(grant.getStatus()) && !"ACTIVE".equalsIgnoreCase(grant.getStatus())) {
             throw new ResponseStatusException(FORBIDDEN, "Support grant is not available for acceptance");
         }
-        if (grant.getExpiresAt() == null || !grant.getExpiresAt().isAfter(Instant.now())) {
+        if (grant.getExpiresAt() != null && !grant.getExpiresAt().isAfter(Instant.now())) {
             markExpired(grant);
             throw new ResponseStatusException(FORBIDDEN, "Support grant has expired");
         }
@@ -131,6 +165,7 @@ public class TenantSupportGrantService {
         return tenantSupportGrantRepository.findActiveByInvitedPlatformSubject(normalizeSubject(subject), Instant.now()).stream()
                 .map(this::refreshExpiredStatus)
                 .filter(grant -> "ACTIVE".equalsIgnoreCase(grant.getStatus()))
+                .sorted(activeGrantPrecedence())
                 .toList();
     }
 
@@ -144,6 +179,7 @@ public class TenantSupportGrantService {
                 .map(this::refreshExpiredStatus)
                 .filter(grant -> tenantLifecycleGuardService.isTenantAccessible(grant.getTenant()))
                 .filter(grant -> "ACTIVE".equalsIgnoreCase(grant.getStatus()))
+                .sorted(activeGrantPrecedence())
                 .findFirst();
     }
 
@@ -175,6 +211,12 @@ public class TenantSupportGrantService {
 
     public boolean isWriteEnabled(String accessMode) {
         return ACCESS_MODE_WRITE_ENABLED.equals(normalizeAccessMode(accessMode));
+    }
+
+    private Comparator<TenantSupportGrant> activeGrantPrecedence() {
+        return Comparator.comparingInt((TenantSupportGrant grant) -> isWriteEnabled(grant.getAccessMode()) ? 0 : 1)
+                .thenComparing(TenantSupportGrant::getRequestedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder()));
     }
 
     @Transactional

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { api, getStoredAuthToken } from '../api/client';
+import { api } from '../api/client';
 import { ActorContextState } from '../features/auth/context';
 import type { ActorContext } from '../features/auth/types';
 import { PlatformConsolePage } from './PlatformConsolePage';
@@ -27,13 +27,13 @@ const PLATFORM_SCOPE_OWNER: ActorContext = {
   }]
 };
 
-describe('PlatformConsolePage tenant context controls', () => {
+describe('PlatformConsolePage tenant privacy boundary', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
   });
 
-  it('switches into tenant context with a fresh token', async () => {
+  it('does not expose workspace entry from the global tenant inventory', async () => {
     mockTenantSchemaStatus();
     vi.spyOn(api, 'listTenants').mockResolvedValue([{
       id: 'tenant-a',
@@ -60,14 +60,12 @@ describe('PlatformConsolePage tenant context controls', () => {
     const queryClient = createTestQueryClient();
     renderPlatformTenants(PLATFORM_SCOPE_OWNER, queryClient);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Enter workspace' }));
-
-    await waitFor(() => {
-      expect(getStoredAuthToken()).toBe('tenant-context-token');
-    });
+    await screen.findByText('Tenant A');
+    expect(screen.queryByRole('button', { name: 'Enter workspace' })).not.toBeInTheDocument();
+    expect(api.selectTenantContext).not.toHaveBeenCalled();
   });
 
-  it('returns an acting platform owner back to platform scope', async () => {
+  it('does not expose workspace exit controls from the global tenant inventory', async () => {
     mockTenantSchemaStatus();
     vi.spyOn(api, 'listTenants').mockResolvedValue([{
       id: 'tenant-a',
@@ -100,11 +98,9 @@ describe('PlatformConsolePage tenant context controls', () => {
       actingAsPlatformOwner: true
     }, queryClient);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Return to platform scope' }));
-
-    await waitFor(() => {
-      expect(getStoredAuthToken()).toBe('platform-scope-token');
-    });
+    await screen.findByText('Tenant A');
+    expect(screen.queryByRole('button', { name: 'Return to platform scope' })).not.toBeInTheDocument();
+    expect(api.clearTenantContext).not.toHaveBeenCalled();
   });
 
   it('shows a platform audit panel with filterable platform-user events', async () => {
@@ -363,9 +359,8 @@ describe('PlatformConsolePage tenant context controls', () => {
       ]
     }, queryClient);
 
-    const enterButtons = await screen.findAllByRole('button', { name: 'Enter workspace' });
-    expect(enterButtons).toHaveLength(2);
-    expect(enterButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    await screen.findByText('Awaiting controlled bootstrap');
+    expect(screen.queryByRole('button', { name: 'Enter workspace' })).not.toBeInTheDocument();
     expect(screen.getByText('Awaiting controlled bootstrap')).toBeInTheDocument();
     expect(screen.getByText('Tenant schema does not match the migrated template')).toBeInTheDocument();
 

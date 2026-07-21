@@ -4,13 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantAccessMode;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
+import com.prototype.vulnwatch.domain.TenantSupportGrant;
 import java.lang.reflect.Method;
 import java.util.Set;
 import java.util.UUID;
@@ -49,6 +50,24 @@ class SensitiveTenantActionInterceptorTest {
     }
 
     @Test
+    void legacyApiKeyActorWithoutExplicitAccessModeIsNotTreatedAsSupport() throws Exception {
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "local-api-user",
+                true,
+                UUID.randomUUID(),
+                "Default Workspace",
+                Set.of("PLATFORM_OWNER", "TENANT_ADMIN")));
+
+        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
+                requestActorService,
+                tenantSupportGrantService
+        );
+
+        assertTrue(interceptor.preHandle(request(), new MockHttpServletResponse(), sensitiveMethod()));
+        verifyNoInteractions(tenantSupportGrantService);
+    }
+
+    @Test
     void platformOwnersNeedWriteGrantForTenantScopedActions() throws Exception {
         UUID tenantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
@@ -56,9 +75,10 @@ class SensitiveTenantActionInterceptorTest {
                 true,
                 tenantId,
                 "Example Co",
-                Set.of("PLATFORM_OWNER")));
-        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "read only"))
-                .when(tenantSupportGrantService).requireActiveGrantForWrite("platform-owner", tenantId);
+                Set.of("PLATFORM_OWNER"),
+                TenantAccessMode.SUPPORT_READ_ONLY,
+                UUID.randomUUID(),
+                null));
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
                 requestActorService,
@@ -76,12 +96,19 @@ class SensitiveTenantActionInterceptorTest {
     @Test
     void platformOwnersWithWriteGrantCanPerformTenantScopedActions() throws Exception {
         UUID tenantId = UUID.randomUUID();
+        UUID grantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
                 "platform-owner",
                 true,
                 tenantId,
                 "Example Co",
-                Set.of("PLATFORM_OWNER")));
+                Set.of("PLATFORM_OWNER"),
+                TenantAccessMode.SUPPORT_WRITE_ENABLED,
+                grantId,
+                null));
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setId(grantId);
+        when(tenantSupportGrantService.requireActiveGrantForWrite("platform-owner", tenantId)).thenReturn(grant);
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
                 requestActorService,
@@ -107,14 +134,32 @@ class SensitiveTenantActionInterceptorTest {
     }
 
     @Test
+    void readOnlySupportCanAlwaysReturnToPlatformScope() throws Exception {
+        SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
+                requestActorService, tenantSupportGrantService);
+        MockHttpServletRequest request = new MockHttpServletRequest("DELETE", "/api/auth/tenant-context");
+        request.setRequestURI("/api/auth/tenant-context");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), sensitiveMethod()));
+        verifyNoInteractions(requestActorService, tenantSupportGrantService);
+    }
+
+    @Test
     void sensitivePlatformOwnedPathsStillRequireTenantSupportChecks() throws Exception {
         UUID tenantId = UUID.randomUUID();
+        UUID grantId = UUID.randomUUID();
         when(requestActorService.currentActor()).thenReturn(new RequestActor(
                 "platform-owner",
                 true,
                 tenantId,
                 "Example Co",
-                Set.of("PLATFORM_OWNER")));
+                Set.of("PLATFORM_OWNER"),
+                TenantAccessMode.SUPPORT_WRITE_ENABLED,
+                grantId,
+                null));
+        TenantSupportGrant grant = new TenantSupportGrant();
+        grant.setId(grantId);
+        when(tenantSupportGrantService.requireActiveGrantForWrite("platform-owner", tenantId)).thenReturn(grant);
 
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
                 requestActorService,
@@ -129,17 +174,19 @@ class SensitiveTenantActionInterceptorTest {
     }
 
     @Test
-    void unannotatedPlatformOwnedIngestionPathsBypassTenantSupportChecks() throws Exception {
+    void unannotatedTenantMutationsAreAlsoBlockedForReadOnlySupport() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "platform-owner", true, tenantId, "Example Co", Set.of("PLATFORM_OWNER"),
+                TenantAccessMode.SUPPORT_READ_ONLY, UUID.randomUUID(), null));
         SensitiveTenantActionInterceptor interceptor = new SensitiveTenantActionInterceptor(
-                requestActorService,
-                tenantSupportGrantService
-        );
+                requestActorService, tenantSupportGrantService);
 
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/ingestion/nvd-sync");
         request.setRequestURI("/api/ingestion/nvd-sync");
 
-        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), unannotatedMethod()));
-        verifyNoInteractions(requestActorService, tenantSupportGrantService);
+        assertThrows(ResponseStatusException.class,
+                () -> interceptor.preHandle(request, new MockHttpServletResponse(), unannotatedMethod()));
     }
 
     private MockHttpServletRequest request() {

@@ -30,6 +30,9 @@ public class TenantMembership {
     @Column(nullable = false, length = 32)
     private String status = "ACTIVE";
 
+    @Column(nullable = false, length = 32)
+    private String provenance = "MANUAL";
+
     @ManyToOne
     @JoinColumn(name = "invited_by")
     private AppUser invitedBy;
@@ -78,6 +81,14 @@ public class TenantMembership {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getProvenance() {
+        return provenance;
+    }
+
+    public void setProvenance(String provenance) {
+        this.provenance = provenance;
     }
 
     public AppUser getInvitedBy() {
