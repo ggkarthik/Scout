@@ -7,6 +7,145 @@ import { getAuthContextQueryKey } from '../features/auth/queries';
 import { canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY
+  ?? (import.meta.env.DEV ? '1x00000000000000000000AA' : '');
+const FREE_EMAIL_DOMAINS = new Set([
+  '126.com', '163.com', 'aol.com', 'fastmail.com', 'gmail.com', 'gmx.com', 'gmx.de', 'googlemail.com',
+  'hey.com', 'hotmail.co.uk', 'hotmail.com', 'hushmail.com', 'icloud.com', 'inbox.com', 'laposte.net',
+  'libero.it', 'live.co.uk', 'live.com', 'mac.com', 'mail.com', 'me.com', 'msn.com', 'orange.fr',
+  'outlook.com', 'proton.me', 'protonmail.com', 'qq.com', 'rambler.ru', 'rediffmail.com', 'tuta.com',
+  'tutanota.com', 'web.de', 'yahoo.co.in', 'yahoo.co.uk', 'yahoo.com', 'yahoo.in', 'yandex.com',
+  'yandex.ru', 'zoho.com'
+]);
+
+type TurnstileOptions = {
+  sitekey: string;
+  action: string;
+  theme: 'light';
+  size: 'flexible';
+  callback: (token: string) => void;
+  'expired-callback': () => void;
+  'error-callback': () => void;
+};
+
+type TurnstileApi = {
+  render: (container: HTMLElement, options: TurnstileOptions) => string;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+function isCorporateEmail(email: string): boolean {
+  const normalized = email.trim().toLowerCase();
+  const separator = normalized.lastIndexOf('@');
+  if (separator <= 0 || separator !== normalized.indexOf('@')) return false;
+  const domain = normalized.slice(separator + 1);
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain)) return false;
+  if (FREE_EMAIL_DOMAINS.has(domain)) return false;
+  return !/^(?:yahoo|hotmail|live)\./.test(domain);
+}
+
+function TurnstileWidget({
+  onTokenChange,
+  resetKey
+}: {
+  onTokenChange: (token: string | null) => void;
+  resetKey: number;
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const widgetIdRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (!TURNSTILE_SITE_KEY || !containerRef.current) return undefined;
+
+    const renderWidget = () => {
+      if (!window.turnstile || !containerRef.current || widgetIdRef.current) return;
+      widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        action: 'demo_request',
+        theme: 'light',
+        size: 'flexible',
+        callback: (token) => onTokenChange(token),
+        'expired-callback': () => onTokenChange(null),
+        'error-callback': () => onTokenChange(null)
+      });
+    };
+
+    let script = document.querySelector<HTMLScriptElement>('script[data-scout-turnstile]');
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.defer = true;
+      script.dataset.scoutTurnstile = 'true';
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', renderWidget);
+    renderWidget();
+
+    return () => {
+      script?.removeEventListener('load', renderWidget);
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current);
+      }
+      widgetIdRef.current = null;
+    };
+  }, [onTokenChange]);
+
+  React.useEffect(() => {
+    if (resetKey > 0 && widgetIdRef.current && window.turnstile) {
+      window.turnstile.reset(widgetIdRef.current);
+      onTokenChange(null);
+    }
+  }, [onTokenChange, resetKey]);
+
+  if (!TURNSTILE_SITE_KEY) {
+    return <div className="notice error full-width">CAPTCHA is not configured. Please contact support.</div>;
+  }
+  return <div className="turnstile-field full-width" ref={containerRef} aria-label="CAPTCHA verification" />;
+}
+
+function PasswordInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [visible, setVisible] = React.useState(false);
+  return (
+    <label>
+      {label}
+      <span className="password-input-wrap">
+        <input
+          aria-label={label}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button
+          className="password-visibility-toggle"
+          type="button"
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          aria-pressed={visible}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.7 10.7 0 0112 4c5.5 0 9 5.5 9 8a11.7 11.7 0 01-2.1 3.5M6.6 6.6C4.3 8.1 3 10.5 3 12c0 2.5 3.5 8 9 8a10 10 0 004.1-.9" /></svg>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c0-2.5 3.5-8 9-8s9 5.5 9 8-3.5 8-9 8-9-5.5-9-8z" /><circle cx="12" cy="12" r="3" /></svg>
+          )}
+        </button>
+      </span>
+    </label>
+  );
+}
 
 const GRID_CARDS: Array<{
   id: string;
@@ -497,9 +636,13 @@ export function DemoLandingPage() {
 export function DemoRequestPage() {
   const navigate = useNavigate();
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
+  const [captchaResetKey, setCaptchaResetKey] = React.useState(0);
+  const handleCaptchaToken = React.useCallback((token: string | null) => setCaptchaToken(token), []);
   const requestDemo = useMutation({
     mutationFn: api.createDemoRequest,
-    onSuccess: () => navigate('/demo/request/success')
+    onSuccess: () => navigate('/demo/request/success'),
+    onError: () => setCaptchaResetKey((current) => current + 1)
   });
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -511,15 +654,25 @@ export function DemoRequestPage() {
       setFormError('Accept the demo terms to request access.');
       return;
     }
+    const email = String(formData.get('email') ?? '').trim();
+    if (!isCorporateEmail(email)) {
+      setFormError('Enter a valid corporate email address. Free email providers are not accepted.');
+      return;
+    }
+    if (!captchaToken) {
+      setFormError('Complete the CAPTCHA verification before submitting.');
+      return;
+    }
     requestDemo.mutate({
       fullName: String(formData.get('fullName') ?? '').trim(),
-      email: String(formData.get('email') ?? '').trim(),
+      email,
       company: String(formData.get('company') ?? '').trim(),
       roleTitle: String(formData.get('roleTitle') ?? '').trim(),
       companySize: String(formData.get('companySize') ?? '').trim(),
       useCase: String(formData.get('useCase') ?? '').trim(),
       notes: String(formData.get('notes') ?? '').trim(),
-      acceptedTerms
+      acceptedTerms,
+      captchaToken
     });
   };
 
@@ -528,7 +681,7 @@ export function DemoRequestPage() {
       <section className="public-form-panel">
         <div className="panel-header">
           <div>
-            <h1>Request a NoScan product demo</h1>
+            <h1>Request for product demo</h1>
             <div className="panel-caption">We review requests before provisioning an isolated 7-day workspace with the full guided product experience.</div>
           </div>
           <div className="panel-actions">
@@ -564,12 +717,13 @@ export function DemoRequestPage() {
             <input name="acceptedTerms" type="checkbox" />
             <span>I understand the demo is time-boxed, uses isolated sample-friendly workflows, and may include demo-specific usage limits.</span>
           </label>
+          <TurnstileWidget onTokenChange={handleCaptchaToken} resetKey={captchaResetKey} />
           {(formError || requestDemo.isError) && (
             <div className="notice error full-width" role="alert">
               {formError ?? (requestDemo.error instanceof Error ? requestDemo.error.message : 'Demo request failed')}
             </div>
           )}
-          <button className="btn btn-primary" type="submit" disabled={requestDemo.isPending}>
+          <button className="btn btn-primary" type="submit" disabled={requestDemo.isPending || !captchaToken}>
             {requestDemo.isPending ? 'Submitting...' : 'Submit request'}
           </button>
         </form>
@@ -583,7 +737,7 @@ export function DemoRequestSuccessPage() {
     <PublicDemoShell compact>
       <section className="public-form-panel">
         <h1>Request received</h1>
-        <p>We’ll review the request and send an invite link after the securityGrid demo workspace is provisioned with the full guided experience.</p>
+        <p>We’ll review the request and send an invite link after the ScoutGrid demo workspace is provisioned with the full guided experience.</p>
         <Link className="btn btn-secondary" to="/demo">Back to demo overview</Link>
       </section>
     </PublicDemoShell>
@@ -628,7 +782,7 @@ export function DemoInvitePage() {
             </div>
             {deliveryFailed && (
               <p>
-                The workspace was provisioned, but securityGrid could not deliver the email automatically.
+                The workspace was provisioned, but ScoutGrid could not deliver the email automatically.
                 You can still accept this invite and continue with manual password setup.
               </p>
             )}
@@ -816,16 +970,12 @@ export function LoginPage() {
   return (
     <PublicDemoShell compact>
       <section className="public-form-panel">
-        <h1>Log in to securityGrid</h1>
+        <h1>Log in to ScoutGrid</h1>
         <p>
           {setupToken
             ? 'Set a password for your tenant workspace. After saving it, return to the login screen and sign in with your email and new password.'
             : 'Use your email and password to access your tenant workspace or the platform console.'}
         </p>
-        <div className="panel-actions panel-actions--stacked">
-          <Link to="/demo">Back to overview</Link>
-          <Link to="/demo/request">Need access? Request a demo</Link>
-        </div>
         {!setupToken && activationComplete && (
           <div className="notice success" role="status">
             Password created successfully. Sign in with your email and new password to continue.
@@ -834,7 +984,7 @@ export function LoginPage() {
         {!setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
             <label>Email<input type="text" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <PasswordInput label="Password" value={password} onChange={setPassword} />
             <button className="btn btn-primary" type="submit" disabled={loginMutation.isPending || !email.trim() || !password.trim()}>
               {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
             </button>
@@ -842,7 +992,7 @@ export function LoginPage() {
         )}
         {setupToken && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
-            <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <PasswordInput label="New password" value={password} onChange={setPassword} />
             <button className="btn btn-primary" type="submit" disabled={setupPasswordMutation.isPending || password.trim().length < 8}>
               {setupPasswordMutation.isPending ? 'Saving...' : 'Set password'}
             </button>

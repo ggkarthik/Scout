@@ -282,6 +282,7 @@ export type DemoRequestCreateRequest = {
   useCase?: string;
   notes?: string;
   acceptedTerms: boolean;
+  captchaToken: string;
 };
 
 export type DemoInviteValidationResponse = {

@@ -93,6 +93,7 @@ public class DemoLifecycleService {
     @Transactional
     public DemoRequestResponse createRequest(DemoRequestCreateRequest request) {
         String email = requireText(request.email(), "email").toLowerCase();
+        CorporateEmailPolicy.requireCorporateEmail(email);
         demoRequestRepository.findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(email, ACTIVE_REQUEST_STATUSES)
                 .ifPresent(existing -> {
                     throw new DemoAccessException("DEMO_REQUEST_EXISTS", "A demo request for this email is already in review", HttpStatus.CONFLICT);

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
 import { authApi } from '../features/auth/api';
@@ -13,9 +13,21 @@ function ExposureActorProbe() {
 }
 
 describe('Demo public pages', () => {
+  beforeEach(() => {
+    window.turnstile = {
+      render: (_container, options) => {
+        options.callback('test-captcha-token');
+        return 'test-widget';
+      },
+      reset: vi.fn(),
+      remove: vi.fn()
+    };
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     clearStoredAuthToken();
+    delete window.turnstile;
   });
 
   it('renders the landing screen at the index route with login and request-demo access', async () => {
@@ -54,7 +66,7 @@ describe('Demo public pages', () => {
 
     renderWithProviders(<DemoRequestPage />, { route: '/demo/request' });
 
-    expect(screen.getByRole('link', { name: /Back to overview/i })).toHaveAttribute('href', '/demo');
+    expect(screen.getByRole('heading', { name: 'Request for product demo' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Already have access\? Log in/i })).toHaveAttribute('href', '/login');
 
     fireEvent.change(screen.getByLabelText(/Full name/i), { target: { value: 'Alex Rivera' } });
@@ -71,9 +83,24 @@ describe('Demo public pages', () => {
         fullName: 'Alex Rivera',
         email: 'alex@example.com',
         company: 'Example Co',
-        acceptedTerms: true
+        acceptedTerms: true,
+        captchaToken: 'test-captcha-token'
       }), expect.anything());
     });
+  });
+
+  it('rejects free email providers before submitting a demo request', async () => {
+    const createDemoRequest = vi.spyOn(api, 'createDemoRequest');
+    renderWithProviders(<DemoRequestPage />, { route: '/demo/request' });
+
+    fireEvent.change(screen.getByLabelText(/Full name/i), { target: { value: 'Alex Rivera' } });
+    fireEvent.change(screen.getByLabelText(/Work email/i), { target: { value: 'alex@gmail.com' } });
+    fireEvent.change(screen.getByLabelText(/^Company$/i), { target: { value: 'Example Co' } });
+    fireEvent.click(screen.getByLabelText(/I understand/i));
+    fireEvent.click(screen.getByRole('button', { name: /Submit request/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/valid corporate email address/i);
+    expect(createDemoRequest).not.toHaveBeenCalled();
   });
 
   it('renders invite validation details', async () => {
@@ -306,7 +333,7 @@ describe('Demo public pages', () => {
       { route: '/login' }
     );
 
-    expect(screen.getByRole('link', { name: /Need access\? Request a demo/i })).toHaveAttribute('href', '/demo/request');
+    expect(screen.queryByRole('link', { name: /Need access\? Request a demo/i })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
@@ -331,6 +358,17 @@ describe('Demo public pages', () => {
     await waitFor(() => {
       expect(getStoredAuthToken()).toBe('');
     });
-    expect(screen.getByRole('heading', { name: /Log in to securityGrid/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Log in to ScoutGrid/i })).toBeInTheDocument();
+  });
+
+  it('toggles password visibility on the login form', () => {
+    renderWithProviders(<LoginPage />, { route: '/login' });
+
+    const password = screen.getByLabelText(/^Password$/i);
+    expect(password).toHaveAttribute('type', 'password');
+    fireEvent.click(screen.getByRole('button', { name: /Show password/i }));
+    expect(password).toHaveAttribute('type', 'text');
+    fireEvent.click(screen.getByRole('button', { name: /Hide password/i }));
+    expect(password).toHaveAttribute('type', 'password');
   });
 });

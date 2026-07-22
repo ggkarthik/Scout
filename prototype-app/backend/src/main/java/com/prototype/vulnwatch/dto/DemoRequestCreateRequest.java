@@ -13,6 +13,7 @@ public record DemoRequestCreateRequest(
         @Size(max = 80) String companySize,
         @Size(max = 120) String useCase,
         @Size(max = 2000) String notes,
-        @AssertTrue(message = "Demo terms must be accepted") boolean acceptedTerms
+        @AssertTrue(message = "Demo terms must be accepted") boolean acceptedTerms,
+        @Size(max = 2048) String captchaToken
 ) {
 }

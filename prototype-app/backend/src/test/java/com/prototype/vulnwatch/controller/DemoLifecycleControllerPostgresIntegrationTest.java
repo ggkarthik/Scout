@@ -50,7 +50,8 @@ class DemoLifecycleControllerPostgresIntegrationTest {
                                   "companySize": "101-1000",
                                   "useCase": "SBOM validation",
                                   "notes": "Need a guided evaluation",
-                                  "acceptedTerms": true
+                                  "acceptedTerms": true,
+                                  "captchaToken": "test-captcha-token"
                                 }
                                 """))
                 .andExpect(status().isOk())

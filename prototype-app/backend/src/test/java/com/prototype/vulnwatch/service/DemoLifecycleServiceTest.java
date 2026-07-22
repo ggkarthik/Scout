@@ -12,6 +12,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.client.ResendEmailClient;
@@ -119,7 +120,8 @@ class DemoLifecycleServiceTest {
                 "11-50",
                 "Product demo",
                 "Please follow up",
-                true
+                true,
+                "captcha-token"
         );
         when(demoRequestRepository.findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(
                 eq("casey@example.com"),
@@ -150,6 +152,27 @@ class DemoLifecycleServiceTest {
                 eq("demo_request"),
                 any(),
                 any());
+    }
+
+    @Test
+    void createRequestRejectsFreeEmailProviders() {
+        DemoRequestCreateRequest request = new DemoRequestCreateRequest(
+                "Casey Example",
+                "casey@gmail.com",
+                "Example Co",
+                "Security Lead",
+                "11-50",
+                "Product demo",
+                null,
+                true,
+                "captcha-token");
+
+        DemoAccessException error = assertThrows(
+                DemoAccessException.class,
+                () -> service().createRequest(request));
+
+        assertEquals("CORPORATE_EMAIL_REQUIRED", error.getCode());
+        verifyNoInteractions(demoRequestRepository);
     }
 
     @Test

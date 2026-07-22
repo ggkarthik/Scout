@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.dto.DemoStatusResponse;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantContext;
+import com.prototype.vulnwatch.service.TurnstileVerificationService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -29,20 +30,24 @@ public class DemoLifecycleController {
 
     private final DemoLifecycleService demoLifecycleService;
     private final RequestActorService requestActorService;
+    private final TurnstileVerificationService turnstileVerificationService;
     private final WorkspaceService workspaceService;
 
     public DemoLifecycleController(
             DemoLifecycleService demoLifecycleService,
             RequestActorService requestActorService,
+            TurnstileVerificationService turnstileVerificationService,
             WorkspaceService workspaceService
     ) {
         this.demoLifecycleService = demoLifecycleService;
         this.requestActorService = requestActorService;
+        this.turnstileVerificationService = turnstileVerificationService;
         this.workspaceService = workspaceService;
     }
 
     @PostMapping("/demo-requests")
     public DemoRequestResponse createRequest(@Valid @RequestBody DemoRequestCreateRequest request) {
+        turnstileVerificationService.verifyDemoRequest(request.captchaToken());
         return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.createRequest(request));
     }
 

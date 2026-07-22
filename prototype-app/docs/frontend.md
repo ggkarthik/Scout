@@ -805,6 +805,7 @@ Copy `.env.example` to `.env.local`. All variables use the `VITE_` prefix.
 | Variable | Default | Purpose |
 |---|---|---|
 | `VITE_API_BASE` | `http://localhost:8080/api` | Backend API base URL |
+| `VITE_TURNSTILE_SITE_KEY` | Cloudflare test key in development | Public Turnstile site key used by the demo-request CAPTCHA |
 | `VITE_API_KEY` | `change-me-in-prod` | `X-API-Key` header (local dev fallback) |
 | `VITE_CREATOR_KEY` | `local-creator` | `X-Creator-Key` for PLATFORM_OWNER endpoints (local dev) |
 | `VITE_AUTH_TOKEN` | (empty) | Static bearer token override |

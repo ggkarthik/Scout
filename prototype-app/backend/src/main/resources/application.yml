@@ -96,6 +96,10 @@ app:
     headers:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}
+    turnstile:
+      enabled: ${APP_TURNSTILE_ENABLED:false}
+      secret-key: ${APP_TURNSTILE_SECRET_KEY:}
+      expected-hostname: ${APP_TURNSTILE_EXPECTED_HOSTNAME:}
   tenancy:
     allow-header-tenant-selection: ${APP_ALLOW_HEADER_TENANT_SELECTION:false}
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
