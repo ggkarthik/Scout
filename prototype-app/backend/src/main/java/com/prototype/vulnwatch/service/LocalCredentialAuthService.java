@@ -35,6 +35,7 @@ public class LocalCredentialAuthService {
     private final TenantLifecycleGuardService tenantLifecycleGuardService;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
     private final AuditEventService auditEventService;
+    private final TenantWorkRunner tenantWorkRunner;
     private final TenantAccessResolutionService accessResolutionService;
     private final boolean requireProductionSecrets;
     private final boolean sharedLocalhostLoginEnabled;
@@ -51,6 +52,7 @@ public class LocalCredentialAuthService {
             TenantLifecycleGuardService tenantLifecycleGuardService,
             AppUserGlobalRoleService appUserGlobalRoleService,
             AuditEventService auditEventService,
+            TenantWorkRunner tenantWorkRunner,
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
             @Value("${app.security.local-auth.shared-localhost-login-enabled:false}") boolean sharedLocalhostLoginEnabled,
             @Value("${app.security.local-auth.shared-localhost-tenant-admin-email:}") String sharedLocalhostTenantAdminEmail,
@@ -65,6 +67,7 @@ public class LocalCredentialAuthService {
         this.tenantLifecycleGuardService = tenantLifecycleGuardService;
         this.appUserGlobalRoleService = appUserGlobalRoleService;
         this.auditEventService = auditEventService;
+        this.tenantWorkRunner = tenantWorkRunner;
         this.accessResolutionService = new TenantAccessResolutionService(
                 tenantRepository,
                 membershipRepository,
@@ -218,23 +221,27 @@ public class LocalCredentialAuthService {
         return authTokenService.issueToken(user, Set.of(normalizeRole(membership.getRole())), membership.getTenant(), access);
     }
 
-    @Transactional
     public AuthTokenResponse switchTenantContext(String subject, UUID tenantId) {
+        return TenantContext.runAsPlatform(() -> switchTenantContextInPlatformScope(subject, tenantId));
+    }
+
+    private AuthTokenResponse switchTenantContextInPlatformScope(String subject, UUID tenantId) {
         AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
         TenantAccessResolution access = accessResolutionService.resolve(user.getExternalSubject(), tenantId);
         Set<String> roles = access.mode().isSupport()
                 ? Set.of("PLATFORM_OWNER")
                 : Set.of("PLATFORM_OWNER", normalizeRole(access.role()));
-        auditEventService.recordExplicitActor(
-                tenantId,
-                user.getExternalSubject(),
-                "PLATFORM_OWNER",
-                "tenant.context.entered",
-                "tenant_access",
-                access.referenceId().toString(),
-                "{\"mode\":\"" + access.mode().name() + "\"}",
-                "SUCCESS");
+        tenantWorkRunner.runScoped(access.tenant(), () ->
+                auditEventService.recordExplicitActor(
+                        tenantId,
+                        user.getExternalSubject(),
+                        "PLATFORM_OWNER",
+                        "tenant.context.entered",
+                        "tenant_access",
+                        access.referenceId().toString(),
+                        "{\"mode\":\"" + access.mode().name() + "\"}",
+                        "SUCCESS"));
         return authTokenService.issueToken(user, roles, access.tenant(), access);
     }
 

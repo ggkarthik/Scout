@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCrypt;
@@ -57,6 +59,8 @@ class LocalCredentialAuthServiceTest {
     private AppUserGlobalRoleService appUserGlobalRoleService;
     @Mock
     private AuditEventService auditEventService;
+    @Mock
+    private TenantWorkRunner tenantWorkRunner;
 
     @Test
     void platformOwnerLoginReturnsPlatformScopeToken() {
@@ -78,6 +82,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -123,6 +128,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -166,6 +172,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -209,6 +216,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -254,6 +262,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -289,6 +298,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -311,7 +321,9 @@ class LocalCredentialAuthServiceTest {
         platformOwner.setEmail("owner@example.com");
         platformOwner.setPlatformOwner(true);
         Tenant tenant = tenant("Default Workspace");
+        tenant.setSlug(TenantAccessResolutionService.PLAYGROUND_SLUG);
         TenantMembership membership = membership(platformOwner, tenant, "TENANT_ADMIN");
+        membership.setProvenance(TenantAccessResolutionService.PLAYGROUND_PROVENANCE);
 
         when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
@@ -330,6 +342,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -340,9 +353,23 @@ class LocalCredentialAuthServiceTest {
         AuthTokenResponse response = service.switchTenantContext("owner@example.com", tenant.getId());
         Jwt jwt = decode(response.token());
 
+        ArgumentCaptor<Runnable> scopedAudit = ArgumentCaptor.forClass(Runnable.class);
+        verify(tenantWorkRunner).runScoped(eq(tenant), scopedAudit.capture());
+        verifyNoInteractions(auditEventService);
+        scopedAudit.getValue().run();
+
         assertEquals(tenant.getId().toString(), jwt.getClaimAsString("active_tenant_id"));
         assertTrue(jwt.getClaimAsStringList("roles").contains("PLATFORM_OWNER"));
         assertTrue(jwt.getClaimAsStringList("roles").contains("TENANT_ADMIN"));
+        verify(auditEventService).recordExplicitActor(
+                eq(tenant.getId()),
+                eq("owner@example.com"),
+                eq("PLATFORM_OWNER"),
+                eq("tenant.context.entered"),
+                eq("tenant_access"),
+                eq(membership.getId().toString()),
+                eq("{\"mode\":\"DIRECT_PLAYGROUND_MEMBERSHIP\"}"),
+                eq("SUCCESS"));
         verifyNoInteractions(tenantSupportGrantService);
     }
 
@@ -362,6 +389,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
@@ -411,6 +439,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "tenant.admin@localhost",
@@ -455,6 +484,7 @@ class LocalCredentialAuthServiceTest {
                 tenantLifecycleGuardService,
                 appUserGlobalRoleService,
                 auditEventService,
+                tenantWorkRunner,
                 false,
                 true,
                 "",
