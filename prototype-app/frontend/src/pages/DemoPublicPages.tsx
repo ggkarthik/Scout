@@ -7,8 +7,8 @@ import { getAuthContextQueryKey } from '../features/auth/queries';
 import { canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY
-  ?? (import.meta.env.DEV ? '1x00000000000000000000AA' : '');
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim()
+  || (import.meta.env.DEV ? '1x00000000000000000000AA' : '0x4AAAAAAD7ahchhUEu5jKLM');
 const FREE_EMAIL_DOMAINS = new Set([
   '126.com', '163.com', 'aol.com', 'fastmail.com', 'gmail.com', 'gmx.com', 'gmx.de', 'googlemail.com',
   'hey.com', 'hotmail.co.uk', 'hotmail.com', 'hushmail.com', 'icloud.com', 'inbox.com', 'laposte.net',
