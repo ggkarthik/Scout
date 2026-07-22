@@ -246,21 +246,25 @@ public class LocalCredentialAuthService {
     }
 
     public AuthTokenResponse clearTenantContext(String subject) {
-        return TenantContext.runAsPlatform(() -> clearTenantContextInPlatformScope(subject));
+        UUID exitedTenantId = TenantContext.getCurrentTenantId();
+        return TenantContext.runAsPlatform(() -> clearTenantContextInPlatformScope(subject, exitedTenantId));
     }
 
-    private AuthTokenResponse clearTenantContextInPlatformScope(String subject) {
+    private AuthTokenResponse clearTenantContextInPlatformScope(String subject, UUID exitedTenantId) {
         AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
-        auditEventService.recordExplicitActor(
-                null,
-                user.getExternalSubject(),
-                "PLATFORM_OWNER",
-                "tenant.context.exited",
-                "app_user",
-                user.getId().toString(),
-                null,
-                "SUCCESS");
+        if (exitedTenantId != null) {
+            tenantWorkRunner.runScoped(exitedTenantId, () ->
+                    auditEventService.recordExplicitActor(
+                            exitedTenantId,
+                            user.getExternalSubject(),
+                            "PLATFORM_OWNER",
+                            "tenant.context.exited",
+                            "app_user",
+                            user.getId().toString(),
+                            null,
+                            "SUCCESS"));
+        }
         return authTokenService.issueToken(user, Set.of("PLATFORM_OWNER"), null);
     }
 

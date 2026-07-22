@@ -6,9 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.AppUser;
@@ -384,13 +383,6 @@ class LocalCredentialAuthServiceTest {
             assertNull(TenantContext.getCurrentTenantId());
             return Optional.of(platformOwner);
         });
-        doAnswer(invocation -> {
-            assertTrue(TenantContext.isPlatformContext());
-            assertNull(TenantContext.getCurrentTenantId());
-            return null;
-        }).when(auditEventService).recordExplicitActor(
-                any(), any(), any(), any(), any(), any(), any(), any());
-
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
                 tenantRepository,
@@ -419,6 +411,20 @@ class LocalCredentialAuthServiceTest {
             assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
             assertEquals(activeTenantId, TenantContext.getCurrentTenantId());
             assertEquals("tenant_default", TenantContext.getCurrentSchemaName());
+
+            ArgumentCaptor<Runnable> scopedAudit = ArgumentCaptor.forClass(Runnable.class);
+            verify(tenantWorkRunner).runScoped(eq(activeTenantId), scopedAudit.capture());
+            verifyNoInteractions(auditEventService);
+            scopedAudit.getValue().run();
+            verify(auditEventService).recordExplicitActor(
+                    activeTenantId,
+                    "owner@example.com",
+                    "PLATFORM_OWNER",
+                    "tenant.context.exited",
+                    "app_user",
+                    platformOwner.getId().toString(),
+                    null,
+                    "SUCCESS");
         } finally {
             TenantContext.clear();
         }
