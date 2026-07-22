@@ -48,3 +48,12 @@ services:
         value: "false"
       - key: APP_REQUIRE_TENANT_CONTEXT
         value: "true"
+      # Direct membership for the internal playground only. The backend resolves
+      # this identity through the platform user registry and never applies it to
+      # customer tenants.
+      - key: APP_PLAYGROUND_MEMBERSHIPS_ENABLED
+        value: "true"
+      - key: APP_PLAYGROUND_MEMBERSHIP_SUBJECTS
+        value: scoutgrid.io@gmail.com
+      - key: APP_PLAYGROUND_MEMBERSHIP_ROLE
+        value: TENANT_ADMIN
