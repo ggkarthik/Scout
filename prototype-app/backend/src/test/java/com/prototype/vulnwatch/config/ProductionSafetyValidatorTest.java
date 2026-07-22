@@ -1,7 +1,9 @@
 package com.prototype.vulnwatch.config;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -11,6 +13,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class ProductionSafetyValidatorTest {
+
+    @Test
+    void sharedDemoLifecycleTablesAreExemptOnlyInDefaultSchema() {
+        assertTrue(ProductionSafetyValidator.isSharedLifecycleTable("tenant_default", "demo_requests"));
+        assertTrue(ProductionSafetyValidator.isSharedLifecycleTable("tenant_default", "demo_invites"));
+        assertFalse(ProductionSafetyValidator.isSharedLifecycleTable("tenant_default", "assets"));
+        assertFalse(ProductionSafetyValidator.isSharedLifecycleTable("tenant_customer", "demo_invites"));
+    }
 
     @Test
     void validateAllowsProductionSafeConfiguration() {

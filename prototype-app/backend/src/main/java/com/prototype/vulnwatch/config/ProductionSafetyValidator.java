@@ -310,6 +310,9 @@ public class ProductionSafetyValidator {
                     order by table_name
                     """, String.class, schema);
             for (String table : tables) {
+                if (isSharedLifecycleTable(schema, table)) {
+                    continue;
+                }
                 Long conflicts = platformJdbcTemplate.queryForObject(
                         "select count(*) from " + quoteIdentifier(schema) + "." + quoteIdentifier(table)
                                 + " where tenant_id is not null and tenant_id <> ?::uuid",
@@ -321,6 +324,15 @@ public class ProductionSafetyValidator {
                 }
             }
         }
+    }
+
+    static boolean isSharedLifecycleTable(String schema, String table) {
+        // Until the live playground is split from tenant_default, demo onboarding records
+        // are intentionally centralized there and may reference any provisioned tenant.
+        // Keep the exemption narrow: copies of these tables in customer schemas remain
+        // subject to the normal single-tenant row ownership validation.
+        return "tenant_default".equals(schema)
+                && ("demo_requests".equals(table) || "demo_invites".equals(table));
     }
 
     private String quoteIdentifier(String identifier) {
