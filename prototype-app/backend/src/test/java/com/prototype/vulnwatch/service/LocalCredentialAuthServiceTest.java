@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -378,7 +379,17 @@ class LocalCredentialAuthServiceTest {
         AppUser platformOwner = new AppUser();
         platformOwner.setExternalSubject("owner@example.com");
         platformOwner.setEmail("owner@example.com");
-        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.of(platformOwner));
+        when(userRepository.findByExternalSubject("owner@example.com")).thenAnswer(invocation -> {
+            assertTrue(TenantContext.isPlatformContext());
+            assertNull(TenantContext.getCurrentTenantId());
+            return Optional.of(platformOwner);
+        });
+        doAnswer(invocation -> {
+            assertTrue(TenantContext.isPlatformContext());
+            assertNull(TenantContext.getCurrentTenantId());
+            return null;
+        }).when(auditEventService).recordExplicitActor(
+                any(), any(), any(), any(), any(), any(), any(), any());
 
         LocalCredentialAuthService service = new LocalCredentialAuthService(
                 userRepository,
@@ -397,11 +408,20 @@ class LocalCredentialAuthServiceTest {
                 "http://localhost:5173,http://127.0.0.1:5173"
         );
 
-        AuthTokenResponse response = service.clearTenantContext("owner@example.com");
-        Jwt jwt = decode(response.token());
+        UUID activeTenantId = UUID.randomUUID();
+        TenantContext.setCurrentTenantId(activeTenantId);
+        TenantContext.setCurrentSchemaName("tenant_default");
+        try {
+            AuthTokenResponse response = service.clearTenantContext("owner@example.com");
+            Jwt jwt = decode(response.token());
 
-        assertNull(jwt.getClaimAsString("active_tenant_id"));
-        assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+            assertNull(jwt.getClaimAsString("active_tenant_id"));
+            assertEquals("PLATFORM_OWNER", jwt.getClaimAsStringList("roles").get(0));
+            assertEquals(activeTenantId, TenantContext.getCurrentTenantId());
+            assertEquals("tenant_default", TenantContext.getCurrentSchemaName());
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     @Test

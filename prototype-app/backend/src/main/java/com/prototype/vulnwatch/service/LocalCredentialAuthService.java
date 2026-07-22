@@ -245,8 +245,11 @@ public class LocalCredentialAuthService {
         return authTokenService.issueToken(user, roles, access.tenant(), access);
     }
 
-    @Transactional
     public AuthTokenResponse clearTenantContext(String subject) {
+        return TenantContext.runAsPlatform(() -> clearTenantContextInPlatformScope(subject));
+    }
+
+    private AuthTokenResponse clearTenantContextInPlatformScope(String subject) {
         AppUser user = userRepository.findByExternalSubject(requireText(subject, "subject"))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered"));
         auditEventService.recordExplicitActor(
