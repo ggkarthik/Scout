@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.prototype.vulnwatch.domain.TenantMembership;
 import com.prototype.vulnwatch.domain.TenantUserInvite;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.TenantInviteValidationResponse;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
@@ -37,6 +38,8 @@ class TenantUserInviteServiceTest {
     private TenantRepository tenantRepository;
     @Mock
     private AuditEventService auditEventService;
+    @Mock
+    private TenantWorkRunner tenantWorkRunner;
 
     @Test
     void createInviteRejectsUserWithAnotherActiveTenantMembership() {
@@ -57,7 +60,8 @@ class TenantUserInviteServiceTest {
                 localCredentialAuthService,
                 appUserRepository,
                 tenantRepository,
-                auditEventService
+                auditEventService,
+                tenantWorkRunner
         );
 
         ResponseStatusException error = assertThrows(
@@ -100,6 +104,10 @@ class TenantUserInviteServiceTest {
                 .thenReturn(membership);
         when(identityAdministrationService.saveInvite(any(TenantUserInvite.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(localCredentialAuthService.issuePasswordSetupToken("customer@example.com")).thenReturn("setup-token");
+        when(tenantWorkRunner.runScoped(
+                eq(tenantId),
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<TenantInviteValidationResponse>>any()))
+                .thenAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get());
 
         TenantUserInviteService service = new TenantUserInviteService(
                 identityAdministrationService,
@@ -107,7 +115,8 @@ class TenantUserInviteServiceTest {
                 localCredentialAuthService,
                 appUserRepository,
                 tenantRepository,
-                auditEventService
+                auditEventService,
+                tenantWorkRunner
         );
 
         service.acceptInvite("invite-token");

@@ -280,8 +280,10 @@ public class DemoLifecycleService {
             demoRequestRepository.save(invite.getRequest());
         }
         String setupToken = localCredentialAuthService.issuePasswordSetupToken(invite.getEmail());
+        // Demo onboarding is centralized in tenant_default. Keep its anonymous audit
+        // row in the pre-auth partition; the referenced tenant remains in detailsJson.
         auditEventService.recordExplicitActor(
-                invite.getTenant().getId(),
+                null,
                 invite.getEmail(),
                 "ANONYMOUS",
                 "demo.invite.accepted",

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.TenantInviteValidationResponse;
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,11 +21,11 @@ public class TenantInviteController {
 
     @GetMapping("/{token}")
     public TenantInviteValidationResponse validate(@PathVariable String token) {
-        return tenantUserInviteService.validateInvite(token);
+        return TenantContext.runAsPreAuthentication(() -> tenantUserInviteService.validateInvite(token));
     }
 
     @PostMapping("/{token}/accept")
     public TenantInviteValidationResponse accept(@PathVariable String token) {
-        return tenantUserInviteService.acceptInvite(token);
+        return TenantContext.runAsPreAuthentication(() -> tenantUserInviteService.acceptInvite(token));
     }
 }

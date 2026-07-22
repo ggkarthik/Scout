@@ -9,6 +9,7 @@ import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.dto.DemoStatusResponse;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -42,7 +43,7 @@ public class DemoLifecycleController {
 
     @PostMapping("/demo-requests")
     public DemoRequestResponse createRequest(@Valid @RequestBody DemoRequestCreateRequest request) {
-        return demoLifecycleService.createRequest(request);
+        return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.createRequest(request));
     }
 
     @GetMapping("/platform/demo-requests")
@@ -89,12 +90,12 @@ public class DemoLifecycleController {
 
     @GetMapping("/demo-invites/{token}")
     public DemoInviteValidationResponse validateInvite(@PathVariable String token) {
-        return demoLifecycleService.validateInvite(token);
+        return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.validateInvite(token));
     }
 
     @PostMapping("/demo-invites/{token}/accept")
     public DemoInviteValidationResponse acceptInvite(@PathVariable String token) {
-        return demoLifecycleService.acceptInvite(token);
+        return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.acceptInvite(token));
     }
 
     @GetMapping("/demo/status")

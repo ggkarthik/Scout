@@ -28,6 +28,7 @@ public class TenantUserInviteService {
     private final AppUserRepository appUserRepository;
     private final TenantRepository tenantRepository;
     private final AuditEventService auditEventService;
+    private final TenantWorkRunner tenantWorkRunner;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public TenantUserInviteService(
@@ -36,7 +37,8 @@ public class TenantUserInviteService {
             LocalCredentialAuthService localCredentialAuthService,
             AppUserRepository appUserRepository,
             TenantRepository tenantRepository,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.identityAdministrationService = identityAdministrationService;
         this.tenantInviteEmailService = tenantInviteEmailService;
@@ -44,6 +46,7 @@ public class TenantUserInviteService {
         this.appUserRepository = appUserRepository;
         this.tenantRepository = tenantRepository;
         this.auditEventService = auditEventService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     @Transactional(readOnly = true)
@@ -112,8 +115,14 @@ public class TenantUserInviteService {
         return toValidationResponse(invite, null, null);
     }
 
-    @Transactional
     public TenantInviteValidationResponse acceptInvite(String token) {
+        TenantUserInvite invite = findInvite(token);
+        return tenantWorkRunner.runScoped(
+                invite.getTenant().getId(),
+                () -> acceptInviteInTenantScope(token));
+    }
+
+    private TenantInviteValidationResponse acceptInviteInTenantScope(String token) {
         TenantUserInvite invite = findInvite(token);
         TenantInviteValidationResponse validation = toValidationResponse(invite, null, null);
         if (!validation.valid()) {

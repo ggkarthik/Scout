@@ -319,6 +319,41 @@ class DemoLifecycleServiceTest {
     }
 
     @Test
+    void acceptInviteRecordsPreAuthenticationAuditWithoutTenantAttribution() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        tenant.setStatus("ACTIVE");
+        tenant.setDemoExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        DemoInvite invite = new DemoInvite();
+        ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+        invite.setRequest(request);
+        invite.setTenant(tenant);
+        invite.setEmail(request.getEmail());
+        invite.setToken("invite-token-123");
+        invite.setStatus("SENT");
+        invite.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
+
+        when(demoInviteRepository.findByToken("invite-token-123")).thenReturn(Optional.of(invite));
+        when(demoInviteRepository.save(invite)).thenReturn(invite);
+        when(demoRequestRepository.save(request)).thenReturn(request);
+        when(localCredentialAuthService.issuePasswordSetupToken(request.getEmail())).thenReturn("setup-token");
+
+        DemoInviteValidationResponse response = service().acceptInvite("invite-token-123");
+
+        assertEquals("ACCEPTED", response.status());
+        assertEquals("setup-token", response.setupToken());
+        verify(auditEventService).recordExplicitActor(
+                eq(null),
+                eq(request.getEmail()),
+                eq("ANONYMOUS"),
+                eq("demo.invite.accepted"),
+                eq("demo_invite"),
+                eq(invite.getId().toString()),
+                eq("{\"tenantId\":\"" + tenant.getId() + "\"}"),
+                eq("SUCCESS"));
+    }
+
+    @Test
     void approveBlocksDuplicateAffiliationBeforeProvisioning() {
         DemoRequest request = pendingRequest();
         AppUser lockedUser = new AppUser();

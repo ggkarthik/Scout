@@ -28,6 +28,7 @@ class DemoLifecycleControllerPostgresIntegrationTest {
     @DynamicPropertySource
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
         PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
+        registry.add("app.tenancy.require-tenant-context", () -> "true");
     }
 
     @Autowired
@@ -37,7 +38,7 @@ class DemoLifecycleControllerPostgresIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Test
-    void approvingDemoRequestProvisionsEnterpriseEquivalentTenant() throws Exception {
+    void demoRequestCanBeProvisionedAndActivatedWithStrictTenantContext() throws Exception {
         String response = mockMvc.perform(post("/api/demo-requests")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -69,11 +70,21 @@ class DemoLifecycleControllerPostgresIntegrationTest {
                 .getContentAsString();
 
         String tenantId = com.jayway.jsonpath.JsonPath.read(approvalResponse, "$.tenantId");
+        String inviteUrl = com.jayway.jsonpath.JsonPath.read(approvalResponse, "$.latestInvite.inviteUrl");
+        String inviteToken = inviteUrl.substring(inviteUrl.lastIndexOf('/') + 1);
         Tenant tenant = tenantRepository.findById(UUID.fromString(tenantId)).orElseThrow();
 
         org.junit.jupiter.api.Assertions.assertEquals("ENTERPRISE", tenant.getPlanCode());
         org.junit.jupiter.api.Assertions.assertNotNull(tenant.getDemoExpiresAt());
         org.junit.jupiter.api.Assertions.assertEquals("REQUEST_REVIEW", tenant.getDemoSource());
         org.junit.jupiter.api.Assertions.assertEquals("alex@example.com", tenant.getDemoOwnerEmail());
+        tenant.setStatus("ACTIVE");
+        tenantRepository.saveAndFlush(tenant);
+
+        mockMvc.perform(post("/api/demo-invites/{token}/accept", inviteToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACCEPTED"))
+                .andExpect(jsonPath("$.setupToken").isString())
+                .andExpect(jsonPath("$.tenantId").value(tenantId));
     }
 }

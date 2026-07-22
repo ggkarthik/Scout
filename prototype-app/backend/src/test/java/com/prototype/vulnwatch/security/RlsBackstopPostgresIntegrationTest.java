@@ -66,6 +66,28 @@ class RlsBackstopPostgresIntegrationTest {
         }
     }
 
+    @Test
+    void preAuthenticationAuditRowsRemainHiddenAndUnwritableFromTenantContext() throws Exception {
+        Tenant defaultTenant = tenantService.getDefaultTenant();
+        prepareRuntimeRole();
+
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET ROLE rls_runtime_role");
+            statement.execute("RESET app.current_tenant_id");
+            insertAuditEvent(connection, null, "demo.invite.accepted");
+
+            setCurrentTenant(connection, defaultTenant.getId());
+            assertEquals(0, countAuditEvents(connection, "demo.invite.accepted"));
+
+            SQLException tenantWrite = assertThrows(
+                    SQLException.class,
+                    () -> insertAuditEvent(connection, null, "tenant.cannot.write.pre_auth")
+            );
+            assertEquals("42501", tenantWrite.getSQLState());
+        }
+    }
+
     private void enableRlsForAssets() {
         platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets ENABLE ROW LEVEL SECURITY");
         platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets FORCE ROW LEVEL SECURITY");
@@ -78,8 +100,15 @@ class RlsBackstopPostgresIntegrationTest {
     }
 
     private void prepareRuntimeRole() {
-        platformJdbcTemplate.execute("DROP ROLE IF EXISTS rls_runtime_role");
-        platformJdbcTemplate.execute("CREATE ROLE rls_runtime_role");
+        platformJdbcTemplate.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rls_runtime_role') THEN
+                        CREATE ROLE rls_runtime_role;
+                    END IF;
+                END
+                $$
+                """);
         platformJdbcTemplate.execute("GRANT USAGE ON SCHEMA platform, tenant_default TO rls_runtime_role");
         platformJdbcTemplate.execute("GRANT SELECT, REFERENCES ON ALL TABLES IN SCHEMA platform TO rls_runtime_role");
         platformJdbcTemplate.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA tenant_default TO rls_runtime_role");
@@ -121,6 +150,39 @@ class RlsBackstopPostgresIntegrationTest {
             statement.setString(3, identifier);
             statement.setObject(4, tenantId);
             statement.execute();
+        }
+    }
+
+    private void insertAuditEvent(Connection connection, UUID tenantId, String action) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO tenant_default.audit_events (
+                    id,
+                    occurred_at,
+                    actor_subject,
+                    actor_role,
+                    action,
+                    target_type,
+                    target_id,
+                    outcome,
+                    tenant_id
+                ) VALUES (?, now(), 'anonymous@example.com', 'ANONYMOUS', ?, 'demo_invite', ?, 'SUCCESS', ?)
+                """)) {
+            statement.setObject(1, UUID.randomUUID());
+            statement.setString(2, action);
+            statement.setString(3, UUID.randomUUID().toString());
+            statement.setObject(4, tenantId);
+            statement.execute();
+        }
+    }
+
+    private int countAuditEvents(Connection connection, String action) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT count(*) FROM tenant_default.audit_events WHERE action = ?")) {
+            statement.setString(1, action);
+            try (java.sql.ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getInt(1);
+            }
         }
     }
 }
