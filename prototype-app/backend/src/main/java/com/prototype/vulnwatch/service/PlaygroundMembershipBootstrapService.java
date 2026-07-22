@@ -14,7 +14,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PlaygroundMembershipBootstrapService {
@@ -27,6 +26,7 @@ public class PlaygroundMembershipBootstrapService {
     private final TenantMembershipRepository membershipRepository;
     private final AppUserGlobalRoleService globalRoleService;
     private final AuditEventService auditEventService;
+    private final TenantWorkRunner tenantWorkRunner;
 
     public PlaygroundMembershipBootstrapService(
             PlaygroundMembershipProperties properties,
@@ -34,7 +34,8 @@ public class PlaygroundMembershipBootstrapService {
             AppUserRepository userRepository,
             TenantMembershipRepository membershipRepository,
             AppUserGlobalRoleService globalRoleService,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            TenantWorkRunner tenantWorkRunner
     ) {
         this.properties = properties;
         this.tenantRepository = tenantRepository;
@@ -42,12 +43,16 @@ public class PlaygroundMembershipBootstrapService {
         this.membershipRepository = membershipRepository;
         this.globalRoleService = globalRoleService;
         this.auditEventService = auditEventService;
+        this.tenantWorkRunner = tenantWorkRunner;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     @Order(20)
-    @Transactional
     public void reconcile() {
+        TenantContext.runAsPlatform(this::reconcileInPlatformScope);
+    }
+
+    private void reconcileInPlatformScope() {
         Set<String> configured = properties.isEnabled()
                 ? properties.getSubjects().stream().filter(this::hasText)
                         .map(String::trim).collect(java.util.stream.Collectors.toSet())
@@ -92,24 +97,29 @@ public class PlaygroundMembershipBootstrapService {
             membership.setStatus("ACTIVE");
             membership.setProvenance(TenantAccessResolutionService.PLAYGROUND_PROVENANCE);
             membership.setUpdatedAt(Instant.now());
-            membership = membershipRepository.save(membership);
+            TenantMembership membershipToSave = membership;
             String action = created
                     ? "playground.membership.created"
                     : (!"ACTIVE".equalsIgnoreCase(priorStatus) ? "playground.membership.reactivated"
                     : (!role.equalsIgnoreCase(priorRole) ? "playground.membership.role_changed" : null));
-            if (action != null) {
-                audit(action, membership);
-            }
+            tenantWorkRunner.runScoped(playground, () -> {
+                TenantMembership savedMembership = membershipRepository.save(membershipToSave);
+                if (action != null) {
+                    audit(action, savedMembership);
+                }
+            });
         }
 
         for (TenantMembership membership : membershipRepository
                 .findByProvenance(TenantAccessResolutionService.PLAYGROUND_PROVENANCE)) {
             String subject = membership.getUser().getExternalSubject();
             if (!configured.contains(subject) && "ACTIVE".equalsIgnoreCase(membership.getStatus())) {
-                membership.setStatus("SUSPENDED");
-                membership.setUpdatedAt(Instant.now());
-                membershipRepository.save(membership);
-                audit("playground.membership.suspended", membership);
+                tenantWorkRunner.runScoped(membership.getTenant(), () -> {
+                    membership.setStatus("SUSPENDED");
+                    membership.setUpdatedAt(Instant.now());
+                    TenantMembership savedMembership = membershipRepository.save(membership);
+                    audit("playground.membership.suspended", savedMembership);
+                });
             }
         }
     }
