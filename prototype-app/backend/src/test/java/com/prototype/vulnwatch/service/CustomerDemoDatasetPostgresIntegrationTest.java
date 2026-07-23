@@ -2,7 +2,10 @@ package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.prototype.vulnwatch.domain.BomSourceType;
+import com.prototype.vulnwatch.domain.BomStatus;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.repo.BomIngestionRecordRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
@@ -35,12 +38,22 @@ class CustomerDemoDatasetPostgresIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private BomIngestionRecordRepository bomIngestionRecordRepository;
+
     @Test
     void seedsCompleteDatasetIdempotentlyInsideTheSelectedTenant() {
         Tenant tenant = tenantService.getDefaultTenant();
 
         var first = datasetService.seed(tenant);
+        tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.update("""
+                UPDATE bom_ingestion_records
+                   SET source_type = 'GITHUB_REPO'
+                 WHERE bom_type IN ('AI_BOM', 'CBOM')
+                """));
+        assertEquals(true, datasetService.needsRepair(tenant));
         var second = datasetService.seed(tenant);
+        assertEquals(false, datasetService.needsRepair(tenant));
 
         assertEquals(first, second);
         assertEquals(6, first.assets());
@@ -67,6 +80,17 @@ class CustomerDemoDatasetPostgresIntegrationTest {
             assertEquals(8, count("cbom_components"));
             assertEquals(9, count("cbom_risk_findings"));
             assertEquals(2, count("cbom_posture_summary"));
+            assertEquals(0, jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                      FROM bom_ingestion_records
+                     WHERE source_type = 'GITHUB_REPO'
+                    """, Integer.class));
+            assertEquals(4, bomIngestionRecordRepository
+                    .findByTenant_IdAndStatus(tenant.getId(), BomStatus.ACTIVE).stream()
+                    .filter(record -> record.getBomType().name().equals("AI_BOM")
+                            || record.getBomType().name().equals("CBOM"))
+                    .filter(record -> record.getSourceType() == BomSourceType.GITHUB_REPOSITORY)
+                    .count());
             assertEquals(24, count("inventory_components"));
             assertEquals(18, count("findings"));
             assertEquals(18, count("finding_events"));

@@ -48,6 +48,10 @@ public class DemoDatasetProvisioningService {
         return seedIfReady(tenantId);
     }
 
+    public boolean needsRepair(Tenant tenant) {
+        return datasetService.needsRepair(tenant);
+    }
+
     @Scheduled(initialDelayString = "${app.demo-data.initial-delay-ms:15000}",
             fixedDelayString = "${app.demo-data.poll-delay-ms:30000}")
     public void seedRequestedTenants() {

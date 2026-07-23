@@ -36,7 +36,8 @@ public class DemoDatasetStartupRunner {
         }
         var tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
                 .orElseThrow(() -> new IllegalStateException("Demo seed tenant slug not found: " + tenantSlug));
-        if (CustomerDemoDatasetService.DATASET_VERSION.equals(DemoDatasetProvisioningService.version(tenant))) {
+        if (CustomerDemoDatasetService.DATASET_VERSION.equals(DemoDatasetProvisioningService.version(tenant))
+                && !provisioningService.needsRepair(tenant)) {
             LOG.info("Demo dataset {} is already installed for tenant {}",
                     DemoDatasetProvisioningService.version(tenant), tenantSlug);
             return;

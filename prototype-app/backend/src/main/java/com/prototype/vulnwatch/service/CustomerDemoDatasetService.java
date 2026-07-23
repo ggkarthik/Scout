@@ -67,6 +67,17 @@ public class CustomerDemoDatasetService {
         return tenantSchemaExecutionService.run(tenant, () -> seedInTenantSchema(tenant));
     }
 
+    public boolean needsRepair(Tenant tenant) {
+        return tenantSchemaExecutionService.run(tenant, () -> Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM bom_ingestion_records
+                     WHERE tenant_id = ?
+                       AND source_type = 'GITHUB_REPO'
+                )
+                """, Boolean.class, tenant.getId())));
+    }
+
     private DemoDatasetSummary seedInTenantSchema(Tenant tenant) {
         UUID tenantId = tenant.getId();
         Instant now = Instant.now();
@@ -382,9 +393,13 @@ public class CustomerDemoDatasetService {
                      source_label, spec_family, document_format, document_name, content_type,
                      component_count, status, ingested_at, ingested_by)
                 VALUES (?, ?, ?, ?, 'CYCLONEDX', '1.6', ?, ?, 'GITHUB_REPO',
-                        'GITHUB_REPO', 'github', ?, ?, 'CYCLONEDX', 'JSON', ?,
+                        'GITHUB_REPOSITORY', 'github', ?, ?, 'CYCLONEDX', 'JSON', ?,
                         'application/vnd.cyclonedx+json', ?, 'ACTIVE', ?, 'demo-seeder')
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT (id) DO UPDATE
+                    SET source_type = EXCLUDED.source_type,
+                        source_reference = EXCLUDED.source_reference,
+                        source_label = EXCLUDED.source_label,
+                        document_name = EXCLUDED.document_name
                 """, id, tenantId, assetId, bomType, "urn:uuid:" + id, supplier,
                 "github.com/kanra/platform/" + filename, filename, filename, componentCount, ts(ingestedAt));
         return id;
