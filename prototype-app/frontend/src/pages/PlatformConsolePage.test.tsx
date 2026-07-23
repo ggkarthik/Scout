@@ -368,6 +368,43 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
     await waitFor(() => expect(vi.mocked(api.retryTenantProvisioning).mock.calls[0]?.[0]).toBe('tenant-failed'));
   });
 
+  it('sends demo data only when the provisioning option is selected', async () => {
+    mockTenantSchemaStatus();
+    vi.spyOn(api, 'listTenants').mockResolvedValue([]);
+    vi.spyOn(api, 'listInventoryConnectorHealth').mockResolvedValue([]);
+    const createTenant = vi.spyOn(api, 'createTenant').mockResolvedValue({
+      id: 'tenant-kanra',
+      name: 'Kanra',
+      slug: 'kanra',
+      status: 'PROVISIONING',
+      planCode: 'ENTERPRISE',
+      billingRef: null,
+      maxConnectorCount: 10,
+      maxServiceAccountCount: 25,
+      maxDailySbomUploads: 100,
+      maxExportRows: 50000,
+      maxDailyExposureRefreshes: 25,
+      demoDataRequested: true,
+      demoDataStatus: 'REQUESTED',
+      createdAt: '2026-07-23T00:00:00Z',
+      updatedAt: null
+    });
+
+    renderPlatformTenants(PLATFORM_SCOPE_OWNER, createTestQueryClient());
+
+    fireEvent.change(await screen.findByLabelText('Tenant name'), { target: { value: 'Kanra' } });
+    fireEvent.change(screen.getByLabelText('Tenant slug'), { target: { value: 'kanra' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Add demo data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Tenant' }));
+
+    await waitFor(() => expect(createTenant.mock.calls[0]?.[0]).toEqual({
+      name: 'Kanra',
+      slug: 'kanra',
+      billingRef: '',
+      addDemoData: true
+    }));
+  });
+
   it('renders enterprise performance guardrails in reliability view', async () => {
     mockOperationsApi({
       performanceScorecard: {

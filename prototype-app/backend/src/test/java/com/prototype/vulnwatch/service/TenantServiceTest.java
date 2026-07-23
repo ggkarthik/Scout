@@ -61,6 +61,22 @@ class TenantServiceTest {
     }
 
     @Test
+    void tenantCreationKeepsDemoDataOptionalAndRecordsExplicitOptIn() {
+        when(tenantSchemaService.deriveSchemaName(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> "tenant_" + invocation.getArgument(0));
+        when(tenantRepository.save(org.mockito.ArgumentMatchers.any(Tenant.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Tenant withoutDemoData = tenantService.createTenant("Plain Tenant", "plain", null, null);
+        Tenant withDemoData = tenantService.createTenant("Kanra", "kanra", null, null, true);
+
+        assertEquals(false, withoutDemoData.isDemoDataRequested());
+        assertEquals("NOT_REQUESTED", withoutDemoData.getDemoDataStatus());
+        assertEquals(true, withDemoData.isDemoDataRequested());
+        assertEquals("REQUESTED", withDemoData.getDemoDataStatus());
+    }
+
+    @Test
     void updateQuotasAllowsNullAdmissionOverridesToFallBackToDefaults() {
         UUID tenantId = UUID.randomUUID();
         Tenant tenant = new Tenant();

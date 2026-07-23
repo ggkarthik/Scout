@@ -78,6 +78,10 @@ public class TenantService {
     }
 
     public Tenant createTenant(String name, String slug, String planCode, String billingRef) {
+        return createTenant(name, slug, planCode, billingRef, false);
+    }
+
+    public Tenant createTenant(String name, String slug, String planCode, String billingRef, boolean addDemoData) {
         Tenant tenant = new Tenant();
         tenant.setName(requireText(name, "name"));
         tenant.setSlug(normalizeSlug(slug == null || slug.isBlank() ? name : slug));
@@ -85,6 +89,8 @@ public class TenantService {
         tenant.setPlanCode(normalizePlanCode(planCode));
         tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
         tenant.setStatus("PROVISIONING");
+        tenant.setDemoDataRequested(addDemoData);
+        tenant.setDemoDataStatus(addDemoData ? "REQUESTED" : "NOT_REQUESTED");
         return tenantRepository.save(tenant);
     }
 

@@ -33,7 +33,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
     @Test
     void contextStartupAppliesAllMigrationsOnFreshDatabase() {
         assertNotNull(flyway.info().current());
-        assertEquals("46", flyway.info().current().getVersion().getVersion());
+        assertEquals("47", flyway.info().current().getVersion().getVersion());
         assertEquals(0, flyway.info().pending().length);
 
         Integer failed = jdbcTemplate.queryForObject(
@@ -41,7 +41,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
                 Integer.class
         );
         Integer latest = jdbcTemplate.queryForObject(
-                "select count(*) from public.flyway_schema_history where version = '46' and success = true",
+                "select count(*) from public.flyway_schema_history where version = '47' and success = true",
                 Integer.class
         );
 

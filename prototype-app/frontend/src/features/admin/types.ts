@@ -126,6 +126,11 @@ export type Tenant = {
   demoCreatedBy?: string | null;
   demoSource?: string | null;
   demoOwnerEmail?: string | null;
+  demoDataRequested?: boolean;
+  demoDataStatus?: string;
+  demoDataVersion?: string | null;
+  demoDataSeededAt?: string | null;
+  demoDataError?: string | null;
   createdAt: string;
   updatedAt: string | null;
 };
@@ -135,6 +140,7 @@ export type TenantCreateRequest = {
   slug: string;
   planCode?: string;
   billingRef?: string;
+  addDemoData?: boolean;
 };
 
 export type TenantSchemaStatusItem = {

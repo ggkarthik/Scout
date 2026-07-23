@@ -90,7 +90,8 @@ public class TenantAdministrationController {
     @PostMapping("/platform/tenants")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public ResponseEntity<TenantResponse> createTenant(@RequestBody TenantCreateRequest request) {
-        Tenant tenant = tenantAdministrationService.createTenant(request.name(), request.slug(), request.planCode(), request.billingRef());
+        Tenant tenant = tenantAdministrationService.createTenant(
+                request.name(), request.slug(), request.planCode(), request.billingRef(), request.addDemoData());
         auditEventService.record("tenant.provisioning.requested", "tenant", tenant.getId().toString(), null);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(toTenantResponse(tenant));
     }
@@ -375,6 +376,11 @@ public class TenantAdministrationController {
                 tenant.getDemoCreatedBy(),
                 tenant.getDemoSource(),
                 tenant.getDemoOwnerEmail(),
+                tenant.isDemoDataRequested(),
+                tenant.getDemoDataStatus(),
+                tenant.getDemoDataVersion(),
+                tenant.getDemoDataSeededAt(),
+                tenant.getDemoDataError(),
                 tenant.getCreatedAt(),
                 tenant.getUpdatedAt());
     }

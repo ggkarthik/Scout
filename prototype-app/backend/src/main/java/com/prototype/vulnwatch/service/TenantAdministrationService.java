@@ -26,8 +26,8 @@ public class TenantAdministrationService {
         return tenantService.requireTenantUuid(tenantId);
     }
 
-    public Tenant createTenant(String name, String slug, String planCode, String billingRef) {
-        return tenantService.createTenant(name, slug, planCode, billingRef);
+    public Tenant createTenant(String name, String slug, String planCode, String billingRef, boolean addDemoData) {
+        return tenantService.createTenant(name, slug, planCode, billingRef, addDemoData);
     }
 
     public Tenant retryProvisioning(UUID tenantId) {

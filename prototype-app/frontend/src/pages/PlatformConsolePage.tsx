@@ -1172,10 +1172,11 @@ function TenantLifecyclePanel() {
     const name = String(formData.get('name') ?? '').trim();
     const slug = String(formData.get('slug') ?? '').trim();
     const billingRef = String(formData.get('billingRef') ?? '').trim();
+    const addDemoData = formData.get('addDemoData') === 'on';
     if (!name || !slug) {
       return;
     }
-    createTenant.mutate({ name, slug, billingRef });
+    createTenant.mutate({ name, slug, billingRef, addDemoData });
     event.currentTarget.reset();
   };
 
@@ -1191,6 +1192,10 @@ function TenantLifecyclePanel() {
         <input name="name" placeholder="Tenant name" aria-label="Tenant name" />
         <input name="slug" placeholder="tenant-slug" aria-label="Tenant slug" />
         <input name="billingRef" placeholder="Billing reference" aria-label="Billing reference" />
+        <label className="checkbox-row">
+          <input type="checkbox" name="addDemoData" />
+          <span>Add demo data</span>
+        </label>
         <button type="submit" className="btn btn-primary" disabled={createTenant.isPending}>
           {createTenant.isPending ? 'Creating...' : 'Create Tenant'}
         </button>
@@ -1219,6 +1224,7 @@ function TenantLifecyclePanel() {
                 <th>Owner Email</th>
                 <th>Slug</th>
                 <th>Status</th>
+                <th>Demo Data</th>
                 <th>Workspace</th>
                 <th>Daily Exposure Refreshes</th>
                 <th>Demo Expires</th>
@@ -1252,6 +1258,10 @@ function TenantLifecyclePanel() {
                           {schemaStatus.migrationRunId ? ` · Run ${schemaStatus.migrationRunId.slice(0, 8)}` : ''}
                         </small>
                       ) : null}
+                    </td>
+                    <td>
+                      <div>{tenant.demoDataStatus ?? 'NOT_REQUESTED'}</div>
+                      {tenant.demoDataError ? <small>{tenant.demoDataError}</small> : null}
                     </td>
                     <td>{formatWorkspaceProfile(tenant.planCode)}</td>
                     <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>

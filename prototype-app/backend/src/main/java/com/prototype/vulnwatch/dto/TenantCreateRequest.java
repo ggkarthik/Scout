@@ -4,6 +4,7 @@ public record TenantCreateRequest(
         String name,
         String slug,
         String planCode,
-        String billingRef
+        String billingRef,
+        boolean addDemoData
 ) {
 }

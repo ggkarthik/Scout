@@ -27,6 +27,11 @@ public record TenantResponse(
         String demoCreatedBy,
         String demoSource,
         String demoOwnerEmail,
+        boolean demoDataRequested,
+        String demoDataStatus,
+        String demoDataVersion,
+        Instant demoDataSeededAt,
+        String demoDataError,
         Instant createdAt,
         Instant updatedAt
 ) {
