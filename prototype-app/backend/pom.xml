@@ -110,6 +110,13 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>apache-client</artifactId>
+            <exclusions>
+                <!-- Spring's spring-jcl provides the Commons Logging API bridge. -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Azure Identity SDK — Cloud Discovery -->
