@@ -46,7 +46,7 @@ public final class CorporateEmailPolicy {
         if (!isCorporateEmail(email)) {
             throw new DemoAccessException(
                     "CORPORATE_EMAIL_REQUIRED",
-                    "Enter a valid corporate email address. Free email providers are not accepted.",
+                    "Enter a valid corporate email address.",
                     HttpStatus.BAD_REQUEST);
         }
     }

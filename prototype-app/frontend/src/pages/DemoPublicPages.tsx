@@ -656,7 +656,7 @@ export function DemoRequestPage() {
     }
     const email = String(formData.get('email') ?? '').trim();
     if (!isCorporateEmail(email)) {
-      setFormError('Enter a valid corporate email address. Free email providers are not accepted.');
+      setFormError('Enter a valid corporate email address.');
       return;
     }
     if (!captchaToken) {
@@ -669,7 +669,6 @@ export function DemoRequestPage() {
       company: String(formData.get('company') ?? '').trim(),
       roleTitle: String(formData.get('roleTitle') ?? '').trim(),
       companySize: String(formData.get('companySize') ?? '').trim(),
-      useCase: String(formData.get('useCase') ?? '').trim(),
       notes: String(formData.get('notes') ?? '').trim(),
       acceptedTerms,
       captchaToken
@@ -690,11 +689,11 @@ export function DemoRequestPage() {
           </div>
         </div>
         <form className="demo-request-form" onSubmit={submit}>
-          <label>Full name<input name="fullName" required maxLength={255} /></label>
-          <label>Work email<input name="email" type="email" required maxLength={255} /></label>
-          <label>Company<input name="company" required maxLength={255} /></label>
-          <label>Role<input name="roleTitle" maxLength={255} /></label>
-          <label>Company size
+          <label className="half-width">Full name<input name="fullName" required maxLength={255} /></label>
+          <label className="half-width">Work email<input name="email" type="email" required maxLength={255} /></label>
+          <label className="third-width">Company<input name="company" required maxLength={255} /></label>
+          <label className="third-width">Role<input name="roleTitle" maxLength={255} /></label>
+          <label className="third-width">Company size
             <select name="companySize" defaultValue="">
               <option value="" disabled>Select size</option>
               <option value="1-100">1-100</option>
@@ -703,16 +702,7 @@ export function DemoRequestPage() {
               <option value="5000+">5,000+</option>
             </select>
           </label>
-          <label>Primary use case
-            <select name="useCase" defaultValue="">
-              <option value="" disabled>Select use case</option>
-              <option value="SBOM validation">SBOM validation</option>
-              <option value="Vulnerability prioritization">Vulnerability prioritization</option>
-              <option value="Finding workflow">Finding workflow</option>
-              <option value="Executive reporting">Executive reporting</option>
-            </select>
-          </label>
-          <label className="full-width">Notes<textarea name="notes" rows={4} maxLength={2000} /></label>
+          <label className="full-width">Notes<textarea name="notes" rows={3} maxLength={2000} /></label>
           <label className="demo-terms full-width">
             <input name="acceptedTerms" type="checkbox" />
             <span>I understand the demo is time-boxed, uses isolated sample-friendly workflows, and may include demo-specific usage limits.</span>
@@ -755,9 +745,9 @@ export function DemoInvitePage() {
   const acceptInvite = useMutation({
     mutationFn: () => api.acceptDemoInvite(token),
     onSuccess: (response) => {
-      if (response.setupToken) {
+      if (response.status === 'ACCEPTED') {
         const nextParams = new URLSearchParams({
-          setup: response.setupToken,
+          setup: '1',
           email: response.email
         });
         navigate(`/login?${nextParams.toString()}`);
@@ -820,9 +810,9 @@ export function TenantInvitePage() {
   const acceptInvite = useMutation({
     mutationFn: () => api.acceptTenantInvite(token),
     onSuccess: (response) => {
-      if (response.setupToken) {
+      if (response.status === 'ACCEPTED') {
         const nextParams = new URLSearchParams({
-          setup: response.setupToken,
+          setup: '1',
           email: response.email
         });
         navigate(`/login?${nextParams.toString()}`);
@@ -875,7 +865,7 @@ export function TenantInvitePage() {
 
 export function LoginPage() {
   const [searchParams] = useSearchParams();
-  const setupToken = searchParams.get('setup');
+  const setupMode = searchParams.get('setup') === '1';
   const loginEmailParam = searchParams.get('email') ?? '';
   const activationComplete = searchParams.get('activated') === '1';
   const [email, setEmail] = React.useState(loginEmailParam);
@@ -929,10 +919,10 @@ export function LoginPage() {
 
   const setupPasswordMutation = useMutation({
     mutationFn: async () => {
-      if (!setupToken) {
-        throw new Error('Password setup token is missing');
+      if (!setupMode) {
+        throw new Error('Password setup session is missing');
       }
-      return api.setupPassword(setupToken, password);
+      return api.setupPassword(password);
     },
     onSuccess: () => {
       const nextParams = new URLSearchParams({ activated: '1' });
@@ -960,7 +950,7 @@ export function LoginPage() {
   const submitLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    if (setupToken) {
+    if (setupMode) {
       setupPasswordMutation.mutate();
       return;
     }
@@ -972,16 +962,16 @@ export function LoginPage() {
       <section className="public-form-panel">
         <h1>Log in to ScoutGrid</h1>
         <p>
-          {setupToken
+          {setupMode
             ? 'Set a password for your tenant workspace. After saving it, return to the login screen and sign in with your email and new password.'
             : 'Use your email and password to access your tenant workspace or the platform console.'}
         </p>
-        {!setupToken && activationComplete && (
+        {!setupMode && activationComplete && (
           <div className="notice success" role="status">
             Password created successfully. Sign in with your email and new password to continue.
           </div>
         )}
-        {!setupToken && (
+        {!setupMode && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
             <label>Email<input type="text" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             <PasswordInput label="Password" value={password} onChange={setPassword} />
@@ -990,8 +980,9 @@ export function LoginPage() {
             </button>
           </form>
         )}
-        {setupToken && (
+        {setupMode && (
           <form className="auth-token-form dev-token-form" onSubmit={submitLogin}>
+            {loginEmailParam.trim() ? <p>Account: {loginEmailParam.trim()}</p> : null}
             <PasswordInput label="New password" value={password} onChange={setPassword} />
             <button className="btn btn-primary" type="submit" disabled={setupPasswordMutation.isPending || password.trim().length < 8}>
               {setupPasswordMutation.isPending ? 'Saving...' : 'Set password'}
@@ -1028,6 +1019,50 @@ export function LoginPage() {
             )}
           </div>
         )}
+      </section>
+    </PublicDemoShell>
+  );
+}
+
+export function SetupSessionPage() {
+  const { token = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [error, setError] = React.useState<string | null>(null);
+  const exchangePromiseRef = React.useRef<Promise<void> | null>(null);
+
+  React.useEffect(() => {
+    if (!token) {
+      setError('Password setup link is invalid or expired.');
+      return;
+    }
+    const email = searchParams.get('email') ?? '';
+    if (!exchangePromiseRef.current) {
+      window.history.replaceState(window.history.state, '', '/login?setup=pending');
+      exchangePromiseRef.current = api.startPasswordSetupSession(token);
+    }
+    let active = true;
+    void exchangePromiseRef.current
+      .then(() => {
+        if (!active) return;
+        const nextParams = new URLSearchParams({ setup: '1' });
+        if (email.trim()) nextParams.set('email', email.trim());
+        navigate(`/login?${nextParams.toString()}`, { replace: true });
+      })
+      .catch((setupError) => {
+        if (!active) return;
+        setError(setupError instanceof Error ? setupError.message : 'Password setup link is invalid or expired.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [navigate, searchParams, token]);
+
+  return (
+    <PublicDemoShell compact>
+      <section className="public-form-panel">
+        <h1>Preparing password setup</h1>
+        {error ? <div className="notice error" role="alert">{error}</div> : <p>Securing your one-time setup session...</p>}
       </section>
     </PublicDemoShell>
   );

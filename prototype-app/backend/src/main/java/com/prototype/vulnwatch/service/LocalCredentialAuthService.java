@@ -173,7 +173,10 @@ public class LocalCredentialAuthService {
 
     @Transactional
     public AuthTokenResponse setupPassword(String setupToken, String password) {
-        String normalizedToken = requireText(setupToken, "setupToken");
+        if (!hasText(setupToken)) {
+            throw invalidSetupToken();
+        }
+        String normalizedToken = setupToken.trim();
         AppUser user = userRepository.findByPasswordSetupTokenHash(hashToken(normalizedToken))
                 .orElseThrow(this::invalidSetupToken);
         if (user.getPasswordSetupTokenExpiresAt() == null || !user.getPasswordSetupTokenExpiresAt().isAfter(Instant.now())) {
@@ -274,10 +277,29 @@ public class LocalCredentialAuthService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invited user not found"));
         String token = UUID.randomUUID() + "-" + UUID.randomUUID();
         user.setPasswordSetupTokenHash(hashToken(token));
-        user.setPasswordSetupTokenExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        user.setPasswordSetupTokenExpiresAt(Instant.now().plus(30, ChronoUnit.MINUTES));
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
         return token;
+    }
+
+    @Transactional
+    public String exchangePasswordSetupToken(String setupToken) {
+        if (!hasText(setupToken)) {
+            throw invalidSetupToken();
+        }
+        AppUser user = userRepository.findByPasswordSetupTokenHash(hashToken(setupToken.trim()))
+                .orElseThrow(this::invalidSetupToken);
+        if (user.getPasswordSetupTokenExpiresAt() == null || !user.getPasswordSetupTokenExpiresAt().isAfter(Instant.now())) {
+            clearSetupToken(user);
+            throw invalidSetupToken();
+        }
+        String sessionToken = UUID.randomUUID() + "-" + UUID.randomUUID();
+        user.setPasswordSetupTokenHash(hashToken(sessionToken));
+        user.setPasswordSetupTokenExpiresAt(Instant.now().plus(30, ChronoUnit.MINUTES));
+        user.setUpdatedAt(Instant.now());
+        userRepository.save(user);
+        return sessionToken;
     }
 
     private AuthTokenResponse issuePlatformOwnerToken(AppUser user) {

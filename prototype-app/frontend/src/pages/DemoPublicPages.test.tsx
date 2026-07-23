@@ -5,7 +5,7 @@ import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } fro
 import { authApi } from '../features/auth/api';
 import { useActorQuery } from '../features/auth/queries';
 import { createTestQueryClient, renderWithProviders } from '../test/test-utils';
-import { DemoInvitePage, DemoLandingPage, DemoRequestPage, LoginPage } from './DemoPublicPages';
+import { DemoInvitePage, DemoLandingPage, DemoRequestPage, LoginPage, SetupSessionPage } from './DemoPublicPages';
 
 function ExposureActorProbe() {
   const actorQuery = useActorQuery();
@@ -74,7 +74,7 @@ describe('Demo public pages', () => {
     fireEvent.change(screen.getByLabelText(/^Company$/i), { target: { value: 'Example Co' } });
     fireEvent.change(screen.getByLabelText(/Role/i), { target: { value: 'Security Lead' } });
     fireEvent.change(screen.getByLabelText(/Company size/i), { target: { value: '101-1000' } });
-    fireEvent.change(screen.getByLabelText(/Primary use case/i), { target: { value: 'SBOM validation' } });
+    expect(screen.queryByLabelText(/Primary use case/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/I understand/i));
     fireEvent.click(screen.getByRole('button', { name: /Submit request/i }));
 
@@ -87,6 +87,7 @@ describe('Demo public pages', () => {
         captchaToken: 'test-captcha-token'
       }), expect.anything());
     });
+    expect(createDemoRequest.mock.calls[0]?.[0]).not.toHaveProperty('useCase');
   });
 
   it('rejects free email providers before submitting a demo request', async () => {
@@ -99,7 +100,9 @@ describe('Demo public pages', () => {
     fireEvent.click(screen.getByLabelText(/I understand/i));
     fireEvent.click(screen.getByRole('button', { name: /Submit request/i }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/valid corporate email address/i);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Enter a valid corporate email address.');
+    expect(alert).not.toHaveTextContent(/free email providers/i);
     expect(createDemoRequest).not.toHaveBeenCalled();
   });
 
@@ -248,8 +251,7 @@ describe('Demo public pages', () => {
       demoExpiresAt: '2026-05-09T00:00:00Z',
       inviteExpiresAt: '2026-05-09T00:00:00Z',
       loginUrl: '/login',
-      message: 'Invite accepted',
-      setupToken: 'setup-token-123'
+      message: 'Invite accepted'
     });
 
     renderWithProviders(
@@ -276,7 +278,7 @@ describe('Demo public pages', () => {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
       </Routes>,
-      { route: '/login?setup=setup-token-123&email=alex%40example.com' }
+      { route: '/login?setup=1&email=alex%40example.com' }
     );
 
     fireEvent.change(screen.getByLabelText(/New password/i), { target: { value: 'password-123' } });
@@ -284,7 +286,24 @@ describe('Demo public pages', () => {
 
     expect(await screen.findByText(/Password created successfully/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue('alex@example.com')).toBeInTheDocument();
-    expect(api.setupPassword).toHaveBeenCalledWith('setup-token-123', 'password-123');
+    expect(api.setupPassword).toHaveBeenCalledWith('password-123');
+  });
+
+  it('exchanges a setup link before rendering the password form', async () => {
+    const exchangeSpy = vi.spyOn(api, 'startPasswordSetupSession').mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/setup/:token" element={<SetupSessionPage />} />
+        <Route path="/login" element={<LoginPage />} />
+      </Routes>,
+      { route: '/setup/one-time-secret?email=alex%40example.com' }
+    );
+
+    expect(await screen.findByText(/Set a password for your tenant workspace/i)).toBeInTheDocument();
+    expect(screen.getByText(/Account: alex@example.com/i)).toBeInTheDocument();
+    expect(exchangeSpy).toHaveBeenCalledWith('one-time-secret');
+    expect(window.location.href).not.toContain('one-time-secret');
   });
 
   it('allows tenant login with the request email and new password after activation reset', async () => {
@@ -315,7 +334,7 @@ describe('Demo public pages', () => {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/configurations" element={<div>Configurations</div>} />
       </Routes>,
-      { route: '/login?setup=setup-token-123&email=alex%40example.com' }
+      { route: '/login?setup=1&email=alex%40example.com' }
     );
 
     fireEvent.change(screen.getByLabelText(/New password/i), { target: { value: 'password-123' } });

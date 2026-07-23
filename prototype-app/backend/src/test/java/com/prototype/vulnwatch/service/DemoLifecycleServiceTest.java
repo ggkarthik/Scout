@@ -117,8 +117,8 @@ class DemoLifecycleServiceTest {
                 "Casey@example.com",
                 "Example Co",
                 "Security Lead",
-                "11-50",
-                "Product demo",
+                "1-100",
+                "SBOM validation",
                 "Please follow up",
                 true,
                 "captcha-token"
@@ -127,7 +127,7 @@ class DemoLifecycleServiceTest {
                 eq("casey@example.com"),
                 eq(List.of("PENDING", "SENT", "ERROR"))))
                 .thenReturn(Optional.empty());
-        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> {
+        when(demoRequestRepository.saveAndFlush(any(DemoRequest.class))).thenAnswer(invocation -> {
             DemoRequest saved = invocation.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", UUID.randomUUID());
             return saved;
@@ -551,7 +551,7 @@ class DemoLifecycleServiceTest {
 
         assertEquals("ACCEPTED", response.inviteStatus());
         assertNotNull(existingInvite.getAcceptedAt());
-        assertEquals("https://app.example.com/login?setup=setup-token-123", response.setupUrl());
+        assertEquals("https://app.example.com/setup/setup-token-123?email=alex%40example.com", response.setupUrl());
         verify(localCredentialAuthService).issuePasswordSetupToken(request.getEmail());
     }
 

@@ -17,19 +17,19 @@ class TurnstileVerificationServiceTest {
     @Test
     void acceptsSuccessfulVerificationForExpectedHostnameAndAction() {
         TurnstileClient client = mock(TurnstileClient.class);
-        when(client.verify("secret", "valid-token")).thenReturn(
+        when(client.verify("secret", "valid-token", null)).thenReturn(
                 new VerificationResult(true, "scoutgrid.io", "demo_request", List.of()));
         TurnstileVerificationService service = new TurnstileVerificationService(
                 client, true, "secret", "scoutgrid.io");
 
         assertDoesNotThrow(() -> service.verifyDemoRequest("valid-token"));
-        verify(client).verify("secret", "valid-token");
+        verify(client).verify("secret", "valid-token", null);
     }
 
     @Test
     void rejectsFailedOrContextMismatchedVerification() {
         TurnstileClient client = mock(TurnstileClient.class);
-        when(client.verify("secret", "valid-token")).thenReturn(
+        when(client.verify("secret", "valid-token", null)).thenReturn(
                 new VerificationResult(true, "attacker.example", "other_action", List.of()));
         TurnstileVerificationService service = new TurnstileVerificationService(
                 client, true, "secret", "scoutgrid.io");

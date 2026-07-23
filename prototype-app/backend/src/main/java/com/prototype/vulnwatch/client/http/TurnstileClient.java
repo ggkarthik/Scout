@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.client.http;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,9 +24,17 @@ public class TurnstileClient {
     }
 
     public VerificationResult verify(String secretKey, String token) {
+        return verify(secretKey, token, null);
+    }
+
+    public VerificationResult verify(String secretKey, String token, String remoteIp) {
         MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
         body.add("secret", secretKey);
         body.add("response", token);
+        if (remoteIp != null && !remoteIp.isBlank() && !"unknown".equals(remoteIp)) {
+            body.add("remoteip", remoteIp);
+        }
+        body.add("idempotency_key", UUID.randomUUID().toString());
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         try {

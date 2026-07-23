@@ -135,6 +135,9 @@ const DemoInvitePage = React.lazy(async () => ({
 const TenantInvitePage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).TenantInvitePage
 }));
+const SetupSessionPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).SetupSessionPage
+}));
 const LoginPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).LoginPage
 }));
@@ -1149,6 +1152,7 @@ export default function App() {
         <Route path="/demo/expired" element={<DemoExpiredPage />} />
         <Route path="/invite/:token" element={<DemoInvitePage />} />
         <Route path="/tenant-invite/:token" element={<TenantInvitePage />} />
+        <Route path="/setup/:token" element={<SetupSessionPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/*" element={
           <AuthSessionBoundary>

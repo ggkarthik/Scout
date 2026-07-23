@@ -44,6 +44,7 @@ public class SecurityConfig {
                                 "/actuator/**",
                                 "/api/auth/login",
                                 "/api/auth/setup-password",
+                                "/api/auth/setup-session",
                                 "/api/demo-requests",
                                 "/api/demo-invites/**",
                                 "/api/tenant-invites/**"))
@@ -59,7 +60,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/readiness", "/actuator/health/liveness", "/actuator/info").permitAll()
                         .requestMatchers("/actuator/**").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/setup-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/setup-password", "/api/auth/setup-session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-invites/**").permitAll()

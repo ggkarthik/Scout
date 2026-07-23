@@ -241,7 +241,7 @@ public class IdentityAdministrationService {
         return new PlatformUserSetupLinkResponse(
                 user.getId(),
                 user.getEmail(),
-                appBaseUrl + "/login?setup=" + setupToken + "&email=" + URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8)
+                appBaseUrl + "/setup/" + setupToken + "?email=" + URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8)
         );
     }
 

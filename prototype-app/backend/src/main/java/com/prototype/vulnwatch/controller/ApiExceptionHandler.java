@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.service.QuotaExceededException;
 import com.prototype.vulnwatch.service.DemoAccessException;
+import com.prototype.vulnwatch.security.PublicRateLimitException;
 import jakarta.persistence.EntityNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
@@ -146,6 +147,13 @@ public class ApiExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleDemoAccess(DemoAccessException ex) {
         log.warn("Demo access boundary rejected API request: {}", ex.getMessage());
         return ResponseEntity.status(ex.getStatus()).body(error(ex.getCode(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(PublicRateLimitException.class)
+    public ResponseEntity<Map<String, Object>> handlePublicRateLimit(PublicRateLimitException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", Long.toString(ex.getRetryAfterSeconds()))
+                .body(error("RATE_LIMITED", ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)

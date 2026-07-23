@@ -90,9 +90,14 @@ app:
       allow-non-expiring: ${APP_SUPPORT_ACCESS_ALLOW_NON_EXPIRING:false}
     production-forbidden-identity-subjects: ${APP_PRODUCTION_FORBIDDEN_IDENTITY_SUBJECTS:}
     local-auth:
+      setup-cookie-secure: ${APP_SETUP_COOKIE_SECURE:false}
+      setup-token-ttl-minutes: ${APP_SETUP_TOKEN_TTL_MINUTES:30}
       shared-localhost-login-enabled: ${APP_SHARED_LOCALHOST_LOGIN_ENABLED:false}
       shared-localhost-tenant-admin-email: ${APP_SHARED_LOCALHOST_TENANT_ADMIN_EMAIL:}
       shared-localhost-tenant-admin-password-hash: ${APP_SHARED_LOCALHOST_TENANT_ADMIN_PASSWORD_HASH:}
+    public-rate-limit:
+      enabled: ${APP_PUBLIC_RATE_LIMIT_ENABLED:true}
+      trust-proxy-headers: ${APP_PUBLIC_RATE_LIMIT_TRUST_PROXY_HEADERS:false}
     headers:
       content-security-policy: ${APP_CONTENT_SECURITY_POLICY:default-src 'none'; frame-ancestors 'none'}
       permissions-policy: ${APP_PERMISSIONS_POLICY:camera=(), microphone=(), geolocation=(), payment=()}

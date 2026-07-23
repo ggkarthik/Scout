@@ -748,7 +748,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers
+    headers,
+    credentials: 'include'
   });
   const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   recordApiTiming(
@@ -782,7 +783,8 @@ async function publicRequest<T>(path: string, options?: RequestInit): Promise<T>
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers
+    headers,
+    credentials: 'include'
   });
   if (!response.ok) {
     throw await parseApiError(response);
@@ -1438,9 +1440,15 @@ export const api = {
     request<TenantSupportGrant>(`/auth/support-grants/${encodeURIComponent(grantId)}/accept`, {
       method: 'POST'
     }),
-  setupPassword: (setupToken: string, password: string) => publicRequest<AuthTokenResponse>('/auth/setup-password', {
+  setupPassword: (password: string) => publicRequest<AuthTokenResponse>('/auth/setup-password', {
     method: 'POST',
-    body: JSON.stringify({ setupToken, password })
+    headers: { 'X-Scout-Setup': '1' },
+    body: JSON.stringify({ password })
+  }),
+  startPasswordSetupSession: (setupToken: string) => publicRequest<void>('/auth/setup-session', {
+    method: 'POST',
+    headers: { 'X-Scout-Setup': '1' },
+    body: JSON.stringify({ setupToken })
   }),
   listTestPersonas: () => request<TestPersona[]>('/dev/test-personas'),
   issueTestPersonaToken: (personaKey: string) =>

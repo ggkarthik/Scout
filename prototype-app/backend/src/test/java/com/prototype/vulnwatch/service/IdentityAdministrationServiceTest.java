@@ -77,7 +77,7 @@ class IdentityAdministrationServiceTest {
     }
 
     @Test
-    void issuePlatformUserSetupLinkReturnsLoginSetupUrl() {
+    void issuePlatformUserSetupLinkReturnsOneTimeExchangeUrl() {
         AppUser user = user("owner-subject", true);
         user.setEmail("owner@example.com");
 
@@ -89,7 +89,7 @@ class IdentityAdministrationServiceTest {
 
         assertEquals(user.getId(), response.userId());
         assertEquals("owner@example.com", response.email());
-        assertTrue(response.setupUrl().contains("/login?setup=setup-token-123"));
+        assertTrue(response.setupUrl().contains("/setup/setup-token-123"));
         assertTrue(response.setupUrl().contains("email=owner%40example.com"));
     }
 

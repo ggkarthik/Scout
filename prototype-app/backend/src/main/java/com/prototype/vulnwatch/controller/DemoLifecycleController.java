@@ -6,12 +6,18 @@ import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
 import com.prototype.vulnwatch.dto.DemoRequestDecisionRequest;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
+import com.prototype.vulnwatch.dto.DemoRequestReceiptResponse;
+import com.prototype.vulnwatch.service.DuplicateDemoRequestException;
 import com.prototype.vulnwatch.dto.DemoStatusResponse;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TurnstileVerificationService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import com.prototype.vulnwatch.security.PasswordSetupCookieService;
+import com.prototype.vulnwatch.security.PublicEndpointRateLimiter;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -23,6 +29,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api")
@@ -32,23 +39,38 @@ public class DemoLifecycleController {
     private final RequestActorService requestActorService;
     private final TurnstileVerificationService turnstileVerificationService;
     private final WorkspaceService workspaceService;
+    private final PasswordSetupCookieService passwordSetupCookieService;
+    private final PublicEndpointRateLimiter publicEndpointRateLimiter;
 
     public DemoLifecycleController(
             DemoLifecycleService demoLifecycleService,
             RequestActorService requestActorService,
             TurnstileVerificationService turnstileVerificationService,
-            WorkspaceService workspaceService
+            WorkspaceService workspaceService,
+            PasswordSetupCookieService passwordSetupCookieService,
+            PublicEndpointRateLimiter publicEndpointRateLimiter
     ) {
         this.demoLifecycleService = demoLifecycleService;
         this.requestActorService = requestActorService;
         this.turnstileVerificationService = turnstileVerificationService;
         this.workspaceService = workspaceService;
+        this.passwordSetupCookieService = passwordSetupCookieService;
+        this.publicEndpointRateLimiter = publicEndpointRateLimiter;
     }
 
     @PostMapping("/demo-requests")
-    public DemoRequestResponse createRequest(@Valid @RequestBody DemoRequestCreateRequest request) {
-        turnstileVerificationService.verifyDemoRequest(request.captchaToken());
-        return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.createRequest(request));
+    public ResponseEntity<DemoRequestReceiptResponse> createRequest(
+            @Valid @RequestBody DemoRequestCreateRequest request,
+            HttpServletRequest servletRequest
+    ) {
+        publicEndpointRateLimiter.checkRegistration(servletRequest, request.email());
+        turnstileVerificationService.verifyDemoRequest(request.captchaToken(), publicEndpointRateLimiter.clientIp(servletRequest));
+        try {
+            TenantContext.runAsPreAuthentication(() -> demoLifecycleService.createRequest(request));
+        } catch (DuplicateDemoRequestException ignored) {
+            // Deliberately indistinguishable from a new request to prevent email enumeration.
+        }
+        return ResponseEntity.accepted().body(DemoRequestReceiptResponse.received());
     }
 
     @GetMapping("/platform/demo-requests")
@@ -94,13 +116,21 @@ public class DemoLifecycleController {
     }
 
     @GetMapping("/demo-invites/{token}")
-    public DemoInviteValidationResponse validateInvite(@PathVariable String token) {
+    public DemoInviteValidationResponse validateInvite(@PathVariable String token, HttpServletRequest request) {
+        publicEndpointRateLimiter.checkInvite(request, token);
         return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.validateInvite(token));
     }
 
     @PostMapping("/demo-invites/{token}/accept")
-    public DemoInviteValidationResponse acceptInvite(@PathVariable String token) {
-        return TenantContext.runAsPreAuthentication(() -> demoLifecycleService.acceptInvite(token));
+    public DemoInviteValidationResponse acceptInvite(
+            @PathVariable String token,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        publicEndpointRateLimiter.checkInvite(request, token);
+        DemoInviteValidationResponse result = TenantContext.runAsPreAuthentication(() -> demoLifecycleService.acceptInvite(token));
+        passwordSetupCookieService.write(response, result.setupToken());
+        return result;
     }
 
     @GetMapping("/demo/status")

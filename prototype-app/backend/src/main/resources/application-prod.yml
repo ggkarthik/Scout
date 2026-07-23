@@ -22,6 +22,12 @@ app:
     allow-api-key-auth: false
     default-user-id: ${APP_DEFAULT_USER_ID:}
     validate-rls-runtime-role: true
+    local-auth:
+      setup-cookie-secure: true
+      setup-token-ttl-minutes: ${APP_SETUP_TOKEN_TTL_MINUTES:30}
+    public-rate-limit:
+      enabled: true
+      trust-proxy-headers: true
     turnstile:
       enabled: ${APP_TURNSTILE_ENABLED:true}
       expected-hostname: ${APP_TURNSTILE_EXPECTED_HOSTNAME:scoutgrid.io}

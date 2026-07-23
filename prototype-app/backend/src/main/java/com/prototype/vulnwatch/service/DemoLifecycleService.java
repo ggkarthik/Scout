@@ -1,6 +1,8 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.DemoInvite;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.DemoRequest;
 import com.prototype.vulnwatch.domain.AppUser;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -25,6 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -36,6 +39,7 @@ public class DemoLifecycleService {
     public static final String DEMO_PLAN_CODE = "DEMO";
     private static final String DEMO_SOURCE_REQUEST_REVIEW = "REQUEST_REVIEW";
     private static final List<String> ACTIVE_REQUEST_STATUSES = List.of("PENDING", "SENT", "ERROR");
+    private static final ObjectMapper AUDIT_JSON = new ObjectMapper();
 
     private final DemoRequestRepository demoRequestRepository;
     private final DemoInviteRepository demoInviteRepository;
@@ -92,21 +96,29 @@ public class DemoLifecycleService {
 
     @Transactional
     public DemoRequestResponse createRequest(DemoRequestCreateRequest request) {
-        String email = requireText(request.email(), "email").toLowerCase();
+        String email = DemoRequestInputPolicy.requiredSingleLine(request.email(), "email").toLowerCase(java.util.Locale.ROOT);
         CorporateEmailPolicy.requireCorporateEmail(email);
-        demoRequestRepository.findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(email, ACTIVE_REQUEST_STATUSES)
-                .ifPresent(existing -> {
-                    throw new DemoAccessException("DEMO_REQUEST_EXISTS", "A demo request for this email is already in review", HttpStatus.CONFLICT);
-                });
+        var existingRequest = demoRequestRepository.findFirstByEmailIgnoreCaseAndStatusInOrderByRequestedAtDesc(email, ACTIVE_REQUEST_STATUSES);
+        if (existingRequest.isPresent()) {
+            return toRequestResponse(existingRequest.get());
+        }
         DemoRequest demoRequest = new DemoRequest();
         demoRequest.setEmail(email);
-        demoRequest.setFullName(requireText(request.fullName(), "fullName"));
-        demoRequest.setCompany(requireText(request.company(), "company"));
-        demoRequest.setRoleTitle(trimToNull(request.roleTitle()));
-        demoRequest.setCompanySize(trimToNull(request.companySize()));
-        demoRequest.setUseCase(trimToNull(request.useCase()));
-        demoRequest.setNotes(trimToNull(request.notes()));
-        DemoRequest saved = demoRequestRepository.save(demoRequest);
+        demoRequest.setFullName(DemoRequestInputPolicy.requiredSingleLine(request.fullName(), "fullName"));
+        demoRequest.setCompany(DemoRequestInputPolicy.requiredSingleLine(request.company(), "company"));
+        demoRequest.setRoleTitle(DemoRequestInputPolicy.optionalSingleLine(request.roleTitle(), "roleTitle"));
+        demoRequest.setCompanySize(DemoRequestInputPolicy.companySize(request.companySize()));
+        demoRequest.setUseCase(DemoRequestInputPolicy.useCase(request.useCase()));
+        demoRequest.setNotes(DemoRequestInputPolicy.optionalNotes(request.notes()));
+        DemoRequest saved;
+        try {
+            saved = demoRequestRepository.saveAndFlush(demoRequest);
+        } catch (DataIntegrityViolationException duplicateActiveRequest) {
+            if (!exceptionChainContains(duplicateActiveRequest, "uk_demo_requests_active_email")) {
+                throw duplicateActiveRequest;
+            }
+            throw new DuplicateDemoRequestException(duplicateActiveRequest);
+        }
         auditEventService.recordExplicitActor(
                 null,
                 email,
@@ -114,9 +126,26 @@ public class DemoLifecycleService {
                 "demo.request.created",
                 "demo_request",
                 saved.getId().toString(),
-                "{\"email\":\"" + email + "\"}",
+                auditJson(Map.of("email", email)),
                 "SUCCESS");
         return toRequestResponse(saved);
+    }
+
+    private String auditJson(Map<String, ?> details) {
+        try {
+            return AUDIT_JSON.writeValueAsString(details);
+        } catch (JsonProcessingException impossibleForScalarDetails) {
+            throw new IllegalStateException("Failed to serialize audit details", impossibleForScalarDetails);
+        }
+    }
+
+    private boolean exceptionChainContains(Throwable failure, String marker) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current.getMessage() != null && current.getMessage().contains(marker)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Transactional(readOnly = true)
@@ -244,7 +273,7 @@ public class DemoLifecycleService {
                 invite.getStatus(),
                 invite.getExpiresAt(),
                 appBaseUrl + "/invite/" + invite.getToken(),
-                appBaseUrl + "/login?setup=" + setupToken
+                appBaseUrl + "/setup/" + setupToken + "?email=" + java.net.URLEncoder.encode(invite.getEmail(), java.nio.charset.StandardCharsets.UTF_8)
         );
     }
 

@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import static com.prototype.vulnwatch.support.AuthRequest.asPlatformOwner;
+import static com.prototype.vulnwatch.support.AuthRequest.authedGet;
 import static com.prototype.vulnwatch.support.AuthRequest.authedPost;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +19,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockCookie;
+import jakarta.servlet.http.Cookie;
 
 @PostgresControllerIntegrationTest
 class DemoLifecycleControllerPostgresIntegrationTest {
@@ -29,6 +32,7 @@ class DemoLifecycleControllerPostgresIntegrationTest {
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
         PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
         registry.add("app.tenancy.require-tenant-context", () -> "true");
+        registry.add("app.security.jwt.hmac-secret", () -> "demo-lifecycle-integration-test-signing-secret-32-bytes-minimum");
     }
 
     @Autowired
@@ -39,28 +43,36 @@ class DemoLifecycleControllerPostgresIntegrationTest {
 
     @Test
     void demoRequestCanBeProvisionedAndActivatedWithStrictTenantContext() throws Exception {
-        String response = mockMvc.perform(post("/api/demo-requests")
+        String requestBody = """
+                {
+                  "fullName": "Alex Rivera",
+                  "email": "alex@example.com",
+                  "company": "Example Co",
+                  "roleTitle": "Security Lead",
+                  "companySize": "101-1000",
+                  "useCase": "SBOM validation",
+                  "notes": "Need a guided evaluation",
+                  "acceptedTerms": true,
+                  "captchaToken": "test-captcha-token"
+                }
+                """;
+        mockMvc.perform(post("/api/demo-requests")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "fullName": "Alex Rivera",
-                                  "email": "alex@example.com",
-                                  "company": "Example Co",
-                                  "roleTitle": "Security Lead",
-                                  "companySize": "101-1000",
-                                  "useCase": "SBOM validation",
-                                  "notes": "Need a guided evaluation",
-                                  "acceptedTerms": true,
-                                  "captchaToken": "test-captcha-token"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.provisionedPlanCode").value("ENTERPRISE"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                        .content(requestBody))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.accepted").value(true));
 
-        String requestId = com.jayway.jsonpath.JsonPath.read(response, "$.id");
+        mockMvc.perform(post("/api/demo-requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.accepted").value(true));
+
+        String queueResponse = mockMvc.perform(asPlatformOwner(authedGet("/api/platform/demo-requests")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andReturn().getResponse().getContentAsString();
+        String requestId = com.jayway.jsonpath.JsonPath.read(queueResponse, "$[0].id");
 
         String approvalResponse = mockMvc.perform(asPlatformOwner(authedPost("/api/platform/demo-requests/{requestId}/approve", requestId)))
                 .andExpect(status().isOk())
@@ -82,10 +94,26 @@ class DemoLifecycleControllerPostgresIntegrationTest {
         tenant.setStatus("ACTIVE");
         tenantRepository.saveAndFlush(tenant);
 
-        mockMvc.perform(post("/api/demo-invites/{token}/accept", inviteToken))
+        String setCookie = mockMvc.perform(post("/api/demo-invites/{token}/accept", inviteToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ACCEPTED"))
-                .andExpect(jsonPath("$.setupToken").isString())
-                .andExpect(jsonPath("$.tenantId").value(tenantId));
+                .andExpect(jsonPath("$.setupToken").doesNotExist())
+                .andExpect(jsonPath("$.tenantId").value(tenantId))
+                .andReturn().getResponse().getHeader("Set-Cookie");
+
+        Cookie setupCookie = MockCookie.parse(setCookie);
+        mockMvc.perform(post("/api/auth/setup-password")
+                        .cookie(setupCookie)
+                        .header("X-Scout-Setup", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"StrongPassword-123!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"alex@example.com\",\"password\":\"StrongPassword-123!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString());
     }
 }

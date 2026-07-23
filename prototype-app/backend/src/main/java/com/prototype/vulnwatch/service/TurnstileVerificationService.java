@@ -35,6 +35,10 @@ public class TurnstileVerificationService {
     }
 
     public void verifyDemoRequest(String token) {
+        verifyDemoRequest(token, null);
+    }
+
+    public void verifyDemoRequest(String token, String remoteIp) {
         if (!enabled) {
             return;
         }
@@ -51,7 +55,7 @@ public class TurnstileVerificationService {
 
         VerificationResult response;
         try {
-            response = turnstileClient.verify(secretKey, token.trim());
+            response = turnstileClient.verify(secretKey, token.trim(), remoteIp);
         } catch (TurnstileClientException verificationFailure) {
             LOG.warn("Turnstile Siteverify request failed", verificationFailure);
             throw new DemoAccessException(

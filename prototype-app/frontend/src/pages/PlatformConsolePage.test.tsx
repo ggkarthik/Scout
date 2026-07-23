@@ -197,7 +197,7 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
     vi.spyOn(api, 'issuePlatformUserSetupLink').mockResolvedValue({
       userId: 'user-1',
       email: 'owner@example.com',
-      setupUrl: 'http://localhost:5173/login?setup=setup-token-123&email=owner%40example.com'
+      setupUrl: 'http://localhost:5173/setup/setup-token-123?email=owner%40example.com'
     });
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
@@ -209,7 +209,7 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
       expect(api.issuePlatformUserSetupLink).toHaveBeenCalled();
       expect(vi.mocked(api.issuePlatformUserSetupLink).mock.calls[0]?.[0]).toBe('user-1');
       expect(openSpy).toHaveBeenCalledWith(
-        'http://localhost:5173/login?setup=setup-token-123&email=owner%40example.com',
+        'http://localhost:5173/setup/setup-token-123?email=owner%40example.com',
         '_self'
       );
     });

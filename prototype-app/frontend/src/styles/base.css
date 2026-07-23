@@ -1422,8 +1422,8 @@
 
 .public-form-panel {
   width: min(760px, 100%);
-  margin: 8vh auto;
-  padding: 28px;
+  margin: 24px auto;
+  padding: 24px 28px;
 }
 
 .public-form-panel h1 {
@@ -1458,8 +1458,8 @@
 
 .demo-request-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px 14px;
 }
 
 .demo-request-form label,
@@ -1472,6 +1472,14 @@
 
 .demo-request-form .full-width {
   grid-column: 1 / -1;
+}
+
+.demo-request-form .half-width {
+  grid-column: span 3;
+}
+
+.demo-request-form .third-width {
+  grid-column: span 2;
 }
 
 .turnstile-field {
@@ -1571,6 +1579,12 @@
   .ai-capabilities,
   .footer-grid {
     grid-template-columns: 1fr;
+  }
+
+  .demo-request-form .half-width,
+  .demo-request-form .third-width,
+  .demo-request-form .full-width {
+    grid-column: 1;
   }
 
   .feature-grid.reverse .feature-content {
