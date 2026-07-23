@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class DemoDatasetProvisioningService {
 
     private static final Logger LOG = LoggerFactory.getLogger(DemoDatasetProvisioningService.class);
+    public static final String REQUESTED_MARKER = "CUSTOMER_DATASET_REQUESTED";
+    public static final String SEEDING_MARKER = "CUSTOMER_DATASET_SEEDING";
+    public static final String SEEDED_MARKER = "CUSTOMER_DATASET_V1_SEEDED";
 
     private final TenantRepository tenantRepository;
     private final JdbcTemplate jdbcTemplate;
@@ -35,9 +37,7 @@ public class DemoDatasetProvisioningService {
     public Tenant request(UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
-        tenant.setDemoDataRequested(true);
-        tenant.setDemoDataStatus("REQUESTED");
-        tenant.setDemoDataError(null);
+        tenant.setDemoSource(REQUESTED_MARKER);
         tenant.setUpdatedAt(Instant.now());
         return tenantRepository.save(tenant);
     }
@@ -51,10 +51,8 @@ public class DemoDatasetProvisioningService {
             fixedDelayString = "${app.demo-data.poll-delay-ms:30000}")
     public void seedRequestedTenants() {
         tenantRepository.findAllByOrderByCreatedAtAsc().stream()
-                .filter(Tenant::isDemoDataRequested)
+                .filter(DemoDatasetProvisioningService::isRequested)
                 .filter(tenant -> "ACTIVE".equalsIgnoreCase(tenant.getStatus()))
-                .filter(tenant -> "REQUESTED".equalsIgnoreCase(tenant.getDemoDataStatus())
-                        || "FAILED".equalsIgnoreCase(tenant.getDemoDataStatus()))
                 .forEach(tenant -> {
                     try {
                         seedIfReady(tenant.getId());
@@ -72,13 +70,11 @@ public class DemoDatasetProvisioningService {
         }
         int claimed = jdbcTemplate.update("""
                 UPDATE platform.tenants
-                   SET demo_data_requested = true,
-                       demo_data_status = 'SEEDING',
-                       demo_data_error = null,
+                   SET demo_source = ?,
                        updated_at = now()
                  WHERE id = ?
-                   AND demo_data_status <> 'SEEDING'
-                """, tenantId);
+                   AND coalesce(demo_source, '') <> ?
+                """, SEEDING_MARKER, tenantId, SEEDING_MARKER);
         if (claimed == 0) {
             throw new IllegalStateException("Demo data seed is already running");
         }
@@ -86,35 +82,37 @@ public class DemoDatasetProvisioningService {
             CustomerDemoDatasetService.DemoDatasetSummary summary = datasetService.seed(tenant);
             jdbcTemplate.update("""
                     UPDATE platform.tenants
-                       SET demo_data_status = 'SEEDED',
-                           demo_data_version = ?,
-                           demo_data_seeded_at = now(),
-                           demo_data_error = null,
+                       SET demo_source = ?,
                            updated_at = now()
                      WHERE id = ?
-                    """, CustomerDemoDatasetService.DATASET_VERSION, tenantId);
+                    """, SEEDED_MARKER, tenantId);
             return summary;
         } catch (RuntimeException ex) {
-            String message = rootMessage(ex);
             jdbcTemplate.update("""
                     UPDATE platform.tenants
-                       SET demo_data_status = 'FAILED',
-                           demo_data_error = ?,
+                       SET demo_source = ?,
                            updated_at = now()
                      WHERE id = ?
-                    """, message.substring(0, Math.min(message.length(), 2000)), tenantId);
+                    """, REQUESTED_MARKER, tenantId);
             throw ex;
         }
     }
 
-    private String rootMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        String message = current.getMessage();
-        return message == null || message.isBlank()
-                ? current.getClass().getSimpleName().toLowerCase(Locale.ROOT)
-                : message;
+    public static boolean isRequested(Tenant tenant) {
+        String source = tenant.getDemoSource();
+        return REQUESTED_MARKER.equals(source) || SEEDING_MARKER.equals(source) || SEEDED_MARKER.equals(source);
+    }
+
+    public static String status(Tenant tenant) {
+        return switch (tenant.getDemoSource() == null ? "" : tenant.getDemoSource()) {
+            case REQUESTED_MARKER -> "REQUESTED";
+            case SEEDING_MARKER -> "SEEDING";
+            case SEEDED_MARKER -> "SEEDED";
+            default -> "NOT_REQUESTED";
+        };
+    }
+
+    public static String version(Tenant tenant) {
+        return SEEDED_MARKER.equals(tenant.getDemoSource()) ? CustomerDemoDatasetService.DATASET_VERSION : null;
     }
 }

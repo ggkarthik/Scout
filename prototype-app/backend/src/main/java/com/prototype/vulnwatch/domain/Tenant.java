@@ -69,20 +69,6 @@ public class Tenant {
     private String demoOwnerEmail;
 
     @Column(nullable = false)
-    private boolean demoDataRequested;
-
-    @Column(nullable = false, length = 32)
-    private String demoDataStatus = "NOT_REQUESTED";
-
-    @Column(length = 64)
-    private String demoDataVersion;
-
-    private Instant demoDataSeededAt;
-
-    @Column(length = 2000)
-    private String demoDataError;
-
-    @Column(nullable = false)
     private Integer maxConnectorCount = 10;
 
     @Column(nullable = false)
@@ -229,46 +215,6 @@ public class Tenant {
 
     public void setDemoOwnerEmail(String demoOwnerEmail) {
         this.demoOwnerEmail = demoOwnerEmail;
-    }
-
-    public boolean isDemoDataRequested() {
-        return demoDataRequested;
-    }
-
-    public void setDemoDataRequested(boolean demoDataRequested) {
-        this.demoDataRequested = demoDataRequested;
-    }
-
-    public String getDemoDataStatus() {
-        return demoDataStatus;
-    }
-
-    public void setDemoDataStatus(String demoDataStatus) {
-        this.demoDataStatus = demoDataStatus;
-    }
-
-    public String getDemoDataVersion() {
-        return demoDataVersion;
-    }
-
-    public void setDemoDataVersion(String demoDataVersion) {
-        this.demoDataVersion = demoDataVersion;
-    }
-
-    public Instant getDemoDataSeededAt() {
-        return demoDataSeededAt;
-    }
-
-    public void setDemoDataSeededAt(Instant demoDataSeededAt) {
-        this.demoDataSeededAt = demoDataSeededAt;
-    }
-
-    public String getDemoDataError() {
-        return demoDataError;
-    }
-
-    public void setDemoDataError(String demoDataError) {
-        this.demoDataError = demoDataError;
     }
 
     public Instant getExpiredAt() {

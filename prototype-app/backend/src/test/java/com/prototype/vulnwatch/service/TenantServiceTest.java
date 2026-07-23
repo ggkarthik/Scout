@@ -70,10 +70,10 @@ class TenantServiceTest {
         Tenant withoutDemoData = tenantService.createTenant("Plain Tenant", "plain", null, null);
         Tenant withDemoData = tenantService.createTenant("Kanra", "kanra", null, null, true);
 
-        assertEquals(false, withoutDemoData.isDemoDataRequested());
-        assertEquals("NOT_REQUESTED", withoutDemoData.getDemoDataStatus());
-        assertEquals(true, withDemoData.isDemoDataRequested());
-        assertEquals("REQUESTED", withDemoData.getDemoDataStatus());
+        assertEquals(false, DemoDatasetProvisioningService.isRequested(withoutDemoData));
+        assertEquals("NOT_REQUESTED", DemoDatasetProvisioningService.status(withoutDemoData));
+        assertEquals(true, DemoDatasetProvisioningService.isRequested(withDemoData));
+        assertEquals("REQUESTED", DemoDatasetProvisioningService.status(withDemoData));
     }
 
     @Test

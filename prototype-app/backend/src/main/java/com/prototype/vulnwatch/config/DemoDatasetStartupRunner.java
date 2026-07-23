@@ -36,9 +36,9 @@ public class DemoDatasetStartupRunner {
         }
         var tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
                 .orElseThrow(() -> new IllegalStateException("Demo seed tenant slug not found: " + tenantSlug));
-        if (CustomerDemoDatasetService.DATASET_VERSION.equals(tenant.getDemoDataVersion())
-                && "SEEDED".equalsIgnoreCase(tenant.getDemoDataStatus())) {
-            LOG.info("Demo dataset {} is already installed for tenant {}", tenant.getDemoDataVersion(), tenantSlug);
+        if ("SEEDED".equals(DemoDatasetProvisioningService.status(tenant))) {
+            LOG.info("Demo dataset {} is already installed for tenant {}",
+                    DemoDatasetProvisioningService.version(tenant), tenantSlug);
             return;
         }
         var summary = provisioningService.requestAndSeed(tenant.getId());

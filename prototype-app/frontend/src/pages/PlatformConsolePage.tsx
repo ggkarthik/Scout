@@ -1261,7 +1261,6 @@ function TenantLifecyclePanel() {
                     </td>
                     <td>
                       <div>{tenant.demoDataStatus ?? 'NOT_REQUESTED'}</div>
-                      {tenant.demoDataError ? <small>{tenant.demoDataError}</small> : null}
                     </td>
                     <td>{formatWorkspaceProfile(tenant.planCode)}</td>
                     <td>{tenant.maxDailyExposureRefreshes ?? '-'}</td>

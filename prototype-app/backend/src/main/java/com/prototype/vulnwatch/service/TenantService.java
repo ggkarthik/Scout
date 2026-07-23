@@ -89,8 +89,9 @@ public class TenantService {
         tenant.setPlanCode(normalizePlanCode(planCode));
         tenant.setBillingRef(billingRef == null || billingRef.isBlank() ? null : billingRef.trim());
         tenant.setStatus("PROVISIONING");
-        tenant.setDemoDataRequested(addDemoData);
-        tenant.setDemoDataStatus(addDemoData ? "REQUESTED" : "NOT_REQUESTED");
+        if (addDemoData) {
+            tenant.setDemoSource(DemoDatasetProvisioningService.REQUESTED_MARKER);
+        }
         return tenantRepository.save(tenant);
     }
 

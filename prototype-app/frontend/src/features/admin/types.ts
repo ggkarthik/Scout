@@ -129,8 +129,6 @@ export type Tenant = {
   demoDataRequested?: boolean;
   demoDataStatus?: string;
   demoDataVersion?: string | null;
-  demoDataSeededAt?: string | null;
-  demoDataError?: string | null;
   createdAt: string;
   updatedAt: string | null;
 };

@@ -26,6 +26,7 @@ import com.prototype.vulnwatch.service.PlatformInventoryConnectorHealthService;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
+import com.prototype.vulnwatch.service.DemoDatasetProvisioningService;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
 import java.util.List;
 import java.util.UUID;
@@ -376,11 +377,9 @@ public class TenantAdministrationController {
                 tenant.getDemoCreatedBy(),
                 tenant.getDemoSource(),
                 tenant.getDemoOwnerEmail(),
-                tenant.isDemoDataRequested(),
-                tenant.getDemoDataStatus(),
-                tenant.getDemoDataVersion(),
-                tenant.getDemoDataSeededAt(),
-                tenant.getDemoDataError(),
+                DemoDatasetProvisioningService.isRequested(tenant),
+                DemoDatasetProvisioningService.status(tenant),
+                DemoDatasetProvisioningService.version(tenant),
                 tenant.getCreatedAt(),
                 tenant.getUpdatedAt());
     }

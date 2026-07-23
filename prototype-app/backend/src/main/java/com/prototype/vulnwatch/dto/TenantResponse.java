@@ -30,8 +30,6 @@ public record TenantResponse(
         boolean demoDataRequested,
         String demoDataStatus,
         String demoDataVersion,
-        Instant demoDataSeededAt,
-        String demoDataError,
         Instant createdAt,
         Instant updatedAt
 ) {
