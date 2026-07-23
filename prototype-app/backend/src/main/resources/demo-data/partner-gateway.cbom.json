@@ -1,0 +1,19 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:4d7d8b14-a55f-4c76-9651-ad2b260c0d69",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "Kanra Partner Gateway Cryptography",
+      "version": "2026.07"
+    }
+  },
+  "components": [
+    {"type": "cryptographic-asset", "bom-ref": "crypto:partner-tls", "name": "Partner gateway TLS", "version": "TLS 1.0"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:partner-ecdsa", "name": "Partner ECDSA certificate", "version": "ECDSA P-256"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:partner-signing", "name": "Partner API signing secret", "version": "HMAC-SHA256"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:partner-rsa", "name": "Partner RSA encryption key", "version": "RSA-2048"}
+  ]
+}

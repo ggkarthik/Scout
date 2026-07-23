@@ -1,0 +1,42 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:143dd63d-8490-4c19-949e-a91e43643a04",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "Kanra Analytics AI",
+      "version": "2026.07"
+    }
+  },
+  "components": [
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "ai:kanra-support-rag",
+      "name": "kanra-support-rag",
+      "version": "2026.06",
+      "supplier": {"name": "Kanra AI Platform"}
+    },
+    {
+      "type": "library",
+      "bom-ref": "ai:sentence-transformers",
+      "name": "sentence-transformers",
+      "version": "2.6.1",
+      "purl": "pkg:pypi/sentence-transformers@2.6.1"
+    },
+    {
+      "type": "data",
+      "bom-ref": "ai:customer-support-embeddings",
+      "name": "customer-support-embeddings",
+      "version": "2026-Q2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ai:libwebp",
+      "name": "libwebp",
+      "version": "1.3.1",
+      "purl": "pkg:generic/libwebp@1.3.1"
+    }
+  ]
+}

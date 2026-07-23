@@ -17,7 +17,8 @@ public class DemoDatasetProvisioningService {
     private static final Logger LOG = LoggerFactory.getLogger(DemoDatasetProvisioningService.class);
     public static final String REQUESTED_MARKER = "CUSTOMER_DATASET_REQUESTED";
     public static final String SEEDING_MARKER = "CUSTOMER_DATASET_SEEDING";
-    public static final String SEEDED_MARKER = "CUSTOMER_DATASET_V1_SEEDED";
+    public static final String SEEDED_V1_MARKER = "CUSTOMER_DATASET_V1_SEEDED";
+    public static final String SEEDED_MARKER = "CUSTOMER_DATASET_V2_SEEDED";
 
     private final TenantRepository tenantRepository;
     private final JdbcTemplate jdbcTemplate;
@@ -53,6 +54,7 @@ public class DemoDatasetProvisioningService {
         tenantRepository.findAllByOrderByCreatedAtAsc().stream()
                 .filter(DemoDatasetProvisioningService::isRequested)
                 .filter(tenant -> "ACTIVE".equalsIgnoreCase(tenant.getStatus()))
+                .filter(tenant -> !CustomerDemoDatasetService.DATASET_VERSION.equals(version(tenant)))
                 .forEach(tenant -> {
                     try {
                         seedIfReady(tenant.getId());
@@ -100,19 +102,24 @@ public class DemoDatasetProvisioningService {
 
     public static boolean isRequested(Tenant tenant) {
         String source = tenant.getDemoSource();
-        return REQUESTED_MARKER.equals(source) || SEEDING_MARKER.equals(source) || SEEDED_MARKER.equals(source);
+        return REQUESTED_MARKER.equals(source) || SEEDING_MARKER.equals(source)
+                || SEEDED_V1_MARKER.equals(source) || SEEDED_MARKER.equals(source);
     }
 
     public static String status(Tenant tenant) {
         return switch (tenant.getDemoSource() == null ? "" : tenant.getDemoSource()) {
             case REQUESTED_MARKER -> "REQUESTED";
             case SEEDING_MARKER -> "SEEDING";
+            case SEEDED_V1_MARKER -> "SEEDED";
             case SEEDED_MARKER -> "SEEDED";
             default -> "NOT_REQUESTED";
         };
     }
 
     public static String version(Tenant tenant) {
-        return SEEDED_MARKER.equals(tenant.getDemoSource()) ? CustomerDemoDatasetService.DATASET_VERSION : null;
+        if (SEEDED_MARKER.equals(tenant.getDemoSource())) {
+            return CustomerDemoDatasetService.DATASET_VERSION;
+        }
+        return SEEDED_V1_MARKER.equals(tenant.getDemoSource()) ? "customer-demo-v1" : null;
     }
 }

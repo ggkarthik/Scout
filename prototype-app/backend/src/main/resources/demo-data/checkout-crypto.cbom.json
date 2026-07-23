@@ -1,0 +1,19 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:aed36794-f093-4845-98bd-0c0b74277149",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "Kanra Checkout Cryptography",
+      "version": "2026.07"
+    }
+  },
+  "components": [
+    {"type": "cryptographic-asset", "bom-ref": "crypto:checkout-cert", "name": "Checkout TLS certificate", "version": "X.509 RSA-2048"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:legacy-signing", "name": "Legacy payment signing key", "version": "RSA-1024"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:receipt-digest", "name": "Legacy receipt digest", "version": "SHA-1"},
+    {"type": "cryptographic-asset", "bom-ref": "crypto:checkout-encryption", "name": "Checkout data encryption", "version": "AES-256-GCM"}
+  ]
+}

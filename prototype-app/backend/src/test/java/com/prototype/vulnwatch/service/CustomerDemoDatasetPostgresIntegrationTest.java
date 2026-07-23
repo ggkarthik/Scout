@@ -49,11 +49,24 @@ class CustomerDemoDatasetPostgresIntegrationTest {
         assertEquals(18, first.findings());
         assertEquals(8, first.cves());
         assertEquals(2, first.campaigns());
+        assertEquals(2, first.aiBoms());
+        assertEquals(8, first.aiComponents());
+        assertEquals(5, first.aiFindings());
+        assertEquals(2, first.cboms());
+        assertEquals(8, first.cbomComponents());
+        assertEquals(9, first.cbomFindings());
 
         tenantSchemaExecutionService.run(tenant, () -> {
             assertEquals(6, count("assets"));
             assertEquals(6, count("sbom_uploads"));
-            assertEquals(6, count("bom_ingestion_records"));
+            assertEquals(10, count("bom_ingestion_records"));
+            assertEquals(16, count("bom_components"));
+            assertEquals(16, count("bom_component_evidence"));
+            assertEquals(5, count("bom_component_vulnerability_links"));
+            assertEquals(5, count("bom_component_workflows"));
+            assertEquals(8, count("cbom_components"));
+            assertEquals(9, count("cbom_risk_findings"));
+            assertEquals(2, count("cbom_posture_summary"));
             assertEquals(24, count("inventory_components"));
             assertEquals(18, count("findings"));
             assertEquals(18, count("finding_events"));

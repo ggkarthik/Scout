@@ -1,0 +1,43 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:75edda70-5dd7-4e27-b47b-2fcba7d8da83",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "Kanra Checkout AI",
+      "version": "2026.07"
+    }
+  },
+  "components": [
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "ai:kanra-fraud-detector",
+      "name": "kanra-fraud-detector",
+      "version": "2026.07",
+      "supplier": {"name": "Kanra Data Science"}
+    },
+    {
+      "type": "library",
+      "bom-ref": "ai:pytorch",
+      "name": "pytorch",
+      "version": "2.2.0",
+      "purl": "pkg:pypi/torch@2.2.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ai:onnxruntime",
+      "name": "onnxruntime",
+      "version": "1.17.0",
+      "purl": "pkg:pypi/onnxruntime@1.17.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ai:langchain",
+      "name": "langchain",
+      "version": "0.2.5",
+      "purl": "pkg:pypi/langchain@0.2.5"
+    }
+  ]
+}

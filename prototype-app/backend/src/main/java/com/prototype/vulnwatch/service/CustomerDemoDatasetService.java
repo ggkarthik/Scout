@@ -18,7 +18,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class CustomerDemoDatasetService {
 
-    public static final String DATASET_VERSION = "customer-demo-v1";
+    public static final String DATASET_VERSION = "customer-demo-v2";
+    private static final String ID_NAMESPACE = "customer-demo-v1";
 
     private static final List<DemoVulnerability> VULNERABILITIES = List.of(
             new DemoVulnerability("CVE-2021-44228", "Apache Log4j remote code execution", "CRITICAL", 10.0, 0.975, true),
@@ -161,8 +162,286 @@ public class CustomerDemoDatasetService {
 
         seedOrgCves(tenantId, vulnerabilityIds, now);
         seedOperatingRecords(tenantId, vulnerabilityIds, now);
+        BomDatasetSummary bomSummary = seedAiAndCryptoBoms(tenantId, assetIds, vulnerabilityIds, now);
         return new DemoDatasetSummary(ASSETS.size(), ASSETS.size(), componentIds.size(), findingIds.size(),
-                VULNERABILITIES.size(), 2);
+                VULNERABILITIES.size(), 2, bomSummary.aiBoms(), bomSummary.aiComponents(),
+                bomSummary.aiFindings(), bomSummary.cboms(), bomSummary.cbomComponents(), bomSummary.cbomFindings());
+    }
+
+    private BomDatasetSummary seedAiAndCryptoBoms(
+            UUID tenantId,
+            List<UUID> assetIds,
+            List<UUID> vulnerabilityIds,
+            Instant now
+    ) {
+        List<UUID> aiBomIds = List.of(
+                seedBomRecord(tenantId, assetIds.get(0), "ai-bom-checkout", "AI_BOM",
+                        "checkout-ai-bom.cdx.json", "Kanra AI Platform", 4, now.minus(2, ChronoUnit.DAYS)),
+                seedBomRecord(tenantId, assetIds.get(3), "ai-bom-analytics", "AI_BOM",
+                        "analytics-ai-bom.cdx.json", "Kanra Data Science", 4, now.minus(1, ChronoUnit.DAYS))
+        );
+        List<DemoBomComponent> aiComponents = List.of(
+                new DemoBomComponent("kanra-fraud-detector", "2026.07", null, "Proprietary",
+                        "Kanra Data Science", "machine-learning-model", "runtime"),
+                new DemoBomComponent("pytorch", "2.2.0", "pkg:pypi/torch@2.2.0", "BSD-3-Clause",
+                        "PyTorch Foundation", "library", "runtime"),
+                new DemoBomComponent("onnxruntime", "1.17.0", "pkg:pypi/onnxruntime@1.17.0", "MIT",
+                        "Microsoft", "library", "runtime"),
+                new DemoBomComponent("langchain", "0.2.5", "pkg:pypi/langchain@0.2.5", "MIT",
+                        "LangChain", "library", "runtime"),
+                new DemoBomComponent("kanra-support-rag", "2026.06", null, "Proprietary",
+                        "Kanra AI Platform", "machine-learning-model", "runtime"),
+                new DemoBomComponent("sentence-transformers", "2.6.1", "pkg:pypi/sentence-transformers@2.6.1",
+                        "Apache-2.0", "UKPLab", "library", "runtime"),
+                new DemoBomComponent("customer-support-embeddings", "2026-Q2", null, "Internal",
+                        "Kanra Data Science", "dataset", "training"),
+                new DemoBomComponent("libwebp", "1.3.1", "pkg:generic/libwebp@1.3.1", "BSD-3-Clause",
+                        "Google", "library", "runtime")
+        );
+        List<UUID> aiComponentIds = new ArrayList<>();
+        for (int i = 0; i < aiComponents.size(); i++) {
+            UUID bomId = aiBomIds.get(i < 4 ? 0 : 1);
+            DemoBomComponent component = aiComponents.get(i);
+            UUID componentId = stableId(tenantId, "ai-bom-component:" + component.name());
+            aiComponentIds.add(componentId);
+            jdbcTemplate.update("""
+                    INSERT INTO bom_components
+                        (id, bom_id, tenant_id, name, version, purl, license, supplier,
+                         component_type, category, is_active, properties, bom_ref, scope, workflow_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'AI_MODEL', true, ?::jsonb, ?, ?, 'DISCOVERED')
+                    ON CONFLICT (id) DO NOTHING
+                    """, componentId, bomId, tenantId, component.name(), component.version(), component.purl(),
+                    component.license(), component.supplier(), component.componentType(),
+                    "{\"bomType\":\"AI_BOM\",\"purpose\":\"customer-demo\",\"modelRiskTier\":\""
+                            + (component.componentType().contains("model") ? "HIGH" : "MEDIUM") + "\"}",
+                    "ai:" + component.name(), component.scope());
+            jdbcTemplate.update("""
+                    INSERT INTO bom_component_evidence
+                        (id, tenant_id, bom_component_id, bom_id, evidence_type, evidence_key,
+                         evidence_value, source_system, source_reference, created_at)
+                    VALUES (?, ?, ?, ?, 'ATTESTATION', 'ai-bom-source', ?,
+                            'github', ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, stableId(tenantId, "ai-evidence:" + component.name()), tenantId, componentId, bomId,
+                    component.supplier(), "github.com/kanra/platform/" + (i < 4 ? "checkout" : "analytics"),
+                    ts(now.minus(1, ChronoUnit.DAYS)));
+        }
+        int aiFindingCount = 0;
+        int[][] aiLinks = {{1, 5}, {2, 2}, {3, 5}, {5, 3}, {7, 3}};
+        for (int[] link : aiLinks) {
+            UUID componentId = aiComponentIds.get(link[0]);
+            UUID bomId = aiBomIds.get(link[0] < 4 ? 0 : 1);
+            DemoVulnerability vulnerability = VULNERABILITIES.get(link[1]);
+            UUID vulnerabilityLinkId = stableId(tenantId,
+                    "ai-vulnerability-link:" + componentId + ":" + vulnerability.externalId());
+            jdbcTemplate.update("""
+                    INSERT INTO bom_component_vulnerability_links
+                        (id, tenant_id, bom_component_id, bom_id, vulnerability_key,
+                         vulnerability_source, relation_type, match_source, match_confidence,
+                         direct_match, correlation_evidence_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'NVD', 'CVE', 'AI_BOM_PURL', 96.00, true,
+                            ?::jsonb, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, vulnerabilityLinkId, tenantId, componentId, bomId, vulnerability.externalId(),
+                    "{\"dataset\":\"" + DATASET_VERSION + "\",\"vulnerabilityId\":\""
+                            + vulnerabilityIds.get(link[1]) + "\"}", ts(now.minus(1, ChronoUnit.DAYS)), ts(now));
+            jdbcTemplate.update("""
+                    INSERT INTO bom_component_workflows
+                        (id, tenant_id, bom_component_id, vulnerability_link_id, workflow_type,
+                         workflow_status, workflow_reason, investigation_key, started_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'INVESTIGATION', 'IN_PROGRESS',
+                            'AI runtime dependency exposure requires model-serving impact review',
+                            ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, stableId(tenantId, "ai-workflow:" + vulnerabilityLinkId), tenantId, componentId,
+                    vulnerabilityLinkId, "AIBOM-" + vulnerability.externalId(),
+                    ts(now.minus(1, ChronoUnit.DAYS)), ts(now));
+            aiFindingCount++;
+        }
+
+        List<UUID> cbomIds = List.of(
+                seedBomRecord(tenantId, assetIds.get(0), "cbom-checkout", "CBOM",
+                        "checkout-crypto.cbom.json", "Kanra Security Engineering", 4, now.minus(3, ChronoUnit.DAYS)),
+                seedBomRecord(tenantId, assetIds.get(4), "cbom-partner", "CBOM",
+                        "partner-gateway.cbom.json", "Kanra Platform Security", 4, now.minus(2, ChronoUnit.DAYS))
+        );
+        List<DemoCbomComponent> cryptoComponents = List.of(
+                new DemoCbomComponent("Checkout TLS certificate", "CERTIFICATE", "X.509", 2048,
+                        "RSA", null, "TLS termination", 62.0),
+                new DemoCbomComponent("Legacy payment signing key", "RELATED_CRYPTO_MATERIAL", "RSA", 1024,
+                        "RSA", "vault://payments/legacy-signing", "Payment signature", 88.0),
+                new DemoCbomComponent("Legacy receipt digest", "ALGORITHM", "SHA-1", null,
+                        null, null, "Receipt integrity", 78.0),
+                new DemoCbomComponent("Checkout data encryption", "ALGORITHM", "AES-256-GCM", 256,
+                        null, "kms://payments/checkout", "Card-data encryption", 12.0),
+                new DemoCbomComponent("Partner gateway TLS", "PROTOCOL", "TLS", null,
+                        "TLS 1.0", null, "Partner transport", 82.0),
+                new DemoCbomComponent("Partner ECDSA certificate", "CERTIFICATE", "ECDSA", 256,
+                        "P-256", null, "Mutual TLS", 48.0),
+                new DemoCbomComponent("Partner API signing secret", "RELATED_CRYPTO_MATERIAL", "HMAC-SHA256", 256,
+                        null, "env://PARTNER_SIGNING_SECRET", "Webhook signing", 95.0),
+                new DemoCbomComponent("Partner RSA encryption key", "RELATED_CRYPTO_MATERIAL", "RSA", 2048,
+                        "RSA", "hsm://partner/rsa-primary", "Payload encryption", 45.0)
+        );
+        List<UUID> cbomComponentIds = new ArrayList<>();
+        for (int i = 0; i < cryptoComponents.size(); i++) {
+            UUID bomId = cbomIds.get(i < 4 ? 0 : 1);
+            UUID assetId = assetIds.get(i < 4 ? 0 : 4);
+            DemoCbomComponent component = cryptoComponents.get(i);
+            UUID genericId = stableId(tenantId, "cbom-generic-component:" + component.name());
+            jdbcTemplate.update("""
+                    INSERT INTO bom_components
+                        (id, bom_id, tenant_id, name, version, supplier, component_type,
+                         category, is_active, properties, bom_ref, scope, workflow_status)
+                    VALUES (?, ?, ?, ?, ?, 'Kanra Security Engineering', 'cryptographic-asset',
+                            'CRYPTOGRAPHIC', true, ?::jsonb, ?, 'runtime', 'DISCOVERED')
+                    ON CONFLICT (id) DO NOTHING
+                    """, genericId, bomId, tenantId, component.name(), component.primitive(),
+                    "{\"bomType\":\"CBOM\",\"assetType\":\"" + component.assetType() + "\"}",
+                    "crypto:" + component.name());
+            jdbcTemplate.update("""
+                    INSERT INTO bom_component_evidence
+                        (id, tenant_id, bom_component_id, bom_id, evidence_type, evidence_key,
+                         evidence_value, source_system, source_reference, created_at)
+                    VALUES (?, ?, ?, ?, 'CRYPTOGRAPHIC_DECLARATION', 'cbom-asset-type', ?,
+                            'github', ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, stableId(tenantId, "cbom-evidence:" + component.name()), tenantId, genericId, bomId,
+                    component.assetType(), "github.com/kanra/platform/"
+                            + (i < 4 ? "checkout-crypto.cbom.json" : "partner-gateway.cbom.json"),
+                    ts(now.minus(2, ChronoUnit.DAYS)));
+            UUID cbomComponentId = stableId(tenantId, "cbom-component:" + component.name());
+            cbomComponentIds.add(cbomComponentId);
+            jdbcTemplate.update("""
+                    INSERT INTO cbom_components
+                        (id, tenant_id, asset_id, source_bom_id, bom_ref, component_fingerprint,
+                         name, description, asset_type, component_type, primitive, key_size, curve,
+                         protocol_version, storage_location, used_in, not_before, not_after,
+                         issuer, subject, signature_algorithm, risk_score, active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'cryptographic-asset', ?, ?, ?, ?, ?, ?,
+                            current_date - 300, current_date + ?, 'Kanra Internal CA', ?, ?, ?, true, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, cbomComponentId, tenantId, assetId, bomId, "crypto:" + component.name(),
+                    stableId(tenantId, "cbom-fingerprint:" + component.name()).toString(),
+                    component.name(), "Synthetic CBOM asset for the Kanra customer demonstration",
+                    component.assetType(), component.primitive(), component.keySize(),
+                    component.curve(), component.curve(), component.storageLocation(), component.usedIn(),
+                    i == 0 ? 25 : 365, component.name(), i == 0 ? "sha256WithRSAEncryption" : null,
+                    component.riskScore(), ts(now.minus(3, ChronoUnit.DAYS)), ts(now));
+        }
+        int cbomFindingCount = 0;
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(0), "CBOM-CERT-EXPIRING",
+                "CERT_EXPIRY", "MEDIUM", "Checkout certificate expires soon",
+                "Renew the public certificate and validate the deployment before expiry.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(1), "CBOM-RSA-SMALL-KEY",
+                "KEY_MANAGEMENT", "HIGH", "RSA signing key is below 2048 bits",
+                "Rotate the signing key to RSA-3072 or an approved elliptic-curve algorithm.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(1), "CBOM-QUANTUM-VULNERABLE",
+                "QUANTUM_VULNERABLE", "MEDIUM", "Signing key is not post-quantum resistant",
+                "Track migration to an approved hybrid post-quantum signature scheme.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(2), "CBOM-WEAK-ALGO",
+                "WEAK_ALGORITHM", "HIGH", "SHA-1 is used for receipt integrity",
+                "Replace SHA-1 with SHA-256 or SHA-384 and reissue stored digests.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(4), "CBOM-DEPRECATED-PROTOCOL",
+                "DEPRECATED_PROTOCOL", "HIGH", "Partner endpoint permits TLS 1.0",
+                "Require TLS 1.2 or later and remove legacy cipher suites.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(5), "CBOM-QUANTUM-VULNERABLE",
+                "QUANTUM_VULNERABLE", "MEDIUM", "ECDSA certificate needs a quantum migration plan",
+                "Inventory dependencies and plan hybrid certificate adoption.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(6), "CBOM-MATERIAL-COMPROMISED",
+                "CREDENTIAL_EXPOSURE", "CRITICAL", "Partner signing secret is marked compromised",
+                "Revoke and rotate the secret immediately, then review webhook access logs.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(6), "CBOM-SECRET-ENV-STORAGE",
+                "STORAGE_RISK", "MEDIUM", "Signing secret is stored in an environment variable",
+                "Move the secret to the managed vault and use workload identity.", now);
+        cbomFindingCount += seedCbomFinding(tenantId, cbomComponentIds.get(7), "CBOM-QUANTUM-VULNERABLE",
+                "QUANTUM_VULNERABLE", "MEDIUM", "RSA encryption key is quantum vulnerable",
+                "Plan migration to hybrid post-quantum key encapsulation.", now);
+
+        seedCbomPosture(tenantId, assetIds.get(0), cbomIds.get(0), 4, 0, 2, 2, 0, 1, 1, 1, 42.0, now);
+        seedCbomPosture(tenantId, assetIds.get(4), cbomIds.get(1), 4, 1, 1, 3, 0, 2, 0, 0, 28.0, now);
+        return new BomDatasetSummary(2, aiComponents.size(), aiFindingCount,
+                2, cryptoComponents.size(), cbomFindingCount);
+    }
+
+    private UUID seedBomRecord(
+            UUID tenantId,
+            UUID assetId,
+            String key,
+            String bomType,
+            String filename,
+            String supplier,
+            int componentCount,
+            Instant ingestedAt
+    ) {
+        UUID id = stableId(tenantId, "bom-record:" + key);
+        jdbcTemplate.update("""
+                INSERT INTO bom_ingestion_records
+                    (id, tenant_id, asset_id, bom_type, format, format_version, serial_number,
+                     supplier, source_method, source_type, source_system, source_reference,
+                     source_label, spec_family, document_format, document_name, content_type,
+                     component_count, status, ingested_at, ingested_by)
+                VALUES (?, ?, ?, ?, 'CYCLONEDX', '1.6', ?, ?, 'GITHUB_REPO',
+                        'GITHUB_REPO', 'github', ?, ?, 'CYCLONEDX', 'JSON', ?,
+                        'application/vnd.cyclonedx+json', ?, 'ACTIVE', ?, 'demo-seeder')
+                ON CONFLICT (id) DO NOTHING
+                """, id, tenantId, assetId, bomType, "urn:uuid:" + id, supplier,
+                "github.com/kanra/platform/" + filename, filename, filename, componentCount, ts(ingestedAt));
+        return id;
+    }
+
+    private int seedCbomFinding(
+            UUID tenantId,
+            UUID componentId,
+            String ruleId,
+            String riskClass,
+            String severity,
+            String title,
+            String recommendation,
+            Instant now
+    ) {
+        UUID id = stableId(tenantId, "cbom-finding:" + componentId + ":" + ruleId);
+        jdbcTemplate.update("""
+                INSERT INTO cbom_risk_findings
+                    (id, tenant_id, cbom_component_id, rule_id, rule_version, finding_fingerprint,
+                     risk_class, severity, title, detail, evidence, recommendation, status,
+                     first_seen_at, last_seen_at, created_at)
+                VALUES (?, ?, ?, ?, '1', ?, ?, ?, ?,
+                        'Detected by the ScoutGrid customer-demo CBOM policy engine.',
+                        ?::jsonb, ?, 'OPEN', ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """, id, tenantId, componentId, ruleId,
+                stableId(tenantId, "cbom-finding-fingerprint:" + componentId + ":" + ruleId).toString(),
+                riskClass, severity, title, "{\"dataset\":\"" + DATASET_VERSION + "\"}",
+                recommendation, ts(now.minus(2, ChronoUnit.DAYS)), ts(now), ts(now.minus(2, ChronoUnit.DAYS)));
+        return 1;
+    }
+
+    private void seedCbomPosture(
+            UUID tenantId,
+            UUID assetId,
+            UUID bomId,
+            int total,
+            int critical,
+            int high,
+            int medium,
+            int low,
+            int quantum,
+            int weak,
+            int expiring,
+            double score,
+            Instant now
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO cbom_posture_summary
+                    (id, tenant_id, asset_id, last_source_bom_id, total_components,
+                     critical_findings, high_findings, medium_findings, low_findings,
+                     info_findings, accepted_findings, quantum_vulnerable, weak_algorithms,
+                     expiring_certs, posture_score, last_evaluated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, asset_id) DO NOTHING
+                """, stableId(tenantId, "cbom-posture:" + assetId), tenantId, assetId, bomId, total,
+                critical, high, medium, low, quantum, weak, expiring, score, ts(now));
     }
 
     private List<UUID> seedVulnerabilities(Instant now) {
@@ -402,7 +681,7 @@ public class CustomerDemoDatasetService {
     }
 
     private UUID stableId(UUID tenantId, String key) {
-        String namespace = DATASET_VERSION + ":" + (tenantId == null ? "platform" : tenantId) + ":" + key;
+        String namespace = ID_NAMESPACE + ":" + (tenantId == null ? "platform" : tenantId) + ":" + key;
         return UUID.nameUUIDFromBytes(namespace.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -416,7 +695,13 @@ public class CustomerDemoDatasetService {
             int components,
             int findings,
             int cves,
-            int campaigns
+            int campaigns,
+            int aiBoms,
+            int aiComponents,
+            int aiFindings,
+            int cboms,
+            int cbomComponents,
+            int cbomFindings
     ) {
     }
 
@@ -431,6 +716,39 @@ public class CustomerDemoDatasetService {
     }
 
     private record DemoComponent(String purl, String ecosystem, String name, String version) {
+    }
+
+    private record DemoBomComponent(
+            String name,
+            String version,
+            String purl,
+            String license,
+            String supplier,
+            String componentType,
+            String scope
+    ) {
+    }
+
+    private record DemoCbomComponent(
+            String name,
+            String assetType,
+            String primitive,
+            Integer keySize,
+            String curve,
+            String storageLocation,
+            String usedIn,
+            double riskScore
+    ) {
+    }
+
+    private record BomDatasetSummary(
+            int aiBoms,
+            int aiComponents,
+            int aiFindings,
+            int cboms,
+            int cbomComponents,
+            int cbomFindings
+    ) {
     }
 
     private record DemoAsset(
