@@ -74,8 +74,13 @@ public class CustomerDemoDatasetService {
                       FROM bom_ingestion_records
                      WHERE tenant_id = ?
                        AND source_type = 'GITHUB_REPO'
+                    UNION ALL
+                    SELECT 1
+                      FROM bom_component_workflows
+                     WHERE tenant_id = ?
+                       AND workflow_status = 'IN_PROGRESS'
                 )
-                """, Boolean.class, tenant.getId())));
+                """, Boolean.class, tenant.getId(), tenant.getId())));
     }
 
     private DemoDatasetSummary seedInTenantSchema(Tenant tenant) {
@@ -260,10 +265,14 @@ public class CustomerDemoDatasetService {
                     INSERT INTO bom_component_workflows
                         (id, tenant_id, bom_component_id, vulnerability_link_id, workflow_type,
                          workflow_status, workflow_reason, investigation_key, started_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'INVESTIGATION', 'IN_PROGRESS',
+                    VALUES (?, ?, ?, ?, 'INVESTIGATION', 'UNDER_INVESTIGATION',
                             'AI runtime dependency exposure requires model-serving impact review',
                             ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
+                    ON CONFLICT (id) DO UPDATE SET
+                        workflow_status = EXCLUDED.workflow_status,
+                        workflow_reason = EXCLUDED.workflow_reason,
+                        investigation_key = EXCLUDED.investigation_key,
+                        updated_at = EXCLUDED.updated_at
                     """, stableId(tenantId, "ai-workflow:" + vulnerabilityLinkId), tenantId, componentId,
                     vulnerabilityLinkId, "AIBOM-" + vulnerability.externalId(),
                     ts(now.minus(1, ChronoUnit.DAYS)), ts(now));
