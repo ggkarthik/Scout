@@ -844,7 +844,13 @@ export const api = {
   }),
   getDemoStatus: () => request<DemoStatus>('/demo/status'),
   listDemoRequests: () => request<DemoRequest[]>('/platform/demo-requests'),
-  approveDemoRequest: (requestId: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/approve`, { method: 'POST' }),
+  approveDemoRequest: (requestId: string, addDemoData = false) => request<DemoRequest>(`/platform/demo-requests/${requestId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ addDemoData })
+  }),
+  seedTenantDemoData: (tenantId: string) => request<unknown>(`/platform/tenants/${encodeURIComponent(tenantId)}/demo-data`, {
+    method: 'POST'
+  }),
   rejectDemoRequest: (requestId: string, reason?: string) => request<DemoRequest>(`/platform/demo-requests/${requestId}/reject`, {
     method: 'POST',
     body: JSON.stringify({ reason: reason ?? '' })

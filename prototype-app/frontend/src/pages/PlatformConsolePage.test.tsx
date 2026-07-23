@@ -405,6 +405,58 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
     }));
   });
 
+  it('offers demo data during approval and for an existing demo tenant', async () => {
+    vi.spyOn(api, 'listDemoRequests').mockResolvedValue([{
+      id: 'request-pending',
+      email: 'pending@example.com',
+      fullName: 'Pending User',
+      company: 'Pending Co',
+      roleTitle: null,
+      companySize: null,
+      useCase: 'SBOM validation',
+      notes: null,
+      status: 'PENDING',
+      requestedAt: '2026-07-23T00:00:00Z',
+      decidedAt: null,
+      decidedBy: null,
+      rejectionReason: null,
+      bootstrapStatus: null,
+      tenantId: null,
+      provisionedPlanCode: null,
+      latestInvite: null
+    }, {
+      id: 'request-existing',
+      email: 'existing@example.com',
+      fullName: 'Existing User',
+      company: 'Existing Co',
+      roleTitle: null,
+      companySize: null,
+      useCase: 'SBOM validation',
+      notes: null,
+      status: 'SENT',
+      requestedAt: '2026-07-22T00:00:00Z',
+      decidedAt: '2026-07-22T01:00:00Z',
+      decidedBy: 'owner@example.com',
+      rejectionReason: null,
+      bootstrapStatus: 'INVITE_SENT',
+      tenantId: 'tenant-existing',
+      provisionedPlanCode: 'ENTERPRISE',
+      latestInvite: null
+    }]);
+    const approve = vi.spyOn(api, 'approveDemoRequest').mockResolvedValue({} as never);
+    const seedDemoData = vi.spyOn(api, 'seedTenantDemoData').mockResolvedValue({});
+
+    renderPlatformDemoRequests();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Add demo data for Pending Co' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0]!);
+
+    await waitFor(() => expect(approve).toHaveBeenCalledWith('request-pending', true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add demo data' }));
+    await waitFor(() => expect(seedDemoData).toHaveBeenCalledWith('tenant-existing'));
+  });
+
   it('renders enterprise performance guardrails in reliability view', async () => {
     mockOperationsApi({
       performanceScorecard: {
@@ -516,6 +568,21 @@ function renderPlatformAudit() {
         <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
           <Routes>
             <Route path="/platform/platform-audit" element={<PlatformConsolePage selectedView="platform-audit" />} />
+          </Routes>
+        </ActorContextState.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderPlatformDemoRequests() {
+  const queryClient = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/platform/demo-requests']}>
+        <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
+          <Routes>
+            <Route path="/platform/demo-requests" element={<PlatformConsolePage selectedView="demo-requests" />} />
           </Routes>
         </ActorContextState.Provider>
       </MemoryRouter>

@@ -159,6 +159,11 @@ public class DemoLifecycleService {
     // locks open around it or PostgreSQL can wait on this request's own transaction.
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DemoRequestResponse approve(UUID requestId, String actor) {
+        return approve(requestId, actor, false);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public DemoRequestResponse approve(UUID requestId, String actor, boolean addDemoData) {
         DemoRequest request = getRequest(requestId);
         Tenant tenant;
         if (request.getTenantId() != null) {
@@ -173,7 +178,12 @@ public class DemoLifecycleService {
                         assertBootstrapEligibility(request, actor, existingTenant.getId());
                         return existingTenant;
                     })
-                    .orElseGet(() -> provisionTenant(request, actor));
+                    .orElseGet(() -> provisionTenant(request, actor, addDemoData));
+        }
+        if (addDemoData && !DemoDatasetProvisioningService.isRequested(tenant)) {
+            tenant.setDemoSource(DemoDatasetProvisioningService.REQUESTED_MARKER);
+            tenant.setUpdatedAt(Instant.now());
+            tenant = tenantRepository.save(tenant);
         }
         request.setBootstrapStatus("CREATED");
 
@@ -388,7 +398,7 @@ public class DemoLifecycleService {
         }
     }
 
-    private Tenant provisionTenant(DemoRequest request, String actor) {
+    private Tenant provisionTenant(DemoRequest request, String actor, boolean addDemoData) {
         AppUser bootstrapUser = assertBootstrapEligibility(request, actor, null);
         String baseName = requireText(request.getCompany(), "company");
         String nameCandidate = baseName;
@@ -403,15 +413,24 @@ public class DemoLifecycleService {
         while (tenantRepository.existsBySlugIgnoreCase(candidate)) {
             candidate = slug + "-" + suffix++;
         }
-        Tenant tenant = tenantService.createTenant(
-                nameCandidate,
-                candidate,
-                TenantService.DEFAULT_PLAN_CODE,
-                "demo-request:" + request.getId());
+        Tenant tenant = addDemoData
+                ? tenantService.createTenant(
+                        nameCandidate,
+                        candidate,
+                        TenantService.DEFAULT_PLAN_CODE,
+                        "demo-request:" + request.getId(),
+                        true)
+                : tenantService.createTenant(
+                        nameCandidate,
+                        candidate,
+                        TenantService.DEFAULT_PLAN_CODE,
+                        "demo-request:" + request.getId());
         Instant expiresAt = Instant.now().plus(7, ChronoUnit.DAYS);
         tenant.setDemoExpiresAt(expiresAt);
         tenant.setDemoCreatedBy(trimToNull(actor));
-        tenant.setDemoSource(DEMO_SOURCE_REQUEST_REVIEW);
+        if (!addDemoData) {
+            tenant.setDemoSource(DEMO_SOURCE_REQUEST_REVIEW);
+        }
         tenant.setDemoOwnerEmail(request.getEmail());
         tenant.setMaxConnectorCount(25);
         tenant.setMaxServiceAccountCount(0);

@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.dto.DemoInviteResponse;
 import com.prototype.vulnwatch.dto.DemoSetupLinkResponse;
 import com.prototype.vulnwatch.dto.DemoInviteValidationResponse;
 import com.prototype.vulnwatch.dto.DemoRequestCreateRequest;
+import com.prototype.vulnwatch.dto.DemoRequestApprovalRequest;
 import com.prototype.vulnwatch.dto.DemoRequestDecisionRequest;
 import com.prototype.vulnwatch.dto.DemoRequestResponse;
 import com.prototype.vulnwatch.dto.DemoRequestReceiptResponse;
@@ -81,8 +82,14 @@ public class DemoLifecycleController {
 
     @PostMapping("/platform/demo-requests/{requestId}/approve")
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
-    public DemoRequestResponse approve(@PathVariable UUID requestId) {
-        return demoLifecycleService.approve(requestId, requestActorService.currentActor().userId());
+    public DemoRequestResponse approve(
+            @PathVariable UUID requestId,
+            @RequestBody(required = false) DemoRequestApprovalRequest request
+    ) {
+        return demoLifecycleService.approve(
+                requestId,
+                requestActorService.currentActor().userId(),
+                request != null && request.addDemoData());
     }
 
     @PostMapping("/platform/demo-requests/{requestId}/reject")

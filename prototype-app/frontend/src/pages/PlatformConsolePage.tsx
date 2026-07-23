@@ -1404,6 +1404,7 @@ function TenantLifecyclePanel() {
 
 function DemoRequestsPanel() {
   const queryClient = useQueryClient();
+  const [addDemoDataByRequest, setAddDemoDataByRequest] = React.useState<Record<string, boolean>>({});
   const [requestPendingDelete, setRequestPendingDelete] = React.useState<{
     id: string;
     company: string;
@@ -1418,7 +1419,15 @@ function DemoRequestsPanel() {
     await queryClient.invalidateQueries({ queryKey: ['platform-demo-requests'] });
     await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
   };
-  const approve = useMutation({ mutationFn: api.approveDemoRequest, onSuccess: refresh });
+  const approve = useMutation({
+    mutationFn: ({ id, addDemoData }: { id: string; addDemoData: boolean }) =>
+      api.approveDemoRequest(id, addDemoData),
+    onSuccess: refresh
+  });
+  const seedDemoData = useMutation({
+    mutationFn: (tenantId: string) => api.seedTenantDemoData(tenantId),
+    onSuccess: refresh
+  });
   const reject = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.rejectDemoRequest(id, reason), onSuccess: refresh });
   const resend = useMutation({ mutationFn: api.resendDemoInvite, onSuccess: refresh });
   const issueSetup = useMutation({
@@ -1505,13 +1514,40 @@ function DemoRequestsPanel() {
                   <td>{new Date(request.requestedAt).toLocaleDateString()}</td>
                   <td>
                     <div className="button-row compact">
+                      {!request.tenantId && (
+                        <label className="checkbox-row" style={{ marginRight: 8 }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Add demo data for ${request.company}`}
+                            checked={addDemoDataByRequest[request.id] ?? false}
+                            disabled={approve.isPending || isApprovalComplete(request.status, request.tenantId)}
+                            onChange={(event) => setAddDemoDataByRequest((current) => ({
+                              ...current,
+                              [request.id]: event.target.checked
+                            }))}
+                          />
+                          <span>Add demo data</span>
+                        </label>
+                      )}
                       <button
                         className="btn btn-secondary btn-sm"
                         disabled={approve.isPending || isApprovalComplete(request.status, request.tenantId)}
-                        onClick={() => approve.mutate(request.id)}
+                        onClick={() => approve.mutate({
+                          id: request.id,
+                          addDemoData: addDemoDataByRequest[request.id] ?? false
+                        })}
                       >
                         Approve
                       </button>
+                      {request.tenantId && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={seedDemoData.isPending}
+                          onClick={() => seedDemoData.mutate(request.tenantId!)}
+                        >
+                          Add demo data
+                        </button>
+                      )}
                       <button className="btn btn-secondary btn-sm" disabled={resend.isPending || !request.tenantId} onClick={() => resend.mutate(request.id)}>
                         Resend
                       </button>
@@ -1547,10 +1583,10 @@ function DemoRequestsPanel() {
           </table>
         </div>
       )}
-      {(approve.isError || reject.isError || resend.isError || issueSetup.isError || (deleteRequest.isError && !deleteNotFound)) && (
+      {(approve.isError || seedDemoData.isError || reject.isError || resend.isError || issueSetup.isError || (deleteRequest.isError && !deleteNotFound)) && (
         <div className="notice error" role="alert">
-          {[approve.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) instanceof Error
-            ? ([approve.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) as Error).message
+          {[approve.error, seedDemoData.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) instanceof Error
+            ? ([approve.error, seedDemoData.error, reject.error, resend.error, issueSetup.error, deleteNotFound ? null : deleteRequest.error].find(Boolean) as Error).message
             : 'Demo request action failed'}
         </div>
       )}

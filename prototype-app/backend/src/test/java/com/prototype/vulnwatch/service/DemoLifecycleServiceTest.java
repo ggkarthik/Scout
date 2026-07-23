@@ -111,6 +111,55 @@ class DemoLifecycleServiceTest {
     }
 
     @Test
+    void approveCanRequestDemoDataForTheProvisionedTenant() {
+        DemoRequest request = pendingRequest();
+        Tenant tenant = provisionedTenant();
+        AtomicReference<DemoInvite> latestInvite = new AtomicReference<>();
+
+        when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.existsByNameIgnoreCase("Example Co")).thenReturn(false);
+        when(tenantRepository.existsBySlugIgnoreCase("example-co")).thenReturn(false);
+        when(tenantService.createTenant(
+                "Example Co",
+                "example-co",
+                TenantService.DEFAULT_PLAN_CODE,
+                "demo-request:" + request.getId(),
+                true))
+                .thenAnswer(invocation -> {
+                    tenant.setDemoSource(DemoDatasetProvisioningService.REQUESTED_MARKER);
+                    return tenant;
+                });
+        when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> {
+            DemoInvite invite = invocation.getArgument(0);
+            if (invite.getId() == null) {
+                ReflectionTestUtils.setField(invite, "id", UUID.randomUUID());
+            }
+            latestInvite.set(invite);
+            return invite;
+        });
+        when(demoRequestRepository.save(any(DemoRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId()))
+                .thenAnswer(invocation -> latestInvite.get() == null ? List.of() : List.of(latestInvite.get()));
+        when(demoInviteEmailService.sendInvite(eq(request), any(DemoInvite.class)))
+                .thenReturn(ResendEmailClient.DeliveryResult.sent("email-123"));
+
+        DemoRequestResponse response = service().approve(
+                request.getId(),
+                "platform-owner@example.com",
+                true);
+
+        assertEquals("SENT", response.status());
+        assertEquals(DemoDatasetProvisioningService.REQUESTED_MARKER, tenant.getDemoSource());
+        verify(tenantService).createTenant(
+                "Example Co",
+                "example-co",
+                TenantService.DEFAULT_PLAN_CODE,
+                "demo-request:" + request.getId(),
+                true);
+    }
+
+    @Test
     void createRequestRecordsAnonymousAuditActor() {
         DemoRequestCreateRequest request = new DemoRequestCreateRequest(
                 "Casey Example",
