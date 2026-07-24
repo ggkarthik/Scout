@@ -48,10 +48,14 @@ class CustomerDemoDatasetPostgresIntegrationTest {
     @Autowired
     private BomInventoryReadService bomInventoryReadService;
 
+    @Autowired
+    private HostInventoryReadService hostInventoryReadService;
+
     @Test
     void seedsCompleteDatasetIdempotentlyInsideTheSelectedTenant() {
         Tenant tenant = tenantService.getDefaultTenant();
 
+        assertTrue(datasetService.needsRepair(tenant));
         var first = datasetService.seed(tenant);
         tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.update("""
                 UPDATE bom_ingestion_records
@@ -67,10 +71,10 @@ class CustomerDemoDatasetPostgresIntegrationTest {
         assertEquals(false, datasetService.needsRepair(tenant));
 
         assertEquals(first, second);
-        assertEquals(6, first.assets());
-        assertEquals(6, first.sboms());
-        assertEquals(24, first.components());
-        assertEquals(18, first.findings());
+        assertEquals(10, first.assets());
+        assertEquals(10, first.sboms());
+        assertEquals(40, first.components());
+        assertEquals(26, first.findings());
         assertEquals(8, first.cves());
         assertEquals(2, first.campaigns());
         assertEquals(2, first.aiBoms());
@@ -81,8 +85,12 @@ class CustomerDemoDatasetPostgresIntegrationTest {
         assertEquals(9, first.cbomFindings());
 
         tenantSchemaExecutionService.run(tenant, () -> {
-            assertEquals(6, count("assets"));
-            assertEquals(6, count("sbom_uploads"));
+            assertEquals(10, count("assets"));
+            assertEquals(4, jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM assets WHERE type = 'HOST'", Integer.class));
+            assertEquals(10, count("sbom_uploads"));
+            assertEquals(4, jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM sbom_uploads WHERE format = 'HOST_INVENTORY'", Integer.class));
             assertEquals(10, count("bom_ingestion_records"));
             assertEquals(16, count("bom_components"));
             assertEquals(16, count("bom_component_evidence"));
@@ -112,10 +120,13 @@ class CustomerDemoDatasetPostgresIntegrationTest {
                             || record.getBomType().name().equals("CBOM"))
                     .filter(record -> record.getSourceType() == BomSourceType.GITHUB_REPOSITORY)
                     .count());
-            assertEquals(24, count("inventory_components"));
-            assertEquals(18, count("findings"));
-            assertEquals(18, count("finding_events"));
-            assertEquals(18, count("finding_comments"));
+            assertEquals(40, count("inventory_components"));
+            assertEquals(26, count("findings"));
+            assertEquals(26, count("finding_events"));
+            assertEquals(26, count("finding_comments"));
+            assertEquals(4, count("cis"));
+            assertEquals(4, count("ci_aliases"));
+            assertEquals(20, count("software_instances"));
             assertEquals(8, count("org_cve_records"));
             assertEquals(4, count("fix_records"));
             assertEquals(2, count("campaigns"));
@@ -155,6 +166,23 @@ class CustomerDemoDatasetPostgresIntegrationTest {
         assertTrue(componentSummaries.stream()
                 .filter(component -> component.packageName().equals("log4j-core"))
                 .allMatch(component -> component.bomTypes().equals(List.of("SBOM"))));
+
+        UUID hostAssetId = tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.queryForObject("""
+                SELECT id
+                  FROM assets
+                 WHERE tenant_id = ?
+                   AND identifier = 'kanra-prod-web-01'
+                """, UUID.class, tenant.getId()));
+        var hostDetail = tenantSchemaExecutionService.run(
+                tenant,
+                () -> hostInventoryReadService.getHostDetail(tenant, hostAssetId, null)
+        );
+        assertEquals("kanra-prod-web-01", hostDetail.host().identifier());
+        assertEquals(5, hostDetail.software().size());
+        assertEquals(2, hostDetail.findings().size());
+        assertTrue(hostDetail.software().stream()
+                .anyMatch(software -> software.displayName().equals("Ubuntu Server 22.04 LTS")
+                        && software.softwareIdentity().equals("Ubuntu Server 22.04 LTS")));
     }
 
     private int count(String table) {

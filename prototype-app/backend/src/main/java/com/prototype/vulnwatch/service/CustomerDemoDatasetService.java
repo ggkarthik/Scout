@@ -52,6 +52,21 @@ public class CustomerDemoDatasetService {
             new DemoAsset("admin-console", "Operations Admin Console", "APPLICATION", "MEDIUM", "Development", "Operations", "operations@kanra.example")
     );
 
+    private static final List<DemoHost> HOSTS = List.of(
+            new DemoHost("kanra-prod-web-01", "Kanra Production Web 01", "CRITICAL", "Production",
+                    "Digital Experience", "web@kanra.example", "Ubuntu", "Ubuntu Server 22.04 LTS", "22.04",
+                    "aws", "AWS Systems Manager", "i-0a11b22c33d44e501", "us-east-1", "us-east-1a", "m6i.large"),
+            new DemoHost("kanra-payments-db-01", "Kanra Payments Database 01", "CRITICAL", "Production",
+                    "Payments", "payments@kanra.example", "Red Hat", "Red Hat Enterprise Linux 8.9", "8.9",
+                    "aws", "AWS Systems Manager", "i-0a11b22c33d44e502", "us-east-1", "us-east-1b", "r6i.xlarge"),
+            new DemoHost("kanra-win-app-01", "Kanra Windows Application 01", "HIGH", "Staging",
+                    "Operations", "operations@kanra.example", "Microsoft", "Windows Server 2019", "2019",
+                    "azure", "Azure Arc", "vm-kanra-win-app-01", "eastus", "eastus-2", "Standard_D4s_v5"),
+            new DemoHost("kanra-analytics-01", "Kanra Analytics Worker 01", "HIGH", "Production",
+                    "Data Platform", "data@kanra.example", "Amazon", "Amazon Linux 2023", "2023",
+                    "aws", "AWS Systems Manager", "i-0a11b22c33d44e504", "us-west-2", "us-west-2a", "c6i.xlarge")
+    );
+
     private final JdbcTemplate jdbcTemplate;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
 
@@ -79,8 +94,16 @@ public class CustomerDemoDatasetService {
                       FROM bom_component_workflows
                      WHERE tenant_id = ?
                        AND workflow_status = 'IN_PROGRESS'
+                    UNION ALL
+                    SELECT 1
+                     WHERE (
+                         SELECT count(*)
+                           FROM assets
+                          WHERE tenant_id = ?
+                            AND type = 'HOST'
+                     ) < ?
                 )
-                """, Boolean.class, tenant.getId(), tenant.getId())));
+                """, Boolean.class, tenant.getId(), tenant.getId(), tenant.getId(), HOSTS.size())));
     }
 
     private DemoDatasetSummary seedInTenantSchema(Tenant tenant) {
@@ -176,12 +199,201 @@ public class CustomerDemoDatasetService {
             }
         }
 
+        HostDatasetSummary hostSummary = seedHosts(tenantId, vulnerabilityIds, softwareIds, now);
         seedOrgCves(tenantId, vulnerabilityIds, now);
         seedOperatingRecords(tenantId, vulnerabilityIds, now);
         BomDatasetSummary bomSummary = seedAiAndCryptoBoms(tenantId, assetIds, vulnerabilityIds, now);
-        return new DemoDatasetSummary(ASSETS.size(), ASSETS.size(), componentIds.size(), findingIds.size(),
+        return new DemoDatasetSummary(ASSETS.size() + hostSummary.assets(), ASSETS.size() + hostSummary.uploads(),
+                componentIds.size() + hostSummary.components(), findingIds.size() + hostSummary.findings(),
                 VULNERABILITIES.size(), 2, bomSummary.aiBoms(), bomSummary.aiComponents(),
                 bomSummary.aiFindings(), bomSummary.cboms(), bomSummary.cbomComponents(), bomSummary.cbomFindings());
+    }
+
+    private HostDatasetSummary seedHosts(
+            UUID tenantId,
+            List<UUID> vulnerabilityIds,
+            List<UUID> softwareIds,
+            Instant now
+    ) {
+        int componentCount = 0;
+        int findingCount = 0;
+        for (int hostIndex = 0; hostIndex < HOSTS.size(); hostIndex++) {
+            DemoHost host = HOSTS.get(hostIndex);
+            UUID assetId = stableId(tenantId, "asset:" + host.identifier());
+            UUID ciId = stableId(tenantId, "ci:" + host.identifier());
+            UUID uploadId = stableId(tenantId, "host-inventory:" + host.identifier());
+            Instant observedAt = now.minus(hostIndex + 1L, ChronoUnit.HOURS);
+
+            jdbcTemplate.update("""
+                    INSERT INTO assets
+                        (id, tenant_id, identifier, name, type, state, business_criticality,
+                         environment, department, owner_team, owner_email, managed_by, support_group,
+                         assigned_to, cloud_provider, cloud_resource_type, cloud_account_id, cloud_region,
+                         cloud_availability_zone, cloud_instance_type, cloud_arn, cloud_vpc_id, cloud_subnet_id,
+                         cloud_tags_json, cloud_launch_time, ssm_managed, ssm_ping_status, ssm_last_ping_at,
+                         ssm_inventory_available, ssm_inventory_last_captured_at, missing_iam_instance_profile,
+                         created_at, last_inventory_at, last_cmdb_sync_at)
+                    VALUES (?, ?, ?, ?, 'HOST', 'ACTIVE', ?, ?, ?, ?, ?, ?, 'Infrastructure Operations',
+                            ?, ?, 'COMPUTE_INSTANCE', 'kanra-demo-001', ?, ?, ?, ?, 'vpc-kanra-demo',
+                            'subnet-kanra-demo', ?, ?, ?, 'ONLINE', ?, true, ?, false, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, assetId, tenantId, host.identifier(), host.name(), host.criticality(),
+                    host.environment(), host.department(), host.department(), host.ownerEmail(),
+                    host.managedBy(), host.ownerEmail(), host.cloudProvider(), host.region(),
+                    host.availabilityZone(), host.instanceType(),
+                    "arn:" + host.cloudProvider() + ":compute:" + host.region() + ":kanra-demo:" + host.cloudId(),
+                    "{\"dataset\":\"" + DATASET_VERSION + "\",\"service\":\"" + host.department() + "\"}",
+                    ts(now.minus(120L - hostIndex * 15L, ChronoUnit.DAYS)),
+                    !"azure".equals(host.cloudProvider()), ts(observedAt),
+                    ts(observedAt), ts(now.minus(120L - hostIndex * 15L, ChronoUnit.DAYS)),
+                    ts(observedAt), ts(now.minus(hostIndex + 2L, ChronoUnit.HOURS)));
+
+            jdbcTemplate.update("""
+                    INSERT INTO cis
+                        (id, tenant_id, asset_id, sys_id, display_name, business_criticality,
+                         environment, owner_email, managed_by, department, support_group, assigned_to,
+                         last_inventory_at, last_cmdb_sync_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Infrastructure Operations', ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, ciId, tenantId, assetId, host.cloudId(), host.name(), host.criticality(),
+                    host.environment(), host.ownerEmail(), host.managedBy(), host.department(), host.ownerEmail(),
+                    ts(observedAt), ts(now.minus(hostIndex + 2L, ChronoUnit.HOURS)),
+                    ts(now.minus(120L - hostIndex * 15L, ChronoUnit.DAYS)), ts(observedAt));
+
+            jdbcTemplate.update("""
+                    INSERT INTO ci_aliases
+                        (id, tenant_id, ci_id, alias_name, normalized_alias_name, source_system,
+                         first_seen_at, last_seen_at, confidence)
+                    VALUES (?, ?, ?, ?, lower(?), ?, ?, ?, 0.99)
+                    ON CONFLICT (id) DO NOTHING
+                    """, stableId(tenantId, "ci-alias:" + host.identifier()), tenantId, ciId,
+                    host.identifier(), host.identifier(), host.managedBy(),
+                    ts(now.minus(90L, ChronoUnit.DAYS)), ts(observedAt));
+
+            jdbcTemplate.update("""
+                    INSERT INTO sbom_uploads
+                        (id, tenant_id, asset_id, format, status, original_filename, component_count,
+                         findings_generated, content_type, ingestion_source_type, ingestion_source_system,
+                         source_reference, uploaded_at)
+                    VALUES (?, ?, ?, 'HOST_INVENTORY', 'SUCCESS', ?, 4, 2,
+                            'application/json', 'HOST_INVENTORY', ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """, uploadId, tenantId, assetId, host.identifier() + "-software-inventory.json",
+                    host.managedBy(), host.cloudId(), ts(observedAt));
+
+            UUID osIdentityId = seedHostOsIdentity(host, now);
+            seedSoftwareInstance(tenantId, ciId, null, osIdentityId, host.osName(), host.osVendor(),
+                    host.osVersion(), host.osName(), host.osVendor(), host.osVersion(), host.managedBy(),
+                    "HOST_OS_INVENTORY", observedAt, now);
+
+            DemoAsset findingAsset = new DemoAsset(host.identifier(), host.name(), "HOST", host.criticality(),
+                    host.environment(), host.department(), host.ownerEmail());
+            for (int slot = 0; slot < 4; slot++) {
+                int componentIndex = (hostIndex * 2 + slot + 2) % COMPONENTS.size();
+                DemoComponent component = COMPONENTS.get(componentIndex);
+                UUID componentId = stableId(tenantId, "component:" + host.identifier() + ":" + component.purl());
+                jdbcTemplate.update("""
+                        INSERT INTO inventory_components
+                            (id, tenant_id, asset_id, sbom_upload_id, software_identity_id, component_status,
+                             ecosystem, package_name, version, purl, normalized_name, normalized_version,
+                             normalized_purl, coord_key, ingested_at, last_observed_at)
+                        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, lower(?), ?, ?, ?, ?, ?)
+                        ON CONFLICT (id) DO NOTHING
+                        """, componentId, tenantId, assetId, uploadId, softwareIds.get(componentIndex),
+                        component.ecosystem(), component.name(), component.version(), component.purl(),
+                        component.name(), component.version(), component.purl(), component.purl(),
+                        ts(observedAt), ts(observedAt));
+                seedSoftwareInstance(tenantId, ciId, componentId, softwareIds.get(componentIndex),
+                        component.name() + " " + component.version(), componentPublisher(component),
+                        component.version(), component.name(), componentPublisher(component), component.version(),
+                        host.managedBy(), "PACKAGE_INVENTORY", observedAt, now);
+                componentCount++;
+
+                if (slot < 2) {
+                    DemoVulnerability vulnerability = VULNERABILITIES.get(componentIndex);
+                    UUID findingId = stableId(tenantId,
+                            "finding:" + host.identifier() + ":" + vulnerability.externalId());
+                    String status = hostIndex == 3 && slot == 1 ? "RESOLVED" : "OPEN";
+                    String decision = "RESOLVED".equals(status) ? "FIXED"
+                            : slot == 1 ? "UNDER_INVESTIGATION" : "AFFECTED";
+                    double risk = Math.max(35.0, vulnerability.cvss() * 10.0 - hostIndex * 2.0 - slot);
+                    jdbcTemplate.update("""
+                            INSERT INTO findings
+                                (id, tenant_id, asset_id, component_id, vulnerability_id, display_id,
+                                 status, decision_state, creation_source, matched_by, risk_score,
+                                 confidence_score, owner_group, assigned_to, first_observed_at,
+                                 last_observed_at, created_at, updated_at, due_at, evidence)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AUTOMATIC', 'PURL', ?, 0.98, ?, ?,
+                                    ?, ?, ?, ?, ?, ?::jsonb)
+                            ON CONFLICT (id) DO NOTHING
+                            """, findingId, tenantId, assetId, componentId, vulnerabilityIds.get(componentIndex),
+                            displayId(findingId), status, decision, risk, host.department(), host.ownerEmail(),
+                            ts(now.minus(25L - hostIndex * 2L, ChronoUnit.DAYS)), ts(observedAt),
+                            ts(now.minus(25L - hostIndex * 2L, ChronoUnit.DAYS)), ts(observedAt),
+                            ts(now.plus(5L + hostIndex * 2L, ChronoUnit.DAYS)),
+                            "{\"source\":\"customer-demo-host-inventory\",\"match\":\"" + component.purl() + "\"}");
+                    seedFindingHistory(tenantId, findingId, findingAsset, vulnerability, status,
+                            now, ASSETS.size() + hostIndex, slot);
+                    findingCount++;
+                }
+            }
+        }
+        return new HostDatasetSummary(HOSTS.size(), HOSTS.size(), componentCount, findingCount);
+    }
+
+    private UUID seedHostOsIdentity(DemoHost host, Instant now) {
+        String canonicalKey = "host-os:" + host.osVendor().toLowerCase() + ":" + host.osName().toLowerCase();
+        UUID proposedId = stableId(null, "software:" + canonicalKey);
+        jdbcTemplate.update("""
+                INSERT INTO platform.software_identities
+                    (id, canonical_key, display_name, vendor, product, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (canonical_key) DO NOTHING
+                """, proposedId, canonicalKey, host.osName(), host.osVendor(), host.osName(), ts(now), ts(now));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM platform.software_identities WHERE canonical_key = ?",
+                UUID.class, canonicalKey);
+    }
+
+    private void seedSoftwareInstance(
+            UUID tenantId,
+            UUID ciId,
+            UUID inventoryComponentId,
+            UUID softwareIdentityId,
+            String displayName,
+            String publisher,
+            String version,
+            String normalizedProduct,
+            String normalizedPublisher,
+            String normalizedVersion,
+            String sourceSystem,
+            String versionEvidence,
+            Instant observedAt,
+            Instant now
+    ) {
+        UUID id = stableId(tenantId, "software-instance:" + ciId + ":" + normalizedProduct + ":" + version);
+        jdbcTemplate.update("""
+                INSERT INTO software_instances
+                    (id, tenant_id, ci_id, inventory_component_id, software_identity_id,
+                     display_name, publisher, version, normalized_product, normalized_publisher,
+                     normalized_version, source_system, version_evidence, active_install,
+                     unlicensed_install, install_date, last_scanned, last_used, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, lower(?), lower(?), ?, ?, ?, true, false,
+                        ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """, id, tenantId, ciId, inventoryComponentId, softwareIdentityId, displayName, publisher,
+                version, normalizedProduct, normalizedPublisher, normalizedVersion, sourceSystem, versionEvidence,
+                ts(now.minus(75, ChronoUnit.DAYS)), ts(observedAt), ts(observedAt), ts(now), ts(observedAt));
+    }
+
+    private String componentPublisher(DemoComponent component) {
+        return switch (component.ecosystem()) {
+            case "MAVEN" -> component.name().startsWith("spring-") ? "VMware" : "Apache Software Foundation";
+            case "DEBIAN" -> "Debian";
+            case "GO" -> "Go Authors";
+            case "NPM" -> "OpenJS Foundation";
+            default -> "Open Source Community";
+        };
     }
 
     private BomDatasetSummary seedAiAndCryptoBoms(
@@ -772,6 +984,28 @@ public class CustomerDemoDatasetService {
             int cboms,
             int cbomComponents,
             int cbomFindings
+    ) {
+    }
+
+    private record HostDatasetSummary(int assets, int uploads, int components, int findings) {
+    }
+
+    private record DemoHost(
+            String identifier,
+            String name,
+            String criticality,
+            String environment,
+            String department,
+            String ownerEmail,
+            String osVendor,
+            String osName,
+            String osVersion,
+            String cloudProvider,
+            String managedBy,
+            String cloudId,
+            String region,
+            String availabilityZone,
+            String instanceType
     ) {
     }
 
