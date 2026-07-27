@@ -25,7 +25,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 44;
+    private static final int TARGET_VERSION = 45;
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
@@ -412,7 +412,7 @@ public final class ProductionBootstrapCli {
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
                     current_version = 44,
-                    target_version = 44,
+                    target_version = 45,
                     status = 'CURRENT',
                     structural_checksum = excluded.structural_checksum,
                     migration_completed_at = now(),

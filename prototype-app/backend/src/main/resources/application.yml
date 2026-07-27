@@ -63,6 +63,14 @@ app:
     enforce-tenant-allowlist: ${APP_ENTITLEMENTS_ENFORCE_TENANT_ALLOWLIST:}
     # Cron for the leader-locked shadow-mismatch sweep (skipped entirely in LEGACY mode).
     shadow-sweep-cron: ${APP_ENTITLEMENTS_SHADOW_SWEEP_CRON:0 */30 * * * *}
+  ai-security:
+    aws:
+      max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
+      admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}
+    jobs:
+      enabled: ${APP_AI_SECURITY_JOBS_ENABLED:true}
+      poll-interval-ms: ${APP_AI_SECURITY_JOBS_POLL_INTERVAL_MS:3000}
+      max-concurrent-per-tenant: ${APP_AI_SECURITY_MAX_CONCURRENT_PER_TENANT:1}
   security:
     api-key: ${APP_API_KEY:}
     creator-key: ${APP_CREATOR_KEY:}
@@ -119,7 +127,7 @@ app:
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
     enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
-    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:44}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:45}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}
