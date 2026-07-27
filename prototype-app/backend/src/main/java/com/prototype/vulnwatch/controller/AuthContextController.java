@@ -6,6 +6,7 @@ import com.prototype.vulnwatch.service.AllowedTenantContextService;
 import com.prototype.vulnwatch.service.DemoLifecycleService;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -25,19 +26,22 @@ public class AuthContextController {
     private final DemoLifecycleService demoLifecycleService;
     private final AllowedTenantContextService allowedTenantContextService;
     private final TenantSupportGrantService tenantSupportGrantService;
+    private final TenantEntitlementService tenantEntitlementService;
 
     public AuthContextController(
             RequestActorService requestActorService,
             WorkspaceService workspaceService,
             DemoLifecycleService demoLifecycleService,
             AllowedTenantContextService allowedTenantContextService,
-            TenantSupportGrantService tenantSupportGrantService
+            TenantSupportGrantService tenantSupportGrantService,
+            TenantEntitlementService tenantEntitlementService
     ) {
         this.requestActorService = requestActorService;
         this.workspaceService = workspaceService;
         this.demoLifecycleService = demoLifecycleService;
         this.allowedTenantContextService = allowedTenantContextService;
         this.tenantSupportGrantService = tenantSupportGrantService;
+        this.tenantEntitlementService = tenantEntitlementService;
     }
 
     @GetMapping({"/auth/context", "/me"})
@@ -53,6 +57,8 @@ public class AuthContextController {
                         : Optional.empty();
         String tenantId = actor.tenantId() == null ? null : actor.tenantId().toString();
         String tenantName = actor.tenantName();
+        // Empty in platform/null scope (snapshot returns an empty map), so the frontend fails closed.
+        java.util.Map<String, Boolean> entitlements = tenantEntitlementService.snapshot(workspace);
         return new AuthContextResponse(
                 actor.creator(),
                 actor.userId(),
@@ -73,7 +79,8 @@ public class AuthContextController {
                 demoStatus == null ? null : demoStatus.demoExpiresAt(),
                 demoStatus == null ? null : demoStatus.demoDaysRemaining(),
                 demoStatus == null ? null : demoStatus.demoCapabilities(),
-                demoStatus == null ? null : demoStatus.demoUsage()
+                demoStatus == null ? null : demoStatus.demoUsage(),
+                entitlements
         );
     }
 
