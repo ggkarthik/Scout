@@ -89,6 +89,11 @@ public class TenantEntitlementService {
     }
 
     public Map<String, Boolean> snapshot(Tenant tenant) {
+        // Platform/null context is not a tenant: expose no entitlements so the frontend fails closed
+        // and null tenants are never reported enabled (even under global enforcement).
+        if (tenant == null || tenant.getId() == null) {
+            return Map.of();
+        }
         LinkedHashMap<String, Boolean> snapshot = new LinkedHashMap<>();
         for (ResolvedEntitlement entitlement : resolveAll(tenant)) {
             snapshot.put(entitlement.key(), entitlement.enabled());
@@ -143,45 +148,83 @@ public class TenantEntitlementService {
             Map<String, PlanEntitlementRow> planRows,
             String commercialPlan) {
         String key = definition.key();
-        TenantOverrideRow overrideRow = overrideRows.get(key);
-        Map<String, Object> config = overrideRow != null && overrideRow.config() != null
-                ? overrideRow.config()
-                : Map.of();
 
         // Legacy behavior: every entitlement resolves enabled.
         boolean legacyEnabled = true;
 
         if (mode == ResolutionMode.LEGACY) {
-            return new ResolvedEntitlement(key, definition.category(), legacyEnabled, SOURCE_DEFAULT, commercialPlan, config);
+            TenantOverrideRow legacyOverride = overrideRows.get(key);
+            Map<String, Object> legacyConfig = legacyOverride != null && legacyOverride.config() != null
+                    ? legacyOverride.config()
+                    : Map.of();
+            return new ResolvedEntitlement(key, definition.category(), legacyEnabled, SOURCE_DEFAULT, commercialPlan, legacyConfig);
         }
 
-        // Corrected precedence: active tenant override -> plan value -> disabled default.
+        // Corrected precedence: active tenant override -> plan value -> disabled default. Config
+        // follows the same precedence, so plan-level config is inherited when no override exists.
         // Expired overrides are already filtered out by loadTenantOverrides, so an expired override
         // falls through to the plan value rather than resolving disabled.
-        boolean correctedEnabled;
-        String correctedSource;
-        if (overrideRow != null) {
-            correctedEnabled = overrideRow.enabled();
-            correctedSource = SOURCE_TENANT_OVERRIDE;
-        } else {
-            PlanEntitlementRow planRow = planRows.get(key);
-            if (planRow != null) {
-                correctedEnabled = planRow.enabled();
-                correctedSource = SOURCE_PLAN;
+        CorrectedResolution corrected = corrected(key, overrideRows.get(key), planRows.get(key));
+
+        if (legacyEnabled != corrected.enabled()) {
+            incrementMismatchCounter(key, corrected.source(), corrected.enabled());
+        }
+
+        boolean effectiveEnabled;
+        String effectiveSource;
+        if (mode == ResolutionMode.ENFORCE) {
+            if (tenant == null || tenant.getId() == null) {
+                // Platform/null context is not a tenant; fail closed under enforcement rather than
+                // leaving it legacy-enabled.
+                effectiveEnabled = false;
+                effectiveSource = SOURCE_DEFAULT;
+            } else if (isEnforcedTenant(tenant)) {
+                effectiveEnabled = corrected.enabled();
+                effectiveSource = corrected.source();
             } else {
-                correctedEnabled = false;
-                correctedSource = SOURCE_DEFAULT;
+                // Outside the canary allowlist: behave as SHADOW (legacy enforced).
+                effectiveEnabled = legacyEnabled;
+                effectiveSource = SOURCE_DEFAULT;
+            }
+        } else {
+            // SHADOW: legacy enforced, corrected shadowed.
+            effectiveEnabled = legacyEnabled;
+            effectiveSource = SOURCE_DEFAULT;
+        }
+        return new ResolvedEntitlement(key, definition.category(), effectiveEnabled, effectiveSource, commercialPlan, corrected.config());
+    }
+
+    /** Corrected precedence, independent of rollout mode: active override -> plan -> disabled default. */
+    private CorrectedResolution corrected(String key, TenantOverrideRow overrideRow, PlanEntitlementRow planRow) {
+        if (overrideRow != null) {
+            Map<String, Object> config = overrideRow.config() != null ? overrideRow.config() : Map.of();
+            return new CorrectedResolution(overrideRow.enabled(), SOURCE_TENANT_OVERRIDE, config);
+        }
+        if (planRow != null) {
+            Map<String, Object> config = planRow.config() != null ? planRow.config() : Map.of();
+            return new CorrectedResolution(planRow.enabled(), SOURCE_PLAN, config);
+        }
+        return new CorrectedResolution(false, SOURCE_DEFAULT, Map.of());
+    }
+
+    /**
+     * Returns keys where the corrected result diverges from the legacy (always-enabled) result for
+     * the given tenant. Used by the scheduled shadow sweep so coverage does not depend on a feature
+     * actually being exercised. Pure: increments no counters and writes no logs.
+     */
+    public List<ShadowMismatch> detectShadowMismatches(Tenant tenant) {
+        String commercialPlan = commercialPlanCode(tenant);
+        Map<String, TenantOverrideRow> overrideRows =
+                tenant == null ? Map.of() : loadTenantOverrides(tenant.getId());
+        Map<String, PlanEntitlementRow> planRows = loadPlanEntitlements(commercialPlan);
+        List<ShadowMismatch> mismatches = new ArrayList<>();
+        for (String key : KNOWN_ENTITLEMENT_KEYS) {
+            CorrectedResolution corrected = corrected(key, overrideRows.get(key), planRows.get(key));
+            if (!corrected.enabled()) {
+                mismatches.add(new ShadowMismatch(key, corrected.enabled(), corrected.source()));
             }
         }
-
-        if (legacyEnabled != correctedEnabled) {
-            recordMismatch(tenant, key, legacyEnabled, correctedEnabled, correctedSource);
-        }
-
-        boolean enforceCorrected = mode == ResolutionMode.ENFORCE && isEnforcedTenant(tenant);
-        boolean effectiveEnabled = enforceCorrected ? correctedEnabled : legacyEnabled;
-        String effectiveSource = enforceCorrected ? correctedSource : SOURCE_DEFAULT;
-        return new ResolvedEntitlement(key, definition.category(), effectiveEnabled, effectiveSource, commercialPlan, config);
+        return mismatches;
     }
 
     private boolean isEnforcedTenant(Tenant tenant) {
@@ -192,17 +235,14 @@ public class TenantEntitlementService {
                 || enforceTenantAllowlist.contains(tenant.getId().toString());
     }
 
-    private void recordMismatch(
-            Tenant tenant, String key, boolean legacyEnabled, boolean correctedEnabled, String correctedSource) {
+    /** Increments the mismatch counter with a bounded key label. Logging is handled by the sweep. */
+    public void incrementMismatchCounter(String key, String correctedSource, boolean correctedEnabled) {
         String metricKey = KNOWN_ENTITLEMENT_KEYS.contains(key) ? key : METRIC_KEY_UNKNOWN;
         meterRegistry.counter(
                 "entitlement.resolution.mismatch",
                 "key", metricKey,
                 "source", correctedSource,
                 "corrected", Boolean.toString(correctedEnabled)).increment();
-        LOG.info("entitlement resolution mismatch tenant={} key={} legacy={} corrected={} source={} mode={}",
-                tenant == null || tenant.getId() == null ? "<none>" : tenant.getId(),
-                key, legacyEnabled, correctedEnabled, correctedSource, mode);
     }
 
     private ResolutionMode parseMode(String raw) {
@@ -212,8 +252,9 @@ public class TenantEntitlementService {
         try {
             return ResolutionMode.valueOf(raw.trim().toUpperCase());
         } catch (IllegalArgumentException ex) {
-            LOG.warn("Unrecognized app.entitlements.mode='{}', defaulting to LEGACY", raw);
-            return ResolutionMode.LEGACY;
+            // Fail fast: a typo in the rollout mode must not silently defeat a planned cutover.
+            throw new IllegalStateException(
+                    "Invalid app.entitlements.mode='" + raw + "'; expected one of LEGACY, SHADOW, ENFORCE", ex);
         }
     }
 
@@ -446,6 +487,10 @@ public class TenantEntitlementService {
             boolean enabled,
             Map<String, Object> config
     ) {}
+
+    private record CorrectedResolution(boolean enabled, String source, Map<String, Object> config) {}
+
+    public record ShadowMismatch(String key, boolean correctedEnabled, String source) {}
 
     private record TenantOverrideRow(
             boolean enabled,
