@@ -14,6 +14,8 @@ import com.prototype.vulnwatch.dto.CampaignDtos.CampaignStatusUpdateRequest;
 import com.prototype.vulnwatch.dto.CampaignDtos.CampaignSummaryResponse;
 import com.prototype.vulnwatch.dto.CampaignDtos.CampaignWatchlistEntryUpdateRequest;
 import com.prototype.vulnwatch.service.CampaignService;
+import com.prototype.vulnwatch.service.CampaignAiService;
+import com.prototype.vulnwatch.service.CampaignAiService.CampaignAiResponse;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
@@ -36,15 +38,30 @@ public class CampaignController {
     private final WorkspaceService workspaceService;
     private final RequestActorService requestActorService;
     private final CampaignService campaignService;
+    private final CampaignAiService campaignAiService;
 
     public CampaignController(
             WorkspaceService workspaceService,
             RequestActorService requestActorService,
-            CampaignService campaignService
+            CampaignService campaignService,
+            CampaignAiService campaignAiService
     ) {
         this.workspaceService = workspaceService;
         this.requestActorService = requestActorService;
         this.campaignService = campaignService;
+        this.campaignAiService = campaignAiService;
+    }
+
+    @PostMapping("/{campaignId}/ai-insights")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public CampaignAiResponse generateAiInsights(@PathVariable UUID campaignId) {
+        return campaignAiService.insights(workspaceService.getWorkspace(), campaignId);
+    }
+
+    @PostMapping("/{campaignId}/ai-advisories")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public CampaignAiResponse generateAiAdvisories(@PathVariable UUID campaignId) {
+        return campaignAiService.advisories(workspaceService.getWorkspace(), campaignId);
     }
 
     @GetMapping

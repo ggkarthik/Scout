@@ -610,64 +610,10 @@ export function CampaignDetailPage() {
     setAiInsightsLoading(true);
     setAiInsightsError(null);
 
-    const apiKey = (import.meta.env as Record<string, string>).VITE_OPENAI_API_KEY;
-    if (!apiKey) {
-      setAiInsightsError('OpenAI API key not configured (add VITE_OPENAI_API_KEY to .env.local).');
-      setAiInsightsLoading(false);
-      return;
-    }
-
-    const teamSummary = teamRows.map((r) =>
-      `${r.group}: ${r.total} findings (${r.resolved} resolved, ${r.overdue} overdue)`,
-    ).join('; ') || 'No team data';
-
-    const sevSummary = sevRows.map((r) =>
-      `${r.sev}: ${r.resolved}/${r.total} resolved`,
-    ).join(', ') || 'No findings';
-
-    const cveList = s.cveIds.join(', ') || 'None';
-
-    const prompt = `You are a security operations analyst generating an executive-level campaign insight summary for a vulnerability remediation campaign. Be concise, specific, and action-oriented. Output exactly 4 bullet points, one per line, starting with "• ".
-
-Campaign: ${s.name}
-Status: ${formatStatus(s.status)}
-CVEs in scope: ${cveList}
-Due date: ${formatDate(s.dueAt)}
-Remediation progress: ${pct}% (${s.resolvedFindings} of ${s.totalFindings} findings resolved)
-Overdue findings: ${overdueCount}
-Assets in scope: ${s.assetCount}
-Critical assets still exposed: ${criticalExposed}
-Exceptions pending: ${s.exceptionCount}
-Severity breakdown: ${sevSummary}
-Team accountability: ${teamSummary}
-
-Generate exactly 4 bullet points covering:
-1. Remediation velocity and current progress risk
-2. Which teams are not moving forward and need escalation
-3. CVE risk impact and exploitability concern
-4. What requires immediate leadership attention and recommended next action`;
-
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 520,
-          temperature: 0.55,
-        }),
-      });
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`OpenAI ${response.status}: ${errText.slice(0, 200)}`);
-      }
-      const data = await response.json() as { choices: Array<{ message: { content: string } }> };
-      const text = (data.choices[0]?.message?.content ?? '').trim();
-      const generatedAt = new Date().toISOString();
+      const response = await api.generateCampaignAiInsights(id);
+      const text = response.text?.trim() ?? '';
+      const generatedAt = response.generatedAt;
       setAiInsights(text);
       setAiInsightsGeneratedAt(generatedAt);
       localStorage.setItem(`campaign-insights-${id}`, JSON.stringify({ text, generatedAt }));
@@ -683,42 +629,10 @@ Generate exactly 4 bullet points covering:
     setAdvisoriesLoading(true);
     setAdvisoriesError(null);
 
-    const apiKey = (import.meta.env as Record<string, string>).VITE_OPENAI_API_KEY;
-    if (!apiKey) {
-      setAdvisoriesError('OpenAI API key not configured (add VITE_OPENAI_API_KEY to .env.local).');
-      setAdvisoriesLoading(false);
-      return;
-    }
-
-    const cveList = s.cveIds.join(', ') || 'None';
-    const prompt = `You are a security intelligence analyst. Given the following CVEs tracked in a vulnerability remediation campaign, identify the top 5 most critical security advisories relevant to these CVEs. Consider patch availability, active exploitation, CVSS scores, and recency.
-
-CVEs in scope: ${cveList}
-Campaign name: ${s.name}
-Severity context: ${(detail?.vulnerabilities ?? []).map((v) => `${v.externalId}=${v.severity ?? 'unknown'}`).join(', ')}
-
-Return ONLY a valid JSON array (no markdown, no explanation) with exactly 5 objects using this schema:
-[{"title":"...","cveId":"CVE-...","severity":"CRITICAL|HIGH|MEDIUM|LOW","type":"Patch Available|Exploit Public|Workaround|KEV Listed|No Fix","publishedDate":"YYYY-MM-DD or null if unknown","summary":"One sentence describing the advisory and recommended action."}]`;
-
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 800,
-          temperature: 0.3,
-        }),
-      });
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`OpenAI ${response.status}: ${errText.slice(0, 200)}`);
-      }
-      const data = await response.json() as { choices: Array<{ message: { content: string } }> };
-      const raw = (data.choices[0]?.message?.content ?? '').trim();
-      const parsed = JSON.parse(raw) as Advisory[];
-      const fetchedAt = new Date().toISOString();
+      const response = await api.generateCampaignAiAdvisories(id);
+      const parsed = (response.advisories ?? []) as Advisory[];
+      const fetchedAt = response.generatedAt;
       setAdvisories(parsed);
       setAdvisoriesFetchedAt(fetchedAt);
       localStorage.setItem(`campaign-advisories-${id}`, JSON.stringify({ items: parsed, fetchedAt }));
