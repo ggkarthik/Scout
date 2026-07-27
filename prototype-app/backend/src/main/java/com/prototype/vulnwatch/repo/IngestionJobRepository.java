@@ -33,6 +33,30 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
 
     @Query(value = """
             SELECT * FROM ingestion_jobs
+             WHERE status = 'QUEUED'
+               AND visible_at <= now()
+               AND job_type <> :excludedJobType
+             ORDER BY requested_at, id
+             LIMIT :limit
+             FOR UPDATE SKIP LOCKED
+            """, nativeQuery = true)
+    List<IngestionJob> pollPendingExcluding(
+            @Param("excludedJobType") String excludedJobType,
+            @Param("limit") int limit);
+
+    @Query(value = """
+            SELECT * FROM ingestion_jobs
+             WHERE status = 'QUEUED'
+               AND visible_at <= now()
+               AND job_type = :jobType
+             ORDER BY requested_at, id
+             LIMIT :limit
+             FOR UPDATE SKIP LOCKED
+            """, nativeQuery = true)
+    List<IngestionJob> pollPendingByJobType(@Param("jobType") String jobType, @Param("limit") int limit);
+
+    @Query(value = """
+            SELECT * FROM ingestion_jobs
              WHERE dedupe_key = :dedupeKey
                AND status IN ('QUEUED', 'RUNNING')
              ORDER BY requested_at DESC, id DESC
@@ -43,6 +67,14 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
 
     @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status = :status")
     long countByStatusValue(@Param("status") String status);
+
+    @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status = :status AND j.jobType <> :excludedJobType")
+    long countByStatusExcludingJobType(
+            @Param("status") String status,
+            @Param("excludedJobType") String excludedJobType);
+
+    @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status = :status AND j.jobType = :jobType")
+    long countByStatusAndJobType(@Param("status") String status, @Param("jobType") String jobType);
 
     @Query(value = """
             select

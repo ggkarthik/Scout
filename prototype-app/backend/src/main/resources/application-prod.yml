@@ -17,6 +17,14 @@ server:
   shutdown: graceful
 
 app:
+  ai-security:
+    aws:
+      max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
+      admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}
+    jobs:
+      enabled: ${APP_AI_SECURITY_JOBS_ENABLED:true}
+      poll-interval-ms: ${APP_AI_SECURITY_JOBS_POLL_INTERVAL_MS:3000}
+      max-concurrent-per-tenant: ${APP_AI_SECURITY_MAX_CONCURRENT_PER_TENANT:1}
   security:
     require-production-secrets: true
     allow-api-key-auth: false
@@ -35,7 +43,7 @@ app:
     allow-header-tenant-selection: false
     require-tenant-context: true
     enforce-schema-version: true
-    minimum-compatible-schema-version: 44
+    minimum-compatible-schema-version: 45
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
 

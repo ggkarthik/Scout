@@ -24,7 +24,8 @@ export type InventoryViewKey =
   | 'container-images'
   | 'sbom'
   | 'bom-components'
-  | 'bom-inventory';
+  | 'bom-inventory'
+  | 'ai';
 
 export type InventoryScopedAssetType = 'ALL' | 'APPLICATION' | 'HOST' | 'CONTAINER_IMAGE';
 export type InventoryComponentFilterKey = 'assetType' | 'componentStatus' | 'sourceSystem' | 'ecosystem' | 'reviewCategory' | 'query';

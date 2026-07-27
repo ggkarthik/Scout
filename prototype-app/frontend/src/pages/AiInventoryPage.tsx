@@ -1,0 +1,154 @@
+import { useQuery } from '@tanstack/react-query';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../api/client';
+import type { AiSecurityArtifact } from '../features/ai-security/types';
+import { timeAgo } from '../lib/time';
+
+type InventoryPill = 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
+
+const PILLS: Array<{ key: InventoryPill; label: string }> = [
+  { key: 'AI_AGENT', label: 'AI Agents' },
+  { key: 'AI_MODEL', label: 'AI Models' },
+  { key: 'OTHER_AI_ARTIFACT', label: 'Other AI Artifacts' },
+];
+
+export function AiInventoryPage() {
+  const navigate = useNavigate();
+  const [activePill, setActivePill] = React.useState<InventoryPill>('AI_AGENT');
+  const [selected, setSelected] = React.useState<AiSecurityArtifact | null>(null);
+  const artifactsQuery = useQuery({
+    queryKey: ['ai-security-artifacts', activePill],
+    queryFn: () => api.listAiSecurityArtifacts(activePill, 0, 100),
+  });
+  const summaryQuery = useQuery({
+    queryKey: ['ai-security-summary'],
+    queryFn: api.getAiSecuritySummary,
+  });
+  const graphQuery = useQuery({
+    queryKey: ['ai-security-graph', selected?.id],
+    queryFn: () => api.getAiSecurityGraph(selected?.id),
+    enabled: selected != null,
+  });
+
+  const items = artifactsQuery.data?.items ?? [];
+
+  return (
+    <div className="ai-security-page">
+      <section className="ai-security-hero">
+        <div>
+          <span className="ai-security-kicker">AWS Bedrock estate</span>
+          <h2>AI Inventory</h2>
+          <p>Tenant-scoped agents, referenced models, and supporting AI-native resources.</p>
+        </div>
+        <div className="ai-security-hero-metrics">
+          <Metric label="Open AI findings" value={summaryQuery.data?.openFindings ?? 0} tone="danger" />
+          <Metric label="Incomplete scopes" value={summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
+        </div>
+      </section>
+
+      <div className="ai-security-pill-row" role="tablist" aria-label="AI inventory artifact types">
+        {PILLS.map((pill) => (
+          <button
+            key={pill.key}
+            type="button"
+            role="tab"
+            aria-selected={activePill === pill.key}
+            className={`ai-security-pill${activePill === pill.key ? ' active' : ''}`}
+            onClick={() => {
+              setActivePill(pill.key);
+              setSelected(null);
+            }}
+          >
+            {pill.label}
+            <span>{summaryQuery.data?.artifactCounts[pill.key] ?? (pill.key === 'OTHER_AI_ARTIFACT' ? items.length : 0)}</span>
+          </button>
+        ))}
+      </div>
+
+      {artifactsQuery.isLoading ? (
+        <section className="panel"><div className="empty-state"><p>Loading AI inventory…</p></div></section>
+      ) : artifactsQuery.isError ? (
+        <section className="panel"><div className="notice error">AI inventory could not be loaded.</div></section>
+      ) : items.length === 0 ? (
+        <section className="ai-security-empty">
+          <div className="ai-security-empty-mark">AI</div>
+          <h3>No {PILLS.find((pill) => pill.key === activePill)?.label.toLowerCase()} discovered</h3>
+          <p>Connect an AWS account and run Bedrock discovery. Empty inventory never hides this workspace.</p>
+          <button className="btn btn-primary" type="button" onClick={() => navigate('/connect/sources?connectSource=ai-security-aws')}>
+            Configure AI connector
+          </button>
+        </section>
+      ) : (
+        <section className="ai-security-split">
+          <div className="panel ai-security-table-panel">
+            <table className="data-table">
+              <thead>
+                <tr><th>Name</th><th>Native type</th><th>Account / Region</th><th>Last observed</th><th>State</th></tr>
+              </thead>
+              <tbody>
+                {items.map((artifact) => (
+                  <tr
+                    key={artifact.id}
+                    className={selected?.id === artifact.id ? 'selected' : ''}
+                    onClick={() => setSelected(artifact)}
+                  >
+                    <td><strong>{artifact.name}</strong><small>{artifact.providerResourceId}</small></td>
+                    <td>{artifact.nativeKind.replace(/_/g, ' ')}</td>
+                    <td>{artifact.accountId}<small>{artifact.region}</small></td>
+                    <td>{timeAgo(artifact.lastObservedAt) ?? 'Unknown'}</td>
+                    <td><span className={`status-pill ${artifact.active ? 'success' : 'muted'}`}>{artifact.active ? 'Active' : 'Inactive'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selected && (
+            <aside className="panel ai-security-detail">
+              <span className="ai-security-kicker">{selected.nativeKind.replace(/_/g, ' ')}</span>
+              <h3>{selected.name}</h3>
+              <dl>
+                <dt>Provider ID</dt><dd>{selected.providerResourceId}</dd>
+                <dt>Account</dt><dd>{selected.accountId}</dd>
+                <dt>Region</dt><dd>{selected.region}</dd>
+              </dl>
+              <h4>Observed facts</h4>
+              <div className="ai-security-facts">
+                {Object.entries(selected.attributes).map(([key, value]) => (
+                  <div key={key}><span>{key.replace(/([A-Z_])/g, ' $1')}</span><strong>{formatValue(value)}</strong></div>
+                ))}
+              </div>
+              <h4>Relationships</h4>
+              {graphQuery.isLoading ? (
+                <p className="panel-caption">Loading connected resources…</p>
+              ) : (graphQuery.data?.edges.length ?? 0) === 0 ? (
+                <p className="panel-caption">No active relationships observed.</p>
+              ) : (
+                <div className="ai-security-graph" aria-label="AI artifact relationship graph">
+                  {graphQuery.data?.edges.slice(0, 12).map((edge) => (
+                    <div className="ai-security-graph-edge" key={edge.id}>
+                      <span>{edge.sourceName}</span>
+                      <strong>{edge.relationshipType.replace(/_/g, ' ')}</strong>
+                      <span>{edge.targetName}</span>
+                    </div>
+                  ))}
+                  {graphQuery.data?.truncated && <small>Graph capped for safe rendering.</small>}
+                </div>
+              )}
+            </aside>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return <div className={`ai-security-metric ${tone}`}><strong>{value.toLocaleString()}</strong><span>{label}</span></div>;
+}
+
+function formatValue(value: unknown): string {
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (typeof value === 'object' && value != null) return JSON.stringify(value);
+  return String(value ?? 'Not observed');
+}

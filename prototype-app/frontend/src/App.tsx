@@ -25,6 +25,7 @@ import {
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
 import { ActorContextState, useActor } from './features/auth/context';
 import { useActorQuery } from './features/auth/queries';
+import { canUseEntitlement } from './features/auth/entitlements';
 import type { ActorContext } from './features/auth/types';
 import {
   canAccessPlatformConsole,
@@ -37,12 +38,22 @@ import {
 } from './features/auth/roles';
 import './styles/index.css';
 import './styles/finding-detail.css';
+import './styles/ai-security.css';
 
 const ExposureDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/ExposureDashboardPage')).ExposureDashboardPage
 }));
 const FindingsPage = React.lazy(async () => ({
   default: (await import('./pages/FindingsPage')).FindingsPage
+}));
+const AiFindingsPage = React.lazy(async () => ({
+  default: (await import('./pages/AiFindingsPage')).AiFindingsPage
+}));
+const AiPoliciesPage = React.lazy(async () => ({
+  default: (await import('./pages/AiPoliciesPage')).AiPoliciesPage
+}));
+const AiInventoryPage = React.lazy(async () => ({
+  default: (await import('./pages/AiInventoryPage')).AiInventoryPage
 }));
 const FindingDetailPage = React.lazy(async () => ({
   default: (await import('./pages/FindingDetailPage')).FindingDetailPage
@@ -187,7 +198,8 @@ const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countK
   { key: 'container-images', label: 'Container Images', countKey: 'containerImages' },
   { key: 'sbom', label: 'Applications', countKey: 'applications' },
   { key: 'bom-components', label: 'BOM Components', countKey: 'bomInventory' },
-  { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' }
+  { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' },
+  { key: 'ai', label: 'AI Inventory' }
 ];
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -291,6 +303,14 @@ function FindingsRoute() {
       onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnRepoView('org-cves', vulnerabilityId))}
     />
   );
+}
+
+function AiSecurityRoute({ children }: { children: React.ReactNode }) {
+  const actor = useActor();
+  if (!canUseEntitlement(actor, 'ai.security') || actor?.platformScope) {
+    return <Navigate to="/exposure" replace />;
+  }
+  return <>{children}</>;
 }
 
 function FindingDetailRoute() {
@@ -418,6 +438,9 @@ function InventoryRoute() {
   }
   if (selectedView === 'bom-inventory') {
     return <BomInventoryPage />;
+  }
+  if (selectedView === 'ai') {
+    return <AiSecurityRoute><AiInventoryPage /></AiSecurityRoute>;
   }
   return <InventoryComponentViewsPage selectedView={selectedView} />;
 }
@@ -627,6 +650,7 @@ function AppShell() {
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
   const [inventoryNavExpanded, setInventoryNavExpanded] = React.useState(true);
+  const [findingsNavExpanded, setFindingsNavExpanded] = React.useState(true);
   const [adminNavExpanded, setAdminNavExpanded] = React.useState(true);
   const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(true);
 
@@ -647,6 +671,7 @@ function AppShell() {
       : 'dashboard';
   const isPlatformScope = actor?.platformScope ?? false;
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
+  const aiSecurityEnabled = canUseEntitlement(actor, 'ai.security') && !isPlatformScope;
   const visibleVulnRepoNavItems = React.useMemo(
     () => VULN_REPO_NAV_ITEMS,
     []
@@ -656,11 +681,14 @@ function AppShell() {
       return ['vuln-repo', 'connect', 'platform', 'end-of-life'] satisfies AppTab[];
     }
     if (canManageTenant(actor)) {
-      return ['exposure', 'findings', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'] satisfies AppTab[];
+      const tabs: AppTab[] = ['exposure', 'findings', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'];
+      if (aiSecurityEnabled) tabs.splice(2, 0, 'policies');
+      return tabs;
     }
     const tabs: AppTab[] = ['exposure'];
     if (canRunSecurityWorkflow(actor) || canViewReadOnly(actor)) {
       tabs.push('findings', 'vuln-repo', 'campaigns', 'inventory');
+      if (aiSecurityEnabled) tabs.push('policies');
     }
     if (canAccessPlatformConsole(actor)) {
       tabs.push('operations');
@@ -675,7 +703,7 @@ function AppShell() {
       tabs.push('configurations');
     }
     return tabs;
-  }, [actor, platformScopeOwner]);
+  }, [actor, aiSecurityEnabled, platformScopeOwner]);
   const inventoryAssetsQuery = useQuery({
     queryKey: ['inventory-nav-assets'],
     queryFn: api.listAssets,
@@ -702,8 +730,9 @@ function AppShell() {
     };
   }, [inventoryAssetsQuery.data, inventoryBomQuery.data?.length, inventorySoftwareQuery.data?.totalElements]);
   const visibleInventoryPills = React.useMemo(
-    () => INVENTORY_PILL_ORDER.filter((item) => !item.countKey || inventoryPillCounts[item.countKey] > 0),
-    [inventoryPillCounts]
+    () => INVENTORY_PILL_ORDER.filter((item) =>
+      (item.key !== 'ai' || aiSecurityEnabled) && (!item.countKey || inventoryPillCounts[item.countKey] > 0)),
+    [aiSecurityEnabled, inventoryPillCounts]
   );
 
   React.useEffect(() => {
@@ -770,7 +799,7 @@ function AppShell() {
     return titleForTab(activeTab);
   }, [activeTab]);
 
-  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'inventory', 'admin', 'configurations']);
+  const tenantScopedTabs = new Set<AppTab>(['exposure', 'findings', 'policies', 'inventory', 'admin', 'configurations']);
   if (actor && isPlatformScope && tenantScopedTabs.has(activeTab)) {
     return <Navigate to={pathForPlatformView('tenants')} replace state={{ platformMessage: 'Select a tenant to continue.' }} />;
   }
@@ -862,6 +891,19 @@ function AppShell() {
 
           <div className="nav-main-section">
             {visiblePrimaryNavTabs.map((tab) => {
+              if (tab === 'findings' && aiSecurityEnabled) {
+                return renderExpandableNavButton(
+                  tab,
+                  findingsNavExpanded,
+                  () => setFindingsNavExpanded((current) => !current),
+                  [
+                    { key: 'vulnerability', label: 'Vulnerability Findings' },
+                    { key: 'ai', label: 'AI Findings' },
+                  ],
+                  (key) => key === 'ai' ? location.pathname.startsWith('/findings/ai') : location.pathname === '/findings',
+                  (key) => navigate(key === 'ai' ? '/findings/ai' : '/findings')
+                );
+              }
               if (tab === 'inventory') {
                 return renderExpandableNavButton(
                   tab,
@@ -1029,7 +1071,9 @@ function AppShell() {
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
               <Route path="/" element={<HomeRoute />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
+              <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
+              <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
               <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />

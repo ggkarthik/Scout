@@ -24,6 +24,8 @@ import { VulnerabilitySourcesSection } from './ConfigurationsPage';
 import { timeAgo } from '../lib/time';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { BomManagementPage } from './BomManagementPage';
+import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
+import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
   | 'sbom-endpoint'
@@ -33,6 +35,7 @@ type ConnectorId =
   | 'sccm-cmdb'
   | 'aws-discovery'
   | 'azure-discovery'
+  | 'ai-security-aws'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -223,6 +226,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     icon: IconCloud
   },
   {
+    id: 'ai-security-aws',
+    name: 'AI Security — AWS Bedrock',
+    summary: 'Discover tenant-scoped agents, referenced models, AI artifacts, relationships, and configuration findings.',
+    icon: IconBrain
+  },
+  {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
     summary: '',
@@ -298,6 +307,8 @@ const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
   'aws-discovery',
   'azure-discovery'
 ];
+
+const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws'];
 
 function formatInstantConnect(iso?: string): string {
   if (!iso) return 'Never';
@@ -624,6 +635,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   if (connectorId === 'azure-discovery') {
     return <AzureDiscoveryConnectorPage />;
   }
+  if (connectorId === 'ai-security-aws') {
+    return <AiSecurityConnectorPage />;
+  }
 
   return (
     <section className="panel">
@@ -718,6 +732,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
 
   const cloudConnectors = CONNECTORS
     .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
+  const aiConnectors = CONNECTORS
+    .filter((connector) => AI_CONNECTOR_IDS.includes(connector.id) && canUseEntitlement(actor, 'ai.security'));
 
   const visibleSections = [
     {
@@ -731,6 +747,12 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Inventory — Cloud Sources',
       connectors: cloudConnectors,
       caption: 'Cloud hyperscaler discovery — AWS and Azure, with future GCP integration.',
+    },
+    {
+      key: 'ai-sources' as const,
+      title: 'Inventory — AI',
+      connectors: aiConnectors,
+      caption: 'Read-only AI estate discovery and deterministic configuration assessment.',
     }
   ];
 

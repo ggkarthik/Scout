@@ -29,6 +29,7 @@ public class IngestionJobService {
     public static final String JOB_TYPE_REMOTE_ENDPOINT = "REMOTE_ENDPOINT";
     public static final String JOB_TYPE_GITHUB_REPOSITORY = "GITHUB_REPOSITORY";
     public static final String JOB_TYPE_GITHUB_GHCR = "GITHUB_GHCR";
+    public static final String JOB_TYPE_AI_SECURITY_AWS_BEDROCK = "AI_SECURITY_AWS_BEDROCK";
     public static final String STATUS_QUEUED = "QUEUED";
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_SUCCEEDED = "SUCCEEDED";
@@ -191,7 +192,8 @@ public class IngestionJobService {
     // opening a TransactionTemplate keeps the ordering correct for every tenant.
     public List<ClaimedJobRef> claimPendingJobs(Tenant tenant, int limit, int maxConcurrentPerTenant) {
         return tenantSchemaExecutionService.run(tenant, () -> transactionTemplate.execute(status -> {
-            long running = ingestionJobRepository.countByStatusValue(STATUS_RUNNING);
+            long running = ingestionJobRepository.countByStatusExcludingJobType(
+                    STATUS_RUNNING, JOB_TYPE_AI_SECURITY_AWS_BEDROCK);
             if (running >= maxConcurrentPerTenant) {
                 return List.of();
             }
@@ -199,7 +201,8 @@ public class IngestionJobService {
             if (claimLimit == 0) {
                 return List.of();
             }
-            List<IngestionJob> jobs = ingestionJobRepository.pollPending(claimLimit);
+            List<IngestionJob> jobs = ingestionJobRepository.pollPendingExcluding(
+                    JOB_TYPE_AI_SECURITY_AWS_BEDROCK, claimLimit);
             Instant now = Instant.now();
             for (IngestionJob job : jobs) {
                 job.setStatus(STATUS_RUNNING);
@@ -210,6 +213,41 @@ public class IngestionJobService {
             return jobs.stream()
                     .map(job -> new ClaimedJobRef(tenant.getId(), job.getId()))
                     .toList();
+        }));
+    }
+
+    public IngestionJobAcceptedResponse enqueueAiSecurityJob(
+            Tenant tenant, UUID connectorId, String requestedBy) {
+        return enqueueJob(
+                tenant,
+                JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
+                "ai-security-aws",
+                "ai-security:" + connectorId,
+                requestedBy,
+                new AiSecurityJobPayload(connectorId)
+        );
+    }
+
+    public List<ClaimedJobRef> claimPendingJobsByType(
+            Tenant tenant, String jobType, int limit, int maxConcurrentPerTenant) {
+        return tenantSchemaExecutionService.run(tenant, () -> transactionTemplate.execute(status -> {
+            long running = ingestionJobRepository.countByStatusAndJobType(STATUS_RUNNING, jobType);
+            if (running >= maxConcurrentPerTenant) {
+                return List.of();
+            }
+            int claimLimit = Math.max(0, Math.min(limit, maxConcurrentPerTenant - (int) running));
+            if (claimLimit == 0) {
+                return List.of();
+            }
+            List<IngestionJob> jobs = ingestionJobRepository.pollPendingByJobType(jobType, claimLimit);
+            Instant now = Instant.now();
+            jobs.forEach(job -> {
+                job.setStatus(STATUS_RUNNING);
+                job.setStartedAt(now);
+                job.setAttemptCount(job.getAttemptCount() + 1);
+            });
+            ingestionJobRepository.saveAll(jobs);
+            return jobs.stream().map(job -> new ClaimedJobRef(tenant.getId(), job.getId())).toList();
         }));
     }
 
@@ -420,5 +458,8 @@ public class IngestionJobService {
     }
 
     public record ClaimedJobRef(UUID tenantId, UUID jobId) {
+    }
+
+    public record AiSecurityJobPayload(UUID connectorId) {
     }
 }
