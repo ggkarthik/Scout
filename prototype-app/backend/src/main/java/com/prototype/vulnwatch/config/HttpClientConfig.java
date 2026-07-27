@@ -93,6 +93,18 @@ public class HttpClientConfig {
         return executor;
     }
 
+    @Bean(name = "aiSecurityJobExecutor")
+    public ThreadPoolTaskExecutor aiSecurityJobExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("ai-security-job-");
+        executor.setTaskDecorator(tenantContextTaskDecorator());
+        executor.initialize();
+        return executor;
+    }
+
     static TaskDecorator tenantContextTaskDecorator() {
         return runnable -> {
             TenantContext.Snapshot captured = TenantContext.capture();

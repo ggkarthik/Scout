@@ -67,4 +67,35 @@ class ArchitectureRulesTest {
             noMethods()
                     .that().areAnnotatedWith(Scheduled.class)
                     .should().beAnnotatedWith(Transactional.class);
+
+    @ArchTest
+    static final ArchRule ai_security_sync_runs_must_use_the_tenant_qualified_facade =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .and().doNotHaveSimpleName("AiSecuritySyncRunFacade")
+                    .should().dependOnClassesThat().haveSimpleName("SyncRunRepository");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_org_cve_ai_artifacts =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("OrgCveAiArtifact");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_component_vulnerability_state =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("ComponentVulnerabilityState");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_cve_delta_queue =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("FindingDeltaQueueService");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_vulnerability_risk_policy =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("RiskPolicy");
 }
