@@ -105,6 +105,11 @@ public class TenantEntitlementService {
         return resolve(tenant, entitlementKey).enabled();
     }
 
+    /** True in SHADOW or ENFORCE mode: corrected results are being computed, so the sweep should run. */
+    public boolean shadowSweepEnabled() {
+        return mode != ResolutionMode.LEGACY;
+    }
+
     public ResolvedEntitlement resolve(Tenant tenant, String entitlementKey) {
         String key = normalizeKey(entitlementKey);
         String commercialPlan = commercialPlanCode(tenant);
