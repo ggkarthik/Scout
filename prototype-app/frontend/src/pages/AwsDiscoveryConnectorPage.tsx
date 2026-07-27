@@ -400,7 +400,7 @@ export function AwsDiscoveryConnectorPage() {
                       type="text"
                       value={form.accessKeyId ?? ''}
                       onChange={(e) => updateField('accessKeyId', e.target.value)}
-                      placeholder="AKIAIOSFODNN7EXAMPLE"
+                      placeholder="Enter AWS access key ID"
                     />
                   </label>
                   <label>
