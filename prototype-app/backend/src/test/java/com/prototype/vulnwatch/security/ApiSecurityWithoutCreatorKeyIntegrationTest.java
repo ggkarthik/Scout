@@ -23,6 +23,7 @@ import com.prototype.vulnwatch.service.OperationalQualityReadService;
 import com.prototype.vulnwatch.service.PerformanceScorecardService;
 import com.prototype.vulnwatch.service.PlatformTenantAttentionService;
 import com.prototype.vulnwatch.service.RequestActorService;
+import com.prototype.vulnwatch.service.TenantEntitlementService;
 import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.service.TenantSupportGrantService;
 import com.prototype.vulnwatch.service.WorkspaceService;
@@ -87,6 +88,9 @@ class ApiSecurityWithoutCreatorKeyIntegrationTest {
 
     @MockBean
     private TenantSupportGrantService tenantSupportGrantService;
+
+    @MockBean
+    private TenantEntitlementService tenantEntitlementService;
 
     @BeforeEach
     void setUp() {

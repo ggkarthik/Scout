@@ -24,6 +24,7 @@ public record AuthContextResponse(
         Instant demoExpiresAt,
         Long demoDaysRemaining,
         java.util.Map<String, Boolean> demoCapabilities,
-        java.util.Map<String, Long> demoUsage
+        java.util.Map<String, Long> demoUsage,
+        java.util.Map<String, Boolean> entitlements
 ) {
 }

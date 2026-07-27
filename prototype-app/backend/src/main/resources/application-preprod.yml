@@ -11,3 +11,8 @@ app:
   tenancy:
     allow-header-tenant-selection: false
     require-tenant-context: true
+  entitlements:
+    # Preprod (customer-validation) runs the corrected resolver in SHADOW: legacy is still enforced,
+    # corrected results are computed, and mismatch telemetry is emitted. Flip to ENFORCE with a
+    # canary allowlist only after >=7 days of clean/explained mismatches (see the Phase 0 runbook).
+    mode: ${APP_ENTITLEMENTS_MODE:SHADOW}
