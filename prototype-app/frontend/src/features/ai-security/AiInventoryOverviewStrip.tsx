@@ -1,0 +1,35 @@
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../../api/client';
+import { useActor } from '../auth/context';
+import { canUseEntitlement } from '../auth/entitlements';
+
+export function AiInventoryOverviewStrip() {
+  const actor = useActor();
+  const navigate = useNavigate();
+  const entitled = canUseEntitlement(actor, 'ai.security') && actor?.platformScope !== true;
+  const summaryQuery = useQuery({
+    queryKey: ['ai-security-summary'],
+    queryFn: api.getAiSecuritySummary,
+    enabled: entitled,
+  });
+  if (!entitled) return null;
+
+  const summary = summaryQuery.data;
+  const other = Object.entries(summary?.artifactCounts ?? {})
+    .filter(([key]) => key !== 'AI_AGENT' && key !== 'AI_MODEL')
+    .reduce((total, [, count]) => total + count, 0);
+  return (
+    <section className="ai-overview-strip">
+      <div>
+        <span className="ai-security-kicker">AI inventory</span>
+        <h3>Bedrock estate coverage</h3>
+      </div>
+      <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_AGENT ?? 0}</strong><span>Agents</span></button>
+      <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_MODEL ?? 0}</strong><span>Models</span></button>
+      <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{other}</strong><span>Other artifacts</span></button>
+      <button type="button" onClick={() => navigate('/findings/ai')} className="risk"><strong>{summary?.openFindings ?? 0}</strong><span>Open findings</span></button>
+      <div className="coverage"><strong>{summary?.incompleteScopes ?? 0}</strong><span>Incomplete scopes</span></div>
+    </section>
+  );
+}

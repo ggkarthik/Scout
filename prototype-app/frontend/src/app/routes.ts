@@ -6,6 +6,7 @@ export type AppTab =
   | 'exposure'
   | 'dashboard'
   | 'findings'
+  | 'policies'
   | 'operations'
   | 'vuln-repo'
   | 'campaigns'
@@ -68,7 +69,8 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
   'container-images',
   'sbom',
   'bom-components',
-  'bom-inventory'
+  'bom-inventory',
+  'ai'
 ]);
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
@@ -186,6 +188,8 @@ export function pathForTab(tab: AppTab): string {
       return '/';
     case 'findings':
       return '/findings';
+    case 'policies':
+      return '/policies';
     case 'operations':
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
     case 'vuln-repo':
@@ -355,6 +359,7 @@ export function pathForFindingDetail(displayId: string, returnTo?: string): stri
 export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/exposure')) return 'exposure';
   if (pathname.startsWith('/findings')) return 'findings';
+  if (pathname.startsWith('/policies')) return 'policies';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
   if (pathname.startsWith('/vuln-repo/campaigns')) return 'campaigns';
@@ -377,6 +382,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Overview';
     case 'findings':
       return 'Findings';
+    case 'policies':
+      return 'Policies';
     case 'operations':
       return 'Operational Dashboard';
     case 'vuln-repo':

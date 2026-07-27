@@ -479,7 +479,34 @@ import type {
   CampaignSummary,
   CampaignWatchlistEntryUpdateRequest,
 } from '../features/campaigns/types';
+
+export type CampaignAdvisory = {
+  title: string;
+  cveId: string;
+  severity: string;
+  type: string;
+  publishedDate: string | null;
+  summary: string;
+};
+
+export type CampaignAiResponse = {
+  text: string | null;
+  advisories: CampaignAdvisory[] | null;
+  generatedAt: string;
+};
 import { resolveApiBase } from './base';
+import type {
+  AiSecurityArtifact,
+  AiSecurityConnectionTest,
+  AiSecurityConnectorConfig,
+  AiSecurityFinding,
+  AiSecurityGraph,
+  AiSecurityPage,
+  AiSecurityPolicy,
+  AiSecurityRun,
+  AiSecurityScope,
+  AiSecuritySummary,
+} from '../features/ai-security/types';
 
 const API_BASE = resolveApiBase();
 const API_KEY = import.meta.env.VITE_API_KEY ?? (import.meta.env.DEV ? 'change-me-in-prod' : '');
@@ -1247,6 +1274,14 @@ export const api = {
     request<CampaignSummary[]>(status ? `/campaigns?status=${encodeURIComponent(status)}` : '/campaigns'),
   getCampaign: (campaignId: string) =>
     request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}`),
+  generateCampaignAiInsights: (campaignId: string) =>
+    request<CampaignAiResponse>(`/campaigns/${encodeURIComponent(campaignId)}/ai-insights`, {
+      method: 'POST',
+    }),
+  generateCampaignAiAdvisories: (campaignId: string) =>
+    request<CampaignAiResponse>(`/campaigns/${encodeURIComponent(campaignId)}/ai-advisories`, {
+      method: 'POST',
+    }),
   createCampaign: (payload: CampaignCreateRequest) =>
     request<CampaignDetail>('/campaigns', {
       method: 'POST',
@@ -1282,6 +1317,54 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  getAiSecuritySummary: () => request<AiSecuritySummary>('/ai-security/summary'),
+  listAiSecurityArtifacts: (artifactType?: string, page = 0, size = 50) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (artifactType) params.set('artifactType', artifactType);
+    return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
+  },
+  getAiSecurityGraph: (rootArtifactId?: string) => {
+    const suffix = rootArtifactId ? `?rootArtifactId=${encodeURIComponent(rootArtifactId)}` : '';
+    return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
+  },
+  listAiSecurityFindings: (policyId?: string, status?: string, page = 0, size = 50) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (policyId) params.set('policyId', policyId);
+    if (status) params.set('status', status);
+    return request<AiSecurityPage<AiSecurityFinding>>(`/ai-security/findings?${params.toString()}`);
+  },
+  reviewAiSecurityFinding: (
+    findingId: string,
+    disposition: 'CONFIRMED' | 'FALSE_POSITIVE' | 'NEEDS_INVESTIGATION',
+    reason?: string,
+  ) => request<AiSecurityFinding>(`/ai-security/findings/${encodeURIComponent(findingId)}/review`, {
+    method: 'PUT',
+    body: JSON.stringify({ disposition, reason }),
+  }),
+  listAiSecurityPolicies: () => request<AiSecurityPolicy[]>('/ai-security/policies'),
+  updateAiSecurityPolicy: (policyId: string, enabled: boolean) =>
+    request<AiSecurityPolicy>(`/ai-security/policies/${encodeURIComponent(policyId)}/enabled`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  listAiSecurityRuns: () => request<AiSecurityRun[]>('/ai-security/runs'),
+  listAiSecurityRunScopes: (runId: string) =>
+    request<AiSecurityScope[]>(`/ai-security/runs/${encodeURIComponent(runId)}/scopes`),
+  getAiSecurityConnector: () => request<AiSecurityConnectorConfig | null>('/connectors/ai-security/aws'),
+  saveAiSecurityConnector: (payload: {
+    accountId: string;
+    roleArn?: string;
+    externalId?: string;
+    regions: string[];
+    enabled: boolean;
+  }) => request<AiSecurityConnectorConfig>('/connectors/ai-security/aws', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  testAiSecurityConnector: () =>
+    request<AiSecurityConnectionTest>('/connectors/ai-security/aws/test', { method: 'POST' }),
+  runAiSecurityConnector: () =>
+    request<{ jobId: string; status: string; message: string }>('/connectors/ai-security/aws/run', { method: 'POST' }),
   createOwnershipRule: (payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>('/ownership-rules', {
     method: 'POST',
     body: JSON.stringify(payload)
