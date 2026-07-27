@@ -479,6 +479,21 @@ import type {
   CampaignSummary,
   CampaignWatchlistEntryUpdateRequest,
 } from '../features/campaigns/types';
+
+export type CampaignAdvisory = {
+  title: string;
+  cveId: string;
+  severity: string;
+  type: string;
+  publishedDate: string | null;
+  summary: string;
+};
+
+export type CampaignAiResponse = {
+  text: string | null;
+  advisories: CampaignAdvisory[] | null;
+  generatedAt: string;
+};
 import { resolveApiBase } from './base';
 
 const API_BASE = resolveApiBase();
@@ -1247,6 +1262,14 @@ export const api = {
     request<CampaignSummary[]>(status ? `/campaigns?status=${encodeURIComponent(status)}` : '/campaigns'),
   getCampaign: (campaignId: string) =>
     request<CampaignDetail>(`/campaigns/${encodeURIComponent(campaignId)}`),
+  generateCampaignAiInsights: (campaignId: string) =>
+    request<CampaignAiResponse>(`/campaigns/${encodeURIComponent(campaignId)}/ai-insights`, {
+      method: 'POST',
+    }),
+  generateCampaignAiAdvisories: (campaignId: string) =>
+    request<CampaignAiResponse>(`/campaigns/${encodeURIComponent(campaignId)}/ai-advisories`, {
+      method: 'POST',
+    }),
   createCampaign: (payload: CampaignCreateRequest) =>
     request<CampaignDetail>('/campaigns', {
       method: 'POST',
