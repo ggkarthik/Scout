@@ -19,6 +19,7 @@ import { useOperationalQualitySummaryQuery } from '../features/operations/querie
 import type { OperationalQualitySummary } from '../features/operations/types';
 import { useSoftwareIdentitiesQuery } from '../features/software-identities/queries';
 import type { SoftwareIdentitySummary } from '../features/software-identities/types';
+import { AiInventoryOverviewStrip } from '../features/ai-security/AiInventoryOverviewStrip';
 
 const HOST_STALE_DAYS = 30;
 const HOST_AGING_DAYS = 7;
@@ -1247,6 +1248,7 @@ export function InventoryOverviewPage() {
               <div className="empty-state"><p>Loading combined inventory overview…</p></div>
             ) : (
               <>
+            <AiInventoryOverviewStrip />
             <div className="stats-grid vuln-repo-dashboard-stats-grid inventory-overview-dashboard-stats">
               <article className="vuln-repo-dashboard-stat-button vuln-repo-dashboard-funnel-card">
                 <div className="stat-card">
