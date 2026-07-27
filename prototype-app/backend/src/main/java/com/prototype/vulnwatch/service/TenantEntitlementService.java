@@ -3,16 +3,21 @@ package com.prototype.vulnwatch.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Tenant;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -31,18 +36,56 @@ public class TenantEntitlementService {
     public static final String AI_FIX_GENERATION = "ai.fix_generation";
     public static final String AI_INVESTIGATION_AGENT = "ai.investigation_agent";
     public static final String AI_UPGRADE_RECOMMENDATION = "ai.upgrade_recommendation";
+    public static final String AI_SECURITY = "ai.security";
 
     private static final Set<String> KNOWN_PLANS = Set.of(PLAN_PRO, PLAN_ENTERPRISE, PLAN_DEMO, PLAN_PILOT);
     private static final String SOURCE_DEFAULT = "DEFAULT";
     private static final String SOURCE_PLAN = "PLAN";
     private static final String SOURCE_TENANT_OVERRIDE = "TENANT_OVERRIDE";
 
+    /** Bounded set of entitlement keys allowed as metric labels; anything else buckets to UNKNOWN. */
+    private static final Set<String> KNOWN_ENTITLEMENT_KEYS = Set.of(
+            AI_INVESTIGATION_SUMMARY,
+            AI_SOLUTION_GENERATION,
+            AI_REQUIRED_ACTIONS,
+            AI_FIX_GENERATION,
+            AI_INVESTIGATION_AGENT,
+            AI_UPGRADE_RECOMMENDATION,
+            AI_SECURITY);
+
+    private static final String METRIC_KEY_UNKNOWN = "UNKNOWN";
+    private static final String ENFORCE_ALL_SENTINEL = "*";
+
+    private static final Logger LOG = LoggerFactory.getLogger(TenantEntitlementService.class);
+
+    /**
+     * Rollout mode for the corrected resolver.
+     * LEGACY  — return the historical always-enabled result; no corrected computation.
+     * SHADOW  — enforce the legacy result, compute the corrected result, emit mismatch telemetry.
+     * ENFORCE — enforce the corrected result for tenants in the allowlist (or all when the
+     *           allowlist contains "*"); every other tenant behaves as SHADOW.
+     */
+    public enum ResolutionMode { LEGACY, SHADOW, ENFORCE }
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
+    private final ResolutionMode mode;
+    private final Set<String> enforceTenantAllowlist;
 
-    public TenantEntitlementService(NamedParameterJdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public TenantEntitlementService(
+            NamedParameterJdbcTemplate jdbcTemplate,
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry,
+            @Value("${app.entitlements.mode:LEGACY}") String modeRaw,
+            @Value("${app.entitlements.enforce-tenant-allowlist:}") String enforceTenantAllowlistRaw) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
+        this.mode = parseMode(modeRaw);
+        this.enforceTenantAllowlist = parseAllowlist(enforceTenantAllowlistRaw);
+        LOG.info("TenantEntitlementService rollout mode={} enforceAllowlistSize={}",
+                this.mode, this.enforceTenantAllowlist.size());
     }
 
     public Map<String, Boolean> snapshot(Tenant tenant) {
@@ -66,42 +109,125 @@ public class TenantEntitlementService {
                 .findFirst()
                 .orElse(new EntitlementDefinition(key, "UNCATEGORIZED", "BOOLEAN", null));
 
-        Map<String, Object> config = Map.of();
-        TenantOverrideRow overrideRow = tenant == null ? null : loadTenantOverrides(tenant.getId()).get(key);
-        if (overrideRow != null && overrideRow.config() != null) {
-            config = overrideRow.config();
-        }
+        Map<String, TenantOverrideRow> overrideRows =
+                tenant == null ? Map.of() : loadTenantOverrides(tenant.getId());
+        Map<String, PlanEntitlementRow> planRows =
+                mode == ResolutionMode.LEGACY ? Map.of() : loadPlanEntitlements(commercialPlan);
 
-        return new ResolvedEntitlement(
-                definition.key(),
-                definition.category(),
-                true,
-                SOURCE_DEFAULT,
-                commercialPlan,
-                config
-        );
+        return resolveEffective(tenant, definition, overrideRows, planRows, commercialPlan);
     }
 
     public List<ResolvedEntitlement> resolveAll(Tenant tenant) {
         String commercialPlan = commercialPlanCode(tenant);
-        Map<String, TenantOverrideRow> overrideRows = tenant == null ? Map.of() : loadTenantOverrides(tenant.getId());
+        Map<String, TenantOverrideRow> overrideRows =
+                tenant == null ? Map.of() : loadTenantOverrides(tenant.getId());
+        Map<String, PlanEntitlementRow> planRows =
+                mode == ResolutionMode.LEGACY ? Map.of() : loadPlanEntitlements(commercialPlan);
         List<ResolvedEntitlement> entitlements = new ArrayList<>();
         for (EntitlementDefinition definition : loadDefinitions()) {
-            TenantOverrideRow overrideRow = overrideRows.get(definition.key());
-            Map<String, Object> config = Map.of();
-            if (overrideRow != null && overrideRow.config() != null) {
-                config = overrideRow.config();
-            }
-            entitlements.add(new ResolvedEntitlement(
-                    definition.key(),
-                    definition.category(),
-                    true,
-                    SOURCE_DEFAULT,
-                    commercialPlan,
-                    config
-            ));
+            entitlements.add(resolveEffective(tenant, definition, overrideRows, planRows, commercialPlan));
         }
         return entitlements;
+    }
+
+    /**
+     * Computes the effective entitlement, applying rollout mode and canary allowlist, and emits
+     * shadow mismatch telemetry when the corrected result diverges from the legacy result. This is
+     * the single authoritative decision used by both enforcement ({@link #isEnabled}) and the
+     * auth-context snapshot exposed to the frontend, so the two never disagree.
+     */
+    private ResolvedEntitlement resolveEffective(
+            Tenant tenant,
+            EntitlementDefinition definition,
+            Map<String, TenantOverrideRow> overrideRows,
+            Map<String, PlanEntitlementRow> planRows,
+            String commercialPlan) {
+        String key = definition.key();
+        TenantOverrideRow overrideRow = overrideRows.get(key);
+        Map<String, Object> config = overrideRow != null && overrideRow.config() != null
+                ? overrideRow.config()
+                : Map.of();
+
+        // Legacy behavior: every entitlement resolves enabled.
+        boolean legacyEnabled = true;
+
+        if (mode == ResolutionMode.LEGACY) {
+            return new ResolvedEntitlement(key, definition.category(), legacyEnabled, SOURCE_DEFAULT, commercialPlan, config);
+        }
+
+        // Corrected precedence: active tenant override -> plan value -> disabled default.
+        // Expired overrides are already filtered out by loadTenantOverrides, so an expired override
+        // falls through to the plan value rather than resolving disabled.
+        boolean correctedEnabled;
+        String correctedSource;
+        if (overrideRow != null) {
+            correctedEnabled = overrideRow.enabled();
+            correctedSource = SOURCE_TENANT_OVERRIDE;
+        } else {
+            PlanEntitlementRow planRow = planRows.get(key);
+            if (planRow != null) {
+                correctedEnabled = planRow.enabled();
+                correctedSource = SOURCE_PLAN;
+            } else {
+                correctedEnabled = false;
+                correctedSource = SOURCE_DEFAULT;
+            }
+        }
+
+        if (legacyEnabled != correctedEnabled) {
+            recordMismatch(tenant, key, legacyEnabled, correctedEnabled, correctedSource);
+        }
+
+        boolean enforceCorrected = mode == ResolutionMode.ENFORCE && isEnforcedTenant(tenant);
+        boolean effectiveEnabled = enforceCorrected ? correctedEnabled : legacyEnabled;
+        String effectiveSource = enforceCorrected ? correctedSource : SOURCE_DEFAULT;
+        return new ResolvedEntitlement(key, definition.category(), effectiveEnabled, effectiveSource, commercialPlan, config);
+    }
+
+    private boolean isEnforcedTenant(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            return false;
+        }
+        return enforceTenantAllowlist.contains(ENFORCE_ALL_SENTINEL)
+                || enforceTenantAllowlist.contains(tenant.getId().toString());
+    }
+
+    private void recordMismatch(
+            Tenant tenant, String key, boolean legacyEnabled, boolean correctedEnabled, String correctedSource) {
+        String metricKey = KNOWN_ENTITLEMENT_KEYS.contains(key) ? key : METRIC_KEY_UNKNOWN;
+        meterRegistry.counter(
+                "entitlement.resolution.mismatch",
+                "key", metricKey,
+                "source", correctedSource,
+                "corrected", Boolean.toString(correctedEnabled)).increment();
+        LOG.info("entitlement resolution mismatch tenant={} key={} legacy={} corrected={} source={} mode={}",
+                tenant == null || tenant.getId() == null ? "<none>" : tenant.getId(),
+                key, legacyEnabled, correctedEnabled, correctedSource, mode);
+    }
+
+    private ResolutionMode parseMode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return ResolutionMode.LEGACY;
+        }
+        try {
+            return ResolutionMode.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            LOG.warn("Unrecognized app.entitlements.mode='{}', defaulting to LEGACY", raw);
+            return ResolutionMode.LEGACY;
+        }
+    }
+
+    private Set<String> parseAllowlist(String raw) {
+        Set<String> values = new HashSet<>();
+        if (raw != null) {
+            for (String part : raw.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    values.add(trimmed);
+                }
+            }
+        }
+        return Set.copyOf(values);
     }
 
     public List<TenantEntitlementOverrideRecord> listOverrides(UUID tenantId) {
