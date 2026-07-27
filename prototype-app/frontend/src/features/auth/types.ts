@@ -30,4 +30,7 @@ export type ActorContext = {
   demoDaysRemaining?: number | null;
   demoCapabilities?: Record<string, boolean> | null;
   demoUsage?: Record<string, number> | null;
+  // Effective entitlement snapshot from /api/auth/context. Optional for fixture compatibility;
+  // the production API always returns it. Absent/false means the feature is disabled (fail closed).
+  entitlements?: Record<string, boolean> | null;
 };
