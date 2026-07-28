@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class AiSecurityAzureMetricsTest {
 
@@ -25,5 +26,20 @@ class AiSecurityAzureMetricsTest {
                 "ai.security.azure.scopes", "family", "unknown", "status", "complete").count());
         assertEquals(1.0, registry.counter("ai.security.azure.credentials", "event", "created").count());
         assertEquals(1, registry.timer("ai.security.azure.discovery.duration").count());
+    }
+
+    @Test
+    void springSelectsTheOptionalRegistryConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(SimpleMeterRegistry.class, SimpleMeterRegistry::new);
+            context.register(AiSecurityAzureMetrics.class);
+            context.refresh();
+
+            context.getBean(AiSecurityAzureMetrics.class).recordRun("completed");
+
+            assertEquals(1.0, context.getBean(SimpleMeterRegistry.class)
+                    .counter("ai.security.azure.discovery.runs", "outcome", "completed")
+                    .count());
+        }
     }
 }

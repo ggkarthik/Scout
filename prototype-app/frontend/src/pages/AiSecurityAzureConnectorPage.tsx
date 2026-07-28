@@ -67,7 +67,6 @@ export function AiSecurityAzureConnectorPage() {
   const createProfile = useMutation({
     mutationFn: () => api.createAiSecurityAzureCredential({
       name,
-      authType: 'CLIENT_SECRET',
       azureTenantId,
       clientId,
       clientSecret,

@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Tags;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +22,7 @@ public class AiSecurityAzureMetrics {
 
     private final MeterRegistry registry;
 
+    @Autowired
     public AiSecurityAzureMetrics(ObjectProvider<MeterRegistry> registryProvider) {
         this.registry = registryProvider.getIfAvailable();
     }

@@ -86,7 +86,7 @@ public class AiSecurityAzureCredentialService {
                     .addValue("id", id)
                     .addValue("tenantId", tenant.getId())
                     .addValue("name", request.name().trim())
-                    .addValue("authType", request.authType())
+                    .addValue("authType", "CLIENT_SECRET")
                     .addValue("azureTenantId", request.azureTenantId().trim())
                     .addValue("clientId", blankToNull(request.clientId()))
                     .addValue("secret", encryption.encrypt(blankToNull(request.clientSecret())))
@@ -126,10 +126,7 @@ public class AiSecurityAzureCredentialService {
                 || !request.expiresAt().isAfter(Instant.now().plus(1, ChronoUnit.DAYS))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A replacement secret and future expiry are required");
         }
-        CredentialSecret existing = secret(tenant, profileId);
-        if (!"CLIENT_SECRET".equals(existing.authType())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only client-secret profiles can be rotated");
-        }
+        CredentialSecret existing = clientSecret(tenant, profileId);
         String encrypted = encryption.encrypt(request.clientSecret().trim());
         tenantExecution.run(tenant, () -> jdbc.update("""
                 update ai_security_azure_credential_profiles
@@ -269,6 +266,36 @@ public class AiSecurityAzureCredentialService {
         });
     }
 
+    private CredentialSecret clientSecret(Tenant tenant, UUID profileId) {
+        return tenantExecution.run(tenant, () -> {
+            List<CredentialSecret> rows = jdbc.query("""
+                    select id, auth_type, azure_tenant_id, client_id, active_secret_ciphertext,
+                           active_secret_expires_at, status
+                      from ai_security_azure_credential_profiles
+                     where id = :id and auth_type = 'CLIENT_SECRET'
+                    """, Map.of("id", profileId), (rs, rowNum) -> new CredentialSecret(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("auth_type"),
+                    rs.getString("azure_tenant_id"),
+                    rs.getString("client_id"),
+                    encryption.decrypt(rs.getString("active_secret_ciphertext")),
+                    instant(rs.getTimestamp("active_secret_expires_at")),
+                    rs.getString("status")));
+            if (rows.isEmpty()) {
+                throw new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Active client-secret credential profile not found");
+            }
+            CredentialSecret result = rows.get(0);
+            if (!"ACTIVE".equals(result.status())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Azure credential profile is not active");
+            }
+            if (result.expiresAt() == null || !result.expiresAt().isAfter(Instant.now())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Azure credential profile has expired");
+            }
+            return result;
+        });
+    }
+
     public TokenCredential tokenCredential(CredentialSecret profile) {
         return switch (profile.authType()) {
             case "CLIENT_SECRET" -> new ClientSecretCredentialBuilder()
@@ -335,24 +362,15 @@ public class AiSecurityAzureCredentialService {
     }
 
     private void validateCreate(CredentialProfileRequest request) {
-        if (request == null || !hasText(request.name()) || !hasText(request.authType())
-                || !hasText(request.azureTenantId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Name, authentication type, and Azure tenant are required");
+        if (request == null || !hasText(request.name()) || !hasText(request.azureTenantId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Name and Azure tenant are required");
         }
-        if ("WORKLOAD_FEDERATION".equals(request.authType())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Workload federation is not approved for this hosting path");
+        if (!hasText(request.clientId()) || !hasText(request.clientSecret()) || request.expiresAt() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Client ID, client secret, and expiry are required");
         }
-        if ("CLIENT_SECRET".equals(request.authType())) {
-            if (!hasText(request.clientId()) || !hasText(request.clientSecret()) || request.expiresAt() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Client ID, client secret, and expiry are required");
-            }
-            if (!request.expiresAt().isAfter(Instant.now().plus(1, ChronoUnit.DAYS))) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Credential expiry must be in the future");
-            }
-        } else if (!"MANAGED_IDENTITY".equals(request.authType())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported Azure authentication type");
+        if (!request.expiresAt().isAfter(Instant.now().plus(1, ChronoUnit.DAYS))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Credential expiry must be in the future");
         }
     }
 
@@ -370,7 +388,6 @@ public class AiSecurityAzureCredentialService {
 
     public record CredentialProfileRequest(
             String name,
-            String authType,
             String azureTenantId,
             String clientId,
             String clientSecret,

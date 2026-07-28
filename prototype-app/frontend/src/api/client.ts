@@ -1419,7 +1419,6 @@ export const api = {
     request<AiSecurityAzureCredentialProfile[]>('/connectors/ai-security/azure/credentials'),
   createAiSecurityAzureCredential: (payload: {
     name: string;
-    authType: 'CLIENT_SECRET' | 'MANAGED_IDENTITY';
     azureTenantId: string;
     clientId?: string;
     clientSecret?: string;

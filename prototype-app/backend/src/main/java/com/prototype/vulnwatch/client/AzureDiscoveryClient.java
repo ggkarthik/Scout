@@ -50,7 +50,7 @@ public class AzureDiscoveryClient {
             return new AzureConnectivityResult(
                     true, subscriptionId, hasText(displayName) ? displayName : subscriptionId, tenantId, null);
         } catch (Exception e) {
-            LOG.debug("Azure subscription {} failed connectivity test: {}", subscriptionId, e.getMessage());
+            LOG.debug("Azure subscription connectivity test failed: {}", e.getClass().getSimpleName());
             return new AzureConnectivityResult(false, subscriptionId, null, null, e.getMessage());
         }
     }
