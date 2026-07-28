@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.CredentialEncryptionService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -90,7 +91,7 @@ public class AiSecurityAzureCredentialService {
                     .addValue("azureTenantId", request.azureTenantId().trim())
                     .addValue("clientId", blankToNull(request.clientId()))
                     .addValue("secret", encryption.encrypt(blankToNull(request.clientSecret())))
-                    .addValue("expiresAt", request.expiresAt())
+                    .addValue("expiresAt", timestamp(request.expiresAt()))
                     .addValue("actor", actor));
             audit.record("ai_security.azure_credential.created", "azure_credential_profile", id.toString(), null);
             metrics.recordCredentialEvent("created");
@@ -136,7 +137,7 @@ public class AiSecurityAzureCredentialService {
                  where id = :id and status = 'ACTIVE'
                 """, new MapSqlParameterSource()
                 .addValue("secret", encrypted)
-                .addValue("expiresAt", request.expiresAt())
+                .addValue("expiresAt", timestamp(request.expiresAt()))
                 .addValue("actor", actor)
                 .addValue("id", profileId)));
 
@@ -376,6 +377,10 @@ public class AiSecurityAzureCredentialService {
 
     private Instant instant(java.sql.Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private Timestamp timestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
     }
 
     private String blankToNull(String value) {
