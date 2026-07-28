@@ -13,7 +13,7 @@ export function AiSecurityConnectorPage() {
   });
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
-    queryFn: api.listAiSecurityRuns,
+    queryFn: () => api.listAiSecurityRuns(),
   });
   const latestRunId = runsQuery.data?.[0]?.id;
   const scopesQuery = useQuery({

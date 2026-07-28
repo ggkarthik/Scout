@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureKillSwitchService;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.EvaluationOutcome;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
@@ -24,34 +25,39 @@ public class AiSecurityPolicyEvaluationService {
     private final ObjectMapper objectMapper;
     private final AiSecurityPolicyRegistry registry;
     private final AiSecurityResourceFamilyCatalogue resourceFamilies;
+    private final AiSecurityAzureKillSwitchService azureKillSwitches;
 
     public AiSecurityPolicyEvaluationService(
             NamedParameterJdbcTemplate jdbc,
             ObjectMapper objectMapper,
             AiSecurityPolicyRegistry registry,
-            AiSecurityResourceFamilyCatalogue resourceFamilies
+            AiSecurityResourceFamilyCatalogue resourceFamilies,
+            AiSecurityAzureKillSwitchService azureKillSwitches
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.resourceFamilies = resourceFamilies;
+        this.azureKillSwitches = azureKillSwitches;
     }
 
     void evaluateRunCurrentTenant(Tenant tenant, UUID runId) {
         Map<String, Boolean> enabled = effectivePolicyStates();
         List<ArtifactFact> artifacts = jdbc.query("""
-                select id, artifact_type, account_id, region, attributes_json::text
+                select id, artifact_type, native_kind, account_id, region, attributes_json::text
                   from ai_security_artifacts
                  where active = true
                 """, (rs, rowNum) -> new ArtifactFact(
                 rs.getObject("id", UUID.class),
                 rs.getString("artifact_type"),
+                rs.getString("native_kind"),
                 rs.getString("account_id"),
                 rs.getString("region"),
                 readMap(rs.getString("attributes_json"))));
 
         for (PolicyDefinition policy : registry.all()) {
-            if (!enabled.getOrDefault(policy.id(), false)) {
+            if (!enabled.getOrDefault(policy.id(), false)
+                    || (policy.id().startsWith("AZURE_") && azureKillSwitches.isPolicyDisabled(policy.id()))) {
                 suppressPolicyFindings(policy.id());
                 continue;
             }
@@ -59,8 +65,11 @@ public class AiSecurityPolicyEvaluationService {
                 if (!policy.artifactTypes().contains(artifact.artifactType())) {
                     continue;
                 }
+                if (!isApplicable(policy.id(), artifact.attributes())) {
+                    continue;
+                }
                 Evaluation evaluation = hasCompleteEvidence(
-                        runId, artifact.accountId(), artifact.region(), policy)
+                        runId, artifact.accountId(), artifact.region(), policy, artifact.nativeKind())
                         ? evaluate(policy.id(), artifact.attributes())
                         : new Evaluation(EvaluationOutcome.NO_DECISION, List.of("required snapshot scope incomplete"), Map.of());
                 persistEvaluation(tenant, runId, policy, artifact, evaluation);
@@ -89,7 +98,17 @@ public class AiSecurityPolicyEvaluationService {
 
     boolean hasCompleteEvidence(
             UUID runId, String accountId, String artifactRegion, PolicyDefinition policy) {
-        for (String family : policy.requiredResourceFamilies()) {
+        return hasCompleteEvidence(runId, accountId, artifactRegion, policy, null);
+    }
+
+    boolean hasCompleteEvidence(
+            UUID runId,
+            String accountId,
+            String artifactRegion,
+            PolicyDefinition policy,
+            String nativeKind
+    ) {
+        for (String family : requiredFamilies(policy, nativeKind)) {
             var requiredRegion = resourceFamilies.requiredRegion(family, artifactRegion);
             if (requiredRegion.isEmpty()) {
                 return false;
@@ -114,7 +133,25 @@ public class AiSecurityPolicyEvaluationService {
         return true;
     }
 
-    private Evaluation evaluate(String policyId, Map<String, Object> attributes) {
+    List<String> requiredFamilies(PolicyDefinition policy, String nativeKind) {
+        String postureFamily = switch (nativeKind == null ? "" : nativeKind) {
+            case "AZURE_AI_ACCOUNTS" -> "AZURE_AI_ACCOUNTS";
+            case "AZURE_ML_WORKSPACES" -> "AZURE_ML_WORKSPACES";
+            case "AZURE_SEARCH_SERVICES" -> "AZURE_SEARCH_SERVICES";
+            default -> null;
+        };
+        if (postureFamily == null) {
+            return policy.requiredResourceFamilies();
+        }
+        return switch (policy.id()) {
+            case "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS" -> List.of(postureFamily);
+            case "AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED" ->
+                    List.of(postureFamily, "AZURE_DIAGNOSTIC_SETTINGS");
+            default -> policy.requiredResourceFamilies();
+        };
+    }
+
+    Evaluation evaluate(String policyId, Map<String, Object> attributes) {
         return switch (policyId) {
             case "AWS_BEDROCK_PUBLIC_KB_S3" ->
                     booleanFact(attributes, "s3Public")
@@ -136,8 +173,58 @@ public class AiSecurityPolicyEvaluationService {
                     booleanFact(attributes, "invocationLoggingEnabled")
                             .map(value -> result(!value, "Bedrock invocation logging is disabled", attributes))
                             .orElseGet(() -> missing("invocationLoggingEnabled"));
+            case "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS" ->
+                    booleanFact(attributes, "publicNetworkUnrestricted")
+                            .map(value -> result(value, "Azure AI public network access is unrestricted", attributes))
+                            .orElseGet(() -> missing("publicNetworkUnrestricted"));
+            case "AZURE_AI_LOCAL_AUTH_ENABLED" ->
+                    booleanFact(attributes, "localAuthEnabled")
+                            .map(value -> result(value, "Azure AI local authentication is enabled", attributes))
+                            .orElseGet(() -> missing("localAuthEnabled"));
+            case "AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED" ->
+                    booleanFact(attributes, "diagnosticLoggingEnabled")
+                            .map(value -> result(!value, "Azure AI diagnostic logging is disabled", attributes))
+                            .orElseGet(() -> missing("diagnosticLoggingEnabled"));
+            case "AZURE_FOUNDRY_AGENT_CODE_INTERPRETER_ENABLED" ->
+                    booleanFact(attributes, "codeInterpreterEnabled")
+                            .map(value -> result(value, "Foundry agent Code Interpreter is enabled", attributes))
+                            .orElseGet(() -> missing("codeInterpreterEnabled"));
+            case "AZURE_ML_ENDPOINT_LOCAL_AUTH_ENABLED" ->
+                    booleanFact(attributes, "mlLocalAuthEnabled")
+                            .map(value -> result(value, "Azure ML endpoint local authentication is enabled", attributes))
+                            .orElseGet(() -> missing("mlLocalAuthEnabled"));
+            case "AZURE_SEARCH_LOCAL_ADMIN_AUTH_ENABLED" ->
+                    booleanFact(attributes, "searchLocalAuthEnabled")
+                            .map(value -> result(value, "Azure AI Search local admin authentication is enabled", attributes))
+                            .orElseGet(() -> missing("searchLocalAuthEnabled"));
+            case "AZURE_SEARCH_DATA_SOURCE_NON_IDENTITY_AUTH" ->
+                    booleanFact(attributes, "authoritativeNonIdentityAuthentication")
+                            .map(value -> result(value,
+                                    "Azure AI Search data source does not use identity authentication", attributes))
+                            .orElseGet(() -> missing("authoritativeNonIdentityAuthentication"));
+            case "AZURE_BOT_PASSWORD_AUTH_WITHOUT_MANAGED_IDENTITY" ->
+                    booleanFact(attributes, "botPasswordAuthWithoutManagedIdentity")
+                            .map(value -> result(value,
+                                    "Azure Bot uses password authentication without managed identity", attributes))
+                            .orElseGet(() -> missing("botPasswordAuthWithoutManagedIdentity"));
             default -> new Evaluation(EvaluationOutcome.NOT_APPLICABLE, List.of(), Map.of());
         };
+    }
+
+    boolean isApplicable(String policyId, Map<String, Object> attributes) {
+        String marker = switch (policyId) {
+            case "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS" -> "publicNetworkUnrestricted";
+            case "AZURE_AI_LOCAL_AUTH_ENABLED" -> "localAuthEnabled";
+            case "AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED" -> "diagnosticLoggingEnabled";
+            case "AZURE_FOUNDRY_AGENT_CODE_INTERPRETER_ENABLED" -> "codeInterpreterEnabled";
+            case "AZURE_ML_ENDPOINT_LOCAL_AUTH_ENABLED" -> "mlLocalAuthEnabled";
+            case "AZURE_SEARCH_LOCAL_ADMIN_AUTH_ENABLED" -> "searchLocalAuthEnabled";
+            case "AZURE_SEARCH_DATA_SOURCE_NON_IDENTITY_AUTH" -> "authoritativeNonIdentityAuthentication";
+            case "AZURE_BOT_PASSWORD_AUTH_WITHOUT_MANAGED_IDENTITY" ->
+                    "botPasswordAuthWithoutManagedIdentity";
+            default -> null;
+        };
+        return marker == null || attributes.containsKey(marker);
     }
 
     private Evaluation evaluateGuardrail(Map<String, Object> attributes) {
@@ -277,13 +364,14 @@ public class AiSecurityPolicyEvaluationService {
     private record ArtifactFact(
             UUID id,
             String artifactType,
+            String nativeKind,
             String accountId,
             String region,
             Map<String, Object> attributes
     ) {
     }
 
-    private record Evaluation(
+    record Evaluation(
             EvaluationOutcome outcome,
             List<String> missingEvidence,
             Map<String, Object> evidence

@@ -25,6 +25,7 @@ import { timeAgo } from '../lib/time';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { BomManagementPage } from './BomManagementPage';
 import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
+import { AiSecurityAzureConnectorPage } from './AiSecurityAzureConnectorPage';
 import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
@@ -36,6 +37,7 @@ type ConnectorId =
   | 'aws-discovery'
   | 'azure-discovery'
   | 'ai-security-aws'
+  | 'ai-security-azure'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -232,6 +234,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     icon: IconBrain
   },
   {
+    id: 'ai-security-azure',
+    name: 'AI Security — Microsoft Azure',
+    summary: 'Discover tenant-scoped Foundry, Azure ML, AI Search, and Bot resources with isolated policy findings.',
+    icon: IconBrain
+  },
+  {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
     summary: '',
@@ -308,7 +316,7 @@ const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
   'azure-discovery'
 ];
 
-const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws'];
+const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure'];
 
 function formatInstantConnect(iso?: string): string {
   if (!iso) return 'Never';
@@ -637,6 +645,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'ai-security-aws') {
     return <AiSecurityConnectorPage />;
+  }
+  if (connectorId === 'ai-security-azure') {
+    return <AiSecurityAzureConnectorPage />;
   }
 
   return (

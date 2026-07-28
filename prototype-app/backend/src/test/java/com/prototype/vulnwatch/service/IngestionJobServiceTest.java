@@ -182,12 +182,17 @@ class IngestionJobServiceTest {
         UUID secondId = UUID.randomUUID();
         setId(first, firstId);
         setId(second, secondId);
-        when(ingestionJobRepository.countByStatusExcludingJobType(
+        when(ingestionJobRepository.countByStatusExcludingJobTypes(
                 IngestionJobService.STATUS_RUNNING,
-                IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK
+                List.of(
+                        IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
+                        IngestionJobService.JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY)
         )).thenReturn(0L);
-        when(ingestionJobRepository.pollPendingExcluding(
-                IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK, 2
+        when(ingestionJobRepository.pollPendingExcludingJobTypes(
+                List.of(
+                        IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
+                        IngestionJobService.JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY),
+                2
         )).thenReturn(List.of(first, second));
 
         List<IngestionJobService.ClaimedJobRef> claimed = service.claimPendingJobs(tenant, 2, 2);

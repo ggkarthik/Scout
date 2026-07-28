@@ -10,10 +10,20 @@ export function AiFindingsPage() {
   const [searchParams] = useSearchParams();
   const policyId = searchParams.get('policyId') ?? undefined;
   const [status, setStatus] = React.useState('OPEN');
+  const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
+  const [subscription, setSubscription] = React.useState('');
+  const deferredSubscription = React.useDeferredValue(subscription.trim());
   const [selected, setSelected] = React.useState<AiSecurityFinding | null>(null);
   const findingsQuery = useQuery({
-    queryKey: ['ai-security-findings', policyId, status],
-    queryFn: () => api.listAiSecurityFindings(policyId, status || undefined, 0, 100),
+    queryKey: ['ai-security-findings', policyId, status, provider, deferredSubscription],
+    queryFn: () => api.listAiSecurityFindings(
+      policyId,
+      status || undefined,
+      0,
+      100,
+      provider || undefined,
+      deferredSubscription || undefined,
+    ),
   });
   const reviewMutation = useMutation({
     mutationFn: (disposition: 'CONFIRMED' | 'FALSE_POSITIVE' | 'NEEDS_INVESTIGATION') => {
@@ -33,14 +43,32 @@ export function AiFindingsPage() {
         <div>
           <span className="ai-security-kicker">Configuration evidence, separate from CVEs</span>
           <h2>AI Findings</h2>
-          <p>Deterministic policy failures from complete AWS evidence scopes.</p>
+          <p>Deterministic policy failures from complete AWS and Azure evidence scopes.</p>
         </div>
+        <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
+          <option value="">All providers</option>
+          <option value="AWS">AWS</option>
+          <option value="AZURE">Azure</option>
+        </select>
         <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Finding status">
           <option value="OPEN">Open</option>
           <option value="RESOLVED">Resolved</option>
           <option value="SUPPRESSED_BY_POLICY">Suppressed by policy</option>
           <option value="">All states</option>
         </select>
+        <label>
+          <span className="sr-only">Azure subscription</span>
+          <input
+            type="search"
+            value={subscription}
+            placeholder="Filter subscription ID"
+            aria-label="Azure subscription"
+            onChange={(event) => {
+              setSubscription(event.target.value);
+              setSelected(null);
+            }}
+          />
+        </label>
       </section>
 
       {findingsQuery.isLoading ? (

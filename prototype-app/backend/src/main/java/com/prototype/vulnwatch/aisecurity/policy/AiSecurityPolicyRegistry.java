@@ -38,7 +38,63 @@ public class AiSecurityPolicyRegistry {
                     "MEDIUM", List.of("ACCOUNT_CONFIGURATION"), List.of("BEDROCK_INVOCATION_LOGGING"),
                     "Model invocation logging is disabled for an applicable AWS account and region.",
                     "Enable Bedrock model invocation logging to an encrypted CloudWatch Logs or S3 destination.",
-                    Map.of("AWS", "BEDROCK-LOGGING"))
+                    Map.of("AWS", "BEDROCK-LOGGING")),
+            new PolicyDefinition(
+                    "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS", "1.0.0", "Unrestricted Azure AI public access",
+                    "CRITICAL", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_AI_ACCOUNTS"),
+                    "An Azure AI account permits unrestricted public network access.",
+                    "Disable public access or restrict network ACLs and use approved private endpoints.",
+                    Map.of("AZURE", "AI-NETWORK-ACCESS")),
+            new PolicyDefinition(
+                    "AZURE_AI_LOCAL_AUTH_ENABLED", "1.0.0", "Azure AI local authentication enabled",
+                    "HIGH", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_AI_ACCOUNTS"),
+                    "An Azure AI account permits key-based local authentication.",
+                    "Disable local authentication and require Microsoft Entra identities.",
+                    Map.of("AZURE", "AI-LOCAL-AUTH")),
+            new PolicyDefinition(
+                    "AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED", "1.0.0", "Azure AI diagnostic logging disabled",
+                    "MEDIUM", List.of("OTHER_AI_ARTIFACT"),
+                    List.of("AZURE_AI_ACCOUNTS", "AZURE_DIAGNOSTIC_SETTINGS"),
+                    "An Azure AI account has no enabled diagnostic-log destination.",
+                    "Enable diagnostic logs to an approved Log Analytics workspace, storage account, or event hub.",
+                    Map.of("AZURE", "AI-DIAGNOSTIC-LOGGING")),
+            new PolicyDefinition(
+                    "AZURE_FOUNDRY_AGENT_CODE_INTERPRETER_ENABLED", "1.0.0",
+                    "Foundry agent Code Interpreter enabled",
+                    "HIGH", List.of("AI_AGENT"),
+                    List.of("AZURE_FOUNDRY_AGENTS", "AZURE_FOUNDRY_AGENT_TOOLS"),
+                    "A Foundry agent enables Code Interpreter.",
+                    "Disable Code Interpreter unless the use case and data boundary are explicitly approved.",
+                    Map.of("NIST-AI-RMF", "GOVERN-1.7")),
+            new PolicyDefinition(
+                    "AZURE_ML_ENDPOINT_LOCAL_AUTH_ENABLED", "1.0.0",
+                    "Azure ML endpoint local authentication enabled",
+                    "HIGH", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_ML_ENDPOINTS"),
+                    "An Azure ML online endpoint permits local token authentication.",
+                    "Require Microsoft Entra authentication for the endpoint.",
+                    Map.of("AZURE", "ML-ENDPOINT-AUTH")),
+            new PolicyDefinition(
+                    "AZURE_SEARCH_LOCAL_ADMIN_AUTH_ENABLED", "1.0.0",
+                    "Azure AI Search local admin authentication enabled",
+                    "HIGH", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_SEARCH_SERVICES"),
+                    "An Azure AI Search service permits local admin-key authentication.",
+                    "Disable local authentication and use Microsoft Entra role-based access.",
+                    Map.of("AZURE", "SEARCH-LOCAL-AUTH")),
+            new PolicyDefinition(
+                    "AZURE_SEARCH_DATA_SOURCE_NON_IDENTITY_AUTH", "1.0.0",
+                    "Azure AI Search data source does not use identity authentication",
+                    "HIGH", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_SEARCH_DATA_SOURCES"),
+                    "An Azure AI Search data source uses authoritative non-identity authentication evidence.",
+                    "Use a managed identity for the Search data-source connection.",
+                    Map.of("AZURE", "SEARCH-DATA-SOURCE-AUTH")),
+            new PolicyDefinition(
+                    "AZURE_BOT_PASSWORD_AUTH_WITHOUT_MANAGED_IDENTITY", "1.0.0",
+                    "Azure Bot password authentication without managed identity",
+                    "HIGH", List.of("AI_AGENT"),
+                    List.of("AZURE_BOT_SERVICES", "AZURE_BOT_IDENTITIES"),
+                    "An Azure Bot uses password authentication without an assigned managed identity.",
+                    "Use a user-assigned managed identity and remove password-based application credentials.",
+                    Map.of("AZURE", "BOT-MANAGED-IDENTITY"))
     );
 
     public List<PolicyDefinition> all() {

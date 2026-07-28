@@ -57,11 +57,13 @@ public class AiSecurityController {
     @GetMapping("/artifacts")
     public PageResponse<ArtifactResponse> artifacts(
             @RequestParam(required = false) String artifactType,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String subscription,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
-        return apiService.artifacts(tenant, artifactType, page, size);
+        return apiService.artifacts(tenant, artifactType, provider, subscription, page, size);
     }
 
     @GetMapping("/artifacts/{artifactId}")
@@ -86,11 +88,13 @@ public class AiSecurityController {
     public PageResponse<FindingResponse> findings(
             @RequestParam(required = false) String policyId,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String subscription,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
-        return apiService.findings(tenant, policyId, status, page, size);
+        return apiService.findings(tenant, policyId, status, provider, subscription, page, size);
     }
 
     @GetMapping("/findings/{findingId}")
@@ -129,15 +133,19 @@ public class AiSecurityController {
     }
 
     @GetMapping("/runs")
-    public List<RunResponse> runs() {
+    public List<RunResponse> runs(@RequestParam(required = false) String provider) {
         Tenant tenant = tenant();
-        return apiService.runs(tenant);
+        return apiService.runs(tenant, provider);
     }
 
     @GetMapping("/runs/{runId}/scopes")
-    public List<ScopeResponse> scopes(@PathVariable UUID runId) {
+    public List<ScopeResponse> scopes(
+            @PathVariable UUID runId,
+            @RequestParam(required = false) String resourceFamily,
+            @RequestParam(required = false) String status
+    ) {
         Tenant tenant = tenant();
-        return apiService.scopes(tenant, runId);
+        return apiService.scopes(tenant, runId, resourceFamily, status);
     }
 
     private Tenant tenant() {

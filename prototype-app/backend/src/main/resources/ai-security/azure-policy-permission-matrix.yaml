@@ -1,0 +1,212 @@
+version: 1
+provider: AZURE
+status: approved-for-implementation
+defaults:
+  incomplete_evidence: NO_DECISION
+  search_data_plane: disabled-unless-custom-role-certified
+  prohibited_actions:
+    - Microsoft.CognitiveServices/accounts/listKeys/action
+    - Microsoft.Search/searchServices/listAdminKeys/action
+    - Microsoft.Search/searchServices/listQueryKeys/action
+    - Microsoft.Search/searchServices/indexes/documents/read
+    - Microsoft.Authorization/roleAssignments/write
+family_permissions:
+  AZURE_AI_ACCOUNTS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/read]
+  AZURE_FOUNDRY_PROJECTS:
+    api_version: "2025-06-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+  AZURE_FOUNDRY_DEPLOYMENTS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/deployments/read]
+  AZURE_FOUNDRY_AGENTS:
+    api_version: "2026-01-15-preview"
+    role: Azure AI Developer
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+  AZURE_FOUNDRY_AGENT_TOOLS:
+    api_version: "2026-01-15-preview"
+    role: Azure AI Developer
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+  AZURE_ML_WORKSPACES:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/read]
+  AZURE_ML_MODELS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/models/read]
+  AZURE_ML_ENDPOINTS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/onlineEndpoints/read]
+  AZURE_ML_DEPLOYMENTS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/onlineEndpoints/deployments/read]
+  AZURE_ML_COMPUTE:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/computes/read]
+  AZURE_ML_JOBS:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/jobs/read]
+  AZURE_ML_PIPELINES:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.MachineLearningServices/workspaces/jobs/read]
+  AZURE_SEARCH_SERVICES:
+    api_version: "2024-03-01-preview"
+    role: Reader
+    actions: [Microsoft.Search/searchServices/read]
+  AZURE_SEARCH_INDEXES:
+    api_version: "2024-07-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/indexes/read]
+  AZURE_SEARCH_SKILLSETS:
+    api_version: "2024-07-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/skillsets/read]
+  AZURE_SEARCH_INDEXERS:
+    api_version: "2024-07-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/indexers/read]
+  AZURE_SEARCH_DATA_SOURCES:
+    api_version: "2024-07-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/dataSources/read]
+  AZURE_BOT_SERVICES:
+    api_version: "2022-09-15"
+    role: Reader
+    actions: [Microsoft.BotService/botServices/read]
+  AZURE_BOT_CHANNELS:
+    api_version: "2022-09-15"
+    role: Reader
+    actions: [Microsoft.BotService/botServices/channels/read]
+  AZURE_BOT_IDENTITIES:
+    api_version: "2022-09-15"
+    role: Reader
+    actions: [Microsoft.BotService/botServices/read]
+  AZURE_DIAGNOSTIC_SETTINGS:
+    api_version: "2021-05-01-preview"
+    role: Monitoring Reader
+    actions: [Microsoft.Insights/diagnosticSettings/read]
+  AZURE_RBAC_GLOBAL:
+    api_version: "2022-04-01"
+    role: Reader
+    actions: [Microsoft.Authorization/roleAssignments/read]
+policies:
+  - id: AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS
+    version: 1.0.0
+    artifacts: [AZURE_AI_ACCOUNT, AZURE_ML_WORKSPACE, AZURE_SEARCH_SERVICE]
+    facts: [publicNetworkAccess, networkAcls.defaultAction, privateEndpointConnections]
+    families: [AZURE_AI_ACCOUNTS]
+    api: Azure Resource Manager
+    api_version: "2024-10-01"
+    actions:
+      - Microsoft.CognitiveServices/accounts/read
+      - Microsoft.MachineLearningServices/workspaces/read
+      - Microsoft.Search/searchServices/read
+    role: Reader
+    scopes: [REGIONAL]
+    applicability: Public network configuration is exposed by the resource provider.
+    connector_test: Read each selected provider resource and its network properties.
+
+  - id: AZURE_AI_LOCAL_AUTH_ENABLED
+    version: 1.0.0
+    artifacts: [AZURE_AI_ACCOUNT]
+    facts: [disableLocalAuth]
+    families: [AZURE_AI_ACCOUNTS]
+    api: Azure Resource Manager
+    api_version: "2024-10-01"
+    actions: [Microsoft.CognitiveServices/accounts/read]
+    role: Reader
+    scopes: [REGIONAL]
+    applicability: Account kind supports Microsoft Entra authentication.
+    connector_test: Read disableLocalAuth without invoking listKeys.
+
+  - id: AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED
+    version: 1.0.0
+    artifacts: [AZURE_AI_ACCOUNT, AZURE_ML_WORKSPACE, AZURE_SEARCH_SERVICE]
+    facts: [diagnosticSettings.logs, diagnosticSettings.destination]
+    families: [AZURE_AI_ACCOUNTS, AZURE_DIAGNOSTIC_SETTINGS]
+    api: Azure Monitor Diagnostic Settings
+    api_version: "2021-05-01-preview"
+    actions: [Microsoft.Insights/diagnosticSettings/read]
+    role: Monitoring Reader
+    scopes: [REGIONAL]
+    applicability: The provider exposes resource logs.
+    connector_test: List diagnostic settings for one resource in every enabled family.
+
+  - id: AZURE_FOUNDRY_AGENT_CODE_INTERPRETER_ENABLED
+    version: 1.0.0
+    artifacts: [AI_AGENT]
+    facts: [tools.type]
+    families: [AZURE_FOUNDRY_AGENTS, AZURE_FOUNDRY_AGENT_TOOLS]
+    api: Microsoft Foundry project data plane
+    api_version: "v1-preview-profile"
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+    role: Azure AI Developer
+    scopes: [REGIONAL]
+    applicability: Foundry agent preview discovery is enabled and supported.
+    connector_test: List agents and tool definitions without reading conversations or content.
+
+  - id: AZURE_ML_ENDPOINT_LOCAL_AUTH_ENABLED
+    version: 1.0.0
+    artifacts: [AZURE_ML_ENDPOINT]
+    facts: [authMode]
+    families: [AZURE_ML_ENDPOINTS]
+    api: Azure Machine Learning Resource Manager
+    api_version: "2024-10-01"
+    actions: [Microsoft.MachineLearningServices/workspaces/onlineEndpoints/read]
+    role: Reader
+    scopes: [REGIONAL]
+    applicability: Online endpoint is active.
+    connector_test: List online endpoints and read authMode.
+
+  - id: AZURE_SEARCH_LOCAL_ADMIN_AUTH_ENABLED
+    version: 1.0.0
+    artifacts: [AZURE_SEARCH_SERVICE]
+    facts: [disableLocalAuth, authOptions]
+    families: [AZURE_SEARCH_SERVICES]
+    api: Azure Resource Manager
+    api_version: "2024-03-01-preview"
+    actions: [Microsoft.Search/searchServices/read]
+    role: Reader
+    scopes: [REGIONAL]
+    applicability: Search service configuration exposes local authentication state.
+    connector_test: Read service authentication settings without listing keys.
+
+  - id: AZURE_SEARCH_DATA_SOURCE_NON_IDENTITY_AUTH
+    version: 1.0.0
+    artifacts: [AZURE_SEARCH_DATA_SOURCE]
+    facts: [authenticationType]
+    families: [AZURE_SEARCH_DATA_SOURCES]
+    api: Azure AI Search data plane
+    api_version: "2024-07-01"
+    actions:
+      - Microsoft.Search/searchServices/indexes/read
+      - Microsoft.Search/searchServices/indexers/read
+      - Microsoft.Search/searchServices/dataSources/read
+      - Microsoft.Search/searchServices/skillsets/read
+    role: No built-in pilot role; certified definition-only custom role required.
+    scopes: [REGIONAL]
+    applicability: Search data-plane custom role has passed the A0 certification.
+    connector_test: Prove definitions can be listed and keys, documents, writes, runs, and resets are denied.
+
+  - id: AZURE_BOT_PASSWORD_AUTH_WITHOUT_MANAGED_IDENTITY
+    version: 1.0.0
+    artifacts: [AI_AGENT]
+    facts: [msaAppType, identity.type, localAuthEnabled]
+    families: [AZURE_BOT_SERVICES, AZURE_BOT_IDENTITIES]
+    api: Azure Bot Service Resource Manager
+    api_version: "2022-09-15"
+    actions: [Microsoft.BotService/botServices/read]
+    role: Reader
+    scopes: [GLOBAL]
+    applicability: Bot registration exposes authentication and identity configuration.
+    connector_test: List bot registrations and identity configuration.

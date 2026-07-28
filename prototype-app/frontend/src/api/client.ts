@@ -499,6 +499,10 @@ import type {
   AiSecurityArtifact,
   AiSecurityConnectionTest,
   AiSecurityConnectorConfig,
+  AiSecurityAzureConnectionTest,
+  AiSecurityAzureConnector,
+  AiSecurityAzureCredentialProfile,
+  AiSecurityAzureRequirements,
   AiSecurityFinding,
   AiSecurityGraph,
   AiSecurityPage,
@@ -1318,19 +1322,36 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getAiSecuritySummary: () => request<AiSecuritySummary>('/ai-security/summary'),
-  listAiSecurityArtifacts: (artifactType?: string, page = 0, size = 50) => {
+  listAiSecurityArtifacts: (
+    artifactType?: string,
+    page = 0,
+    size = 50,
+    provider?: 'AWS' | 'AZURE',
+    subscription?: string,
+  ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (artifactType) params.set('artifactType', artifactType);
+    if (provider) params.set('provider', provider);
+    if (subscription) params.set('subscription', subscription);
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
   },
   getAiSecurityGraph: (rootArtifactId?: string) => {
     const suffix = rootArtifactId ? `?rootArtifactId=${encodeURIComponent(rootArtifactId)}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
   },
-  listAiSecurityFindings: (policyId?: string, status?: string, page = 0, size = 50) => {
+  listAiSecurityFindings: (
+    policyId?: string,
+    status?: string,
+    page = 0,
+    size = 50,
+    provider?: 'AWS' | 'AZURE',
+    subscription?: string,
+  ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (policyId) params.set('policyId', policyId);
     if (status) params.set('status', status);
+    if (provider) params.set('provider', provider);
+    if (subscription) params.set('subscription', subscription);
     return request<AiSecurityPage<AiSecurityFinding>>(`/ai-security/findings?${params.toString()}`);
   },
   reviewAiSecurityFinding: (
@@ -1347,7 +1368,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
     }),
-  listAiSecurityRuns: () => request<AiSecurityRun[]>('/ai-security/runs'),
+  listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
+    request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>
     request<AiSecurityScope[]>(`/ai-security/runs/${encodeURIComponent(runId)}/scopes`),
   getAiSecurityConnector: () => request<AiSecurityConnectorConfig | null>('/connectors/ai-security/aws'),
@@ -1365,6 +1387,63 @@ export const api = {
     request<AiSecurityConnectionTest>('/connectors/ai-security/aws/test', { method: 'POST' }),
   runAiSecurityConnector: () =>
     request<{ jobId: string; status: string; message: string }>('/connectors/ai-security/aws/run', { method: 'POST' }),
+  listAiSecurityAzureConnectors: () =>
+    request<AiSecurityAzureConnector[]>('/connectors/ai-security/azure'),
+  getAiSecurityAzureRequirements: () =>
+    request<AiSecurityAzureRequirements>('/connectors/ai-security/azure/requirements'),
+  saveAiSecurityAzureConnector: (payload: {
+    credentialProfileId: string;
+    targetId: string;
+    resourceFamilies?: string[];
+    enabled: boolean;
+  }) => request<AiSecurityAzureConnector>('/connectors/ai-security/azure', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  testAiSecurityAzureConnector: (connectorId: string) =>
+    request<AiSecurityAzureConnectionTest>(
+      `/connectors/ai-security/azure/${encodeURIComponent(connectorId)}/test`,
+      { method: 'POST' },
+    ),
+  runAiSecurityAzureConnector: (connectorId: string) =>
+    request<{ jobId: string; status: string; message: string }>(
+      `/connectors/ai-security/azure/${encodeURIComponent(connectorId)}/run`,
+      { method: 'POST' },
+    ),
+  runAiSecurityAzureTarget: (targetId: string) =>
+    request<{ jobId: string; status: string; message: string }>(
+      `/connectors/ai-security/azure/targets/${encodeURIComponent(targetId)}/run`,
+      { method: 'POST' },
+    ),
+  listAiSecurityAzureCredentials: () =>
+    request<AiSecurityAzureCredentialProfile[]>('/connectors/ai-security/azure/credentials'),
+  createAiSecurityAzureCredential: (payload: {
+    name: string;
+    authType: 'CLIENT_SECRET' | 'MANAGED_IDENTITY';
+    azureTenantId: string;
+    clientId?: string;
+    clientSecret?: string;
+    expiresAt?: string;
+  }) => request<AiSecurityAzureCredentialProfile>('/connectors/ai-security/azure/credentials', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  testAiSecurityAzureCredential: (profileId: string, subscriptionId: string) =>
+    request<{ success: boolean; code: string | null; message: string; retryable: boolean }>(
+      `/connectors/ai-security/azure/credentials/${encodeURIComponent(profileId)}/test?subscriptionId=${encodeURIComponent(subscriptionId)}`,
+      { method: 'POST' },
+    ),
+  rotateAiSecurityAzureCredential: (
+    profileId: string,
+    payload: { clientSecret: string; expiresAt: string; subscriptionId: string },
+  ) => request<AiSecurityAzureCredentialProfile>(
+    `/connectors/ai-security/azure/credentials/${encodeURIComponent(profileId)}/rotate`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
+  revokeAiSecurityAzureCredential: (profileId: string) =>
+    request<void>(`/connectors/ai-security/azure/credentials/${encodeURIComponent(profileId)}`, {
+      method: 'DELETE',
+    }),
   createOwnershipRule: (payload: OwnershipRuleRequest) => request<OwnershipRuleResponse>('/ownership-rules', {
     method: 'POST',
     body: JSON.stringify(payload)

@@ -98,4 +98,46 @@ class ArchitectureRulesTest {
             noClasses()
                     .that().resideInAPackage("..aisecurity..")
                     .should().dependOnClassesThat().haveSimpleName("RiskPolicy");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_assets =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("Asset");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_asset_repositories =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("AssetRepository");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_enter_existing_azure_ingestion =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("AzureDiscoveryIngestionService");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_enter_existing_azure_sync =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("AzureDiscoverySyncService");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_access_azure_target_repository_directly =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("AzureDiscoveryTargetRepository");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_vulnerability_repositories =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("VulnerabilityRepository");
+
+    @ArchTest
+    static final ArchRule ai_security_must_not_depend_on_vulnerability_findings =
+            noClasses()
+                    .that().resideInAPackage("..aisecurity..")
+                    .should().dependOnClassesThat().haveSimpleName("VulnerabilityFinding");
 }

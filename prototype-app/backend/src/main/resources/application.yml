@@ -67,6 +67,20 @@ app:
     aws:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
       admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}
+    azure:
+      enabled: ${APP_AI_SECURITY_AZURE_ENABLED:false}
+      disabled-tenant-ids: ${APP_AI_SECURITY_AZURE_DISABLED_TENANT_IDS:}
+      disabled-connector-ids: ${APP_AI_SECURITY_AZURE_DISABLED_CONNECTOR_IDS:}
+      disabled-resource-families: ${APP_AI_SECURITY_AZURE_DISABLED_RESOURCE_FAMILIES:}
+      disabled-policy-ids: ${APP_AI_SECURITY_AZURE_DISABLED_POLICY_IDS:}
+      max-concurrent: ${APP_AI_SECURITY_AZURE_MAX_CONCURRENT:2}
+      max-concurrent-per-subscription: ${APP_AI_SECURITY_AZURE_MAX_CONCURRENT_PER_SUBSCRIPTION:1}
+      admission-timeout-seconds: ${APP_AI_SECURITY_AZURE_ADMISSION_TIMEOUT_SECONDS:30}
+      credential-expiry-cron: ${APP_AI_SECURITY_AZURE_CREDENTIAL_EXPIRY_CRON:0 20 2 * * *}
+      foundry-agents:
+        enabled: ${APP_AI_SECURITY_AZURE_FOUNDRY_AGENTS_ENABLED:false}
+      search-data-plane:
+        enabled: ${APP_AI_SECURITY_AZURE_SEARCH_DATA_PLANE_ENABLED:false}
     jobs:
       enabled: ${APP_AI_SECURITY_JOBS_ENABLED:true}
       poll-interval-ms: ${APP_AI_SECURITY_JOBS_POLL_INTERVAL_MS:3000}

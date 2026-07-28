@@ -83,12 +83,25 @@ public class AiSecurityApiService {
     }
 
     public PageResponse<ArtifactResponse> artifacts(Tenant tenant, String artifactType, int page, int size) {
+        return artifacts(tenant, artifactType, null, null, page, size);
+    }
+
+    public PageResponse<ArtifactResponse> artifacts(
+            Tenant tenant,
+            String artifactType,
+            String provider,
+            String subscription,
+            int page,
+            int size
+    ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("artifactType", blankToNull(artifactType))
                     .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType))
+                    .addValue("provider", normalizedProvider(provider))
+                    .addValue("subscription", blankToNull(subscription))
                     .addValue("limit", safeSize)
                     .addValue("offset", safePage * safeSize);
             List<ArtifactResponse> items = jdbc.query("""
@@ -99,6 +112,8 @@ public class AiSecurityApiService {
                      where (:artifactType is null
                         or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
                         or (:otherArtifacts = false and artifact_type = :artifactType))
+                       and (:provider is null or provider = :provider)
+                       and (:subscription is null or account_id = :subscription)
                      order by active desc, last_observed_at desc, id
                      limit :limit offset :offset
                     """, params, this::artifact);
@@ -107,6 +122,8 @@ public class AiSecurityApiService {
                      where (:artifactType is null
                         or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
                         or (:otherArtifacts = false and artifact_type = :artifactType))
+                       and (:provider is null or provider = :provider)
+                       and (:subscription is null or account_id = :subscription)
                     """, params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
@@ -178,17 +195,33 @@ public class AiSecurityApiService {
     }
 
     public PageResponse<FindingResponse> findings(Tenant tenant, String policyId, String status, int page, int size) {
+        return findings(tenant, policyId, status, null, null, page, size);
+    }
+
+    public PageResponse<FindingResponse> findings(
+            Tenant tenant,
+            String policyId,
+            String status,
+            String provider,
+            String subscription,
+            int page,
+            int size
+    ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("policyId", blankToNull(policyId))
                     .addValue("status", blankToNull(status))
+                    .addValue("provider", normalizedProvider(provider))
+                    .addValue("subscription", blankToNull(subscription))
                     .addValue("limit", safeSize)
                     .addValue("offset", safePage * safeSize);
             String filter = """
                      where (:policyId is null or f.policy_id = :policyId)
                        and (:status is null or f.status = :status)
+                       and (:provider is null or a.provider = :provider)
+                       and (:subscription is null or a.account_id = :subscription)
                     """;
             List<FindingResponse> items = jdbc.query("""
                     select f.id, f.display_id, f.policy_id, f.policy_version, f.artifact_id,
@@ -203,7 +236,10 @@ public class AiSecurityApiService {
                       ) review on true
                     """ + filter + " order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
-            long total = count("select count(*) from ai_security_findings f " + filter, params);
+            long total = count("""
+                    select count(*) from ai_security_findings f
+                    join ai_security_artifacts a on a.id = f.artifact_id
+                    """ + filter, params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -290,18 +326,40 @@ public class AiSecurityApiService {
     }
 
     public List<RunResponse> runs(Tenant tenant) {
-        return syncRunFacade.listForTenant(tenant.getId()).stream().map(this::run).toList();
+        return runs(tenant, null);
+    }
+
+    public List<RunResponse> runs(Tenant tenant, String provider) {
+        String normalized = normalizedProvider(provider);
+        return syncRunFacade.listForTenant(tenant.getId()).stream()
+                .filter(run -> normalized == null
+                        || ("AWS".equals(normalized)
+                                && AiSecuritySyncRunFacade.AWS_SYNC_TYPE.equals(run.getSyncType()))
+                        || ("AZURE".equals(normalized)
+                                && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType())))
+                .map(this::run)
+                .toList();
     }
 
     public List<ScopeResponse> scopes(Tenant tenant, UUID runId) {
+        return scopes(tenant, runId, null, null);
+    }
+
+    public List<ScopeResponse> scopes(Tenant tenant, UUID runId, String resourceFamily, String status) {
         syncRunFacade.loadForTenant(tenant.getId(), runId);
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select id, run_id, account_id, region, resource_family, scope_key, status,
                        expected_chunks, accepted_chunks, diagnostic_code, diagnostic_json::text,
                        started_at, completed_at
                   from ai_security_snapshot_scopes
-                 where run_id = :runId order by account_id, region, resource_family
-                """, Map.of("runId", runId), (rs, rowNum) -> new ScopeResponse(
+                 where run_id = :runId
+                   and (:resourceFamily is null or resource_family = :resourceFamily)
+                   and (:status is null or status = :status)
+                 order by account_id, region, resource_family
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("resourceFamily", blankToNull(resourceFamily))
+                .addValue("status", blankToNull(status)), (rs, rowNum) -> new ScopeResponse(
                 rs.getObject("id", UUID.class),
                 rs.getObject("run_id", UUID.class),
                 rs.getString("account_id"),
@@ -315,6 +373,16 @@ public class AiSecurityApiService {
                 readMap(rs.getString("diagnostic_json")),
                 instant(rs, "started_at"),
                 instant(rs, "completed_at"))));
+    }
+
+    private String normalizedProvider(String provider) {
+        String value = blankToNull(provider);
+        if (value == null) return null;
+        String normalized = value.toUpperCase(java.util.Locale.ROOT);
+        if (!List.of("AWS", "AZURE").contains(normalized)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported AI Security provider");
+        }
+        return normalized;
     }
 
     private PolicyResponse policy(PolicyDefinition definition) {

@@ -16,10 +16,19 @@ const PILLS: Array<{ key: InventoryPill; label: string }> = [
 export function AiInventoryPage() {
   const navigate = useNavigate();
   const [activePill, setActivePill] = React.useState<InventoryPill>('AI_AGENT');
+  const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
+  const [subscription, setSubscription] = React.useState('');
+  const deferredSubscription = React.useDeferredValue(subscription.trim());
   const [selected, setSelected] = React.useState<AiSecurityArtifact | null>(null);
   const artifactsQuery = useQuery({
-    queryKey: ['ai-security-artifacts', activePill],
-    queryFn: () => api.listAiSecurityArtifacts(activePill, 0, 100),
+    queryKey: ['ai-security-artifacts', activePill, provider, deferredSubscription],
+    queryFn: () => api.listAiSecurityArtifacts(
+      activePill,
+      0,
+      100,
+      provider || undefined,
+      deferredSubscription || undefined,
+    ),
   });
   const summaryQuery = useQuery({
     queryKey: ['ai-security-summary'],
@@ -37,7 +46,7 @@ export function AiInventoryPage() {
     <div className="ai-security-page">
       <section className="ai-security-hero">
         <div>
-          <span className="ai-security-kicker">AWS Bedrock estate</span>
+          <span className="ai-security-kicker">AWS and Azure AI estate</span>
           <h2>AI Inventory</h2>
           <p>Tenant-scoped agents, referenced models, and supporting AI-native resources.</p>
         </div>
@@ -45,6 +54,24 @@ export function AiInventoryPage() {
           <Metric label="Open AI findings" value={summaryQuery.data?.openFindings ?? 0} tone="danger" />
           <Metric label="Incomplete scopes" value={summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
         </div>
+        <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
+          <option value="">All providers</option>
+          <option value="AWS">AWS</option>
+          <option value="AZURE">Azure</option>
+        </select>
+        <label>
+          <span className="sr-only">Azure subscription</span>
+          <input
+            type="search"
+            value={subscription}
+            placeholder="Filter subscription ID"
+            aria-label="Azure subscription"
+            onChange={(event) => {
+              setSubscription(event.target.value);
+              setSelected(null);
+            }}
+          />
+        </label>
       </section>
 
       <div className="ai-security-pill-row" role="tablist" aria-label="AI inventory artifact types">
@@ -74,8 +101,8 @@ export function AiInventoryPage() {
         <section className="ai-security-empty">
           <div className="ai-security-empty-mark">AI</div>
           <h3>No {PILLS.find((pill) => pill.key === activePill)?.label.toLowerCase()} discovered</h3>
-          <p>Connect an AWS account and run Bedrock discovery. Empty inventory never hides this workspace.</p>
-          <button className="btn btn-primary" type="button" onClick={() => navigate('/connect/sources?connectSource=ai-security-aws')}>
+          <p>Connect an AWS or Azure account and run AI discovery. Empty inventory never hides this workspace.</p>
+          <button className="btn btn-primary" type="button" onClick={() => navigate(`/connect/sources?connectSource=${provider === 'AZURE' ? 'ai-security-azure' : 'ai-security-aws'}`)}>
             Configure AI connector
           </button>
         </section>

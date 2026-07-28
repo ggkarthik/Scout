@@ -136,3 +136,78 @@ export type AiSecurityConnectionTest = {
   retryable: boolean;
   missingPermissions: string[];
 };
+
+export type AiSecurityAzureCredentialProfile = {
+  id: string;
+  name: string;
+  authType: 'CLIENT_SECRET' | 'MANAGED_IDENTITY' | 'WORKLOAD_FEDERATION';
+  azureTenantId: string;
+  clientId: string | null;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+  expiresAt: string | null;
+  lastVerifiedAt: string | null;
+  lastVerificationStatus: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiSecurityAzureConnector = {
+  id: string;
+  subscriptionId: string;
+  azureTenantId: string;
+  credentialProfileId: string;
+  sourceConfigId: string;
+  sourceTargetId: string;
+  regions: string[];
+  resourceFamilies: string[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiSecurityAzureFamilyPermission = {
+  resourceFamily: string;
+  required: string[];
+  granted: string[];
+  missing: string[];
+  status: string;
+};
+
+export type AiSecurityAzureConnectionTest = {
+  success: boolean;
+  code: string | null;
+  message: string;
+  retryable: boolean;
+  correlationId: string;
+  resourceFamilies: AiSecurityAzureFamilyPermission[];
+};
+
+export type AiSecurityAzureRequirements = {
+  matrixVersion: number;
+  provider: 'AZURE';
+  resourceFamilies: Array<{
+    resourceFamily: string;
+    apiVersion: string;
+    role: string;
+    actions: string[];
+  }>;
+  policies: Array<{
+    policyId: string;
+    version: string;
+    resourceFamilies: string[];
+    facts: string[];
+    scopes: string[];
+    connectorTest: string;
+  }>;
+  prohibitedActions: string[];
+  roleTemplate: {
+    name: string;
+    isCustom: boolean;
+    description: string;
+    actions: string[];
+    notActions: string[];
+    dataActions: string[];
+    notDataActions: string[];
+    assignableScopes: string[];
+  };
+};

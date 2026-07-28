@@ -48,6 +48,19 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
             SELECT * FROM ingestion_jobs
              WHERE status = 'QUEUED'
                AND visible_at <= now()
+               AND job_type NOT IN (:excludedJobTypes)
+             ORDER BY requested_at, id
+             LIMIT :limit
+             FOR UPDATE SKIP LOCKED
+            """, nativeQuery = true)
+    List<IngestionJob> pollPendingExcludingJobTypes(
+            @Param("excludedJobTypes") Collection<String> excludedJobTypes,
+            @Param("limit") int limit);
+
+    @Query(value = """
+            SELECT * FROM ingestion_jobs
+             WHERE status = 'QUEUED'
+               AND visible_at <= now()
                AND job_type = :jobType
              ORDER BY requested_at, id
              LIMIT :limit
@@ -72,6 +85,11 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
     long countByStatusExcludingJobType(
             @Param("status") String status,
             @Param("excludedJobType") String excludedJobType);
+
+    @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status = :status AND j.jobType NOT IN :excludedJobTypes")
+    long countByStatusExcludingJobTypes(
+            @Param("status") String status,
+            @Param("excludedJobTypes") Collection<String> excludedJobTypes);
 
     @Query("SELECT COUNT(j) FROM IngestionJob j WHERE j.status = :status AND j.jobType = :jobType")
     long countByStatusAndJobType(@Param("status") String status, @Param("jobType") String jobType);
