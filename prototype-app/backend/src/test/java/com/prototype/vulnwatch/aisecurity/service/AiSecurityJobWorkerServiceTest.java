@@ -9,7 +9,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.prototype.vulnwatch.aisecurity.aws.AwsBedrockDiscoveryService;
 import com.prototype.vulnwatch.aisecurity.aws.AwsBedrockDiscoveryService.DiscoveryResult;
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -32,15 +31,16 @@ class AiSecurityJobWorkerServiceTest {
     @Mock private IngestionJobService jobs;
     @Mock private TenantService tenants;
     @Mock private TenantSchemaExecutionService tenantExecution;
-    @Mock private AwsBedrockDiscoveryService discovery;
+    @Mock private AiSecurityDiscoveryProvider discovery;
     @Mock private TaskExecutor executor;
 
     private AiSecurityJobWorkerService worker;
 
     @BeforeEach
     void setUp() {
+        when(discovery.jobType()).thenReturn(IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK);
         worker = new AiSecurityJobWorkerService(
-                jobs, tenants, tenantExecution, discovery, executor, true, 1);
+                jobs, tenants, tenantExecution, List.of(discovery), executor, true, 1);
     }
 
     @Test
@@ -48,6 +48,7 @@ class AiSecurityJobWorkerServiceTest {
         Tenant broken = tenant("broken");
         Tenant healthy = tenant("healthy");
         UUID jobId = UUID.randomUUID();
+        when(discovery.provider()).thenReturn("AWS");
         when(tenants.listActiveTenants()).thenReturn(List.of(broken, healthy));
         doThrow(new IllegalStateException("schema unavailable"))
                 .when(jobs).claimPendingJobsByType(
@@ -70,6 +71,7 @@ class AiSecurityJobWorkerServiceTest {
         UUID jobId = UUID.randomUUID();
         UUID connectorId = UUID.randomUUID();
         IngestionJob job = mock(IngestionJob.class);
+        when(job.getJobType()).thenReturn(IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK);
         when(tenants.resolveTenantUuid(tenant.getId())).thenReturn(tenant);
         when(jobs.loadJob(tenant.getId(), jobId)).thenReturn(job);
         when(jobs.readPayload(job, IngestionJobService.AiSecurityJobPayload.class))
@@ -92,12 +94,16 @@ class AiSecurityJobWorkerServiceTest {
         UUID jobId = UUID.randomUUID();
         UUID connectorId = UUID.randomUUID();
         IngestionJob job = mock(IngestionJob.class);
+        when(job.getJobType()).thenReturn(IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK);
         when(tenants.resolveTenantUuid(tenant.getId())).thenReturn(tenant);
         when(jobs.loadJob(tenant.getId(), jobId)).thenReturn(job);
         when(jobs.readPayload(job, IngestionJobService.AiSecurityJobPayload.class))
                 .thenReturn(new IngestionJobService.AiSecurityJobPayload(connectorId));
         when(discovery.discover(tenant, connectorId))
                 .thenThrow(new IllegalStateException("secret provider response"));
+        when(discovery.failureCode(any())).thenReturn("PROVIDER_UNAVAILABLE");
+        when(discovery.safeFailureMessage("PROVIDER_UNAVAILABLE"))
+                .thenReturn("AI Security discovery could not be completed");
 
         worker.execute(tenant.getId(), jobId);
 

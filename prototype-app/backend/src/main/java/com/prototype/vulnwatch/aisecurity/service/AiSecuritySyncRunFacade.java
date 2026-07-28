@@ -10,7 +10,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class AiSecuritySyncRunFacade {
 
-    public static final String SYNC_TYPE = "AI_SECURITY_AWS_BEDROCK";
+    public static final String AWS_SYNC_TYPE = "AI_SECURITY_AWS_BEDROCK";
+    public static final String AZURE_SYNC_TYPE = "AI_SECURITY_AZURE_DISCOVERY";
+    private static final List<String> SYNC_TYPES = List.of(AWS_SYNC_TYPE, AZURE_SYNC_TYPE);
     private final SyncRunRepository repository;
 
     public AiSecuritySyncRunFacade(SyncRunRepository repository) {
@@ -18,9 +20,16 @@ public class AiSecuritySyncRunFacade {
     }
 
     public SyncRun start(Tenant tenant) {
+        return start(tenant, AWS_SYNC_TYPE);
+    }
+
+    public SyncRun start(Tenant tenant, String syncType) {
+        if (!SYNC_TYPES.contains(syncType)) {
+            throw new IllegalArgumentException("Unsupported AI Security sync type");
+        }
         SyncRun run = new SyncRun();
         run.setTenant(tenant);
-        run.setSyncType(SYNC_TYPE);
+        run.setSyncType(syncType);
         run.setRunScope("TENANT_AI_SECURITY");
         run.setStatus("running");
         return repository.save(run);
@@ -29,13 +38,13 @@ public class AiSecuritySyncRunFacade {
     public SyncRun loadForTenant(UUID tenantId, UUID runId) {
         return repository.findById(runId)
                 .filter(run -> run.getTenant() != null && tenantId.equals(run.getTenant().getId()))
-                .filter(run -> SYNC_TYPE.equals(run.getSyncType()))
+                .filter(run -> SYNC_TYPES.contains(run.getSyncType()))
                 .orElseThrow(() -> new IllegalArgumentException("AI Security run not found"));
     }
 
     public List<SyncRun> listForTenant(UUID tenantId) {
         return repository.findByTenant_IdOrderByStartedAtDesc(tenantId).stream()
-                .filter(run -> SYNC_TYPE.equals(run.getSyncType()))
+                .filter(run -> SYNC_TYPES.contains(run.getSyncType()))
                 .limit(100)
                 .toList();
     }

@@ -29,7 +29,11 @@ public class AiSecurityObservationService {
     public static final String CONTRACT_VERSION = "1.0";
     private static final Set<String> RELATIONSHIP_TYPES = Set.of(
             "USES_MODEL", "USES_GUARDRAIL", "USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE",
-            "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT");
+            "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
+            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL", "USES_SEARCH_INDEX",
+            "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
+            "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
+            "HAS_ROLE_ASSIGNMENT");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -150,12 +154,15 @@ public class AiSecurityObservationService {
                 || envelope.chunkSequence() >= envelope.expectedChunks()) {
             throw new IllegalArgumentException("Invalid AI Security observation envelope");
         }
+        if ("AZURE".equalsIgnoreCase(envelope.provider()) && blank(envelope.providerTenantId())) {
+            throw new IllegalArgumentException("Azure observation provider tenant assertion is required");
+        }
     }
 
-    private void validateCurrentTenantOwnership(Tenant tenant, ObservationEnvelopeV1 envelope) {
+    void validateCurrentTenantOwnership(Tenant tenant, ObservationEnvelopeV1 envelope) {
         syncRunFacade.loadForTenant(tenant.getId(), envelope.runId());
-        Integer connectors = jdbc.queryForObject("""
-                select count(*)
+        List<String> connectors = jdbc.query("""
+                select provider_tenant_id
                   from ai_security_connector_configs
                  where id = :connectorId
                    and tenant_id = :tenantId
@@ -165,10 +172,19 @@ public class AiSecurityObservationService {
                 .addValue("connectorId", envelope.connectorId())
                 .addValue("tenantId", tenant.getId())
                 .addValue("provider", envelope.provider())
-                .addValue("accountId", envelope.accountId()), Integer.class);
-        if (connectors == null || connectors != 1) {
+                .addValue("accountId", envelope.accountId()),
+                (rs, rowNum) -> rs.getString("provider_tenant_id"));
+        if (connectors.size() != 1) {
             throw new IllegalArgumentException(
                     "Observation connector does not belong to the claimed tenant and account");
+        }
+        if ("AZURE".equalsIgnoreCase(envelope.provider())) {
+            String configuredProviderTenant = connectors.get(0);
+            if (blank(configuredProviderTenant)
+                    || !configuredProviderTenant.equalsIgnoreCase(envelope.providerTenantId())) {
+                throw new IllegalArgumentException(
+                        "Azure observation provider tenant does not match the connector");
+            }
         }
     }
 
@@ -414,4 +430,5 @@ public class AiSecurityObservationService {
             String contentHash
     ) {
     }
+
 }

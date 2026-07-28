@@ -42,6 +42,7 @@ public final class AiSecurityContracts {
             UUID connectorId,
             UUID tenantId,
             String provider,
+            String providerTenantId,
             String accountId,
             String region,
             String resourceFamily,
@@ -56,6 +57,47 @@ public final class AiSecurityContracts {
             List<RelationshipObservation> relationships,
             List<Diagnostic> diagnostics
     ) {
+        public ObservationEnvelopeV1(
+                String contractVersion,
+                UUID runId,
+                UUID connectorId,
+                UUID tenantId,
+                String provider,
+                String accountId,
+                String region,
+                String resourceFamily,
+                String scopeKey,
+                int chunkSequence,
+                int expectedChunks,
+                String idempotencyKey,
+                String contentHash,
+                Instant observedAt,
+                ScopeStatus completionStatus,
+                List<ArtifactObservation> artifacts,
+                List<RelationshipObservation> relationships,
+                List<Diagnostic> diagnostics
+        ) {
+            this(
+                    contractVersion,
+                    runId,
+                    connectorId,
+                    tenantId,
+                    provider,
+                    null,
+                    accountId,
+                    region,
+                    resourceFamily,
+                    scopeKey,
+                    chunkSequence,
+                    expectedChunks,
+                    idempotencyKey,
+                    contentHash,
+                    observedAt,
+                    completionStatus,
+                    artifacts,
+                    relationships,
+                    diagnostics);
+        }
     }
 
     public record ArtifactObservation(

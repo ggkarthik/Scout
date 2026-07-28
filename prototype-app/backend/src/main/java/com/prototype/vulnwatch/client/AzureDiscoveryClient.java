@@ -46,10 +46,12 @@ public class AzureDiscoveryClient {
             JsonNode response = getJson(credential,
                     "https://management.azure.com/subscriptions/" + encode(subscriptionId) + "?api-version=2020-01-01");
             String displayName = textOrNull(response.path("displayName"));
-            return new AzureConnectivityResult(true, subscriptionId, hasText(displayName) ? displayName : subscriptionId, null);
+            String tenantId = textOrNull(response.path("tenantId"));
+            return new AzureConnectivityResult(
+                    true, subscriptionId, hasText(displayName) ? displayName : subscriptionId, tenantId, null);
         } catch (Exception e) {
-            LOG.debug("Azure subscription {} failed connectivity test: {}", subscriptionId, e.getMessage());
-            return new AzureConnectivityResult(false, subscriptionId, null, e.getMessage());
+            LOG.debug("Azure subscription connectivity test failed: {}", e.getClass().getSimpleName());
+            return new AzureConnectivityResult(false, subscriptionId, null, null, e.getMessage());
         }
     }
 
@@ -200,6 +202,7 @@ public class AzureDiscoveryClient {
             boolean success,
             String subscriptionId,
             String subscriptionName,
+            String tenantId,
             String errorMessage
     ) {}
 
