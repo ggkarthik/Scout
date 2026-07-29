@@ -141,6 +141,39 @@ class AiSecurityObservationPostgresIntegrationTest {
         assertEquals("FAIL", wildcardRoleOutcome(tenant, runId));
     }
 
+    @Test
+    void hashesEvidenceIdentityForLongProviderResourceIds() {
+        Tenant tenant = provision("Long Resource Co", "long-resource-co");
+        UUID connectorId = connectorService.save(
+                tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)
+        ).id();
+        UUID runId = syncRunFacade.start(tenant).getId();
+        String providerResourceId = "/subscriptions/" + "a".repeat(220);
+
+        observationService.ingest(
+                tenant,
+                envelope(
+                        tenant,
+                        connectorId,
+                        runId,
+                        "f".repeat(64),
+                        ScopeStatus.COMPLETE,
+                        List.of(new ArtifactObservation(
+                                providerResourceId,
+                                "AI_MODEL",
+                                "AZURE_OPENAI_DEPLOYMENT",
+                                "Long Azure resource",
+                                Map.of()))));
+
+        Integer hashLength = tenantExecution.run(tenant, () -> jdbc.queryForObject(
+                "select length(evidence_hash) from ai_security_artifact_sources",
+                Map.of(),
+                Integer.class));
+        assertEquals(64, hashLength);
+    }
+
     private Tenant provision(String name, String slug) {
         Tenant tenant = tenantService.createTenant(name, slug, "pilot", null);
         tenantSchemaMigrationService.provisionNewTenant(tenant);

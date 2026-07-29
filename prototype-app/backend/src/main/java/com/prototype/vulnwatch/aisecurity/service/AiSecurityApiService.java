@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.service.AuditEventService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -98,12 +99,12 @@ public class AiSecurityApiService {
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
-                    .addValue("artifactType", blankToNull(artifactType))
-                    .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType))
-                    .addValue("provider", normalizedProvider(provider))
-                    .addValue("subscription", blankToNull(subscription))
-                    .addValue("limit", safeSize)
-                    .addValue("offset", safePage * safeSize);
+                    .addValue("artifactType", blankToNull(artifactType), Types.VARCHAR)
+                    .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType), Types.BOOLEAN)
+                    .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
+                    .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
+                    .addValue("limit", safeSize, Types.INTEGER)
+                    .addValue("offset", safePage * safeSize, Types.INTEGER);
             List<ArtifactResponse> items = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
                            account_id, region, active, attributes_json::text,
@@ -211,12 +212,12 @@ public class AiSecurityApiService {
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
-                    .addValue("policyId", blankToNull(policyId))
-                    .addValue("status", blankToNull(status))
-                    .addValue("provider", normalizedProvider(provider))
-                    .addValue("subscription", blankToNull(subscription))
-                    .addValue("limit", safeSize)
-                    .addValue("offset", safePage * safeSize);
+                    .addValue("policyId", blankToNull(policyId), Types.VARCHAR)
+                    .addValue("status", blankToNull(status), Types.VARCHAR)
+                    .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
+                    .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
+                    .addValue("limit", safeSize, Types.INTEGER)
+                    .addValue("offset", safePage * safeSize, Types.INTEGER);
             String filter = """
                      where (:policyId is null or f.policy_id = :policyId)
                        and (:status is null or f.status = :status)

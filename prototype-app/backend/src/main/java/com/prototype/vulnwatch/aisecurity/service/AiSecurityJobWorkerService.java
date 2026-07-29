@@ -126,6 +126,8 @@ public class AiSecurityJobWorkerService {
                 return null;
             });
         } catch (Exception ex) {
+            LOG.warn("AI Security job {} failed for tenant {}: {}",
+                    jobId, tenantId, ex.getMessage(), ex);
             tenantExecution.run(tenant, () -> {
                 IngestionJob failedJob = jobs.loadJob(tenantId, jobId);
                 AiSecurityDiscoveryProvider provider = providersByJobType.get(failedJob.getJobType());

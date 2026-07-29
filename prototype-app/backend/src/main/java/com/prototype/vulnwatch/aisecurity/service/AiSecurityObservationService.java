@@ -9,6 +9,8 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.Relationship
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -265,7 +267,7 @@ public class AiSecurityObservationService {
                 .addValue("artifactId", artifactId)
                 .addValue("connectorId", envelope.connectorId())
                 .addValue("observedAt", timestamp(envelope.observedAt()))
-                .addValue("evidenceHash", envelope.contentHash() + ":" + artifact.providerResourceId());
+                .addValue("evidenceHash", sha256(envelope.contentHash() + ":" + artifact.providerResourceId()));
         jdbc.update("""
                 insert into ai_security_artifact_sources (
                     id, tenant_id, artifact_id, connector_config_id, scope_key, run_id, observed_at, evidence_hash
@@ -277,6 +279,15 @@ public class AiSecurityObservationService {
                         observed_at = excluded.observed_at,
                         evidence_hash = excluded.evidence_hash
                 """, params);
+    }
+
+    private String sha256(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to hash AI Security evidence", exception);
+        }
     }
 
     private void upsertRelationship(
