@@ -38,7 +38,9 @@ describe('Demo public pages', () => {
       { route: '/' }
     );
 
-    expect(screen.getByRole('heading', { name: /See every threat\. Secure every surface\./i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Exposure and SBOM management for modern software\./i })).toBeInTheDocument();
+    expect(screen.getByText(/SBOM · AI BOM · CBOM/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /What does ScoutGrid do\?/i })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /Request demo/i })[0]).toHaveAttribute('href', '/demo/request');
     expect(screen.getAllByRole('link', { name: /Log in/i })[0]).toHaveAttribute('href', '/login');
   });

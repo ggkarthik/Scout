@@ -213,6 +213,25 @@ const AI_CAPABILITIES: Array<{ icon: string; name: string; desc: string }> = [
   { icon: '📋', name: 'AI-BOM Generation', desc: 'Generate a complete AI inventory of models, frameworks, datasets, and dependencies.' }
 ];
 
+const HOMEPAGE_FAQS = [
+  {
+    question: 'What does ScoutGrid do?',
+    answer: 'ScoutGrid combines asset inventory, SBOM management, vulnerability intelligence, and remediation context so security teams can identify which risks affect their applications, cloud workloads, hosts, and AI systems.'
+  },
+  {
+    question: 'Which BOM formats does ScoutGrid support?',
+    answer: 'ScoutGrid is designed for CycloneDX and SPDX software bills of materials, with dedicated inventory views for SBOM, AI BOM, cryptography BOM, and vendor-supplied BOM records.'
+  },
+  {
+    question: 'How does ScoutGrid prioritize vulnerabilities?',
+    answer: 'Findings can be prioritized using vulnerability severity, CISA KEV status, EPSS likelihood, asset criticality, ownership, software lifecycle, and the business context of the affected workload.'
+  },
+  {
+    question: 'Can ScoutGrid cover hosts as well as applications?',
+    answer: 'Yes. ScoutGrid correlates host and infrastructure inventory with application, cloud, container, software-component, and BOM data to create one exposure-management workflow.'
+  }
+];
+
 function VisualPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="visual-panel">
@@ -250,31 +269,108 @@ export function DemoLandingPage() {
         <div className="scout-hero-grid" aria-hidden="true" />
         <div className="scout-hero-glow scout-hero-glow--red" aria-hidden="true" />
         <div className="scout-hero-glow scout-hero-glow--cyan" aria-hidden="true" />
-        <div className="scout-hero-content">
-          <span className="scout-eyebrow">✦ Exposure Management Platform</span>
-          <h1>See every threat. Secure every <span className="hero-accent">surface.</span></h1>
-          <p>
-            Scout delivers agentless vulnerability assessment across your entire infrastructure — Infra, Cloud,
-            BOM, and AI. Powered by real-time intelligence feeds, AI-driven prioritization, and precision noise
-            reduction for every security alert in your stack.
-          </p>
-          <div className="hero-actions">
-            <Link className="btn btn-primary" to="/demo/request">Get a demo</Link>
-            <a className="btn btn-outline" href="#platform">Explore the platform</a>
+        <div className="scout-hero-layout">
+          <div className="scout-hero-content">
+            <span className="scout-eyebrow">✦ Exposure &amp; BOM Management Platform</span>
+            <h1>Exposure and SBOM management for <span className="hero-accent">modern software.</span></h1>
+            <p>
+              ScoutGrid unifies applications, hosts, cloud workloads, SBOM, AI BOM, CBOM, and vulnerability
+              intelligence in one operational view—so security teams can identify real exposure and fix what
+              matters first.
+            </p>
+            <div className="hero-actions">
+              <Link className="btn btn-primary" to="/demo/request">Request a product demo</Link>
+              <a className="btn btn-outline" href="#platform">Explore the platform</a>
+            </div>
+            <div className="scout-stats" aria-label="ScoutGrid coverage">
+              {[
+                ['BOM coverage', 'SBOM · AI BOM · CBOM'],
+                ['Asset context', 'Apps · Hosts · Cloud'],
+                ['Risk signals', 'KEV · EPSS · EOL']
+              ].map(([label, value]) => (
+                <div key={label} className="scout-stat">
+                  <strong>{label}</strong>
+                  <span>{value}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="scout-stats" aria-label="Portfolio signals">
-            {[
-              ['4×', 'Faster Triage'],
-              ['0', 'Agents Required'],
-              ['< 24h', '0-Day Response']
-            ].map(([label, value]) => (
-              <div key={value} className="scout-stat">
-                <strong>{label}</strong>
-                <span>{value}</span>
+
+          <div className="scout-hero-visual" aria-label="ScoutGrid exposure command center preview">
+            <div className="hero-console-topbar">
+              <div>
+                <span className="hero-console-kicker">Exposure command center</span>
+                <strong>Risk that connects back to the business</strong>
               </div>
-            ))}
+              <span className="hero-console-live"><i /> Live context</span>
+            </div>
+            <div className="hero-console-metrics">
+              <div>
+                <span>Open exposure</span>
+                <strong>187</strong>
+                <small>Across 42 assets</small>
+              </div>
+              <div>
+                <span>Active exploitation</span>
+                <strong className="critical">14</strong>
+                <small>CISA KEV matched</small>
+              </div>
+              <div>
+                <span>BOM coverage</span>
+                <strong>94%</strong>
+                <small>6 sources connected</small>
+              </div>
+            </div>
+            <div className="hero-console-body">
+              <div className="hero-risk-list">
+                <div className="hero-console-label">Priority queue</div>
+                {[
+                  ['CVE-2024-3094', 'Production checkout API', '9.4', 'Critical'],
+                  ['CVE-2021-44228', 'Payments database host', '9.1', 'Critical'],
+                  ['CVE-2023-44487', 'Partner cloud gateway', '8.2', 'High']
+                ].map(([cve, asset, score, severity]) => (
+                  <div className="hero-risk-item" key={cve}>
+                    <span className={`hero-severity-dot hero-severity-dot--${severity.toLowerCase()}`} />
+                    <div>
+                      <strong>{cve}</strong>
+                      <span>{asset}</span>
+                    </div>
+                    <b>{score}</b>
+                  </div>
+                ))}
+              </div>
+              <div className="hero-coverage-map">
+                <div className="hero-console-label">Unified inventory</div>
+                {[
+                  ['Applications', '6', '92%'],
+                  ['Hosts', '4', '74%'],
+                  ['BOM components', '40', '88%'],
+                  ['AI & crypto assets', '16', '64%']
+                ].map(([label, count, width]) => (
+                  <div className="hero-coverage-row" key={label}>
+                    <span>{label}</span>
+                    <div><i style={{ width }} /></div>
+                    <strong>{count}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="hero-console-footer">
+              <span>Evidence: NVD · CISA KEV · EPSS · vendor advisories</span>
+              <strong>Prioritized with asset context</strong>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section className="security-signal-strip" aria-label="Supported security workflows">
+        <span>Built for modern security workflows</span>
+        <strong>CycloneDX</strong>
+        <strong>SPDX</strong>
+        <strong>CISA KEV</strong>
+        <strong>EPSS</strong>
+        <strong>VEX</strong>
+        <strong>ServiceNow</strong>
       </section>
 
       <section id="platform" className="sg-section">
@@ -590,16 +686,31 @@ export function DemoLandingPage() {
         </div>
       </section>
 
+      <section id="faq" className="sg-section faq-section">
+        <div className="sg-section-heading centered">
+          <span className="sg-eyebrow">Frequently asked questions</span>
+          <h2>Understand your exposure before it becomes an incident.</h2>
+          <p>Clear answers about ScoutGrid&rsquo;s inventory, BOM, and vulnerability-management approach.</p>
+        </div>
+        <div className="faq-grid">
+          {HOMEPAGE_FAQS.map((faq) => (
+            <article className="faq-card" key={faq.question}>
+              <h3>{faq.question}</h3>
+              <p>{faq.answer}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <footer className="scout-footer">
         <div className="footer-grid">
           <div className="footer-brand">
             <div className="footer-brand-name">
               <span className="brand-mark">S</span>
-              Scout
+              ScoutGrid
             </div>
             <p className="footer-tagline">
-              See every threat. Secure every surface. Agentless vulnerability intelligence across Infra, Cloud,
-              BOM, and AI.
+              Exposure and BOM management across applications, hosts, cloud workloads, software components, and AI.
             </p>
           </div>
           <div className="footer-col">
@@ -624,9 +735,9 @@ export function DemoLandingPage() {
             <Link to="/login">Log in</Link>
           </div>
         </div>
-        <div className="footer-bottom">
-          <span>© 2026 Scout Security, Inc. All rights reserved.</span>
-          <span>Built for the AI-attack era.</span>
+          <div className="footer-bottom">
+          <span>© 2026 ScoutGrid. All rights reserved.</span>
+          <span>See every threat. Secure every surface.</span>
         </div>
       </footer>
     </PublicDemoShell>
@@ -1101,13 +1212,15 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
         <div className="public-demo-nav-inner">
           <Link to="/demo" className="public-demo-brand">
             <span className="brand-mark">S</span>
-            <strong>Scout</strong>
+            <strong>ScoutGrid</strong>
           </Link>
           <div className="public-demo-links">
             <a href="/demo#platform">Platform</a>
+            <a href="/demo#bom-grid">BOM Security</a>
+            <a href="/demo#solutions">Exposure</a>
             <a href="/demo#intelligence">Intelligence</a>
-            <a href="/demo#solutions">Solutions</a>
             <a href="/demo#ai-grid">AI Grid</a>
+            <a href="/demo#faq">FAQ</a>
             <Link className="nav-link-cta" to="/demo/request">Request demo</Link>
             <Link className="nav-link-outline" to="/login">Log in</Link>
             {hasStoredToken && (
