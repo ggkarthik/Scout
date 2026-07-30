@@ -65,6 +65,15 @@ public class AiSecurityObservationService {
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> ingestCurrentTenant(tenant, envelope)));
     }
 
+    public int countPersistedArtifacts(Tenant tenant, UUID runId) {
+        syncRunFacade.loadForTenant(tenant.getId(), runId);
+        return tenantExecution.run(tenant, () -> jdbc.queryForObject("""
+                select count(distinct artifact_id)
+                  from ai_security_artifact_sources
+                 where run_id = :runId
+                """, Map.of("runId", runId), Integer.class));
+    }
+
     private IngestionResult ingestCurrentTenant(Tenant tenant, ObservationEnvelopeV1 envelope) {
         validateCurrentTenantOwnership(tenant, envelope);
         MapSqlParameterSource receipt = new MapSqlParameterSource()

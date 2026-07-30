@@ -203,6 +203,7 @@ export function AwsDiscoveryConnectorPage() {
       if (!saved) return;
       const result = await api.triggerAwsDiscoverySync();
       setSyncResult(result);
+      await queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -279,6 +280,7 @@ export function AwsDiscoveryConnectorPage() {
     try {
       const result = await api.triggerAwsDiscoveryTargetSync(targetId);
       setSyncResult(result);
+      await queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
       await refreshTargets();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

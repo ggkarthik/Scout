@@ -316,11 +316,11 @@ public class AzureDiscoverySyncService {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
             run.setStatus("running");
-            run.setMetadataJson(toJson(Map.of(
-                    "triggerMode", triggerMode,
-                    "state", "running",
-                    "sourceSystem", "azure"
-            )));
+            Map<String, Object> metadata = readMetadata(run.getMetadataJson());
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("state", "running");
+            metadata.put("sourceSystem", "azure");
+            run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
         });
     }
@@ -378,11 +378,12 @@ public class AzureDiscoverySyncService {
             run.setRecordsFailed(Math.max(1, run.getRecordsFailed()));
             run.setErrorMessage(errorMessage);
             run.setCompletedAt(Instant.now());
-            run.setMetadataJson(toJson(Map.of(
-                    "triggerMode", triggerMode,
-                    "sourceSystem", "azure",
-                    "error", errorMessage
-            )));
+            Map<String, Object> metadata = readMetadata(run.getMetadataJson());
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("state", "failed");
+            metadata.put("sourceSystem", "azure");
+            metadata.put("error", errorMessage);
+            run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
         });
     }
@@ -420,6 +421,19 @@ public class AzureDiscoverySyncService {
 
     private String defaultIfBlank(String value, String fallback) {
         return hasText(value) ? value.trim() : fallback;
+    }
+
+    private Map<String, Object> readMetadata(String json) {
+        if (!hasText(json)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return new LinkedHashMap<>(objectMapper.readValue(
+                    json,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+        } catch (Exception ignored) {
+            return new LinkedHashMap<>();
+        }
     }
 
     private String toJson(Object value) {

@@ -114,7 +114,14 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             throw new IllegalArgumentException("Azure credential tenant does not match connector tenant");
         }
 
-        SyncRun run = runs.start(tenant, AiSecuritySyncRunFacade.AZURE_SYNC_TYPE);
+        SyncRun run = runs.start(
+                tenant,
+                AiSecuritySyncRunFacade.AZURE_SYNC_TYPE,
+                json(Map.of(
+                        "provider", "AZURE",
+                        "connectorId", connector.id(),
+                        "subscriptionId", connector.subscriptionId(),
+                        "families", connector.resourceFamilies())));
         Instant startedAt = Instant.now();
         int observed = 0;
         int incomplete = 0;
@@ -136,13 +143,14 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                     }
                 }
             }
-            runs.complete(tenant.getId(), run.getId(), observed, incomplete, json(Map.of(
+            int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
+            runs.complete(tenant.getId(), run.getId(), persistedArtifacts, incomplete, json(Map.of(
                     "provider", "AZURE",
                     "connectorId", connector.id(),
                     "subscriptionId", connector.subscriptionId(),
                     "families", connector.resourceFamilies())));
             metrics.recordRun("completed");
-            return new DiscoveryResult(run.getId(), observed, incomplete);
+            return new DiscoveryResult(run.getId(), persistedArtifacts, incomplete);
         } catch (Exception exception) {
             runs.fail(tenant.getId(), run.getId(), "Azure AI Security discovery failed");
             metrics.recordRun("failed");

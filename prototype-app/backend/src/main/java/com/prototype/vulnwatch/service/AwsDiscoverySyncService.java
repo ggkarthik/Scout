@@ -420,11 +420,11 @@ public class AwsDiscoverySyncService {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
             run.setStatus("running");
-            run.setMetadataJson(toJson(Map.of(
-                    "triggerMode", triggerMode,
-                    "state", "running",
-                    "sourceSystem", "aws"
-            )));
+            Map<String, Object> metadata = readMetadata(run.getMetadataJson());
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("state", "running");
+            metadata.put("sourceSystem", "aws");
+            run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
         });
     }
@@ -440,14 +440,14 @@ public class AwsDiscoverySyncService {
         transactionTemplate.executeWithoutResult(status -> {
             SyncRun run = requireRun(runId);
             run.setRecordsFetched(recordsFetched);
-            run.setMetadataJson(toJson(Map.of(
-                    "triggerMode", triggerMode,
-                    "sourceSystem", "aws",
-                    "awsAccountId", defaultIfBlank(config.getAwsAccountId(), "unknown"),
-                    "stage", stage,
-                    "recordsFetched", recordsFetched,
-                    "targets", targetResults
-            )));
+            Map<String, Object> metadata = readMetadata(run.getMetadataJson());
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("sourceSystem", "aws");
+            metadata.put("awsAccountId", defaultIfBlank(config.getAwsAccountId(), "unknown"));
+            metadata.put("stage", stage);
+            metadata.put("recordsFetched", recordsFetched);
+            metadata.put("targets", targetResults);
+            run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
         });
     }
@@ -485,6 +485,8 @@ public class AwsDiscoverySyncService {
             metadata.put("triggerMode", triggerMode);
             metadata.put("sourceSystem", "aws");
             metadata.put("awsAccountId", defaultIfBlank(config.getAwsAccountId(), "unknown"));
+            metadata.put("regions", parseRegions(config.getRegionsJson()));
+            metadata.put("resourceTypes", parseResourceTypes(config.getResourceTypesJson()));
             metadata.put("assetsIngested", result.assetsUpserted());
             metadata.put("assetsUpserted", result.assetsUpserted());
             metadata.put("ssmAssetsIngested", ssmSummary.assetsIngested());
@@ -516,11 +518,12 @@ public class AwsDiscoverySyncService {
             run.setRecordsFailed(Math.max(1, run.getRecordsFailed()));
             run.setErrorMessage(errorMessage);
             run.setCompletedAt(Instant.now());
-            run.setMetadataJson(toJson(Map.of(
-                    "triggerMode", triggerMode,
-                    "state", "failed",
-                    "sourceSystem", "aws"
-            )));
+            Map<String, Object> metadata = readMetadata(run.getMetadataJson());
+            metadata.put("triggerMode", triggerMode);
+            metadata.put("state", "failed");
+            metadata.put("sourceSystem", "aws");
+            metadata.put("error", errorMessage);
+            run.setMetadataJson(toJson(metadata));
             syncRunRepository.save(run);
         });
     }
@@ -605,6 +608,19 @@ public class AwsDiscoverySyncService {
             return objectMapper.writeValueAsString(value);
         } catch (Exception e) {
             return "{}";
+        }
+    }
+
+    private Map<String, Object> readMetadata(String json) {
+        if (!hasText(json)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return new LinkedHashMap<>(objectMapper.readValue(
+                    json,
+                    new TypeReference<Map<String, Object>>() {}));
+        } catch (Exception ignored) {
+            return new LinkedHashMap<>();
         }
     }
 

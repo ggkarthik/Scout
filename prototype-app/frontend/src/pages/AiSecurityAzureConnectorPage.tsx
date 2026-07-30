@@ -103,7 +103,12 @@ export function AiSecurityAzureConnectorPage() {
   });
   const runDiscovery = useMutation({
     mutationFn: (selectedTargetId: string) => api.runAiSecurityAzureTarget(selectedTargetId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
+    },
   });
 
   const connectorForTarget = connectorsQuery.data?.find((connector) => connector.sourceTargetId === targetId);
@@ -157,6 +162,9 @@ export function AiSecurityAzureConnectorPage() {
               Matrix v{requirementsQuery.data?.matrixVersion ?? '…'} · generated from shipped policy evidence
             </span>
           </div>
+          <button className="btn btn-secondary" type="button" onClick={() => navigate('/inventory/ai')}>
+            View AI Inventory
+          </button>
         </div>
         {requirementsQuery.isError ? (
           <div className="notice error">Azure permission requirements could not be loaded.</div>

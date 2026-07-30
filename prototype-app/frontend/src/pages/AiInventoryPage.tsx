@@ -3,36 +3,54 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { AiSecurityArtifact } from '../features/ai-security/types';
+import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 import { timeAgo } from '../lib/time';
 
-type InventoryPill = 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
+type InventoryPill = 'ALL' | 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
 
 const PILLS: Array<{ key: InventoryPill; label: string }> = [
+  { key: 'ALL', label: 'All AI Assets' },
   { key: 'AI_AGENT', label: 'AI Agents' },
   { key: 'AI_MODEL', label: 'AI Models' },
   { key: 'OTHER_AI_ARTIFACT', label: 'Other AI Artifacts' },
 ];
 
+function emptyStateTitle(activePill: InventoryPill): string {
+  if (activePill === 'ALL') {
+    return 'No AI assets discovered';
+  }
+  return `No ${PILLS.find((pill) => pill.key === activePill)?.label.toLowerCase()} discovered`;
+}
+
 export function AiInventoryPage() {
   const navigate = useNavigate();
-  const [activePill, setActivePill] = React.useState<InventoryPill>('AI_AGENT');
+  const [activePill, setActivePill] = React.useState<InventoryPill>('ALL');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
   const [selected, setSelected] = React.useState<AiSecurityArtifact | null>(null);
+  const runsQuery = useQuery({
+    queryKey: ['ai-security-runs'],
+    queryFn: () => api.listAiSecurityRuns(),
+    refetchInterval: (query) => shouldPollAiRuns(query.state.data as Array<{ status: string }> | undefined)
+      ? RUN_QUEUE_REFRESH_INTERVAL_MS
+      : false,
+  });
   const artifactsQuery = useQuery({
     queryKey: ['ai-security-artifacts', activePill, provider, deferredSubscription],
     queryFn: () => api.listAiSecurityArtifacts(
-      activePill,
+      activePill === 'ALL' ? undefined : activePill,
       0,
       100,
       provider || undefined,
       deferredSubscription || undefined,
     ),
+    refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
   const summaryQuery = useQuery({
     queryKey: ['ai-security-summary'],
     queryFn: api.getAiSecuritySummary,
+    refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
   const graphQuery = useQuery({
     queryKey: ['ai-security-graph', selected?.id],
@@ -41,6 +59,8 @@ export function AiInventoryPage() {
   });
 
   const items = artifactsQuery.data?.items ?? [];
+  const totalArtifacts = Object.values(summaryQuery.data?.artifactCounts ?? {})
+    .reduce((total, count) => total + count, 0);
 
   return (
     <div className="ai-security-page">
@@ -88,7 +108,12 @@ export function AiInventoryPage() {
             }}
           >
             {pill.label}
-            <span>{summaryQuery.data?.artifactCounts[pill.key] ?? (pill.key === 'OTHER_AI_ARTIFACT' ? items.length : 0)}</span>
+            <span>
+              {pill.key === 'ALL'
+                ? totalArtifacts
+                : summaryQuery.data?.artifactCounts[pill.key]
+                  ?? (pill.key === 'OTHER_AI_ARTIFACT' ? items.length : 0)}
+            </span>
           </button>
         ))}
       </div>
@@ -100,9 +125,9 @@ export function AiInventoryPage() {
       ) : items.length === 0 ? (
         <section className="ai-security-empty">
           <div className="ai-security-empty-mark">AI</div>
-          <h3>No {PILLS.find((pill) => pill.key === activePill)?.label.toLowerCase()} discovered</h3>
+          <h3>{emptyStateTitle(activePill)}</h3>
           <p>Connect an AWS or Azure account and run AI discovery. Empty inventory never hides this workspace.</p>
-          <button className="btn btn-primary" type="button" onClick={() => navigate(`/connect/sources?connectSource=${provider === 'AZURE' ? 'ai-security-azure' : 'ai-security-aws'}`)}>
+          <button className="btn btn-primary" type="button" onClick={() => navigate('/connect/connectors')}>
             Configure AI connector
           </button>
         </section>
@@ -178,4 +203,11 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
   if (typeof value === 'object' && value != null) return JSON.stringify(value);
   return String(value ?? 'Not observed');
+}
+
+function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {
+  return (runs ?? []).some((run) => {
+    const status = run.status.trim().toUpperCase();
+    return status === 'RUNNING' || status === 'STARTED' || status === 'QUEUED';
+  });
 }

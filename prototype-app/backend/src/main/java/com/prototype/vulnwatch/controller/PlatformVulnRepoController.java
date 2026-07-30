@@ -2,9 +2,9 @@ package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.dto.PlatformVulnIntelDetailResponse;
 import com.prototype.vulnwatch.dto.PlatformVulnRepoPageResponse;
-import com.prototype.vulnwatch.dto.PlatformVulnSourceStatsResponse;
 import com.prototype.vulnwatch.dto.VulnRepoDashboardResponse;
 import com.prototype.vulnwatch.service.PlatformVulnRepoService;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,7 +39,7 @@ public class PlatformVulnRepoController {
     }
 
     @GetMapping("/source-stats")
-    public PlatformVulnSourceStatsResponse getSourceStats() {
+    public Map<String, Object> getSourceStats() {
         return platformVulnRepoService.getSourceStats();
     }
 

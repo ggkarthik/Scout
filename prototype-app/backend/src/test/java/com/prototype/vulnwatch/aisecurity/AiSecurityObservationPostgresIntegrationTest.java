@@ -84,6 +84,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                         envelope(tenant, connectorId, firstRun, "different-hash",
                                 ScopeStatus.COMPLETE, first.artifacts())));
         assertEquals(1, activeArtifacts(tenant));
+        assertEquals(1, observationService.countPersistedArtifacts(tenant, firstRun));
 
         UUID partialRun = syncRunFacade.start(tenant).getId();
         observationService.ingest(

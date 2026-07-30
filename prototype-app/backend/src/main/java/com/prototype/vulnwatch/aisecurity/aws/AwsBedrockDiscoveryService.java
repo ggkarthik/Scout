@@ -84,7 +84,11 @@ public class AwsBedrockDiscoveryService {
         if (!config.id().equals(connectorId)) {
             throw new IllegalArgumentException("AI Security connector does not match claimed job");
         }
-        SyncRun run = syncRunFacade.start(tenant);
+        SyncRun run = syncRunFacade.start(tenant, AiSecuritySyncRunFacade.AWS_SYNC_TYPE, json(Map.of(
+                "provider", "AWS",
+                "connectorId", connectorId,
+                "accountId", config.accountId(),
+                "regions", config.regions())));
         int artifacts = 0;
         int failedScopes = 0;
         try (CredentialsHandle credentials = connectorService.credentials(config)) {
@@ -101,10 +105,15 @@ public class AwsBedrockDiscoveryService {
                     }
                 }
             }
+            int persistedArtifacts = observationService.countPersistedArtifacts(tenant, run.getId());
             syncRunFacade.complete(
-                    tenant.getId(), run.getId(), artifacts, failedScopes,
-                    json(Map.of("connectorId", connectorId, "regions", config.regions())));
-            return new DiscoveryResult(run.getId(), artifacts, failedScopes);
+                    tenant.getId(), run.getId(), persistedArtifacts, failedScopes,
+                    json(Map.of(
+                            "provider", "AWS",
+                            "connectorId", connectorId,
+                            "accountId", config.accountId(),
+                            "regions", config.regions())));
+            return new DiscoveryResult(run.getId(), persistedArtifacts, failedScopes);
         } catch (Exception ex) {
             syncRunFacade.fail(tenant.getId(), run.getId(), "AWS Bedrock discovery failed");
             throw ex;
