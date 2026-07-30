@@ -52,6 +52,9 @@ const AiFindingsPage = React.lazy(async () => ({
 const AiPoliciesPage = React.lazy(async () => ({
   default: (await import('./pages/AiPoliciesPage')).AiPoliciesPage
 }));
+const AiPolicyDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/AiPolicyDetailPage')).AiPolicyDetailPage
+}));
 const AiInventoryPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryPage')).AiInventoryPage
 }));
@@ -320,6 +323,15 @@ function FindingDetailRoute() {
     return <Navigate to="/findings" replace />;
   }
   return <FindingDetailPage />;
+}
+
+function AiPolicyDetailRoute() {
+  const params = useParams<{ policyId?: string }>();
+  const policyId = params.policyId ? decodeURIComponent(params.policyId) : null;
+  if (!policyId) {
+    return <Navigate to="/policies" replace />;
+  }
+  return <AiPolicyDetailPage policyId={policyId} />;
 }
 
 function OperationsRoute() {
@@ -946,6 +958,12 @@ function AppShell() {
               >
                 <span className="nav-label">Operations</span>
               </button>
+              <button
+                className={location.pathname.startsWith('/platform/vuln-intel') ? 'nav-btn active' : 'nav-btn'}
+                onClick={() => navigate(pathForPlatformView('vuln-intel'))}
+              >
+                <span className="nav-label">Vulnerability Intelligence</span>
+              </button>
             </div>
           )}
 
@@ -1074,6 +1092,7 @@ function AppShell() {
               <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />
+              <Route path="/policies/:policyId" element={<AiSecurityRoute><AiPolicyDetailRoute /></AiSecurityRoute>} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
               <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />

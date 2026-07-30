@@ -515,6 +515,22 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
     expect(screen.getByText('Findings List')).toBeInTheDocument();
     expect(screen.getAllByText('Needs attention').length).toBeGreaterThan(0);
   });
+
+  it('exposes platform-owned vulnerability feed configuration under the platform console, not the tenant Connect page', async () => {
+    vi.spyOn(api, 'getVulnIntelSourcesSummary').mockResolvedValue({ sources: {} });
+    vi.spyOn(api, 'getVulnerabilitySourceFilterConfig').mockResolvedValue({
+      sourceSystem: 'nvd',
+      configured: false,
+      isVulnerable: false,
+      hasKev: false
+    } as never);
+
+    renderPlatformVulnIntel();
+
+    expect(await screen.findByText('NVD Vulnerability Feed')).toBeInTheDocument();
+    expect(screen.getByText('CISA KEV Feed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run History' })).toBeInTheDocument();
+  });
 });
 
 function renderPlatformTenants(actor: ActorContext, queryClient: ReturnType<typeof createTestQueryClient>) {
@@ -583,6 +599,21 @@ function renderPlatformDemoRequests() {
         <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
           <Routes>
             <Route path="/platform/demo-requests" element={<PlatformConsolePage selectedView="demo-requests" />} />
+          </Routes>
+        </ActorContextState.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderPlatformVulnIntel() {
+  const queryClient = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/platform/vuln-intel']}>
+        <ActorContextState.Provider value={PLATFORM_SCOPE_OWNER}>
+          <Routes>
+            <Route path="/platform/vuln-intel" element={<PlatformConsolePage selectedView="vuln-intel" />} />
           </Routes>
         </ActorContextState.Provider>
       </MemoryRouter>
