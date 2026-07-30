@@ -502,6 +502,7 @@ import type {
   AiSecurityAzureConnectionTest,
   AiSecurityAzureConnector,
   AiSecurityAzureCredentialProfile,
+  AiSecurityAzureFoundryConfig,
   AiSecurityAzureRequirements,
   AiSecurityFinding,
   AiSecurityGraph,
@@ -1413,6 +1414,26 @@ export const api = {
   runAiSecurityAzureTarget: (targetId: string) =>
     request<{ jobId: string; status: string; message: string }>(
       `/connectors/ai-security/azure/targets/${encodeURIComponent(targetId)}/run`,
+      { method: 'POST' },
+    ),
+  getAiSecurityAzureFoundryConfig: () =>
+    request<AiSecurityAzureFoundryConfig>('/connectors/ai-security/azure-foundry'),
+  saveAiSecurityAzureFoundryConfig: (payload: {
+    foundryEndpointUrl?: string;
+    azureTenantId: string;
+    clientId: string;
+    clientSecret?: string;
+    subscriptionIds: string;
+    region?: string;
+  }) => request<AiSecurityAzureFoundryConfig>('/connectors/ai-security/azure-foundry', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  testAiSecurityAzureFoundryConfig: () =>
+    request<AiSecurityAzureConnectionTest>('/connectors/ai-security/azure-foundry/test', { method: 'POST' }),
+  runAiSecurityAzureFoundryConfig: () =>
+    request<{ jobId: string; status: string; message: string }>(
+      '/connectors/ai-security/azure-foundry/run',
       { method: 'POST' },
     ),
   listAiSecurityAzureCredentials: () =>

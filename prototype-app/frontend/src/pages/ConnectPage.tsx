@@ -1,10 +1,8 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { IngestionPage } from './IngestionPage';
 import { SourcesPage } from './SourcesPage';
 import { AssetsPage } from './AssetsPage';
-import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 import { EolSourcePanel } from '../components/EolSourcePanel';
 import { SccmConnectorPage } from './SccmConnectorPage';
@@ -19,10 +17,9 @@ import {
   useServiceNowCmdbConfigQuery
 } from '../features/connect/queries';
 import { useActor } from '../features/auth/context';
-import { canAccessPlatformConsole, canManageSourceFilters, hasRole } from '../features/auth/roles';
+import { canManageSourceFilters, hasRole } from '../features/auth/roles';
 import { VulnerabilitySourcesSection } from './ConfigurationsPage';
 import { timeAgo } from '../lib/time';
-import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { BomManagementPage } from './BomManagementPage';
 import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
 import { AiSecurityAzureConnectorPage } from './AiSecurityAzureConnectorPage';
@@ -48,7 +45,9 @@ type ConnectorId =
   | 'euvd-feed'
   | 'jvn-feed';
 
-type ConnectView = 'sources' | 'connectors' | 'run-history';
+type ConnectView = 'sources' | 'run-history';
+
+const CONNECT_VIEW_ORDER: ConnectView[] = ['sources', 'run-history'];
 
 type ConnectorDefinition = {
   id: ConnectorId;
@@ -705,29 +704,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   }, [activeConnector, searchParams, setSearchParams]);
 
   const selectedConnector = activeConnector ? CONNECTORS.find((connector) => connector.id === activeConnector) ?? null : null;
-  const canAccessPlatformConnectors = canAccessPlatformConsole(actor);
-  const platformConnectorSummaryQuery = useQuery({
-    queryKey: ['vuln-intel-sources-summary'],
-    queryFn: api.getVulnIntelSourcesSummary,
-    enabled: canAccessPlatformConnectors
-  });
   const selectedConnectorAllowed = selectedConnector != null
     && !VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS.includes(selectedConnector.id);
-
-  const availableViews = React.useMemo(
-    () => (canAccessPlatformConnectors
-      ? (['connectors', 'run-history'] as const)
-      : (['sources', 'run-history'] as const)),
-    [canAccessPlatformConnectors]
-  );
-
-  React.useEffect(() => {
-    if (!(availableViews as readonly ConnectView[]).includes(activeView)) {
-      const fallbackView = availableViews[0];
-      setActiveView(fallbackView);
-      onViewChange?.(fallbackView);
-    }
-  }, [activeView, availableViews, onViewChange]);
 
   React.useEffect(() => {
     if (!activeConnector) return;
@@ -770,7 +748,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   return (
     <div className="page-grid">
       <div className="connect-filter-bar connect-filter-bar--standalone">
-        {availableViews.map((view) => (
+        {CONNECT_VIEW_ORDER.map((view) => (
           <button
             key={view}
             type="button"
@@ -784,7 +762,6 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
             }}
           >
             {view === 'sources' && 'Sources'}
-            {view === 'connectors' && 'Connectors'}
             {view === 'run-history' && 'Run History'}
           </button>
         ))}
@@ -889,24 +866,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
         </section>
       )}
 
-      {activeView === 'connectors' && canAccessPlatformConnectors && (
-        <section className="panel">
-          <VulnIntelConfigPage vulnSummary={platformConnectorSummaryQuery.data ?? null} />
-        </section>
-      )}
-
-      {activeView === 'run-history' && (
-        canAccessPlatformConnectors ? (
-          <IntegrationRunQueuePage
-            title="Vulnerability Integration Run History"
-            caption="Track platform-owned vulnerability ingestion jobs triggered from the Connect workspace."
-            queryParams={{ category: 'vuln-intel', limit: 200 }}
-            storageKey="platform-vulnerability-run-history-table-widths"
-          />
-        ) : (
-          <InventoryRunQueuePage />
-        )
-      )}
+      {activeView === 'run-history' && <InventoryRunQueuePage />}
 
       {activeConnector && selectedConnector && !selectedConnectorAllowed && (
         <section className="panel">

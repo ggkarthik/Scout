@@ -165,6 +165,19 @@ export type AiSecurityAzureConnector = {
   updatedAt: string;
 };
 
+export type AiSecurityAzureFoundryConfig = {
+  configured: boolean;
+  azureTenantId: string | null;
+  clientId: string | null;
+  hasCredential: boolean;
+  primarySubscriptionId: string | null;
+  subscriptionIds: string[];
+  regions: string[];
+  foundryEndpointUrl: string | null;
+  connectorId: string | null;
+  credentialExpiresAt: string | null;
+};
+
 export type AiSecurityAzureFamilyPermission = {
   resourceFamily: string;
   required: string[];

@@ -19,9 +19,9 @@ export type AppTab =
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
-export type ConnectRouteView = 'sources' | 'connectors' | 'run-history';
+export type ConnectRouteView = 'sources' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'users' | 'platform-audit' | 'demo-requests' | 'operations' | 'eol';
+export type PlatformRouteView = 'tenants' | 'users' | 'platform-audit' | 'demo-requests' | 'operations' | 'vuln-intel' | 'eol';
 export type ConfigurationsRouteView =
   | 'sla'
   | 'triage'
@@ -75,7 +75,6 @@ const INVENTORY_VIEWS = new Set<InventoryViewKey>([
 
 const CONNECT_VIEWS = new Set<ConnectRouteView>([
   'sources',
-  'connectors',
   'run-history'
 ]);
 
@@ -87,7 +86,7 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'platform-audit', 'demo-requests', 'operations', 'eol']);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'platform-audit', 'demo-requests', 'operations', 'vuln-intel', 'eol']);
 
 const CONFIGURATIONS_VIEWS = new Set<ConfigurationsRouteView>([
   'sla',
@@ -135,11 +134,8 @@ export function normalizeConnectRouteView(value: string | null | undefined): Con
   if (!value) {
     return CONNECT_DEFAULT_VIEW;
   }
-  if (value === 'github-pipelines') {
+  if (value === 'github-pipelines' || value === 'feeds' || value === 'central-repository' || value === 'connectors') {
     return 'sources';
-  }
-  if (value === 'feeds' || value === 'central-repository') {
-    return 'connectors';
   }
   if (value === 'integration-queue' || value === 'inventory-run-queue' || value === 'vuln-intel-queue' || value === 'integration-run-queue') {
     return 'run-history';
@@ -220,6 +216,10 @@ export function pathForInventoryView(view: InventoryViewKey): string {
 
 export function pathForSoftwareIdentityDetail(softwareIdentityId: string): string {
   return `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`;
+}
+
+export function pathForPolicyDetail(policyId: string): string {
+  return `/policies/${encodeURIComponent(policyId)}`;
 }
 
 export function appendSearchToPath(
