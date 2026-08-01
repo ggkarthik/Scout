@@ -270,6 +270,16 @@ export function pathForInventoryHostAsset(assetId: string, returnTo?: string): s
   return `/inventory/hosts/${encodedAssetId}?${searchParams.toString()}`;
 }
 
+export function pathForInventoryAiAsset(assetId: string, returnTo?: string): string {
+  const encodedAssetId = encodeURIComponent(assetId);
+  if (!returnTo || returnTo.trim().length === 0) {
+    return `/inventory/ai/${encodedAssetId}`;
+  }
+  const searchParams = new URLSearchParams();
+  searchParams.set('returnTo', returnTo.trim());
+  return `/inventory/ai/${encodedAssetId}?${searchParams.toString()}`;
+}
+
 export function pathForOperationsView(view: OperationsRouteView): string {
   return `/operations/${normalizeOperationsRouteView(view)}`;
 }

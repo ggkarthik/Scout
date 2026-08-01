@@ -97,12 +97,26 @@ public class AiSecurityPolicyRegistry {
                     Map.of("AZURE", "BOT-MANAGED-IDENTITY"))
     );
 
+    private static final Map<String, List<PolicyParameterSpec>> PARAMETER_SPECS = Map.of(
+            "AWS_BEDROCK_WEAK_GUARDRAIL", List.of(new PolicyParameterSpec(
+                    "minimumGuardrailStrength",
+                    "Minimum guardrail strength",
+                    "ENUM",
+                    List.of("NONE", "LOW", "MEDIUM", "HIGH"),
+                    "MEDIUM",
+                    "Agents in scope must have a guardrail at or above this strength attached."))
+    );
+
     public List<PolicyDefinition> all() {
         return definitions;
     }
 
     public Optional<PolicyDefinition> find(String policyId) {
         return definitions.stream().filter(definition -> definition.id().equals(policyId)).findFirst();
+    }
+
+    public List<PolicyParameterSpec> parameterSpecs(String policyId) {
+        return PARAMETER_SPECS.getOrDefault(policyId, List.of());
     }
 
     public record PolicyDefinition(
@@ -115,6 +129,16 @@ public class AiSecurityPolicyRegistry {
             String description,
             String remediation,
             Map<String, String> controlMappings
+    ) {
+    }
+
+    public record PolicyParameterSpec(
+            String key,
+            String label,
+            String type,
+            List<String> options,
+            String defaultValue,
+            String helpText
     ) {
     }
 }

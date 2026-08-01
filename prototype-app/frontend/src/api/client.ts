@@ -511,6 +511,12 @@ import type {
   AiSecurityRun,
   AiSecurityScope,
   AiSecuritySummary,
+  PolicyAssistExplanation,
+  PolicyAssistScopeSuggestion,
+  PolicyConfiguration,
+  PolicyExceptionOverride,
+  PolicyScopeCondition,
+  PolicyScopeMode,
 } from '../features/ai-security/types';
 
 const API_BASE = resolveApiBase();
@@ -1336,6 +1342,8 @@ export const api = {
     if (subscription) params.set('subscription', subscription);
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
   },
+  getAiSecurityArtifact: (artifactId: string) =>
+    request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
   getAiSecurityGraph: (rootArtifactId?: string) => {
     const suffix = rootArtifactId ? `?rootArtifactId=${encodeURIComponent(rootArtifactId)}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
@@ -1369,6 +1377,42 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
     }),
+  getAiSecurityPolicyConfiguration: (policyId: string) =>
+    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/configuration`),
+  updateAiSecurityPolicyScope: (
+    policyId: string,
+    mode: PolicyScopeMode,
+    conditionLogic: 'AND' | 'OR',
+    conditions: PolicyScopeCondition[],
+  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/scope`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode, conditionLogic, conditions }),
+  }),
+  addAiSecurityPolicyException: (
+    policyId: string,
+    artifactId: string,
+    override: PolicyExceptionOverride,
+    reason?: string,
+  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/exceptions`, {
+    method: 'POST',
+    body: JSON.stringify({ artifactId, override, reason }),
+  }),
+  removeAiSecurityPolicyException: (policyId: string, artifactId: string) =>
+    request<PolicyConfiguration>(
+      `/ai-security/policies/${encodeURIComponent(policyId)}/exceptions/${encodeURIComponent(artifactId)}`,
+      { method: 'DELETE' },
+    ),
+  updateAiSecurityPolicyParameters: (policyId: string, parameters: Record<string, string>) =>
+    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/parameters`, {
+      method: 'PUT',
+      body: JSON.stringify({ parameters }),
+    }),
+  explainAiSecurityPolicy: (policyId: string) =>
+    request<PolicyAssistExplanation>(`/ai-security/policies/${encodeURIComponent(policyId)}/assist/explain`),
+  suggestAiSecurityPolicyScope: (policyId: string) =>
+    request<PolicyAssistScopeSuggestion>(
+      `/ai-security/policies/${encodeURIComponent(policyId)}/assist/suggested-scope`,
+    ),
   listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>

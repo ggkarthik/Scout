@@ -58,6 +58,9 @@ const AiPolicyDetailPage = React.lazy(async () => ({
 const AiInventoryPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryPage')).AiInventoryPage
 }));
+const AiAssetDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
+}));
 const FindingDetailPage = React.lazy(async () => ({
   default: (await import('./pages/FindingDetailPage')).FindingDetailPage
 }));
@@ -417,6 +420,17 @@ function InventoryHostAssetRoute() {
   }
 
   return <HostAssetDetailPage assetId={assetId} />;
+}
+
+function InventoryAiAssetRoute() {
+  const params = useParams<{ assetId?: string }>();
+  const assetId = params.assetId ? decodeURIComponent(params.assetId) : null;
+
+  if (!assetId) {
+    return <Navigate to={pathForInventoryView('ai')} replace />;
+  }
+
+  return <AiSecurityRoute><AiAssetDetailPage artifactId={assetId} /></AiSecurityRoute>;
 }
 
 function SoftwareIdentityDetailRoute() {
@@ -1108,6 +1122,7 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EndOfLifeRoute />} />

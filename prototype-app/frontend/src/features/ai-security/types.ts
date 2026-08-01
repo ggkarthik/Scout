@@ -84,6 +84,66 @@ export type AiSecurityPolicy = {
   noDecisionCount: number;
 };
 
+export type PolicyScopeMode = 'ALL' | 'MATCH_RULES' | 'CUSTOM_LIST';
+
+export type PolicyScopeField = 'PROVIDER' | 'REGION' | 'ACCOUNT_ID' | 'ARTIFACT_TYPE' | 'NATIVE_KIND' | 'NAME';
+
+export type PolicyScopeOperator = 'EQUALS' | 'NOT_EQUALS' | 'CONTAINS' | 'NOT_CONTAINS';
+
+export type PolicyScopeCondition = {
+  field: PolicyScopeField | string;
+  operator: PolicyScopeOperator | string;
+  value: string;
+};
+
+export type PolicyScope = {
+  mode: PolicyScopeMode;
+  conditionLogic: 'AND' | 'OR';
+  conditions: PolicyScopeCondition[];
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+
+export type PolicyExceptionOverride = 'INCLUDED' | 'EXCLUDED';
+
+export type PolicyException = {
+  artifactId: string;
+  artifactName: string;
+  override: PolicyExceptionOverride;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type PolicyParameterValue = {
+  key: string;
+  label: string;
+  type: string;
+  options: string[];
+  defaultValue: string;
+  helpText: string;
+  value: string;
+};
+
+export type PolicyConfiguration = {
+  scope: PolicyScope;
+  exceptions: PolicyException[];
+  parameters: PolicyParameterValue[];
+  matchedArtifactCount: number;
+  totalArtifactCount: number;
+};
+
+export type PolicyAssistExplanation = {
+  summary: string;
+  generatedAt: string;
+};
+
+export type PolicyAssistScopeSuggestion = {
+  suggestedCondition: PolicyScopeCondition | null;
+  rationale: string;
+  falsePositiveCount: number;
+};
+
 export type AiSecurityRun = {
   id: string;
   status: string;
