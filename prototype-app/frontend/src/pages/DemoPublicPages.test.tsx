@@ -5,7 +5,15 @@ import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } fro
 import { authApi } from '../features/auth/api';
 import { useActorQuery } from '../features/auth/queries';
 import { createTestQueryClient, renderWithProviders } from '../test/test-utils';
-import { DemoInvitePage, DemoLandingPage, DemoRequestPage, LoginPage, SetupSessionPage } from './DemoPublicPages';
+import {
+  BlogIndexPage,
+  DemoInvitePage,
+  DemoLandingPage,
+  DemoRequestPage,
+  LoginPage,
+  SetupSessionPage,
+  ZeroDayBlogPage
+} from './DemoPublicPages';
 
 function ExposureActorProbe() {
   const actorQuery = useActorQuery();
@@ -40,9 +48,28 @@ describe('Demo public pages', () => {
 
     expect(screen.getByRole('heading', { name: /Exposure and SBOM management for modern software\./i })).toBeInTheDocument();
     expect(screen.getByText(/SBOM · AI BOM · CBOM/i)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /What does ScoutGrid do\?/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Frequently asked questions/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Blogs' })).toHaveAttribute('href', '/demo/blog');
     expect(screen.getAllByRole('link', { name: /Request demo/i })[0]).toHaveAttribute('href', '/demo/request');
     expect(screen.getAllByRole('link', { name: /Log in/i })[0]).toHaveAttribute('href', '/login');
+  });
+
+  it('lists the first blog post and links to the article', () => {
+    renderWithProviders(<BlogIndexPage />, { route: '/demo/blog' });
+
+    expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument();
+    expect(screen.getByText('July 19, 2026')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Zero-day response: from disclosure/i }))
+      .toHaveAttribute('href', '/demo/blog/zero-day-response-hours-not-weeks');
+  });
+
+  it('publishes the zero-day article using ScoutGrid branding', () => {
+    renderWithProviders(<ZeroDayBlogPage />, { route: '/demo/blog/zero-day-response-hours-not-weeks' });
+
+    expect(screen.getByRole('heading', { name: /Zero-day response: from disclosure/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'How ScoutGrid closes the gap' })).toBeInTheDocument();
+    expect(screen.getByText(/ScoutGrid tells you what it means for you/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Scout$/)).not.toBeInTheDocument();
   });
 
   it('submits a demo request with customer details', async () => {
