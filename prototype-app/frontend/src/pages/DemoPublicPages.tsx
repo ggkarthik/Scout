@@ -213,25 +213,6 @@ const AI_CAPABILITIES: Array<{ icon: string; name: string; desc: string }> = [
   { icon: '📋', name: 'AI-BOM Generation', desc: 'Generate a complete AI inventory of models, frameworks, datasets, and dependencies.' }
 ];
 
-const HOMEPAGE_FAQS = [
-  {
-    question: 'What does ScoutGrid do?',
-    answer: 'ScoutGrid combines asset inventory, SBOM management, vulnerability intelligence, and remediation context so security teams can identify which risks affect their applications, cloud workloads, hosts, and AI systems.'
-  },
-  {
-    question: 'Which BOM formats does ScoutGrid support?',
-    answer: 'ScoutGrid is designed for CycloneDX and SPDX software bills of materials, with dedicated inventory views for SBOM, AI BOM, cryptography BOM, and vendor-supplied BOM records.'
-  },
-  {
-    question: 'How does ScoutGrid prioritize vulnerabilities?',
-    answer: 'Findings can be prioritized using vulnerability severity, CISA KEV status, EPSS likelihood, asset criticality, ownership, software lifecycle, and the business context of the affected workload.'
-  },
-  {
-    question: 'Can ScoutGrid cover hosts as well as applications?',
-    answer: 'Yes. ScoutGrid correlates host and infrastructure inventory with application, cloud, container, software-component, and BOM data to create one exposure-management workflow.'
-  }
-];
-
 function VisualPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="visual-panel">
@@ -686,22 +667,6 @@ export function DemoLandingPage() {
         </div>
       </section>
 
-      <section id="faq" className="sg-section faq-section">
-        <div className="sg-section-heading centered">
-          <span className="sg-eyebrow">Frequently asked questions</span>
-          <h2>Understand your exposure before it becomes an incident.</h2>
-          <p>Clear answers about ScoutGrid&rsquo;s inventory, BOM, and vulnerability-management approach.</p>
-        </div>
-        <div className="faq-grid">
-          {HOMEPAGE_FAQS.map((faq) => (
-            <article className="faq-card" key={faq.question}>
-              <h3>{faq.question}</h3>
-              <p>{faq.answer}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       <footer className="scout-footer">
         <div className="footer-grid">
           <div className="footer-brand">
@@ -740,6 +705,134 @@ export function DemoLandingPage() {
           <span>See every threat. Secure every surface.</span>
         </div>
       </footer>
+    </PublicDemoShell>
+  );
+}
+
+const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
+
+export function BlogIndexPage() {
+  return (
+    <PublicDemoShell>
+      <div className="blog-index-page">
+        <header className="blog-hero">
+          <div className="blog-page-width">
+            <span className="blog-hero-eyebrow">Insights</span>
+            <h1>Blog</h1>
+            <p>Insights on exposure management, zero-day response, and security operations.</p>
+          </div>
+        </header>
+
+        <section className="blog-list blog-page-width" aria-label="ScoutGrid blog posts">
+          <article className="blog-card">
+            <time dateTime="2026-07-19">July 19, 2026</time>
+            <h2>
+              <Link to={ZERO_DAY_BLOG_PATH}>
+                Zero-day response: from disclosure to remediation in hours, not weeks
+              </Link>
+            </h2>
+            <p>
+              A zero-day response should not stall while teams rebuild context. See how Fix Intelligence and
+              AI-assisted investigation turn days of manual digging into a clear remediation path in minutes.
+            </p>
+            <Link className="blog-read-more" to={ZERO_DAY_BLOG_PATH}>
+              Read more <span aria-hidden="true">→</span>
+            </Link>
+          </article>
+        </section>
+      </div>
+    </PublicDemoShell>
+  );
+}
+
+export function ZeroDayBlogPage() {
+  return (
+    <PublicDemoShell>
+      <article className="blog-article">
+        <header className="blog-article-header">
+          <Link className="blog-back-link" to="/demo/blog">← All blogs</Link>
+          <span className="blog-article-kicker">ScoutGrid Blog · Zero-Day Response</span>
+          <h1>Zero-day response: from disclosure to remediation in hours, not weeks</h1>
+          <p className="blog-article-deck">Fix Intelligence + AI-assisted investigation.</p>
+          <time dateTime="2026-07-19">July 19, 2026</time>
+        </header>
+
+        <div className="blog-article-body">
+          <p>
+            A zero-day drops on a Monday morning. Within minutes, it&rsquo;s everywhere — security Twitter,
+            vendor advisories, your Slack. But for most teams, the next few days aren&rsquo;t spent fixing
+            anything. They&rsquo;re spent answering three questions: <em>Are we affected? Where? How bad is it?</em>
+          </p>
+          <p>
+            That&rsquo;s the gap that matters most — not the moment a vulnerability is disclosed, but the days it
+            takes a team to turn &ldquo;this exists&rdquo; into &ldquo;this is handled.&rdquo; Most of that time
+            isn&rsquo;t urgency or effort. It&rsquo;s manual investigation: digging through systems, chasing owners,
+            and rebuilding context that has to be assembled from scratch every single time.
+          </p>
+
+          <blockquote>
+            The vulnerability isn&rsquo;t what costs you the most time. Figuring out what to do about it is.
+          </blockquote>
+
+          <section>
+            <h2>What the slow path actually costs you</h2>
+            <ul>
+              <li><strong>Hours lost just scoping the blast radius.</strong> Analysts manually search for where an affected component lives — across teams, tickets, and spreadsheets that are already out of date.</li>
+              <li><strong>Context rebuilt from scratch, every time.</strong> Understanding what a new vulnerability actually means for your environment means reading advisories, cross-referencing internal systems, and looping in the right owner — and doing it all again for the next one.</li>
+              <li><strong>A severity score isn&rsquo;t a plan.</strong> Knowing something is &ldquo;critical&rdquo; doesn&rsquo;t tell your team what to do next, in what order, or how.</li>
+              <li><strong>Days of investigation before a single hour of remediation.</strong> By the time the team has enough context to act with confidence, the exposure window has already cost you the time that mattered most.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>How ScoutGrid closes the gap</h2>
+            <p>
+              ScoutGrid is built to collapse the distance between disclosure and action, so your team&rsquo;s time
+              goes toward fixing things — not investigating them.
+            </p>
+            <ul>
+              <li><strong>Instant answers, not hours of digging.</strong> The moment a new vulnerability matters to your environment, ScoutGrid tells you plainly what it affects, how exposed you are, and why it matters — in plain language, immediately.</li>
+              <li><strong>A clear next step, not just a score.</strong> Instead of leaving your team to figure out what to do with a severity rating, ScoutGrid points directly at what to fix and how — turning a number into an actual plan.</li>
+              <li><strong>Remediation starts sooner.</strong> The investigation work that used to take hours or days happens instantly, so your team moves straight to fixing — compressing the response timeline from weeks to hours.</li>
+              <li><strong>Less tribal knowledge required.</strong> Your team doesn&rsquo;t need to be the world&rsquo;s foremost expert on every new vulnerability to respond well. ScoutGrid brings the context and the fix path directly to them.</li>
+              <li><strong>Confidence under pressure.</strong> When a zero-day breaks, your team acts from a complete picture immediately — instead of racing to assemble one first.</li>
+            </ul>
+          </section>
+
+          <aside className="blog-practice-callout">
+            <strong>In practice</strong>
+            <p>
+              A zero-day is disclosed Monday morning. With the old approach, your team spends the rest of the
+              week just figuring out exposure and next steps. With ScoutGrid, that same team has answers and a fix
+              path before lunch — and remediation is already underway by end of day.
+            </p>
+          </aside>
+
+          <section>
+            <h2>The bigger picture</h2>
+            <p>
+              Zero-days aren&rsquo;t rare anymore — they&rsquo;re routine. The teams that come out ahead aren&rsquo;t
+              the ones with the most headcount or the most dashboards. They&rsquo;re the ones who can go from
+              &ldquo;this just happened&rdquo; to &ldquo;this is fixed&rdquo; the fastest. ScoutGrid is built to make
+              that the normal outcome every time — not the exception on the days everything happens to go right.
+            </p>
+          </section>
+
+          <aside className="blog-takeaways">
+            <strong>Key takeaways</strong>
+            <ul>
+              <li>Response time is decided by investigation speed, not team size.</li>
+              <li>A severity score without a fix path just shifts the work onto your team.</li>
+              <li>ScoutGrid turns days of manual digging into minutes of clarity — and hours to remediation instead of weeks.</li>
+            </ul>
+          </aside>
+
+          <div className="blog-closing-callout">
+            <strong>Other tools tell you something bad happened.</strong>
+            <span>ScoutGrid tells you what it means for you — and exactly what to do about it, in hours, not weeks.</span>
+          </div>
+        </div>
+      </article>
     </PublicDemoShell>
   );
 }
@@ -1220,7 +1313,7 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
             <a href="/demo#solutions">Exposure</a>
             <a href="/demo#intelligence">Intelligence</a>
             <a href="/demo#ai-grid">AI Grid</a>
-            <a href="/demo#faq">FAQ</a>
+            <Link to="/demo/blog">Blogs</Link>
             <Link className="nav-link-cta" to="/demo/request">Request demo</Link>
             <Link className="nav-link-outline" to="/login">Log in</Link>
             {hasStoredToken && (
