@@ -36,7 +36,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
 @PostgresIntegrationTest
-@TestPropertySource(properties = "spring.main.allow-circular-references=true")
+@TestPropertySource(properties = {
+    "spring.main.allow-circular-references=true",
+    "app.ai-security.grid.legacy-findings-enabled=true"
+})
 class AiSecurityPolicyConfigurationPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
