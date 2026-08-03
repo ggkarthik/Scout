@@ -6,15 +6,48 @@
 
 ---
 
-## 2026-08-03 (session 9) — Merge to `main`, CI green-up, retire legacy policy-assist suggestion
+## 2026-08-03 (session 10) — R2 implementation review: mechanism-complete, not release-complete
 
-**Context.** Opened PR #22 (R0–R2), merged `main`, resolved conflicts, and fixed CI.
+**Request.** Review Claude's R2 completion at `3e431fa`, preserve durable context, and identify missing or
+incorrect implementation.
+
+**Verified state.** R2's backend foundation is substantial: stable system identity/revisions/lineage, temporal
+host-context facts, three versioned bounded correlations, hypothesis/validated separation, immutable replay
+manifests, canonical finding graduation and compression, complete-reassessment closure, exposure APIs, and
+computed R2 release gates are implemented. Focused PostgreSQL suites pass (7 exposure tests and 1 certification
+test). The certification test intentionally remains blocked without operational evidence.
+
+**Corrections to status.** PR #22 is still **open**, with `mergedAt = null`; `3e431fa` is not on `main` as of this
+review. The platform migration V59 tenant-`findings` loop was restored after session 9 and the local/GitHub
+`migration-boundaries` guard correctly fails. Production bootstrap already migrates `tenant_default` through the
+tenant Flyway line before runtime verification, so the recommended durable fix is to enforce that bootstrap and
+make PostgreSQL tests migrate the default tenant before JPA initialization, then remove the V59 loop. A narrow
+guard exemption is acceptable only as explicit, time-boxed release debt—not the architecture.
+
+**Material R2 gaps.** The strong facts required for validated exposures have no real CIEM/DSPM/ASM/reachability
+producer in application code; they are test-seeded or accepted through a generic analyst-writable endpoint.
+Producer identity/method trust is not server-bound, null confidence becomes `1.0`, and correlations do not enforce
+calibrated minimum-confidence/corroboration/scope rules. R2 precision governance uses a raw point estimate with no
+minimum sample, Wilson lower bound, dual review, or adjudication, regressing from R1/FR-19. The frontend has no AI
+exposure path experience, and correlation recomputes the entire current graph rather than affected subgraphs.
+Stale demotion correctly avoids false closure but leaves the existing finding marked `VALIDATED_EXPOSURE` with an
+active SLA; the owner-facing needs-evidence behavior remains a product decision.
+
+**Conclusion.** Record R2 as **backend mechanisms implemented and integration-tested**, not R2-certified or
+release-complete. Full evidence and recommended closure order are in
+[`evaluations/2026-08-03-r2-implementation-review.md`](evaluations/2026-08-03-r2-implementation-review.md).
+
+## 2026-08-03 (session 9) — Merge `main` into the R0–R2 branch, CI work, retire legacy policy-assist suggestion
+
+**Context.** Opened PR #22 (R0–R2), merged `main` into the feature branch, resolved conflicts, and worked through CI.
+This did not merge PR #22 into `main`.
 
 **Merge/CI resolutions.** Reconciled main's "AI-backed policy assist": kept main's scope/exception/parameter
 evaluator but preserved the `legacyFindingsEnabled` gate; caught a hidden **tenant V48 collision** (renamed
 main's policy-scope migration to tenant V58, bumped the tenant schema target 57→58 across CLI/status/ITs);
-bumped platform schema-version ITs 60→64; removed the tenant-`findings` DDL loop from platform V59 (guard
-`check-tenant-ddl.py` — generalization already owned by tenant V48).
+bumped platform schema-version ITs 60→64; temporarily removed the tenant-`findings` DDL loop from platform V59.
+Commit `3e431fa` later restored that loop to keep JPA-backed PostgreSQL tests compatible before the application-ready
+tenant migrator runs, reopening the migration-boundary failure. Session 10 records the required resolution.
 
 **Retire legacy policy-assist suggestion (user decision, option 1 + correction).** The post-merge state was
 inconsistent: `review()`/`findingsById` moved to the host `findings` table, but the review-history

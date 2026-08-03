@@ -179,13 +179,16 @@ Key contents summarized in §3 below so we don't need the PDF open every time.
 
 ---
 
-## 5. Current Status (R0 and R1 implementation complete; R2 not complete)
+## 5. Current Status (R0–R2 backend mechanisms implemented; certification and merge incomplete)
 
-**Release position:** R0 and the bounded R1 Managed-AI Foundation implementation are code-complete on
-`codex/ai-grid-exposure-management`. R1 includes selected exact Bedrock/Azure controls rather than a commitment
-to all 62 candidates. R2 exposure validation is not complete. R1 deployment certification remains blocked until
-real AWS/Azure answer-key, precision, discovery-recall, first-run, isolation, economics, and design-partner soak
-evidence passes the aggregate release gate and an explicit approval is recorded.
+**Release position:** R0, the bounded R1 Managed-AI Foundation, and the R2 backend exposure mechanisms are
+implemented on `codex/ai-grid-exposure-management` at `3e431fa`. R1 includes selected exact Bedrock/Azure controls
+rather than a commitment to all 62 candidates. R2 adds system lifecycle, temporal host-context ports, three
+bounded correlations, deterministic replay, exposure APIs, canonical finding graduation, and computed release
+gates. This is **not** an R2 certification or production-release claim. As of 2026-08-03, GitHub PR #22 is still
+open (not merged to `main`), `migration-boundaries` is red, strong host-context producers are not integrated,
+and operational R1/R2 evidence has not passed the aggregate gates. Detailed review:
+[`evaluations/2026-08-03-r2-implementation-review.md`](evaluations/2026-08-03-r2-implementation-review.md).
 
 **R0 implemented:**
 - ✅ Time-deterministic, provider-free replay from immutable artifact/edge/fact snapshots with a stored as-of
@@ -231,9 +234,35 @@ evidence passes the aggregate release gate and an explicit approval is recorded.
   and AWS/Azure design-partner soak.
 - Evaluate `/api/platform/ai-grid/validation/releases/r1/readiness`; record an R1 decision only after it is ready.
 
-**Next product work:** certify and canary the R1 provider slices with real evidence. R2 adds stable AI systems
-plus verified identity, sensitive-data, and reachability context and three validated exposure paths.
-Runtime assurance, agent/MCP, supply chain, and continuous validation stay later modules.
+**R2 backend mechanisms implemented:**
+- ✅ Stable provider-rooted AI-system IDs, immutable membership revisions/overrides, and split/merge/successor/
+  retirement lineage without automatic finding transfer
+- ✅ Temporal relationship and host-context evidence plus separate configuration-proxy and verified fact keys
+- ✅ Three versioned, bounded PostgreSQL correlation templates with hypothesis and validated-exposure states
+- ✅ Current multi-provider coverage-epoch correlation and immutable replay execution manifests/material digests
+- ✅ Canonical host-finding graduation only for validated exposure, shared-root ticket compression, reassessment
+  closure, recurrence/reopen, dispositions, and exposure/system APIs
+- ✅ Computed R2 gates for template precision, explainability, owner/SLA routing, stale evidence, and closure
+- ✅ Focused PostgreSQL proof for all three templates, replay, stale demotion, complete closure, path compression,
+  multi-provider epochs, membership lifecycle, and traversal bounds
+
+**R2 release gaps:**
+- ❌ Resolve platform/tenant migration ownership; do not permanently exempt the V59 tenant-DDL loop
+- ❌ Connect trusted CIEM/DSPM/ASM/reachability producers for the seven strong facts used by validated templates
+- ❌ Bind host facts to authorized/calibrated producer methods; reject null/low/unapproved confidence rather than
+  treating missing confidence as `1.0`
+- ❌ Replace R2 point-estimate/single-review precision with the R1 Wilson-bound, sample, dual-review,
+  adjudication, and answer-key provenance contract
+- ❌ Add the analyst exposure/path/evidence/root-cause/breakpoint/disposition frontend experience
+- ❌ Implement affected-subgraph invalidation/recompute rather than full current-graph traversal on every change
+- ❌ Define owner-facing finding/SLA behavior when a validated exposure demotes to a stale hypothesis
+- ❌ Collect real R2 precision, explainability, owner/SLA, stale-demotion, verified-closure, and design-partner
+  evidence and record an explicit R2 approval
+
+**Next product work:** first close the migration boundary, host-evidence trust/confidence, and R2 precision-governance
+gaps. Then connect real host evidence producers, add the analyst exposure UI and affected-subgraph economics, and
+certify/canary R1 and R2 with real evidence. Runtime assurance, agent/MCP, supply chain, and continuous validation
+stay later modules.
 
 ---
 
@@ -285,6 +314,10 @@ Detailed slice build plan (schemas/services/endpoints/migrations): [`designs/202
 - [ ] GCP timing — deferred for now (near-term scope is AWS+Azure); revisit after Epic 4.
 - [ ] Subject linkage detail (Epic 2): do AI artifacts register as first-class `assets`, or link opportunistically
   via nullable `ai_artifact_id` on `findings`? Plan currently assumes the latter — confirm during build.
+- [ ] Migration lifecycle: remove the tenant `findings` compatibility loop from platform V59 by enforcing the
+  existing production bootstrap before API startup and migrating `tenant_default` before JPA in PostgreSQL tests.
+- [ ] Stale exposure workflow: decide whether an existing SLA-bound finding becomes `NEEDS_EVIDENCE`, pauses its
+  SLA, or remains owner-actionable when validating evidence expires; expiry must not falsely resolve it.
 
 ---
 
