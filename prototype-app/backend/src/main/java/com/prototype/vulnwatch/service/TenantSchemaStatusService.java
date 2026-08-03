@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantSchemaStatusService {
 
-    public static final int TARGET_VERSION = 58;
+    public static final int TARGET_VERSION = 59;
 
     private final JdbcTemplate jdbc;
 

@@ -27,15 +27,18 @@ public class AiGridR2CertificationService {
     private final ObjectMapper objectMapper;
     private final TenantRepository tenants;
     private final TenantSchemaExecutionService tenantExecution;
+    private final AiGridValidationGovernanceService governance;
 
     public AiGridR2CertificationService(NamedParameterJdbcTemplate jdbc, TransactionTemplate transactions,
                                         ObjectMapper objectMapper, TenantRepository tenants,
-                                        TenantSchemaExecutionService tenantExecution) {
+                                        TenantSchemaExecutionService tenantExecution,
+                                        AiGridValidationGovernanceService governance) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.objectMapper = objectMapper;
         this.tenants = tenants;
         this.tenantExecution = tenantExecution;
+        this.governance = governance;
     }
 
     public Readiness readiness() {
@@ -47,32 +50,43 @@ public class AiGridR2CertificationService {
         });
     }
 
-    public PrecisionReview recordPrecision(PrecisionCommand command, String actor) {
-        if (command.sampleSize() <= 0 || command.acceptedSamples() < 0 || command.acceptedSamples() > command.sampleSize())
-            throw new IllegalArgumentException("Invalid precision sample counts");
+    public AiGridValidationGovernanceService.PrecisionReview createPrecisionReview(
+            PrecisionReviewCommand command, String actor) {
+        if (command.minimumSampleSize() < 30)
+            throw new IllegalArgumentException("R2 precision reviews require at least 30 positive samples");
+        if (command.labelSetVersion() == null || command.labelSetVersion().isBlank() || command.answerKeyRunId() == null)
+            throw new IllegalArgumentException("R2 precision reviews require label-set and answer-key bindings");
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             Correlation correlation = correlation(command.correlationId(), command.correlationVersion());
-            double precision = (double) command.acceptedSamples() / command.sampleSize();
-            String reviewStatus = precision >= correlation.threshold() ? "PASSED" : "FAILED";
+            Integer answerKey = jdbc.queryForObject("""
+                    select count(*) from platform.ai_grid_answer_key_runs
+                     where id=:id and status='PASS' and provenance_state='PLATFORM_RUN_BOUND'
+                       and total_cases=matched_cases
+                    """, Map.of("id", command.answerKeyRunId()), Integer.class);
+            if (answerKey == null || answerKey != 1)
+                throw new IllegalArgumentException("R2 precision requires a passing platform-run-bound answer key");
             UUID id = UUID.randomUUID();
             jdbc.update("""
-                    insert into platform.ai_grid_correlation_precision_reviews
-                        (id,correlation_id,correlation_version,material_digest,sample_size,accepted_samples,
-                         precision_value,precision_threshold,status,evidence_reference,reviewed_by)
-                    values (:id,:correlationId,:version,:digest,:sampleSize,:accepted,:precision,:threshold,
-                            :status,:reference,:actor)
-                    on conflict (correlation_id,correlation_version,material_digest) do update set
-                        sample_size=excluded.sample_size,accepted_samples=excluded.accepted_samples,
-                        precision_value=excluded.precision_value,precision_threshold=excluded.precision_threshold,
-                        status=excluded.status,evidence_reference=excluded.evidence_reference,
-                        reviewed_by=excluded.reviewed_by,reviewed_at=now()
+                    insert into platform.ai_grid_precision_reviews
+                        (id,policy_id,policy_version,population_definition,sampling_method,minimum_sample_size,
+                         confidence_level,precision_threshold,material_change_digest,created_by,
+                         label_set_version,answer_key_run_id)
+                    values (:id,:correlationId,:version,:population,:sampling,:minimum,:confidence,:threshold,
+                            :digest,:actor,:labelSet,:answerKey)
+                    on conflict (policy_id,policy_version,material_change_digest) do nothing
                     """, new MapSqlParameterSource().addValue("id", id).addValue("correlationId", correlation.id())
-                    .addValue("version", correlation.version()).addValue("digest", digest(correlation))
-                    .addValue("sampleSize", command.sampleSize()).addValue("accepted", command.acceptedSamples())
-                    .addValue("precision", precision).addValue("threshold", correlation.threshold())
-                    .addValue("status", reviewStatus).addValue("reference", command.evidenceReference())
-                    .addValue("actor", actor));
-            return new PrecisionReview(correlation.id(), correlation.version(), precision, correlation.threshold(), reviewStatus);
+                    .addValue("version", correlation.version()).addValue("population", command.populationDefinition())
+                    .addValue("sampling", command.samplingMethod()).addValue("minimum", command.minimumSampleSize())
+                    .addValue("confidence", command.confidenceLevel() == null ? 0.95 : command.confidenceLevel())
+                    .addValue("threshold", correlation.threshold()).addValue("digest", digest(correlation))
+                    .addValue("actor", actor).addValue("labelSet", command.labelSetVersion())
+                    .addValue("answerKey", command.answerKeyRunId()));
+            UUID reviewId = jdbc.queryForObject("""
+                    select id from platform.ai_grid_precision_reviews
+                     where policy_id=:id and policy_version=:version and material_change_digest=:digest
+                    """, new MapSqlParameterSource().addValue("id", correlation.id())
+                    .addValue("version", correlation.version()).addValue("digest", digest(correlation)), UUID.class);
+            return governance.precisionReview(reviewId);
         }));
     }
 
@@ -98,15 +112,26 @@ public class AiGridR2CertificationService {
         List<String> blocked = new ArrayList<>();
         for (Correlation correlation : correlations) {
             Integer passing = jdbc.queryForObject("""
-                    select count(*) from platform.ai_grid_correlation_precision_reviews
-                     where correlation_id=:id and correlation_version=:version and material_digest=:digest
-                       and status='PASSED' and precision_value>=:threshold
+                    select count(*) from platform.ai_grid_precision_reviews
+                     where policy_id=:id and policy_version=:version and material_change_digest=:digest
+                       and status='PASSED' and bias_status='PASSED'
+                       and resolved_positive_samples>=minimum_sample_size
+                       and confidence_lower>=:threshold
+                       and answer_key_run_id is not null and label_set_version<>'R1-LEGACY'
+                       and not exists (select 1 from platform.ai_grid_precision_samples s
+                           join platform.ai_grid_precision_labels l on l.sample_id=s.id
+                          where s.review_id=ai_grid_precision_reviews.id
+                            and l.label_version<>ai_grid_precision_reviews.label_set_version)
                     """, new MapSqlParameterSource().addValue("id", correlation.id()).addValue("version", correlation.version())
                     .addValue("digest", digest(correlation)).addValue("threshold", correlation.threshold()), Integer.class);
             if (passing == null || passing == 0) blocked.add(correlation.id() + "@" + correlation.version());
         }
-        if (correlations.size() != 3) return new Gate("TEMPLATE_PRECISION", "BLOCKED",
-                "R2 requires exactly three published versioned templates");
+        Integer manifestCount = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_release_manifest_items
+                 where release_id='R2' and subject_type='CORRELATION'
+                """, Map.of(), Integer.class);
+        if (manifestCount == null || manifestCount != 3 || correlations.size() < 3) return new Gate("TEMPLATE_PRECISION", "BLOCKED",
+                "R2 requires its immutable three-correlation release manifest");
         return blocked.isEmpty() ? new Gate("TEMPLATE_PRECISION", "PASS", "All three templates passed approved thresholds")
                 : new Gate("TEMPLATE_PRECISION", "BLOCKED", "Missing current precision approval: " + blocked);
     }
@@ -162,28 +187,42 @@ public class AiGridR2CertificationService {
     }
 
     private Gate staleEvidenceGate() {
-        long stale = 0;
-        for (Tenant tenant : measurableTenants()) stale += tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select count(*) from ai_grid_exposure_paths p where p.state='VALIDATED_EXPOSURE' and exists (
+        long stale = 0, demoted = 0;
+        for (Tenant tenant : measurableTenants()) {
+            long[] counts = tenantExecution.run(tenant, () -> jdbc.queryForObject("""
+                select count(*) filter (where p.state='VALIDATED_EXPOSURE' and exists (
                     select 1 from ai_grid_exposure_observations o where o.exposure_path_id=p.id
                       and o.coverage_epoch_id=p.last_complete_epoch_id
-                      and o.temporal_valid_until is not null and o.temporal_valid_until<now())
-                """, Map.of(), Long.class));
+                      and o.temporal_valid_until is not null and o.temporal_valid_until<now())),
+                       count(*) filter (where p.state='EXPOSURE_HYPOTHESIS' and p.validated_at is not null)
+                  from ai_grid_exposure_paths p
+                """, Map.of(), (rs, n) -> new long[]{rs.getLong(1), rs.getLong(2)}));
+            stale += counts[0]; demoted += counts[1];
+        }
+        if (demoted == 0) return new Gate("STALE_EVIDENCE_DEMOTION", "BLOCKED",
+                "No representative stale-evidence demotion cohort exists");
         return stale == 0 ? new Gate("STALE_EVIDENCE_DEMOTION", "PASS", "No stale path remains validated")
                 : new Gate("STALE_EVIDENCE_DEMOTION", "FAIL", stale + " stale paths remain validated");
     }
 
     private Gate closureGate() {
-        long invalid = 0;
-        for (Tenant tenant : measurableTenants()) invalid += tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select count(*) from ai_grid_exposure_paths p where p.status='CLOSED' and not exists (
+        long invalid = 0, closed = 0;
+        for (Tenant tenant : measurableTenants()) {
+            long[] counts = tenantExecution.run(tenant, () -> jdbc.queryForObject("""
+                select count(*) filter (where p.status='CLOSED'),
+                       count(*) filter (where p.status='CLOSED' and not exists (
                     select 1 from ai_grid_exposure_observations o
                      where o.exposure_path_id=p.id and o.run_id=p.last_complete_run_id
                        and o.coverage_epoch_id=p.last_complete_epoch_id and o.state='ABSENT'
                        and exists (select 1 from ai_grid_exposure_executions e
                             where e.coverage_epoch_id=o.coverage_epoch_id
-                              and e.material_digest=o.correlation_material_digest))
-                """, Map.of(), Long.class));
+                              and e.material_digest=o.correlation_material_digest)))
+                  from ai_grid_exposure_paths p
+                """, Map.of(), (rs, n) -> new long[]{rs.getLong(1), rs.getLong(2)}));
+            closed += counts[0]; invalid += counts[1];
+        }
+        if (closed == 0) return new Gate("COMPLETE_REASSESSMENT_CLOSURE", "BLOCKED",
+                "No representative complete-reassessment closure cohort exists");
         return invalid == 0 ? new Gate("COMPLETE_REASSESSMENT_CLOSURE", "PASS", "Every closure is backed by a complete-run absence observation")
                 : new Gate("COMPLETE_REASSESSMENT_CLOSURE", "FAIL", invalid + " closures lack complete reassessment proof");
     }
@@ -195,9 +234,13 @@ public class AiGridR2CertificationService {
     }
     private List<Correlation> correlations() {
         return jdbc.query("""
-                select correlation_id,version,precision_threshold,requirements_json::text,
+                select c.correlation_id,c.version,c.precision_threshold,c.requirements_json::text,
                        allowed_node_types_json::text,allowed_edge_types_json::text,max_path_depth,max_fan_out
-                  from platform.ai_grid_correlation_versions where lifecycle='PUBLISHED' order by correlation_id
+                  from platform.ai_grid_release_manifest_items m
+                  join platform.ai_grid_correlation_versions c on c.correlation_id=m.subject_id
+                       and c.version=m.subject_version
+                 where m.release_id='R2' and m.subject_type='CORRELATION' and c.lifecycle='PUBLISHED'
+                 order by c.correlation_id
                 """, (rs, n) -> new Correlation(rs.getString(1), rs.getString(2), rs.getDouble(3),
                 rs.getString(4), rs.getString(5), rs.getString(6), rs.getInt(7), rs.getInt(8)));
     }
@@ -235,9 +278,9 @@ public class AiGridR2CertificationService {
                                String nodes, String edges, int depth, int fanOut) {}
     public record Gate(String code, String status, String rationale) {}
     public record Readiness(String releaseId, boolean ready, List<Gate> gates) {}
-    public record PrecisionCommand(String correlationId, String correlationVersion, int sampleSize,
-                                   int acceptedSamples, String evidenceReference) {}
-    public record PrecisionReview(String correlationId, String correlationVersion, double precision,
-                                  double threshold, String status) {}
+    public record PrecisionReviewCommand(String correlationId, String correlationVersion,
+                                         String populationDefinition, String samplingMethod,
+                                         int minimumSampleSize, Double confidenceLevel,
+                                         String labelSetVersion, UUID answerKeyRunId) {}
     public record Decision(UUID id, String decision, String reason, List<Gate> gates) {}
 }

@@ -73,6 +73,7 @@ public class AiGridExposureFindingService {
             finding.setDueAt(dueAt(tenant, now, risk));
         }
         finding.setTitle(input.title());
+        finding.setWorkflowClass("VALIDATED_EXPOSURE");
         finding.setPolicyId(input.correlationId());
         finding.setPolicyVersion(input.correlationVersion());
         finding.setReasonCode("VALIDATED_EXPOSURE");
@@ -90,6 +91,21 @@ public class AiGridExposureFindingService {
         link(tenant, finding.getId(), "ARTIFACT", input.entryArtifactId(), "ENTRY_POINT", null);
         link(tenant, finding.getId(), "ARTIFACT", input.rootCauseArtifactId(), "ROOT_CAUSE", null);
         return finding.getId();
+    }
+
+    public void markNeedsEvidence(UUID exposureId, UUID runId) {
+        UUID findingId = jdbc.query("select finding_id from ai_grid_exposure_paths where id=:id",
+                Map.of("id", exposureId), rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
+        if (findingId == null) return;
+        Finding finding = findings.findById(findingId).orElse(null);
+        if (finding == null || finding.getStatus() != FindingStatus.OPEN) return;
+        finding.setWorkflowClass("NEEDS_EVIDENCE");
+        finding.setReasonCode("VALIDATING_EVIDENCE_EXPIRED");
+        finding.setDueAt(null);
+        finding.setEvidence(json(Map.of("exposurePathId", exposureId, "runId", runId,
+                "state", "NEEDS_EVIDENCE", "slaPaused", true)));
+        finding.touch();
+        findings.save(finding);
     }
 
     public void closeVerified(Tenant tenant, UUID findingId, UUID runId, UUID exposureId) {

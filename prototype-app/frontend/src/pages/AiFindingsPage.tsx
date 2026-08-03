@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { AiSecurityFinding } from '../features/ai-security/types';
 import { timeAgo } from '../lib/time';
@@ -44,6 +44,7 @@ export function AiFindingsPage() {
           <span className="ai-security-kicker">Configuration evidence, separate from CVEs</span>
           <h2>AI Findings</h2>
           <p>Deterministic policy failures from complete AWS and Azure evidence scopes.</p>
+          <Link className="btn btn-secondary" to="/findings/ai/exposures">View AI exposure paths</Link>
         </div>
         <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
           <option value="">All providers</option>

@@ -61,7 +61,7 @@ public class AiGridController {
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFact hostContext(
             @PathVariable UUID id,
-            @RequestBody com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFactInput request) {
+            @RequestBody com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.AnalystFactInput request) {
         return api.addHostContext(tenant(), id, request);
     }
     @GetMapping("/ai-exposures")

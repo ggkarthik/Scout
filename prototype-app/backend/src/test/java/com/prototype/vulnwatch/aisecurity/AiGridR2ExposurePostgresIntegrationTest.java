@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFactInput;
+import com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.TrustedFactInput;
 import com.prototype.vulnwatch.aisecurity.service.AiGridSystemService;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
@@ -89,6 +90,10 @@ class AiGridR2ExposurePostgresIntegrationTest {
                     "select state from ai_grid_exposure_paths where id=:id", Map.of("id", exposureId), String.class));
             assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='OPEN'"),
                     "stale evidence demotes the exposure without silently closing its finding");
+            assertEquals("NEEDS_EVIDENCE", jdbc.queryForObject(
+                    "select workflow_class from findings where finding_kind='AI_EXPOSURE'", Map.of(), String.class));
+            assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and due_at is null"),
+                    "stale validation pauses the finding SLA until evidence returns");
 
             UUID closureRun = seedRun(tenant, agent, knowledgeBase, false, true);
             systems.deriveForRun(tenant, closureRun);
@@ -117,9 +122,45 @@ class AiGridR2ExposurePostgresIntegrationTest {
         tenantExecution.run(tenant, () -> {
             UUID artifact = UUID.randomUUID();
             seedArtifact(tenant, artifact, "AI_AGENT", "AWS_BEDROCK_AGENT", "agent");
-            assertThrows(IllegalArgumentException.class, () -> hostContext.upsert(tenant, artifact,
-                    hostFact("network.internet_reachability_verified", "CONFIGURATION",
-                            "REACHABILITY", Instant.now().plus(1, ChronoUnit.HOURS))));
+            var validatingAttestation = new AiGridHostContextService.AnalystFactInput(
+                    "network.internet_reachability_verified", objectMapper.valueToTree(true), "KNOWN",
+                    "REACHABILITY", "analyst://claim", Instant.now(), Instant.now(),
+                    Instant.now().plus(1, ChronoUnit.HOURS));
+            assertThrows(IllegalArgumentException.class,
+                    () -> hostContext.attest(tenant, artifact, validatingAttestation));
+            assertThrows(IllegalArgumentException.class, () -> hostContext.ingestTrusted(tenant, artifact,
+                    "SCOUT_REACHABILITY_GRAPH", new TrustedFactInput("network.internet_reachability_verified",
+                    objectMapper.valueToTree(true), "KNOWN", "probe://null-confidence", Instant.now(), Instant.now(),
+                    Instant.now().plus(1, ChronoUnit.HOURS), null)));
+            return null;
+        });
+    }
+
+    @Test
+    void lowConfidenceTrustedEvidenceRemainsHypothesisAndCannotCreateFinding() {
+        Tenant tenant = tenants.createTenant("R2 low confidence " + UUID.randomUUID(),
+                "r2-low-confidence-" + UUID.randomUUID(), "pilot", null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant, () -> {
+            UUID agent = UUID.randomUUID(); UUID kb = UUID.randomUUID();
+            seedArtifact(tenant, agent, "AI_AGENT", "AWS_BEDROCK_AGENT", "agent");
+            seedArtifact(tenant, kb, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", "kb");
+            Instant validUntil = Instant.now().plus(1, ChronoUnit.HOURS);
+            for (var item : List.of(
+                    Map.entry(agent, "network.internet_reachability_verified"),
+                    Map.entry(agent, "identity.inadequate_authentication_verified"),
+                    Map.entry(kb, "data.sensitive_access_confirmed"))) {
+                String producer = item.getValue().startsWith("data.") ? "SCOUT_DATA_SECURITY" : "SCOUT_REACHABILITY_GRAPH";
+                hostContext.ingestTrusted(tenant, item.getKey(), producer, new TrustedFactInput(item.getValue(),
+                        objectMapper.valueToTree(true), "KNOWN", "probe://low-confidence", Instant.now(), Instant.now(),
+                        validUntil, 0.50));
+            }
+            UUID run = seedRun(tenant, agent, kb, true, false);
+            systems.deriveForRun(tenant, run);
+            var result = exposures.correlateCompleteRun(tenant, run);
+            assertEquals(1, result.hypotheses());
+            assertEquals(0, result.validated());
+            assertEquals(0, count("select count(*) from findings where finding_kind='AI_EXPOSURE'"));
             return null;
         });
     }
@@ -240,15 +281,15 @@ class AiGridR2ExposurePostgresIntegrationTest {
                     new Relationship(toolAgent, tool, "USES_TOOL"),
                     new Relationship(inputAgent, input, "USES_KNOWLEDGE_BASE")));
             Instant until = Instant.now().plus(1, ChronoUnit.HOURS);
-            hostContext.upsert(tenant, tool, hostFact("identity.effective_excessive_privilege_derived",
+            ingestTrusted(tenant, tool, hostFact("identity.effective_excessive_privilege_derived",
                     "GRAPH_ANALYSIS", "IDENTITY", until, "DERIVED"));
-            hostContext.upsert(tenant, tool, hostFact("impact.secret_or_consequential_access_confirmed",
+            ingestTrusted(tenant, tool, hostFact("impact.secret_or_consequential_access_confirmed",
                     "CIEM", "IDENTITY", until, "HOST_INTEGRATION"));
-            hostContext.upsert(tenant, inputAgent, hostFact("agent.autonomous_execution_verified",
+            ingestTrusted(tenant, inputAgent, hostFact("agent.autonomous_execution_verified",
                     "GRAPH_ANALYSIS", "ASSET", until, "HOST_INTEGRATION"));
-            hostContext.upsert(tenant, inputAgent, hostFact("control.execution_boundary_inadequate_verified",
+            ingestTrusted(tenant, inputAgent, hostFact("control.execution_boundary_inadequate_verified",
                     "GRAPH_ANALYSIS", "ASSET", until, "HOST_INTEGRATION"));
-            hostContext.upsert(tenant, input, hostFact("input.untrusted_path_verified",
+            ingestTrusted(tenant, input, hostFact("input.untrusted_path_verified",
                     "GRAPH_ANALYSIS", "DATA", until, "HOST_INTEGRATION"));
             systems.deriveForRun(tenant, run);
             assertEquals(2, exposures.correlateCompleteRun(tenant, run).validated());
@@ -291,9 +332,23 @@ class AiGridR2ExposurePostgresIntegrationTest {
     }
 
     private void addValidatingFacts(Tenant tenant, UUID agent, UUID kb, Instant validUntil) {
-        hostContext.upsert(tenant, agent, hostFact("network.internet_reachability_verified", "GRAPH_ANALYSIS", "REACHABILITY", validUntil));
-        hostContext.upsert(tenant, agent, hostFact("identity.inadequate_authentication_verified", "GRAPH_ANALYSIS", "IDENTITY", validUntil));
-        hostContext.upsert(tenant, kb, hostFact("data.sensitive_access_confirmed", "DSPM", "DATA", validUntil));
+        ingestTrusted(tenant, agent, hostFact("network.internet_reachability_verified", "GRAPH_ANALYSIS", "REACHABILITY", validUntil));
+        ingestTrusted(tenant, agent, hostFact("identity.inadequate_authentication_verified", "GRAPH_ANALYSIS", "IDENTITY", validUntil));
+        ingestTrusted(tenant, kb, hostFact("data.sensitive_access_confirmed", "DSPM", "DATA", validUntil));
+    }
+
+    private void ingestTrusted(Tenant tenant, UUID artifactId, HostFactInput input) {
+        String producer = switch (input.factKey()) {
+            case "network.internet_reachability_verified", "identity.inadequate_authentication_verified" ->
+                    "SCOUT_REACHABILITY_GRAPH";
+            case "data.sensitive_access_confirmed" -> "SCOUT_DATA_SECURITY";
+            case "identity.effective_excessive_privilege_derived",
+                    "impact.secret_or_consequential_access_confirmed" -> "SCOUT_IDENTITY_GRAPH";
+            default -> "SCOUT_RUNTIME_CONTROL";
+        };
+        hostContext.ingestTrusted(tenant, artifactId, producer, new TrustedFactInput(input.factKey(), input.value(),
+                input.state(), input.evidenceReference(), input.observedAt(), input.validFrom(), input.validUntil(),
+                input.confidence()));
     }
 
     private HostFactInput hostFact(String key, String evidenceClass, String port, Instant validUntil) {

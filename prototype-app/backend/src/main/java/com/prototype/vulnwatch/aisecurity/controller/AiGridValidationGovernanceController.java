@@ -150,9 +150,9 @@ public class AiGridValidationGovernanceController {
     public AiGridR2CertificationService.Readiness r2Readiness() { return r2Certification.readiness(); }
 
     @PostMapping("/releases/r2/precision-reviews")
-    public AiGridR2CertificationService.PrecisionReview recordR2Precision(
-            @RequestBody AiGridR2CertificationService.PrecisionCommand command) {
-        return r2Certification.recordPrecision(command, actor());
+    public PrecisionReview recordR2Precision(
+            @RequestBody AiGridR2CertificationService.PrecisionReviewCommand command) {
+        return r2Certification.createPrecisionReview(command, actor());
     }
 
     @PostMapping("/releases/r2/decisions")

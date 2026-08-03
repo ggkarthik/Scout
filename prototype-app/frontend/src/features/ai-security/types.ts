@@ -373,3 +373,35 @@ export type AiSecurityAzureRequirements = {
     assignableScopes: string[];
   };
 };
+
+export type AiGridExposureSummary = {
+  id: string;
+  correlationId: string;
+  correlationVersion: string;
+  title: string;
+  severity: string;
+  state: 'EXPOSURE_HYPOTHESIS' | 'VALIDATED_EXPOSURE' | 'CLOSED';
+  status: 'OPEN' | 'CLOSED';
+  confidence: number;
+  rootCauseArtifactId: string;
+  firstObservedAt: string;
+  lastObservedAt: string;
+  findingId: string | null;
+  affectedSystems: number;
+  impact: string;
+  rootCause: string;
+  breakpoint: string;
+  confidenceMethod: string;
+};
+
+export type AiGridExposurePage = { items: AiGridExposureSummary[]; nextCursor: string | null };
+
+export type AiGridExposureDetail = {
+  exposure: AiGridExposureSummary;
+  observations: Array<{
+    id: string; runId: string; state: string; entryArtifactId: string | null; systemId: string | null;
+    pathJson: string; evidenceJson: string; validFrom: string;
+    validUntil: string | null; confidence: number; observedAt: string;
+  }>;
+  associations: Array<{ systemId: string | null; artifactId: string | null; role: string }>;
+};

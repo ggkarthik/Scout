@@ -518,6 +518,8 @@ import type {
   AiGridPolicySelection,
   AiGridOwner,
   AiGridRunMetrics,
+  AiGridExposurePage,
+  AiGridExposureDetail,
   PolicyAssistExplanation,
   PolicyConfiguration,
   PolicyExceptionOverride,
@@ -1346,6 +1348,19 @@ export const api = {
     }),
   getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
     `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
+  ),
+  listAiGridExposures: (cursor?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    return request<AiGridExposurePage>(`/ai-exposures?${params.toString()}`);
+  },
+  getAiGridExposure: (exposureId: string) => request<AiGridExposureDetail>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}`,
+  ),
+  dispositionAiGridExposure: (exposureId: string, disposition: string, reason: string) => request<void>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}/disposition`, {
+      method: 'POST', body: JSON.stringify({ disposition, reason }),
+    },
   ),
   confirmAiGridArtifactOwner: (artifactId: string, ownerName: string, reason?: string) => request<AiGridOwner>(
     `/ai-artifacts/${encodeURIComponent(artifactId)}/owner`, {

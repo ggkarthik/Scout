@@ -674,7 +674,16 @@ public class AiGridValidationGovernanceService {
     }
 
     private String policySeverity(String policyId, String version) {
-        return policyCandidate(policyId, version).severity();
+        String severity = jdbc.query("""
+                select severity from platform.ai_grid_policy_versions
+                 where policy_id=:id and version=:version
+                union all
+                select severity from platform.ai_grid_correlation_versions
+                 where correlation_id=:id and version=:version
+                limit 1
+                """, Map.of("id", policyId, "version", version), rs -> rs.next() ? rs.getString(1) : null);
+        if (severity == null) throw notFound("AI Grid policy or correlation version not found");
+        return severity;
     }
 
     private void insertReleaseDecision(UUID id, String policyId, String version, String decision,

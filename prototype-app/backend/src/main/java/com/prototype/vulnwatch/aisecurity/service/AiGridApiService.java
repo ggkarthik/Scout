@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -315,16 +316,35 @@ public class AiGridApiService {
     }
 
     public AiGridHostContextService.HostFact addHostContext(Tenant tenant, UUID artifactId,
-                                                             AiGridHostContextService.HostFactInput input) {
+                                                             AiGridHostContextService.AnalystFactInput input) {
         return tenantExecution.run(tenant, () -> transactions.execute(status -> {
-            AiGridHostContextService.HostFact fact = hostContext.upsert(tenant, artifactId, input);
+            AiGridHostContextService.HostFact fact = hostContext.attest(tenant, artifactId, input);
             AiGridCoverageService.CurrentState current = coverage.currentState();
             if (current != null) {
                 UUID epochId = coverage.refreshCurrent(tenant, current.triggerRunId());
                 systemService.deriveForCurrentEpoch(tenant, epochId, current.triggerRunId());
-                exposures.correlateCurrentEpoch(tenant, epochId, current.triggerRunId());
+                exposures.correlateCurrentEpoch(tenant, epochId, current.triggerRunId(), Set.of(artifactId));
             }
             return fact;
+        }));
+    }
+
+    public List<AiGridHostContextService.HostFact> ingestTrustedEvidence(
+            Tenant tenant, String producerId, List<TrustedEvidenceItem> items) {
+        if (items == null || items.isEmpty() || items.size() > 500)
+            throw new IllegalArgumentException("Trusted evidence batch must contain 1-500 facts");
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            List<AiGridHostContextService.HostFact> facts = items.stream()
+                    .map(item -> hostContext.ingestTrusted(tenant, item.artifactId(), producerId, item.fact()))
+                    .toList();
+            AiGridCoverageService.CurrentState current = coverage.currentState();
+            if (current != null) {
+                UUID epochId = coverage.refreshCurrent(tenant, current.triggerRunId());
+                systemService.deriveForCurrentEpoch(tenant, epochId, current.triggerRunId());
+                Set<UUID> changed = items.stream().map(TrustedEvidenceItem::artifactId).collect(java.util.stream.Collectors.toSet());
+                exposures.correlateCurrentEpoch(tenant, epochId, current.triggerRunId(), changed);
+            }
+            return facts;
         }));
     }
 
@@ -471,6 +491,7 @@ public class AiGridApiService {
                                   UUID findingId, int affectedSystems, String impact, String rootCause,
                                   String breakpoint, String confidenceMethod) {}
     public record ExposurePage(List<ExposureSummary> items, String nextCursor) {}
+    public record TrustedEvidenceItem(UUID artifactId, AiGridHostContextService.TrustedFactInput fact) {}
     public record ExposureObservation(UUID id, UUID runId, String state, UUID entryArtifactId, UUID systemId,
                                       String pathJson, String evidenceJson, Instant validFrom, Instant validUntil,
                                       double confidence, Instant observedAt) {}

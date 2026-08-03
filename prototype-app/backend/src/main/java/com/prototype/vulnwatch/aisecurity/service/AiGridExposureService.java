@@ -57,6 +57,12 @@ public class AiGridExposureService {
 
     /** Correlates the authoritative union of all latest complete discovery scope heads. */
     public CorrelationResult correlateCurrentEpoch(Tenant tenant, UUID epochId, UUID triggerRunId) {
+        return correlateCurrentEpoch(tenant, epochId, triggerRunId, Set.of());
+    }
+
+    /** Re-evaluates only systems containing changed artifacts; an empty set performs full reconciliation. */
+    public CorrelationResult correlateCurrentEpoch(Tenant tenant, UUID epochId, UUID triggerRunId,
+                                                    Set<UUID> changedArtifactIds) {
         Instant asOf = jdbc.query("select materialized_at from ai_grid_current_coverage_state where epoch_id=:id",
                 Map.of("id", epochId), rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
         if (asOf == null) return new CorrelationResult(0, 0, 0, 0, 0);
@@ -65,8 +71,22 @@ public class AiGridExposureService {
         Map<UUID, List<Edge>> graph = currentGraph(epochId, asOf);
         Map<UUID, Map<String, Fact>> facts = currentFacts(epochId, asOf);
         List<SystemContext> systems = currentSystems(epochId);
+        boolean affectedOnly = changedArtifactIds != null && !changedArtifactIds.isEmpty();
+        if (affectedOnly) systems = affectedSystems(systems, changedArtifactIds);
         String materialDigest = recordExecution(tenant, epochId, triggerRunId, asOf, templates, artifacts, graph, systems);
-        return correlate(tenant, triggerRunId, epochId, asOf, templates, artifacts, graph, facts, systems, true, materialDigest, false);
+        return correlate(tenant, triggerRunId, epochId, asOf, templates, artifacts, graph, facts, systems,
+                !affectedOnly, materialDigest, false);
+    }
+
+    private List<SystemContext> affectedSystems(List<SystemContext> systems, Set<UUID> changedArtifactIds) {
+        if (systems.isEmpty()) return systems;
+        Set<UUID> revisionIds = systems.stream().map(SystemContext::revisionId).collect(java.util.stream.Collectors.toSet());
+        Set<UUID> affected = new HashSet<>(jdbc.query("""
+                select distinct system_revision_id from ai_grid_system_memberships
+                 where system_revision_id in (:revisions) and artifact_id in (:artifacts)
+                """, new MapSqlParameterSource().addValue("revisions", revisionIds)
+                .addValue("artifacts", changedArtifactIds), (rs, n) -> rs.getObject(1, UUID.class)));
+        return systems.stream().filter(system -> affected.contains(system.revisionId())).toList();
     }
 
     /** Re-evaluates only the immutable inputs captured for the original execution. */
@@ -143,7 +163,10 @@ public class AiGridExposureService {
                         Map.of("findingId", findingId, "id", exposureId));
             } else {
                 hypotheses++;
-                if ("VALIDATED_EXPOSURE".equals(previous)) demoted++;
+                if ("VALIDATED_EXPOSURE".equals(previous)) {
+                    demoted++;
+                    findingService.markNeedsEvidence(exposureId, runId);
+                }
             }
         }
         int closed = closeAbsentFromCompleteRun(tenant, runId, epochId, asOf, observed, authoritative);
@@ -201,14 +224,15 @@ public class AiGridExposureService {
         Map<UUID, Map<String, Fact>> result = new HashMap<>();
         jdbc.query("""
                 select f.artifact_id,f.fact_key,f.value_json::text,f.state,f.provenance,f.evidence_class,f.source,
-                       f.observed_at,f.observed_at valid_from,f.valid_until,coalesce(f.confidence,1.0),f.id
+                       f.observed_at,f.observed_at valid_from,f.valid_until,f.confidence,
+                       f.confidence_method,f.confidence_method_version,f.id
                   from ai_grid_current_coverage_artifacts c join ai_grid_facts f
                     on f.artifact_id=c.artifact_id and f.run_id=c.source_run_id
                  where c.epoch_id=:epochId
                 union all
                 select h.artifact_id,h.fact_key,h.value_json::text,h.state,h.provenance,h.evidence_class,
                        h.source_port||':'||h.evidence_reference,h.observed_at,h.valid_from,h.valid_until,
-                       coalesce(h.confidence,1.0),h.id
+                       h.confidence,h.confidence_method,h.confidence_method_version,h.id
                   from ai_grid_host_context_facts h join ai_grid_current_coverage_artifacts c on c.artifact_id=h.artifact_id
                  where c.epoch_id=:epochId and h.observed_at<=:asOf and h.valid_from<=:asOf
                  order by observed_at desc
@@ -219,10 +243,10 @@ public class AiGridExposureService {
 
     private void addFact(Map<UUID, Map<String, Fact>> result, java.sql.ResultSet rs, Instant asOf) throws java.sql.SQLException {
         UUID artifactId = rs.getObject(1, UUID.class);
-        Fact fact = new Fact(rs.getObject(12, UUID.class), rs.getString(2), tree(rs.getString(3)), rs.getString(4),
+        Fact fact = new Fact(rs.getObject(14, UUID.class), rs.getString(2), tree(rs.getString(3)), rs.getString(4),
                 rs.getString(5), rs.getString(6), rs.getString(7), rs.getTimestamp(8).toInstant(),
                 rs.getTimestamp(9).toInstant(), rs.getTimestamp(10) == null ? null : rs.getTimestamp(10).toInstant(),
-                rs.getDouble(11));
+                (Double) rs.getObject(11), rs.getString(12), rs.getString(13));
         if ("KNOWN".equals(fact.state()) && !fact.validFrom().isAfter(asOf))
             result.computeIfAbsent(artifactId, ignored -> new LinkedHashMap<>()).putIfAbsent(fact.key(), fact);
     }
@@ -280,16 +304,18 @@ public class AiGridExposureService {
         Map<UUID, Map<String, Fact>> result = new HashMap<>();
         if (!bindings.isEmpty()) jdbc.query("""
                 select artifact_id,fact_key,value_json::text,state,provenance,evidence_class,source,
-                       observed_at,observed_at valid_from,valid_until,coalesce(confidence,1.0),id,run_id
+                       observed_at,observed_at valid_from,valid_until,confidence,
+                       confidence_method,confidence_method_version,id,run_id
                   from ai_grid_facts where artifact_id in (:ids) order by observed_at desc
                 """, Map.of("ids", bindings.keySet()), rs -> {
             UUID artifactId = rs.getObject(1, UUID.class);
-            if (bindings.get(artifactId).equals(rs.getObject(13, UUID.class))) addFact(result, rs, asOf);
+            if (bindings.get(artifactId).equals(rs.getObject(15, UUID.class))) addFact(result, rs, asOf);
         });
         if (!hostIds.isEmpty()) jdbc.query("""
                 select artifact_id,fact_key,value_json::text,state,provenance,evidence_class,
                        source_port||':'||evidence_reference,observed_at,valid_from,valid_until,
-                       coalesce(confidence,1.0),id from ai_grid_host_context_facts where id in (:ids)
+                       confidence,confidence_method,confidence_method_version,id
+                  from ai_grid_host_context_facts where id in (:ids)
                  order by observed_at desc
                 """, Map.of("ids", hostIds), rs -> { addFact(result, rs, asOf); });
         return result;
@@ -386,21 +412,22 @@ public class AiGridExposureService {
         Map<UUID, Map<String, Fact>> result = new HashMap<>();
         jdbc.query("""
                 select artifact_id,fact_key,value_json::text,state,provenance,evidence_class,source,
-                       observed_at,observed_at valid_from,valid_until,coalesce(confidence,1.0),id
+                       observed_at,observed_at valid_from,valid_until,confidence,
+                       confidence_method,confidence_method_version,id
                   from ai_grid_facts where run_id=:runId
                 union all
                 select artifact_id,fact_key,value_json::text,state,provenance,evidence_class,
                        source_port||':'||evidence_reference,observed_at,valid_from,valid_until,
-                       coalesce(confidence,1.0),id
+                       confidence,confidence_method,confidence_method_version,id
                   from ai_grid_host_context_facts
                  where observed_at<=:asOf and valid_from<=:asOf
                 order by observed_at desc
                 """, new MapSqlParameterSource().addValue("runId", runId).addValue("asOf", Timestamp.from(asOf)), rs -> {
             UUID artifactId = rs.getObject(1, UUID.class);
-            Fact fact = new Fact(rs.getObject(12, UUID.class), rs.getString(2), tree(rs.getString(3)), rs.getString(4),
+            Fact fact = new Fact(rs.getObject(14, UUID.class), rs.getString(2), tree(rs.getString(3)), rs.getString(4),
                     rs.getString(5), rs.getString(6), rs.getString(7), rs.getTimestamp(8).toInstant(),
                     rs.getTimestamp(9).toInstant(), rs.getTimestamp(10) == null ? null : rs.getTimestamp(10).toInstant(),
-                    rs.getDouble(11));
+                    (Double) rs.getObject(11), rs.getString(12), rs.getString(13));
             if ("KNOWN".equals(fact.state()) && !fact.validFrom().isAfter(asOf))
                 result.computeIfAbsent(artifactId, ignored -> new LinkedHashMap<>()).putIfAbsent(fact.key(), fact);
         });
@@ -507,12 +534,22 @@ public class AiGridExposureService {
             }
             default -> { return null; }
         }
+        List<Fact> validatingEvidence = validatingEvidence(path, facts, template.id());
+        boolean signalsPresent = validatingEvidence.size() == requiredEvidenceCount(template.id())
+                && validatingEvidence.stream().allMatch(f -> truthy(f.value()));
+        if (validated && !meetsConfidenceRequirements(template.id(), validatingEvidence)) {
+            validated = false;
+            hypothesis = true;
+        } else if (!validated && signalsPresent) {
+            hypothesis = true;
+        }
         if (!validated && !hypothesis) return null;
         String state = validated ? "VALIDATED_EXPOSURE" : "EXPOSURE_HYPOTHESIS";
         String signature = pathSignature(path);
         String fingerprint = sha256(tenant.getId() + "|AI_EXPOSURE|" + template.id() + "|" + rootCause + "|" + signature);
         List<Fact> evidenceFacts = evidenceFacts(path, facts, template.id(), validated);
-        double confidence = validated ? evidenceFacts.stream().mapToDouble(Fact::confidence).min().orElse(1.0) : 0.60;
+        double confidence = validated ? validatingEvidence.stream().map(Fact::confidence)
+                .filter(java.util.Objects::nonNull).mapToDouble(Double::doubleValue).min().orElse(0.0) : 0.60;
         Instant validFrom = java.util.stream.Stream.concat(path.edges().stream().map(Edge::validFrom),
                         evidenceFacts.stream().map(Fact::validFrom))
                 .max(Instant::compareTo).orElse(asOf);
@@ -722,7 +759,43 @@ public class AiGridExposureService {
     private boolean qualifies(Fact fact, FactRule rule, Instant asOf) {
         return rule != null && rule.evidenceClasses().contains(fact.evidenceClass()) && fact.validUntil() != null
                 && !fact.validUntil().isBefore(asOf)
-                && !fact.observedAt().isBefore(asOf.minusSeconds(rule.maxAgeSeconds()));
+                && !fact.observedAt().isBefore(asOf.minusSeconds(rule.maxAgeSeconds()))
+                && fact.confidence() != null && fact.confidenceMethod() != null
+                && !fact.confidenceMethod().isBlank() && fact.confidenceMethodVersion() != null
+                && !fact.confidenceMethodVersion().isBlank()
+                && !"ANALYST_ATTESTED".equals(fact.provenance());
+    }
+
+    private boolean meetsConfidenceRequirements(String correlationId, List<Fact> evidence) {
+        if (evidence.size() != requiredEvidenceCount(correlationId)) return false;
+        double minimum = switch (correlationId) {
+            case "R2_EXTERNAL_SENSITIVE_ACCESS" -> 0.95;
+            case "R2_EXCESSIVE_TOOL_PRIVILEGE" -> 0.93;
+            case "R2_UNTRUSTED_AUTONOMOUS_EXECUTION" -> 0.92;
+            default -> 1.0;
+        };
+        return evidence.stream().allMatch(f -> f.confidence() != null && f.confidence() >= minimum
+                && f.confidenceMethod() != null && !f.confidenceMethod().isBlank()
+                && f.confidenceMethodVersion() != null && !f.confidenceMethodVersion().isBlank()
+                && !"ANALYST_ATTESTED".equals(f.provenance()));
+    }
+
+    private int requiredEvidenceCount(String correlationId) {
+        return "R2_EXCESSIVE_TOOL_PRIVILEGE".equals(correlationId) ? 2 : 3;
+    }
+
+    private List<Fact> validatingEvidence(Path path, Map<UUID, Map<String, Fact>> facts, String correlationId) {
+        Set<String> keys = switch (correlationId) {
+            case "R2_EXTERNAL_SENSITIVE_ACCESS" -> Set.of("network.internet_reachability_verified",
+                    "identity.inadequate_authentication_verified", "data.sensitive_access_confirmed");
+            case "R2_EXCESSIVE_TOOL_PRIVILEGE" -> Set.of("identity.effective_excessive_privilege_derived",
+                    "impact.secret_or_consequential_access_confirmed");
+            case "R2_UNTRUSTED_AUTONOMOUS_EXECUTION" -> Set.of("input.untrusted_path_verified",
+                    "agent.autonomous_execution_verified", "control.execution_boundary_inadequate_verified");
+            default -> Set.of();
+        };
+        return path.nodes().stream().flatMap(id -> facts.getOrDefault(id, Map.of()).values().stream())
+                .filter(f -> keys.contains(f.key())).distinct().toList();
     }
     private boolean hasInadequateAuthProxy(Path path, Map<UUID, Map<String, Fact>> facts, Instant asOf) {
         if (List.of("identity.local_auth_enabled_configured", "identity.ml_endpoint_local_auth_enabled_configured",
@@ -803,7 +876,8 @@ public class AiGridExposureService {
     private record Artifact(UUID id, String type, String name) {}
     private record Edge(UUID id, UUID source, UUID target, String type, Instant validFrom, Instant validUntil) {}
     private record Fact(UUID id, String key, JsonNode value, String state, String provenance, String evidenceClass,
-                        String source, Instant observedAt, Instant validFrom, Instant validUntil, double confidence) {}
+                        String source, Instant observedAt, Instant validFrom, Instant validUntil, Double confidence,
+                        String confidenceMethod, String confidenceMethodVersion) {}
     private record FactRule(Set<String> evidenceClasses, long maxAgeSeconds) {}
     private record Path(List<UUID> nodes, List<Edge> edges) {}
     private record SystemContext(UUID id, UUID rootArtifactId, int revision, UUID revisionId) {}
