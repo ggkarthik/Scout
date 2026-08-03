@@ -201,11 +201,6 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     queryFn: () => api.explainAiSecurityPolicy(policyId),
     enabled: false,
   });
-  const suggestQuery = useQuery({
-    queryKey: ['ai-security-policy-suggest-scope', policyId],
-    queryFn: () => api.suggestAiSecurityPolicyScope(policyId),
-    enabled: false,
-  });
 
   const updateCondition = (index: number, next: PolicyScopeCondition) => {
     if (!draftScope) return;
@@ -224,17 +219,6 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     setDraftScope({
       ...draftScope,
       conditions: [...draftScope.conditions, { field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' }],
-    });
-    setScopeDirty(true);
-  };
-  const applySuggestion = () => {
-    const condition = suggestQuery.data?.suggestedCondition;
-    if (!condition || !draftScope) return;
-    const alreadyMatchRules = draftScope.mode === 'MATCH_RULES';
-    setDraftScope({
-      mode: 'MATCH_RULES',
-      conditionLogic: alreadyMatchRules ? draftScope.conditionLogic : 'AND',
-      conditions: [...(alreadyMatchRules ? draftScope.conditions : []), condition],
     });
     setScopeDirty(true);
   };
@@ -671,42 +655,6 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                         {explainQuery.isFetching ? 'Thinking…' : explainQuery.data ? 'Regenerate' : 'Explain'}
                       </button>
                       {explainQuery.data && <div className="ai-policy-assist-result">{explainQuery.data.summary}</div>}
-                    </div>
-
-                    <div className="ai-policy-assist-action">
-                      <div className="ai-policy-assist-title">Suggest scope from review history</div>
-                      <p className="panel-caption">
-                        Looks at findings marked “False positive” and proposes a rule so this policy stops re-flagging the same pattern.
-                      </p>
-                      <button
-                        type="button"
-                        className="btn btn-ai btn-sm"
-                        disabled={suggestQuery.isFetching}
-                        onClick={() => void suggestQuery.refetch()}
-                      >
-                        {suggestQuery.isFetching ? 'Thinking…' : 'Suggest'}
-                      </button>
-                      {suggestQuery.data && (
-                        <div className="ai-policy-assist-result">
-                          {suggestQuery.data.rationale}
-                          {suggestQuery.data.suggestedCondition && canManage && (
-                            <>
-                              <div className="ai-policy-rule-chip">
-                                {SCOPE_FIELD_OPTIONS.find((f) => f.value === suggestQuery.data?.suggestedCondition?.field)?.label ?? suggestQuery.data.suggestedCondition.field}
-                                {' '}
-                                {SCOPE_OPERATOR_OPTIONS.find((o) => o.value === suggestQuery.data?.suggestedCondition?.operator)?.label ?? suggestQuery.data.suggestedCondition.operator}
-                                {' '}
-                                “{suggestQuery.data.suggestedCondition.value}”
-                              </div>
-                              <div className="button-row">
-                                <button type="button" className="btn btn-primary btn-sm" onClick={applySuggestion}>
-                                  Add to scope
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

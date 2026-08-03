@@ -354,9 +354,6 @@ public class AiSecurityApiService {
             Set.of("EQUALS", "NOT_EQUALS", "CONTAINS", "NOT_CONTAINS");
     private static final Set<String> VALID_OVERRIDES = Set.of(
             AiSecurityPolicyScopeMatcher.OVERRIDE_INCLUDED, AiSecurityPolicyScopeMatcher.OVERRIDE_EXCLUDED);
-    private static final Set<String> STOP_TOKENS =
-            Set.of("agent", "bot", "the", "and", "for", "test", "prod", "svc", "service");
-
     public PolicyConfigurationResponse policyConfiguration(Tenant tenant, String policyId) {
         PolicyDefinition definition = requirePolicy(policyId);
         return tenantExecution.run(tenant, () -> buildConfiguration(definition));
@@ -527,51 +524,6 @@ public class AiSecurityApiService {
                 }
             }
             return new PolicyAssistExplanationResponse(text.toString(), Instant.now());
-        });
-    }
-
-    public PolicyAssistScopeSuggestionResponse suggestScopeFromReviewHistory(Tenant tenant, String policyId) {
-        requirePolicy(policyId);
-        return tenantExecution.run(tenant, () -> {
-            List<String> falsePositiveNames = jdbc.query("""
-                    select distinct a.name
-                      from ai_security_findings f
-                      join ai_security_artifacts a on a.id = f.artifact_id
-                      join lateral (
-                          select disposition from ai_security_finding_reviews r
-                           where r.finding_id = f.id order by reviewed_at desc limit 1
-                      ) review on true
-                     where f.policy_id = :policyId and review.disposition = 'FALSE_POSITIVE'
-                    """, Map.of("policyId", policyId), (rs, rowNum) -> rs.getString("name"));
-
-            if (falsePositiveNames.size() < 2) {
-                return new PolicyAssistScopeSuggestionResponse(
-                        null, "Not enough reviewed false positives yet to suggest a rule.", falsePositiveNames.size());
-            }
-            Map<String, Long> tokenCounts = new LinkedHashMap<>();
-            for (String name : falsePositiveNames) {
-                Set<String> tokensInName = Set.of(name.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"));
-                for (String token : tokensInName) {
-                    if (token.length() < 3 || STOP_TOKENS.contains(token)) {
-                        continue;
-                    }
-                    tokenCounts.merge(token, 1L, Long::sum);
-                }
-            }
-            String bestToken = tokenCounts.entrySet().stream()
-                    .filter(entry -> entry.getValue() >= 2)
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse(null);
-            if (bestToken == null) {
-                return new PolicyAssistScopeSuggestionResponse(
-                        null, "False positives so far don't share a common naming pattern.", falsePositiveNames.size());
-            }
-            PolicyScopeConditionResponse suggestion =
-                    new PolicyScopeConditionResponse("NAME", "NOT_CONTAINS", bestToken);
-            String rationale = tokenCounts.get(bestToken) + " of " + falsePositiveNames.size()
-                    + " false-positive reviews on this policy were on artifacts named like \"" + bestToken + "\".";
-            return new PolicyAssistScopeSuggestionResponse(suggestion, rationale, falsePositiveNames.size());
         });
     }
 
@@ -998,11 +950,6 @@ public class AiSecurityApiService {
     }
 
     public record PolicyAssistExplanationResponse(String summary, Instant generatedAt) {
-    }
-
-    public record PolicyAssistScopeSuggestionResponse(
-            PolicyScopeConditionResponse suggestedCondition, String rationale, int falsePositiveCount
-    ) {
     }
 
     record CoverageGate(

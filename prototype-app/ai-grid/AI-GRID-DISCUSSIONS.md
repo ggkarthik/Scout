@@ -6,6 +6,29 @@
 
 ---
 
+## 2026-08-03 (session 9) — Merge to `main`, CI green-up, retire legacy policy-assist suggestion
+
+**Context.** Opened PR #22 (R0–R2), merged `main`, resolved conflicts, and fixed CI.
+
+**Merge/CI resolutions.** Reconciled main's "AI-backed policy assist": kept main's scope/exception/parameter
+evaluator but preserved the `legacyFindingsEnabled` gate; caught a hidden **tenant V48 collision** (renamed
+main's policy-scope migration to tenant V58, bumped the tenant schema target 57→58 across CLI/status/ITs);
+bumped platform schema-version ITs 60→64; removed the tenant-`findings` DDL loop from platform V59 (guard
+`check-tenant-ddl.py` — generalization already owned by tenant V48).
+
+**Retire legacy policy-assist suggestion (user decision, option 1 + correction).** The post-merge state was
+inconsistent: `review()`/`findingsById` moved to the host `findings` table, but the review-history
+scope-**suggestion** still read the *disabled* legacy `ai_security_findings`/`ai_security_finding_reviews`,
+and the frontend still advertised the card. Rather than only delete the failing test, we **retired the whole
+surface**: removed `suggestScopeFromReviewHistory` + its endpoint/DTO, the frontend "Suggest scope from review
+history" card + client method + type, and the obsolete test. Kept AI findings/reviews exclusively in the host
+model (did **not** repoint `review()` to the legacy silo). Added regression coverage (legacy silo stays empty by
+default; host finding review records a disposition) and documented scope suggestions as **deferred** until
+integrated with the governed policy-applicability engine. Rejected option 3 for R1 (a real migration must make
+suggested scopes govern AiGrid applicability/coverage, which lives in the legacy evaluator). See decision log.
+
+---
+
 ## 2026-08-03 — R1 multi-provider coverage integrity closure
 
 **Finding.** Current coverage and readiness selected one tenant-global latest `run_id`. Because AWS and Azure

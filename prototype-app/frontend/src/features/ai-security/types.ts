@@ -233,12 +233,6 @@ export type PolicyAssistExplanation = {
   generatedAt: string;
 };
 
-export type PolicyAssistScopeSuggestion = {
-  suggestedCondition: PolicyScopeCondition | null;
-  rationale: string;
-  falsePositiveCount: number;
-};
-
 export type AiSecurityRun = {
   id: string;
   status: string;

@@ -519,7 +519,6 @@ import type {
   AiGridOwner,
   AiGridRunMetrics,
   PolicyAssistExplanation,
-  PolicyAssistScopeSuggestion,
   PolicyConfiguration,
   PolicyExceptionOverride,
   PolicyScopeCondition,
@@ -1434,10 +1433,6 @@ export const api = {
     }),
   explainAiSecurityPolicy: (policyId: string) =>
     request<PolicyAssistExplanation>(`/ai-security/policies/${encodeURIComponent(policyId)}/assist/explain`),
-  suggestAiSecurityPolicyScope: (policyId: string) =>
-    request<PolicyAssistScopeSuggestion>(
-      `/ai-security/policies/${encodeURIComponent(policyId)}/assist/suggested-scope`,
-    ),
   listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>

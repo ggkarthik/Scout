@@ -8,7 +8,6 @@ import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.FindingRe
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.GraphResponse;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PageResponse;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicyAssistExplanationResponse;
-import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicyAssistScopeSuggestionResponse;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicyConfigurationResponse;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicyResponse;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicyScopeConditionResponse;
@@ -184,12 +183,6 @@ public class AiSecurityController {
     public PolicyAssistExplanationResponse explainPolicy(@PathVariable String policyId) {
         Tenant tenant = tenant();
         return apiService.explainPolicy(tenant, policyId);
-    }
-
-    @GetMapping("/policies/{policyId}/assist/suggested-scope")
-    public PolicyAssistScopeSuggestionResponse suggestedScope(@PathVariable String policyId) {
-        Tenant tenant = tenant();
-        return apiService.suggestScopeFromReviewHistory(tenant, policyId);
     }
 
     @GetMapping("/runs")

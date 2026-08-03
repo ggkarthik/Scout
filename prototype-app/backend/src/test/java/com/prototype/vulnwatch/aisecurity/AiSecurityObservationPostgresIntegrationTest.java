@@ -70,6 +70,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Autowired private AiSecurityObservationService observationService;
     @Autowired private AiGridOwnershipService ownershipService;
     @Autowired private AiGridApiService aiGridApiService;
+    @Autowired private com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService aiSecurityApiService;
     @Autowired private AiGridBudgetService budgetService;
     @Autowired private AiGridCoverageService coverageService;
     @Autowired private AiGridRetentionService retentionService;
@@ -359,6 +360,9 @@ class AiSecurityObservationPostgresIntegrationTest {
             assertEquals(1, jdbc.queryForObject(
                     "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
                     Map.of(), Integer.class));
+            assertEquals(0, jdbc.queryForObject(
+                    "select count(*) from ai_security_findings", Map.of(), Integer.class),
+                    "legacy findings silo stays empty by default; AI findings graduate to the host workflow");
             assertTrue(jdbc.queryForObject("""
                     select due_at is not null from findings where finding_kind = 'AI_POSTURE'
                     """, Map.of(), Boolean.class));
@@ -476,6 +480,17 @@ class AiSecurityObservationPostgresIntegrationTest {
                              where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                             """, Map.of("runId", runId), String.class));
         });
+
+        UUID reviewedFindingId = tenantExecution.run(tenant, () -> jdbc.queryForObject(
+                "select id from findings where finding_kind = 'AI_POSTURE'", Map.of(), UUID.class));
+        aiSecurityApiService.review(tenant, reviewedFindingId,
+                com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition.FALSE_POSITIVE,
+                "regression: review on the host finding model", "integration-reviewer");
+        Integer hostReviewCount = tenantExecution.run(tenant, () -> jdbc.queryForObject("""
+                select count(*) from finding_reviews where finding_id = :id and disposition = 'FALSE_POSITIVE'
+                """, Map.of("id", reviewedFindingId), Integer.class));
+        assertEquals(1, hostReviewCount,
+                "AI finding review is recorded against the host finding model, not the legacy silo");
 
         var completeCoverage = aiGridApiService.coverage(tenant);
         jdbc.update("""
