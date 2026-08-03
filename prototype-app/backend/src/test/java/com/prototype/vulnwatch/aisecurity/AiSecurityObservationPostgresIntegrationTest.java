@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRetentionService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridSystemService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridReconciliationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
@@ -72,6 +73,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Autowired private AiGridBudgetService budgetService;
     @Autowired private AiGridCoverageService coverageService;
     @Autowired private AiGridRetentionService retentionService;
+    @Autowired private AiGridSystemService systemService;
     @Autowired private AiGridRunMetricsService runMetricsService;
     @Autowired private FindingWorkflowService findingWorkflowService;
     @Autowired private AiSecuritySyncRunFacade syncRunFacade;
@@ -212,6 +214,13 @@ class AiSecurityObservationPostgresIntegrationTest {
                         "123456789012", null, null, List.of("us-east-1"), true)
         ).id();
         UUID runId = syncRunFacade.start(tenant).getId();
+        tenantExecution.run(tenant, () -> jdbc.update("""
+                insert into ownership_rules
+                    (id, tenant_id, name, condition_json, user_group, execution_order, created_at, updated_at)
+                values (:id, :tenantId, 'AWS AI ownership',
+                        '{"logic":"AND","conditions":[{"table":"ASSET","column":"cloudProvider","operator":"is","value":"AWS"}]}',
+                        'Cloud AI Team', 10, now(), now())
+                """, Map.of("id", UUID.randomUUID(), "tenantId", tenant.getId())));
         ArtifactObservation agent = new ArtifactObservation(
                 "arn:aws:bedrock:us-east-1:123456789012:agent/context-agent",
                 "AI_AGENT", "AWS_BEDROCK_AGENT", "Context agent",
@@ -229,6 +238,12 @@ class AiSecurityObservationPostgresIntegrationTest {
                         "USES_KNOWLEDGE_BASE", Map.of())), List.of()));
 
         tenantExecution.run(tenant, () -> {
+            assertEquals("INFERRED", jdbc.queryForObject("""
+                    select owner_state from ai_security_artifacts where native_kind = 'AWS_BEDROCK_AGENT'
+                    """, Map.of(), String.class));
+            assertEquals("Cloud AI Team", jdbc.queryForObject("""
+                    select owner_name from ai_security_artifacts where native_kind = 'AWS_BEDROCK_AGENT'
+                    """, Map.of(), String.class));
             assertEquals(true, jdbc.queryForObject("""
                     select value_json = 'true'::jsonb from ai_grid_facts f
                       join ai_security_artifacts a on a.id = f.artifact_id
@@ -334,6 +349,13 @@ class AiSecurityObservationPostgresIntegrationTest {
                      where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of("runId", runId), String.class));
             assertEquals(1, jdbc.queryForObject("select count(*) from ai_grid_systems", Map.of(), Integer.class));
+            jdbc.update("""
+                    update ai_security_relationships set active = false
+                     where relationship_type = 'USES_GUARDRAIL'
+                    """, Map.of());
+            systemService.deriveForRun(tenant, runId);
+            assertEquals(1, jdbc.queryForObject("select count(*) from ai_grid_system_revisions", Map.of(), Integer.class),
+                    "re-deriving a run must use its relationship snapshot, not changed live relationships");
             assertEquals(1, jdbc.queryForObject(
                     "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
                     Map.of(), Integer.class));
@@ -390,6 +412,9 @@ class AiSecurityObservationPostgresIntegrationTest {
                     "Integration cadence gate"), "integration-reviewer");
             budgetService.upsertCadence(tenant, cadence, "integration-reviewer");
             budgetService.admit(tenant, runId, "AWS", List.of("BEDROCK_AGENTS"), "PRODUCTION", "HIGH");
+            assertEquals("ADMITTED", budgetService.admit(tenant, runId, "AWS",
+                    List.of("BEDROCK_AGENTS"), "PRODUCTION", "HIGH").decision(),
+                    "an admission retry must return the persisted decision");
             var cadenceError = assertThrows(AiGridBudgetService.BudgetExceededException.class,
                     () -> budgetService.admit(tenant, UUID.randomUUID(), "AWS",
                             List.of("BEDROCK_AGENTS"), "PRODUCTION", "HIGH"));
@@ -414,12 +439,23 @@ class AiSecurityObservationPostgresIntegrationTest {
                       join ai_security_artifacts a on a.id = m.artifact_id
                      where a.native_kind = 'AWS_BEDROCK_GUARDRAIL' limit 1
                     """, Map.of(), UUID.class);
+            jdbc.update("""
+                    insert into ai_grid_snapshot_bodies
+                        (id, tenant_id, content_hash, content_json, byte_size, redaction_profile,
+                         first_run_id, retention_class, retain_until, retention_state)
+                    values (:id, :tenantId, :hash, '{}'::jsonb, 2, 'STANDARD', :runId,
+                            'ARCHIVE', now() - interval '1 day', 'RETAINED')
+                    """, Map.of("id", UUID.randomUUID(), "tenantId", tenant.getId(),
+                    "hash", "f".repeat(64), "runId", runId));
             var hold = retentionService.createHold(tenant, new AiGridRetentionService.HoldCommand(
                     guardrailBodyId, "LEGAL_HOLD", "legal-case-1",
                     "Preserve evidence for legal review", null), "integration-reviewer");
             jdbc.update("update ai_grid_snapshot_bodies set retain_until = now() - interval '1 day'", Map.of());
             var protectedSweep = retentionService.sweep(tenant);
             assertTrue(protectedSweep.purgeBlocked() >= 2);
+            assertEquals(1, protectedSweep.purged(), "expired unreferenced evidence should be purged safely");
+            assertEquals(1, jdbc.queryForObject("select count(*) from ai_grid_retention_purge_audit",
+                    Map.of(), Integer.class));
             retentionService.releaseHold(tenant, hold.id(), "integration-reviewer");
             var releasedSweep = retentionService.sweep(tenant);
             assertTrue(releasedSweep.purgeEligible() >= 1);

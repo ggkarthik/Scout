@@ -36,10 +36,11 @@ public class AiGridSystemService {
             List<UUID> members = new ArrayList<>();
             members.add(agent.id());
             members.addAll(jdbc.query("""
-                    select target_artifact_id from ai_security_relationships
-                     where source_artifact_id = :agentId and active = true
+                    select target_artifact_id from ai_grid_relationship_snapshots
+                     where run_id = :runId and source_artifact_id = :agentId
                        and relationship_type in ('USES_GUARDRAIL','USES_KNOWLEDGE_BASE','USES_MODEL')
-                    """, Map.of("agentId", agent.id()), (rs, n) -> rs.getObject(1, UUID.class)));
+                    """, Map.of("runId", runId, "agentId", agent.id()),
+                    (rs, n) -> rs.getObject(1, UUID.class)));
             members = members.stream().distinct().sorted(Comparator.comparing(UUID::toString)).toList();
             String stableKey = sha256(tenant.getId() + "|" + agent.provider() + "|" + agent.providerResourceId());
             UUID systemId = jdbc.queryForObject("""

@@ -33,31 +33,43 @@ public class AiGridBudgetService {
 
     public Admission admit(Tenant tenant, UUID runId, String provider, List<String> resourceFamilies,
                            String environment, String criticality) {
-        Admission admission = transactions.execute(status -> {
-            BudgetConfig config = current();
-            BudgetUsage usage = usage();
-            List<String> blockers = exceeded(config, usage, true);
-            cadenceBlocker(provider, resourceFamilies, environment, criticality).ifPresent(blockers::add);
-            boolean throttled = "THROTTLE".equals(config.enforcementMode()) && !blockers.isEmpty();
-            String decision = throttled ? "THROTTLED" : "ADMITTED";
-            String reason = blockers.isEmpty() ? "WITHIN_BUDGET" : String.join(",", blockers);
-            jdbc.update("""
-                    insert into ai_grid_budget_admissions
-                        (id, tenant_id, run_id, provider, resource_families_json, decision, reason_code, usage_json)
-                    values (:id, :tenantId, :runId, :provider, cast(:families as jsonb),
-                            :decision, :reason, cast(:usage as jsonb))
-                    on conflict (tenant_id, run_id) do nothing
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
-                    .addValue("runId", runId).addValue("provider", provider)
-                    .addValue("families", json(resourceFamilies == null ? List.of() : resourceFamilies))
-                    .addValue("decision", decision).addValue("reason", reason).addValue("usage", json(usage)));
-            reconcileAlerts(runId, config, usage);
-            return new Admission(runId, decision, reason, usage);
+        return tenantExecution.run(tenant, () -> {
+            Admission admission = transactions.execute(status -> {
+                Admission persisted = admission(runId);
+                if (persisted != null) return persisted;
+                // Serialize admission for a tenant/day so the hard scan cap is an atomic decision.
+                jdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(:key, 0))::text",
+                        Map.of("key", tenant.getId() + "|" + java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                        String.class);
+                persisted = admission(runId);
+                if (persisted != null) return persisted;
+                BudgetConfig config = current();
+                BudgetUsage usage = usage();
+                List<String> blockers = exceeded(config, usage, true);
+                cadenceBlocker(provider, resourceFamilies, environment, criticality).ifPresent(blockers::add);
+                boolean throttled = "THROTTLE".equals(config.enforcementMode()) && !blockers.isEmpty();
+                String decision = throttled ? "THROTTLED" : "ADMITTED";
+                String reason = blockers.isEmpty() ? "WITHIN_BUDGET" : String.join(",", blockers);
+                jdbc.update("""
+                        insert into ai_grid_budget_admissions
+                            (id, tenant_id, run_id, provider, resource_families_json, environment,
+                             criticality, decision, reason_code, usage_json)
+                        values (:id, :tenantId, :runId, :provider, cast(:families as jsonb),
+                                :environment, :criticality, :decision, :reason, cast(:usage as jsonb))
+                        """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                        .addValue("tenantId", tenant.getId()).addValue("runId", runId)
+                        .addValue("provider", provider).addValue("environment", wildcard(environment))
+                        .addValue("criticality", wildcard(criticality))
+                        .addValue("families", json(resourceFamilies == null ? List.of() : resourceFamilies))
+                        .addValue("decision", decision).addValue("reason", reason).addValue("usage", json(usage)));
+                reconcileAlerts(runId, config, usage);
+                return new Admission(runId, decision, reason, usage);
+            });
+            if (admission != null && "THROTTLED".equals(admission.decision())) {
+                throw new BudgetExceededException(admission.reasonCode());
+            }
+            return admission;
         });
-        if (admission != null && "THROTTLED".equals(admission.decision())) {
-            throw new BudgetExceededException(admission.reasonCode());
-        }
-        return admission;
     }
 
     public BudgetStatus status(Tenant tenant) {
@@ -126,7 +138,7 @@ public class AiGridBudgetService {
     }
 
     public void reconcile(Tenant tenant, UUID runId, String provider) {
-        transactions.executeWithoutResult(status -> {
+        tenantExecution.run(tenant, () -> transactions.executeWithoutResult(status -> {
             BudgetConfig config = current();
             BudgetUsage usage = usage();
             List<String> exceeded = exceeded(config, usage, true);
@@ -138,7 +150,7 @@ public class AiGridBudgetService {
                     """, Map.of("provider", provider, "retained", usage.retainedSnapshotBytes(),
                     "state", exceeded.isEmpty() ? "WITHIN_BUDGET" : "EXCEEDED", "runId", runId));
             reconcileAlerts(runId, config, usage);
-        });
+        }));
     }
 
     public void acknowledgeAlert(Tenant tenant, UUID alertId, String actor) {
@@ -162,13 +174,17 @@ public class AiGridBudgetService {
         return jdbc.queryForObject("""
                 select
                     (select count(*) from ai_grid_budget_admissions
-                      where decision = 'ADMITTED' and admitted_at >= date_trunc('day', now())) scans,
+                      where decision = 'ADMITTED' and admitted_at >=
+                            (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')) scans,
                     (select coalesce(sum(provider_api_calls), 0) from ai_grid_run_metrics
-                      where first_recorded_at >= date_trunc('day', now())) calls,
+                      where first_recorded_at >=
+                            (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')) calls,
                     (select coalesce(sum(new_snapshot_bytes), 0) from ai_grid_run_metrics
-                      where first_recorded_at >= date_trunc('day', now())) new_bytes,
+                      where first_recorded_at >=
+                            (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')) new_bytes,
                     (select coalesce(sum(processing_duration_ms), 0) from ai_grid_run_metrics
-                      where first_recorded_at >= date_trunc('day', now())) processing,
+                      where first_recorded_at >=
+                            (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')) processing,
                     (select coalesce(sum(byte_size), 0) from ai_grid_snapshot_bodies
                       where retention_state <> 'PURGED') retained
                 """, Map.of(), (rs, n) -> new BudgetUsage(rs.getLong("scans"), rs.getLong("calls"),
@@ -205,15 +221,38 @@ public class AiGridBudgetService {
                 .filter(rule -> "*".equals(rule.resourceFamily()) || (families != null && families.stream()
                         .anyMatch(family -> rule.resourceFamily().equalsIgnoreCase(family))))
                 .toList();
-        long minimum = rules.stream().mapToLong(CadenceRule::minimumIntervalSeconds).max().orElse(0);
-        if (minimum == 0) return java.util.Optional.empty();
-        Instant latest = jdbc.query("""
-                select max(admitted_at) from ai_grid_budget_admissions
-                 where provider = :provider and decision = 'ADMITTED'
-                """, Map.of("provider", provider), rs -> rs.next() && rs.getTimestamp(1) != null
-                ? rs.getTimestamp(1).toInstant() : null);
-        return latest != null && latest.plusSeconds(minimum).isAfter(Instant.now())
-                ? java.util.Optional.of("CADENCE_NOT_DUE") : java.util.Optional.empty();
+        for (CadenceRule rule : rules) {
+            if (rule.minimumIntervalSeconds() == 0) continue;
+            Instant latest = jdbc.query("""
+                    select max(admitted_at) from ai_grid_budget_admissions
+                     where provider = :provider and decision = 'ADMITTED'
+                       and (:environment = '*' or environment = :environment)
+                       and (:criticality = '*' or criticality = :criticality)
+                       and (:family = '*' or jsonb_exists(resource_families_json, :family))
+                    """, Map.of("provider", provider, "environment", rule.environment(),
+                    "criticality", rule.criticality(), "family", rule.resourceFamily()),
+                    rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
+            if (latest != null && latest.plusSeconds(rule.minimumIntervalSeconds()).isAfter(Instant.now())) {
+                return java.util.Optional.of("CADENCE_NOT_DUE");
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private Admission admission(UUID runId) {
+        return jdbc.query("""
+                select run_id, decision, reason_code,
+                       coalesce((usage_json ->> 'dailyScans')::bigint, 0) daily_scans,
+                       coalesce((usage_json ->> 'dailyProviderApiCalls')::bigint, 0) daily_calls,
+                       coalesce((usage_json ->> 'dailyNewSnapshotBytes')::bigint, 0) daily_bytes,
+                       coalesce((usage_json ->> 'dailyProcessingMs')::bigint, 0) daily_processing,
+                       coalesce((usage_json ->> 'retainedSnapshotBytes')::bigint, 0) retained_bytes
+                  from ai_grid_budget_admissions where run_id = :runId
+                """, Map.of("runId", runId), rs -> rs.next() ? new Admission(
+                rs.getObject("run_id", UUID.class), rs.getString("decision"), rs.getString("reason_code"),
+                new BudgetUsage(rs.getLong("daily_scans"), rs.getLong("daily_calls"),
+                        rs.getLong("daily_bytes"), rs.getLong("daily_processing"),
+                        rs.getLong("retained_bytes"))) : null);
     }
 
     private List<CadenceRule> cadenceRules() {

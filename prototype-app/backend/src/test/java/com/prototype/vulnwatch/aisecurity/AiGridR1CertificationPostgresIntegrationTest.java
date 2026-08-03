@@ -45,7 +45,7 @@ class AiGridR1CertificationPostgresIntegrationTest {
                 Instant.now().plus(1, ChronoUnit.DAYS)), "platform-owner"));
 
         List<String> externallyAttestable = List.of(
-                "DISCOVERY_RECALL", "FIRST_RUN_UTILITY", "DETERMINISM_AND_ISOLATION",
+                "DISCOVERY_RECALL", "TENANT_ISOLATION",
                 "ECONOMICS_AND_BUDGETS", "AWS_DESIGN_PARTNER_SOAK", "AZURE_DESIGN_PARTNER_SOAK");
         for (String gate : externallyAttestable) {
             certification.recordEvidence(new EvidenceCommand(gate, "PASS", "evidence://" + gate,
@@ -58,6 +58,8 @@ class AiGridR1CertificationPostgresIntegrationTest {
         assertTrue(readiness.gates().stream()
                 .filter(gate -> externallyAttestable.contains(gate.code()))
                 .allMatch(gate -> "PASS".equals(gate.status())));
+        assertTrue(readiness.gates().stream().anyMatch(gate -> "DETERMINISM".equals(gate.code())));
+        assertTrue(readiness.gates().stream().anyMatch(gate -> "FIRST_RUN_UTILITY".equals(gate.code())));
 
         var decision = certification.decide("platform-owner");
         assertEquals("BLOCKED", decision.decision());

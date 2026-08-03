@@ -51,12 +51,13 @@ public class AiGridRetentionService {
                     .addValue("archiveDays", command.archiveAfterDays()).addValue("restricted", command.restricted())
                     .addValue("actor", actor).addValue("reason", required(command.reason(), "reason"))
                     .addValue("class", command.retentionClass()));
-            // Policy changes can extend existing commitments, but never shorten evidence retention automatically.
-            jdbc.update("""
+            String retentionBound = command.restricted() ? "least" : "greatest";
+            jdbc.update(("""
                     update ai_grid_snapshot_bodies
-                       set retain_until = greatest(retain_until, created_at + (:days * interval '1 day'))
+                       set retain_until = %s(retain_until, created_at + (:days * interval '1 day'))
                      where retention_class = :class
-                    """, Map.of("days", command.retainDays(), "class", command.retentionClass()));
+                    """).formatted(retentionBound), Map.of("days", command.retainDays(),
+                    "class", command.retentionClass()));
             return policies().stream().filter(policy -> policy.retentionClass().equals(command.retentionClass()))
                     .findFirst().orElseThrow();
         }));
@@ -136,20 +137,23 @@ public class AiGridRetentionService {
             for (Body body : bodies) {
                 String decision;
                 String reason;
-                if (body.retainUntil().isAfter(Instant.now())) {
-                    RetentionPolicy policy = policyByClass.get(body.retentionClass());
-                    boolean shouldArchive = "HOT".equals(body.retentionClass()) && policy != null
-                            && policy.archiveAfterDays() != null
-                            && body.createdAt().plusSeconds(policy.archiveAfterDays() * 86400L).isBefore(Instant.now());
-                    if (shouldArchive) {
+                Instant now = Instant.now();
+                RetentionPolicy policy = policyByClass.get(body.retentionClass());
+                boolean archiveAgeReached = "HOT".equals(body.retentionClass()) && policy != null
+                        && policy.archiveAfterDays() != null
+                        && !body.createdAt().plusSeconds(policy.archiveAfterDays() * 86400L).isAfter(now);
+                RetentionPolicy archivePolicy = policyByClass.get("ARCHIVE");
+                Instant archiveUntil = archivePolicy == null ? body.retainUntil()
+                        : body.createdAt().plusSeconds(archivePolicy.retainDays() * 86400L);
+                if (archiveAgeReached && archiveUntil.isAfter(now)) {
                         jdbc.update("""
                                 update ai_grid_snapshot_bodies set retention_class = 'ARCHIVE',
-                                    retention_state = 'ARCHIVED' where id = :id
-                                """, Map.of("id", body.id()));
-                        decision = "ARCHIVE"; reason = "ARCHIVE_AGE_REACHED"; archived++;
-                    } else {
-                        decision = "RETAIN"; reason = "RETENTION_WINDOW_ACTIVE"; retained++;
-                    }
+                                    retention_state = 'ARCHIVED', retain_until = :retainUntil
+                                 where id = :id
+                                """, Map.of("id", body.id(), "retainUntil", Timestamp.from(archiveUntil)));
+                    decision = "ARCHIVE"; reason = "ARCHIVE_AGE_REACHED"; archived++;
+                } else if (body.retainUntil().isAfter(now)) {
+                    decision = "RETAIN"; reason = "RETENTION_WINDOW_ACTIVE"; retained++;
                 } else {
                     String protection = protection(body);
                     if (protection == null) {
@@ -170,8 +174,36 @@ public class AiGridRetentionService {
                         .addValue("tenantId", tenant.getId()).addValue("bodyId", body.id())
                         .addValue("decision", decision).addValue("reason", reason));
             }
-            return new SweepResult(bodies.size(), retained, archived, blocked, eligible);
+            int purged = purgeUnreferencedEligible(tenant);
+            return new SweepResult(bodies.size(), retained, archived, blocked, eligible, purged);
         }));
+    }
+
+    private int purgeUnreferencedEligible(Tenant tenant) {
+        List<PurgeCandidate> candidates = jdbc.query("""
+                select b.id, b.content_hash, b.byte_size
+                  from ai_grid_snapshot_bodies b
+                 where b.retention_state = 'PURGE_ELIGIBLE'
+                   and not exists (select 1 from ai_grid_snapshot_manifests m where m.body_id = b.id)
+                   and not exists (select 1 from ai_grid_evidence_holds h
+                                    where h.snapshot_body_id = b.id and h.released_at is null
+                                      and (h.expires_at is null or h.expires_at > now()))
+                 order by b.retain_until, b.id
+                 for update skip locked
+                """, (rs, n) -> new PurgeCandidate(rs.getObject("id", UUID.class),
+                rs.getString("content_hash"), rs.getLong("byte_size")));
+        for (PurgeCandidate candidate : candidates) {
+            jdbc.update("""
+                    insert into ai_grid_retention_purge_audit
+                        (id, tenant_id, snapshot_body_id, content_hash, byte_size, reason_code, purged_by)
+                    values (:id, :tenantId, :bodyId, :hash, :bytes,
+                            'RETENTION_EXPIRED_UNREFERENCED', 'ai-grid-retention-sweeper')
+                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                    .addValue("tenantId", tenant.getId()).addValue("bodyId", candidate.id())
+                    .addValue("hash", candidate.contentHash()).addValue("bytes", candidate.byteSize()));
+            jdbc.update("delete from ai_grid_snapshot_bodies where id = :id", Map.of("id", candidate.id()));
+        }
+        return candidates.size();
     }
 
     private String protection(Body body) {
@@ -249,6 +281,7 @@ public class AiGridRetentionService {
 
     private record Body(UUID id, String retentionClass, String retentionState, Instant createdAt,
                         Instant retainUntil, boolean legalHold, Instant replayCommitmentUntil) {}
+    private record PurgeCandidate(UUID id, String contentHash, long byteSize) {}
     public record RetentionPolicy(String retentionClass, int retainDays, Integer archiveAfterDays,
                                   boolean restricted, String updatedBy, String reason, Instant updatedAt) {}
     public record RetentionCounts(long bodies, long retainedBytes, long archived, long purgeBlocked,
@@ -258,7 +291,8 @@ public class AiGridRetentionService {
     public record EvidenceHold(UUID id, UUID snapshotBodyId, String holdType, String referenceId,
                                String reason, Instant expiresAt, Instant releasedAt, String createdBy,
                                Instant createdAt) {}
-    public record SweepResult(int evaluated, int retained, int archived, int purgeBlocked, int purgeEligible) {}
+    public record SweepResult(int evaluated, int retained, int archived, int purgeBlocked,
+                              int purgeEligible, int purged) {}
     public record PolicyCommand(String retentionClass, int retainDays, Integer archiveAfterDays,
                                 boolean restricted, String reason) {}
     public record HoldCommand(UUID snapshotBodyId, String holdType, String referenceId, String reason,

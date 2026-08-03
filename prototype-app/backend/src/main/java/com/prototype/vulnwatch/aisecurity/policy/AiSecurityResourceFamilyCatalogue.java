@@ -2,6 +2,8 @@ package com.prototype.vulnwatch.aisecurity.policy;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -51,6 +53,18 @@ public class AiSecurityResourceFamilyCatalogue {
 
     public boolean isKnown(String resourceFamily) {
         return FAMILIES.containsKey(resourceFamily);
+    }
+
+    public Set<String> familiesForProvider(String provider) {
+        String prefix = "AZURE".equalsIgnoreCase(provider) ? "AZURE_" : null;
+        Set<String> result = new TreeSet<>();
+        for (String family : FAMILIES.keySet()) {
+            if ((prefix != null && family.startsWith(prefix))
+                    || (prefix == null && !family.startsWith("AZURE_"))) {
+                result.add(family);
+            }
+        }
+        return Set.copyOf(result);
     }
 
     enum ScopeSemantics {
