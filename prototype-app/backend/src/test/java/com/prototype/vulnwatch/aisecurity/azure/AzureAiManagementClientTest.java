@@ -52,6 +52,13 @@ class AzureAiManagementClientTest {
     }
 
     @Test
+    void classifiesRaiPoliciesAsFirstClassDiscoveryResources() {
+        assertEquals(
+                "AZURE_RAI_POLICIES",
+                client.family("Microsoft.CognitiveServices/accounts/raiPolicies"));
+    }
+
+    @Test
     void honorsAndBoundsAzureRetryHeaders() {
         HttpHeaders milliseconds = HttpHeaders.of(
                 Map.of("x-ms-retry-after-ms", List.of("1200")), (name, value) -> true);

@@ -64,6 +64,9 @@ app:
     # Cron for the leader-locked shadow-mismatch sweep (skipped entirely in LEGACY mode).
     shadow-sweep-cron: ${APP_ENTITLEMENTS_SHADOW_SWEEP_CRON:0 */30 * * * *}
   ai-security:
+    grid:
+      enabled: ${APP_AI_GRID_ENABLED:true}
+      legacy-findings-enabled: ${APP_AI_GRID_LEGACY_FINDINGS_ENABLED:false}
     aws:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
       admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}
@@ -141,7 +144,7 @@ app:
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
     enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
-    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:45}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:53}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}

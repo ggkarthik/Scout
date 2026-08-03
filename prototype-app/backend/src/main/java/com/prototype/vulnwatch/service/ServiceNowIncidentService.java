@@ -31,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import static org.springframework.http.HttpStatus.BAD_GATEWAY;
+import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
 @Service
@@ -140,6 +141,89 @@ public class ServiceNowIncidentService {
         }
 
         return responses;
+    }
+
+    /** Creates and links an incident for a canonical non-CVE finding, including AI Grid findings. */
+    @Transactional
+    public ServiceNowIncidentResponse createFindingIncident(
+            Tenant tenant,
+            UUID findingId,
+            CreateServiceNowIncidentRequest request
+    ) {
+        ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config =
+                serviceNowCmdbConfigService.resolveRuntimeConfig(tenant)
+                        .orElseThrow(() -> new ResponseStatusException(
+                                SERVICE_UNAVAILABLE,
+                                "ServiceNow is not configured for this tenant. Configure the ServiceNow connector first."
+                        ));
+        Finding finding = findingRepository.findById(findingId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Finding not found"));
+        if (finding.getStatus() == com.prototype.vulnwatch.domain.FindingStatus.RESOLVED
+                || finding.getStatus() == com.prototype.vulnwatch.domain.FindingStatus.AUTO_CLOSED) {
+            throw new ResponseStatusException(CONFLICT, "Closed findings are not eligible for a new incident");
+        }
+
+        String severity = text(request.severity(), finding.getSeverityOverride(), riskSeverity(finding.getRiskScore()));
+        String priorityLabel = text(request.priority(), severity, "MEDIUM");
+        int priority = PRIORITY_MAP.getOrDefault(priorityLabel.toUpperCase(Locale.ROOT), 3);
+        String assignmentGroup = text(finding.getOwnerGroup(), DEFAULT_ASSIGNMENT_GROUP);
+        String dueDate = text(request.dueDate(), isoDate(finding.getDueAt()));
+        String title = text(request.findingTitle(), finding.getTitle(), finding.getDisplayId());
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("short_description", finding.getDisplayId() + ": " + title);
+        payload.put("description", buildFindingDescription(finding, severity, request, dueDate));
+        payload.put("work_notes", "Scout AI Security finding " + finding.getDisplayId()
+                + " was promoted to the canonical remediation workflow.");
+        payload.put("priority", String.valueOf(priority));
+        payload.put("urgency", String.valueOf(Math.min(3, priority)));
+        payload.put("impact", String.valueOf(Math.min(3, priority)));
+        payload.put("category", "Security");
+        payload.put("subcategory", "Vulnerability");
+        payload.put("assignment_group", assignmentGroup);
+        if (request.assignedTo() != null && !request.assignedTo().isBlank()) {
+            payload.put("assigned_to", request.assignedTo().trim());
+        }
+        if (dueDate != null) payload.put("due_date", dueDate + " 00:00:00");
+        if (request.solutionInfo() != null && !request.solutionInfo().isBlank()) {
+            payload.put("close_notes", request.solutionInfo().trim());
+        }
+
+        String body;
+        try { body = objectMapper.writeValueAsString(payload); }
+        catch (JsonProcessingException e) {
+            throw new ResponseStatusException(BAD_GATEWAY, "Failed to serialize incident payload: " + e.getMessage());
+        }
+        ResponseEntity<String> response = outboundHttpClient.exchange(
+                config.baseUrl() + "/api/now/table/incident", HttpMethod.POST,
+                new HttpEntity<>(body, buildJsonHeaders(config)), String.class,
+                "ServiceNow finding incident creation",
+                outboundPolicyFactory.forProvider("servicenow", 0L, null, null),
+                context -> new OutboundFailureDecision<>(
+                        context.isRetryableByDefault(), context.retryAfterDelayMs(),
+                        context.error() instanceof RuntimeException rte ? rte
+                                : new RuntimeException("ServiceNow incident creation failed: "
+                                + context.error().getMessage(), context.error())));
+        JsonNode result = ServiceNowApiResponseParser.parseJson(
+                objectMapper, response, "ServiceNow finding incident creation").path("result");
+        String incidentNumber = result.path("number").asText(null);
+        String sysId = result.path("sys_id").asText(null);
+        if (incidentNumber == null || incidentNumber.isBlank()) {
+            throw new ResponseStatusException(BAD_GATEWAY,
+                    "ServiceNow returned an unexpected response — incident number missing");
+        }
+        String taskDueDate = text(request.taskSlaDueDate(), dueDate);
+        if (sysId != null && !sysId.isBlank() && taskDueDate != null) {
+            createTaskSla(config, sysId, taskDueDate);
+        }
+        finding.setIncidentId(incidentNumber);
+        finding.setIncidentStatus("New");
+        finding.touch();
+        findingRepository.save(finding);
+        return new ServiceNowIncidentResponse(incidentNumber, sysId,
+                config.baseUrl() + "/incident.do?sys_id=" + sysId, "created",
+                "Incident " + incidentNumber + " created successfully in ServiceNow");
     }
 
     /**
@@ -255,6 +339,47 @@ public class ServiceNowIncidentService {
                 "created",
                 "Incident " + incidentNumber + " created successfully in ServiceNow"
         );
+    }
+
+    private HttpHeaders buildJsonHeaders(ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config) {
+        HttpHeaders headers = buildHeaders(config);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
+    private String buildFindingDescription(Finding finding, String severity,
+                                           CreateServiceNowIncidentRequest request, String dueDate) {
+        StringBuilder description = new StringBuilder("AI SECURITY FINDING\n===================\n");
+        description.append("Finding ID : ").append(finding.getDisplayId()).append('\n');
+        description.append("Title      : ").append(text(finding.getTitle(), "AI security finding")).append('\n');
+        description.append("Severity   : ").append(severity).append('\n');
+        if (finding.getPolicyId() != null) description.append("Policy     : ").append(finding.getPolicyId()).append('\n');
+        if (finding.getReasonCode() != null) description.append("Reason     : ").append(finding.getReasonCode()).append('\n');
+        if (dueDate != null) description.append("Due date   : ").append(dueDate).append('\n');
+        if (request.solutionInfo() != null && !request.solutionInfo().isBlank()) {
+            description.append("\nREMEDIATION\n===========\n").append(request.solutionInfo().trim()).append('\n');
+        }
+        if (request.notes() != null && !request.notes().isBlank()) {
+            description.append("\nANALYST NOTES\n=============\n").append(request.notes().trim()).append('\n');
+        }
+        return description.toString();
+    }
+
+    private String riskSeverity(double score) {
+        if (score >= 9) return "CRITICAL";
+        if (score >= 7) return "HIGH";
+        if (score >= 4) return "MEDIUM";
+        return "LOW";
+    }
+
+    private String isoDate(java.time.Instant instant) {
+        return instant == null ? null : java.time.format.DateTimeFormatter.ISO_LOCAL_DATE
+                .withZone(java.time.ZoneOffset.UTC).format(instant);
+    }
+
+    private String text(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value.trim();
+        return null;
     }
 
     /**

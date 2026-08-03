@@ -511,6 +511,13 @@ import type {
   AiSecurityRun,
   AiSecurityScope,
   AiSecuritySummary,
+  AiGridSystem,
+  AiGridCoverage,
+  AiGridCoverageDimension,
+  AiGridPolicy,
+  AiGridPolicySelection,
+  AiGridOwner,
+  AiGridRunMetrics,
 } from '../features/ai-security/types';
 
 const API_BASE = resolveApiBase();
@@ -1323,6 +1330,24 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getAiSecuritySummary: () => request<AiSecuritySummary>('/ai-security/summary'),
+  listAiGridSystems: () => request<AiGridSystem[]>('/ai-systems'),
+  getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
+  getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
+  listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
+  updateAiGridPolicySelection: (policyId: string, selection: AiGridPolicySelection, reason?: string) =>
+    request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
+      method: 'PUT',
+      body: JSON.stringify({ selection, reason }),
+    }),
+  getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
+    `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
+  ),
+  confirmAiGridArtifactOwner: (artifactId: string, ownerName: string, reason?: string) => request<AiGridOwner>(
+    `/ai-artifacts/${encodeURIComponent(artifactId)}/owner`, {
+      method: 'PUT',
+      body: JSON.stringify({ ownerName, reason }),
+    },
+  ),
   listAiSecurityArtifacts: (
     artifactType?: string,
     page = 0,

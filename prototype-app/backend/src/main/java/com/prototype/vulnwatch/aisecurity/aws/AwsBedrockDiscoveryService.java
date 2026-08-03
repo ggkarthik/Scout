@@ -12,6 +12,9 @@ import com.prototype.vulnwatch.aisecurity.service.AiSecurityAwsConnectorService.
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAwsConnectorService.CredentialsHandle;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
+import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
+import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URLDecoder;
@@ -29,6 +32,9 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.core.interceptor.Context;
+import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
+import software.amazon.awssdk.core.interceptor.ExecutionInterceptor;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrock.BedrockClient;
 import software.amazon.awssdk.services.bedrock.model.GetGuardrailRequest;
@@ -64,19 +70,34 @@ public class AwsBedrockDiscoveryService {
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final ObjectMapper objectMapper;
     private final AiSecurityAwsAdmissionService admissionService;
+    private final AiGridBudgetService budgets;
+    private final AiGridProviderCallCounter providerCalls;
+    private final AiGridRunMetricsService runMetrics;
+    private final ExecutionInterceptor providerCallInterceptor = new ExecutionInterceptor() {
+        @Override
+        public void beforeTransmission(Context.BeforeTransmission context, ExecutionAttributes executionAttributes) {
+            providerCalls.increment();
+        }
+    };
 
     public AwsBedrockDiscoveryService(
             AiSecurityAwsConnectorService connectorService,
             AiSecurityObservationService observationService,
             AiSecuritySyncRunFacade syncRunFacade,
             ObjectMapper objectMapper,
-            AiSecurityAwsAdmissionService admissionService
+            AiSecurityAwsAdmissionService admissionService,
+            AiGridBudgetService budgets,
+            AiGridProviderCallCounter providerCalls,
+            AiGridRunMetricsService runMetrics
     ) {
         this.connectorService = connectorService;
         this.observationService = observationService;
         this.syncRunFacade = syncRunFacade;
         this.objectMapper = objectMapper;
         this.admissionService = admissionService;
+        this.budgets = budgets;
+        this.providerCalls = providerCalls;
+        this.runMetrics = runMetrics;
     }
 
     public DiscoveryResult discover(Tenant tenant, UUID connectorId) {
@@ -91,32 +112,44 @@ public class AwsBedrockDiscoveryService {
                 "regions", config.regions())));
         int artifacts = 0;
         int failedScopes = 0;
-        try (CredentialsHandle credentials = connectorService.credentials(config)) {
-            for (String regionName : config.regions()) {
-                Region region = Region.of(regionName);
-                try (var permit = admissionService.acquire(config.accountId(), regionName)) {
-                    RegionContext context = discoverRegion(config, credentials.provider(), region);
-                    for (ScopePayload scope : context.scopes()) {
-                        observationService.ingest(tenant, envelope(tenant, config, run.getId(), regionName, scope));
-                        artifacts += scope.artifacts().size();
-                        if (scope.status() != ScopeStatus.COMPLETE) {
-                            failedScopes++;
+        try (var measurement = providerCalls.begin()) {
+            try {
+                budgets.admit(tenant, run.getId(), "AWS", List.of(
+                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES",
+                        "S3_EXPOSURE", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING"), "*", "*");
+                try (CredentialsHandle credentials = connectorService.credentials(config)) {
+                    for (String regionName : config.regions()) {
+                        Region region = Region.of(regionName);
+                        try (var permit = admissionService.acquire(config.accountId(), regionName)) {
+                            RegionContext context = discoverRegion(config, credentials.provider(), region);
+                            for (ScopePayload scope : context.scopes()) {
+                                observationService.ingest(tenant, envelope(tenant, config, run.getId(), regionName, scope));
+                                artifacts += scope.artifacts().size();
+                                if (scope.status() != ScopeStatus.COMPLETE) {
+                                    failedScopes++;
+                                }
+                            }
                         }
                     }
                 }
+                int persistedArtifacts = observationService.countPersistedArtifacts(tenant, run.getId());
+                runMetrics.recordProviderCalls(tenant, run.getId(), "AWS", measurement.count());
+                budgets.reconcile(tenant, run.getId(), "AWS");
+                syncRunFacade.complete(
+                        tenant.getId(), run.getId(), persistedArtifacts, failedScopes,
+                        json(Map.of(
+                                "provider", "AWS",
+                                "connectorId", connectorId,
+                                "accountId", config.accountId(),
+                                "regions", config.regions(),
+                                "providerApiCalls", measurement.count())));
+                return new DiscoveryResult(run.getId(), persistedArtifacts, failedScopes);
+            } catch (Exception ex) {
+                runMetrics.recordProviderCalls(tenant, run.getId(), "AWS", measurement.count());
+                budgets.reconcile(tenant, run.getId(), "AWS");
+                syncRunFacade.fail(tenant.getId(), run.getId(), "AWS Bedrock discovery failed");
+                throw ex;
             }
-            int persistedArtifacts = observationService.countPersistedArtifacts(tenant, run.getId());
-            syncRunFacade.complete(
-                    tenant.getId(), run.getId(), persistedArtifacts, failedScopes,
-                    json(Map.of(
-                            "provider", "AWS",
-                            "connectorId", connectorId,
-                            "accountId", config.accountId(),
-                            "regions", config.regions())));
-            return new DiscoveryResult(run.getId(), persistedArtifacts, failedScopes);
-        } catch (Exception ex) {
-            syncRunFacade.fail(tenant.getId(), run.getId(), "AWS Bedrock discovery failed");
-            throw ex;
         }
     }
 
@@ -142,7 +175,8 @@ public class AwsBedrockDiscoveryService {
         List<RelationshipObservation> relationships = new ArrayList<>();
         Map<String, AgentFact> facts = new LinkedHashMap<>();
         try (BedrockAgentClient client = BedrockAgentClient.builder()
-                .region(region).credentialsProvider(credentials).build()) {
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             String token = null;
             do {
                 var response = client.listAgents(ListAgentsRequest.builder().nextToken(token).build());
@@ -196,7 +230,8 @@ public class AwsBedrockDiscoveryService {
             List<ScopePayload> scopes
     ) {
         List<ArtifactObservation> artifacts = new ArrayList<>();
-        try (IamClient iam = IamClient.builder().region(Region.AWS_GLOBAL).credentialsProvider(credentials).build()) {
+        try (IamClient iam = IamClient.builder().region(Region.AWS_GLOBAL).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             for (AgentFact agent : agents.facts().values()) {
                 if (!hasText(agent.roleArn())) {
                     artifacts.add(agentUpdate(agent, Map.of("iamEvidenceAvailable", false)));
@@ -224,9 +259,11 @@ public class AwsBedrockDiscoveryService {
         List<ArtifactObservation> artifacts = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
-                .region(region).credentialsProvider(credentials).build();
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
              LambdaClient lambda = LambdaClient.builder()
-                     .region(region).credentialsProvider(credentials).build()) {
+                     .region(region).credentialsProvider(credentials)
+                     .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             for (AgentFact agent : agents.facts().values()) {
                 List<String> lambdaArns = actionGroupLambdas(bedrock, agent.id());
                 String effectiveAuth = "ABSENT";
@@ -270,8 +307,10 @@ public class AwsBedrockDiscoveryService {
         List<ArtifactObservation> exposureArtifacts = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
-                .region(region).credentialsProvider(credentials).build();
-             S3Client s3 = S3Client.builder().region(region).credentialsProvider(credentials).build()) {
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
+             S3Client s3 = S3Client.builder().region(region).credentialsProvider(credentials)
+                     .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             String token = null;
             do {
                 var response = bedrock.listKnowledgeBases(ListKnowledgeBasesRequest.builder().nextToken(token).build());
@@ -342,7 +381,8 @@ public class AwsBedrockDiscoveryService {
         List<RelationshipObservation> relationships = new ArrayList<>();
         Map<String, String> minimumStrength = new HashMap<>();
         try (BedrockClient bedrock = BedrockClient.builder()
-                .region(region).credentialsProvider(credentials).build()) {
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             String token = null;
             do {
                 var response = bedrock.listGuardrails(ListGuardrailsRequest.builder().nextToken(token).build());
@@ -387,7 +427,8 @@ public class AwsBedrockDiscoveryService {
             List<ScopePayload> scopes
     ) {
         try (BedrockClient bedrock = BedrockClient.builder()
-                .region(region).credentialsProvider(credentials).build()) {
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             var response = bedrock.getModelInvocationLoggingConfiguration(
                     GetModelInvocationLoggingConfigurationRequest.builder().build());
             boolean enabled = response.loggingConfig() != null;

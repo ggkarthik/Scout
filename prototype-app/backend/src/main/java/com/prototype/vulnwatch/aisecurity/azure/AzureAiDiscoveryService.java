@@ -15,6 +15,9 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityDiscoveryProvider;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
+import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
+import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.IngestionJobService;
@@ -35,6 +38,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
+    private final AzureRaiPolicyAnalyzer raiPolicyAnalyzer = new AzureRaiPolicyAnalyzer();
 
     private static final Set<String> SEARCH_DATA_FAMILIES = Set.of(
             "AZURE_SEARCH_INDEXES",
@@ -51,6 +55,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private final AzurePolicyPermissionMatrix permissionMatrix;
     private final AiSecurityAzureKillSwitchService killSwitches;
     private final AiSecurityAzureMetrics metrics;
+    private final AiGridBudgetService budgets;
+    private final AiGridProviderCallCounter providerCalls;
+    private final AiGridRunMetricsService runMetrics;
     private final ObjectMapper objectMapper;
     private final boolean enabled;
     private final boolean foundryAgentsEnabled;
@@ -66,6 +73,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             AzurePolicyPermissionMatrix permissionMatrix,
             AiSecurityAzureKillSwitchService killSwitches,
             AiSecurityAzureMetrics metrics,
+            AiGridBudgetService budgets,
+            AiGridProviderCallCounter providerCalls,
+            AiGridRunMetricsService runMetrics,
             ObjectMapper objectMapper,
             @Value("${app.ai-security.azure.enabled:false}") boolean enabled,
             @Value("${app.ai-security.azure.foundry-agents.enabled:false}") boolean foundryAgentsEnabled,
@@ -80,6 +90,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         this.permissionMatrix = permissionMatrix;
         this.killSwitches = killSwitches;
         this.metrics = metrics;
+        this.budgets = budgets;
+        this.providerCalls = providerCalls;
+        this.runMetrics = runMetrics;
         this.objectMapper = objectMapper;
         this.enabled = enabled;
         this.foundryAgentsEnabled = foundryAgentsEnabled;
@@ -125,36 +138,46 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         Instant startedAt = Instant.now();
         int observed = 0;
         int incomplete = 0;
-        try (var permit = admission.acquire(connector.subscriptionId())) {
-            TokenCredential credential = credentials.tokenCredential(profile);
-            var snapshot = azure.discover(
-                    credential,
-                    connector.subscriptionId(),
-                    Set.copyOf(connector.resourceFamilies()),
-                    foundryAgentsEnabled);
-            Map<String, AzureResource> allResources = index(snapshot.resources());
-            for (String family : connector.resourceFamilies()) {
-                for (ScopePayload payload : payloads(family, connector, snapshot, allResources)) {
-                    observations.ingest(tenant, envelope(tenant, connector, run.getId(), payload));
-                    metrics.recordScope(payload.family(), payload.status().name());
-                    observed += payload.artifacts().size();
-                    if (payload.status() != ScopeStatus.COMPLETE) {
-                        incomplete++;
+        try (var measurement = providerCalls.begin()) {
+            try {
+                budgets.admit(tenant, run.getId(), "AZURE", connector.resourceFamilies(), "*", "*");
+                try (var permit = admission.acquire(connector.subscriptionId())) {
+                    TokenCredential credential = credentials.tokenCredential(profile);
+                    var snapshot = azure.discover(
+                            credential,
+                            connector.subscriptionId(),
+                            Set.copyOf(connector.resourceFamilies()),
+                            foundryAgentsEnabled);
+                    Map<String, AzureResource> allResources = index(snapshot.resources());
+                    for (String family : connector.resourceFamilies()) {
+                        for (ScopePayload payload : payloads(family, connector, snapshot, allResources)) {
+                            observations.ingest(tenant, envelope(tenant, connector, run.getId(), payload));
+                            metrics.recordScope(payload.family(), payload.status().name());
+                            observed += payload.artifacts().size();
+                            if (payload.status() != ScopeStatus.COMPLETE) {
+                                incomplete++;
+                            }
+                        }
                     }
                 }
+                int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
+                runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
+                budgets.reconcile(tenant, run.getId(), "AZURE");
+                runs.complete(tenant.getId(), run.getId(), persistedArtifacts, incomplete, json(Map.of(
+                        "provider", "AZURE",
+                        "connectorId", connector.id(),
+                        "subscriptionId", connector.subscriptionId(),
+                        "families", connector.resourceFamilies(),
+                        "providerApiCalls", measurement.count())));
+                metrics.recordRun("completed");
+                return new DiscoveryResult(run.getId(), persistedArtifacts, incomplete);
+            } catch (Exception exception) {
+                runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
+                budgets.reconcile(tenant, run.getId(), "AZURE");
+                runs.fail(tenant.getId(), run.getId(), "Azure AI Security discovery failed");
+                metrics.recordRun("failed");
+                throw exception;
             }
-            int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
-            runs.complete(tenant.getId(), run.getId(), persistedArtifacts, incomplete, json(Map.of(
-                    "provider", "AZURE",
-                    "connectorId", connector.id(),
-                    "subscriptionId", connector.subscriptionId(),
-                    "families", connector.resourceFamilies())));
-            metrics.recordRun("completed");
-            return new DiscoveryResult(run.getId(), persistedArtifacts, incomplete);
-        } catch (Exception exception) {
-            runs.fail(tenant.getId(), run.getId(), "Azure AI Security discovery failed");
-            metrics.recordRun("failed");
-            throw exception;
         } finally {
             metrics.recordRunDuration(Duration.between(startedAt, Instant.now()));
         }
@@ -255,6 +278,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                         identity.id(), assignment.id(), "HAS_ROLE_ASSIGNMENT", Map.of()));
             }
         }
+        if ("AZURE_RAI_POLICIES".equals(family)) {
+            addRaiPolicyRelationships(artifacts, relationships, included, resources, snapshot);
+        }
 
         if (failure == null) {
             return new ScopePayload(family, region, ScopeStatus.COMPLETE, artifacts, relationships, List.of());
@@ -325,6 +351,18 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             values.put("modelVersion", nullToEmpty(text(resource.properties().path("model").path("version"))));
             values.put("scaleType", nullToEmpty(text(resource.properties().path("scaleSettings").path("scaleType"))));
             values.put("capacity", resource.sku().path("capacity").asInt(0));
+            values.put("raiPolicyName", nullToEmpty(text(resource.properties().path("raiPolicyName"))));
+        }
+        if ("AZURE_RAI_POLICIES".equals(family)) {
+            AzureRaiPolicyAnalyzer.Analysis analysis = raiPolicyAnalyzer.analyze(resource.properties());
+            values.put("raiPolicyMode", nullToEmpty(text(resource.properties().path("mode"))));
+            values.put("raiBasePolicyName", nullToEmpty(text(resource.properties().path("basePolicyName"))));
+            values.put("raiFilterCount", analysis.filterCount());
+            values.put("raiNonBlockingFilterCount", analysis.nonBlockingFilterCount());
+            values.put("raiCustomBlocklistCount", size(resource.properties().path("customBlocklists")));
+            values.put("raiFilterEvidenceComplete", analysis.nonBlockingFilterObserved().isPresent());
+            analysis.nonBlockingFilterObserved()
+                    .ifPresent(value -> values.put("raiNonBlockingFilterObserved", value));
         }
         if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
             values.put("modelDeployment", nullToEmpty(text(resource.properties().path("modelDeploymentName"))));
@@ -436,6 +474,30 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         return tools;
     }
 
+    private void addRaiPolicyRelationships(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            List<AzureResource> policies,
+            AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        for (AzureResource deployment : snapshot.resources()
+                .getOrDefault("AZURE_FOUNDRY_DEPLOYMENTS", List.of())) {
+            String policyName = text(deployment.properties().path("raiPolicyName"));
+            if (policyName == null) continue;
+            policies.stream()
+                    .filter(policy -> policyName.equalsIgnoreCase(policy.name()))
+                    .filter(policy -> policy.parentId() != null
+                            && policy.parentId().equalsIgnoreCase(deployment.parentId()))
+                    .findFirst()
+                    .ifPresent(policy -> {
+                        addArtifact(artifacts, included, deployment, "AZURE_FOUNDRY_DEPLOYMENTS", snapshot);
+                        relationships.add(new RelationshipObservation(
+                                deployment.id(), policy.id(), "USES_GUARDRAIL", Map.of("provider", "AZURE")));
+                    });
+        }
+    }
+
     private ObservationEnvelopeV1 envelope(
             Tenant tenant,
             ConnectorSecret connector,
@@ -527,6 +589,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private String artifactType(String family) {
         if ("AZURE_FOUNDRY_DEPLOYMENTS".equals(family) || "AZURE_ML_MODELS".equals(family)) return "AI_MODEL";
         if ("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_BOT_SERVICES".equals(family)) return "AI_AGENT";
+        if ("AZURE_RAI_POLICIES".equals(family)) return "AI_GUARDRAIL";
         return "OTHER_AI_ARTIFACT";
     }
 
@@ -554,6 +617,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if (normalized.equals("microsoft.cognitiveservices/accounts/projects")) return "AZURE_FOUNDRY_PROJECTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/deployments")) {
             return "AZURE_FOUNDRY_DEPLOYMENTS";
+        }
+        if (normalized.equals("microsoft.cognitiveservices/accounts/raipolicies")) {
+            return "AZURE_RAI_POLICIES";
         }
         if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";
@@ -662,6 +728,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if (exception instanceof AiSecurityAzureAdmissionService.AdmissionException) {
             return "THROTTLED";
         }
+        if (exception instanceof AiGridBudgetService.BudgetExceededException) {
+            return "BUDGET_THROTTLED";
+        }
         return AiSecurityDiscoveryProvider.super.failureCode(exception);
     }
 
@@ -672,6 +741,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             case "AZURE_TENANT_MISMATCH" -> "Azure tenant does not match the connector";
             case "ACCESS_DENIED" -> "Azure permissions are insufficient for discovery";
             case "THROTTLED" -> "Azure temporarily throttled AI Security discovery";
+            case "BUDGET_THROTTLED" -> "AI Security scan was deferred by the tenant budget policy";
             case "TIMEOUT" -> "Azure discovery timed out";
             default -> "Azure AI Security discovery could not be completed";
         };

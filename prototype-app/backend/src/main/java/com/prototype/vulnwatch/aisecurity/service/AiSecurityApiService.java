@@ -107,7 +107,9 @@ public class AiSecurityApiService {
                     .addValue("offset", safePage * safeSize, Types.INTEGER);
             List<ArtifactResponse> items = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text,
+                           account_id, region, active, attributes_json::text, owner_name, owner_state,
+                           owner_source, owner_confidence, owner_confidence_method,
+                           owner_confidence_method_version, business_criticality, environment,
                            first_observed_at, last_observed_at
                       from ai_security_artifacts
                      where (:artifactType is null
@@ -134,7 +136,9 @@ public class AiSecurityApiService {
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> rows = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text,
+                           account_id, region, active, attributes_json::text, owner_name, owner_state,
+                           owner_source, owner_confidence, owner_confidence_method,
+                           owner_confidence_method_version, business_criticality, environment,
                            first_observed_at, last_observed_at
                       from ai_security_artifacts where id = :id
                     """, Map.of("id", artifactId), this::artifact);
@@ -173,7 +177,9 @@ public class AiSecurityApiService {
             if (rootArtifactId == null) {
                 nodes = jdbc.query("""
                         select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                               account_id, region, active, attributes_json::text,
+                               account_id, region, active, attributes_json::text, owner_name, owner_state,
+                               owner_source, owner_confidence, owner_confidence_method,
+                               owner_confidence_method_version, business_criticality, environment,
                                first_observed_at, last_observed_at
                           from ai_security_artifacts where active = true
                          order by last_observed_at desc limit 500
@@ -225,22 +231,27 @@ public class AiSecurityApiService {
                        and (:subscription is null or a.account_id = :subscription)
                     """;
             List<FindingResponse> items = jdbc.query("""
-                    select f.id, f.display_id, f.policy_id, f.policy_version, f.artifact_id,
-                           a.name as artifact_name, f.severity, f.status, f.title,
-                           f.evidence_json::text, f.first_observed_at, f.last_observed_at, f.resolved_at,
+                    select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
+                           a.name as artifact_name,
+                           coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                               when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
+                           f.status, f.title, f.evidence::text evidence_json,
+                           f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
-                      from ai_security_findings f
-                      join ai_security_artifacts a on a.id = f.artifact_id
+                      from findings f
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join ai_security_artifacts a on a.id = fs.subject_id
                       left join lateral (
-                          select disposition from ai_security_finding_reviews r
+                          select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
                       ) review on true
-                    """ + filter + " order by f.last_observed_at desc, f.id limit :limit offset :offset",
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
-                    select count(*) from ai_security_findings f
-                    join ai_security_artifacts a on a.id = f.artifact_id
-                    """ + filter, params);
+                    select count(*) from findings f
+                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                    join ai_security_artifacts a on a.id = fs.subject_id
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -259,7 +270,7 @@ public class AiSecurityApiService {
             FindingResponse finding = findingsById(findingId).stream().findFirst()
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security finding not found"));
             jdbc.update("""
-                    insert into ai_security_finding_reviews (
+                    insert into finding_reviews (
                         id, tenant_id, finding_id, disposition, reason, policy_version, reviewed_by
                     ) values (
                         :id, :tenantId, :findingId, :disposition, :reason, :policyVersion, :reviewedBy
@@ -272,7 +283,7 @@ public class AiSecurityApiService {
                     .addValue("reason", blankToNull(reason))
                     .addValue("policyVersion", finding.policyVersion())
                     .addValue("reviewedBy", actor));
-            auditEventService.record("ai_security.finding.reviewed", "ai_security_finding",
+            auditEventService.record("ai_security.finding.reviewed", "finding",
                     findingId.toString(), "{\"disposition\":\"" + disposition.name() + "\"}");
             return findingsById(findingId).get(0);
         }));
@@ -440,17 +451,21 @@ public class AiSecurityApiService {
 
     private List<FindingResponse> findingsById(UUID findingId) {
         return jdbc.query("""
-                select f.id, f.display_id, f.policy_id, f.policy_version, f.artifact_id,
-                       a.name as artifact_name, f.severity, f.status, f.title,
-                       f.evidence_json::text, f.first_observed_at, f.last_observed_at, f.resolved_at,
+                select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
+                       a.name as artifact_name,
+                       coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                           when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
+                       f.status, f.title, f.evidence::text evidence_json,
+                       f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
-                  from ai_security_findings f
-                  join ai_security_artifacts a on a.id = f.artifact_id
+                  from findings f
+                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                  join ai_security_artifacts a on a.id = fs.subject_id
                   left join lateral (
-                      select disposition from ai_security_finding_reviews r
+                      select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
-                 where f.id = :id
+                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
                 """, Map.of("id", findingId), this::finding);
     }
 
@@ -489,6 +504,14 @@ public class AiSecurityApiService {
                 rs.getString("region"),
                 rs.getBoolean("active"),
                 readMap(rs.getString("attributes_json")),
+                rs.getString("owner_name"),
+                rs.getString("owner_state"),
+                rs.getString("owner_source"),
+                (Double) rs.getObject("owner_confidence"),
+                rs.getString("owner_confidence_method"),
+                rs.getString("owner_confidence_method_version"),
+                rs.getString("business_criticality"),
+                rs.getString("environment"),
                 instant(rs, "first_observed_at"),
                 instant(rs, "last_observed_at"));
     }
@@ -564,6 +587,9 @@ public class AiSecurityApiService {
     public record ArtifactResponse(
             UUID id, String provider, String providerResourceId, String artifactType, String nativeKind,
             String name, String accountId, String region, boolean active, Map<String, Object> attributes,
+            String ownerName, String ownerState, String ownerSource, Double ownerConfidence,
+            String ownerConfidenceMethod, String ownerConfidenceMethodVersion,
+            String businessCriticality, String environment,
             Instant firstObservedAt, Instant lastObservedAt
     ) {
     }

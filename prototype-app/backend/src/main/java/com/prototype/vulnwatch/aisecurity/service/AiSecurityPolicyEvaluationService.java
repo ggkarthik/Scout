@@ -26,6 +26,7 @@ public class AiSecurityPolicyEvaluationService {
     private final AiSecurityPolicyRegistry registry;
     private final AiSecurityResourceFamilyCatalogue resourceFamilies;
     private final AiSecurityAzureKillSwitchService azureKillSwitches;
+    private boolean legacyFindingsEnabled;
 
     public AiSecurityPolicyEvaluationService(
             NamedParameterJdbcTemplate jdbc,
@@ -39,6 +40,11 @@ public class AiSecurityPolicyEvaluationService {
         this.registry = registry;
         this.resourceFamilies = resourceFamilies;
         this.azureKillSwitches = azureKillSwitches;
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${app.ai-security.grid.legacy-findings-enabled:false}")
+    public void setLegacyFindingsEnabled(boolean legacyFindingsEnabled) {
+        this.legacyFindingsEnabled = legacyFindingsEnabled;
     }
 
     void evaluateRunCurrentTenant(Tenant tenant, UUID runId) {
@@ -73,7 +79,9 @@ public class AiSecurityPolicyEvaluationService {
                         ? evaluate(policy.id(), artifact.attributes())
                         : new Evaluation(EvaluationOutcome.NO_DECISION, List.of("required snapshot scope incomplete"), Map.of());
                 persistEvaluation(tenant, runId, policy, artifact, evaluation);
-                reconcileFinding(tenant, policy, artifact, evaluation);
+                if (legacyFindingsEnabled) {
+                    reconcileFinding(tenant, policy, artifact, evaluation);
+                }
             }
         }
     }
@@ -173,6 +181,14 @@ public class AiSecurityPolicyEvaluationService {
                     booleanFact(attributes, "invocationLoggingEnabled")
                             .map(value -> result(!value, "Bedrock invocation logging is disabled", attributes))
                             .orElseGet(() -> missing("invocationLoggingEnabled"));
+            case "AZURE_RAI_POLICY_NON_BLOCKING_FILTER" ->
+                    booleanFact(attributes, "raiFilterEvidenceComplete")
+                            .filter(Boolean::booleanValue)
+                            .flatMap(ignored -> booleanFact(attributes, "raiNonBlockingFilterObserved"))
+                            .map(value -> result(value,
+                                    "Azure RAI policy contains an explicitly disabled or non-blocking filter",
+                                    attributes))
+                            .orElseGet(() -> missing("complete RAI content-filter configuration"));
             case "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS" ->
                     booleanFact(attributes, "publicNetworkUnrestricted")
                             .map(value -> result(value, "Azure AI public network access is unrestricted", attributes))

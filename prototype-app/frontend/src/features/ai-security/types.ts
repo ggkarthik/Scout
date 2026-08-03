@@ -7,6 +7,93 @@ export type AiSecuritySummary = {
   lastCompleteSnapshotAt: string | null;
 };
 
+export type AiGridSystem = {
+  id: string;
+  name: string;
+  status: string;
+  revision: number;
+  memberCount: number;
+  updatedAt: string;
+};
+
+export type AiGridCoverage = {
+  runId: string | null;
+  coverageEpochId: string | null;
+  authoritativeScopeHeads: number;
+  currentArtifacts: number;
+  applicablePublished: number;
+  required: number;
+  tenantEnabled: number;
+  preview: number;
+  tenantDisabled: number;
+  evidenceReady: number;
+  evaluatedPass: number;
+  evaluatedFail: number;
+  noDecision: number;
+  notApplicable: number;
+  stale: number;
+  unsupported: number;
+};
+
+export type AiGridCoverageDimension = {
+  coverageEpochId: string;
+  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK';
+  value: string;
+  expected: number;
+  recorded: number;
+  missing: number;
+  pass: number;
+  fail: number;
+  noDecision: number;
+};
+
+export type AiGridPolicySelection = 'REQUIRED' | 'ENABLED' | 'PREVIEW' | 'DISABLED';
+
+export type AiGridPolicy = {
+  policyId: string;
+  version: string;
+  name: string;
+  severity: string;
+  lifecycle: string;
+  workflowClass: string;
+  selection: AiGridPolicySelection;
+};
+
+export type AiGridOwner = {
+  artifactId: string;
+  ownerName: string;
+  ownerState: 'CONFIRMED';
+  ownerSource: string;
+  confidence: number | null;
+  confidenceMethod: string | null;
+  confidenceMethodVersion: string | null;
+};
+
+export type AiGridRunMetrics = {
+  runId: string;
+  provider: string | null;
+  completedScopeCount: number;
+  processingDurationMs: number;
+  providerApiCalls: number | null;
+  providerCallMeasurementState: string;
+  artifactCount: number;
+  snapshotManifestCount: number;
+  snapshotBytes: number;
+  newSnapshotBytes: number;
+  retainedSnapshotBytes: number;
+  budgetState: string;
+  factCount: number;
+  assessmentCount: number;
+  passCount: number;
+  failCount: number;
+  noDecisionCount: number;
+  openGapCount: number;
+  firstInventoryAt: string | null;
+  firstDecisionAt: string | null;
+  firstFindingAt: string | null;
+  firstGapAt: string | null;
+};
+
 export type AiSecurityArtifact = {
   id: string;
   provider: string;
@@ -18,6 +105,14 @@ export type AiSecurityArtifact = {
   region: string;
   active: boolean;
   attributes: Record<string, unknown>;
+  ownerName: string | null;
+  ownerState: 'CONFIRMED' | 'INFERRED' | 'CANDIDATE' | 'UNOWNED';
+  ownerSource: string | null;
+  ownerConfidence: number | null;
+  ownerConfidenceMethod: string | null;
+  ownerConfidenceMethodVersion: string | null;
+  businessCriticality: string | null;
+  environment: string | null;
   firstObservedAt: string;
   lastObservedAt: string;
 };

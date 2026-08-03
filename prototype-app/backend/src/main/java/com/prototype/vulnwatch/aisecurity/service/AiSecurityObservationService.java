@@ -43,6 +43,7 @@ public class AiSecurityObservationService {
     private final TransactionTemplate transactionTemplate;
     private final AiSecurityPolicyEvaluationService evaluationService;
     private final AiSecuritySyncRunFacade syncRunFacade;
+    private AiGridPipelineService aiGridPipelineService;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -58,6 +59,11 @@ public class AiSecurityObservationService {
         this.transactionTemplate = transactionTemplate;
         this.evaluationService = evaluationService;
         this.syncRunFacade = syncRunFacade;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiGridPipelineService(AiGridPipelineService aiGridPipelineService) {
+        this.aiGridPipelineService = aiGridPipelineService;
     }
 
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -143,6 +149,11 @@ public class AiSecurityObservationService {
             finishScope(envelope, finalStatus, accepted, combinedDiagnostics);
             if (finalStatus == ScopeStatus.COMPLETE) {
                 reconcileCompleteScope(envelope);
+                if (aiGridPipelineService != null) {
+                    aiGridPipelineService.processCompleteScope(tenant, envelope);
+                }
+                // Compatibility projection for the current /api/ai-security policy UI. The legacy
+                // evaluator no longer owns findings when AI Grid is enabled.
                 evaluationService.evaluateRunCurrentTenant(tenant, envelope.runId());
             }
         } else {

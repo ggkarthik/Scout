@@ -5,6 +5,7 @@ import com.azure.core.credential.TokenCredential;
 import com.azure.core.credential.TokenRequestContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -36,17 +37,25 @@ public class AzureAiManagementClient {
     private final HttpClient http;
     private final ObjectMapper objectMapper;
     private final AzurePolicyPermissionMatrix permissionMatrix;
+    private final AiGridProviderCallCounter providerCalls;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AzureAiManagementClient(
             ObjectMapper objectMapper,
-            AzurePolicyPermissionMatrix permissionMatrix
+            AzurePolicyPermissionMatrix permissionMatrix,
+            AiGridProviderCallCounter providerCalls
     ) {
         this.objectMapper = objectMapper;
         this.permissionMatrix = permissionMatrix;
+        this.providerCalls = providerCalls;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
+    }
+
+    AzureAiManagementClient(ObjectMapper objectMapper, AzurePolicyPermissionMatrix permissionMatrix) {
+        this(objectMapper, permissionMatrix, new AiGridProviderCallCounter());
     }
 
     public DiscoverySnapshot discover(TokenCredential credential, String subscriptionId) {
@@ -91,6 +100,8 @@ public class AzureAiManagementClient {
                 "projects", "AZURE_FOUNDRY_PROJECTS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "deployments", "AZURE_FOUNDRY_DEPLOYMENTS", resources, failures);
+        collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
+                "raiPolicies", "AZURE_RAI_POLICIES", resources, failures);
         if (previewAgentsEnabled && requested.stream().anyMatch(family -> family.startsWith("AZURE_FOUNDRY_AGENT"))) {
             collectChildren(credential, resources.get("AZURE_FOUNDRY_PROJECTS"),
                     "applications/agentDeployments", "AZURE_FOUNDRY_AGENTS", resources, failures);
@@ -142,7 +153,8 @@ public class AzureAiManagementClient {
     private boolean neededBaseFamily(String family, Set<String> requested) {
         if (requested.contains(family)) return true;
         if ("AZURE_AI_ACCOUNTS".equals(family)) {
-            return requested.stream().anyMatch(value -> value.startsWith("AZURE_FOUNDRY"));
+            return requested.stream().anyMatch(value -> value.startsWith("AZURE_FOUNDRY")
+                    || value.startsWith("AZURE_RAI"));
         }
         if ("AZURE_ML_WORKSPACES".equals(family)) {
             return requested.stream().anyMatch(value -> value.startsWith("AZURE_ML"));
@@ -296,6 +308,7 @@ public class AzureAiManagementClient {
                         .header("Accept", "application/json")
                         .GET()
                         .build();
+                providerCalls.increment();
                 HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
                 responseHeaders = response.headers();
                 String body = response.body() == null ? "" : response.body();
@@ -409,6 +422,7 @@ public class AzureAiManagementClient {
         if (normalized.equals("microsoft.cognitiveservices/accounts")) return "AZURE_AI_ACCOUNTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/projects")) return "AZURE_FOUNDRY_PROJECTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/deployments")) return "AZURE_FOUNDRY_DEPLOYMENTS";
+        if (normalized.equals("microsoft.cognitiveservices/accounts/raipolicies")) return "AZURE_RAI_POLICIES";
         if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";
         if (normalized.contains("/models")) return "AZURE_ML_MODELS";

@@ -130,9 +130,22 @@ class AiSecurityPolicyEvaluationServiceTest {
     }
 
     @Test
+    void legacyRaiEvaluationAlsoRefusesIncompleteFilterEvidence() {
+        assertEquals(EvaluationOutcome.FAIL, service.evaluate(
+                "AZURE_RAI_POLICY_NON_BLOCKING_FILTER",
+                Map.of("raiFilterEvidenceComplete", true, "raiNonBlockingFilterObserved", true)).outcome());
+        assertEquals(EvaluationOutcome.PASS, service.evaluate(
+                "AZURE_RAI_POLICY_NON_BLOCKING_FILTER",
+                Map.of("raiFilterEvidenceComplete", true, "raiNonBlockingFilterObserved", false)).outcome());
+        assertEquals(EvaluationOutcome.NO_DECISION, service.evaluate(
+                "AZURE_RAI_POLICY_NON_BLOCKING_FILTER",
+                Map.of("raiFilterEvidenceComplete", false, "raiNonBlockingFilterObserved", false)).outcome());
+    }
+
+    @Test
     void registryContainsEveryAzurePilotPolicy() {
         AiSecurityPolicyRegistry registry = new AiSecurityPolicyRegistry();
-        assertEquals(8, registry.all().stream().filter(policy -> policy.id().startsWith("AZURE_")).count());
+        assertEquals(9, registry.all().stream().filter(policy -> policy.id().startsWith("AZURE_")).count());
     }
 
     @Test

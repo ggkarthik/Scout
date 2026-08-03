@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useActor } from '../features/auth/context';
+import { hasRole } from '../features/auth/roles';
 import type { AiSecurityArtifact } from '../features/ai-security/types';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 import { timeAgo } from '../lib/time';
@@ -23,12 +25,38 @@ function emptyStateTitle(activePill: InventoryPill): string {
 }
 
 export function AiInventoryPage() {
+  const actor = useActor();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [activePill, setActivePill] = React.useState<InventoryPill>('ALL');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
   const [selected, setSelected] = React.useState<AiSecurityArtifact | null>(null);
+  const [ownerDraft, setOwnerDraft] = React.useState('');
+  const canConfirmOwner = hasRole(actor, 'PLATFORM_OWNER') || hasRole(actor, 'TENANT_ADMIN')
+    || hasRole(actor, 'SECURITY_ANALYST');
+  React.useEffect(() => setOwnerDraft(selected?.ownerName ?? ''), [selected?.id, selected?.ownerName]);
+  const ownerMutation = useMutation({
+    mutationFn: () => api.confirmAiGridArtifactOwner(
+      selected?.id ?? '',
+      ownerDraft,
+      'Confirmed from AI inventory',
+    ),
+    onSuccess: (owner) => {
+      setSelected((current) => current?.id === owner.artifactId ? {
+        ...current,
+        ownerName: owner.ownerName,
+        ownerState: owner.ownerState,
+        ownerSource: owner.ownerSource,
+        ownerConfidence: owner.confidence,
+        ownerConfidenceMethod: owner.confidenceMethod,
+        ownerConfidenceMethodVersion: owner.confidenceMethodVersion,
+      } : current);
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-grid-coverage'] });
+    },
+  });
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
     queryFn: () => api.listAiSecurityRuns(),
@@ -52,6 +80,16 @@ export function AiInventoryPage() {
     queryFn: api.getAiSecuritySummary,
     refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
+  const systemsQuery = useQuery({
+    queryKey: ['ai-grid-systems'],
+    queryFn: api.listAiGridSystems,
+    refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
+  });
+  const coverageQuery = useQuery({
+    queryKey: ['ai-grid-coverage'],
+    queryFn: api.getAiGridCoverage,
+    refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
+  });
   const graphQuery = useQuery({
     queryKey: ['ai-security-graph', selected?.id],
     queryFn: () => api.getAiSecurityGraph(selected?.id),
@@ -72,7 +110,8 @@ export function AiInventoryPage() {
         </div>
         <div className="ai-security-hero-metrics">
           <Metric label="Open AI findings" value={summaryQuery.data?.openFindings ?? 0} tone="danger" />
-          <Metric label="Incomplete scopes" value={summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
+          <Metric label="AI systems" value={systemsQuery.data?.length ?? 0} tone="success" />
+          <Metric label="Coverage gaps" value={coverageQuery.data?.noDecision ?? summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
         </div>
         <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
           <option value="">All providers</option>
@@ -93,6 +132,26 @@ export function AiInventoryPage() {
           />
         </label>
       </section>
+
+      {(systemsQuery.data?.length ?? 0) > 0 && (
+        <section className="panel ai-security-table-panel">
+          <div className="panel-header">
+            <div><h3>AI systems</h3><p className="panel-caption">Stable systems derived from evidence-backed artifact relationships.</p></div>
+          </div>
+          <table className="data-table">
+            <thead><tr><th>System</th><th>Members</th><th>Revision</th><th>State</th><th>Updated</th></tr></thead>
+            <tbody>{systemsQuery.data?.map((system) => (
+              <tr key={system.id}>
+                <td><strong>{system.name}</strong><small>{system.id}</small></td>
+                <td>{system.memberCount}</td>
+                <td>v{system.revision}</td>
+                <td><span className="status-pill success">{system.status}</span></td>
+                <td>{timeAgo(system.updatedAt) ?? 'Unknown'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </section>
+      )}
 
       <div className="ai-security-pill-row" role="tablist" aria-label="AI inventory artifact types">
         {PILLS.map((pill) => (
@@ -136,7 +195,7 @@ export function AiInventoryPage() {
           <div className="panel ai-security-table-panel">
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Native type</th><th>Account / Region</th><th>Last observed</th><th>State</th></tr>
+                <tr><th>Name</th><th>Native type</th><th>Owner</th><th>Account / Region</th><th>Last observed</th><th>State</th></tr>
               </thead>
               <tbody>
                 {items.map((artifact) => (
@@ -147,6 +206,7 @@ export function AiInventoryPage() {
                   >
                     <td><strong>{artifact.name}</strong><small>{artifact.providerResourceId}</small></td>
                     <td>{artifact.nativeKind.replace(/_/g, ' ')}</td>
+                    <td>{artifact.ownerName ?? 'Unowned'}<small>{artifact.ownerState ?? 'UNOWNED'}</small></td>
                     <td>{artifact.accountId}<small>{artifact.region}</small></td>
                     <td>{timeAgo(artifact.lastObservedAt) ?? 'Unknown'}</td>
                     <td><span className={`status-pill ${artifact.active ? 'success' : 'muted'}`}>{artifact.active ? 'Active' : 'Inactive'}</span></td>
@@ -163,7 +223,31 @@ export function AiInventoryPage() {
                 <dt>Provider ID</dt><dd>{selected.providerResourceId}</dd>
                 <dt>Account</dt><dd>{selected.accountId}</dd>
                 <dt>Region</dt><dd>{selected.region}</dd>
+                <dt>Owner state</dt><dd>{selected.ownerState ?? 'UNOWNED'}</dd>
+                <dt>Owner source</dt><dd>{selected.ownerSource ?? 'No owner signal'}</dd>
               </dl>
+              {canConfirmOwner && (
+                <div className="ai-security-owner-confirmation">
+                  <label>
+                    <span>Accountable owner</span>
+                    <input
+                      value={ownerDraft}
+                      onChange={(event) => setOwnerDraft(event.target.value)}
+                      placeholder="Team or owner"
+                      aria-label="Accountable owner"
+                    />
+                  </label>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    disabled={!ownerDraft.trim() || ownerMutation.isPending}
+                    onClick={() => ownerMutation.mutate()}
+                  >
+                    {ownerMutation.isPending ? 'Confirming…' : 'Confirm owner'}
+                  </button>
+                  {ownerMutation.isError && <div className="notice error">Owner could not be confirmed.</div>}
+                </div>
+              )}
               <h4>Observed facts</h4>
               <div className="ai-security-facts">
                 {Object.entries(selected.attributes).map(([key, value]) => (

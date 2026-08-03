@@ -23,6 +23,10 @@ family_permissions:
     api_version: "2024-10-01"
     role: Reader
     actions: [Microsoft.CognitiveServices/accounts/deployments/read]
+  AZURE_RAI_POLICIES:
+    api_version: "2024-10-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/raiPolicies/read]
   AZURE_FOUNDRY_AGENTS:
     api_version: "2026-01-15-preview"
     role: Azure AI Developer
@@ -100,6 +104,19 @@ family_permissions:
     role: Reader
     actions: [Microsoft.Authorization/roleAssignments/read]
 policies:
+  - id: AZURE_RAI_POLICY_NON_BLOCKING_FILTER
+    version: 1.0.0
+    artifacts: [AI_GUARDRAIL]
+    facts: [contentFilters.enabled, contentFilters.blocking]
+    families: [AZURE_RAI_POLICIES]
+    api: Azure Resource Manager
+    api_version: "2024-10-01"
+    actions: [Microsoft.CognitiveServices/accounts/raiPolicies/read]
+    role: Reader
+    scopes: [REGIONAL]
+    applicability: A user-managed or system-managed RAI policy exposes an explicit content-filter list.
+    connector_test: List RAI policies and read only filter configuration; never prompts or completions.
+
   - id: AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS
     version: 1.0.0
     artifacts: [AZURE_AI_ACCOUNT, AZURE_ML_WORKSPACE, AZURE_SEARCH_SERVICE]

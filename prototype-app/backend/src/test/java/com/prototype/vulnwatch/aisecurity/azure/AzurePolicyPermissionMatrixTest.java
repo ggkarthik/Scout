@@ -16,7 +16,7 @@ class AzurePolicyPermissionMatrixTest {
     @Test
     void coversEveryRuntimeFamilyAndShippedAzurePolicy() {
         assertEquals(AiSecurityAzureConnectorService.RESOURCE_FAMILIES, matrix.resourceFamilies());
-        assertEquals(8, matrix.requirementsReport().policies().size());
+        assertEquals(9, matrix.requirementsReport().policies().size());
         assertTrue(matrix.requirementsReport().policies().stream()
                 .allMatch(policy -> !policy.resourceFamilies().isEmpty()));
     }
