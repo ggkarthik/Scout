@@ -120,9 +120,8 @@ public class AiGridRunMetricsService {
                  where a.run_id = :runId and f.owner_group is not null
                 """, Map.of("runId", runId), (rs, n) -> instant(rs, 1));
         java.time.Instant exposure = jdbc.queryForObject("""
-                select min(f.created_at) from findings f
-                  join ai_grid_assessments a on a.id = f.assessment_id
-                 where a.run_id = :runId and f.finding_kind = 'AI_EXPOSURE'
+                select min(observed_at) from ai_grid_exposure_observations
+                 where run_id = :runId and state in ('EXPOSURE_HYPOTHESIS','VALIDATED_EXPOSURE')
                 """, Map.of("runId", runId), (rs, n) -> instant(rs, 1));
         jdbc.update("""
                 update ai_grid_run_metrics set connector_config_id = :connectorId,
@@ -173,7 +172,9 @@ public class AiGridRunMetricsService {
                        owner_facing_expected_count, owner_facing_decision_count,
                        decision_reachability_percent, owner_facing_utility_percent, baseline_run,
                        first_run_target_percent, first_run_target_met,
-                       first_owner_routed_finding_at, first_exposure_hypothesis_at
+                       first_owner_routed_finding_at, first_exposure_hypothesis_at,
+                       graph_recomputed_node_count, graph_recomputed_edge_count,
+                       graph_traversed_path_count, exposure_path_count, graph_recompute_duration_ms
                   from ai_grid_run_metrics where run_id = :runId
                 """, Map.of("runId", runId), (rs, n) -> new RunMetrics(rs.getObject("run_id", UUID.class),
                 rs.getObject("connector_config_id", UUID.class),
@@ -190,7 +191,10 @@ public class AiGridRunMetricsService {
                 rs.getLong("owner_facing_decision_count"), rs.getDouble("decision_reachability_percent"),
                 rs.getDouble("owner_facing_utility_percent"), rs.getBoolean("baseline_run"),
                 rs.getDouble("first_run_target_percent"), (Boolean) rs.getObject("first_run_target_met"),
-                instant(rs, "first_owner_routed_finding_at"), instant(rs, "first_exposure_hypothesis_at")))
+                instant(rs, "first_owner_routed_finding_at"), instant(rs, "first_exposure_hypothesis_at"),
+                rs.getLong("graph_recomputed_node_count"), rs.getLong("graph_recomputed_edge_count"),
+                rs.getLong("graph_traversed_path_count"), rs.getLong("exposure_path_count"),
+                rs.getLong("graph_recompute_duration_ms")))
                 .stream().findFirst().orElse(null);
     }
 
@@ -223,5 +227,8 @@ public class AiGridRunMetricsService {
                              double ownerFacingUtilityPercent, boolean baselineRun,
                              double firstRunTargetPercent, Boolean firstRunTargetMet,
                              java.time.Instant firstOwnerRoutedFindingAt,
-                             java.time.Instant firstExposureHypothesisAt) {}
+                             java.time.Instant firstExposureHypothesisAt,
+                             long graphRecomputedNodeCount, long graphRecomputedEdgeCount,
+                             long graphTraversedPathCount, long exposurePathCount,
+                             long graphRecomputeDurationMs) {}
 }

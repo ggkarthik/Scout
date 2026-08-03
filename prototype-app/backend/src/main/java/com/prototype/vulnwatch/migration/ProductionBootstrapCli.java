@@ -25,7 +25,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 55;
+    private static final int TARGET_VERSION = 56;
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
@@ -408,15 +408,15 @@ public final class ProductionBootstrapCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 55, 55, 'CURRENT', ?, now(), now(), 55, null, null, now(), ?)
+                ) values (?, ?, 56, 56, 'CURRENT', ?, now(), now(), 56, null, null, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
-                    current_version = 55,
-                    target_version = 55,
+                    current_version = 56,
+                    target_version = 56,
                     status = 'CURRENT',
                     structural_checksum = excluded.structural_checksum,
                     migration_completed_at = now(),
-                    last_successful_version = 55,
+                    last_successful_version = 56,
                     failure_code = null,
                     failure_message = null,
                     updated_at = now(),
@@ -443,7 +443,7 @@ public final class ProductionBootstrapCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 0, 55, ?, null, now(), now(), 0, ?, ?, now(), ?)
+                ) values (?, ?, 0, 56, ?, null, now(), now(), 0, ?, ?, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
                     status = excluded.status,
@@ -619,7 +619,7 @@ public final class ProductionBootstrapCli {
                 where t.deleted_at is null
                   and upper(t.status) = 'ACTIVE'
                   and (v.tenant_id is null or v.status <> 'CURRENT'
-                       or v.current_version < 55 or v.last_successful_version < 55)
+                       or v.current_version < 56 or v.last_successful_version < 56)
                 """, "active tenants missing current schema projection");
         verifyActiveTenantSchemaState(connection);
     }
@@ -641,7 +641,7 @@ public final class ProductionBootstrapCli {
                 requireMinimum(connection, """
                         select count(*)
                         from %s.tenant_schema_history
-                        where version = '55' and success
+                        where version = '56' and success
                         """.formatted(quotedIdentifier(schemaName)), 1, schemaName + " tenant migration version");
                 String actualChecksum = fingerprint(connection, schemaName);
                 if (recordedChecksum == null

@@ -16,6 +16,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseReadiness;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridR1CertificationService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridR2CertificationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridR1CertificationService.EvidenceCommand;
 import com.prototype.vulnwatch.service.RequestActorService;
 import java.util.List;
@@ -35,13 +36,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiGridValidationGovernanceController {
     private final AiGridValidationGovernanceService governance;
     private final AiGridR1CertificationService r1Certification;
+    private final AiGridR2CertificationService r2Certification;
     private final RequestActorService actors;
 
     public AiGridValidationGovernanceController(AiGridValidationGovernanceService governance,
                                                 AiGridR1CertificationService r1Certification,
+                                                AiGridR2CertificationService r2Certification,
                                                 RequestActorService actors) {
         this.governance = governance;
         this.r1Certification = r1Certification;
+        this.r2Certification = r2Certification;
         this.actors = actors;
     }
 
@@ -141,6 +145,18 @@ public class AiGridValidationGovernanceController {
     public AiGridR1CertificationService.ReleaseDecision decideR1() {
         return r1Certification.decide(actor());
     }
+
+    @GetMapping("/releases/r2/readiness")
+    public AiGridR2CertificationService.Readiness r2Readiness() { return r2Certification.readiness(); }
+
+    @PostMapping("/releases/r2/precision-reviews")
+    public AiGridR2CertificationService.PrecisionReview recordR2Precision(
+            @RequestBody AiGridR2CertificationService.PrecisionCommand command) {
+        return r2Certification.recordPrecision(command, actor());
+    }
+
+    @PostMapping("/releases/r2/decisions")
+    public AiGridR2CertificationService.Decision decideR2() { return r2Certification.decide(actor()); }
 
     private String actor() {
         return actors.currentActor().userId();

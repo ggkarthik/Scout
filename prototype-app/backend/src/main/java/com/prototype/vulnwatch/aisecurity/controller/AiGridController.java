@@ -37,6 +37,37 @@ public class AiGridController {
     @GetMapping("/ai-systems/{id}/facts")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST','READ_ONLY_AUDITOR')")
     public List<AiGridApiService.FactView> facts(@PathVariable UUID id) { return api.systemFacts(tenant(), id); }
+    @GetMapping("/ai-systems/{id}/graph")
+    public List<AiGridApiService.GraphEdge> graph(@PathVariable UUID id) { return api.systemGraph(tenant(), id); }
+    @GetMapping("/ai-systems/{id}/lineage")
+    public List<AiGridApiService.SystemLineage> lineage(@PathVariable UUID id) { return api.systemLineage(tenant(), id); }
+    @GetMapping("/ai-systems/{id}/findings")
+    public List<AiGridApiService.SystemFinding> systemFindings(@PathVariable UUID id) {
+        return api.systemFindings(tenant(), id);
+    }
+    @PostMapping("/ai-systems/{id}/memberships")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public RevisionResponse membership(@PathVariable UUID id, @RequestBody MembershipRequest request) {
+        int revision = api.reviseMembership(tenant(), id, request.artifactId(), request.decision(),
+                actors.currentActor().userId(), request.reason(), request.lineageType(), request.relatedSystems());
+        return new RevisionResponse(revision);
+    }
+    @PostMapping("/ai-artifacts/{id}/host-context")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFact hostContext(
+            @PathVariable UUID id,
+            @RequestBody com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFactInput request) {
+        return api.addHostContext(tenant(), id, request);
+    }
+    @GetMapping("/ai-exposures")
+    public List<AiGridApiService.ExposureSummary> exposures() { return api.exposures(tenant()); }
+    @GetMapping("/ai-exposures/{id}")
+    public AiGridApiService.ExposureDetail exposure(@PathVariable UUID id) { return api.exposure(tenant(), id); }
+    @PostMapping("/ai-exposures/{id}/disposition")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public void disposition(@PathVariable UUID id, @RequestBody DispositionRequest request) {
+        api.dispositionExposure(tenant(), id, request.disposition(), actors.currentActor().userId(), request.reason());
+    }
     @GetMapping("/ai-coverage")
     public com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService.Coverage coverage() {
         return api.coverage(tenant());
@@ -93,4 +124,8 @@ public class AiGridController {
     }
     public record SelectionRequest(String selection, String reason) {}
     public record OwnerRequest(String ownerName, String reason) {}
+    public record MembershipRequest(UUID artifactId, String decision, String reason,
+                                    String lineageType, List<UUID> relatedSystems) {}
+    public record RevisionResponse(int revision) {}
+    public record DispositionRequest(String disposition, String reason) {}
 }

@@ -22,12 +22,16 @@ public class AiGridApiService {
     private final AiGridCoverageService coverage;
     private final AiGridReconciliationService reconciliation;
     private final AiGridReadinessService readiness;
+    private final AiGridExposureService exposures;
+    private final AiGridSystemService systemService;
+    private final AiGridHostContextService hostContext;
 
     public AiGridApiService(NamedParameterJdbcTemplate jdbc, TenantSchemaExecutionService tenantExecution,
                             TransactionTemplate transactions, AiGridAssessmentService assessments,
                             AiGridOwnershipService ownership, AiGridRunMetricsService metrics,
                             AiGridCoverageService coverage, AiGridReconciliationService reconciliation,
-                            AiGridReadinessService readiness) {
+                            AiGridReadinessService readiness, AiGridExposureService exposures,
+                            AiGridSystemService systemService, AiGridHostContextService hostContext) {
         this.jdbc = jdbc;
         this.tenantExecution = tenantExecution;
         this.transactions = transactions;
@@ -37,6 +41,9 @@ public class AiGridApiService {
         this.coverage = coverage;
         this.reconciliation = reconciliation;
         this.readiness = readiness;
+        this.exposures = exposures;
+        this.systemService = systemService;
+        this.hostContext = hostContext;
     }
 
     public List<SystemSummary> systems(Tenant tenant) {
@@ -135,6 +142,7 @@ public class AiGridApiService {
             if (exists == null || exists == 0) throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.NOT_FOUND, "Assessment run snapshot not found");
             assessments.evaluateRun(tenant, runId);
+            exposures.correlateCompleteRun(tenant, runId);
             List<AiGridCoverageService.CoverageItem> runCandidates = coverage.expectedCandidates(runId);
             reconciliation.reconcile(tenant, runId, runCandidates);
             readiness.compute(tenant, runId, runCandidates);
@@ -231,6 +239,122 @@ public class AiGridApiService {
         }));
     }
 
+    public List<SystemLineage> systemLineage(Tenant tenant, UUID systemId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select e.id,e.event_type,e.run_id,e.rationale,e.actor,e.created_at,p.participant_role
+                  from ai_grid_system_lineage_events e join ai_grid_system_lineage_participants p on p.event_id=e.id
+                 where p.system_id=:id order by e.created_at desc,e.id
+                """, Map.of("id", systemId), (rs, n) -> new SystemLineage(rs.getObject(1, UUID.class),
+                rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4), rs.getString(5),
+                rs.getTimestamp(6).toInstant(), rs.getString(7))));
+    }
+
+    public List<GraphEdge> systemGraph(Tenant tenant, UUID systemId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select rel.id,rel.source_artifact_id,rel.target_artifact_id,rel.relationship_type,
+                       rel.valid_from,rel.valid_until
+                  from ai_grid_systems s join ai_grid_system_revisions r
+                    on r.system_id=s.id and r.revision=s.current_revision
+                  join ai_grid_system_memberships src on src.system_revision_id=r.id
+                  join ai_grid_relationship_snapshots rel on rel.run_id=r.run_id and rel.source_artifact_id=src.artifact_id
+                  join ai_grid_system_memberships dst on dst.system_revision_id=r.id and dst.artifact_id=rel.target_artifact_id
+                 where s.id=:id order by rel.source_artifact_id,rel.relationship_type,rel.target_artifact_id
+                """, Map.of("id", systemId), (rs, n) -> new GraphEdge(rs.getObject(1, UUID.class),
+                rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4),
+                rs.getTimestamp(5).toInstant(), rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant())));
+    }
+
+    public List<SystemFinding> systemFindings(Tenant tenant, UUID systemId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select distinct f.id,f.finding_kind,f.title,f.severity_override,f.status,f.owner_group,
+                       f.due_at,f.last_observed_at
+                  from findings f join finding_subjects fs on fs.finding_id=f.id
+                 where (fs.subject_type='AI_SYSTEM' and fs.subject_id=:id)
+                    or (fs.subject_type='ARTIFACT' and fs.subject_id in (
+                        select m.artifact_id from ai_grid_systems s join ai_grid_system_revisions r
+                          on r.system_id=s.id and r.revision=s.current_revision
+                        join ai_grid_system_memberships m on m.system_revision_id=r.id where s.id=:id))
+                 order by f.last_observed_at desc,f.id
+                """, Map.of("id", systemId), (rs, n) -> new SystemFinding(rs.getObject(1, UUID.class),
+                rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                rs.getTimestamp(7) == null ? null : rs.getTimestamp(7).toInstant(), rs.getTimestamp(8).toInstant())));
+    }
+
+    public int reviseMembership(Tenant tenant, UUID systemId, UUID artifactId, String decision,
+                                String actor, String reason, String lineageType, List<UUID> relatedSystems) {
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> systemService.reviseMembership(
+                tenant, systemId, artifactId, decision, actor, reason, lineageType, relatedSystems)));
+    }
+
+    public AiGridHostContextService.HostFact addHostContext(Tenant tenant, UUID artifactId,
+                                                             AiGridHostContextService.HostFactInput input) {
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> hostContext.upsert(tenant, artifactId, input)));
+    }
+
+    public List<ExposureSummary> exposures(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select p.id,p.correlation_id,p.correlation_version,p.title,p.severity,p.state,p.status,
+                       p.confidence,p.root_cause_artifact_id,p.first_observed_at,p.last_observed_at,p.finding_id,
+                       count(distinct a.system_id) filter (where a.system_id is not null) affected_systems
+                  from ai_grid_exposure_paths p left join ai_grid_exposure_associations a on a.exposure_path_id=p.id
+                 group by p.id order by p.last_observed_at desc,p.id
+                """, (rs, n) -> new ExposureSummary(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getDouble(8),
+                rs.getObject(9, UUID.class), rs.getTimestamp(10).toInstant(), rs.getTimestamp(11).toInstant(),
+                rs.getObject(12, UUID.class), rs.getInt(13))));
+    }
+
+    public ExposureDetail exposure(Tenant tenant, UUID exposureId) {
+        return tenantExecution.run(tenant, () -> {
+            List<ExposureSummary> summaries = jdbc.query("""
+                    select p.id,p.correlation_id,p.correlation_version,p.title,p.severity,p.state,p.status,
+                           p.confidence,p.root_cause_artifact_id,p.first_observed_at,p.last_observed_at,p.finding_id,
+                           count(distinct a.system_id) filter (where a.system_id is not null)
+                      from ai_grid_exposure_paths p left join ai_grid_exposure_associations a on a.exposure_path_id=p.id
+                     where p.id=:id group by p.id
+                    """, Map.of("id", exposureId), (rs, n) -> new ExposureSummary(rs.getObject(1, UUID.class),
+                    rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                    rs.getString(7), rs.getDouble(8), rs.getObject(9, UUID.class), rs.getTimestamp(10).toInstant(),
+                    rs.getTimestamp(11).toInstant(), rs.getObject(12, UUID.class), rs.getInt(13)));
+            if (summaries.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "AI exposure not found");
+            List<ExposureObservation> observations = jdbc.query("""
+                    select id,run_id,state,entry_artifact_id,system_id,path_json::text,evidence_json::text,
+                           temporal_valid_from,temporal_valid_until,confidence,observed_at
+                      from ai_grid_exposure_observations where exposure_path_id=:id
+                     order by observed_at desc,id
+                    """, Map.of("id", exposureId), (rs, n) -> new ExposureObservation(rs.getObject(1, UUID.class),
+                    rs.getObject(2, UUID.class), rs.getString(3), rs.getObject(4, UUID.class),
+                    rs.getObject(5, UUID.class), rs.getString(6), rs.getString(7), rs.getTimestamp(8).toInstant(),
+                    rs.getTimestamp(9) == null ? null : rs.getTimestamp(9).toInstant(), rs.getDouble(10),
+                    rs.getTimestamp(11).toInstant()));
+            List<ExposureAssociation> associations = jdbc.query("""
+                    select system_id,artifact_id,association_role from ai_grid_exposure_associations
+                     where exposure_path_id=:id order by association_role,system_id,artifact_id
+                    """, Map.of("id", exposureId), (rs, n) -> new ExposureAssociation(
+                    rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3)));
+            return new ExposureDetail(summaries.get(0), observations, associations);
+        });
+    }
+
+    public void dispositionExposure(Tenant tenant, UUID exposureId, String disposition, String actor, String reason) {
+        if (!List.of("ACCEPTED", "REJECTED", "RISK_ACCEPTED", "NEEDS_EVIDENCE").contains(disposition))
+            throw new IllegalArgumentException("Invalid exposure disposition");
+        tenantExecution.run(tenant, () -> transactions.executeWithoutResult(status -> {
+            Integer exists = jdbc.queryForObject("select count(*) from ai_grid_exposure_paths where id=:id",
+                    Map.of("id", exposureId), Integer.class);
+            if (exists == null || exists == 0) throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "AI exposure not found");
+            jdbc.update("""
+                    insert into ai_grid_exposure_dispositions
+                        (id,tenant_id,exposure_path_id,disposition,reason,actor)
+                    values (:id,:tenantId,:exposureId,:disposition,:reason,:actor)
+                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
+                    .addValue("exposureId", exposureId).addValue("disposition", disposition)
+                    .addValue("reason", reason).addValue("actor", actor));
+        }));
+    }
+
     private void refreshCurrentProjection(Tenant tenant, UUID preferredTriggerRunId) {
         AiGridCoverageService.CurrentState current = coverage.currentState();
         UUID triggerRunId = preferredTriggerRunId != null ? preferredTriggerRunId
@@ -261,4 +385,20 @@ public class AiGridApiService {
                                 long assessments, long noDecision) {}
     public record PolicyView(String policyId, String version, String name, String severity,
                              String lifecycle, String workflowClass, String selection) {}
+    public record SystemLineage(UUID eventId, String eventType, UUID runId, String rationale,
+                                String actor, Instant createdAt, String participantRole) {}
+    public record GraphEdge(UUID id, UUID sourceArtifactId, UUID targetArtifactId, String relationshipType,
+                            Instant validFrom, Instant validUntil) {}
+    public record SystemFinding(UUID id, String findingKind, String title, String severity, String status,
+                                String ownerGroup, Instant dueAt, Instant lastObservedAt) {}
+    public record ExposureSummary(UUID id, String correlationId, String correlationVersion, String title,
+                                  String severity, String state, String status, double confidence,
+                                  UUID rootCauseArtifactId, Instant firstObservedAt, Instant lastObservedAt,
+                                  UUID findingId, int affectedSystems) {}
+    public record ExposureObservation(UUID id, UUID runId, String state, UUID entryArtifactId, UUID systemId,
+                                      String pathJson, String evidenceJson, Instant validFrom, Instant validUntil,
+                                      double confidence, Instant observedAt) {}
+    public record ExposureAssociation(UUID systemId, UUID artifactId, String role) {}
+    public record ExposureDetail(ExposureSummary exposure, List<ExposureObservation> observations,
+                                 List<ExposureAssociation> associations) {}
 }

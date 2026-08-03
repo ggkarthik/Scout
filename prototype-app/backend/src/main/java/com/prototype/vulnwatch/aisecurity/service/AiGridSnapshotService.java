@@ -111,9 +111,9 @@ public class AiGridSnapshotService {
         jdbc.update("""
                 insert into ai_grid_relationship_snapshots
                     (id, tenant_id, run_id, source_artifact_id, target_artifact_id,
-                     relationship_type, attributes_json, observed_at)
+                     relationship_type, attributes_json, observed_at, valid_from)
                 select gen_random_uuid(), :tenantId, :runId, source_artifact_id, target_artifact_id,
-                       relationship_type, attributes_json, last_observed_at
+                       relationship_type, attributes_json, last_observed_at, last_observed_at
                   from ai_security_relationships
                  where run_id = :runId and scope_key = :scopeKey
                 on conflict (tenant_id, run_id, source_artifact_id, target_artifact_id, relationship_type)

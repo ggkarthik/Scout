@@ -15,6 +15,7 @@ public class AiGridPipelineService {
     private final AiGridOwnershipService ownership;
     private final AiGridSystemService systems;
     private final AiGridAssessmentService assessments;
+    private final AiGridExposureService exposures;
     private final AiGridReconciliationService reconciliation;
     private final AiGridRunMetricsService metrics;
     private final AiGridReadinessService readiness;
@@ -23,6 +24,7 @@ public class AiGridPipelineService {
     public AiGridPipelineService(AiGridSnapshotService snapshots, AiGridOwnershipService ownership,
                                  AiGridSystemService systems,
                                  AiGridAssessmentService assessments,
+                                 AiGridExposureService exposures,
                                  AiGridReconciliationService reconciliation,
                                  AiGridRunMetricsService metrics,
                                  AiGridReadinessService readiness,
@@ -31,6 +33,7 @@ public class AiGridPipelineService {
         this.ownership = ownership;
         this.systems = systems;
         this.assessments = assessments;
+        this.exposures = exposures;
         this.reconciliation = reconciliation;
         this.metrics = metrics;
         this.readiness = readiness;
@@ -44,6 +47,7 @@ public class AiGridPipelineService {
         ownership.resolveRun(tenant, envelope.runId());
         systems.deriveForRun(tenant, envelope.runId());
         assessments.evaluateRun(tenant, envelope.runId());
+        exposures.correlateCompleteRun(tenant, envelope.runId());
         List<AiGridCoverageService.CoverageItem> runCandidates =
                 coverage.expectedCandidates(envelope.runId());
         reconciliation.reconcile(tenant, envelope.runId(), runCandidates);
