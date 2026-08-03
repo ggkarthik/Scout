@@ -5,11 +5,38 @@ import { api } from '../api/client';
 import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { formatDate, formatLabel, severityClassName } from '../features/cve-workbench/formatting';
-import type { AiSecurityFinding } from '../features/ai-security/types';
+import type {
+  AiSecurityFinding,
+  PolicyExceptionOverride,
+  PolicyScopeCondition,
+  PolicyScopeMode,
+} from '../features/ai-security/types';
 import { timeAgo } from '../lib/time';
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-type PolicyDetailTab = 'overview' | 'findings' | 'artifacts';
+type PolicyDetailTab = 'overview' | 'configure' | 'findings' | 'artifacts';
+
+const SCOPE_FIELD_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'ARTIFACT_TYPE', label: 'Artifact type' },
+  { value: 'PROVIDER', label: 'Provider' },
+  { value: 'REGION', label: 'Region' },
+  { value: 'ACCOUNT_ID', label: 'Account ID' },
+  { value: 'NATIVE_KIND', label: 'Native type' },
+  { value: 'NAME', label: 'Name' },
+];
+
+const SCOPE_OPERATOR_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'EQUALS', label: 'is' },
+  { value: 'NOT_EQUALS', label: 'is not' },
+  { value: 'CONTAINS', label: 'contains' },
+  { value: 'NOT_CONTAINS', label: 'does not contain' },
+];
+
+const SCOPE_MODE_OPTIONS: Array<{ value: PolicyScopeMode; label: string }> = [
+  { value: 'ALL', label: 'All AI inventory' },
+  { value: 'MATCH_RULES', label: 'Match rules' },
+  { value: 'CUSTOM_LIST', label: 'Custom list' },
+];
 
 type ImpactedArtifact = {
   artifactId: string;
@@ -54,11 +81,17 @@ function coverageStatusLabel(status: 'PASS' | 'FAIL' | 'NO_DATA'): string {
   return status === 'PASS' ? 'Pilot coverage gate passed' : 'Pilot coverage gate blocked';
 }
 
+type DraftScope = {
+  mode: PolicyScopeMode;
+  conditionLogic: 'AND' | 'OR';
+  conditions: PolicyScopeCondition[];
+};
+
 export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const actor = useActor();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const canManage = hasRole(actor, 'TENANT_ADMIN') || hasRole(actor, 'PLATFORM_OWNER');
+  const canManage = hasRole(actor, 'TENANT_ADMIN') || hasRole(actor, 'PLATFORM_OWNER') || hasRole(actor, 'SECURITY_ANALYST');
   const [tab, setTab] = React.useState<PolicyDetailTab>('overview');
   const [findingsStatusFilter, setFindingsStatusFilter] = React.useState('OPEN');
 
@@ -81,6 +114,130 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     findingsStatusFilter ? allFindings.filter((finding) => finding.status === findingsStatusFilter) : allFindings
   ), [allFindings, findingsStatusFilter]);
   const impactedArtifacts = React.useMemo(() => buildImpactedArtifacts(allFindings), [allFindings]);
+
+  const configQuery = useQuery({
+    queryKey: ['ai-security-policy-configuration', policyId],
+    queryFn: () => api.getAiSecurityPolicyConfiguration(policyId),
+  });
+  const configuration = configQuery.data ?? null;
+
+  const [draftScope, setDraftScope] = React.useState<DraftScope | null>(null);
+  const [scopeDirty, setScopeDirty] = React.useState(false);
+  React.useEffect(() => {
+    if (configuration && !scopeDirty) {
+      setDraftScope({
+        mode: configuration.scope.mode,
+        conditionLogic: configuration.scope.conditionLogic,
+        conditions: configuration.scope.conditions,
+      });
+    }
+  }, [configuration, scopeDirty]);
+
+  const [draftParameters, setDraftParameters] = React.useState<Record<string, string>>({});
+  const [parametersDirty, setParametersDirty] = React.useState(false);
+  React.useEffect(() => {
+    if (configuration && !parametersDirty) {
+      const next: Record<string, string> = {};
+      configuration.parameters.forEach((param) => { next[param.key] = param.value; });
+      setDraftParameters(next);
+    }
+  }, [configuration, parametersDirty]);
+
+  const refreshAfterConfigChange = React.useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['ai-security-findings-for-policy', policyId] });
+    void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] });
+  }, [queryClient, policyId]);
+
+  const scopeMutation = useMutation({
+    mutationFn: () => {
+      if (!draftScope) throw new Error('Scope is not loaded yet');
+      return api.updateAiSecurityPolicyScope(policyId, draftScope.mode, draftScope.conditionLogic, draftScope.conditions);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
+      setScopeDirty(false);
+      refreshAfterConfigChange();
+    },
+  });
+
+  const parametersMutation = useMutation({
+    mutationFn: () => api.updateAiSecurityPolicyParameters(policyId, draftParameters),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
+      setParametersDirty(false);
+      refreshAfterConfigChange();
+    },
+  });
+
+  const candidateArtifactType = policy?.artifactTypes[0];
+  const candidateArtifactsQuery = useQuery({
+    queryKey: ['ai-security-artifacts-for-exception', candidateArtifactType],
+    queryFn: () => api.listAiSecurityArtifacts(candidateArtifactType, 0, 200),
+    enabled: tab === 'configure' && !!candidateArtifactType,
+  });
+  const [exceptionArtifactId, setExceptionArtifactId] = React.useState('');
+  const [exceptionOverride, setExceptionOverride] = React.useState<PolicyExceptionOverride>('EXCLUDED');
+  const [exceptionReason, setExceptionReason] = React.useState('');
+
+  const addExceptionMutation = useMutation({
+    mutationFn: () => api.addAiSecurityPolicyException(policyId, exceptionArtifactId, exceptionOverride, exceptionReason || undefined),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
+      setExceptionArtifactId('');
+      setExceptionReason('');
+      refreshAfterConfigChange();
+    },
+  });
+  const removeExceptionMutation = useMutation({
+    mutationFn: (artifactId: string) => api.removeAiSecurityPolicyException(policyId, artifactId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
+      refreshAfterConfigChange();
+    },
+  });
+
+  const explainQuery = useQuery({
+    queryKey: ['ai-security-policy-explain', policyId],
+    queryFn: () => api.explainAiSecurityPolicy(policyId),
+    enabled: false,
+  });
+  const suggestQuery = useQuery({
+    queryKey: ['ai-security-policy-suggest-scope', policyId],
+    queryFn: () => api.suggestAiSecurityPolicyScope(policyId),
+    enabled: false,
+  });
+
+  const updateCondition = (index: number, next: PolicyScopeCondition) => {
+    if (!draftScope) return;
+    const conditions = draftScope.conditions.slice();
+    conditions[index] = next;
+    setDraftScope({ ...draftScope, conditions });
+    setScopeDirty(true);
+  };
+  const removeCondition = (index: number) => {
+    if (!draftScope) return;
+    setDraftScope({ ...draftScope, conditions: draftScope.conditions.filter((_, i) => i !== index) });
+    setScopeDirty(true);
+  };
+  const addCondition = () => {
+    if (!draftScope) return;
+    setDraftScope({
+      ...draftScope,
+      conditions: [...draftScope.conditions, { field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' }],
+    });
+    setScopeDirty(true);
+  };
+  const applySuggestion = () => {
+    const condition = suggestQuery.data?.suggestedCondition;
+    if (!condition || !draftScope) return;
+    const alreadyMatchRules = draftScope.mode === 'MATCH_RULES';
+    setDraftScope({
+      mode: 'MATCH_RULES',
+      conditionLogic: alreadyMatchRules ? draftScope.conditionLogic : 'AND',
+      conditions: [...(alreadyMatchRules ? draftScope.conditions : []), condition],
+    });
+    setScopeDirty(true);
+  };
 
   if (policiesQuery.isLoading) {
     return <section className="panel"><div className="empty-state"><p>Loading policy…</p></div></section>;
@@ -118,6 +275,9 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
         <button type="button" className={`cvd2-tab${tab === 'overview' ? ' active' : ''}`} onClick={() => setTab('overview')}>
           Overview
         </button>
+        <button type="button" className={`cvd2-tab${tab === 'configure' ? ' active' : ''}`} onClick={() => setTab('configure')}>
+          Configure
+        </button>
         <button type="button" className={`cvd2-tab${tab === 'findings' ? ' active' : ''}`} onClick={() => setTab('findings')}>
           Findings · {policy.openFindings}
         </button>
@@ -148,11 +308,19 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                     <span className="cvd-signal-pill">{policy.openFindings} open finding{policy.openFindings === 1 ? '' : 's'}</span>
                     <span className="cvd-signal-pill">{impactedArtifacts.length} artifact{impactedArtifacts.length === 1 ? '' : 's'} impacted</span>
                     <span className="cvd-signal-pill">{policy.requiredResourceFamilies.length} evidence source{policy.requiredResourceFamilies.length === 1 ? '' : 's'}</span>
+                    {configuration && configuration.scope.mode !== 'ALL' && (
+                      <span className="cvd-signal-pill ai-policy-scope-pill">
+                        Scoped · {configuration.matchedArtifactCount} of {configuration.totalArtifactCount}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <p className="cvd-ov-description">{policy.description}</p>
                 <div className="cvd-ov-divider" />
                 <div className="cvd-ov-links">
+                  <button type="button" className="cvd-ov-link" onClick={() => setTab('configure')}>
+                    Configure scope and parameters →
+                  </button>
                   <button type="button" className="cvd-ov-link" onClick={() => setTab('findings')}>
                     {policy.openFindings} open finding{policy.openFindings === 1 ? '' : 's'} →
                   </button>
@@ -251,6 +419,300 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
               </div>
             </div>
           </div>
+        )}
+
+        {tab === 'configure' && (
+          configQuery.isLoading || !draftScope ? (
+            <div className="empty-state"><p>Loading configuration…</p></div>
+          ) : configQuery.isError || !configuration ? (
+            <div className="notice error">This policy's configuration could not be loaded.</div>
+          ) : (
+            <div className="cvd2-overview-body">
+              <div className="cvd2-overview-main">
+                <div className="cvd2-panel">
+                  <div className="cvd2-panel-hdr">Scope · which AI inventory this policy evaluates</div>
+                  <div className="ai-policy-config-body">
+                    <p className="card-note">
+                      Artifacts outside scope are skipped entirely — any existing finding for them is suppressed, not just hidden.
+                    </p>
+                    <div className="ai-policy-scope-modes" role="tablist" aria-label="Scope mode">
+                      {SCOPE_MODE_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`ai-policy-scope-mode-btn${draftScope.mode === option.value ? ' active' : ''}`}
+                          disabled={!canManage}
+                          onClick={() => { setDraftScope({ ...draftScope, mode: option.value }); setScopeDirty(true); }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {draftScope.mode === 'MATCH_RULES' && (
+                      <>
+                        <div className="ai-policy-rule-logic">
+                          Match
+                          <div className="ai-policy-scope-modes ai-policy-rule-logic-toggle">
+                            {(['AND', 'OR'] as const).map((logic) => (
+                              <button
+                                key={logic}
+                                type="button"
+                                className={`ai-policy-scope-mode-btn${draftScope.conditionLogic === logic ? ' active' : ''}`}
+                                disabled={!canManage}
+                                onClick={() => { setDraftScope({ ...draftScope, conditionLogic: logic }); setScopeDirty(true); }}
+                              >
+                                {logic === 'AND' ? 'ALL' : 'ANY'}
+                              </button>
+                            ))}
+                          </div>
+                          of the following conditions
+                        </div>
+                        {draftScope.conditions.map((condition, index) => (
+                          <div className="ai-policy-rule-row" key={index}>
+                            <select
+                              value={condition.field}
+                              disabled={!canManage}
+                              onChange={(event) => updateCondition(index, { ...condition, field: event.target.value })}
+                            >
+                              {SCOPE_FIELD_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={condition.operator}
+                              disabled={!canManage}
+                              onChange={(event) => updateCondition(index, { ...condition, operator: event.target.value })}
+                            >
+                              {SCOPE_OPERATOR_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={condition.value}
+                              disabled={!canManage}
+                              placeholder="Value"
+                              onChange={(event) => updateCondition(index, { ...condition, value: event.target.value })}
+                            />
+                            <button
+                              type="button"
+                              className="ai-policy-rule-remove"
+                              aria-label="Remove condition"
+                              disabled={!canManage}
+                              onClick={() => removeCondition(index)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button type="button" className="ai-policy-add-row" disabled={!canManage} onClick={addCondition}>
+                          + Add condition
+                        </button>
+                      </>
+                    )}
+
+                    {draftScope.mode === 'CUSTOM_LIST' && (
+                      <p className="card-note">
+                        Nothing is in scope by default. Mark specific artifacts as “Included” in Exceptions below.
+                      </p>
+                    )}
+
+                    <div className="ai-policy-scope-preview">
+                      <span>
+                        <strong>{configuration.matchedArtifactCount} of {configuration.totalArtifactCount}</strong>{' '}
+                        eligible artifact{configuration.totalArtifactCount === 1 ? '' : 's'} currently match this scope
+                      </span>
+                    </div>
+
+                    <div className="button-row" style={{ marginTop: 12 }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={!canManage || !scopeDirty || scopeMutation.isPending}
+                        onClick={() => scopeMutation.mutate()}
+                      >
+                        {scopeMutation.isPending ? 'Saving…' : 'Save scope'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cvd2-panel">
+                  <div className="cvd2-panel-hdr">Exceptions · {configuration.exceptions.length}</div>
+                  <div className="ai-policy-config-body">
+                    {configuration.exceptions.length === 0 ? (
+                      <p className="card-note">No per-artifact overrides yet.</p>
+                    ) : (
+                      configuration.exceptions.map((exception) => (
+                        <div className="ai-policy-exception-row" key={exception.artifactId}>
+                          <div>
+                            <div className="ai-policy-exception-name">{exception.artifactName}</div>
+                            <div className="panel-caption">
+                              {exception.override === 'EXCLUDED' ? 'Excluded' : 'Included'} by {exception.createdBy} · {formatDate(exception.createdAt)}
+                              {exception.reason ? ` · "${exception.reason}"` : ''}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="ai-policy-rule-remove"
+                            aria-label={`Remove exception for ${exception.artifactName}`}
+                            disabled={!canManage || removeExceptionMutation.isPending}
+                            onClick={() => removeExceptionMutation.mutate(exception.artifactId)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    )}
+
+                    {canManage && (
+                      <div className="ai-policy-add-exception">
+                        <select
+                          aria-label="Artifact"
+                          value={exceptionArtifactId}
+                          onChange={(event) => setExceptionArtifactId(event.target.value)}
+                        >
+                          <option value="">Select an artifact…</option>
+                          {(candidateArtifactsQuery.data?.items ?? [])
+                            .filter((artifact) => !configuration.exceptions.some((exception) => exception.artifactId === artifact.id))
+                            .map((artifact) => (
+                              <option key={artifact.id} value={artifact.id}>{artifact.name}</option>
+                            ))}
+                        </select>
+                        <select
+                          aria-label="Override"
+                          value={exceptionOverride}
+                          onChange={(event) => setExceptionOverride(event.target.value as PolicyExceptionOverride)}
+                        >
+                          <option value="EXCLUDED">Exclude</option>
+                          <option value="INCLUDED">Include</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Reason (optional)"
+                          value={exceptionReason}
+                          onChange={(event) => setExceptionReason(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={!exceptionArtifactId || addExceptionMutation.isPending}
+                          onClick={() => addExceptionMutation.mutate()}
+                        >
+                          + Add exception
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="cvd2-panel">
+                  <div className="cvd2-panel-hdr">Parameters · tenant-tuned thresholds</div>
+                  <div className="ai-policy-config-body">
+                    {configuration.parameters.length === 0 ? (
+                      <p className="card-note">
+                        This policy has no tenant-configurable parameters — it evaluates a fixed condition.
+                      </p>
+                    ) : (
+                      <>
+                        {configuration.parameters.map((param) => (
+                          <div className="ai-policy-param-row" key={param.key}>
+                            <div>
+                              <div className="ai-policy-param-label">{param.label}</div>
+                              <div className="panel-caption">{param.helpText}</div>
+                              <div className="panel-caption">Platform default: {formatLabel(param.defaultValue)}</div>
+                            </div>
+                            <select
+                              value={draftParameters[param.key] ?? param.value}
+                              disabled={!canManage}
+                              onChange={(event) => {
+                                setDraftParameters({ ...draftParameters, [param.key]: event.target.value });
+                                setParametersDirty(true);
+                              }}
+                            >
+                              {param.options.map((option) => (
+                                <option key={option} value={option}>{formatLabel(option)}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                        <div className="button-row" style={{ marginTop: 12 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={!canManage || !parametersDirty || parametersMutation.isPending}
+                            onClick={() => parametersMutation.mutate()}
+                          >
+                            {parametersMutation.isPending ? 'Saving…' : 'Save parameters'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="cvd2-overview-sidebar">
+                <div className="cvd2-panel ai-policy-assist-card">
+                  <div className="cvd2-panel-hdr"><span className="ai-assist-badge">AI</span>Assist</div>
+                  <div className="ai-policy-config-body">
+                    <div className="ai-policy-assist-action">
+                      <div className="ai-policy-assist-title">Explain this policy for our environment</div>
+                      <p className="panel-caption">
+                        Reads your current AI inventory and open findings to translate the policy into what it means for your tenant right now.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-ai btn-sm"
+                        disabled={explainQuery.isFetching}
+                        onClick={() => void explainQuery.refetch()}
+                      >
+                        {explainQuery.isFetching ? 'Thinking…' : explainQuery.data ? 'Regenerate' : 'Explain'}
+                      </button>
+                      {explainQuery.data && <div className="ai-policy-assist-result">{explainQuery.data.summary}</div>}
+                    </div>
+
+                    <div className="ai-policy-assist-action">
+                      <div className="ai-policy-assist-title">Suggest scope from review history</div>
+                      <p className="panel-caption">
+                        Looks at findings marked “False positive” and proposes a rule so this policy stops re-flagging the same pattern.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-ai btn-sm"
+                        disabled={suggestQuery.isFetching}
+                        onClick={() => void suggestQuery.refetch()}
+                      >
+                        {suggestQuery.isFetching ? 'Thinking…' : 'Suggest'}
+                      </button>
+                      {suggestQuery.data && (
+                        <div className="ai-policy-assist-result">
+                          {suggestQuery.data.rationale}
+                          {suggestQuery.data.suggestedCondition && canManage && (
+                            <>
+                              <div className="ai-policy-rule-chip">
+                                {SCOPE_FIELD_OPTIONS.find((f) => f.value === suggestQuery.data?.suggestedCondition?.field)?.label ?? suggestQuery.data.suggestedCondition.field}
+                                {' '}
+                                {SCOPE_OPERATOR_OPTIONS.find((o) => o.value === suggestQuery.data?.suggestedCondition?.operator)?.label ?? suggestQuery.data.suggestedCondition.operator}
+                                {' '}
+                                “{suggestQuery.data.suggestedCondition.value}”
+                              </div>
+                              <div className="button-row">
+                                <button type="button" className="btn btn-primary btn-sm" onClick={applySuggestion}>
+                                  Add to scope
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {tab === 'findings' && (

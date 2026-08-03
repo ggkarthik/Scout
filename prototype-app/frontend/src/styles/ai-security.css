@@ -204,6 +204,28 @@
   white-space: nowrap;
 }
 
+.ai-security-row-link:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.ai-security-row-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ai-security-row-chevron {
+  width: 32px;
+  color: var(--muted);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.ai-security-row-link:hover .ai-security-row-chevron,
+.ai-security-row-link:focus-visible .ai-security-row-chevron {
+  opacity: 1;
+}
+
 .ai-policy-toolbar {
   display: flex;
   flex-wrap: wrap;

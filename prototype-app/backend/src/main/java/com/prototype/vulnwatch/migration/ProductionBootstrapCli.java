@@ -25,7 +25,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 57;
+    private static final int TARGET_VERSION = 58;
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
@@ -408,15 +408,15 @@ public final class ProductionBootstrapCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 57, 57, 'CURRENT', ?, now(), now(), 57, null, null, now(), ?)
+                ) values (?, ?, 58, 58, 'CURRENT', ?, now(), now(), 58, null, null, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
-                    current_version = 57,
-                    target_version = 57,
+                    current_version = 58,
+                    target_version = 58,
                     status = 'CURRENT',
                     structural_checksum = excluded.structural_checksum,
                     migration_completed_at = now(),
-                    last_successful_version = 57,
+                    last_successful_version = 58,
                     failure_code = null,
                     failure_message = null,
                     updated_at = now(),
@@ -641,7 +641,7 @@ public final class ProductionBootstrapCli {
                 requireMinimum(connection, """
                         select count(*)
                         from %s.tenant_schema_history
-                        where version = '57' and success
+                        where version = '58' and success
                         """.formatted(quotedIdentifier(schemaName)), 1, schemaName + " tenant migration version");
                 String actualChecksum = fingerprint(connection, schemaName);
                 if (recordedChecksum == null
