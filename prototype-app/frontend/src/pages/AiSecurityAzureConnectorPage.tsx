@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { AiSecurityAzureConnectionTest } from '../features/ai-security/types';
 
 export function AiSecurityAzureConnectorPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const configQuery = useQuery({
     queryKey: ['ai-security-azure-foundry-config'],
@@ -61,7 +63,12 @@ export function AiSecurityAzureConnectorPage() {
   });
   const runMutation = useMutation({
     mutationFn: api.runAiSecurityAzureFoundryConfig,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
+    },
   });
 
   const error = saveMutation.error ?? testMutation.error ?? runMutation.error;
@@ -77,6 +84,9 @@ export function AiSecurityAzureConnectorPage() {
         <span className={`status-pill ${configured ? 'success' : 'muted'}`}>
           {configQuery.isLoading ? 'Loading' : configured ? 'Success' : 'Not configured'}
         </span>
+        <button className="btn btn-secondary" type="button" onClick={() => navigate('/inventory/ai')}>
+          View AI Inventory
+        </button>
       </section>
 
       <div className="ai-connector-columns">

@@ -19,6 +19,14 @@ function buildArtifact(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityA
     attributes: { kind: 'azurebot', msaAppType: 'SingleTenant' },
     firstObservedAt: '2026-06-01T00:00:00Z',
     lastObservedAt: '2026-07-30T23:00:00Z',
+    ownerName: null,
+    ownerState: 'UNOWNED',
+    ownerSource: null,
+    ownerConfidence: null,
+    ownerConfidenceMethod: null,
+    ownerConfidenceMethodVersion: null,
+    businessCriticality: null,
+    environment: null,
     ...overrides,
   };
 }

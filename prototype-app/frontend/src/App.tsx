@@ -49,6 +49,9 @@ const FindingsPage = React.lazy(async () => ({
 const AiFindingsPage = React.lazy(async () => ({
   default: (await import('./pages/AiFindingsPage')).AiFindingsPage
 }));
+const AiExposuresPage = React.lazy(async () => ({
+  default: (await import('./pages/AiExposuresPage')).AiExposuresPage
+}));
 const AiPoliciesPage = React.lazy(async () => ({
   default: (await import('./pages/AiPoliciesPage')).AiPoliciesPage
 }));
@@ -1109,6 +1112,7 @@ function AppShell() {
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
               <Route path="/" element={<HomeRoute />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
+              <Route path="/findings/ai/exposures/:exposureId?" element={<AiSecurityRoute><AiExposuresPage /></AiSecurityRoute>} />
               <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />

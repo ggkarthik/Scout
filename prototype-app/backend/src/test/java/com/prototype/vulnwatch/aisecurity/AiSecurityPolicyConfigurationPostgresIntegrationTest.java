@@ -1,11 +1,9 @@
 package com.prototype.vulnwatch.aisecurity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ArtifactObservation;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationEnvelopeV1;
-import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.FindingResponse;
@@ -36,7 +34,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
 @PostgresIntegrationTest
-@TestPropertySource(properties = "spring.main.allow-circular-references=true")
+@TestPropertySource(properties = {
+    "spring.main.allow-circular-references=true",
+    "app.ai-security.grid.legacy-findings-enabled=true"
+})
 class AiSecurityPolicyConfigurationPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
@@ -114,29 +115,6 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
         apiService.updatePolicyParameters(tenant, GUARDRAIL_POLICY, Map.of("minimumGuardrailStrength", "LOW"), "tester");
         assertEquals("RESOLVED", findingStatus(tenant, GUARDRAIL_POLICY, agent),
                 "lowering the required threshold to LOW should resolve the finding for a LOW-strength guardrail");
-    }
-
-    @Test
-    void suggestsAScopeRuleFromSharedNamingAcrossFalsePositiveReviews() {
-        Tenant tenant = provision("Suggest Scope Co", "suggest-scope-co");
-        UUID connectorId = connector(tenant);
-        UUID runId = syncRunFacade.start(tenant).getId();
-        ingestWildcardAgents(tenant, connectorId, runId, "sandbox-agent-one", "sandbox-agent-two");
-
-        reviewFinding(tenant, WILDCARD_POLICY, artifactIdByName(tenant, "sandbox-agent-one"));
-        reviewFinding(tenant, WILDCARD_POLICY, artifactIdByName(tenant, "sandbox-agent-two"));
-
-        var suggestion = apiService.suggestScopeFromReviewHistory(tenant, WILDCARD_POLICY);
-        assertTrue(suggestion.suggestedCondition() != null, "expected a suggested condition from 2 shared false positives");
-        assertEquals("sandbox", suggestion.suggestedCondition().value());
-        assertEquals("NOT_CONTAINS", suggestion.suggestedCondition().operator());
-    }
-
-    private void reviewFinding(Tenant tenant, String policyId, UUID artifactId) {
-        UUID findingId = tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select id from ai_security_findings where policy_id = :policyId and artifact_id = :artifactId
-                """, Map.of("policyId", policyId, "artifactId", artifactId), UUID.class));
-        apiService.review(tenant, findingId, ReviewDisposition.FALSE_POSITIVE, "not a real issue", "tester");
     }
 
     private UUID connector(Tenant tenant) {

@@ -511,8 +511,16 @@ import type {
   AiSecurityRun,
   AiSecurityScope,
   AiSecuritySummary,
+  AiGridSystem,
+  AiGridCoverage,
+  AiGridCoverageDimension,
+  AiGridPolicy,
+  AiGridPolicySelection,
+  AiGridOwner,
+  AiGridRunMetrics,
+  AiGridExposurePage,
+  AiGridExposureDetail,
   PolicyAssistExplanation,
-  PolicyAssistScopeSuggestion,
   PolicyConfiguration,
   PolicyExceptionOverride,
   PolicyScopeCondition,
@@ -1329,6 +1337,37 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getAiSecuritySummary: () => request<AiSecuritySummary>('/ai-security/summary'),
+  listAiGridSystems: () => request<AiGridSystem[]>('/ai-systems'),
+  getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
+  getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
+  listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
+  updateAiGridPolicySelection: (policyId: string, selection: AiGridPolicySelection, reason?: string) =>
+    request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
+      method: 'PUT',
+      body: JSON.stringify({ selection, reason }),
+    }),
+  getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
+    `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
+  ),
+  listAiGridExposures: (cursor?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    return request<AiGridExposurePage>(`/ai-exposures?${params.toString()}`);
+  },
+  getAiGridExposure: (exposureId: string) => request<AiGridExposureDetail>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}`,
+  ),
+  dispositionAiGridExposure: (exposureId: string, disposition: string, reason: string) => request<void>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}/disposition`, {
+      method: 'POST', body: JSON.stringify({ disposition, reason }),
+    },
+  ),
+  confirmAiGridArtifactOwner: (artifactId: string, ownerName: string, reason?: string) => request<AiGridOwner>(
+    `/ai-artifacts/${encodeURIComponent(artifactId)}/owner`, {
+      method: 'PUT',
+      body: JSON.stringify({ ownerName, reason }),
+    },
+  ),
   listAiSecurityArtifacts: (
     artifactType?: string,
     page = 0,
@@ -1409,10 +1448,6 @@ export const api = {
     }),
   explainAiSecurityPolicy: (policyId: string) =>
     request<PolicyAssistExplanation>(`/ai-security/policies/${encodeURIComponent(policyId)}/assist/explain`),
-  suggestAiSecurityPolicyScope: (policyId: string) =>
-    request<PolicyAssistScopeSuggestion>(
-      `/ai-security/policies/${encodeURIComponent(policyId)}/assist/suggested-scope`,
-    ),
   listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>

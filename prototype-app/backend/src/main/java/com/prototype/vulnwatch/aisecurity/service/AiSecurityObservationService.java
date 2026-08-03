@@ -43,6 +43,7 @@ public class AiSecurityObservationService {
     private final TransactionTemplate transactionTemplate;
     private final AiSecurityPolicyEvaluationService evaluationService;
     private final AiSecuritySyncRunFacade syncRunFacade;
+    private AiGridPipelineService aiGridPipelineService;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -60,9 +61,23 @@ public class AiSecurityObservationService {
         this.syncRunFacade = syncRunFacade;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiGridPipelineService(AiGridPipelineService aiGridPipelineService) {
+        this.aiGridPipelineService = aiGridPipelineService;
+    }
+
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
         validate(tenant, envelope);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> ingestCurrentTenant(tenant, envelope)));
+    }
+
+    public int countPersistedArtifacts(Tenant tenant, UUID runId) {
+        syncRunFacade.loadForTenant(tenant.getId(), runId);
+        return tenantExecution.run(tenant, () -> jdbc.queryForObject("""
+                select count(distinct artifact_id)
+                  from ai_security_artifact_sources
+                 where run_id = :runId
+                """, Map.of("runId", runId), Integer.class));
     }
 
     private IngestionResult ingestCurrentTenant(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -134,6 +149,11 @@ public class AiSecurityObservationService {
             finishScope(envelope, finalStatus, accepted, combinedDiagnostics);
             if (finalStatus == ScopeStatus.COMPLETE) {
                 reconcileCompleteScope(envelope);
+                if (aiGridPipelineService != null) {
+                    aiGridPipelineService.processCompleteScope(tenant, envelope);
+                }
+                // Compatibility projection for the current /api/ai-security policy UI. The legacy
+                // evaluator no longer owns findings when AI Grid is enabled.
                 evaluationService.evaluateRunCurrentTenant(tenant, envelope.runId());
             }
         } else {

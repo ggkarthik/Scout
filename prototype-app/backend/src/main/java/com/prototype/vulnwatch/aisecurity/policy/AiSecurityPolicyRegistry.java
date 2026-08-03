@@ -40,6 +40,13 @@ public class AiSecurityPolicyRegistry {
                     "Enable Bedrock model invocation logging to an encrypted CloudWatch Logs or S3 destination.",
                     Map.of("AWS", "BEDROCK-LOGGING")),
             new PolicyDefinition(
+                    "AZURE_RAI_POLICY_NON_BLOCKING_FILTER", "1.0.0",
+                    "Azure RAI policy contains a non-blocking filter",
+                    "HIGH", List.of("AI_GUARDRAIL"), List.of("AZURE_RAI_POLICIES"),
+                    "An Azure RAI policy explicitly disables a content filter or configures it as non-blocking.",
+                    "Enable blocking for every explicitly configured RAI content filter.",
+                    Map.of("OWASP-LLM", "LLM01")),
+            new PolicyDefinition(
                     "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS", "1.0.0", "Unrestricted Azure AI public access",
                     "CRITICAL", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_AI_ACCOUNTS"),
                     "An Azure AI account permits unrestricted public network access.",

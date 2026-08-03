@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class PostgresResetMigrationGuardTest {
 
-    private static final int LAST_LEGACY_MIGRATION_VERSION = 27;
+    private static final int LAST_LEGACY_MIGRATION_VERSION = 41;
     private static final Pattern MIGRATION_VERSION = Pattern.compile("^V(\\d+)__.*\\.sql$");
     private static final Pattern TENANT_DEFAULT_DDL =
             Pattern.compile("(?is)\\b(?:create|alter|drop)\\s+(?:table|index|sequence|view)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?tenant_default\\.");
@@ -19,7 +19,7 @@ class PostgresResetMigrationGuardTest {
             Pattern.compile("(?is)\\b(?:create|alter|drop)\\s+(?:table|index|sequence|view)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?(?!platform\\.|tenant_default\\.|information_schema\\.|pg_catalog\\.)[a-z_][a-z0-9_]*\\b");
 
     @Test
-    void newPerTenantMigrationsMustUseAllSchemaLoopOrFlywayPerSchemaMechanism() throws IOException {
+    void newPlatformMigrationsMustNotOwnTenantDdl() throws IOException {
         Path migrationDir = Path.of("src/main/resources/db/migration/postgres_reset");
         try (var files = Files.list(migrationDir)) {
             var violations = files
@@ -31,23 +31,16 @@ class PostgresResetMigrationGuardTest {
                     .toList();
 
             assertThat(violations)
-                    .as("New per-tenant DDL must loop over tenant schemas instead of changing only tenant_default")
+                    .as("Platform migrations V42+ must not own tenant DDL")
                     .isEmpty();
         }
     }
 
     private boolean isDriftProne(Path path, String sql) {
-        if (usesAllSchemaLoop(sql) || approvedFlywayPerSchema(sql) || platformOnly(sql)) {
+        if (approvedFlywayPerSchema(sql) || platformOnly(sql)) {
             return false;
         }
         return TENANT_DEFAULT_DDL.matcher(sql).find() || UNQUALIFIED_TENANT_DDL.matcher(sql).find();
-    }
-
-    private boolean usesAllSchemaLoop(String sql) {
-        String normalized = sql.toLowerCase();
-        return normalized.contains("information_schema.tables")
-                && normalized.contains("table_schema")
-                && normalized.contains("loop");
     }
 
     private boolean approvedFlywayPerSchema(String sql) {

@@ -24,6 +24,10 @@ public class AiSecuritySyncRunFacade {
     }
 
     public SyncRun start(Tenant tenant, String syncType) {
+        return start(tenant, syncType, null);
+    }
+
+    public SyncRun start(Tenant tenant, String syncType, String metadataJson) {
         if (!SYNC_TYPES.contains(syncType)) {
             throw new IllegalArgumentException("Unsupported AI Security sync type");
         }
@@ -32,6 +36,7 @@ public class AiSecuritySyncRunFacade {
         run.setSyncType(syncType);
         run.setRunScope("TENANT_AI_SECURITY");
         run.setStatus("running");
+        run.setMetadataJson(metadataJson);
         return repository.save(run);
     }
 

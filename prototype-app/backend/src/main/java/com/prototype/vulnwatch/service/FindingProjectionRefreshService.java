@@ -103,7 +103,10 @@ public class FindingProjectionRefreshService {
                         finding.id,
                         finding.tenant_id,
                         finding.display_id,
-                        upper(coalesce(finding.severity_override, vulnerability.severity)),
+                        upper(coalesce(finding.severity_override, vulnerability.severity,
+                            case when finding.risk_score >= 9 then 'CRITICAL'
+                                 when finding.risk_score >= 7 then 'HIGH'
+                                 when finding.risk_score >= 4 then 'MEDIUM' else 'LOW' end)),
                         cast(finding.status as varchar),
                         cast(finding.decision_state as varchar),
                         cast(finding.creation_source as varchar),
@@ -112,14 +115,14 @@ public class FindingProjectionRefreshService {
                         finding.vex_freshness,
                         finding.vex_provider,
                         finding.confidence_score,
-                        vulnerability.external_id,
-                        component.package_name,
-                        component.ecosystem,
+                        coalesce(vulnerability.external_id, finding.policy_id),
+                        coalesce(component.package_name, ai_artifact.name),
+                        coalesce(component.ecosystem, case when finding.finding_kind <> 'VULNERABILITY' then 'AI' end),
                         finding.owner_group,
                         finding.assigned_to,
                         finding.incident_id,
                         finding.due_at,
-                        asset.name,
+                        coalesce(asset.name, ai_artifact.name),
                         asset.support_group,
                         patchable_cves.external_id_upper IS NOT NULL,
                         finding.suppressed_until,
@@ -128,9 +131,14 @@ public class FindingProjectionRefreshService {
                         finding.created_at,
                         finding.first_observed_at
                     FROM findings finding
-                    JOIN vulnerabilities vulnerability ON vulnerability.id = finding.vulnerability_id
-                    JOIN inventory_components component ON component.id = finding.component_id
-                    JOIN assets asset ON asset.id = finding.asset_id
+                    LEFT JOIN vulnerabilities vulnerability ON vulnerability.id = finding.vulnerability_id
+                    LEFT JOIN inventory_components component ON component.id = finding.component_id
+                    LEFT JOIN assets asset ON asset.id = finding.asset_id
+                    LEFT JOIN finding_subjects ai_subject
+                      ON ai_subject.finding_id = finding.id
+                     AND ai_subject.subject_type = 'ARTIFACT'
+                     AND ai_subject.subject_role = 'PRIMARY'
+                    LEFT JOIN ai_security_artifacts ai_artifact ON ai_artifact.id = ai_subject.subject_id
                     LEFT JOIN (
                         SELECT DISTINCT upper(fix_record.cve_id) AS external_id_upper
                         FROM fix_records fix_record

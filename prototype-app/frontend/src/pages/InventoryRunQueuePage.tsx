@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   DataTable,
   type DataTableColumn,
@@ -32,6 +33,18 @@ type InventoryRunMetadata = {
   inventoryComponentsCreated?: number;
   inventoryComponentsUpdated?: number;
   message?: string;
+  provider?: string;
+  connectorId?: string;
+  accountId?: string;
+  awsAccountId?: string;
+  subscriptionId?: string;
+  subscriptionIds?: string[];
+  azureTenantId?: string;
+  regions?: string[];
+  resourceTypes?: string[];
+  families?: string[];
+  assetsUpdated?: number;
+  subscriptionErrors?: Record<string, string>;
 };
 
 const INVENTORY_RUN_COLUMNS: DataTableColumn[] = [
@@ -39,7 +52,7 @@ const INVENTORY_RUN_COLUMNS: DataTableColumn[] = [
   { id: 'status', label: 'Status', header: 'Status', initialSize: 160 },
   { id: 'started', label: 'Started', header: 'Started', initialSize: 180 },
   { id: 'duration', label: 'Duration', header: 'Duration', initialSize: 140 },
-  { id: 'assets', label: 'Assets', header: 'Assets', initialSize: 100 },
+  { id: 'assets', label: 'Inventory items', header: 'Inventory items', initialSize: 130 },
   { id: 'components', label: 'Components', header: 'Components', initialSize: 120 },
   { id: 'findings', label: 'Findings', header: 'Findings', initialSize: 100 },
   { id: 'details', label: 'Details', header: 'Details', initialSize: 320 }
@@ -68,11 +81,21 @@ function isActiveRun(status: string): boolean {
 
 function isInventoryRunType(syncType: string): boolean {
   const normalized = syncType.trim().toUpperCase();
-  return normalized.startsWith('GITHUB_') || normalized === 'SERVICENOW_CMDB';
+  return normalized.startsWith('GITHUB_')
+    || normalized === 'SERVICENOW_CMDB'
+    || normalized === 'SCCM_CMDB'
+    || normalized === 'AWS_DISCOVERY'
+    || normalized === 'AZURE_DISCOVERY'
+    || normalized === 'AI_SECURITY_AWS_BEDROCK'
+    || normalized === 'AI_SECURITY_AZURE_DISCOVERY';
 }
 
 function isInventoryRun(run: SyncRun): boolean {
   return run.runDomain === 'INVENTORY' || isInventoryRunType(run.syncType);
+}
+
+function isAiInventoryRun(run: SyncRun): boolean {
+  return run.syncType.trim().toUpperCase().startsWith('AI_SECURITY_');
 }
 
 function queueLabel(run: SyncRun): string {
@@ -92,6 +115,9 @@ function formatSourceSystem(value?: string): string {
 function formatSyncType(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (normalized === 'AWS_DISCOVERY') return 'AWS Cloud Discovery';
+  if (normalized === 'AZURE_DISCOVERY') return 'Azure Cloud Discovery';
+  if (normalized === 'AI_SECURITY_AWS_BEDROCK') return 'AWS AI Discovery';
+  if (normalized === 'AI_SECURITY_AZURE_DISCOVERY') return 'Azure AI Discovery';
   if (normalized === 'SERVICENOW_CMDB') return 'ServiceNow CMDB Live Sync';
   if (normalized === 'GITHUB_REPOSITORY_SBOM') return 'GitHub Repository SBOM';
   if (normalized === 'GITHUB_GHCR_SBOM') return 'GitHub GHCR SBOM';
@@ -108,7 +134,7 @@ function formatRunStatus(value: string): string {
 function runStatusClass(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (normalized === 'FAILED') return 'status-failure';
-  if (normalized === 'PARTIAL_SUCCESS' || normalized === 'COMPLETED_WITH_ERRORS' || normalized === 'SUCCESS_WITH_WARNINGS') return 'status-warning';
+  if (normalized === 'PARTIAL' || normalized === 'PARTIAL_SUCCESS' || normalized === 'COMPLETED_WITH_ERRORS' || normalized === 'SUCCESS_WITH_WARNINGS') return 'status-warning';
   if (normalized === 'COMPLETED') return 'status-success';
   if (normalized === 'RUNNING' || normalized === 'STARTED') return 'status-open';
   if (normalized === 'QUEUED') return 'status-open';
@@ -119,8 +145,13 @@ function formatCount(value?: number): string {
   return value == null ? '-' : String(value);
 }
 
-function readAssetsIngested(metadata: InventoryRunMetadata): number | undefined {
-  return metadata.assetsIngested ?? metadata.assetsUpserted;
+function readAssetsIngested(run: SyncRun, metadata: InventoryRunMetadata): number | undefined {
+  const metadataCount = metadata.assetsIngested ?? metadata.assetsUpserted;
+  if (metadataCount != null) return metadataCount;
+  if (run.syncType.trim().toUpperCase().startsWith('AI_SECURITY_')) {
+    return run.recordsInserted;
+  }
+  return undefined;
 }
 
 function readComponentsIngested(run: SyncRun, metadata: InventoryRunMetadata): number | undefined {
@@ -169,8 +200,14 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
         type: {
           content: (
             <>
-              <div>{formatSyncType(run.syncType)}</div>
-              <div className="panel-caption">{formatSourceSystem(metadata.sourceSystem)}</div>
+              <div>
+                {isAiInventoryRun(run) ? (
+                  <Link to="/inventory/ai">{formatSyncType(run.syncType)}</Link>
+                ) : formatSyncType(run.syncType)}
+              </div>
+              <div className="panel-caption">
+                {formatSourceSystem(metadata.sourceSystem ?? metadata.provider)}
+              </div>
             </>
           )
         },
@@ -188,7 +225,7 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
         },
         started: { content: new Date(run.startedAt).toLocaleString() },
         duration: { content: humanDuration(run.startedAt, run.completedAt) },
-        assets: { content: formatCount(readAssetsIngested(metadata)) },
+        assets: { content: formatCount(readAssetsIngested(run, metadata)) },
         components: { content: formatCount(readComponentsIngested(run, metadata)) },
         findings: { content: formatCount(readFindingsGenerated(run, metadata)) },
         details: {
@@ -196,14 +233,25 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
             <details className="evidence-details">
               <summary>Details</summary>
               {detailLine('Trigger', metadata.triggerMode)}
+              {detailLine('Provider', metadata.provider)}
+              {detailLine('Connector ID', metadata.connectorId)}
+              {detailLine('AWS account', metadata.accountId ?? metadata.awsAccountId)}
+              {detailLine('Azure tenant', metadata.azureTenantId)}
+              {detailLine('Azure subscription', metadata.subscriptionId)}
+              {detailLine('Azure subscriptions', metadata.subscriptionIds?.join(', '))}
+              {detailLine('Regions', metadata.regions?.join(', '))}
+              {detailLine('Resource types', metadata.resourceTypes?.join(', '))}
+              {detailLine('Resource families', metadata.families?.join(', '))}
               {detailLine('Scope', metadata.scope)}
               {detailLine('Stage', metadata.stage)}
               {detailLine('Table', metadata.tableName)}
               {detailLine('Assets discovered', metadata.assetsDiscovered)}
               {detailLine('Assets ingested', metadata.assetsIngested)}
               {detailLine('Assets upserted', metadata.assetsUpserted)}
+              {detailLine('Assets updated', metadata.assetsUpdated)}
               {detailLine('Assets marked inactive', metadata.assetsMarkedInactive)}
               {detailLine('Assets failed', metadata.assetsFailed)}
+              {detailLine('AI artifacts observed', isAiInventoryRun(run) ? run.recordsFetched : null)}
               {detailLine('Fetched', run.recordsFetched)}
               {detailLine('Failed', run.recordsFailed ?? 0)}
               {detailLine('Inserted', run.recordsInserted)}
@@ -221,6 +269,12 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
               {detailLine('Findings generated', metadata.findingsGenerated)}
               {detailLine('Completed', run.completedAt ? new Date(run.completedAt).toLocaleString() : null)}
               {detailLine('Message', metadata.message)}
+              {detailLine(
+                'Subscription errors',
+                metadata.subscriptionErrors
+                  ? Object.values(metadata.subscriptionErrors).join(' | ')
+                  : null
+              )}
               {detailLine('Error', run.errorMessage)}
             </details>
           )

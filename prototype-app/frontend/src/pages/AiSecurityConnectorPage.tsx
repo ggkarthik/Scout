@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { AiSecurityConnectionTest } from '../features/ai-security/types';
 
@@ -56,7 +57,12 @@ export function AiSecurityConnectorPage() {
   });
   const runMutation = useMutation({
     mutationFn: api.runAiSecurityConnector,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-runs'] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-runs'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
+    },
   });
 
   return (
@@ -96,7 +102,10 @@ export function AiSecurityConnectorPage() {
         </section>
 
         <section className="panel ai-connector-runs">
-          <div className="panel-header"><div><h3>Recent runs</h3><span className="panel-caption">Scope failures retain prior inventory and findings.</span></div></div>
+          <div className="panel-header">
+            <div><h3>Recent runs</h3><span className="panel-caption">Scope failures retain prior inventory and findings.</span></div>
+            <Link className="btn btn-secondary" to="/inventory/ai">View AI Inventory</Link>
+          </div>
           {(runsQuery.data ?? []).length === 0 ? (
             <div className="empty-state"><p>No AI Security discovery runs yet.</p></div>
           ) : (
