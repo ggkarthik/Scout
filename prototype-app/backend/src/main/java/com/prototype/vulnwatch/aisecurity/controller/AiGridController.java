@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -32,7 +33,11 @@ public class AiGridController {
         this.api = api;
     }
 
-    @GetMapping("/ai-systems") public List<AiGridApiService.SystemSummary> systems() { return api.systems(tenant()); }
+    @GetMapping("/ai-systems")
+    public AiGridApiService.SystemPage systems(@RequestParam(required = false) String cursor,
+                                               @RequestParam(defaultValue = "50") int limit) {
+        return api.systems(tenant(), cursor, limit);
+    }
     @GetMapping("/ai-systems/{id}") public AiGridApiService.SystemDetail system(@PathVariable UUID id) { return api.system(tenant(), id); }
     @GetMapping("/ai-systems/{id}/facts")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST','READ_ONLY_AUDITOR')")
@@ -60,7 +65,11 @@ public class AiGridController {
         return api.addHostContext(tenant(), id, request);
     }
     @GetMapping("/ai-exposures")
-    public List<AiGridApiService.ExposureSummary> exposures() { return api.exposures(tenant()); }
+    public AiGridApiService.ExposurePage exposures(
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "50") int limit) {
+        return api.exposures(tenant(), cursor, limit);
+    }
     @GetMapping("/ai-exposures/{id}")
     public AiGridApiService.ExposureDetail exposure(@PathVariable UUID id) { return api.exposure(tenant(), id); }
     @PostMapping("/ai-exposures/{id}/disposition")

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.service.AiGridExposureService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridHostContextService.HostFactInput;
 import com.prototype.vulnwatch.aisecurity.service.AiGridSystemService;
@@ -19,6 +21,7 @@ import com.prototype.vulnwatch.support.PostgresIntegrationTest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,8 @@ class AiGridR2ExposurePostgresIntegrationTest {
     @Autowired private NamedParameterJdbcTemplate jdbc;
     @Autowired private AiGridSystemService systems;
     @Autowired private AiGridExposureService exposures;
+    @Autowired private AiGridCoverageService coverage;
+    @Autowired private AiGridApiService api;
     @Autowired private AiGridHostContextService hostContext;
     @Autowired private ObjectMapper objectMapper;
 
@@ -138,6 +143,149 @@ class AiGridR2ExposurePostgresIntegrationTest {
             assertEquals(1, count("select count(*) from ai_grid_system_membership_decisions where decision='ACCEPT'"));
             assertEquals(1, count("select count(*) from ai_grid_system_lineage_events where event_type='SUCCESSOR'"));
             assertEquals(0, count("select count(*) from finding_subjects where subject_type='AI_SYSTEM'"));
+            systems.deriveForRun(tenant, run);
+            assertEquals(1, count("""
+                    select count(*) from ai_grid_systems s join ai_grid_system_revisions r
+                      on r.system_id=s.id and r.revision=s.current_revision
+                    join ai_grid_system_memberships m on m.system_revision_id=r.id
+                     where s.id='""" + systemId + "' and m.artifact_id='" + extra
+                    + "' and m.confidence_method='USER_CONFIRMED'"),
+                    "confirmed membership overrides must survive deterministic derivation");
+            return null;
+        });
+    }
+
+    @Test
+    void authoritativeEpochCorrelatesAcrossScopeHeadsAndReplaysBoundInputs() {
+        Tenant tenant = tenants.createTenant("R2 epoch " + UUID.randomUUID(),
+                "r2-epoch-" + UUID.randomUUID(), "pilot", null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant, () -> {
+            UUID agent = UUID.randomUUID(); UUID kb = UUID.randomUUID();
+            UUID agentRun = UUID.randomUUID(); UUID dataRun = UUID.randomUUID(); Instant observed = Instant.now();
+            seedArtifact(tenant, agent, "AI_AGENT", "AWS_BEDROCK_AGENT", "agent");
+            seedArtifact(tenant, kb, "KNOWLEDGE_BASE", "AZURE_AI_SEARCH", "kb");
+            seedManifest(tenant, agentRun, agent, observed, "epoch-agent");
+            seedManifest(tenant, dataRun, kb, observed, "epoch-kb");
+            jdbc.update("update ai_grid_snapshot_manifests set scope_key='AWS:agents' where run_id=:id", Map.of("id", agentRun));
+            jdbc.update("update ai_grid_snapshot_manifests set scope_key='AZURE:data' where run_id=:id", Map.of("id", dataRun));
+            seedCompleteScope(tenant, agentRun, "AWS", "AWS:agents", observed);
+            seedCompleteScope(tenant, dataRun, "AZURE", "AZURE:data", observed);
+            seedRelationship(tenant, agentRun, agent, kb, "USES_KNOWLEDGE_BASE", observed);
+            addValidatingFacts(tenant, agent, kb, observed.plus(1, ChronoUnit.HOURS));
+
+            UUID epochId = coverage.refreshCurrent(tenant, dataRun);
+            systems.deriveForCurrentEpoch(tenant, epochId, dataRun);
+            assertEquals(1, exposures.correlateCurrentEpoch(tenant, epochId, dataRun).validated());
+            assertEquals(1, count("select count(*) from ai_grid_exposure_executions where coverage_epoch_id='" + epochId + "'"));
+            assertEquals(1, exposures.verifyReplay(tenant, dataRun).validated());
+            jdbc.update("update ai_grid_host_context_facts set valid_until=now()-interval '1 second'", Map.of());
+            UUID staleEpoch = coverage.refreshCurrent(tenant, dataRun);
+            systems.deriveForCurrentEpoch(tenant, staleEpoch, dataRun);
+            assertEquals(1, exposures.correlateCurrentEpoch(tenant, staleEpoch, dataRun).demoted());
+            assertEquals("EXPOSURE_HYPOTHESIS", jdbc.queryForObject(
+                    "select state from ai_grid_exposure_paths", Map.of(), String.class));
+            assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='OPEN'"));
+            assertEquals(1, exposures.verifyReplay(tenant, dataRun).hypotheses());
+            return null;
+        });
+    }
+
+    @Test
+    void convergentPathsAreBothRetainedAndSharedFindingStaysOpenWhenOneBreaks() {
+        Tenant tenant = tenants.createTenant("R2 shared root " + UUID.randomUUID(),
+                "r2-shared-" + UUID.randomUUID(), "pilot", null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant, () -> {
+            UUID agent = UUID.randomUUID(); UUID left = UUID.randomUUID(); UUID right = UUID.randomUUID(); UUID kb = UUID.randomUUID();
+            seedArtifact(tenant, agent, "AI_AGENT", "AWS_BEDROCK_AGENT", "agent");
+            seedArtifact(tenant, left, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", "left");
+            seedArtifact(tenant, right, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", "right");
+            seedArtifact(tenant, kb, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", "kb");
+            UUID run = seedGraphRun(tenant, List.of(agent, left, right, kb), List.of(
+                    new Relationship(agent, left, "USES_DATA_SOURCE"), new Relationship(agent, right, "USES_DATA_SOURCE"),
+                    new Relationship(left, kb, "USES_KNOWLEDGE_BASE"), new Relationship(right, kb, "USES_KNOWLEDGE_BASE")));
+            addValidatingFacts(tenant, agent, kb, Instant.now().plus(1, ChronoUnit.HOURS));
+            systems.deriveForRun(tenant, run);
+            assertEquals(2, exposures.correlateCompleteRun(tenant, run).validated());
+            assertEquals(2, count("select count(*) from ai_grid_exposure_paths where status='OPEN'"));
+            assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE'"));
+            var firstPage = api.exposures(tenant, null, 1);
+            assertEquals(1, firstPage.items().size());
+            assertNotNull(firstPage.nextCursor());
+            assertEquals(1, api.exposures(tenant, firstPage.nextCursor(), 1).items().size());
+
+            UUID next = seedGraphRun(tenant, List.of(agent, left, right, kb), List.of(
+                    new Relationship(agent, left, "USES_DATA_SOURCE"), new Relationship(left, kb, "USES_KNOWLEDGE_BASE")));
+            systems.deriveForRun(tenant, next);
+            exposures.correlateCompleteRun(tenant, next);
+            assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='OPEN'"));
+            return null;
+        });
+    }
+
+    @Test
+    void toolPrivilegeAndUntrustedExecutionTemplatesRequireTheirExactRoles() {
+        Tenant tenant = tenants.createTenant("R2 templates " + UUID.randomUUID(),
+                "r2-templates-" + UUID.randomUUID(), "pilot", null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant, () -> {
+            UUID toolAgent = UUID.randomUUID(); UUID tool = UUID.randomUUID();
+            UUID inputAgent = UUID.randomUUID(); UUID input = UUID.randomUUID();
+            seedArtifact(tenant, toolAgent, "AI_AGENT", "AWS_BEDROCK_AGENT", "tool-agent");
+            seedArtifact(tenant, tool, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", "tool");
+            seedArtifact(tenant, inputAgent, "AI_AGENT", "AWS_BEDROCK_AGENT", "input-agent");
+            seedArtifact(tenant, input, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", "input");
+            UUID run = seedGraphRun(tenant, List.of(toolAgent, tool, inputAgent, input), List.of(
+                    new Relationship(toolAgent, tool, "USES_TOOL"),
+                    new Relationship(inputAgent, input, "USES_KNOWLEDGE_BASE")));
+            Instant until = Instant.now().plus(1, ChronoUnit.HOURS);
+            hostContext.upsert(tenant, tool, hostFact("identity.effective_excessive_privilege_derived",
+                    "GRAPH_ANALYSIS", "IDENTITY", until, "DERIVED"));
+            hostContext.upsert(tenant, tool, hostFact("impact.secret_or_consequential_access_confirmed",
+                    "CIEM", "IDENTITY", until, "HOST_INTEGRATION"));
+            hostContext.upsert(tenant, inputAgent, hostFact("agent.autonomous_execution_verified",
+                    "GRAPH_ANALYSIS", "ASSET", until, "HOST_INTEGRATION"));
+            hostContext.upsert(tenant, inputAgent, hostFact("control.execution_boundary_inadequate_verified",
+                    "GRAPH_ANALYSIS", "ASSET", until, "HOST_INTEGRATION"));
+            hostContext.upsert(tenant, input, hostFact("input.untrusted_path_verified",
+                    "GRAPH_ANALYSIS", "DATA", until, "HOST_INTEGRATION"));
+            systems.deriveForRun(tenant, run);
+            assertEquals(2, exposures.correlateCompleteRun(tenant, run).validated());
+            assertEquals(1, count("select count(*) from ai_grid_exposure_paths where correlation_id='R2_EXCESSIVE_TOOL_PRIVILEGE'"));
+            assertEquals(1, count("select count(*) from ai_grid_exposure_paths where correlation_id='R2_UNTRUSTED_AUTONOMOUS_EXECUTION'"));
+            return null;
+        });
+    }
+
+    @Test
+    void excessiveFanOutIsBoundedAndStaleEdgesAreExcluded() {
+        Tenant tenant = tenants.createTenant("R2 bounds " + UUID.randomUUID(),
+                "r2-bounds-" + UUID.randomUUID(), "pilot", null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant, () -> {
+            UUID agent = UUID.randomUUID(); UUID runId = UUID.randomUUID(); Instant observed = Instant.now();
+            seedArtifact(tenant, agent, "AI_AGENT", "AWS_BEDROCK_AGENT", "agent");
+            seedManifest(tenant, runId, agent, observed, "bounded-agent");
+            upsertSource(tenant, runId, agent, observed);
+            for (int index = 0; index < 102; index++) {
+                UUID target = UUID.randomUUID();
+                seedArtifact(tenant, target, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", "kb-" + index);
+                seedManifest(tenant, runId, target, observed, "bounded-" + index);
+                upsertSource(tenant, runId, target, observed);
+                seedRelationship(tenant, runId, agent, target, "USES_KNOWLEDGE_BASE", observed);
+                if (index == 101) jdbc.update("""
+                        update ai_grid_relationship_snapshots set valid_until=:expired
+                         where run_id=:runId and target_artifact_id=:target
+                        """, new MapSqlParameterSource().addValue("expired", Timestamp.from(observed.minusSeconds(1)))
+                        .addValue("runId", runId).addValue("target", target));
+            }
+            systems.deriveForRun(tenant, runId);
+            exposures.correlateCompleteRun(tenant, runId);
+            assertEquals(101, count("select count(*) from ai_grid_system_memberships"),
+                    "system membership is root plus the first 100 current edges");
+            assertEquals(200, count("select graph_traversed_path_count from ai_grid_run_metrics"),
+                    "two applicable templates each traverse at most 100 first-hop paths");
             return null;
         });
     }
@@ -149,8 +297,13 @@ class AiGridR2ExposurePostgresIntegrationTest {
     }
 
     private HostFactInput hostFact(String key, String evidenceClass, String port, Instant validUntil) {
+        return hostFact(key, evidenceClass, port, validUntil, "HOST_INTEGRATION");
+    }
+
+    private HostFactInput hostFact(String key, String evidenceClass, String port, Instant validUntil,
+                                   String provenance) {
         Instant now = Instant.now().minus(1, ChronoUnit.SECONDS);
-        return new HostFactInput(key, objectMapper.valueToTree(true), "KNOWN", "HOST_INTEGRATION",
+        return new HostFactInput(key, objectMapper.valueToTree(true), "KNOWN", provenance,
                 evidenceClass, port, "evidence://" + key, now, now, validUntil,
                 "APPROVED_HOST_EVIDENCE", "1.0.0", 0.99);
     }
@@ -175,6 +328,38 @@ class AiGridR2ExposurePostgresIntegrationTest {
             seedFact(tenant, runId, agent, agentManifest, "data.source_linked", "true", observed);
         }
         return runId;
+    }
+
+    private UUID seedGraphRun(Tenant tenant, List<UUID> artifacts, List<Relationship> relationships) {
+        UUID runId = UUID.randomUUID(); Instant observed = Instant.now();
+        for (UUID artifact : artifacts) {
+            seedManifest(tenant, runId, artifact, observed, runId + ":" + artifact);
+            upsertSource(tenant, runId, artifact, observed);
+        }
+        for (Relationship relationship : relationships)
+            seedRelationship(tenant, runId, relationship.source(), relationship.target(), relationship.type(), observed);
+        return runId;
+    }
+
+    private void seedRelationship(Tenant tenant, UUID runId, UUID source, UUID target, String type, Instant observed) {
+        jdbc.update("""
+                insert into ai_grid_relationship_snapshots
+                    (id,tenant_id,run_id,source_artifact_id,target_artifact_id,relationship_type,observed_at,valid_from)
+                values (gen_random_uuid(),:tenantId,:runId,:source,:target,:type,:observed,:observed)
+                """, new MapSqlParameterSource().addValue("tenantId", tenant.getId()).addValue("runId", runId)
+                .addValue("source", source).addValue("target", target).addValue("type", type)
+                .addValue("observed", Timestamp.from(observed)));
+    }
+
+    private void seedCompleteScope(Tenant tenant, UUID runId, String provider, String scope, Instant observed) {
+        jdbc.update("""
+                insert into ai_security_snapshot_scopes
+                    (id,tenant_id,run_id,provider,account_id,region,resource_family,scope_key,status,
+                     expected_chunks,accepted_chunks,started_at,completed_at)
+                values (gen_random_uuid(),:tenantId,:runId,:provider,'account','region','family',:scope,'COMPLETE',
+                        1,1,:observed,:observed)
+                """, new MapSqlParameterSource().addValue("tenantId", tenant.getId()).addValue("runId", runId)
+                .addValue("provider", provider).addValue("scope", scope).addValue("observed", Timestamp.from(observed)));
     }
 
     private void seedArtifact(Tenant tenant, UUID id, String type, String nativeKind, String name) {
@@ -232,4 +417,5 @@ class AiGridR2ExposurePostgresIntegrationTest {
     }
 
     private int count(String sql) { Integer count = jdbc.queryForObject(sql, Map.of(), Integer.class); return count == null ? 0 : count; }
+    private record Relationship(UUID source, UUID target, String type) {}
 }

@@ -117,9 +117,12 @@ public class AiGridR2CertificationService {
             long[] counts = tenantExecution.run(tenant, () -> jdbc.queryForObject("""
                     select count(*) total, count(*) filter (where p.impact='' or p.root_cause='' or p.breakpoint=''
                         or p.confidence_method='' or not exists (select 1 from ai_grid_exposure_observations o
-                          where o.exposure_path_id=p.id and o.system_id is not null
-                            and jsonb_array_length(o.path_json)>1 and (o.evidence_json -> 'factIds') is not null
-                            and o.temporal_valid_from is not null)) incomplete
+                          where o.exposure_path_id=p.id and o.coverage_epoch_id=p.last_complete_epoch_id
+                            and o.observed_at=(select max(x.observed_at) from ai_grid_exposure_observations x
+                                               where x.exposure_path_id=p.id and x.coverage_epoch_id=p.last_complete_epoch_id)
+                            and o.system_id is not null and jsonb_array_length(o.path_json)>1
+                            and jsonb_array_length(coalesce(o.evidence_json -> 'factIds','[]'::jsonb))>0
+                            and o.temporal_valid_from is not null and o.correlation_material_digest is not null)) incomplete
                       from ai_grid_exposure_paths p
                     """, Map.of(), (rs, n) -> new long[]{rs.getLong(1), rs.getLong(2)}));
             total += counts[0]; incomplete += counts[1];
@@ -163,7 +166,7 @@ public class AiGridR2CertificationService {
         for (Tenant tenant : measurableTenants()) stale += tenantExecution.run(tenant, () -> jdbc.queryForObject("""
                 select count(*) from ai_grid_exposure_paths p where p.state='VALIDATED_EXPOSURE' and exists (
                     select 1 from ai_grid_exposure_observations o where o.exposure_path_id=p.id
-                      and o.observed_at=(select max(x.observed_at) from ai_grid_exposure_observations x where x.exposure_path_id=p.id)
+                      and o.coverage_epoch_id=p.last_complete_epoch_id
                       and o.temporal_valid_until is not null and o.temporal_valid_until<now())
                 """, Map.of(), Long.class));
         return stale == 0 ? new Gate("STALE_EVIDENCE_DEMOTION", "PASS", "No stale path remains validated")
@@ -175,9 +178,11 @@ public class AiGridR2CertificationService {
         for (Tenant tenant : measurableTenants()) invalid += tenantExecution.run(tenant, () -> jdbc.queryForObject("""
                 select count(*) from ai_grid_exposure_paths p where p.status='CLOSED' and not exists (
                     select 1 from ai_grid_exposure_observations o
-                     where o.exposure_path_id=p.id and o.run_id=p.last_complete_run_id and o.state='ABSENT'
-                       and exists (select 1 from ai_security_artifact_sources s
-                            where s.run_id=o.run_id and s.artifact_id=p.root_cause_artifact_id))
+                     where o.exposure_path_id=p.id and o.run_id=p.last_complete_run_id
+                       and o.coverage_epoch_id=p.last_complete_epoch_id and o.state='ABSENT'
+                       and exists (select 1 from ai_grid_exposure_executions e
+                            where e.coverage_epoch_id=o.coverage_epoch_id
+                              and e.material_digest=o.correlation_material_digest))
                 """, Map.of(), Long.class));
         return invalid == 0 ? new Gate("COMPLETE_REASSESSMENT_CLOSURE", "PASS", "Every closure is backed by a complete-run absence observation")
                 : new Gate("COMPLETE_REASSESSMENT_CLOSURE", "FAIL", invalid + " closures lack complete reassessment proof");
@@ -209,7 +214,16 @@ public class AiGridR2CertificationService {
     private String classDigest() {
         try (var input = AiGridExposureService.class.getResourceAsStream("AiGridExposureService.class")) {
             if (input == null) throw new IllegalStateException("R2 engine build material unavailable");
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(input.readAllBytes()));
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(input.readAllBytes());
+            for (Class<?> dependent : List.of(AiGridSystemService.class, AiGridHostContextService.class,
+                    AiGridExposureFindingService.class)) {
+                try (var dependency = dependent.getResourceAsStream(dependent.getSimpleName() + ".class")) {
+                    if (dependency == null) throw new IllegalStateException("R2 dependent build material unavailable");
+                    digest.update(dependency.readAllBytes());
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
         } catch (Exception e) { throw new IllegalStateException("Unable to digest R2 engine", e); }
     }
     private String json(Object value) {

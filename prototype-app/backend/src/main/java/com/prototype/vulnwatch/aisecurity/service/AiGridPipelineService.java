@@ -45,13 +45,13 @@ public class AiGridPipelineService {
         long started = System.nanoTime();
         snapshots.commitScope(tenant, envelope);
         ownership.resolveRun(tenant, envelope.runId());
-        systems.deriveForRun(tenant, envelope.runId());
         assessments.evaluateRun(tenant, envelope.runId());
-        exposures.correlateCompleteRun(tenant, envelope.runId());
         List<AiGridCoverageService.CoverageItem> runCandidates =
                 coverage.expectedCandidates(envelope.runId());
         reconciliation.reconcile(tenant, envelope.runId(), runCandidates);
         UUID epochId = coverage.refreshCurrent(tenant, envelope.runId());
+        systems.deriveForCurrentEpoch(tenant, epochId, envelope.runId());
+        exposures.correlateCurrentEpoch(tenant, epochId, envelope.runId());
         reconciliation.reconcileCurrent(tenant, epochId, envelope.runId());
         readiness.computeCurrent(tenant, epochId, envelope.runId());
         long durationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);

@@ -60,6 +60,28 @@ public class AiGridApiService {
                 rs.getTimestamp("updated_at").toInstant())));
     }
 
+    public SystemPage systems(Tenant tenant, String cursor, int requestedLimit) {
+        int limit = Math.max(1, Math.min(200, requestedLimit));
+        Cursor position = decodeCursor(cursor);
+        return tenantExecution.run(tenant, () -> {
+            List<SystemSummary> rows = jdbc.query("""
+                    select s.id,s.name,s.status,s.current_revision,s.updated_at,count(m.id) member_count
+                      from ai_grid_systems s
+                      left join ai_grid_system_revisions r on r.system_id=s.id and r.revision=s.current_revision
+                      left join ai_grid_system_memberships m on m.system_revision_id=r.id
+                     where (cast(:cursorTime as timestamptz) is null
+                        or (s.updated_at,s.id)<(cast(:cursorTime as timestamptz),cast(:cursorId as uuid)))
+                     group by s.id order by s.updated_at desc,s.id desc limit :limit
+                    """, cursorParameters(position, limit),
+                    (rs, n) -> new SystemSummary(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                            rs.getInt(4), rs.getInt(6), rs.getTimestamp(5).toInstant()));
+            boolean more = rows.size() > limit;
+            List<SystemSummary> items = more ? rows.subList(0, limit) : rows;
+            SystemSummary last = items.isEmpty() ? null : items.get(items.size() - 1);
+            return new SystemPage(List.copyOf(items), more ? encodeCursor(last.updatedAt(), last.id()) : null);
+        });
+    }
+
     public SystemDetail system(Tenant tenant, UUID systemId) {
         return tenantExecution.run(tenant, () -> {
             List<SystemSummary> systems = jdbc.query("""
@@ -142,7 +164,7 @@ public class AiGridApiService {
             if (exists == null || exists == 0) throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.NOT_FOUND, "Assessment run snapshot not found");
             assessments.evaluateRun(tenant, runId);
-            exposures.correlateCompleteRun(tenant, runId);
+            exposures.verifyReplay(tenant, runId);
             List<AiGridCoverageService.CoverageItem> runCandidates = coverage.expectedCandidates(runId);
             reconciliation.reconcile(tenant, runId, runCandidates);
             readiness.compute(tenant, runId, runCandidates);
@@ -256,9 +278,15 @@ public class AiGridApiService {
                   from ai_grid_systems s join ai_grid_system_revisions r
                     on r.system_id=s.id and r.revision=s.current_revision
                   join ai_grid_system_memberships src on src.system_revision_id=r.id
-                  join ai_grid_relationship_snapshots rel on rel.run_id=r.run_id and rel.source_artifact_id=src.artifact_id
+                  join ai_grid_current_coverage_state state on true
+                  join ai_grid_current_coverage_artifacts current_src
+                    on current_src.epoch_id=state.epoch_id and current_src.artifact_id=src.artifact_id
+                  join ai_grid_relationship_snapshots rel on rel.run_id=current_src.source_run_id
+                    and rel.source_artifact_id=src.artifact_id
                   join ai_grid_system_memberships dst on dst.system_revision_id=r.id and dst.artifact_id=rel.target_artifact_id
-                 where s.id=:id order by rel.source_artifact_id,rel.relationship_type,rel.target_artifact_id
+                 where s.id=:id and rel.valid_from<=state.materialized_at
+                   and (rel.valid_until is null or rel.valid_until>=state.materialized_at)
+                 order by rel.source_artifact_id,rel.relationship_type,rel.target_artifact_id
                 """, Map.of("id", systemId), (rs, n) -> new GraphEdge(rs.getObject(1, UUID.class),
                 rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4),
                 rs.getTimestamp(5).toInstant(), rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant())));
@@ -288,20 +316,42 @@ public class AiGridApiService {
 
     public AiGridHostContextService.HostFact addHostContext(Tenant tenant, UUID artifactId,
                                                              AiGridHostContextService.HostFactInput input) {
-        return tenantExecution.run(tenant, () -> transactions.execute(status -> hostContext.upsert(tenant, artifactId, input)));
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            AiGridHostContextService.HostFact fact = hostContext.upsert(tenant, artifactId, input);
+            AiGridCoverageService.CurrentState current = coverage.currentState();
+            if (current != null) {
+                UUID epochId = coverage.refreshCurrent(tenant, current.triggerRunId());
+                systemService.deriveForCurrentEpoch(tenant, epochId, current.triggerRunId());
+                exposures.correlateCurrentEpoch(tenant, epochId, current.triggerRunId());
+            }
+            return fact;
+        }));
     }
 
-    public List<ExposureSummary> exposures(Tenant tenant) {
-        return tenantExecution.run(tenant, () -> jdbc.query("""
+    public ExposurePage exposures(Tenant tenant, String cursor, int requestedLimit) {
+        int limit = Math.max(1, Math.min(200, requestedLimit));
+        Cursor position = decodeCursor(cursor);
+        return tenantExecution.run(tenant, () -> {
+            List<ExposureSummary> rows = jdbc.query("""
                 select p.id,p.correlation_id,p.correlation_version,p.title,p.severity,p.state,p.status,
                        p.confidence,p.root_cause_artifact_id,p.first_observed_at,p.last_observed_at,p.finding_id,
-                       count(distinct a.system_id) filter (where a.system_id is not null) affected_systems
+                       count(distinct a.system_id) filter (where a.system_id is not null) affected_systems,
+                       p.impact,p.root_cause,p.breakpoint,p.confidence_method
                   from ai_grid_exposure_paths p left join ai_grid_exposure_associations a on a.exposure_path_id=p.id
-                 group by p.id order by p.last_observed_at desc,p.id
-                """, (rs, n) -> new ExposureSummary(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                 where (cast(:cursorTime as timestamptz) is null
+                    or (p.last_observed_at,p.id)<(cast(:cursorTime as timestamptz),cast(:cursorId as uuid)))
+                 group by p.id order by p.last_observed_at desc,p.id desc limit :limit
+                """, cursorParameters(position, limit),
+                    (rs, n) -> new ExposureSummary(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
                 rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getDouble(8),
                 rs.getObject(9, UUID.class), rs.getTimestamp(10).toInstant(), rs.getTimestamp(11).toInstant(),
-                rs.getObject(12, UUID.class), rs.getInt(13))));
+                rs.getObject(12, UUID.class), rs.getInt(13), rs.getString(14), rs.getString(15),
+                rs.getString(16), rs.getString(17)));
+            boolean more = rows.size() > limit;
+            List<ExposureSummary> items = more ? rows.subList(0, limit) : rows;
+            ExposureSummary last = items.isEmpty() ? null : items.get(items.size() - 1);
+            return new ExposurePage(List.copyOf(items), more ? encodeCursor(last.lastObservedAt(), last.id()) : null);
+        });
     }
 
     public ExposureDetail exposure(Tenant tenant, UUID exposureId) {
@@ -309,13 +359,15 @@ public class AiGridApiService {
             List<ExposureSummary> summaries = jdbc.query("""
                     select p.id,p.correlation_id,p.correlation_version,p.title,p.severity,p.state,p.status,
                            p.confidence,p.root_cause_artifact_id,p.first_observed_at,p.last_observed_at,p.finding_id,
-                           count(distinct a.system_id) filter (where a.system_id is not null)
+                           count(distinct a.system_id) filter (where a.system_id is not null),
+                           p.impact,p.root_cause,p.breakpoint,p.confidence_method
                       from ai_grid_exposure_paths p left join ai_grid_exposure_associations a on a.exposure_path_id=p.id
                      where p.id=:id group by p.id
                     """, Map.of("id", exposureId), (rs, n) -> new ExposureSummary(rs.getObject(1, UUID.class),
                     rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                     rs.getString(7), rs.getDouble(8), rs.getObject(9, UUID.class), rs.getTimestamp(10).toInstant(),
-                    rs.getTimestamp(11).toInstant(), rs.getObject(12, UUID.class), rs.getInt(13)));
+                    rs.getTimestamp(11).toInstant(), rs.getObject(12, UUID.class), rs.getInt(13),
+                    rs.getString(14), rs.getString(15), rs.getString(16), rs.getString(17)));
             if (summaries.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.NOT_FOUND, "AI exposure not found");
             List<ExposureObservation> observations = jdbc.query("""
@@ -365,6 +417,27 @@ public class AiGridApiService {
         readiness.computeCurrent(tenant, epochId, triggerRunId);
     }
 
+    private Cursor decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) return null;
+        try {
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursor), java.nio.charset.StandardCharsets.UTF_8);
+            int separator = decoded.lastIndexOf('|');
+            return new Cursor(Instant.parse(decoded.substring(0, separator)), UUID.fromString(decoded.substring(separator + 1)));
+        } catch (RuntimeException error) { throw new IllegalArgumentException("Invalid exposure cursor", error); }
+    }
+    private String encodeCursor(Instant time, UUID id) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                (time + "|" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private MapSqlParameterSource cursorParameters(Cursor position, int limit) {
+        return new MapSqlParameterSource()
+                .addValue("cursorTime", position == null ? null : java.sql.Timestamp.from(position.time()),
+                        java.sql.Types.TIMESTAMP)
+                .addValue("cursorId", position == null ? null : position.id(), java.sql.Types.OTHER)
+                .addValue("limit", limit + 1, java.sql.Types.INTEGER);
+    }
+
     private List<AssessmentRun> runsCurrent() {
         return jdbc.query("""
                 select run_id, min(evaluated_at) started_at, max(evaluated_at) completed_at,
@@ -376,6 +449,7 @@ public class AiGridApiService {
     }
 
     public record SystemSummary(UUID id, String name, String status, int revision, int memberCount, Instant updatedAt) {}
+    public record SystemPage(List<SystemSummary> items, String nextCursor) {}
     public record SystemMember(UUID id, String artifactType, String name, String provider,
                                String providerResourceId, double confidence, String confidenceMethod) {}
     public record SystemDetail(SystemSummary system, List<SystemMember> members) {}
@@ -394,11 +468,14 @@ public class AiGridApiService {
     public record ExposureSummary(UUID id, String correlationId, String correlationVersion, String title,
                                   String severity, String state, String status, double confidence,
                                   UUID rootCauseArtifactId, Instant firstObservedAt, Instant lastObservedAt,
-                                  UUID findingId, int affectedSystems) {}
+                                  UUID findingId, int affectedSystems, String impact, String rootCause,
+                                  String breakpoint, String confidenceMethod) {}
+    public record ExposurePage(List<ExposureSummary> items, String nextCursor) {}
     public record ExposureObservation(UUID id, UUID runId, String state, UUID entryArtifactId, UUID systemId,
                                       String pathJson, String evidenceJson, Instant validFrom, Instant validUntil,
                                       double confidence, Instant observedAt) {}
     public record ExposureAssociation(UUID systemId, UUID artifactId, String role) {}
     public record ExposureDetail(ExposureSummary exposure, List<ExposureObservation> observations,
                                  List<ExposureAssociation> associations) {}
+    private record Cursor(Instant time, UUID id) {}
 }
