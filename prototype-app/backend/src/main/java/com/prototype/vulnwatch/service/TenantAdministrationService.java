@@ -38,6 +38,10 @@ public class TenantAdministrationService {
         return tenantService.updateStatus(tenantId, status);
     }
 
+    public Tenant extendDemoExpiry(UUID tenantId, Instant expiresAt) {
+        return tenantService.extendDemoExpiry(tenantId, expiresAt);
+    }
+
     public Tenant updateQuotas(UUID tenantId, TenantQuotaUpdateRequest request) {
         return tenantService.updateQuotas(tenantId, request);
     }

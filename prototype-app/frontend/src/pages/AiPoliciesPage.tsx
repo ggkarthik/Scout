@@ -6,7 +6,6 @@ import { pathForPolicyDetail } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
-import type { AiGridPolicySelection } from '../features/ai-security/types';
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
@@ -20,19 +19,11 @@ export function AiPoliciesPage() {
     queryKey: ['ai-security-policies'],
     queryFn: api.listAiSecurityPolicies,
   });
-  const governedPoliciesQuery = useQuery({
-    queryKey: ['ai-grid-policies'],
-    queryFn: api.listAiGridPolicies,
+  const mutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiSecurityPolicy(id, enabled),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
   });
   const canManage = hasRole(actor, 'TENANT_ADMIN') || hasRole(actor, 'PLATFORM_OWNER');
-  const selectionMutation = useMutation({
-    mutationFn: ({ id, selection }: { id: string; selection: AiGridPolicySelection }) =>
-      api.updateAiGridPolicySelection(id, selection, 'Updated from governed policy catalog'),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-grid-policies'] }),
-  });
-  const governedSelection = React.useMemo(() => new Map(
-    (governedPoliciesQuery.data ?? []).map((policy) => [policy.policyId, policy.selection]),
-  ), [governedPoliciesQuery.data]);
 
   const policies = React.useMemo(() => policiesQuery.data ?? [], [policiesQuery.data]);
   const severityOptions = React.useMemo(() => (
@@ -107,7 +98,7 @@ export function AiPoliciesPage() {
                     <th>Required evidence</th>
                     <th>Coverage</th>
                     <th>Findings</th>
-                    <th>Selection</th>
+                    <th>Enabled</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -132,21 +123,15 @@ export function AiPoliciesPage() {
                         </button>
                       </td>
                       <td>
-                        <select
-                          value={governedSelection.get(policy.id) ?? (policy.enabled ? 'ENABLED' : 'DISABLED')}
-                          disabled={!canManage || (selectionMutation.isPending && selectionMutation.variables?.id === policy.id)}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => selectionMutation.mutate({
-                            id: policy.id,
-                            selection: event.target.value as AiGridPolicySelection,
-                          })}
-                          aria-label={`${policy.name} selection`}
-                        >
-                          <option value="REQUIRED">Required</option>
-                          <option value="ENABLED">Enabled</option>
-                          <option value="PREVIEW">Preview</option>
-                          <option value="DISABLED">Disabled</option>
-                        </select>
+                        <label className="ai-policy-switch" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={policy.enabled}
+                            disabled={!canManage || (mutation.isPending && mutation.variables?.id === policy.id)}
+                            onChange={(event) => mutation.mutate({ id: policy.id, enabled: event.target.checked })}
+                            aria-label={policy.enabled ? 'Enabled' : 'Disabled'}
+                          />
+                        </label>
                       </td>
                     </tr>
                   ))}

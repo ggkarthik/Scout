@@ -368,6 +368,69 @@ describe('PlatformConsolePage tenant privacy boundary', () => {
     await waitFor(() => expect(vi.mocked(api.retryTenantProvisioning).mock.calls[0]?.[0]).toBe('tenant-failed'));
   });
 
+  it('lets platform owners extend, block, restore, and manually delete retained tenants', async () => {
+    mockTenantSchemaStatus();
+    const activeTenant = {
+      id: 'tenant-demo-active',
+      name: 'Active Demo',
+      slug: 'active-demo',
+      status: 'ACTIVE',
+      planCode: 'ENTERPRISE',
+      billingRef: null,
+      maxConnectorCount: 25,
+      maxServiceAccountCount: 0,
+      maxDailySbomUploads: 5,
+      maxExportRows: 1000,
+      maxDailyExposureRefreshes: 3,
+      demoExpiresAt: '2099-08-07T00:00:00Z',
+      createdAt: '2026-07-20T00:00:00Z',
+      updatedAt: null
+    };
+    const suspendedTenant = {
+      ...activeTenant,
+      id: 'tenant-demo-suspended',
+      name: 'Suspended Demo',
+      slug: 'suspended-demo',
+      status: 'SUSPENDED'
+    };
+    vi.spyOn(api, 'listTenants').mockResolvedValue([activeTenant, suspendedTenant]);
+    vi.spyOn(api, 'listInventoryConnectorHealth').mockResolvedValue([]);
+    const extendTenant = vi.spyOn(api, 'extendTenantDemoExpiry').mockResolvedValue({
+      ...activeTenant,
+      demoExpiresAt: '2099-09-15T12:30:00Z'
+    });
+    const updateStatus = vi.spyOn(api, 'updateTenantStatus').mockImplementation(async (tenantId, status) => ({
+      ...(tenantId === activeTenant.id ? activeTenant : suspendedTenant),
+      status
+    }));
+    const deleteTenant = vi.spyOn(api, 'deleteTenant').mockResolvedValue(undefined);
+
+    renderPlatformTenants(PLATFORM_SCOPE_OWNER, createTestQueryClient());
+
+    await screen.findByText('Active Demo');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Extend' })[0]!);
+    fireEvent.change(screen.getByLabelText('New tenant expiration'), {
+      target: { value: '2099-09-15T12:30' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Extend Tenant' }));
+    await waitFor(() => expect(extendTenant).toHaveBeenCalledWith(
+      activeTenant.id,
+      expect.objectContaining({ expiresAt: expect.any(String) })
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Block access' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Block Access' }));
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledWith(activeTenant.id, 'SUSPENDED'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore access' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Access' }));
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledWith(suspendedTenant.id, 'ACTIVE'));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Tenant' }));
+    await waitFor(() => expect(deleteTenant.mock.calls[0]?.[0]).toBe(activeTenant.id));
+  });
+
   it('sends demo data only when the provisioning option is selected', async () => {
     mockTenantSchemaStatus();
     vi.spyOn(api, 'listTenants').mockResolvedValue([]);

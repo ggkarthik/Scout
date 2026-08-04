@@ -102,6 +102,17 @@ function formatWorkspaceProfile(planCode: string | null | undefined): string {
   return normalized;
 }
 
+function toLocalDateTimeInput(value: Date): string {
+  const localValue = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
+  return localValue.toISOString().slice(0, 16);
+}
+
+function suggestedTenantExtension(currentExpiry?: string | null): string {
+  const current = currentExpiry ? new Date(currentExpiry) : null;
+  const base = current && current.getTime() > Date.now() ? current : new Date();
+  return toLocalDateTimeInput(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000));
+}
+
 type PlatformConsolePageProps = {
   selectedView: PlatformRouteView;
 };
@@ -1162,6 +1173,17 @@ function PlatformUserAuditPanel() {
 
 function TenantLifecyclePanel() {
   const queryClient = useQueryClient();
+  const [tenantPendingExtension, setTenantPendingExtension] = React.useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [extensionExpiresAt, setExtensionExpiresAt] = React.useState('');
+  const [extensionMinimum, setExtensionMinimum] = React.useState('');
+  const [tenantPendingStatus, setTenantPendingStatus] = React.useState<{
+    id: string;
+    name: string;
+    nextStatus: 'ACTIVE' | 'SUSPENDED';
+  } | null>(null);
   const [tenantPendingDelete, setTenantPendingDelete] = React.useState<{
     id: string;
     name: string;
@@ -1194,6 +1216,25 @@ function TenantLifecyclePanel() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
+    }
+  });
+  const extendTenant = useMutation({
+    mutationFn: ({ tenantId, expiresAt }: { tenantId: string; expiresAt: string }) =>
+      api.extendTenantDemoExpiry(tenantId, { expiresAt }),
+    onSuccess: async () => {
+      setTenantPendingExtension(null);
+      setExtensionExpiresAt('');
+      setExtensionMinimum('');
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+    }
+  });
+  const updateTenantStatus = useMutation({
+    mutationFn: ({ tenantId, status }: { tenantId: string; status: 'ACTIVE' | 'SUSPENDED' }) =>
+      api.updateTenantStatus(tenantId, status),
+    onSuccess: async () => {
+      setTenantPendingStatus(null);
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
+      await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
     }
   });
   const deleteTenant = useMutation({
@@ -1248,6 +1289,7 @@ function TenantLifecyclePanel() {
       <div className="notice" role="status">
         New tenants remain in <strong>PROVISIONING</strong> until the controlled production bootstrap runs.
         Workspace access and tenant operations are enabled only after verification changes the tenant to <strong>ACTIVE</strong>.
+        Expired and blocked tenants retain their data until a platform owner deletes them manually.
       </div>
       {createTenant.isError && (
         <div className="notice error" role="alert">
@@ -1280,6 +1322,8 @@ function TenantLifecyclePanel() {
             <tbody>
               {tenants.map((tenant) => {
                 const normalizedStatus = tenant.status.toUpperCase();
+                const demoExpired = tenant.demoExpiresAt != null
+                  && new Date(tenant.demoExpiresAt).getTime() <= tenantsQuery.dataUpdatedAt;
                 const schemaStatus = schemaStatusByTenantId.get(tenant.id);
                 const provisioningFailure = normalizedStatus === 'PROVISIONING_FAILED'
                   ? schemaStatus?.failureMessage ?? schemaStatus?.failureCode ?? 'Provisioning failed. Review the bootstrap report.'
@@ -1325,6 +1369,48 @@ function TenantLifecyclePanel() {
                             : 'Retry provisioning'}
                         </button>
                       ) : null}
+                      {tenant.demoExpiresAt && !['PURGING', 'DELETED'].includes(normalizedStatus) ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={extendTenant.isPending}
+                          onClick={() => {
+                            setTenantPendingExtension({ id: tenant.id, name: tenant.name });
+                            setExtensionExpiresAt(suggestedTenantExtension(tenant.demoExpiresAt));
+                            setExtensionMinimum(toLocalDateTimeInput(new Date()));
+                          }}
+                        >
+                          Extend
+                        </button>
+                      ) : null}
+                      {normalizedStatus === 'ACTIVE' && !demoExpired ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={updateTenantStatus.isPending}
+                          onClick={() => setTenantPendingStatus({
+                            id: tenant.id,
+                            name: tenant.name,
+                            nextStatus: 'SUSPENDED'
+                          })}
+                        >
+                          Block access
+                        </button>
+                      ) : null}
+                      {normalizedStatus === 'SUSPENDED' && !demoExpired ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={updateTenantStatus.isPending}
+                          onClick={() => setTenantPendingStatus({
+                            id: tenant.id,
+                            name: tenant.name,
+                            nextStatus: 'ACTIVE'
+                          })}
+                        >
+                          Restore access
+                        </button>
+                      ) : null}
                       {tenant.slug === 'default-workspace' ? null : (
                         <button
                           type="button"
@@ -1356,6 +1442,16 @@ function TenantLifecyclePanel() {
           {deleteTenant.error instanceof Error ? deleteTenant.error.message : 'Failed to delete tenant'}
         </div>
       )}
+      {extendTenant.isError && (
+        <div className="notice error" role="alert">
+          {extendTenant.error instanceof Error ? extendTenant.error.message : 'Failed to extend tenant'}
+        </div>
+      )}
+      {updateTenantStatus.isError && (
+        <div className="notice error" role="alert">
+          {updateTenantStatus.error instanceof Error ? updateTenantStatus.error.message : 'Failed to update tenant access'}
+        </div>
+      )}
       {retryProvisioning.isError && (
         <div className="notice error" role="alert">
           {retryProvisioning.error instanceof Error
@@ -1363,6 +1459,73 @@ function TenantLifecyclePanel() {
             : 'Failed to request tenant provisioning retry'}
         </div>
       )}
+      <ConfirmDialog
+        isOpen={tenantPendingExtension != null}
+        title="Extend tenant access?"
+        message={tenantPendingExtension == null ? '' : (
+          <label>
+            New expiration for {tenantPendingExtension.name}
+            <input
+              type="datetime-local"
+              aria-label="New tenant expiration"
+              min={extensionMinimum}
+              value={extensionExpiresAt}
+              onChange={(event) => setExtensionExpiresAt(event.target.value)}
+            />
+          </label>
+        )}
+        confirmLabel={extendTenant.isPending ? 'Extending...' : 'Extend Tenant'}
+        confirmDisabled={extendTenant.isPending || extensionExpiresAt === ''}
+        cancelLabel="Cancel"
+        onCancel={() => {
+          if (!extendTenant.isPending) {
+            setTenantPendingExtension(null);
+            setExtensionExpiresAt('');
+            setExtensionMinimum('');
+          }
+        }}
+        onConfirm={() => {
+          if (tenantPendingExtension != null && extensionExpiresAt !== '' && !extendTenant.isPending) {
+            extendTenant.mutate({
+              tenantId: tenantPendingExtension.id,
+              expiresAt: new Date(extensionExpiresAt).toISOString()
+            });
+          }
+        }}
+      />
+      <ConfirmDialog
+        isOpen={tenantPendingStatus != null}
+        title={tenantPendingStatus?.nextStatus === 'SUSPENDED' ? 'Block tenant access?' : 'Restore tenant access?'}
+        message={
+          tenantPendingStatus == null
+            ? ''
+            : tenantPendingStatus.nextStatus === 'SUSPENDED'
+              ? `Temporarily block all tenant users from ${tenantPendingStatus.name}? Tenant data will be retained.`
+              : `Restore tenant-user access to ${tenantPendingStatus.name}? Expiration rules will still apply.`
+        }
+        confirmLabel={
+          updateTenantStatus.isPending
+            ? 'Updating...'
+            : tenantPendingStatus?.nextStatus === 'SUSPENDED'
+              ? 'Block Access'
+              : 'Restore Access'
+        }
+        confirmDisabled={updateTenantStatus.isPending}
+        cancelLabel="Cancel"
+        onCancel={() => {
+          if (!updateTenantStatus.isPending) {
+            setTenantPendingStatus(null);
+          }
+        }}
+        onConfirm={() => {
+          if (tenantPendingStatus != null && !updateTenantStatus.isPending) {
+            updateTenantStatus.mutate({
+              tenantId: tenantPendingStatus.id,
+              status: tenantPendingStatus.nextStatus
+            });
+          }
+        }}
+      />
       <ConfirmDialog
         isOpen={tenantPendingDelete != null}
         title="Delete tenant?"

@@ -52,15 +52,10 @@ public class DemoTenantPurgeService {
         if (!demoTenantPurgePlanner.isEligibleForAutomaticPurge(tenant, now)) {
             return;
         }
-
-        if (!"DELETED".equalsIgnoreCase(tenant.getStatus())) {
-            markExpired(tenant, now);
-        }
-        if (tenant.getPurgedAt() != null) {
+        if (tenant.getExpiredAt() != null) {
             return;
         }
-
-        purgeTenantInternal(tenant, now, "EXPIRED", "demo.tenant.purged", "demo.tenant.purge_failed");
+        markExpired(tenant, now);
     }
 
     public void deleteTenant(UUID tenantId, Instant now) {

@@ -113,6 +113,84 @@ class TenantServiceTest {
     }
 
     @Test
+    void extendDemoExpiryReactivatesRetainedExpiredTenant() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setStatus("EXPIRED");
+        tenant.setSchemaName("tenant_demo");
+        tenant.setDemoSource("demo-request:test");
+        tenant.setDemoExpiresAt(Instant.parse("2026-07-01T00:00:00Z"));
+        tenant.setExpiredAt(Instant.parse("2026-07-01T00:01:00Z"));
+        tenant.setSuspendedAt(Instant.parse("2026-07-01T00:01:00Z"));
+        Instant extendedUntil = Instant.parse("2099-08-31T23:59:59Z");
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(tenantSchemaService.schemaExists("tenant_demo")).thenReturn(true);
+        when(tenantRepository.save(tenant)).thenReturn(tenant);
+
+        Tenant updated = tenantService.extendDemoExpiry(tenantId, extendedUntil);
+
+        assertEquals("ACTIVE", updated.getStatus());
+        assertEquals(extendedUntil, updated.getDemoExpiresAt());
+        assertNull(updated.getExpiredAt());
+        assertNull(updated.getSuspendedAt());
+        verify(tenantRepository).save(tenant);
+    }
+
+    @Test
+    void extendDemoExpiryRejectsTenantWhoseSchemaWasDeleted() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setStatus("EXPIRED");
+        tenant.setSchemaName("tenant_deleted_demo");
+        tenant.setDemoExpiresAt(Instant.parse("2026-07-01T00:00:00Z"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(tenantSchemaService.schemaExists("tenant_deleted_demo")).thenReturn(false);
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> tenantService.extendDemoExpiry(tenantId, Instant.parse("2099-08-31T23:59:59Z"))
+        );
+
+        assertEquals("Tenant schema is not provisioned: tenant_deleted_demo", ex.getMessage());
+    }
+
+    @Test
+    void restoringSuspendedExpiredDemoRequiresExtensionFirst() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setStatus("SUSPENDED");
+        tenant.setDemoExpiresAt(Instant.parse("2020-01-01T00:00:00Z"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> tenantService.updateStatus(tenantId, "ACTIVE")
+        );
+
+        assertEquals("Extend the demo expiration before restoring tenant access", ex.getMessage());
+    }
+
+    @Test
+    void updateStatusTemporarilyBlocksTenantWithoutDeletingIt() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setStatus("ACTIVE");
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(tenantRepository.save(tenant)).thenReturn(tenant);
+
+        Tenant updated = tenantService.updateStatus(tenantId, "SUSPENDED");
+
+        assertEquals("SUSPENDED", updated.getStatus());
+        assertNull(updated.getDeletedAt());
+        assertNull(updated.getPurgeStartedAt());
+        verify(tenantRepository).save(tenant);
+    }
+
+    @Test
     void listActiveTenantsFiltersInactiveAndDeletedTenants() {
         Tenant active = new Tenant();
         active.setName("Active");

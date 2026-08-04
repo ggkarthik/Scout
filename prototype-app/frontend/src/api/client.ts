@@ -1485,16 +1485,6 @@ export const api = {
       `/connectors/ai-security/azure/${encodeURIComponent(connectorId)}/test`,
       { method: 'POST' },
     ),
-  runAiSecurityAzureConnector: (connectorId: string) =>
-    request<{ jobId: string; status: string; message: string }>(
-      `/connectors/ai-security/azure/${encodeURIComponent(connectorId)}/run`,
-      { method: 'POST' },
-    ),
-  runAiSecurityAzureTarget: (targetId: string) =>
-    request<{ jobId: string; status: string; message: string }>(
-      `/connectors/ai-security/azure/targets/${encodeURIComponent(targetId)}/run`,
-      { method: 'POST' },
-    ),
   getAiSecurityAzureFoundryConfig: () =>
     request<AiSecurityAzureFoundryConfig>('/connectors/ai-security/azure-foundry'),
   saveAiSecurityAzureFoundryConfig: (payload: {
@@ -1513,6 +1503,16 @@ export const api = {
   runAiSecurityAzureFoundryConfig: () =>
     request<{ jobId: string; status: string; message: string }>(
       '/connectors/ai-security/azure-foundry/run',
+      { method: 'POST' },
+    ),
+  runAiSecurityAzureConnector: (connectorId: string) =>
+    request<{ jobId: string; status: string; message: string }>(
+      `/connectors/ai-security/azure/${encodeURIComponent(connectorId)}/run`,
+      { method: 'POST' },
+    ),
+  runAiSecurityAzureTarget: (targetId: string) =>
+    request<{ jobId: string; status: string; message: string }>(
+      `/connectors/ai-security/azure/targets/${encodeURIComponent(targetId)}/run`,
       { method: 'POST' },
     ),
   listAiSecurityAzureCredentials: () =>
@@ -1731,6 +1731,16 @@ export const api = {
   retryTenantProvisioning: (tenantId: string) =>
     request<Tenant>(`/platform/tenants/${encodeURIComponent(tenantId)}/provisioning-retry`, {
       method: 'POST'
+    }),
+  extendTenantDemoExpiry: (tenantId: string, payload: { expiresAt: string }) =>
+    request<Tenant>(`/platform/tenants/${encodeURIComponent(tenantId)}/demo-expiry`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+  updateTenantStatus: (tenantId: string, status: 'ACTIVE' | 'SUSPENDED') =>
+    request<Tenant>(`/platform/tenants/${encodeURIComponent(tenantId)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
     }),
   getTenantSchemaStatus: () =>
     request<TenantSchemaStatusPage>('/platform/tenant-schema-status?page=0&size=200'),

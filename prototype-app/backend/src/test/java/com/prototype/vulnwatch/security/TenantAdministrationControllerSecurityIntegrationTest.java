@@ -153,6 +153,37 @@ class TenantAdministrationControllerSecurityIntegrationTest {
     }
 
     @Test
+    void platformOwnerCanExtendDemoTenantExpiry() throws Exception {
+        tenant.setDemoExpiresAt(java.time.Instant.parse("2099-08-31T23:59:59Z"));
+        when(tenantAdministrationService.extendDemoExpiry(
+                org.mockito.ArgumentMatchers.eq(tenant.getId()),
+                org.mockito.ArgumentMatchers.any(java.time.Instant.class)))
+                .thenReturn(tenant);
+
+        mockMvc.perform(patch("/api/platform/tenants/{tenantId}/demo-expiry", tenant.getId())
+                        .header("X-API-Key", "test-api-key")
+                        .header("X-Creator-Key", "test-creator-key")
+                        .contentType("application/json")
+                        .content("""
+                                {"expiresAt":"2099-08-31T23:59:59Z"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.demoExpiresAt").value("2099-08-31T23:59:59Z"));
+    }
+
+    @Test
+    void demoTenantExtensionRequiresPlatformOwnerPrivileges() throws Exception {
+        mockMvc.perform(patch("/api/platform/tenants/{tenantId}/demo-expiry", tenant.getId())
+                        .header("X-API-Key", "test-api-key")
+                        .contentType("application/json")
+                        .content("""
+                                {"expiresAt":"2099-08-31T23:59:59Z"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void tenantQuotaPolicyUpdateRequiresPlatformOwnerPrivileges() throws Exception {
         mockMvc.perform(patch("/api/platform/tenants/{tenantId}/quotas", tenant.getId())
                         .header("X-API-Key", "test-api-key")

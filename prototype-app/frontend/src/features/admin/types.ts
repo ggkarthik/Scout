@@ -141,6 +141,10 @@ export type TenantCreateRequest = {
   addDemoData?: boolean;
 };
 
+export type TenantDemoExpiryRequest = {
+  expiresAt: string;
+};
+
 export type TenantSchemaStatusItem = {
   tenantId: string;
   tenantName: string;

@@ -8,6 +8,7 @@ import com.prototype.vulnwatch.dto.TenantBulkInviteItemResponse;
 import com.prototype.vulnwatch.dto.TenantBulkInviteRequest;
 import com.prototype.vulnwatch.dto.TenantBulkInviteResponse;
 import com.prototype.vulnwatch.dto.TenantCreateRequest;
+import com.prototype.vulnwatch.dto.TenantDemoExpiryRequest;
 import com.prototype.vulnwatch.dto.TenantInviteRequest;
 import com.prototype.vulnwatch.dto.TenantInviteResponse;
 import com.prototype.vulnwatch.dto.TenantMemberRequest;
@@ -28,6 +29,7 @@ import com.prototype.vulnwatch.service.TenantAccessControlService;
 import com.prototype.vulnwatch.service.TenantAdministrationService;
 import com.prototype.vulnwatch.service.DemoDatasetProvisioningService;
 import com.prototype.vulnwatch.service.TenantUserInviteService;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -117,6 +119,18 @@ public class TenantAdministrationController {
         Tenant tenant = tenantAdministrationService.updateStatus(tenantId, request.status());
         auditEventService.record("tenant.status.updated", "tenant", tenant.getId().toString(),
                 "{\"status\":\"" + tenant.getStatus() + "\"}");
+        return toTenantResponse(tenant);
+    }
+
+    @PatchMapping("/platform/tenants/{tenantId}/demo-expiry")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantResponse extendTenantDemoExpiry(
+            @PathVariable UUID tenantId,
+            @Valid @RequestBody TenantDemoExpiryRequest request
+    ) {
+        Tenant tenant = tenantAdministrationService.extendDemoExpiry(tenantId, request.expiresAt());
+        auditEventService.record("tenant.demo_expiry.extended", "tenant", tenant.getId().toString(),
+                "{\"expiresAt\":\"" + tenant.getDemoExpiresAt() + "\"}");
         return toTenantResponse(tenant);
     }
 

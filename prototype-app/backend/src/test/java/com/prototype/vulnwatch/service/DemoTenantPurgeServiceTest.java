@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.prototype.vulnwatch.domain.Tenant;
@@ -58,7 +59,7 @@ class DemoTenantPurgeServiceTest {
     }
 
     @Test
-    void processExpiredTenantDropsTenantSchemaAndPurgesSharedRows() {
+    void processExpiredTenantBlocksAccessButRetainsTenantData() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
         tenant.setName("Demo");
@@ -69,30 +70,19 @@ class DemoTenantPurgeServiceTest {
         tenant.setDemoExpiresAt(Instant.parse("2026-05-20T00:00:00Z"));
 
         Instant now = Instant.parse("2026-05-21T00:00:00Z");
-        UUID userId = UUID.randomUUID();
-        AppUser user = new AppUser();
-        user.setId(userId);
-        user.setStatus("ACTIVE");
-
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
-        when(demoTenantPurgePlanner.isEligibleForAutomaticPurge(tenant, now)).thenReturn(true);
-        when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
-                .thenReturn(java.util.List.of(userId));
-        when(resetJdbcTemplate.queryForObject("select count(*) from platform.tenant_memberships where user_id = ?", Integer.class, userId))
-                .thenReturn(0);
-        when(appUserRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))
-                .thenReturn(java.util.List.of("platform.tenant_support_grants", "platform.tenant_memberships"));
+        when(demoTenantPurgePlanner.isEligibleForAutomaticPurge(eq(tenant), any())).thenReturn(true);
 
         service.processExpiredTenant(tenant.getId(), now);
+        service.processExpiredTenant(tenant.getId(), now.plusSeconds(3600));
 
-        verify(tenantSchemaService).dropTenantSchema("tenant_demo");
-        verify(resetJdbcTemplate).update("delete from platform.tenant_support_grants where tenant_id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
-        verify(appUserRepository).save(user);
-        verify(auditEventService).record("demo.tenant.purged", "tenant", tenant.getId().toString(), null);
+        assertEquals("EXPIRED", tenant.getStatus());
+        assertEquals(now, tenant.getExpiredAt());
+        assertEquals(now, tenant.getSuspendedAt());
+        verify(tenantRepository).save(tenant);
+        verify(tenantSchemaService, never()).dropTenantSchema(any(String.class));
+        verifyNoInteractions(resetJdbcTemplate, appUserRepository);
+        verify(auditEventService).record("demo.tenant.expired", "tenant", tenant.getId().toString(), null);
     }
 
     @Test

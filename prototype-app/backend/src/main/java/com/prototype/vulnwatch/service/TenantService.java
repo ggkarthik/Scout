@@ -112,9 +112,45 @@ public class TenantService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
         String normalizedStatus = requireText(status, "status").toUpperCase();
+        if ("ACTIVE".equals(normalizedStatus)
+                && tenant.getDemoExpiresAt() != null
+                && !tenant.getDemoExpiresAt().isAfter(Instant.now())) {
+            throw new IllegalArgumentException("Extend the demo expiration before restoring tenant access");
+        }
         tenant.setStatus(normalizedStatus);
         tenant.setUpdatedAt(Instant.now());
         tenant.setSuspendedAt("SUSPENDED".equals(normalizedStatus) ? Instant.now() : null);
+        return tenantRepository.save(tenant);
+    }
+
+    @Transactional
+    public Tenant extendDemoExpiry(UUID tenantId, Instant expiresAt) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        Instant now = Instant.now();
+        if (expiresAt == null || !expiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("expiresAt must be in the future");
+        }
+        if (!isDemoTenant(tenant)) {
+            throw new IllegalArgumentException("Only demo tenants can be extended");
+        }
+        if (tenant.getPurgeStartedAt() != null
+                || tenant.getPurgedAt() != null
+                || "PURGING".equalsIgnoreCase(tenant.getStatus())
+                || "DELETED".equalsIgnoreCase(tenant.getStatus())) {
+            throw new IllegalStateException("Tenant deletion has started and cannot be reversed");
+        }
+        if (!tenantSchemaService.schemaExists(tenant.getSchemaName())) {
+            throw new IllegalStateException("Tenant schema is not provisioned: " + tenant.getSchemaName());
+        }
+
+        tenant.setDemoExpiresAt(expiresAt);
+        tenant.setExpiredAt(null);
+        if ("EXPIRED".equalsIgnoreCase(tenant.getStatus())) {
+            tenant.setStatus("ACTIVE");
+            tenant.setSuspendedAt(null);
+        }
+        tenant.setUpdatedAt(now);
         return tenantRepository.save(tenant);
     }
 
@@ -176,6 +212,13 @@ public class TenantService {
             return DEFAULT_PLAN_CODE;
         }
         return planCode.trim().toUpperCase();
+    }
+
+    private boolean isDemoTenant(Tenant tenant) {
+        return tenant != null
+                && (tenant.getDemoExpiresAt() != null
+                || (tenant.getDemoSource() != null && !tenant.getDemoSource().isBlank())
+                || DemoLifecycleService.DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode()));
     }
 
     private boolean isUsableDefaultTenantCandidate(Tenant tenant) {
