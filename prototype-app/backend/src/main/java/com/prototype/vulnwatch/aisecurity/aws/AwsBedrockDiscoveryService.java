@@ -118,11 +118,19 @@ public class AwsBedrockDiscoveryService {
                         "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES",
                         "S3_EXPOSURE", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING"), "*", "*");
                 try (CredentialsHandle credentials = connectorService.credentials(config)) {
+                    Set<String> ingestedScopeKeys = new java.util.HashSet<>();
                     for (String regionName : config.regions()) {
                         Region region = Region.of(regionName);
                         try (var permit = admissionService.acquire(config.accountId(), regionName)) {
                             RegionContext context = discoverRegion(config, credentials.provider(), region);
                             for (ScopePayload scope : context.scopes()) {
+                                // Global scopes are collected during each regional pass, but
+                                // the receipt contract permits one global scope per run.
+                                String scopeKey = "AWS:" + config.accountId() + ":"
+                                        + (scope.global() ? "GLOBAL" : regionName) + ":" + scope.family();
+                                if (!ingestedScopeKeys.add(scopeKey)) {
+                                    continue;
+                                }
                                 observationService.ingest(tenant, envelope(tenant, config, run.getId(), regionName, scope));
                                 artifacts += scope.artifacts().size();
                                 if (scope.status() != ScopeStatus.COMPLETE) {

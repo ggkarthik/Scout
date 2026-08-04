@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AiSecurityBedrockDiscovery",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListKnowledgeBases",
+        "bedrock:ListDataSources",
+        "bedrock:GetDataSource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AiSecurityS3ExposureCheck",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketPolicyStatus"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
