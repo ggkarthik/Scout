@@ -5,6 +5,7 @@ app:
     # Legacy repository tests exercise the platform reset line. P0 migration/RLS
     # tests opt in explicitly through PostgresITSupport.
     enabled: false
+    pre-jpa-default-tenant-enabled: true
   security:
     # Deterministic test-only AES-256 key; never used by a deployed profile.
     credential-encryption-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

@@ -255,6 +255,91 @@ class SyncRunHistoryServiceTest {
     }
 
     @Test
+    void awsAndAzureDiscoveryRunsAppearAsTenantInventoryRunsWithLifecycleDetails() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("AI Workspace");
+
+        SyncRun awsRun = syncRun(
+                "AI_SECURITY_AWS_BEDROCK",
+                "completed",
+                Instant.parse("2026-07-29T09:00:00Z"));
+        awsRun.setRecordsFetched(14);
+        awsRun.setRecordsInserted(14);
+        awsRun.setMetadataJson("""
+                {"provider":"AWS","accountId":"123456789012","regions":["us-east-1"]}
+                """);
+
+        SyncRun azureRun = syncRun(
+                "AI_SECURITY_AZURE_DISCOVERY",
+                "failed",
+                Instant.parse("2026-07-29T09:01:00Z"));
+        azureRun.setRecordsFailed(1);
+        azureRun.setErrorMessage("Azure AI Security discovery failed");
+        azureRun.setMetadataJson("""
+                {"provider":"AZURE","subscriptionId":"sub-1","families":["AZURE_AI_ACCOUNTS"]}
+                """);
+
+        SyncRun azureCloudRun = syncRun(
+                "AZURE_DISCOVERY",
+                "queued",
+                Instant.parse("2026-07-29T09:02:00Z"));
+        azureCloudRun.setCompletedAt(null);
+        azureCloudRun.setMetadataJson("""
+                {"sourceSystem":"azure","azureTenantId":"tenant-1","subscriptionIds":["sub-1"],"regions":["eastus"]}
+                """);
+
+        SyncRun awsCloudRun = syncRun(
+                "AWS_DISCOVERY",
+                "queued",
+                Instant.parse("2026-07-29T09:03:00Z"));
+        awsCloudRun.setCompletedAt(null);
+        awsCloudRun.setMetadataJson("""
+                {"sourceSystem":"aws","awsAccountId":"123456789012","regions":["us-east-1"],"resourceTypes":["EC2","SSM"]}
+                """);
+
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "tenant-admin",
+                false,
+                tenant.getId(),
+                tenant.getName(),
+                java.util.Set.of("TENANT_ADMIN")));
+        when(syncRunRepository.findByTenant_IdOrderByStartedAtDesc(tenant.getId()))
+                .thenReturn(List.of(awsCloudRun, azureCloudRun, azureRun, awsRun));
+        when(syncRunRepository.findQueueByTenantAndStatuses(
+                tenant.getId(), List.of("queued", "running")))
+                .thenReturn(List.of(azureCloudRun, awsCloudRun));
+
+        List<SyncRunResponse> runs = newHistoryService().list("inventory", 20);
+
+        assertEquals(4, runs.size());
+        assertTrue(runs.stream().allMatch(run -> "INVENTORY".equals(run.runDomain())));
+        assertTrue(runs.stream().allMatch(run -> "INGESTION".equals(run.runClass())));
+        SyncRunResponse failedAzure = runs.stream()
+                .filter(run -> "AI_SECURITY_AZURE_DISCOVERY".equals(run.syncType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("failed", failedAzure.status());
+        assertEquals(1, failedAzure.recordsFailed());
+        assertEquals("Azure AI Security discovery failed", failedAzure.errorMessage());
+        assertTrue(failedAzure.metadataJson().contains("\"subscriptionId\":\"sub-1\""));
+        SyncRunResponse queuedAzureCloud = runs.stream()
+                .filter(run -> "AZURE_DISCOVERY".equals(run.syncType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("queued", queuedAzureCloud.status());
+        assertEquals(1, queuedAzureCloud.queuePosition());
+        assertTrue(queuedAzureCloud.metadataJson().contains("\"azureTenantId\":\"tenant-1\""));
+        SyncRunResponse queuedAwsCloud = runs.stream()
+                .filter(run -> "AWS_DISCOVERY".equals(run.syncType()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("queued", queuedAwsCloud.status());
+        assertEquals(2, queuedAwsCloud.queuePosition());
+        assertTrue(queuedAwsCloud.metadataJson().contains("\"awsAccountId\":\"123456789012\""));
+    }
+
+    @Test
     void tenantScopedActorsDoNotSeeOtherTenantInventoryRunsInHistoryOrSummary() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());

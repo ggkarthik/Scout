@@ -312,9 +312,42 @@ public class FindingWorkflowService {
                 finding,
                 "REOPENED_BY_OBSERVATION",
                 "system",
-                "Finding reopened because the vulnerability was observed again",
+                "Finding reopened because the affected subject was observed again",
                 Map.of(
                         "fromStatus", previousStatus.name(),
+                        "observedAt", observedAt
+                ));
+    }
+
+    public void resolveByVerifiedReassessment(
+            Finding finding,
+            UUID assessmentId,
+            Instant observedAt,
+            UUID observedRunId
+    ) {
+        if (finding == null || finding.getStatus() == FindingStatus.RESOLVED) {
+            return;
+        }
+        FindingStatus previousStatus = finding.getStatus();
+        finding.setStatus(FindingStatus.RESOLVED);
+        finding.setDecisionState(FindingDecisionState.FIXED);
+        finding.setAssessmentId(assessmentId);
+        finding.setSuppressionReason(null);
+        finding.setSuppressedUntil(null);
+        finding.setSuppressedByRuleId(null);
+        finding.setSuppressedByRuleName(null);
+        markObserved(finding, observedAt, observedRunId);
+        applyClosureMetadata(finding, FindingCloseReason.VERIFIED_REMEDIATION,
+                "ai-grid-reassessment", null, observedAt);
+        finding.touch();
+        appendEvent(
+                finding,
+                "RESOLVED_BY_VERIFIED_REASSESSMENT",
+                "ai-grid-reassessment",
+                "Finding resolved after a complete reassessment verified remediation",
+                Map.of(
+                        "fromStatus", previousStatus.name(),
+                        "assessmentId", assessmentId,
                         "observedAt", observedAt
                 ));
     }

@@ -502,6 +502,7 @@ import type {
   AiSecurityAzureConnectionTest,
   AiSecurityAzureConnector,
   AiSecurityAzureCredentialProfile,
+  AiSecurityAzureFoundryConfig,
   AiSecurityAzureRequirements,
   AiSecurityFinding,
   AiSecurityGraph,
@@ -510,6 +511,20 @@ import type {
   AiSecurityRun,
   AiSecurityScope,
   AiSecuritySummary,
+  AiGridSystem,
+  AiGridCoverage,
+  AiGridCoverageDimension,
+  AiGridPolicy,
+  AiGridPolicySelection,
+  AiGridOwner,
+  AiGridRunMetrics,
+  AiGridExposurePage,
+  AiGridExposureDetail,
+  PolicyAssistExplanation,
+  PolicyConfiguration,
+  PolicyExceptionOverride,
+  PolicyScopeCondition,
+  PolicyScopeMode,
 } from '../features/ai-security/types';
 
 const API_BASE = resolveApiBase();
@@ -1322,6 +1337,37 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getAiSecuritySummary: () => request<AiSecuritySummary>('/ai-security/summary'),
+  listAiGridSystems: () => request<AiGridSystem[]>('/ai-systems'),
+  getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
+  getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
+  listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
+  updateAiGridPolicySelection: (policyId: string, selection: AiGridPolicySelection, reason?: string) =>
+    request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
+      method: 'PUT',
+      body: JSON.stringify({ selection, reason }),
+    }),
+  getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
+    `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
+  ),
+  listAiGridExposures: (cursor?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    return request<AiGridExposurePage>(`/ai-exposures?${params.toString()}`);
+  },
+  getAiGridExposure: (exposureId: string) => request<AiGridExposureDetail>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}`,
+  ),
+  dispositionAiGridExposure: (exposureId: string, disposition: string, reason: string) => request<void>(
+    `/ai-exposures/${encodeURIComponent(exposureId)}/disposition`, {
+      method: 'POST', body: JSON.stringify({ disposition, reason }),
+    },
+  ),
+  confirmAiGridArtifactOwner: (artifactId: string, ownerName: string, reason?: string) => request<AiGridOwner>(
+    `/ai-artifacts/${encodeURIComponent(artifactId)}/owner`, {
+      method: 'PUT',
+      body: JSON.stringify({ ownerName, reason }),
+    },
+  ),
   listAiSecurityArtifacts: (
     artifactType?: string,
     page = 0,
@@ -1335,6 +1381,8 @@ export const api = {
     if (subscription) params.set('subscription', subscription);
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
   },
+  getAiSecurityArtifact: (artifactId: string) =>
+    request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
   getAiSecurityGraph: (rootArtifactId?: string) => {
     const suffix = rootArtifactId ? `?rootArtifactId=${encodeURIComponent(rootArtifactId)}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
@@ -1368,6 +1416,38 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
     }),
+  getAiSecurityPolicyConfiguration: (policyId: string) =>
+    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/configuration`),
+  updateAiSecurityPolicyScope: (
+    policyId: string,
+    mode: PolicyScopeMode,
+    conditionLogic: 'AND' | 'OR',
+    conditions: PolicyScopeCondition[],
+  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/scope`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode, conditionLogic, conditions }),
+  }),
+  addAiSecurityPolicyException: (
+    policyId: string,
+    artifactId: string,
+    override: PolicyExceptionOverride,
+    reason?: string,
+  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/exceptions`, {
+    method: 'POST',
+    body: JSON.stringify({ artifactId, override, reason }),
+  }),
+  removeAiSecurityPolicyException: (policyId: string, artifactId: string) =>
+    request<PolicyConfiguration>(
+      `/ai-security/policies/${encodeURIComponent(policyId)}/exceptions/${encodeURIComponent(artifactId)}`,
+      { method: 'DELETE' },
+    ),
+  updateAiSecurityPolicyParameters: (policyId: string, parameters: Record<string, string>) =>
+    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/parameters`, {
+      method: 'PUT',
+      body: JSON.stringify({ parameters }),
+    }),
+  explainAiSecurityPolicy: (policyId: string) =>
+    request<PolicyAssistExplanation>(`/ai-security/policies/${encodeURIComponent(policyId)}/assist/explain`),
   listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>
@@ -1413,6 +1493,26 @@ export const api = {
   runAiSecurityAzureTarget: (targetId: string) =>
     request<{ jobId: string; status: string; message: string }>(
       `/connectors/ai-security/azure/targets/${encodeURIComponent(targetId)}/run`,
+      { method: 'POST' },
+    ),
+  getAiSecurityAzureFoundryConfig: () =>
+    request<AiSecurityAzureFoundryConfig>('/connectors/ai-security/azure-foundry'),
+  saveAiSecurityAzureFoundryConfig: (payload: {
+    foundryEndpointUrl?: string;
+    azureTenantId: string;
+    clientId: string;
+    clientSecret?: string;
+    subscriptionIds: string;
+    region?: string;
+  }) => request<AiSecurityAzureFoundryConfig>('/connectors/ai-security/azure-foundry', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  testAiSecurityAzureFoundryConfig: () =>
+    request<AiSecurityAzureConnectionTest>('/connectors/ai-security/azure-foundry/test', { method: 'POST' }),
+  runAiSecurityAzureFoundryConfig: () =>
+    request<{ jobId: string; status: string; message: string }>(
+      '/connectors/ai-security/azure-foundry/run',
       { method: 'POST' },
     ),
   listAiSecurityAzureCredentials: () =>

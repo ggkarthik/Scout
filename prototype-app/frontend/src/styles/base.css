@@ -4629,6 +4629,48 @@ label {
   background: color-mix(in srgb, var(--accent) 10%, var(--panel-muted));
 }
 
+.ai-asset-detail-page {
+  color: var(--text);
+  min-height: calc(100vh - 180px);
+}
+
+.ai-asset-detail-page .fd3-col-left {
+  order: 2;
+}
+
+.ai-asset-detail-page .fd3-col-right {
+  order: 1;
+}
+
+.ai-asset-detail-page .table-scroll,
+.ai-asset-detail-page .data-table {
+  background: var(--panel-solid);
+}
+
+.ai-asset-detail-page .data-table th,
+.ai-asset-detail-page .data-table td {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.ai-asset-detail-page .panel-caption,
+.ai-asset-detail-page .empty-state {
+  color: var(--muted);
+}
+
+.ai-asset-detail-page .modal-close-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-muted) 86%, var(--panel-solid));
+  border-color: var(--border);
+  color: var(--title);
+}
+
+.ai-asset-detail-page .modal-close-btn:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-muted));
+}
+
 .host-hero {
   display: flex;
   justify-content: space-between;
@@ -6979,7 +7021,8 @@ label {
 }
 
 @media (max-width: 760px) {
-  .host-detail-page {
+  .host-detail-page,
+  .ai-asset-detail-page {
     min-height: auto;
     padding: 16px;
   }
@@ -7878,6 +7921,7 @@ label {
 .app-page,
 .cve-assessment-page,
 .host-detail-page,
+.ai-asset-detail-page,
 .bom-inventory-page,
 .campaigns-page,
 .fpl-root,

@@ -7,6 +7,93 @@ export type AiSecuritySummary = {
   lastCompleteSnapshotAt: string | null;
 };
 
+export type AiGridSystem = {
+  id: string;
+  name: string;
+  status: string;
+  revision: number;
+  memberCount: number;
+  updatedAt: string;
+};
+
+export type AiGridCoverage = {
+  runId: string | null;
+  coverageEpochId: string | null;
+  authoritativeScopeHeads: number;
+  currentArtifacts: number;
+  applicablePublished: number;
+  required: number;
+  tenantEnabled: number;
+  preview: number;
+  tenantDisabled: number;
+  evidenceReady: number;
+  evaluatedPass: number;
+  evaluatedFail: number;
+  noDecision: number;
+  notApplicable: number;
+  stale: number;
+  unsupported: number;
+};
+
+export type AiGridCoverageDimension = {
+  coverageEpochId: string;
+  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK';
+  value: string;
+  expected: number;
+  recorded: number;
+  missing: number;
+  pass: number;
+  fail: number;
+  noDecision: number;
+};
+
+export type AiGridPolicySelection = 'REQUIRED' | 'ENABLED' | 'PREVIEW' | 'DISABLED';
+
+export type AiGridPolicy = {
+  policyId: string;
+  version: string;
+  name: string;
+  severity: string;
+  lifecycle: string;
+  workflowClass: string;
+  selection: AiGridPolicySelection;
+};
+
+export type AiGridOwner = {
+  artifactId: string;
+  ownerName: string;
+  ownerState: 'CONFIRMED';
+  ownerSource: string;
+  confidence: number | null;
+  confidenceMethod: string | null;
+  confidenceMethodVersion: string | null;
+};
+
+export type AiGridRunMetrics = {
+  runId: string;
+  provider: string | null;
+  completedScopeCount: number;
+  processingDurationMs: number;
+  providerApiCalls: number | null;
+  providerCallMeasurementState: string;
+  artifactCount: number;
+  snapshotManifestCount: number;
+  snapshotBytes: number;
+  newSnapshotBytes: number;
+  retainedSnapshotBytes: number;
+  budgetState: string;
+  factCount: number;
+  assessmentCount: number;
+  passCount: number;
+  failCount: number;
+  noDecisionCount: number;
+  openGapCount: number;
+  firstInventoryAt: string | null;
+  firstDecisionAt: string | null;
+  firstFindingAt: string | null;
+  firstGapAt: string | null;
+};
+
 export type AiSecurityArtifact = {
   id: string;
   provider: string;
@@ -18,6 +105,14 @@ export type AiSecurityArtifact = {
   region: string;
   active: boolean;
   attributes: Record<string, unknown>;
+  ownerName: string | null;
+  ownerState: 'CONFIRMED' | 'INFERRED' | 'CANDIDATE' | 'UNOWNED';
+  ownerSource: string | null;
+  ownerConfidence: number | null;
+  ownerConfidenceMethod: string | null;
+  ownerConfidenceMethodVersion: string | null;
+  businessCriticality: string | null;
+  environment: string | null;
   firstObservedAt: string;
   lastObservedAt: string;
 };
@@ -82,6 +177,60 @@ export type AiSecurityPolicy = {
   decisionCoverageStatus: 'PASS' | 'FAIL' | 'NO_DATA';
   evaluatedArtifacts: number;
   noDecisionCount: number;
+};
+
+export type PolicyScopeMode = 'ALL' | 'MATCH_RULES' | 'CUSTOM_LIST';
+
+export type PolicyScopeField = 'PROVIDER' | 'REGION' | 'ACCOUNT_ID' | 'ARTIFACT_TYPE' | 'NATIVE_KIND' | 'NAME';
+
+export type PolicyScopeOperator = 'EQUALS' | 'NOT_EQUALS' | 'CONTAINS' | 'NOT_CONTAINS';
+
+export type PolicyScopeCondition = {
+  field: PolicyScopeField | string;
+  operator: PolicyScopeOperator | string;
+  value: string;
+};
+
+export type PolicyScope = {
+  mode: PolicyScopeMode;
+  conditionLogic: 'AND' | 'OR';
+  conditions: PolicyScopeCondition[];
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+
+export type PolicyExceptionOverride = 'INCLUDED' | 'EXCLUDED';
+
+export type PolicyException = {
+  artifactId: string;
+  artifactName: string;
+  override: PolicyExceptionOverride;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type PolicyParameterValue = {
+  key: string;
+  label: string;
+  type: string;
+  options: string[];
+  defaultValue: string;
+  helpText: string;
+  value: string;
+};
+
+export type PolicyConfiguration = {
+  scope: PolicyScope;
+  exceptions: PolicyException[];
+  parameters: PolicyParameterValue[];
+  matchedArtifactCount: number;
+  totalArtifactCount: number;
+};
+
+export type PolicyAssistExplanation = {
+  summary: string;
+  generatedAt: string;
 };
 
 export type AiSecurityRun = {
@@ -165,6 +314,19 @@ export type AiSecurityAzureConnector = {
   updatedAt: string;
 };
 
+export type AiSecurityAzureFoundryConfig = {
+  configured: boolean;
+  azureTenantId: string | null;
+  clientId: string | null;
+  hasCredential: boolean;
+  primarySubscriptionId: string | null;
+  subscriptionIds: string[];
+  regions: string[];
+  foundryEndpointUrl: string | null;
+  connectorId: string | null;
+  credentialExpiresAt: string | null;
+};
+
 export type AiSecurityAzureFamilyPermission = {
   resourceFamily: string;
   required: string[];
@@ -210,4 +372,36 @@ export type AiSecurityAzureRequirements = {
     notDataActions: string[];
     assignableScopes: string[];
   };
+};
+
+export type AiGridExposureSummary = {
+  id: string;
+  correlationId: string;
+  correlationVersion: string;
+  title: string;
+  severity: string;
+  state: 'EXPOSURE_HYPOTHESIS' | 'VALIDATED_EXPOSURE' | 'CLOSED';
+  status: 'OPEN' | 'CLOSED';
+  confidence: number;
+  rootCauseArtifactId: string;
+  firstObservedAt: string;
+  lastObservedAt: string;
+  findingId: string | null;
+  affectedSystems: number;
+  impact: string;
+  rootCause: string;
+  breakpoint: string;
+  confidenceMethod: string;
+};
+
+export type AiGridExposurePage = { items: AiGridExposureSummary[]; nextCursor: string | null };
+
+export type AiGridExposureDetail = {
+  exposure: AiGridExposureSummary;
+  observations: Array<{
+    id: string; runId: string; state: string; entryArtifactId: string | null; systemId: string | null;
+    pathJson: string; evidenceJson: string; validFrom: string;
+    validUntil: string | null; confidence: number; observedAt: string;
+  }>;
+  associations: Array<{ systemId: string | null; artifactId: string | null; role: string }>;
 };

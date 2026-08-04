@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyParameterSpec;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ArtifactScopeFacts;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeCondition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeConfig;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.AuditEventService;
@@ -16,7 +21,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -107,7 +114,9 @@ public class AiSecurityApiService {
                     .addValue("offset", safePage * safeSize, Types.INTEGER);
             List<ArtifactResponse> items = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text,
+                           account_id, region, active, attributes_json::text, owner_name, owner_state,
+                           owner_source, owner_confidence, owner_confidence_method,
+                           owner_confidence_method_version, business_criticality, environment,
                            first_observed_at, last_observed_at
                       from ai_security_artifacts
                      where (:artifactType is null
@@ -134,7 +143,9 @@ public class AiSecurityApiService {
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> rows = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text,
+                           account_id, region, active, attributes_json::text, owner_name, owner_state,
+                           owner_source, owner_confidence, owner_confidence_method,
+                           owner_confidence_method_version, business_criticality, environment,
                            first_observed_at, last_observed_at
                       from ai_security_artifacts where id = :id
                     """, Map.of("id", artifactId), this::artifact);
@@ -173,7 +184,9 @@ public class AiSecurityApiService {
             if (rootArtifactId == null) {
                 nodes = jdbc.query("""
                         select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                               account_id, region, active, attributes_json::text,
+                               account_id, region, active, attributes_json::text, owner_name, owner_state,
+                               owner_source, owner_confidence, owner_confidence_method,
+                               owner_confidence_method_version, business_criticality, environment,
                                first_observed_at, last_observed_at
                           from ai_security_artifacts where active = true
                          order by last_observed_at desc limit 500
@@ -225,22 +238,27 @@ public class AiSecurityApiService {
                        and (:subscription is null or a.account_id = :subscription)
                     """;
             List<FindingResponse> items = jdbc.query("""
-                    select f.id, f.display_id, f.policy_id, f.policy_version, f.artifact_id,
-                           a.name as artifact_name, f.severity, f.status, f.title,
-                           f.evidence_json::text, f.first_observed_at, f.last_observed_at, f.resolved_at,
+                    select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
+                           a.name as artifact_name,
+                           coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                               when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
+                           f.status, f.title, f.evidence::text evidence_json,
+                           f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
-                      from ai_security_findings f
-                      join ai_security_artifacts a on a.id = f.artifact_id
+                      from findings f
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join ai_security_artifacts a on a.id = fs.subject_id
                       left join lateral (
-                          select disposition from ai_security_finding_reviews r
+                          select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
                       ) review on true
-                    """ + filter + " order by f.last_observed_at desc, f.id limit :limit offset :offset",
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
-                    select count(*) from ai_security_findings f
-                    join ai_security_artifacts a on a.id = f.artifact_id
-                    """ + filter, params);
+                    select count(*) from findings f
+                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                    join ai_security_artifacts a on a.id = fs.subject_id
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -259,7 +277,7 @@ public class AiSecurityApiService {
             FindingResponse finding = findingsById(findingId).stream().findFirst()
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security finding not found"));
             jdbc.update("""
-                    insert into ai_security_finding_reviews (
+                    insert into finding_reviews (
                         id, tenant_id, finding_id, disposition, reason, policy_version, reviewed_by
                     ) values (
                         :id, :tenantId, :findingId, :disposition, :reason, :policyVersion, :reviewedBy
@@ -272,7 +290,7 @@ public class AiSecurityApiService {
                     .addValue("reason", blankToNull(reason))
                     .addValue("policyVersion", finding.policyVersion())
                     .addValue("reviewedBy", actor));
-            auditEventService.record("ai_security.finding.reviewed", "ai_security_finding",
+            auditEventService.record("ai_security.finding.reviewed", "finding",
                     findingId.toString(), "{\"disposition\":\"" + disposition.name() + "\"}");
             return findingsById(findingId).get(0);
         }));
@@ -324,6 +342,290 @@ public class AiSecurityApiService {
                     policyId, "{\"enabled\":" + enabled + "}");
             return policy(definition);
         }));
+    }
+
+    private static final Set<String> VALID_SCOPE_MODES = Set.of(
+            AiSecurityPolicyScopeMatcher.MODE_ALL,
+            AiSecurityPolicyScopeMatcher.MODE_MATCH_RULES,
+            AiSecurityPolicyScopeMatcher.MODE_CUSTOM_LIST);
+    private static final Set<String> VALID_SCOPE_FIELDS =
+            Set.of("PROVIDER", "REGION", "ACCOUNT_ID", "ARTIFACT_TYPE", "NATIVE_KIND", "NAME");
+    private static final Set<String> VALID_SCOPE_OPERATORS =
+            Set.of("EQUALS", "NOT_EQUALS", "CONTAINS", "NOT_CONTAINS");
+    private static final Set<String> VALID_OVERRIDES = Set.of(
+            AiSecurityPolicyScopeMatcher.OVERRIDE_INCLUDED, AiSecurityPolicyScopeMatcher.OVERRIDE_EXCLUDED);
+    public PolicyConfigurationResponse policyConfiguration(Tenant tenant, String policyId) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        return tenantExecution.run(tenant, () -> buildConfiguration(definition));
+    }
+
+    public PolicyConfigurationResponse updatePolicyScope(
+            Tenant tenant, String policyId, String rawMode, String rawConditionLogic,
+            List<PolicyScopeConditionResponse> rawConditions, String actor) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        String mode = rawMode == null ? null : rawMode.toUpperCase(Locale.ROOT);
+        if (!VALID_SCOPE_MODES.contains(mode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported scope mode");
+        }
+        String conditionLogic = "OR".equalsIgnoreCase(rawConditionLogic) ? "OR" : "AND";
+        List<PolicyScopeConditionResponse> conditions = rawConditions == null ? List.of() : rawConditions;
+        for (PolicyScopeConditionResponse condition : conditions) {
+            if (!VALID_SCOPE_FIELDS.contains(condition.field())
+                    || !VALID_SCOPE_OPERATORS.contains(condition.operator())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported scope condition");
+            }
+        }
+        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.update("""
+                    insert into ai_security_policy_scopes (
+                        policy_id, tenant_id, mode, condition_logic, conditions_json, updated_by
+                    ) values (
+                        :policyId, :tenantId, :mode, :conditionLogic, cast(:conditions as jsonb), :actor
+                    ) on conflict (policy_id) do update
+                        set mode = excluded.mode,
+                            condition_logic = excluded.condition_logic,
+                            conditions_json = excluded.conditions_json,
+                            updated_by = excluded.updated_by,
+                            updated_at = now()
+                    """, new MapSqlParameterSource()
+                    .addValue("policyId", policyId)
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("mode", mode)
+                    .addValue("conditionLogic", conditionLogic)
+                    .addValue("conditions", json(conditions))
+                    .addValue("actor", actor));
+            auditEventService.record("ai_security.policy.scope_updated", "ai_security_policy", policyId,
+                    "{\"mode\":\"" + mode + "\"}");
+            evaluationService.reevaluatePolicy(tenant, policyId);
+            return buildConfiguration(definition);
+        }));
+    }
+
+    public PolicyConfigurationResponse addPolicyException(
+            Tenant tenant, String policyId, UUID artifactId, String rawOverride, String reason, String actor) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        if (artifactId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An artifact is required");
+        }
+        String override = rawOverride == null ? null : rawOverride.toUpperCase(Locale.ROOT);
+        if (!VALID_OVERRIDES.contains(override)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported exception override");
+        }
+        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.update("""
+                    insert into ai_security_policy_artifact_overrides (
+                        id, tenant_id, policy_id, artifact_id, override, reason, created_by
+                    ) values (
+                        :id, :tenantId, :policyId, :artifactId, :override, :reason, :actor
+                    ) on conflict (tenant_id, policy_id, artifact_id) do update
+                        set override = excluded.override, reason = excluded.reason, updated_at = now()
+                    """, new MapSqlParameterSource()
+                    .addValue("id", UUID.randomUUID())
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("policyId", policyId)
+                    .addValue("artifactId", artifactId)
+                    .addValue("override", override)
+                    .addValue("reason", blankToNull(reason))
+                    .addValue("actor", actor));
+            auditEventService.record("ai_security.policy.exception_added", "ai_security_policy", policyId,
+                    "{\"artifactId\":\"" + artifactId + "\",\"override\":\"" + override + "\"}");
+            evaluationService.reevaluatePolicy(tenant, policyId);
+            return buildConfiguration(definition);
+        }));
+    }
+
+    public PolicyConfigurationResponse removePolicyException(
+            Tenant tenant, String policyId, UUID artifactId, String actor) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.update("""
+                    delete from ai_security_policy_artifact_overrides
+                     where policy_id = :policyId and artifact_id = :artifactId
+                    """, Map.of("policyId", policyId, "artifactId", artifactId));
+            auditEventService.record("ai_security.policy.exception_removed", "ai_security_policy", policyId,
+                    "{\"artifactId\":\"" + artifactId + "\"}");
+            evaluationService.reevaluatePolicy(tenant, policyId);
+            return buildConfiguration(definition);
+        }));
+    }
+
+    public PolicyConfigurationResponse updatePolicyParameters(
+            Tenant tenant, String policyId, Map<String, String> parameters, String actor) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        List<PolicyParameterSpec> specs = policyRegistry.parameterSpecs(policyId);
+        Map<String, String> validated = new LinkedHashMap<>();
+        for (PolicyParameterSpec spec : specs) {
+            String value = parameters == null ? null : parameters.get(spec.key());
+            if (value == null || value.isBlank()) {
+                validated.put(spec.key(), spec.defaultValue());
+                continue;
+            }
+            if ("ENUM".equals(spec.type()) && !spec.options().contains(value.toUpperCase(Locale.ROOT))) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Unsupported value for parameter " + spec.key());
+            }
+            validated.put(spec.key(), value.toUpperCase(Locale.ROOT));
+        }
+        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.update("""
+                    insert into ai_security_policy_parameters (policy_id, tenant_id, parameters_json, updated_by)
+                    values (:policyId, :tenantId, cast(:parameters as jsonb), :actor)
+                    on conflict (policy_id) do update
+                        set parameters_json = excluded.parameters_json,
+                            updated_by = excluded.updated_by,
+                            updated_at = now()
+                    """, new MapSqlParameterSource()
+                    .addValue("policyId", policyId)
+                    .addValue("tenantId", tenant.getId())
+                    .addValue("parameters", json(validated))
+                    .addValue("actor", actor));
+            auditEventService.record("ai_security.policy.parameters_updated", "ai_security_policy", policyId,
+                    json(validated));
+            evaluationService.reevaluatePolicy(tenant, policyId);
+            return buildConfiguration(definition);
+        }));
+    }
+
+    public PolicyAssistExplanationResponse explainPolicy(Tenant tenant, String policyId) {
+        PolicyDefinition definition = requirePolicy(policyId);
+        return tenantExecution.run(tenant, () -> {
+            PolicyConfigurationResponse configuration = buildConfiguration(definition);
+            long openOnMatched = count("""
+                    select count(*) from ai_security_findings where policy_id = :policyId and status = 'OPEN'
+                    """, Map.of("policyId", policyId));
+            StringBuilder text = new StringBuilder();
+            if (configuration.totalArtifactCount() == 0) {
+                text.append("No ").append(String.join(" or ", definition.artifactTypes()))
+                        .append(" artifacts have been discovered yet, so this policy has nothing to evaluate.");
+            } else if (configuration.matchedArtifactCount() == 0) {
+                text.append("The current scope excludes all ").append(configuration.totalArtifactCount())
+                        .append(" eligible artifact(s) in your inventory — this policy will not produce findings until scope is widened.");
+            } else {
+                text.append(configuration.matchedArtifactCount()).append(" of ")
+                        .append(configuration.totalArtifactCount())
+                        .append(" eligible artifact(s) are currently in scope for this policy. ");
+                if (openOnMatched == 0) {
+                    text.append("None of them currently violate it.");
+                } else {
+                    text.append(openOnMatched).append(" of them currently violate it and have an open finding.");
+                }
+                if (!configuration.parameters().isEmpty()) {
+                    PolicyParameterValueResponse param = configuration.parameters().get(0);
+                    text.append(" The policy is evaluated against your configured \"")
+                            .append(param.label()).append("\" of ").append(param.value()).append(".");
+                }
+            }
+            if (!configuration.exceptions().isEmpty()) {
+                long excludedCount = configuration.exceptions().stream()
+                        .filter(exception -> AiSecurityPolicyScopeMatcher.OVERRIDE_EXCLUDED.equals(exception.override()))
+                        .count();
+                if (excludedCount > 0) {
+                    text.append(" ").append(excludedCount).append(" artifact(s) are explicitly excepted from this policy.");
+                }
+            }
+            return new PolicyAssistExplanationResponse(text.toString(), Instant.now());
+        });
+    }
+
+    private PolicyDefinition requirePolicy(String policyId) {
+        return policyRegistry.find(policyId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
+    }
+
+    private PolicyConfigurationResponse buildConfiguration(PolicyDefinition definition) {
+        Map<String, Object> scopeRow = jdbc.query("""
+                select mode, condition_logic, conditions_json::text, updated_by, updated_at
+                  from ai_security_policy_scopes where policy_id = :policyId
+                """, Map.of("policyId", definition.id()), rs -> rs.next()
+                ? Map.of(
+                        "mode", rs.getString("mode"),
+                        "conditionLogic", rs.getString("condition_logic"),
+                        "conditionsJson", rs.getString("conditions_json"),
+                        "updatedBy", (Object) rs.getString("updated_by"),
+                        "updatedAt", (Object) rs.getTimestamp("updated_at"))
+                : Map.of());
+        String mode = (String) scopeRow.getOrDefault("mode", AiSecurityPolicyScopeMatcher.MODE_ALL);
+        String conditionLogic = (String) scopeRow.getOrDefault("conditionLogic", "AND");
+        List<PolicyScopeConditionResponse> conditions = readConditions((String) scopeRow.get("conditionsJson"));
+        PolicyScopeResponse scope = new PolicyScopeResponse(
+                mode, conditionLogic, conditions,
+                (String) scopeRow.get("updatedBy"),
+                scopeRow.get("updatedAt") instanceof java.sql.Timestamp timestamp ? timestamp.toInstant() : null);
+
+        List<PolicyExceptionResponse> exceptions = jdbc.query("""
+                select o.artifact_id, a.name as artifact_name, o.override, o.reason, o.created_by, o.created_at
+                  from ai_security_policy_artifact_overrides o
+                  join ai_security_artifacts a on a.id = o.artifact_id
+                 where o.policy_id = :policyId
+                 order by o.created_at desc
+                """, Map.of("policyId", definition.id()), (rs, rowNum) -> new PolicyExceptionResponse(
+                rs.getObject("artifact_id", UUID.class),
+                rs.getString("artifact_name"),
+                rs.getString("override"),
+                rs.getString("reason"),
+                rs.getString("created_by"),
+                instant(rs, "created_at")));
+        Map<String, String> overridesByArtifact = new LinkedHashMap<>();
+        exceptions.forEach(exception -> overridesByArtifact.put(exception.artifactId().toString(), exception.override()));
+
+        List<ArtifactScopeRow> artifacts = jdbc.query("""
+                select id, provider, region, account_id, artifact_type, native_kind, name
+                  from ai_security_artifacts
+                 where active = true and artifact_type in (:types)
+                """, Map.of("types", definition.artifactTypes()),
+                (rs, rowNum) -> new ArtifactScopeRow(
+                        rs.getObject("id", UUID.class), rs.getString("provider"), rs.getString("region"),
+                        rs.getString("account_id"), rs.getString("artifact_type"), rs.getString("native_kind"),
+                        rs.getString("name")));
+        ScopeConfig scopeConfig = new ScopeConfig(mode, conditionLogic, conditions.stream()
+                .map(condition -> new ScopeCondition(condition.field(), condition.operator(), condition.value()))
+                .toList());
+        long matched = artifacts.stream()
+                .filter(artifact -> AiSecurityPolicyScopeMatcher.isInScope(
+                        scopeConfig,
+                        new ArtifactScopeFacts(artifact.provider(), artifact.region(), artifact.accountId(),
+                                artifact.artifactType(), artifact.nativeKind(), artifact.name()),
+                        overridesByArtifact.get(artifact.id().toString())))
+                .count();
+
+        List<PolicyParameterValueResponse> parameters = buildParameterValues(definition.id());
+        return new PolicyConfigurationResponse(scope, exceptions, parameters, matched, artifacts.size());
+    }
+
+    private List<PolicyParameterValueResponse> buildParameterValues(String policyId) {
+        List<PolicyParameterSpec> specs = policyRegistry.parameterSpecs(policyId);
+        if (specs.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> stored = jdbc.query("""
+                select parameters_json::text from ai_security_policy_parameters where policy_id = :policyId
+                """, Map.of("policyId", policyId), rs -> rs.next() ? readMap(rs.getString("parameters_json")) : Map.of());
+        return specs.stream()
+                .map(spec -> new PolicyParameterValueResponse(
+                        spec.key(), spec.label(), spec.type(), spec.options(), spec.defaultValue(), spec.helpText(),
+                        String.valueOf(stored.getOrDefault(spec.key(), spec.defaultValue()))))
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<PolicyScopeConditionResponse> readConditions(String conditionsJson) {
+        if (conditionsJson == null || conditionsJson.isBlank()) {
+            return List.of();
+        }
+        List<Map<String, Object>> raw;
+        try {
+            raw = objectMapper.readValue(conditionsJson, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+        } catch (Exception ex) {
+            return List.of();
+        }
+        return raw.stream()
+                .map(row -> new PolicyScopeConditionResponse(
+                        String.valueOf(row.get("field")), String.valueOf(row.get("operator")), String.valueOf(row.get("value"))))
+                .toList();
+    }
+
+    private record ArtifactScopeRow(
+            UUID id, String provider, String region, String accountId, String artifactType, String nativeKind, String name) {
     }
 
     public List<RunResponse> runs(Tenant tenant) {
@@ -440,17 +742,21 @@ public class AiSecurityApiService {
 
     private List<FindingResponse> findingsById(UUID findingId) {
         return jdbc.query("""
-                select f.id, f.display_id, f.policy_id, f.policy_version, f.artifact_id,
-                       a.name as artifact_name, f.severity, f.status, f.title,
-                       f.evidence_json::text, f.first_observed_at, f.last_observed_at, f.resolved_at,
+                select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
+                       a.name as artifact_name,
+                       coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                           when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
+                       f.status, f.title, f.evidence::text evidence_json,
+                       f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
-                  from ai_security_findings f
-                  join ai_security_artifacts a on a.id = f.artifact_id
+                  from findings f
+                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                  join ai_security_artifacts a on a.id = fs.subject_id
                   left join lateral (
-                      select disposition from ai_security_finding_reviews r
+                      select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
-                 where f.id = :id
+                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
                 """, Map.of("id", findingId), this::finding);
     }
 
@@ -489,6 +795,14 @@ public class AiSecurityApiService {
                 rs.getString("region"),
                 rs.getBoolean("active"),
                 readMap(rs.getString("attributes_json")),
+                rs.getString("owner_name"),
+                rs.getString("owner_state"),
+                rs.getString("owner_source"),
+                (Double) rs.getObject("owner_confidence"),
+                rs.getString("owner_confidence_method"),
+                rs.getString("owner_confidence_method_version"),
+                rs.getString("business_criticality"),
+                rs.getString("environment"),
                 instant(rs, "first_observed_at"),
                 instant(rs, "last_observed_at"));
     }
@@ -542,6 +856,14 @@ public class AiSecurityApiService {
         }
     }
 
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Unable to serialize AI Security payload", ex);
+        }
+    }
+
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
@@ -564,6 +886,9 @@ public class AiSecurityApiService {
     public record ArtifactResponse(
             UUID id, String provider, String providerResourceId, String artifactType, String nativeKind,
             String name, String accountId, String region, boolean active, Map<String, Object> attributes,
+            String ownerName, String ownerState, String ownerSource, Double ownerConfidence,
+            String ownerConfidenceMethod, String ownerConfidenceMethodVersion,
+            String businessCriticality, String environment,
             Instant firstObservedAt, Instant lastObservedAt
     ) {
     }
@@ -596,6 +921,35 @@ public class AiSecurityApiService {
             double decisionCoverageThreshold, String decisionCoverageStatus,
             long evaluatedArtifacts, long noDecisionCount
     ) {
+    }
+
+    public record PolicyScopeConditionResponse(String field, String operator, String value) {
+    }
+
+    public record PolicyScopeResponse(
+            String mode, String conditionLogic, List<PolicyScopeConditionResponse> conditions,
+            String updatedBy, Instant updatedAt
+    ) {
+    }
+
+    public record PolicyExceptionResponse(
+            UUID artifactId, String artifactName, String override, String reason, String createdBy, Instant createdAt
+    ) {
+    }
+
+    public record PolicyParameterValueResponse(
+            String key, String label, String type, List<String> options, String defaultValue, String helpText,
+            String value
+    ) {
+    }
+
+    public record PolicyConfigurationResponse(
+            PolicyScopeResponse scope, List<PolicyExceptionResponse> exceptions,
+            List<PolicyParameterValueResponse> parameters, long matchedArtifactCount, long totalArtifactCount
+    ) {
+    }
+
+    public record PolicyAssistExplanationResponse(String summary, Instant generatedAt) {
     }
 
     record CoverageGate(

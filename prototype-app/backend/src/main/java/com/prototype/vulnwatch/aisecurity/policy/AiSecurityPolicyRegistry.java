@@ -40,6 +40,13 @@ public class AiSecurityPolicyRegistry {
                     "Enable Bedrock model invocation logging to an encrypted CloudWatch Logs or S3 destination.",
                     Map.of("AWS", "BEDROCK-LOGGING")),
             new PolicyDefinition(
+                    "AZURE_RAI_POLICY_NON_BLOCKING_FILTER", "1.0.0",
+                    "Azure RAI policy contains a non-blocking filter",
+                    "HIGH", List.of("AI_GUARDRAIL"), List.of("AZURE_RAI_POLICIES"),
+                    "An Azure RAI policy explicitly disables a content filter or configures it as non-blocking.",
+                    "Enable blocking for every explicitly configured RAI content filter.",
+                    Map.of("OWASP-LLM", "LLM01")),
+            new PolicyDefinition(
                     "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS", "1.0.0", "Unrestricted Azure AI public access",
                     "CRITICAL", List.of("OTHER_AI_ARTIFACT"), List.of("AZURE_AI_ACCOUNTS"),
                     "An Azure AI account permits unrestricted public network access.",
@@ -97,12 +104,26 @@ public class AiSecurityPolicyRegistry {
                     Map.of("AZURE", "BOT-MANAGED-IDENTITY"))
     );
 
+    private static final Map<String, List<PolicyParameterSpec>> PARAMETER_SPECS = Map.of(
+            "AWS_BEDROCK_WEAK_GUARDRAIL", List.of(new PolicyParameterSpec(
+                    "minimumGuardrailStrength",
+                    "Minimum guardrail strength",
+                    "ENUM",
+                    List.of("NONE", "LOW", "MEDIUM", "HIGH"),
+                    "MEDIUM",
+                    "Agents in scope must have a guardrail at or above this strength attached."))
+    );
+
     public List<PolicyDefinition> all() {
         return definitions;
     }
 
     public Optional<PolicyDefinition> find(String policyId) {
         return definitions.stream().filter(definition -> definition.id().equals(policyId)).findFirst();
+    }
+
+    public List<PolicyParameterSpec> parameterSpecs(String policyId) {
+        return PARAMETER_SPECS.getOrDefault(policyId, List.of());
     }
 
     public record PolicyDefinition(
@@ -115,6 +136,16 @@ public class AiSecurityPolicyRegistry {
             String description,
             String remediation,
             Map<String, String> controlMappings
+    ) {
+    }
+
+    public record PolicyParameterSpec(
+            String key,
+            String label,
+            String type,
+            List<String> options,
+            String defaultValue,
+            String helpText
     ) {
     }
 }

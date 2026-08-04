@@ -5,7 +5,6 @@ import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.dto.OrgSpecificCveExposureRecordResponse;
 import com.prototype.vulnwatch.dto.PlatformVulnIntelDetailResponse;
 import com.prototype.vulnwatch.dto.PlatformVulnRepoPageResponse;
-import com.prototype.vulnwatch.dto.PlatformVulnSourceStatsResponse;
 import com.prototype.vulnwatch.dto.VulnRepoDashboardResponse;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityIntelObservationRepository;
@@ -384,7 +383,7 @@ public class PlatformVulnRepoService {
     }
 
     @Transactional(readOnly = true)
-    public PlatformVulnSourceStatsResponse getSourceStats() {
+    public Map<String, Object> getSourceStats() {
         Map<String, Map<String, Long>> bySourceSeverity = new LinkedHashMap<>();
         jdbcTemplate.query(
                 """
@@ -405,17 +404,23 @@ public class PlatformVulnRepoService {
                     bySourceSeverity.computeIfAbsent(src, k -> new java.util.HashMap<>()).put(sev, total);
                 }
         );
-        Map<String, PlatformVulnSourceStatsResponse.SourceStat> sources = new LinkedHashMap<>();
+        Map<String, Map<String, Long>> sources = new LinkedHashMap<>();
         bySourceSeverity.forEach((src, sevCounts) -> {
             long critical = sevCounts.getOrDefault("CRITICAL", 0L);
             long high     = sevCounts.getOrDefault("HIGH",     0L);
             long medium   = sevCounts.getOrDefault("MEDIUM",   0L);
             long low      = sevCounts.getOrDefault("LOW",      0L);
             long unknown  = sevCounts.getOrDefault("UNKNOWN",  0L);
-            sources.put(src, new PlatformVulnSourceStatsResponse.SourceStat(
-                    critical + high + medium + low + unknown, critical, high, medium, low, unknown));
+            Map<String, Long> sourceStat = new LinkedHashMap<>();
+            sourceStat.put("total", critical + high + medium + low + unknown);
+            sourceStat.put("critical", critical);
+            sourceStat.put("high", high);
+            sourceStat.put("medium", medium);
+            sourceStat.put("low", low);
+            sourceStat.put("unknown", unknown);
+            sources.put(src, sourceStat);
         });
-        return new PlatformVulnSourceStatsResponse(sources);
+        return Map.of("sources", sources);
     }
 
     @Transactional(readOnly = true)

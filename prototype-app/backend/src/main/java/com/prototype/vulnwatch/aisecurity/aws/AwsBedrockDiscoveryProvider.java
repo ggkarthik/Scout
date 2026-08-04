@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.aws;
 
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityDiscoveryProvider;
+import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.IngestionJobService;
 import java.util.UUID;
@@ -44,6 +45,9 @@ public class AwsBedrockDiscoveryProvider implements AiSecurityDiscoveryProvider 
         if (exception instanceof AiSecurityAwsAdmissionService.AdmissionException) {
             return "THROTTLED";
         }
+        if (exception instanceof AiGridBudgetService.BudgetExceededException) {
+            return "BUDGET_THROTTLED";
+        }
         return AiSecurityDiscoveryProvider.super.failureCode(exception);
     }
 
@@ -52,6 +56,7 @@ public class AwsBedrockDiscoveryProvider implements AiSecurityDiscoveryProvider 
         return switch (code) {
             case "ASSUME_ROLE_FAILED" -> "Unable to assume the configured AWS role";
             case "THROTTLED" -> "AWS temporarily throttled the AI Security scan";
+            case "BUDGET_THROTTLED" -> "AI Security scan was deferred by the tenant budget policy";
             default -> AiSecurityDiscoveryProvider.super.safeFailureMessage(code);
         };
     }

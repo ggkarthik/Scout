@@ -45,6 +45,10 @@ public class SyncRunHistoryService {
             "VEX_ROLLOUT_BACKFILL",
             "EOL_DATE_SWEEP"
     );
+    private static final Set<String> AI_INVENTORY_RUN_TYPES = Set.of(
+            "AI_SECURITY_AWS_BEDROCK",
+            "AI_SECURITY_AZURE_DISCOVERY"
+    );
 
     private final SyncRunRepository syncRunRepository;
     private final RequestActorService requestActorService;
@@ -200,7 +204,9 @@ public class SyncRunHistoryService {
         return normalizedType.startsWith("GITHUB_")
                 || "SERVICENOW_CMDB".equals(normalizedType)
                 || "SCCM_CMDB".equals(normalizedType)
-                || "AWS_DISCOVERY".equals(normalizedType);
+                || "AWS_DISCOVERY".equals(normalizedType)
+                || "AZURE_DISCOVERY".equals(normalizedType)
+                || AI_INVENTORY_RUN_TYPES.contains(normalizedType);
     }
 
     private String normalizeCategory(String category) {

@@ -194,6 +194,7 @@ export function AzureDiscoveryConnectorPage() {
       if (!saved) return;
       const result = await api.triggerAzureDiscoverySync();
       setSyncResult(result);
+      await queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -270,6 +271,7 @@ export function AzureDiscoveryConnectorPage() {
     try {
       const result = await api.triggerAzureDiscoveryTargetSync(targetId);
       setSyncResult(result);
+      await queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
       await refreshTargets();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

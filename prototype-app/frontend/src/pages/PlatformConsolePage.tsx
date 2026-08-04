@@ -8,6 +8,8 @@ import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFre
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { EolPage } from './EolPage';
+import { VulnIntelConfigPage } from './VulnIntelConfigPage';
+import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and workspace metadata' },
@@ -15,8 +17,50 @@ const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: stri
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
   { key: 'platform-audit', label: 'Platform Audit', helper: 'Review platform-user identity changes and setup history' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
+  { key: 'vuln-intel', label: 'Vulnerability Intelligence', helper: 'Platform-owned NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, EUVD, and JVN feed configuration' },
   { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
 ];
+
+function PlatformVulnIntelSection() {
+  const [subView, setSubView] = React.useState<'feeds' | 'run-history'>('feeds');
+  const vulnSummaryQuery = useQuery({
+    queryKey: ['vuln-intel-sources-summary'],
+    queryFn: api.getVulnIntelSourcesSummary
+  });
+
+  return (
+    <div className="platform-vuln-intel-section">
+      <div className="connect-filter-bar connect-filter-bar--standalone">
+        <button
+          type="button"
+          className={`connect-filter-btn${subView === 'feeds' ? ' active' : ''}`}
+          onClick={() => setSubView('feeds')}
+        >
+          Feeds
+        </button>
+        <button
+          type="button"
+          className={`connect-filter-btn${subView === 'run-history' ? ' active' : ''}`}
+          onClick={() => setSubView('run-history')}
+        >
+          Run History
+        </button>
+      </div>
+      {subView === 'feeds' ? (
+        <section className="panel">
+          <VulnIntelConfigPage vulnSummary={vulnSummaryQuery.data ?? null} />
+        </section>
+      ) : (
+        <IntegrationRunQueuePage
+          title="Vulnerability Integration Run History"
+          caption="Track platform-owned vulnerability ingestion jobs across NVD, KEV, GHSA, CSAF/VEX, advisory, EUVD, and JVN feeds."
+          queryParams={{ category: 'vuln-intel', limit: 200 }}
+          storageKey="platform-vulnerability-run-history-table-widths"
+        />
+      )}
+    </div>
+  );
+}
 
 const PLATFORM_TAB_GROUPS: Array<{
   key: 'tenant-management';
@@ -69,7 +113,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
-  const hideSidebar = selectedView === 'eol' || selectedView === 'operations';
+  const hideSidebar = selectedView === 'eol' || selectedView === 'operations' || selectedView === 'vuln-intel';
   const visibleTabGroups = PLATFORM_TAB_GROUPS.map((group) => ({
     ...group,
     tabs: group.tabs
@@ -134,6 +178,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
             {selectedView === 'users' && <PlatformUsersPanel />}
             {selectedView === 'platform-audit' && <PlatformUserAuditPanel />}
             {selectedView === 'demo-requests' && <DemoRequestsPanel />}
+            {selectedView === 'vuln-intel' && <PlatformVulnIntelSection />}
             {selectedView === 'eol' && <EolPage embedded mode="platform" />}
           </div>
         </div>

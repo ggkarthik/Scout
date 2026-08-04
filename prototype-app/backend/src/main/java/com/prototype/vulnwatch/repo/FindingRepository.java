@@ -18,6 +18,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpecificationExecutor<Finding> {
@@ -27,6 +28,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     }
 
     List<Finding> findAllByOrderByUpdatedAtDesc();
+    Optional<Finding> findByTenantAndFingerprint(Tenant tenant, String fingerprint);
     Page<Finding> findAllByOrderByUpdatedAtDesc(Pageable pageable);
     List<Finding> findByStatusOrderByUpdatedAtDesc(FindingStatus status);
     List<Finding> findByStatusAndSuppressedUntilBefore(FindingStatus status, Instant before);

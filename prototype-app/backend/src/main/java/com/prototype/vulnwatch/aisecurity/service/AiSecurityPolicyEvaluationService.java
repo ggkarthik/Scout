@@ -6,9 +6,14 @@ import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureKillSwitchService
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.EvaluationOutcome;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ArtifactScopeFacts;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeCondition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeConfig;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityResourceFamilyCatalogue;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,6 +31,7 @@ public class AiSecurityPolicyEvaluationService {
     private final AiSecurityPolicyRegistry registry;
     private final AiSecurityResourceFamilyCatalogue resourceFamilies;
     private final AiSecurityAzureKillSwitchService azureKillSwitches;
+    private boolean legacyFindingsEnabled;
 
     public AiSecurityPolicyEvaluationService(
             NamedParameterJdbcTemplate jdbc,
@@ -41,19 +47,17 @@ public class AiSecurityPolicyEvaluationService {
         this.azureKillSwitches = azureKillSwitches;
     }
 
+    @org.springframework.beans.factory.annotation.Value("${app.ai-security.grid.legacy-findings-enabled:false}")
+    public void setLegacyFindingsEnabled(boolean legacyFindingsEnabled) {
+        this.legacyFindingsEnabled = legacyFindingsEnabled;
+    }
+
     void evaluateRunCurrentTenant(Tenant tenant, UUID runId) {
         Map<String, Boolean> enabled = effectivePolicyStates();
-        List<ArtifactFact> artifacts = jdbc.query("""
-                select id, artifact_type, native_kind, account_id, region, attributes_json::text
-                  from ai_security_artifacts
-                 where active = true
-                """, (rs, rowNum) -> new ArtifactFact(
-                rs.getObject("id", UUID.class),
-                rs.getString("artifact_type"),
-                rs.getString("native_kind"),
-                rs.getString("account_id"),
-                rs.getString("region"),
-                readMap(rs.getString("attributes_json"))));
+        List<ArtifactFact> artifacts = loadActiveArtifacts();
+        Map<String, ScopeConfig> scopes = loadScopes();
+        Map<String, Map<String, String>> exceptionsByPolicy = loadExceptions();
+        Map<String, Map<String, Object>> parametersByPolicy = loadParameters();
 
         for (PolicyDefinition policy : registry.all()) {
             if (!enabled.getOrDefault(policy.id(), false)
@@ -61,21 +65,190 @@ public class AiSecurityPolicyEvaluationService {
                 suppressPolicyFindings(policy.id());
                 continue;
             }
-            for (ArtifactFact artifact : artifacts) {
-                if (!policy.artifactTypes().contains(artifact.artifactType())) {
-                    continue;
-                }
-                if (!isApplicable(policy.id(), artifact.attributes())) {
-                    continue;
-                }
-                Evaluation evaluation = hasCompleteEvidence(
-                        runId, artifact.accountId(), artifact.region(), policy, artifact.nativeKind())
-                        ? evaluate(policy.id(), artifact.attributes())
-                        : new Evaluation(EvaluationOutcome.NO_DECISION, List.of("required snapshot scope incomplete"), Map.of());
-                persistEvaluation(tenant, runId, policy, artifact, evaluation);
+            evaluatePolicyAcrossArtifacts(
+                    tenant, runId, policy, artifacts,
+                    scopes.getOrDefault(policy.id(), ScopeConfig.all()),
+                    exceptionsByPolicy.getOrDefault(policy.id(), Map.of()),
+                    parametersByPolicy.getOrDefault(policy.id(), Map.of()));
+        }
+    }
+
+    /**
+     * Re-runs one policy against the tenant's current inventory immediately after its
+     * scope, exceptions, or parameters changed — so a tenant edit takes effect without
+     * waiting for the next scheduled discovery run.
+     */
+    public void reevaluatePolicy(Tenant tenant, String policyId) {
+        PolicyDefinition policy = registry.find(policyId).orElse(null);
+        if (policy == null) {
+            return;
+        }
+        Map<String, Boolean> enabled = effectivePolicyStates();
+        if (!enabled.getOrDefault(policyId, false)) {
+            return;
+        }
+        UUID latestRun = jdbc.query("""
+                select run_id from ai_security_snapshot_scopes
+                 order by started_at desc limit 1
+                """, rs -> rs.next() ? rs.getObject("run_id", UUID.class) : null);
+        if (latestRun == null) {
+            return;
+        }
+        evaluatePolicyAcrossArtifacts(
+                tenant, latestRun, policy, loadActiveArtifacts(),
+                loadScope(policyId), loadExceptions(policyId), loadParameters(policyId));
+    }
+
+    private void evaluatePolicyAcrossArtifacts(
+            Tenant tenant,
+            UUID runId,
+            PolicyDefinition policy,
+            List<ArtifactFact> artifacts,
+            ScopeConfig scope,
+            Map<String, String> exceptions,
+            Map<String, Object> parameters
+    ) {
+        for (ArtifactFact artifact : artifacts) {
+            if (!policy.artifactTypes().contains(artifact.artifactType())) {
+                continue;
+            }
+            if (!isApplicable(policy.id(), artifact.attributes())) {
+                continue;
+            }
+            String override = exceptions.get(artifact.id().toString());
+            boolean inScope = AiSecurityPolicyScopeMatcher.isInScope(scope, toScopeFacts(artifact), override);
+            if (!inScope) {
+                suppressSingleFinding(policy.id(), artifact.id());
+                continue;
+            }
+            Evaluation evaluation = hasCompleteEvidence(
+                    runId, artifact.accountId(), artifact.region(), policy, artifact.nativeKind())
+                    ? evaluate(policy.id(), artifact.attributes(), parameters)
+                    : new Evaluation(EvaluationOutcome.NO_DECISION, List.of("required snapshot scope incomplete"), Map.of());
+            persistEvaluation(tenant, runId, policy, artifact, evaluation);
+            if (legacyFindingsEnabled) {
                 reconcileFinding(tenant, policy, artifact, evaluation);
             }
         }
+    }
+
+    private List<ArtifactFact> loadActiveArtifacts() {
+        return jdbc.query("""
+                select id, provider, artifact_type, native_kind, name, account_id, region, attributes_json::text
+                  from ai_security_artifacts
+                 where active = true
+                """, (rs, rowNum) -> new ArtifactFact(
+                rs.getObject("id", UUID.class),
+                rs.getString("provider"),
+                rs.getString("artifact_type"),
+                rs.getString("native_kind"),
+                rs.getString("name"),
+                rs.getString("account_id"),
+                rs.getString("region"),
+                readMap(rs.getString("attributes_json"))));
+    }
+
+    private ArtifactScopeFacts toScopeFacts(ArtifactFact artifact) {
+        return new ArtifactScopeFacts(
+                artifact.provider(), artifact.region(), artifact.accountId(),
+                artifact.artifactType(), artifact.nativeKind(), artifact.name());
+    }
+
+    private Map<String, ScopeConfig> loadScopes() {
+        return jdbc.query("""
+                select policy_id, mode, condition_logic, conditions_json::text
+                  from ai_security_policy_scopes
+                """, rs -> {
+            Map<String, ScopeConfig> values = new LinkedHashMap<>();
+            while (rs.next()) {
+                values.put(rs.getString("policy_id"), toScopeConfig(
+                        rs.getString("mode"), rs.getString("condition_logic"), rs.getString("conditions_json")));
+            }
+            return values;
+        });
+    }
+
+    private ScopeConfig loadScope(String policyId) {
+        List<ScopeConfig> rows = jdbc.query("""
+                select mode, condition_logic, conditions_json::text
+                  from ai_security_policy_scopes
+                 where policy_id = :policyId
+                """, Map.of("policyId", policyId), (rs, rowNum) -> toScopeConfig(
+                rs.getString("mode"), rs.getString("condition_logic"), rs.getString("conditions_json")));
+        return rows.isEmpty() ? ScopeConfig.all() : rows.get(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ScopeConfig toScopeConfig(String mode, String conditionLogic, String conditionsJson) {
+        List<Map<String, Object>> raw;
+        try {
+            raw = objectMapper.readValue(conditionsJson, new TypeReference<>() {});
+        } catch (Exception ex) {
+            raw = List.of();
+        }
+        List<ScopeCondition> conditions = raw.stream()
+                .map(row -> new ScopeCondition(
+                        String.valueOf(row.get("field")), String.valueOf(row.get("operator")), String.valueOf(row.get("value"))))
+                .toList();
+        return new ScopeConfig(mode, conditionLogic, conditions);
+    }
+
+    private Map<String, Map<String, String>> loadExceptions() {
+        return jdbc.query("""
+                select policy_id, artifact_id, override
+                  from ai_security_policy_artifact_overrides
+                """, rs -> {
+            Map<String, Map<String, String>> values = new LinkedHashMap<>();
+            while (rs.next()) {
+                values.computeIfAbsent(rs.getString("policy_id"), key -> new LinkedHashMap<>())
+                        .put(rs.getString("artifact_id"), rs.getString("override"));
+            }
+            return values;
+        });
+    }
+
+    private Map<String, String> loadExceptions(String policyId) {
+        return jdbc.query("""
+                select artifact_id, override
+                  from ai_security_policy_artifact_overrides
+                 where policy_id = :policyId
+                """, Map.of("policyId", policyId), rs -> {
+            Map<String, String> values = new LinkedHashMap<>();
+            while (rs.next()) {
+                values.put(rs.getString("artifact_id"), rs.getString("override"));
+            }
+            return values;
+        });
+    }
+
+    private Map<String, Map<String, Object>> loadParameters() {
+        return jdbc.query("""
+                select policy_id, parameters_json::text
+                  from ai_security_policy_parameters
+                """, rs -> {
+            Map<String, Map<String, Object>> values = new LinkedHashMap<>();
+            while (rs.next()) {
+                values.put(rs.getString("policy_id"), readMap(rs.getString("parameters_json")));
+            }
+            return values;
+        });
+    }
+
+    private Map<String, Object> loadParameters(String policyId) {
+        List<Map<String, Object>> rows = jdbc.query("""
+                select parameters_json::text
+                  from ai_security_policy_parameters
+                 where policy_id = :policyId
+                """, Map.of("policyId", policyId), (rs, rowNum) -> readMap(rs.getString("parameters_json")));
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    private void suppressSingleFinding(String policyId, UUID artifactId) {
+        jdbc.update("""
+                update ai_security_findings
+                   set status = 'SUPPRESSED_BY_POLICY', last_observed_at = now()
+                 where policy_id = :policyId and artifact_id = :artifactId and status = 'OPEN'
+                """, Map.of("policyId", policyId, "artifactId", artifactId));
     }
 
     private Map<String, Boolean> effectivePolicyStates() {
@@ -152,6 +325,10 @@ public class AiSecurityPolicyEvaluationService {
     }
 
     Evaluation evaluate(String policyId, Map<String, Object> attributes) {
+        return evaluate(policyId, attributes, Map.of());
+    }
+
+    Evaluation evaluate(String policyId, Map<String, Object> attributes, Map<String, Object> parameters) {
         return switch (policyId) {
             case "AWS_BEDROCK_PUBLIC_KB_S3" ->
                     booleanFact(attributes, "s3Public")
@@ -168,11 +345,19 @@ public class AiSecurityPolicyEvaluationService {
                     booleanFact(attributes, "iamWildcardActions")
                             .map(value -> result(value, "Execution role grants wildcard actions", attributes))
                             .orElseGet(() -> missing("iamWildcardActions"));
-            case "AWS_BEDROCK_WEAK_GUARDRAIL" -> evaluateGuardrail(attributes);
+            case "AWS_BEDROCK_WEAK_GUARDRAIL" -> evaluateGuardrail(attributes, parameters);
             case "AWS_BEDROCK_INVOCATION_LOGGING_DISABLED" ->
                     booleanFact(attributes, "invocationLoggingEnabled")
                             .map(value -> result(!value, "Bedrock invocation logging is disabled", attributes))
                             .orElseGet(() -> missing("invocationLoggingEnabled"));
+            case "AZURE_RAI_POLICY_NON_BLOCKING_FILTER" ->
+                    booleanFact(attributes, "raiFilterEvidenceComplete")
+                            .filter(Boolean::booleanValue)
+                            .flatMap(ignored -> booleanFact(attributes, "raiNonBlockingFilterObserved"))
+                            .map(value -> result(value,
+                                    "Azure RAI policy contains an explicitly disabled or non-blocking filter",
+                                    attributes))
+                            .orElseGet(() -> missing("complete RAI content-filter configuration"));
             case "AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS" ->
                     booleanFact(attributes, "publicNetworkUnrestricted")
                             .map(value -> result(value, "Azure AI public network access is unrestricted", attributes))
@@ -227,7 +412,7 @@ public class AiSecurityPolicyEvaluationService {
         return marker == null || attributes.containsKey(marker);
     }
 
-    private Evaluation evaluateGuardrail(Map<String, Object> attributes) {
+    private Evaluation evaluateGuardrail(Map<String, Object> attributes, Map<String, Object> parameters) {
         var attached = booleanFact(attributes, "guardrailAttached");
         if (attached.isEmpty()) {
             return missing("guardrailAttached");
@@ -243,8 +428,14 @@ public class AiSecurityPolicyEvaluationService {
         if (strength < 0) {
             return missing("recognized guardrailMinimumStrength");
         }
-        return result(strength < GUARDRAIL_STRENGTHS.indexOf("MEDIUM"),
-                "Attached guardrail is below MEDIUM strength", attributes);
+        String thresholdParam = String.valueOf(
+                parameters.getOrDefault("minimumGuardrailStrength", "MEDIUM")).toUpperCase();
+        int threshold = GUARDRAIL_STRENGTHS.indexOf(thresholdParam);
+        if (threshold < 0) {
+            threshold = GUARDRAIL_STRENGTHS.indexOf("MEDIUM");
+        }
+        return result(strength < threshold,
+                "Attached guardrail is below " + thresholdParam + " strength", attributes);
     }
 
     private java.util.Optional<Boolean> booleanFact(Map<String, Object> attributes, String key) {
@@ -332,7 +523,7 @@ public class AiSecurityPolicyEvaluationService {
                      where tenant_id = :tenantId
                        and policy_id = :policyId
                        and artifact_id = :artifactId
-                       and status = 'OPEN'
+                       and status in ('OPEN', 'SUPPRESSED_BY_POLICY')
                     """, params);
         }
     }
@@ -363,8 +554,10 @@ public class AiSecurityPolicyEvaluationService {
 
     private record ArtifactFact(
             UUID id,
+            String provider,
             String artifactType,
             String nativeKind,
+            String name,
             String accountId,
             String region,
             Map<String, Object> attributes

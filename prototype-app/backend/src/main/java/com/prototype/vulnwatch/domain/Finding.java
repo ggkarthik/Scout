@@ -14,7 +14,6 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -23,9 +22,6 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(
         name = "findings",
-        uniqueConstraints = {
-                @UniqueConstraint(name = "uk_findings_component_vulnerability", columnNames = {"component_id", "vulnerability_id"})
-        },
         indexes = {
                 @Index(name = "idx_findings_tenant_status_updated", columnList = "tenant_id,status,updated_at"),
                 @Index(name = "idx_findings_tenant_component_vuln", columnList = "tenant_id,component_id,vulnerability_id"),
@@ -51,17 +47,41 @@ public class Finding {
     @JoinColumn(name = "tenant_id")
     private Tenant tenant;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
     @JoinColumn(name = "asset_id")
     private Asset asset;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
     @JoinColumn(name = "component_id")
     private InventoryComponent component;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
     @JoinColumn(name = "vulnerability_id")
     private Vulnerability vulnerability;
+
+    @Column(name = "finding_kind", nullable = false, length = 32)
+    private String findingKind = "VULNERABILITY";
+
+    @Column(name = "fingerprint", length = 64)
+    private String fingerprint;
+
+    @Column(name = "workflow_class", length = 32)
+    private String workflowClass;
+
+    @Column(name = "title", length = 512)
+    private String title;
+
+    @Column(name = "policy_id", length = 128)
+    private String policyId;
+
+    @Column(name = "policy_version", length = 32)
+    private String policyVersion;
+
+    @Column(name = "reason_code", length = 128)
+    private String reasonCode;
+
+    @Column(name = "assessment_id")
+    private UUID assessmentId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -216,6 +236,23 @@ public class Finding {
     public void setVulnerability(Vulnerability vulnerability) {
         this.vulnerability = vulnerability;
     }
+
+    public String getFindingKind() { return findingKind; }
+    public void setFindingKind(String findingKind) { this.findingKind = findingKind; }
+    public String getFingerprint() { return fingerprint; }
+    public void setFingerprint(String fingerprint) { this.fingerprint = fingerprint; }
+    public String getWorkflowClass() { return workflowClass; }
+    public void setWorkflowClass(String workflowClass) { this.workflowClass = workflowClass; }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    public String getPolicyId() { return policyId; }
+    public void setPolicyId(String policyId) { this.policyId = policyId; }
+    public String getPolicyVersion() { return policyVersion; }
+    public void setPolicyVersion(String policyVersion) { this.policyVersion = policyVersion; }
+    public String getReasonCode() { return reasonCode; }
+    public void setReasonCode(String reasonCode) { this.reasonCode = reasonCode; }
+    public UUID getAssessmentId() { return assessmentId; }
+    public void setAssessmentId(UUID assessmentId) { this.assessmentId = assessmentId; }
 
     public FindingStatus getStatus() {
         return status;
