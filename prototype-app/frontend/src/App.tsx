@@ -49,6 +49,12 @@ const FindingsPage = React.lazy(async () => ({
 const AiFindingsPage = React.lazy(async () => ({
   default: (await import('./pages/AiFindingsPage')).AiFindingsPage
 }));
+const AiFindingDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/AiFindingDetailPage')).AiFindingDetailPage
+}));
+const AiExposuresPage = React.lazy(async () => ({
+  default: (await import('./pages/AiExposuresPage')).AiExposuresPage
+}));
 const AiPoliciesPage = React.lazy(async () => ({
   default: (await import('./pages/AiPoliciesPage')).AiPoliciesPage
 }));
@@ -57,6 +63,9 @@ const AiPolicyDetailPage = React.lazy(async () => ({
 }));
 const AiInventoryPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryPage')).AiInventoryPage
+}));
+const AiAssetDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
 }));
 const FindingDetailPage = React.lazy(async () => ({
   default: (await import('./pages/FindingDetailPage')).FindingDetailPage
@@ -331,6 +340,15 @@ function FindingDetailRoute() {
   return <FindingDetailPage />;
 }
 
+function AiFindingDetailRoute() {
+  const params = useParams<{ findingId?: string }>();
+  const findingId = params.findingId ? decodeURIComponent(params.findingId) : null;
+  if (!findingId) {
+    return <Navigate to="/findings/ai" replace />;
+  }
+  return <AiSecurityRoute><AiFindingDetailPage findingId={findingId} /></AiSecurityRoute>;
+}
+
 function AiPolicyDetailRoute() {
   const params = useParams<{ policyId?: string }>();
   const policyId = params.policyId ? decodeURIComponent(params.policyId) : null;
@@ -421,6 +439,17 @@ function InventoryHostAssetRoute() {
   }
 
   return <HostAssetDetailPage assetId={assetId} />;
+}
+
+function InventoryAiAssetRoute() {
+  const params = useParams<{ assetId?: string }>();
+  const assetId = params.assetId ? decodeURIComponent(params.assetId) : null;
+
+  if (!assetId) {
+    return <Navigate to={pathForInventoryView('ai')} replace />;
+  }
+
+  return <AiSecurityRoute><AiAssetDetailPage artifactId={assetId} /></AiSecurityRoute>;
 }
 
 function SoftwareIdentityDetailRoute() {
@@ -1087,6 +1116,9 @@ function AppShell() {
               <Route path="/exposure" element={<ExposureDashboardRoute />} />
               <Route path="/" element={<HomeRoute />} />
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
+              <Route path="/findings/ai/exposures" element={<AiSecurityRoute><AiExposuresPage /></AiSecurityRoute>} />
+              <Route path="/findings/ai/exposures/:exposureId" element={<AiSecurityRoute><AiExposuresPage /></AiSecurityRoute>} />
+              <Route path="/findings/ai/:findingId" element={<AiFindingDetailRoute />} />
               <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />
@@ -1106,6 +1138,7 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />
               <Route path="/end-of-life" element={<EndOfLifeRoute />} />

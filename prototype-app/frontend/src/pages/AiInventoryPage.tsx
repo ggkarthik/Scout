@@ -1,10 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { useActor } from '../features/auth/context';
-import { hasRole } from '../features/auth/roles';
-import type { AiSecurityArtifact } from '../features/ai-security/types';
+import { pathForInventoryAiAsset } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 import { timeAgo } from '../lib/time';
 
@@ -25,38 +23,12 @@ function emptyStateTitle(activePill: InventoryPill): string {
 }
 
 export function AiInventoryPage() {
-  const actor = useActor();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const location = useLocation();
   const [activePill, setActivePill] = React.useState<InventoryPill>('ALL');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
-  const [selected, setSelected] = React.useState<AiSecurityArtifact | null>(null);
-  const [ownerDraft, setOwnerDraft] = React.useState('');
-  const canConfirmOwner = hasRole(actor, 'PLATFORM_OWNER') || hasRole(actor, 'TENANT_ADMIN')
-    || hasRole(actor, 'SECURITY_ANALYST');
-  React.useEffect(() => setOwnerDraft(selected?.ownerName ?? ''), [selected?.id, selected?.ownerName]);
-  const ownerMutation = useMutation({
-    mutationFn: () => api.confirmAiGridArtifactOwner(
-      selected?.id ?? '',
-      ownerDraft,
-      'Confirmed from AI inventory',
-    ),
-    onSuccess: (owner) => {
-      setSelected((current) => current?.id === owner.artifactId ? {
-        ...current,
-        ownerName: owner.ownerName,
-        ownerState: owner.ownerState,
-        ownerSource: owner.ownerSource,
-        ownerConfidence: owner.confidence,
-        ownerConfidenceMethod: owner.confidenceMethod,
-        ownerConfidenceMethodVersion: owner.confidenceMethodVersion,
-      } : current);
-      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
-      void queryClient.invalidateQueries({ queryKey: ['ai-grid-coverage'] });
-    },
-  });
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
     queryFn: () => api.listAiSecurityRuns(),
@@ -90,11 +62,6 @@ export function AiInventoryPage() {
     queryFn: api.getAiGridCoverage,
     refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
-  const graphQuery = useQuery({
-    queryKey: ['ai-security-graph', selected?.id],
-    queryFn: () => api.getAiSecurityGraph(selected?.id),
-    enabled: selected != null,
-  });
 
   const items = artifactsQuery.data?.items ?? [];
   const totalArtifacts = Object.values(summaryQuery.data?.artifactCounts ?? {})
@@ -113,7 +80,7 @@ export function AiInventoryPage() {
           <Metric label="AI systems" value={systemsQuery.data?.length ?? 0} tone="success" />
           <Metric label="Coverage gaps" value={coverageQuery.data?.noDecision ?? summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
         </div>
-        <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
+        <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')} aria-label="Cloud provider">
           <option value="">All providers</option>
           <option value="AWS">AWS</option>
           <option value="AZURE">Azure</option>
@@ -125,10 +92,7 @@ export function AiInventoryPage() {
             value={subscription}
             placeholder="Filter subscription ID"
             aria-label="Azure subscription"
-            onChange={(event) => {
-              setSubscription(event.target.value);
-              setSelected(null);
-            }}
+            onChange={(event) => setSubscription(event.target.value)}
           />
         </label>
       </section>
@@ -161,10 +125,7 @@ export function AiInventoryPage() {
             role="tab"
             aria-selected={activePill === pill.key}
             className={`ai-security-pill${activePill === pill.key ? ' active' : ''}`}
-            onClick={() => {
-              setActivePill(pill.key);
-              setSelected(null);
-            }}
+            onClick={() => setActivePill(pill.key)}
           >
             {pill.label}
             <span>
@@ -191,88 +152,27 @@ export function AiInventoryPage() {
           </button>
         </section>
       ) : (
-        <section className="ai-security-split">
-          <div className="panel ai-security-table-panel">
-            <table className="data-table">
-              <thead>
-                <tr><th>Name</th><th>Native type</th><th>Owner</th><th>Account / Region</th><th>Last observed</th><th>State</th></tr>
-              </thead>
-              <tbody>
-                {items.map((artifact) => (
-                  <tr
-                    key={artifact.id}
-                    className={selected?.id === artifact.id ? 'selected' : ''}
-                    onClick={() => setSelected(artifact)}
-                  >
-                    <td><strong>{artifact.name}</strong><small>{artifact.providerResourceId}</small></td>
-                    <td>{artifact.nativeKind.replace(/_/g, ' ')}</td>
-                    <td>{artifact.ownerName ?? 'Unowned'}<small>{artifact.ownerState ?? 'UNOWNED'}</small></td>
-                    <td>{artifact.accountId}<small>{artifact.region}</small></td>
-                    <td>{timeAgo(artifact.lastObservedAt) ?? 'Unknown'}</td>
-                    <td><span className={`status-pill ${artifact.active ? 'success' : 'muted'}`}>{artifact.active ? 'Active' : 'Inactive'}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {selected && (
-            <aside className="panel ai-security-detail">
-              <span className="ai-security-kicker">{selected.nativeKind.replace(/_/g, ' ')}</span>
-              <h3>{selected.name}</h3>
-              <dl>
-                <dt>Provider ID</dt><dd>{selected.providerResourceId}</dd>
-                <dt>Account</dt><dd>{selected.accountId}</dd>
-                <dt>Region</dt><dd>{selected.region}</dd>
-                <dt>Owner state</dt><dd>{selected.ownerState ?? 'UNOWNED'}</dd>
-                <dt>Owner source</dt><dd>{selected.ownerSource ?? 'No owner signal'}</dd>
-              </dl>
-              {canConfirmOwner && (
-                <div className="ai-security-owner-confirmation">
-                  <label>
-                    <span>Accountable owner</span>
-                    <input
-                      value={ownerDraft}
-                      onChange={(event) => setOwnerDraft(event.target.value)}
-                      placeholder="Team or owner"
-                      aria-label="Accountable owner"
-                    />
-                  </label>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    disabled={!ownerDraft.trim() || ownerMutation.isPending}
-                    onClick={() => ownerMutation.mutate()}
-                  >
-                    {ownerMutation.isPending ? 'Confirming…' : 'Confirm owner'}
-                  </button>
-                  {ownerMutation.isError && <div className="notice error">Owner could not be confirmed.</div>}
-                </div>
-              )}
-              <h4>Observed facts</h4>
-              <div className="ai-security-facts">
-                {Object.entries(selected.attributes).map(([key, value]) => (
-                  <div key={key}><span>{key.replace(/([A-Z_])/g, ' $1')}</span><strong>{formatValue(value)}</strong></div>
-                ))}
-              </div>
-              <h4>Relationships</h4>
-              {graphQuery.isLoading ? (
-                <p className="panel-caption">Loading connected resources…</p>
-              ) : (graphQuery.data?.edges.length ?? 0) === 0 ? (
-                <p className="panel-caption">No active relationships observed.</p>
-              ) : (
-                <div className="ai-security-graph" aria-label="AI artifact relationship graph">
-                  {graphQuery.data?.edges.slice(0, 12).map((edge) => (
-                    <div className="ai-security-graph-edge" key={edge.id}>
-                      <span>{edge.sourceName}</span>
-                      <strong>{edge.relationshipType.replace(/_/g, ' ')}</strong>
-                      <span>{edge.targetName}</span>
-                    </div>
-                  ))}
-                  {graphQuery.data?.truncated && <small>Graph capped for safe rendering.</small>}
-                </div>
-              )}
-            </aside>
-          )}
+        <section className="panel ai-security-table-panel">
+          <table className="data-table">
+            <thead>
+              <tr><th>Name</th><th>Native type</th><th>Owner</th><th>Account / Region</th><th>Last observed</th><th>State</th></tr>
+            </thead>
+            <tbody>
+              {items.map((artifact) => (
+                <tr
+                  key={artifact.id}
+                  onClick={() => navigate(pathForInventoryAiAsset(artifact.id, `${location.pathname}${location.search}`))}
+                >
+                  <td><strong>{artifact.name}</strong><small>{artifact.providerResourceId}</small></td>
+                  <td>{artifact.nativeKind.replace(/_/g, ' ')}</td>
+                  <td>{artifact.ownerName ?? 'Unowned'}<small>{artifact.ownerState ?? 'UNOWNED'}</small></td>
+                  <td>{artifact.accountId}<small>{artifact.region}</small></td>
+                  <td>{timeAgo(artifact.lastObservedAt) ?? 'Unknown'}</td>
+                  <td><span className={`status-pill ${artifact.active ? 'success' : 'muted'}`}>{artifact.active ? 'Active' : 'Inactive'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
     </div>
@@ -281,12 +181,6 @@ export function AiInventoryPage() {
 
 function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
   return <div className={`ai-security-metric ${tone}`}><strong>{value.toLocaleString()}</strong><span>{label}</span></div>;
-}
-
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (typeof value === 'object' && value != null) return JSON.stringify(value);
-  return String(value ?? 'Not observed');
 }
 
 function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {

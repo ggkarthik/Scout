@@ -222,6 +222,16 @@ export function pathForPolicyDetail(policyId: string): string {
   return `/policies/${encodeURIComponent(policyId)}`;
 }
 
+export function pathForAiFindingDetail(findingId: string, returnTo?: string): string {
+  const encodedFindingId = encodeURIComponent(findingId);
+  if (!returnTo || returnTo.trim().length === 0) {
+    return `/findings/ai/${encodedFindingId}`;
+  }
+  const searchParams = new URLSearchParams();
+  searchParams.set('returnTo', returnTo.trim());
+  return `/findings/ai/${encodedFindingId}?${searchParams.toString()}`;
+}
+
 export function appendSearchToPath(
   path: string,
   values?: Record<string, RouteSearchValue>

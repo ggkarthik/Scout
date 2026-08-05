@@ -81,7 +81,22 @@ describe('AiAssetDetailPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the asset identity and its applicable policies by default', async () => {
+  it('renders the asset identity and opens on the Overview tab by default', async () => {
+    vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
+    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [buildFinding()], page: 0, size: 200, total: 1 });
+    vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
+
+    renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+
+    expect(await screen.findByText('claims-triage-agent45800')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Overview' })).toHaveClass('fd3-tab--active');
+    expect(screen.getByText('Resource details')).toBeInTheDocument();
+    expect(screen.getByText('Observed facts')).toBeInTheDocument();
+    expect(screen.queryByText('Public bot endpoint exposed')).not.toBeInTheDocument();
+  });
+
+  it('shows applicable policies scoped to this artifact type in the Policies tab', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
     vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([
       buildPolicy(),
@@ -91,9 +106,10 @@ describe('AiAssetDetailPage', () => {
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 
     renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+    await screen.findByText('claims-triage-agent45800');
 
-    expect(await screen.findByText('claims-triage-agent45800')).toBeInTheDocument();
-    expect(screen.getByText('Public bot endpoint exposed')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Policies/ }));
+    expect(await screen.findByText('Public bot endpoint exposed')).toBeInTheDocument();
     expect(screen.queryByText('Model-only policy')).not.toBeInTheDocument();
   });
 
@@ -140,6 +156,24 @@ describe('AiAssetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Relationships/ }));
     expect(await screen.findByText('claims-model')).toBeInTheDocument();
     expect(screen.getByText('INVOKES MODEL')).toBeInTheDocument();
+  });
+
+  it('shows ownership details for the artifact', async () => {
+    vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact({
+      ownerName: 'Data Platform',
+      ownerState: 'CONFIRMED',
+      ownerSource: 'Manual confirmation',
+    }));
+    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
+    vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
+
+    renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+    await screen.findByText('claims-triage-agent45800');
+
+    expect(screen.getByText('Data Platform')).toBeInTheDocument();
+    expect(screen.getByText('CONFIRMED')).toBeInTheDocument();
+    expect(screen.getByText('Manual confirmation')).toBeInTheDocument();
   });
 
   it('shows a not-found state for an unknown artifact', async () => {

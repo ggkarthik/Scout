@@ -1,19 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import type { AiSecurityFinding } from '../features/ai-security/types';
+import { pathForAiFindingDetail } from '../app/routes';
 import { timeAgo } from '../lib/time';
 
 export function AiFindingsPage() {
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const policyId = searchParams.get('policyId') ?? undefined;
   const [status, setStatus] = React.useState('OPEN');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
-  const [selected, setSelected] = React.useState<AiSecurityFinding | null>(null);
   const findingsQuery = useQuery({
     queryKey: ['ai-security-findings', policyId, status, provider, deferredSubscription],
     queryFn: () => api.listAiSecurityFindings(
@@ -24,16 +24,6 @@ export function AiFindingsPage() {
       provider || undefined,
       deferredSubscription || undefined,
     ),
-  });
-  const reviewMutation = useMutation({
-    mutationFn: (disposition: 'CONFIRMED' | 'FALSE_POSITIVE' | 'NEEDS_INVESTIGATION') => {
-      if (!selected) throw new Error('Select a finding first');
-      return api.reviewAiSecurityFinding(selected.id, disposition);
-    },
-    onSuccess: (finding) => {
-      setSelected(finding);
-      void queryClient.invalidateQueries({ queryKey: ['ai-security-findings'] });
-    },
   });
 
   const items = findingsQuery.data?.items ?? [];
@@ -46,7 +36,7 @@ export function AiFindingsPage() {
           <p>Deterministic policy failures from complete AWS and Azure evidence scopes.</p>
           <Link className="btn btn-secondary" to="/findings/ai/exposures">View AI exposure paths</Link>
         </div>
-        <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setSelected(null); }} aria-label="Cloud provider">
+        <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')} aria-label="Cloud provider">
           <option value="">All providers</option>
           <option value="AWS">AWS</option>
           <option value="AZURE">Azure</option>
@@ -64,10 +54,7 @@ export function AiFindingsPage() {
             value={subscription}
             placeholder="Filter subscription ID"
             aria-label="Azure subscription"
-            onChange={(event) => {
-              setSubscription(event.target.value);
-              setSelected(null);
-            }}
+            onChange={(event) => setSubscription(event.target.value)}
           />
         </label>
       </section>
@@ -83,39 +70,24 @@ export function AiFindingsPage() {
           <p>Findings appear only when a policy has complete evidence and returns a deterministic failure.</p>
         </section>
       ) : (
-        <section className="ai-security-split">
-          <div className="panel ai-security-table-panel">
-            <table className="data-table">
-              <thead><tr><th>Finding</th><th>Policy</th><th>Artifact</th><th>State</th><th>Observed</th></tr></thead>
-              <tbody>
-                {items.map((finding) => (
-                  <tr key={finding.id} onClick={() => setSelected(finding)} className={selected?.id === finding.id ? 'selected' : ''}>
-                    <td><span className={`severity-badge ${finding.severity.toLowerCase()}`}>{finding.severity}</span><strong>{finding.displayId}</strong></td>
-                    <td>{finding.title}<small>v{finding.policyVersion}</small></td>
-                    <td>{finding.artifactName}</td>
-                    <td><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></td>
-                    <td>{timeAgo(finding.lastObservedAt) ?? 'Unknown'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {selected && (
-            <aside className="panel ai-security-detail">
-              <span className={`severity-badge ${selected.severity.toLowerCase()}`}>{selected.severity}</span>
-              <h3>{selected.title}</h3>
-              <p>{selected.artifactName}</p>
-              <h4>Evidence</h4>
-              <pre>{JSON.stringify(selected.evidence, null, 2)}</pre>
-              <h4>Analyst review</h4>
-              <p>Current: <strong>{selected.reviewDisposition.replace(/_/g, ' ')}</strong></p>
-              <div className="ai-security-review-actions">
-                <button className="btn btn-secondary" onClick={() => reviewMutation.mutate('CONFIRMED')}>Confirm</button>
-                <button className="btn btn-secondary" onClick={() => reviewMutation.mutate('NEEDS_INVESTIGATION')}>Investigate</button>
-                <button className="btn btn-secondary" onClick={() => reviewMutation.mutate('FALSE_POSITIVE')}>False positive</button>
-              </div>
-            </aside>
-          )}
+        <section className="panel ai-security-table-panel">
+          <table className="data-table">
+            <thead><tr><th>Finding</th><th>Policy</th><th>Artifact</th><th>State</th><th>Observed</th></tr></thead>
+            <tbody>
+              {items.map((finding) => (
+                <tr
+                  key={finding.id}
+                  onClick={() => navigate(pathForAiFindingDetail(finding.id, `${location.pathname}${location.search}`))}
+                >
+                  <td><span className={`severity-badge ${finding.severity.toLowerCase()}`}>{finding.severity}</span><strong>{finding.displayId}</strong></td>
+                  <td>{finding.title}<small>v{finding.policyVersion}</small></td>
+                  <td>{finding.artifactName}</td>
+                  <td><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></td>
+                  <td>{timeAgo(finding.lastObservedAt) ?? 'Unknown'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
     </div>

@@ -27,6 +27,7 @@ import type {
   GridExposure,
   ImpactedCvePage
 } from '../features/dashboard/types';
+import type { CreateServiceNowIncidentRequest, ServiceNowIncidentResponse } from '../features/cve-workbench/types';
 import type {
   ClusterImpactResult,
   ConnectorIssueGroup,
@@ -1402,6 +1403,18 @@ export const api = {
     if (subscription) params.set('subscription', subscription);
     return request<AiSecurityPage<AiSecurityFinding>>(`/ai-security/findings?${params.toString()}`);
   },
+  getAiSecurityFinding: (findingId: string) =>
+    request<AiSecurityFinding>(`/ai-security/findings/${encodeURIComponent(findingId)}`),
+  updateFindingWorkflow: (findingId: string, payload: Record<string, unknown>) =>
+    request(`/findings/${encodeURIComponent(findingId)}/workflow`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  createFindingIncident: (findingId: string, payload: CreateServiceNowIncidentRequest) =>
+    request<ServiceNowIncidentResponse>(`/findings/${encodeURIComponent(findingId)}/servicenow-incident`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   reviewAiSecurityFinding: (
     findingId: string,
     disposition: 'CONFIRMED' | 'FALSE_POSITIVE' | 'NEEDS_INVESTIGATION',

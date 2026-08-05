@@ -68,6 +68,48 @@ describe('AiInventoryPage', () => {
     ));
   });
 
+  it('navigates to the AI asset detail page when a row is clicked', async () => {
+    vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({
+      items: [{
+        id: 'artifact-1',
+        provider: 'AWS',
+        providerResourceId: 'arn:aws:bedrock:us-east-1:123456789012:guardrail/example',
+        artifactType: 'AI_GUARDRAIL',
+        nativeKind: 'AWS_BEDROCK_GUARDRAIL',
+        name: 'Production Guardrail',
+        accountId: '123456789012',
+        region: 'us-east-1',
+        active: true,
+        attributes: {},
+        ownerName: null,
+        ownerState: 'UNOWNED',
+        ownerSource: null,
+        ownerConfidence: null,
+        ownerConfidenceMethod: null,
+        ownerConfidenceMethodVersion: null,
+        businessCriticality: null,
+        environment: null,
+        firstObservedAt: '2026-07-29T09:00:00Z',
+        lastObservedAt: '2026-07-29T09:05:00Z',
+      }],
+      page: 0,
+      size: 100,
+      total: 1,
+    });
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
+      artifactCounts: { AI_GUARDRAIL: 1 },
+      openFindings: 0,
+      incompleteScopes: 0,
+      lastCompleteSnapshotAt: '2026-07-29T09:05:00Z',
+    });
+
+    renderWithProviders(<AiInventoryPage />, { route: '/inventory/ai' });
+
+    fireEvent.click(await screen.findByText('Production Guardrail'));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/artifact-1?returnTo=%2Finventory%2Fai'));
+  });
+
   it('routes empty inventory CTA to the connectors landing page', async () => {
     vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({
       items: [],

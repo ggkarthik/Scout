@@ -6,13 +6,14 @@ import { pathForInventoryView, pathForPolicyDetail } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
+import { InventoryOverviewPanel, type OverviewField } from '../features/inventory/InventoryOverviewPanel';
 import { timeAgo } from '../lib/time';
 
 type AiAssetDetailPageProps = {
   artifactId: string;
 };
 
-type AssetDetailTab = 'policies' | 'findings' | 'relationships';
+type AssetDetailTab = 'overview' | 'policies' | 'findings' | 'relationships';
 
 const ARTIFACT_TYPE_ICON: Record<string, string> = {
   AI_AGENT: '🤖',
@@ -33,24 +34,6 @@ function formatFactValue(value: unknown): string {
   return String(value);
 }
 
-function KVRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="fd3-kv-row">
-      <span className="fd3-kv-key">{label}</span>
-      <span className="fd3-kv-val">{children ?? <span className="fd3-empty">—</span>}</span>
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="fd3-panel">
-      <div className="fd3-panel-title">{title}</div>
-      <div className="fd3-panel-body">{children}</div>
-    </div>
-  );
-}
-
 export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,11 +46,26 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       ? String((location.state as { returnTo?: string }).returnTo ?? '').trim()
       : ''
   );
-  const [tab, setTab] = React.useState<AssetDetailTab>('policies');
+  const canConfirmOwner = hasRole(actor, 'PLATFORM_OWNER') || hasRole(actor, 'TENANT_ADMIN')
+    || hasRole(actor, 'SECURITY_ANALYST');
+  const [tab, setTab] = React.useState<AssetDetailTab>('overview');
+  const [ownerDraft, setOwnerDraft] = React.useState('');
 
   const artifactQuery = useQuery({
     queryKey: ['ai-security-artifact', artifactId],
     queryFn: () => api.getAiSecurityArtifact(artifactId),
+  });
+  React.useEffect(
+    () => setOwnerDraft(artifactQuery.data?.ownerName ?? ''),
+    [artifactQuery.data?.id, artifactQuery.data?.ownerName],
+  );
+  const ownerMutation = useMutation({
+    mutationFn: () => api.confirmAiGridArtifactOwner(artifactId, ownerDraft, 'Confirmed from AI asset detail'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifact', artifactId] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-artifacts'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-grid-coverage'] });
+    },
   });
   const policiesQuery = useQuery({
     queryKey: ['ai-security-policies'],
@@ -103,6 +101,53 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     if (!artifact) return [];
     return (policiesQuery.data ?? []).filter((policy) => policy.artifactTypes.includes(artifact.artifactType));
   }, [policiesQuery.data, artifact]);
+
+  const overviewPrimaryFields = React.useMemo<OverviewField[]>(() => {
+    if (!artifact) return [];
+    return [
+      { label: 'Provider', value: artifact.provider },
+      { label: 'Native type', value: formatLabel(artifact.nativeKind) },
+      { label: 'Account', value: artifact.accountId },
+      { label: 'Region', value: artifact.region },
+      { label: 'Provider ID', value: <span className="mono">{artifact.providerResourceId}</span> },
+      { label: 'First observed', value: formatTimestamp(artifact.firstObservedAt) },
+      { label: 'Last observed', value: formatTimestamp(artifact.lastObservedAt) },
+      { label: 'Owner', value: artifact.ownerName ?? 'Unowned' },
+      { label: 'Owner state', value: artifact.ownerState ?? 'UNOWNED' },
+      { label: 'Owner source', value: artifact.ownerSource ?? 'No owner signal' },
+    ];
+  }, [artifact]);
+
+  const overviewSecondaryFields = React.useMemo<OverviewField[]>(() => {
+    if (!artifact) return [];
+    return Object.entries(artifact.attributes).map(([key, value]) => ({
+      label: key.replace(/([A-Z_])/g, ' $1'),
+      value: formatFactValue(value),
+    }));
+  }, [artifact]);
+
+  const overviewOwnerFooter = canConfirmOwner ? (
+    <div className="ai-security-owner-confirmation">
+      <label>
+        <span>Accountable owner</span>
+        <input
+          value={ownerDraft}
+          onChange={(event) => setOwnerDraft(event.target.value)}
+          placeholder="Team or owner"
+          aria-label="Accountable owner"
+        />
+      </label>
+      <button
+        className="btn btn-secondary"
+        type="button"
+        disabled={!ownerDraft.trim() || ownerMutation.isPending}
+        onClick={() => ownerMutation.mutate()}
+      >
+        {ownerMutation.isPending ? 'Confirming…' : 'Confirm owner'}
+      </button>
+      {ownerMutation.isError && <div className="notice error">Owner could not be confirmed.</div>}
+    </div>
+  ) : null;
 
   const handleClose = React.useCallback(() => {
     if (returnTo) {
@@ -156,6 +201,13 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       <div className="fd3-tab-bar" role="tablist" aria-label="AI asset detail sections">
         <button
           type="button"
+          className={`fd3-tab${tab === 'overview' ? ' fd3-tab--active' : ''}`}
+          onClick={() => setTab('overview')}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
           className={`fd3-tab${tab === 'policies' ? ' fd3-tab--active' : ''}`}
           onClick={() => setTab('policies')}
         >
@@ -178,54 +230,34 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       </div>
 
       <div className="fd3-body">
-        <div className="fd3-col fd3-col-left">
-          {openFindings.length > 0 && (
-            <div className="fd3-panel">
-              <div className="fd3-panel-title">Needs Attention</div>
-              <div className="cvd2-wf-cards">
-                <button type="button" className="cvd2-wf-card" onClick={() => setTab('findings')}>
-                  <div className="cvd2-wf-card-num">1</div>
-                  <div className="cvd2-wf-card-body">
-                    <div className="cvd2-wf-card-title-row">
-                      <span className="cvd2-wf-card-title">Review open findings</span>
-                    </div>
-                    <p className="cvd2-wf-card-sub">
-                      {openFindings.length} open finding{openFindings.length === 1 ? '' : 's'} on this asset need
-                      {openFindings.length === 1 ? 's' : ''} review.
-                    </p>
-                  </div>
-                </button>
-              </div>
-            </div>
-          )}
-
-          <Panel title="Resource">
-            <div className="fd3-kv-table">
-              <KVRow label="Provider">{artifact.provider}</KVRow>
-              <KVRow label="Provider ID"><span className="mono">{artifact.providerResourceId}</span></KVRow>
-              <KVRow label="Account">{artifact.accountId}</KVRow>
-              <KVRow label="Region">{artifact.region}</KVRow>
-              <KVRow label="Native type">{formatLabel(artifact.nativeKind)}</KVRow>
-              <KVRow label="First observed">{formatTimestamp(artifact.firstObservedAt)}</KVRow>
-              <KVRow label="Last observed">{formatTimestamp(artifact.lastObservedAt)}</KVRow>
-            </div>
-          </Panel>
-
-          {Object.keys(artifact.attributes).length > 0 && (
-            <Panel title="Observed Facts">
-              <div className="ai-security-facts">
-                {Object.entries(artifact.attributes).map(([key, value]) => (
-                  <div key={key}>
-                    <span>{key.replace(/([A-Z_])/g, ' $1')}</span>
-                    <strong>{formatFactValue(value)}</strong>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          )}
-        </div>
-
         <div className="fd3-col fd3-col-right">
+          {tab === 'overview' && (
+            <InventoryOverviewPanel
+              alerts={openFindings.length > 0 && (
+                <div className="fd3-panel">
+                  <div className="fd3-panel-title">Needs Attention</div>
+                  <div className="cvd2-wf-cards">
+                    <button type="button" className="cvd2-wf-card" onClick={() => setTab('findings')}>
+                      <div className="cvd2-wf-card-num">1</div>
+                      <div className="cvd2-wf-card-body">
+                        <div className="cvd2-wf-card-title-row">
+                          <span className="cvd2-wf-card-title">Review open findings</span>
+                        </div>
+                        <p className="cvd2-wf-card-sub">
+                          {openFindings.length} open finding{openFindings.length === 1 ? '' : 's'} on this asset need
+                          {openFindings.length === 1 ? 's' : ''} review.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+              primaryFields={overviewPrimaryFields}
+              primaryFooter={overviewOwnerFooter}
+              secondaryFields={overviewSecondaryFields}
+            />
+          )}
+
           {tab === 'policies' && (
             applicablePolicies.length === 0 ? (
               <div className="empty-state"><p>No policies currently cover this artifact type.</p></div>
