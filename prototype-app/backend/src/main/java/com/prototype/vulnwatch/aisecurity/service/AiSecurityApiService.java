@@ -40,7 +40,9 @@ public class AiSecurityApiService {
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactionTemplate;
     private final AiSecurityPolicyRegistry policyRegistry;
-    private final AiSecurityPolicyEvaluationService evaluationService;
+    private final AiGridReevaluationService reevaluationService;
+    private final AiGridApiService aiGridApi;
+    private final AiGridFindingService canonicalFindings;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
 
@@ -50,7 +52,9 @@ public class AiSecurityApiService {
             TenantSchemaExecutionService tenantExecution,
             TransactionTemplate transactionTemplate,
             AiSecurityPolicyRegistry policyRegistry,
-            AiSecurityPolicyEvaluationService evaluationService,
+            AiGridReevaluationService reevaluationService,
+            AiGridApiService aiGridApi,
+            AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService
     ) {
@@ -59,7 +63,9 @@ public class AiSecurityApiService {
         this.tenantExecution = tenantExecution;
         this.transactionTemplate = transactionTemplate;
         this.policyRegistry = policyRegistry;
-        this.evaluationService = evaluationService;
+        this.reevaluationService = reevaluationService;
+        this.aiGridApi = aiGridApi;
+        this.canonicalFindings = canonicalFindings;
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
     }
@@ -78,7 +84,11 @@ public class AiSecurityApiService {
                 }
                 return result;
             });
-            long openFindings = count("select count(*) from ai_security_findings where status = 'OPEN'", Map.of());
+            long openFindings = count("""
+                    select count(*) from findings
+                     where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                       and status = 'OPEN'
+                    """, Map.of());
             long incomplete = count("""
                     select count(*) from ai_security_snapshot_scopes
                      where status in ('PARTIAL','FAILED','UNSUPPORTED')
@@ -313,35 +323,21 @@ public class AiSecurityApiService {
     public PolicyResponse updatePolicy(Tenant tenant, String policyId, boolean enabled, String actor) {
         PolicyDefinition definition = policyRegistry.find(policyId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
-        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
-            if (!policy(definition).available()) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found");
-            }
-            jdbc.update("""
-                    insert into ai_security_policy_settings (policy_id, tenant_id, enabled, updated_by)
-                    values (:policyId, :tenantId, :enabled, :actor)
-                    on conflict (policy_id) do update
-                        set enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = now()
-                    """, Map.of("policyId", policyId, "tenantId", tenant.getId(), "enabled", enabled, "actor", actor));
-            if (!enabled) {
-                jdbc.update("""
-                        update ai_security_findings
-                           set status = 'SUPPRESSED_BY_POLICY', last_observed_at = now()
-                         where policy_id = :policyId and status = 'OPEN'
-                        """, Map.of("policyId", policyId));
-            } else {
-                UUID latestRun = jdbc.query("""
-                        select run_id from ai_security_snapshot_scopes
-                         order by started_at desc limit 1
-                        """, rs -> rs.next() ? rs.getObject("run_id", UUID.class) : null);
-                if (latestRun != null) {
-                    evaluationService.evaluateRunCurrentTenant(tenant, latestRun);
-                }
-            }
-            auditEventService.record("ai_security.policy.updated", "ai_security_policy",
-                    policyId, "{\"enabled\":" + enabled + "}");
-            return policy(definition);
-        }));
+        if (!policy(definition).available()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found");
+        }
+        aiGridApi.updateSelection(
+                tenant,
+                policyId,
+                enabled ? "ENABLED" : "DISABLED",
+                actor,
+                "Updated through the AI Security policy compatibility API");
+        if (!enabled) {
+            canonicalFindings.closeForPolicy(tenant, policyId);
+        }
+        auditEventService.record("ai_security.policy.updated", "ai_security_policy",
+                policyId, "{\"enabled\":" + enabled + "}");
+        return policy(definition);
     }
 
     private static final Set<String> VALID_SCOPE_MODES = Set.of(
@@ -396,7 +392,7 @@ public class AiSecurityApiService {
                     .addValue("actor", actor));
             auditEventService.record("ai_security.policy.scope_updated", "ai_security_policy", policyId,
                     "{\"mode\":\"" + mode + "\"}");
-            evaluationService.reevaluatePolicy(tenant, policyId);
+            reevaluationService.reevaluatePolicy(tenant, policyId);
             return buildConfiguration(definition);
         }));
     }
@@ -429,7 +425,7 @@ public class AiSecurityApiService {
                     .addValue("actor", actor));
             auditEventService.record("ai_security.policy.exception_added", "ai_security_policy", policyId,
                     "{\"artifactId\":\"" + artifactId + "\",\"override\":\"" + override + "\"}");
-            evaluationService.reevaluatePolicy(tenant, policyId);
+            reevaluationService.reevaluatePolicy(tenant, policyId);
             return buildConfiguration(definition);
         }));
     }
@@ -444,7 +440,7 @@ public class AiSecurityApiService {
                     """, Map.of("policyId", policyId, "artifactId", artifactId));
             auditEventService.record("ai_security.policy.exception_removed", "ai_security_policy", policyId,
                     "{\"artifactId\":\"" + artifactId + "\"}");
-            evaluationService.reevaluatePolicy(tenant, policyId);
+            reevaluationService.reevaluatePolicy(tenant, policyId);
             return buildConfiguration(definition);
         }));
     }
@@ -481,7 +477,7 @@ public class AiSecurityApiService {
                     .addValue("actor", actor));
             auditEventService.record("ai_security.policy.parameters_updated", "ai_security_policy", policyId,
                     json(validated));
-            evaluationService.reevaluatePolicy(tenant, policyId);
+            reevaluationService.reevaluatePolicy(tenant, policyId);
             return buildConfiguration(definition);
         }));
     }
@@ -491,7 +487,10 @@ public class AiSecurityApiService {
         return tenantExecution.run(tenant, () -> {
             PolicyConfigurationResponse configuration = buildConfiguration(definition);
             long openOnMatched = count("""
-                    select count(*) from ai_security_findings where policy_id = :policyId and status = 'OPEN'
+                    select count(*) from findings
+                     where policy_id = :policyId
+                       and finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                       and status = 'OPEN'
                     """, Map.of("policyId", policyId));
             StringBuilder text = new StringBuilder();
             if (configuration.totalArtifactCount() == 0) {
@@ -690,34 +689,42 @@ public class AiSecurityApiService {
 
     private PolicyResponse policy(PolicyDefinition definition) {
         Map<String, Object> row = jdbc.queryForMap("""
-                select d.available, d.default_enabled, s.enabled as tenant_enabled,
+                select d.available,
+                       coalesce(s.selection, published.default_selection,
+                                case when d.default_enabled then 'ENABLED' else 'DISABLED' end) as selection,
                        coalesce(open_counts.open_count, 0) as open_count,
                        coalesce(lifetime_counts.lifetime_count, 0) as lifetime_count,
                        quality.last_evaluated_at, quality.pass_count, quality.fail_count,
                        quality.no_decision_count
                   from platform.ai_security_policy_distribution d
-                  left join ai_security_policy_settings s on s.policy_id = d.policy_id
+                  left join ai_grid_policy_selections s on s.policy_id = d.policy_id
                   left join (
-                      select policy_id, count(*) as open_count from ai_security_findings
-                       where status = 'OPEN' group by policy_id
+                      select distinct on (policy_id) policy_id, default_selection
+                        from platform.ai_grid_policy_versions
+                       where lifecycle = 'PUBLISHED'
+                       order by policy_id, published_at desc, version desc
+                  ) published on published.policy_id = d.policy_id
+                  left join (
+                      select policy_id, count(*) as open_count from findings
+                       where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                         and status = 'OPEN' group by policy_id
                   ) open_counts on open_counts.policy_id = d.policy_id
                   left join (
-                      select policy_id, count(*) as lifetime_count from ai_security_findings group by policy_id
+                      select policy_id, count(*) as lifetime_count from findings
+                       where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE') group by policy_id
                   ) lifetime_counts on lifetime_counts.policy_id = d.policy_id
                   left join (
                       select policy_id, max(evaluated_at) as last_evaluated_at,
-                             count(*) filter (where outcome = 'PASS') as pass_count,
-                             count(*) filter (where outcome = 'FAIL') as fail_count,
-                             count(*) filter (where outcome = 'NO_DECISION') as no_decision_count
-                        from ai_security_policy_evaluations group by policy_id
+                             count(*) filter (where decision = 'PASS') as pass_count,
+                             count(*) filter (where decision = 'FAIL') as fail_count,
+                             count(*) filter (where decision not in ('PASS', 'FAIL')) as no_decision_count
+                        from ai_grid_assessments group by policy_id
                   ) quality on quality.policy_id = d.policy_id
                  where d.policy_id = :policyId
                 """, Map.of("policyId", definition.id()));
         boolean available = Boolean.TRUE.equals(row.get("available"));
-        Boolean tenantEnabled = (Boolean) row.get("tenant_enabled");
-        boolean enabled = available && (tenantEnabled != null
-                ? tenantEnabled
-                : Boolean.TRUE.equals(row.get("default_enabled")));
+        String selection = (String) row.get("selection");
+        boolean enabled = available && ("REQUIRED".equals(selection) || "ENABLED".equals(selection));
         long pass = number(row.get("pass_count"));
         long fail = number(row.get("fail_count"));
         long noDecision = number(row.get("no_decision_count"));

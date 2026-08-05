@@ -20,7 +20,7 @@ public class AiSecurityPlatformPolicyService {
     private final AiSecurityPolicyRegistry registry;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantExecution;
-    private final AiSecurityPolicyEvaluationService evaluationService;
+    private final AiGridFindingService canonicalFindings;
     private final AuditEventService auditEventService;
 
     public AiSecurityPlatformPolicyService(
@@ -28,14 +28,14 @@ public class AiSecurityPlatformPolicyService {
             AiSecurityPolicyRegistry registry,
             TenantService tenantService,
             TenantSchemaExecutionService tenantExecution,
-            AiSecurityPolicyEvaluationService evaluationService,
+            AiGridFindingService canonicalFindings,
             AuditEventService auditEventService
     ) {
         this.jdbc = jdbc;
         this.registry = registry;
         this.tenantService = tenantService;
         this.tenantExecution = tenantExecution;
-        this.evaluationService = evaluationService;
+        this.canonicalFindings = canonicalFindings;
         this.auditEventService = auditEventService;
     }
 
@@ -63,19 +63,7 @@ public class AiSecurityPlatformPolicyService {
             for (Tenant tenant : tenantService.listActiveTenants()) {
                 tenantExecution.run(tenant, () -> {
                     if (!available) {
-                        jdbc.update("""
-                                update ai_security_findings
-                                   set status = 'SUPPRESSED_BY_POLICY', last_observed_at = now()
-                                 where policy_id = :policyId and status = 'OPEN'
-                                """, Map.of("policyId", policyId));
-                    } else {
-                        java.util.UUID latestRun = jdbc.query("""
-                                select run_id from ai_security_snapshot_scopes
-                                 order by started_at desc limit 1
-                                """, rs -> rs.next() ? rs.getObject("run_id", java.util.UUID.class) : null);
-                        if (latestRun != null) {
-                            evaluationService.evaluateRunCurrentTenant(tenant, latestRun);
-                        }
+                        canonicalFindings.closeForPolicy(tenant, policyId);
                     }
                     return null;
                 });

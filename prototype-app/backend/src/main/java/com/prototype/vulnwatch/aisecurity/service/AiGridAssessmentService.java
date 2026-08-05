@@ -4,6 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.policy.AiGridPredicateEngine;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ArtifactScopeFacts;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeCondition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeConfig;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityResourceFamilyCatalogue;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +52,9 @@ public class AiGridAssessmentService {
 
     public void evaluateRun(Tenant tenant, UUID runId) {
         List<Policy> policies = loadPublishedPolicies();
+        Map<String, ScopeConfig> scopes = loadScopes();
+        Map<String, Map<String, String>> overrides = loadOverrides();
+        Map<String, Map<String, Object>> parameters = loadParameters();
         List<Artifact> artifacts = jdbc.query("""
                 select distinct on (m.artifact_id)
                        m.artifact_id id,
@@ -55,14 +62,17 @@ public class AiGridAssessmentService {
                        b.content_json->>'nativeKind' native_kind,
                        b.content_json->>'accountId' account_id,
                        b.content_json->>'region' region,
+                       a.provider,
+                       a.name,
                        m.id manifest_id
                   from ai_grid_snapshot_manifests m
                   join ai_grid_snapshot_bodies b on b.id = m.body_id
+                  join ai_security_artifacts a on a.id = m.artifact_id
                  where m.run_id = :runId
                  order by m.artifact_id, m.observed_at desc, m.id
                 """, Map.of("runId", runId), (rs, n) -> new Artifact(rs.getObject("id", UUID.class),
                 rs.getString("artifact_type"), rs.getString("native_kind"), rs.getString("account_id"), rs.getString("region"),
-                rs.getObject("manifest_id", UUID.class)));
+                rs.getString("provider"), rs.getString("name"), rs.getObject("manifest_id", UUID.class)));
         if (artifacts.isEmpty()) return;
         Instant evaluationAsOf = evaluationAsOf(runId);
         boolean findingChanged = false;
@@ -71,22 +81,36 @@ public class AiGridAssessmentService {
             for (Artifact artifact : artifacts) {
                 if (!policy.artifactTypes().contains(artifact.artifactType())) continue;
                 if (!policy.nativeKinds().isEmpty() && !policy.nativeKinds().contains(artifact.nativeKind())) continue;
-                findingChanged |= evaluateSubject(tenant, runId, evaluationAsOf, policy, artifact);
+                findingChanged |= evaluateSubject(tenant, runId, evaluationAsOf, policy, artifact,
+                        scopes.getOrDefault(policy.id(), ScopeConfig.all()),
+                        overrides.getOrDefault(policy.id(), Map.of()),
+                        parameters.getOrDefault(policy.id(), Map.of()));
             }
         }
         if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
     }
 
     private boolean evaluateSubject(Tenant tenant, UUID runId, Instant evaluationAsOf,
-                                    Policy policy, Artifact artifact) {
+                                    Policy policy, Artifact artifact, ScopeConfig policyScope,
+                                    Map<String, String> overrides, Map<String, Object> parameters) {
         String selection = selection(policy);
+        boolean inScope = AiSecurityPolicyScopeMatcher.isInScope(policyScope,
+                new ArtifactScopeFacts(artifact.provider(), artifact.region(), artifact.accountId(),
+                        artifact.artifactType(), artifact.nativeKind(), artifact.name()),
+                overrides.get(artifact.id().toString()));
+        if (!inScope) {
+            AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
+                    policy, artifact, "DISABLED", "NOT_APPLICABLE", "READY", "NO_DECISION",
+                    "OUT_OF_SCOPE", List.of(), Map.of());
+            return findings.reconcile(tenant, result);
+        }
         List<String> requiredScopes = new ArrayList<>(policy.requiredFamilies());
         if ("NATIVE_KIND_PLUS_STATIC".equals(policy.scopeResolution())) {
             requiredScopes.add(artifact.nativeKind());
         }
         List<String> missingScopes = missingScopes(runId, artifact, requiredScopes.stream().distinct().toList());
         if (!missingScopes.isEmpty()) {
-            List<String> missing = missingScopes.stream().map(scope -> "scope:" + scope).toList();
+            List<String> missing = missingScopes.stream().map(family -> "scope:" + family).toList();
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", "INCOMPLETE_SCOPE",
                     "NO_DECISION", "INCOMPLETE_SCOPE", missing, Map.of());
@@ -135,7 +159,7 @@ public class AiGridAssessmentService {
             upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(readiness), missing);
             return findings.reconcile(tenant, result);
         }
-        boolean failure = predicates.evaluate(policy.predicate(), predicateFacts);
+        boolean failure = evaluatePredicate(policy, predicateFacts, parameters);
         String decision = failure ? "FAIL" : "PASS";
         AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                 policy, artifact, selection,
@@ -143,6 +167,26 @@ public class AiGridAssessmentService {
                 List.of(), evidence);
         resolveGap(tenant, artifact.id(), policy.id());
         return findings.reconcile(tenant, result);
+    }
+
+    private boolean evaluatePredicate(Policy policy, Map<String, JsonNode> facts, Map<String, Object> parameters) {
+        if (!"AWS_BEDROCK_WEAK_GUARDRAIL".equals(policy.id()) || parameters.isEmpty()) {
+            return predicates.evaluate(policy.predicate(), facts);
+        }
+        JsonNode configured = facts.get("bedrock.guardrail.minimum_strength_configured");
+        String minimum = String.valueOf(parameters.getOrDefault("minimumGuardrailStrength", "MEDIUM"));
+        if (configured == null || !configured.isTextual()) return predicates.evaluate(policy.predicate(), facts);
+        return strength(configured.asText()) < strength(minimum);
+    }
+
+    private int strength(String value) {
+        return switch (value == null ? "" : value.toUpperCase()) {
+            case "NONE" -> 0;
+            case "LOW" -> 1;
+            case "MEDIUM" -> 2;
+            case "HIGH" -> 3;
+            default -> -1;
+        };
     }
 
     private AiGridFindingService.AssessmentResult persist(Tenant tenant, UUID runId, Instant evaluationAsOf,
@@ -219,6 +263,60 @@ public class AiGridAssessmentService {
         List<String> values = jdbc.query("select selection from ai_grid_policy_selections where policy_id = :id",
                 Map.of("id", policy.id()), (rs, n) -> rs.getString(1));
         return values.isEmpty() ? policy.defaultSelection() : values.get(0);
+    }
+
+    private Map<String, ScopeConfig> loadScopes() {
+        return jdbc.query("""
+                select policy_id, mode, condition_logic, conditions_json::text
+                  from ai_security_policy_scopes
+                """, rs -> {
+            Map<String, ScopeConfig> result = new LinkedHashMap<>();
+            while (rs.next()) {
+                result.put(rs.getString("policy_id"), scopeConfig(
+                        rs.getString("mode"), rs.getString("condition_logic"), rs.getString("conditions_json")));
+            }
+            return result;
+        });
+    }
+
+    private ScopeConfig scopeConfig(String mode, String logic, String json) {
+        try {
+            List<Map<String, Object>> raw = objectMapper.readValue(json, new TypeReference<>() {});
+            List<ScopeCondition> conditions = raw.stream()
+                    .map(row -> new ScopeCondition(String.valueOf(row.get("field")),
+                            String.valueOf(row.get("operator")), String.valueOf(row.get("value"))))
+                    .toList();
+            return new ScopeConfig(mode, logic, conditions);
+        } catch (Exception ex) {
+            return ScopeConfig.all();
+        }
+    }
+
+    private Map<String, Map<String, String>> loadOverrides() {
+        return jdbc.query("""
+                select policy_id, artifact_id, override
+                  from ai_security_policy_artifact_overrides
+                """, rs -> {
+            Map<String, Map<String, String>> result = new LinkedHashMap<>();
+            while (rs.next()) {
+                result.computeIfAbsent(rs.getString("policy_id"), ignored -> new LinkedHashMap<>())
+                        .put(rs.getString("artifact_id"), rs.getString("override"));
+            }
+            return result;
+        });
+    }
+
+    private Map<String, Map<String, Object>> loadParameters() {
+        return jdbc.query("""
+                select policy_id, parameters_json::text
+                  from ai_security_policy_parameters
+                """, rs -> {
+            Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+            while (rs.next()) {
+                result.put(rs.getString("policy_id"), readMap(rs.getString("parameters_json")));
+            }
+            return result;
+        });
     }
     private boolean hasRelationships(UUID runId, UUID artifactId, List<String> required) {
         for (String type : required) {
@@ -319,6 +417,7 @@ public class AiGridAssessmentService {
     private List<String> strings(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog list", e); } }
     List<FactRequirement> requirements(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw new IllegalArgumentException("Invalid fact requirements", e); } }
     private JsonNode tree(String json) { try { return objectMapper.readTree(json); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog JSON", e); } }
+    private Map<String, Object> readMap(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { return Map.of(); } }
     private String json(Object value) { try { return objectMapper.writeValueAsString(value); } catch (Exception e) { throw new IllegalArgumentException("Invalid assessment JSON", e); } }
     private String decisionFingerprint(String policyVersion, String decision, Map<String, Object> evidence) {
         Map<String, Object> inputFacts = new TreeMap<>();
@@ -346,7 +445,8 @@ public class AiGridAssessmentService {
     public record FactRequirement(String factKey, String valueType, Set<String> evidenceClasses,
                                   long maxAgeSeconds, Double minConfidence) {}
     private record FactIssue(String factKey, String kind) {}
-    private record Artifact(UUID id, String artifactType, String nativeKind, String accountId, String region, UUID manifestId) {}
+    private record Artifact(UUID id, String artifactType, String nativeKind, String accountId, String region,
+                            String provider, String name, UUID manifestId) {}
     record Fact(UUID id, String valueType, JsonNode value, String state, String evidenceClass,
                 Instant observedAt, Double confidence) {}
 }

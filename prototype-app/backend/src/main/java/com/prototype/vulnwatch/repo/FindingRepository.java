@@ -29,6 +29,19 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
 
     List<Finding> findAllByOrderByUpdatedAtDesc();
     Optional<Finding> findByTenantAndFingerprint(Tenant tenant, String fingerprint);
+    @Query("""
+            select f
+            from Finding f
+            where f.tenant = :tenant
+              and f.policyId = :policyId
+              and f.findingKind in ('AI_POSTURE', 'AI_EXPOSURE')
+              and f.status in (com.prototype.vulnwatch.domain.FindingStatus.OPEN,
+                               com.prototype.vulnwatch.domain.FindingStatus.SUPPRESSED)
+            """)
+    List<Finding> findOpenAiFindingsByTenantAndPolicy(
+            @Param("tenant") Tenant tenant,
+            @Param("policyId") String policyId
+    );
     Page<Finding> findAllByOrderByUpdatedAtDesc(Pageable pageable);
     List<Finding> findByStatusOrderByUpdatedAtDesc(FindingStatus status);
     List<Finding> findByStatusAndSuppressedUntilBefore(FindingStatus status, Instant before);

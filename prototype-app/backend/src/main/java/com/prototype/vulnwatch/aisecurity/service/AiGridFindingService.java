@@ -20,6 +20,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -57,6 +58,29 @@ public class AiGridFindingService {
         if ("FAIL".equals(assessment.decision())) return openOrUpdate(tenant, assessment);
         if ("PASS".equals(assessment.decision())) return closeVerified(tenant, assessment);
         return false;
+    }
+
+    /**
+     * Closes owner-facing AI findings when a policy is no longer available or enabled.
+     * This keeps policy administration on the canonical finding workflow.
+     */
+    @Transactional
+    public int closeForPolicy(Tenant tenant, String policyId) {
+        List<Finding> candidates = findings.findOpenAiFindingsByTenantAndPolicy(tenant, policyId);
+        Instant closedAt = Instant.now();
+        for (Finding finding : candidates) {
+            workflow.autoCloseFinding(
+                    finding,
+                    FindingCloseReason.AUTO_POLICY_NOT_OWNER_FACING,
+                    "AI finding auto-closed because its policy is no longer owner-facing",
+                    Map.of("policyId", policyId),
+                    closedAt);
+        }
+        if (!candidates.isEmpty()) {
+            findings.saveAll(candidates);
+            refreshProjectionAfterCommit(tenant);
+        }
+        return candidates.size();
     }
 
     private boolean openOrUpdate(Tenant tenant, AssessmentResult assessment) {

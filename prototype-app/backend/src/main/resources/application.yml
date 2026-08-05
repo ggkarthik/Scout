@@ -66,7 +66,6 @@ app:
   ai-security:
     grid:
       enabled: ${APP_AI_GRID_ENABLED:true}
-      legacy-findings-enabled: ${APP_AI_GRID_LEGACY_FINDINGS_ENABLED:false}
     aws:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
       admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}

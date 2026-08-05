@@ -30,7 +30,6 @@ class AiSecurityObservationServiceTest {
             new ObjectMapper(),
             mock(TenantSchemaExecutionService.class),
             mock(TransactionTemplate.class),
-            mock(AiSecurityPolicyEvaluationService.class),
             runs);
 
     @Test

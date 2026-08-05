@@ -35,8 +35,7 @@ import org.springframework.test.context.TestPropertySource;
 
 @PostgresIntegrationTest
 @TestPropertySource(properties = {
-    "spring.main.allow-circular-references=true",
-    "app.ai-security.grid.legacy-findings-enabled=true"
+    "spring.main.allow-circular-references=true"
 })
 class AiSecurityPolicyConfigurationPostgresIntegrationTest {
 
@@ -74,7 +73,7 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
         assertEquals("OPEN", findingStatus(tenant, WILDCARD_POLICY, agentA));
 
         apiService.addPolicyException(tenant, WILDCARD_POLICY, agentA, "EXCLUDED", "known issue, ticketed", "tester");
-        assertEquals("SUPPRESSED_BY_POLICY", findingStatus(tenant, WILDCARD_POLICY, agentA));
+        assertEquals("AUTO_CLOSED", findingStatus(tenant, WILDCARD_POLICY, agentA));
 
         apiService.removePolicyException(tenant, WILDCARD_POLICY, agentA, "tester");
         assertEquals("OPEN", findingStatus(tenant, WILDCARD_POLICY, agentA),
@@ -97,7 +96,7 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
         assertEquals(1, configuration.matchedArtifactCount());
         assertEquals(2, configuration.totalArtifactCount());
         assertEquals("OPEN", findingStatus(tenant, WILDCARD_POLICY, artifactIdByName(tenant, "prod-triage-agent")));
-        assertEquals("SUPPRESSED_BY_POLICY",
+        assertEquals("AUTO_CLOSED",
                 findingStatus(tenant, WILDCARD_POLICY, artifactIdByName(tenant, "sandbox-triage-agent")));
     }
 
@@ -163,14 +162,18 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
 
     private String findingStatus(Tenant tenant, String policyId, UUID artifactId) {
         return tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select status from ai_security_findings where policy_id = :policyId and artifact_id = :artifactId
+                select f.status from findings f
+                 join finding_subjects s on s.finding_id = f.id
+                                      and s.subject_type = 'ARTIFACT'
+                                      and s.subject_role = 'PRIMARY'
+                where f.policy_id = :policyId and s.subject_id = :artifactId
                 """, Map.of("policyId", policyId, "artifactId", artifactId), String.class));
     }
 
     private String evaluationOutcome(Tenant tenant, UUID runId, String policyId, UUID artifactId) {
         return tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select outcome from ai_security_policy_evaluations
-                 where run_id = :runId and policy_id = :policyId and artifact_id = :artifactId
+                select decision from ai_grid_assessments
+                 where run_id = :runId and policy_id = :policyId and subject_id = :artifactId
                 """, Map.of("runId", runId, "policyId", policyId, "artifactId", artifactId), String.class));
     }
 

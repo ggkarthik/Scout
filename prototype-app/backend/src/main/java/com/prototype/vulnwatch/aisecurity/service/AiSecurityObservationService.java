@@ -41,7 +41,6 @@ public class AiSecurityObservationService {
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactionTemplate;
-    private final AiSecurityPolicyEvaluationService evaluationService;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private AiGridPipelineService aiGridPipelineService;
 
@@ -50,14 +49,12 @@ public class AiSecurityObservationService {
             ObjectMapper objectMapper,
             TenantSchemaExecutionService tenantExecution,
             TransactionTemplate transactionTemplate,
-            AiSecurityPolicyEvaluationService evaluationService,
             AiSecuritySyncRunFacade syncRunFacade
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.tenantExecution = tenantExecution;
         this.transactionTemplate = transactionTemplate;
-        this.evaluationService = evaluationService;
         this.syncRunFacade = syncRunFacade;
     }
 
@@ -152,9 +149,6 @@ public class AiSecurityObservationService {
                 if (aiGridPipelineService != null) {
                     aiGridPipelineService.processCompleteScope(tenant, envelope);
                 }
-                // Compatibility projection for the current /api/ai-security policy UI. The legacy
-                // evaluator no longer owns findings when AI Grid is enabled.
-                evaluationService.evaluateRunCurrentTenant(tenant, envelope.runId());
             }
         } else {
             updateAcceptedChunks(envelope, accepted);
