@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ArtifactObservation;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationEnvelopeV1;
+import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.RelationshipObservation;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.FindingResponse;
@@ -129,7 +130,7 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
                 .map(name -> new ArtifactObservation(
                         "arn:aws:bedrock:us-east-1:123456789012:agent/" + name,
                         "AI_AGENT",
-                        "BEDROCK_AGENT",
+                        "AWS_BEDROCK_AGENT",
                         name,
                         Map.of("iamWildcardActions", true)))
                 .toList();
@@ -141,16 +142,26 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
     }
 
     private UUID ingestGuardrailAgent(Tenant tenant, UUID connectorId, UUID runId, String guardrailStrength) {
+        String agentResourceId = "arn:aws:bedrock:us-east-1:123456789012:agent/guardrail-agent";
+        String guardrailResourceId = "arn:aws:bedrock:us-east-1:123456789012:guardrail/guardrail-1";
         ArtifactObservation agent = new ArtifactObservation(
-                "arn:aws:bedrock:us-east-1:123456789012:agent/guardrail-agent",
+                agentResourceId,
                 "AI_AGENT",
-                "BEDROCK_AGENT",
+                "AWS_BEDROCK_AGENT",
                 "guardrail-agent",
                 Map.of("guardrailAttached", true, "guardrailMinimumStrength", guardrailStrength));
+        ArtifactObservation guardrail = new ArtifactObservation(
+                guardrailResourceId,
+                "OTHER_AI_ARTIFACT",
+                "AWS_BEDROCK_GUARDRAIL",
+                "guardrail-1",
+                Map.of());
         observationService.ingest(tenant, evidenceEnvelope(
                 tenant, connectorId, runId, "us-east-1", "BEDROCK_AGENTS", "guardrail-agents-hash", List.of(agent)));
         observationService.ingest(tenant, evidenceEnvelope(
-                tenant, connectorId, runId, "us-east-1", "BEDROCK_GUARDRAILS", "guardrails-hash", List.of()));
+                tenant, connectorId, runId, "us-east-1", "BEDROCK_GUARDRAILS", "guardrails-hash",
+                List.of(agent, guardrail), List.of(new RelationshipObservation(
+                        agentResourceId, guardrailResourceId, "USES_GUARDRAIL", Map.of()))));
         return artifactIdByName(tenant, "guardrail-agent");
     }
 
@@ -192,6 +203,19 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
             String hash,
             List<ArtifactObservation> artifacts
     ) {
+        return evidenceEnvelope(tenant, connectorId, runId, region, resourceFamily, hash, artifacts, List.of());
+    }
+
+    private ObservationEnvelopeV1 evidenceEnvelope(
+            Tenant tenant,
+            UUID connectorId,
+            UUID runId,
+            String region,
+            String resourceFamily,
+            String hash,
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships
+    ) {
         String scopeKey = "AWS:123456789012:" + region + ":" + resourceFamily;
         return new ObservationEnvelopeV1(
                 AiSecurityObservationService.CONTRACT_VERSION,
@@ -210,7 +234,7 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
                 Instant.now(),
                 ScopeStatus.COMPLETE,
                 artifacts,
-                List.of(),
+                relationships,
                 List.of());
     }
 }

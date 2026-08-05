@@ -100,7 +100,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                 List.of(new ArtifactObservation(
                         "arn:aws:bedrock:us-east-1:123456789012:agent/agent-1",
                         "AI_AGENT",
-                        "BEDROCK_AGENT",
+                        "AWS_BEDROCK_AGENT",
                         "Support agent",
                         Map.of("iamWildcardActions", false))));
 
@@ -147,7 +147,7 @@ class AiSecurityObservationPostgresIntegrationTest {
         ArtifactObservation agent = new ArtifactObservation(
                 "arn:aws:bedrock:us-east-1:123456789012:agent/scope-agent",
                 "AI_AGENT",
-                "BEDROCK_AGENT",
+                "AWS_BEDROCK_AGENT",
                 "Scope agent",
                 Map.of("iamWildcardActions", true));
 
@@ -901,8 +901,8 @@ class AiSecurityObservationPostgresIntegrationTest {
 
     private String wildcardRoleOutcome(Tenant tenant, UUID runId) {
         return tenantExecution.run(tenant, () -> jdbc.queryForObject("""
-                select outcome
-                  from ai_security_policy_evaluations
+                select decision
+                  from ai_grid_assessments
                  where run_id = :runId
                    and policy_id = 'AWS_BEDROCK_WILDCARD_AGENT_ROLE'
                 """, Map.of("runId", runId), String.class));
