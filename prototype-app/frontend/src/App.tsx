@@ -18,7 +18,6 @@ import {
   pathForConnectView,
   pathForInventoryView,
   pathForPlatformView,
-  pathForPolicyDetail,
   pathForTab,
   pathForVulnRepoView,
   titleForTab
