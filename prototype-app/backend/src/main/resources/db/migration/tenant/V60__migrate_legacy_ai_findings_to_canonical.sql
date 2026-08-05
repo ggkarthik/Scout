@@ -43,7 +43,7 @@ SELECT gen_random_uuid(), f.id, f.tenant_id, 'ARTIFACT', f.artifact_id, 'PRIMARY
            select 1 from finding_subjects subject
             where subject.finding_id = f.id and subject.subject_role = 'PRIMARY'
        )
-ON CONFLICT (finding_id, subject_type, subject_id, subject_role) DO NOTHING;
+ON CONFLICT (tenant_id, finding_id, subject_type, subject_id, subject_role) DO NOTHING;
 
 INSERT INTO finding_reviews (id, finding_id, tenant_id, disposition, reason, policy_version, reviewed_by, reviewed_at)
 SELECT r.id, r.finding_id, r.tenant_id, r.disposition, r.reason,
