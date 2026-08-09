@@ -205,12 +205,15 @@ public class AiGridApiService {
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select distinct on (p.policy_id)
                        p.policy_id, p.version, p.name, p.severity, p.lifecycle, p.workflow_class,
-                       coalesce(s.selection, p.default_selection) selection
+                       coalesce(s.selection, d.default_selection, p.default_selection) selection
                   from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
-                 where p.lifecycle = 'PUBLISHED'
+                 where p.lifecycle = 'PUBLISHED' and d.available = true
+                   and (d.rollout_stage = 'GENERAL_AVAILABILITY'
+                        or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
-                """, (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
+                """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
                 rs.getString("workflow_class"), rs.getString("selection"))));
     }
@@ -233,13 +236,21 @@ public class AiGridApiService {
         if (!List.of("REQUIRED", "ENABLED", "PREVIEW", "DISABLED").contains(selection))
             throw new IllegalArgumentException("Invalid AI policy selection");
         tenantExecution.run(tenant, () -> transactions.executeWithoutResult(status -> {
-            Integer publishedPolicy = jdbc.queryForObject("""
-                    select count(*) from platform.ai_grid_policy_versions
-                     where policy_id = :id and lifecycle = 'PUBLISHED'
-                    """, Map.of("id", policyId), Integer.class);
-            if (publishedPolicy == null || publishedPolicy == 0) {
+            List<String> defaults = jdbc.query("""
+                    select d.default_selection from platform.ai_grid_policy_distribution d
+                     where d.policy_id = :id and d.available = true
+                       and (d.rollout_stage = 'GENERAL_AVAILABILITY'
+                            or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                       and exists (select 1 from platform.ai_grid_policy_versions p
+                                    where p.policy_id=d.policy_id and p.lifecycle='PUBLISHED')
+                    """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> rs.getString(1));
+            if (defaults.isEmpty()) {
                 throw new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.NOT_FOUND, "Published AI policy not found");
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Distributed AI policy not found");
+            }
+            if ("REQUIRED".equals(defaults.get(0)) && !"REQUIRED".equals(selection)) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Required AI policies cannot be disabled or downgraded");
             }
             List<String> current = jdbc.query("select selection from ai_grid_policy_selections where policy_id = :id",
                     Map.of("id", policyId), (rs, n) -> rs.getString(1));

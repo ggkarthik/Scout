@@ -14,19 +14,23 @@ public class AiGridPredicateEngine {
     static final int MAX_NODES = 100;
 
     public boolean evaluate(JsonNode predicate, Map<String, JsonNode> facts) {
+        return evaluate(predicate, facts, Map.of());
+    }
+
+    public boolean evaluate(JsonNode predicate, Map<String, JsonNode> facts, Map<String, Object> parameters) {
         Counter counter = new Counter();
-        return evaluate(predicate, facts, 1, counter);
+        return evaluate(predicate, facts, parameters, 1, counter);
     }
 
     public void validate(JsonNode predicate) {
-        evaluate(predicate, Map.of(), 1, new Counter(), true);
+        evaluate(predicate, Map.of(), Map.of(), 1, new Counter(), true);
     }
 
-    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, int depth, Counter counter) {
-        return evaluate(node, facts, depth, counter, false);
+    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, Map<String, Object> parameters, int depth, Counter counter) {
+        return evaluate(node, facts, parameters, depth, counter, false);
     }
 
-    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, int depth, Counter counter, boolean validationOnly) {
+    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, Map<String, Object> parameters, int depth, Counter counter, boolean validationOnly) {
         if (node == null || !node.isObject() || depth > MAX_DEPTH || ++counter.nodes > MAX_NODES) {
             throw new IllegalArgumentException("Invalid or unbounded AI Grid predicate");
         }
@@ -39,14 +43,14 @@ public class AiGridPredicateEngine {
             }
             boolean result = "all".equals(operator);
             for (JsonNode child : children) {
-                boolean childResult = evaluate(child, facts, depth + 1, counter, validationOnly);
+                boolean childResult = evaluate(child, facts, parameters, depth + 1, counter, validationOnly);
                 result = "all".equals(operator) ? result && childResult : result || childResult;
             }
             return result;
         }
         if (node.has("not")) {
             ensureOnly(node, "not");
-            return !evaluate(node.get("not"), facts, depth + 1, counter, validationOnly);
+            return !evaluate(node.get("not"), facts, parameters, depth + 1, counter, validationOnly);
         }
         if (!node.hasNonNull("fact") || !node.get("fact").isTextual()) {
             throw new IllegalArgumentException("Leaf predicate requires a fact key");
@@ -64,6 +68,11 @@ public class AiGridPredicateEngine {
             return false;
         }
         JsonNode expected = node.get(operator);
+        if (expected != null && expected.isObject() && expected.hasNonNull("parameter")) {
+            Object parameter = parameters.get(expected.path("parameter").asText());
+            if (parameter == null) return false;
+            expected = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(parameter);
+        }
         return switch (operator) {
             case "eq" -> value.equals(expected);
             case "neq" -> !value.equals(expected);
@@ -72,6 +81,7 @@ public class AiGridPredicateEngine {
             case "gte" -> compare(value, expected) >= 0;
             case "lt" -> compare(value, expected) < 0;
             case "lte" -> compare(value, expected) <= 0;
+            case "strength_lt" -> strength(value.asText()) < strength(expected.asText());
             default -> throw new IllegalArgumentException("Unsupported predicate operator");
         };
     }
@@ -82,7 +92,7 @@ public class AiGridPredicateEngine {
         while (fields.hasNext()) {
             String field = fields.next();
             if ("fact".equals(field)) continue;
-            if (!java.util.Set.of("exists", "eq", "neq", "in", "gt", "gte", "lt", "lte").contains(field)
+            if (!java.util.Set.of("exists", "eq", "neq", "in", "gt", "gte", "lt", "lte", "strength_lt").contains(field)
                     || found != null) {
                 throw new IllegalArgumentException("Leaf predicate requires exactly one allowed operator");
             }
@@ -106,6 +116,7 @@ public class AiGridPredicateEngine {
         for (JsonNode value : values) if (value.equals(actual)) return true;
         return false;
     }
+    private int strength(String value) { return switch (value == null ? "" : value.toUpperCase()) { case "NONE" -> 0; case "LOW" -> 1; case "MEDIUM" -> 2; case "HIGH" -> 3; default -> -1; }; }
 
     private void ensureOnly(JsonNode node, String field) {
         if (node.size() != 1 || !node.has(field)) {

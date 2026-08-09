@@ -21,7 +21,7 @@ export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
 export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
 export type ConnectRouteView = 'sources' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
-export type PlatformRouteView = 'tenants' | 'users' | 'platform-audit' | 'demo-requests' | 'operations' | 'vuln-intel' | 'eol';
+export type PlatformRouteView = 'tenants' | 'users' | 'platform-audit' | 'demo-requests' | 'operations' | 'vuln-intel' | 'eol' | 'ai-policies';
 export type ConfigurationsRouteView =
   | 'sla'
   | 'triage'
@@ -86,7 +86,7 @@ const ADMIN_VIEWS = new Set<AdminRouteView>([
   'audit'
 ]);
 
-const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'platform-audit', 'demo-requests', 'operations', 'vuln-intel', 'eol']);
+const PLATFORM_VIEWS = new Set<PlatformRouteView>(['tenants', 'users', 'platform-audit', 'demo-requests', 'operations', 'vuln-intel', 'eol', 'ai-policies']);
 
 const CONFIGURATIONS_VIEWS = new Set<ConfigurationsRouteView>([
   'sla',

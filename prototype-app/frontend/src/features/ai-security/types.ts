@@ -59,6 +59,72 @@ export type AiGridPolicy = {
   selection: AiGridPolicySelection;
 };
 
+export type AiGridPolicyDistribution = {
+  policyId: string;
+  available: boolean;
+  defaultSelection: AiGridPolicySelection;
+  rolloutStage: 'GENERAL_AVAILABILITY' | 'CANARY' | 'PAUSED' | 'RETIRED';
+  canaryTenantIdsJson: string;
+  pinnedVersion: string | null;
+  updatedBy: string;
+  updatedAt: string;
+  version: string;
+  name: string;
+  severity: string;
+  lifecycle: string;
+};
+
+export type AiGridPolicyImpactPreview = {
+  policyId: string;
+  version: string;
+  tenantId: string;
+  applicableArtifacts: number;
+  expectedPass: number;
+  expectedFail: number;
+  expectedNoDecision: number;
+  expectedNotApplicable: number;
+  missingFacts: Record<string, number>;
+  generatedAt: string;
+};
+
+export type AiGridPolicyReleaseReadiness = {
+  policyId: string;
+  version: string;
+  lifecycle: string;
+  severity: string;
+  catalogDigest: string;
+  ready: boolean;
+  blockers: string[];
+  answerKeyRunId: string | null;
+  precisionReviewId: string | null;
+  latestDecision: string | null;
+  latestDecisionReason: string | null;
+  latestDecisionAt: string | null;
+};
+
+export type AiGridPolicyTenantReconciliation = {
+  tenantId: string;
+  tenantName: string;
+  legacySelections: number;
+  governedSelections: number;
+  unmappedLegacySelections: number;
+  unmappedScopes: number;
+  unmappedExceptions: number;
+  unmappedParameters: number;
+  unmappedFindings: number;
+  generatedAt: string;
+};
+
+export type AiGridPolicyRetirementStatus = {
+  legacyFallbackEnabled: boolean;
+  eligibleForRetirement: boolean;
+  activeTenantCount: number;
+  unmappedRecordCount: number;
+};
+
+export type AiGridOwaspCoverage = { owaspId: string; publishedPolicyCount: number };
+export type AiGridPolicyCandidate = { id: string; title: string; sourceType: string; status: string; technologyId: string | null; rationale: string; riskScore: number; reachScore: number; evidenceMaturity: number; remediationClarity: number; owner: string | null; priorityScore: number };
+
 export type AiGridOwner = {
   artifactId: string;
   ownerName: string;

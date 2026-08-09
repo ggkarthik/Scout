@@ -54,6 +54,9 @@ app:
     vex-rollout-controls-enabled: ${FEATURE_VEX_ROLLOUT_CONTROLS_ENABLED:true}
     vex-rollout-backfill-enabled: ${FEATURE_VEX_ROLLOUT_BACKFILL_ENABLED:true}
     software-model-enabled: ${FEATURE_SOFTWARE_MODEL_ENABLED:false}
+    # Keep true until Policy Studio reconciliation reports no unmapped tenant records.
+    # Canonical AI Grid catalog is now authoritative. Set true only for a time-bounded rollback.
+    ai-grid-legacy-policy-fallback-enabled: ${FEATURE_AI_GRID_LEGACY_POLICY_FALLBACK_ENABLED:false}
   entitlements:
     # Resolver rollout mode: LEGACY (always enabled, historical default), SHADOW (enforce legacy,
     # compute + report the corrected result), ENFORCE (enforce corrected for allowlisted tenants).

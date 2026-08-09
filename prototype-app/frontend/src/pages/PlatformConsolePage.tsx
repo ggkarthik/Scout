@@ -10,6 +10,7 @@ import { MetricInfoIcon } from '../components/MetricInfoIcon';
 import { EolPage } from './EolPage';
 import { VulnIntelConfigPage } from './VulnIntelConfigPage';
 import { IntegrationRunQueuePage } from './IntegrationRunQueuePage';
+import { PlatformAiPolicyStudio } from './PlatformAiPolicyStudio';
 
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and workspace metadata' },
@@ -19,6 +20,7 @@ const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: stri
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'vuln-intel', label: 'Vulnerability Intelligence', helper: 'Platform-owned NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, EUVD, and JVN feed configuration' },
   { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
+  ,{ key: 'ai-policies', label: 'AI Policy Studio', helper: 'Release and distribute governed AI policies' }
 ];
 
 function PlatformVulnIntelSection() {
@@ -124,7 +126,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
-  const hideSidebar = selectedView === 'eol' || selectedView === 'operations' || selectedView === 'vuln-intel';
+  const hideSidebar = selectedView === 'eol' || selectedView === 'operations' || selectedView === 'vuln-intel' || selectedView === 'ai-policies';
   const visibleTabGroups = PLATFORM_TAB_GROUPS.map((group) => ({
     ...group,
     tabs: group.tabs
@@ -191,6 +193,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
             {selectedView === 'demo-requests' && <DemoRequestsPanel />}
             {selectedView === 'vuln-intel' && <PlatformVulnIntelSection />}
             {selectedView === 'eol' && <EolPage embedded mode="platform" />}
+            {selectedView === 'ai-policies' && <PlatformAiPolicyStudio />}
           </div>
         </div>
       </section>

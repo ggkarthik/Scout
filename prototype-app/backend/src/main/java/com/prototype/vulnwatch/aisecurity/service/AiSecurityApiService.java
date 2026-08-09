@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,7 @@ public class AiSecurityApiService {
     private final AiGridFindingService canonicalFindings;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
+    private final boolean legacyPolicyFallbackEnabled;
 
     public AiSecurityApiService(
             NamedParameterJdbcTemplate jdbc,
@@ -56,7 +58,8 @@ public class AiSecurityApiService {
             AiGridApiService aiGridApi,
             AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
-            AuditEventService auditEventService
+            AuditEventService auditEventService,
+            @Value("${app.features.ai-grid-legacy-policy-fallback-enabled:false}") boolean legacyPolicyFallbackEnabled
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
@@ -68,6 +71,7 @@ public class AiSecurityApiService {
         this.canonicalFindings = canonicalFindings;
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
+        this.legacyPolicyFallbackEnabled = legacyPolicyFallbackEnabled;
     }
 
     public SummaryResponse summary(Tenant tenant) {
@@ -307,22 +311,24 @@ public class AiSecurityApiService {
     }
 
     public List<PolicyResponse> policies(Tenant tenant) {
-        return tenantExecution.run(tenant, () -> policyRegistry.all().stream()
+        return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
                 .map(this::policy)
                 .filter(PolicyResponse::available)
                 .toList());
     }
 
     public PolicyResponse policy(Tenant tenant, String policyId) {
-        return tenantExecution.run(tenant, () -> policyRegistry.find(policyId)
+        return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
+                .filter(definition -> definition.id().equals(policyId))
                 .map(this::policy)
                 .filter(PolicyResponse::available)
+                .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found")));
     }
 
     public PolicyResponse updatePolicy(Tenant tenant, String policyId, boolean enabled, String actor) {
-        PolicyDefinition definition = policyRegistry.find(policyId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
+        PolicyDefinition definition = catalogPolicies(tenant).stream().filter(policy -> policy.id().equals(policyId))
+                .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
         if (!policy(definition).available()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found");
         }
@@ -448,7 +454,7 @@ public class AiSecurityApiService {
     public PolicyConfigurationResponse updatePolicyParameters(
             Tenant tenant, String policyId, Map<String, String> parameters, String actor) {
         PolicyDefinition definition = requirePolicy(policyId);
-        List<PolicyParameterSpec> specs = policyRegistry.parameterSpecs(policyId);
+        List<PolicyParameterSpec> specs = policyParameterSpecs(policyId);
         Map<String, String> validated = new LinkedHashMap<>();
         for (PolicyParameterSpec spec : specs) {
             String value = parameters == null ? null : parameters.get(spec.key());
@@ -527,8 +533,68 @@ public class AiSecurityApiService {
     }
 
     private PolicyDefinition requirePolicy(String policyId) {
-        return policyRegistry.find(policyId)
+        return catalogDefinition(policyId).or(() -> legacyPolicyFallbackEnabled ? policyRegistry.find(policyId) : java.util.Optional.empty())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
+    }
+
+    /** Compatibility projection: tenant pages read governed catalog metadata while legacy configuration remains usable. */
+    private List<PolicyDefinition> catalogPolicies(Tenant tenant) {
+        return jdbc.query("""
+                select distinct on (p.policy_id) p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
+                       p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
+                 where p.lifecycle='PUBLISHED'
+                   and (d.rollout_stage='GENERAL_AVAILABILITY'
+                        or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                 order by p.policy_id,p.published_at desc nulls last,p.version desc
+                """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
+    }
+
+    private java.util.Optional<PolicyDefinition> catalogDefinition(String policyId) {
+        List<PolicyDefinition> definitions = jdbc.query("""
+                select p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
+                       p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
+                 where p.policy_id=:id and p.lifecycle='PUBLISHED'
+                 order by p.published_at desc nulls last,p.version desc limit 1
+                """, Map.of("id", policyId), (rs, n) -> catalogDefinition(rs));
+        return definitions.stream().findFirst();
+    }
+
+    /** Catalog definitions are the source of truth; the in-process registry is rollback-only. */
+    private List<PolicyParameterSpec> policyParameterSpecs(String policyId) {
+        List<String> definitions = jdbc.query("""
+                select parameter_definitions_json::text from platform.ai_grid_policy_versions
+                 where policy_id=:id and lifecycle='PUBLISHED'
+                 order by published_at desc nulls last, version desc limit 1
+                """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
+        List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));
+        if (!catalogSpecs.isEmpty() || !legacyPolicyFallbackEnabled) return catalogSpecs;
+        return policyRegistry.parameterSpecs(policyId);
+    }
+
+    private List<PolicyParameterSpec> parameterSpecs(String json) {
+        try {
+            List<Map<String, Object>> definitions = objectMapper.readValue(json, new TypeReference<>() {});
+            return definitions.stream().map(definition -> new PolicyParameterSpec(
+                    String.valueOf(definition.get("key")),
+                    String.valueOf(definition.getOrDefault("label", definition.get("key"))),
+                    String.valueOf(definition.get("type")),
+                    ((List<?>) definition.getOrDefault("options", List.of())).stream().map(String::valueOf).toList(),
+                    String.valueOf(definition.get("defaultValue")),
+                    String.valueOf(definition.getOrDefault("helpText", "")))).toList();
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Invalid published policy parameter definitions");
+        }
+    }
+
+    private PolicyDefinition catalogDefinition(ResultSet rs) throws SQLException {
+        return new PolicyDefinition(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
+                rs.getString("severity"), readStringList(rs.getString("artifact_types_json")),
+                readStringList(rs.getString("required_resource_families_json")), rs.getString("description"),
+                rs.getString("remediation"), readStringMap(rs.getString("framework_mappings_json")));
     }
 
     private PolicyConfigurationResponse buildConfiguration(PolicyDefinition definition) {
@@ -592,7 +658,7 @@ public class AiSecurityApiService {
     }
 
     private List<PolicyParameterValueResponse> buildParameterValues(String policyId) {
-        List<PolicyParameterSpec> specs = policyRegistry.parameterSpecs(policyId);
+        List<PolicyParameterSpec> specs = policyParameterSpecs(policyId);
         if (specs.isEmpty()) {
             return List.of();
         }
@@ -690,20 +756,13 @@ public class AiSecurityApiService {
     private PolicyResponse policy(PolicyDefinition definition) {
         Map<String, Object> row = jdbc.queryForMap("""
                 select d.available,
-                       coalesce(s.selection, published.default_selection,
-                                case when d.default_enabled then 'ENABLED' else 'DISABLED' end) as selection,
+                       coalesce(s.selection, d.default_selection) as selection,
                        coalesce(open_counts.open_count, 0) as open_count,
                        coalesce(lifetime_counts.lifetime_count, 0) as lifetime_count,
                        quality.last_evaluated_at, quality.pass_count, quality.fail_count,
                        quality.no_decision_count
-                  from platform.ai_security_policy_distribution d
+                  from platform.ai_grid_policy_distribution d
                   left join ai_grid_policy_selections s on s.policy_id = d.policy_id
-                  left join (
-                      select distinct on (policy_id) policy_id, default_selection
-                        from platform.ai_grid_policy_versions
-                       where lifecycle = 'PUBLISHED'
-                       order by policy_id, published_at desc, version desc
-                  ) published on published.policy_id = d.policy_id
                   left join (
                       select policy_id, count(*) as open_count from findings
                        where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
@@ -714,7 +773,7 @@ public class AiSecurityApiService {
                        where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE') group by policy_id
                   ) lifetime_counts on lifetime_counts.policy_id = d.policy_id
                   left join (
-                      select policy_id, max(evaluated_at) as last_evaluated_at,
+                select policy_id, max(evaluated_at) as last_evaluated_at,
                              count(*) filter (where decision = 'PASS') as pass_count,
                              count(*) filter (where decision = 'FAIL') as fail_count,
                              count(*) filter (where decision not in ('PASS', 'FAIL')) as no_decision_count
@@ -861,6 +920,19 @@ public class AiSecurityApiService {
         } catch (Exception ex) {
             return Map.of();
         }
+    }
+
+    private List<String> readStringList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception ex) { return List.of(); }
+    }
+
+    private Map<String, String> readStringMap(String json) {
+        Map<String, Object> raw = readMap(json);
+        Map<String, String> result = new LinkedHashMap<>();
+        raw.forEach((key, value) -> result.put(key, value instanceof List<?> values
+                ? values.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(", ")) : String.valueOf(value)));
+        return result;
     }
 
     private String json(Object value) {

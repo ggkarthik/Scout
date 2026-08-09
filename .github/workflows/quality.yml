@@ -15,6 +15,16 @@ jobs:
       - name: Enforce tenant migration ownership
         run: python3 .github/scripts/check-tenant-ddl.py
 
+  policy-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate governed AI policy packages
+        run: node scripts/validate-policy-packages.mjs
+
   secrets:
     runs-on: ubuntu-latest
     steps:

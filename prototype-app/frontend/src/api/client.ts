@@ -516,6 +516,13 @@ import type {
   AiGridCoverage,
   AiGridCoverageDimension,
   AiGridPolicy,
+  AiGridPolicyDistribution,
+  AiGridPolicyImpactPreview,
+  AiGridPolicyReleaseReadiness,
+  AiGridPolicyTenantReconciliation,
+  AiGridPolicyRetirementStatus,
+  AiGridOwaspCoverage,
+  AiGridPolicyCandidate,
   AiGridPolicySelection,
   AiGridOwner,
   AiGridRunMetrics,
@@ -1346,6 +1353,33 @@ export const api = {
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
+  listPlatformAiGridPolicies: () => request<AiGridPolicyDistribution[]>('/platform/ai-grid/policies'),
+  updatePlatformAiGridPolicyDistribution: (
+    policyId: string,
+    payload: Pick<AiGridPolicyDistribution, 'available' | 'defaultSelection' | 'rolloutStage' | 'pinnedVersion'> & { canaryTenantIds: string[] },
+  ) => request<AiGridPolicyDistribution>(`/platform/ai-grid/policies/${encodeURIComponent(policyId)}/distribution`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  getPlatformAiGridPolicyImpactPreview: (policyId: string, version: string, tenantId: string) => request<AiGridPolicyImpactPreview>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/impact-preview?tenantId=${encodeURIComponent(tenantId)}`,
+  ),
+  getPlatformAiGridPolicyReleaseReadiness: (policyId: string, version: string) => request<AiGridPolicyReleaseReadiness>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/release-readiness`,
+  ),
+  publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
+  ),
+  getPlatformAiGridPolicyReconciliation: () => request<AiGridPolicyTenantReconciliation[]>('/platform/ai-grid/policies/reconciliation'),
+  migratePlatformAiGridLegacySelections: () => request<AiGridPolicyTenantReconciliation[]>('/platform/ai-grid/policies/reconciliation/migrate-legacy-selections', { method: 'POST' }),
+  getPlatformAiGridPolicyRetirementStatus: () => request<AiGridPolicyRetirementStatus>('/platform/ai-grid/policies/reconciliation/retirement-status'),
+  getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
+  getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
+  createPlatformAiGridPolicyCandidate: (payload: {
+    title: string; sourceType: string; status: string; technologyId?: string; rationale: string;
+    frameworkMappings: Record<string, unknown>; riskScore: number; reachScore: number;
+    evidenceMaturity: number; remediationClarity: number; owner?: string;
+  }) => request<AiGridPolicyCandidate>('/platform/ai-grid/policies/portfolio/candidates', { method: 'POST', body: JSON.stringify(payload) }),
   updateAiGridPolicySelection: (policyId: string, selection: AiGridPolicySelection, reason?: string) =>
     request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
       method: 'PUT',

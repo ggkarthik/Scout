@@ -1,0 +1,23 @@
+{
+  "policyId": "AWS_BEDROCK_WEAK_GUARDRAIL",
+  "version": "2.0.0",
+  "name": "Weak attached guardrail content filters",
+  "description": "An attached Bedrock guardrail is configured below the approved minimum strength.",
+  "severity": "HIGH",
+  "workflowClass": "POSTURE_FINDING",
+  "defaultSelection": "REQUIRED",
+  "artifactTypes": ["AI_AGENT"],
+  "nativeKinds": ["AWS_BEDROCK_AGENT"],
+  "requiredResourceFamilies": ["BEDROCK_AGENTS", "BEDROCK_GUARDRAILS"],
+  "requiredFacts": [
+    {"factKey": "bedrock.agent.guardrail_attached_configured", "valueType": "BOOLEAN", "evidenceClasses": ["CONFIGURATION"], "maxAgeSeconds": 86400},
+    {"factKey": "bedrock.guardrail.minimum_strength_configured", "valueType": "STRING", "evidenceClasses": ["CONFIGURATION"], "maxAgeSeconds": 86400}
+  ],
+  "parameterDefinitions": [{"key": "minimumGuardrailStrength", "type": "ENUM", "options": ["NONE", "LOW", "MEDIUM", "HIGH"], "defaultValue": "MEDIUM"}],
+  "predicate": {"all": [{"fact": "bedrock.agent.guardrail_attached_configured", "eq": true}, {"fact": "bedrock.guardrail.minimum_strength_configured", "strength_lt": {"parameter": "minimumGuardrailStrength"}}]},
+  "reasonCode": "BEDROCK_GUARDRAIL_BELOW_APPROVED_STRENGTH",
+  "remediation": "Configure at least MEDIUM input and output strength for required harmful-content categories.",
+  "frameworkMappings": {"OWASP_LLM_TOP_10": ["LLM01"]},
+  "packageSourceRef": "policy-packages/AWS_BEDROCK_WEAK_GUARDRAIL/2.0.0.json",
+  "releaseNotes": "Canonical package example for the governed AI Grid catalog."
+}

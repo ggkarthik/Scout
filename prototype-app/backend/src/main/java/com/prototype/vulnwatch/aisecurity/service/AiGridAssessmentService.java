@@ -51,7 +51,7 @@ public class AiGridAssessmentService {
     }
 
     public void evaluateRun(Tenant tenant, UUID runId) {
-        List<Policy> policies = loadPublishedPolicies();
+        List<Policy> policies = loadPublishedPolicies(tenant);
         Map<String, ScopeConfig> scopes = loadScopes();
         Map<String, Map<String, String>> overrides = loadOverrides();
         Map<String, Map<String, Object>> parameters = loadParameters();
@@ -81,10 +81,12 @@ public class AiGridAssessmentService {
             for (Artifact artifact : artifacts) {
                 if (!policy.artifactTypes().contains(artifact.artifactType())) continue;
                 if (!policy.nativeKinds().isEmpty() && !policy.nativeKinds().contains(artifact.nativeKind())) continue;
+                Map<String, Object> effectiveParameters = new LinkedHashMap<>(policy.parameterDefaults());
+                effectiveParameters.putAll(parameters.getOrDefault(policy.id(), Map.of()));
                 findingChanged |= evaluateSubject(tenant, runId, evaluationAsOf, policy, artifact,
                         scopes.getOrDefault(policy.id(), ScopeConfig.all()),
                         overrides.getOrDefault(policy.id(), Map.of()),
-                        parameters.getOrDefault(policy.id(), Map.of()));
+                        effectiveParameters);
             }
         }
         if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
@@ -170,23 +172,7 @@ public class AiGridAssessmentService {
     }
 
     private boolean evaluatePredicate(Policy policy, Map<String, JsonNode> facts, Map<String, Object> parameters) {
-        if (!"AWS_BEDROCK_WEAK_GUARDRAIL".equals(policy.id()) || parameters.isEmpty()) {
-            return predicates.evaluate(policy.predicate(), facts);
-        }
-        JsonNode configured = facts.get("bedrock.guardrail.minimum_strength_configured");
-        String minimum = String.valueOf(parameters.getOrDefault("minimumGuardrailStrength", "MEDIUM"));
-        if (configured == null || !configured.isTextual()) return predicates.evaluate(policy.predicate(), facts);
-        return strength(configured.asText()) < strength(minimum);
-    }
-
-    private int strength(String value) {
-        return switch (value == null ? "" : value.toUpperCase()) {
-            case "NONE" -> 0;
-            case "LOW" -> 1;
-            case "MEDIUM" -> 2;
-            case "HIGH" -> 3;
-            default -> -1;
-        };
+        return predicates.evaluate(policy.predicate(), facts, parameters);
     }
 
     private AiGridFindingService.AssessmentResult persist(Tenant tenant, UUID runId, Instant evaluationAsOf,
@@ -242,20 +228,24 @@ public class AiGridAssessmentService {
         return asOf;
     }
 
-    private List<Policy> loadPublishedPolicies() {
+    private List<Policy> loadPublishedPolicies(Tenant tenant) {
         return jdbc.query("""
                 select distinct on (policy_id)
-                       policy_id, version, name, severity, default_selection, artifact_types_json::text,
+                       p.policy_id, p.version, p.name, p.severity, coalesce(d.default_selection,p.default_selection) default_selection, p.artifact_types_json::text,
                        native_kinds_json::text, scope_resolution,
                        required_relationships_json::text, required_resource_families_json::text,
-                       required_facts_json::text, predicate_json::text, reason_code
-                  from platform.ai_grid_policy_versions where lifecycle = 'PUBLISHED'
-                 order by policy_id, published_at desc, version desc
-                """, (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
+                       required_facts_json::text, predicate_json::text, parameter_definitions_json::text, reason_code
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
+                 where p.lifecycle = 'PUBLISHED'
+                   and (d.rollout_stage = 'GENERAL_AVAILABILITY'
+                        or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                 order by p.policy_id, p.published_at desc, p.version desc
+                """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
                 rs.getString("severity"), rs.getString("default_selection"), strings(rs.getString("artifact_types_json")),
                 strings(rs.getString("native_kinds_json")), rs.getString("scope_resolution"),
                 strings(rs.getString("required_relationships_json")), strings(rs.getString("required_resource_families_json")),
-                requirements(rs.getString("required_facts_json")), tree(rs.getString("predicate_json")),
+                requirements(rs.getString("required_facts_json")), tree(rs.getString("predicate_json")), defaults(rs.getString("parameter_definitions_json")),
                 rs.getString("reason_code")));
     }
 
@@ -418,6 +408,7 @@ public class AiGridAssessmentService {
     List<FactRequirement> requirements(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw new IllegalArgumentException("Invalid fact requirements", e); } }
     private JsonNode tree(String json) { try { return objectMapper.readTree(json); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog JSON", e); } }
     private Map<String, Object> readMap(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { return Map.of(); } }
+    private Map<String, Object> defaults(String json) { try { List<Map<String,Object>> definitions=objectMapper.readValue(json,new TypeReference<>() {}); Map<String,Object> result=new LinkedHashMap<>(); definitions.forEach(definition -> { if(definition.get("key") != null && definition.get("defaultValue") != null) result.put(String.valueOf(definition.get("key")), definition.get("defaultValue")); }); return result; } catch(Exception e) { return Map.of(); } }
     private String json(Object value) { try { return objectMapper.writeValueAsString(value); } catch (Exception e) { throw new IllegalArgumentException("Invalid assessment JSON", e); } }
     private String decisionFingerprint(String policyVersion, String decision, Map<String, Object> evidence) {
         Map<String, Object> inputFacts = new TreeMap<>();
@@ -441,7 +432,7 @@ public class AiGridAssessmentService {
     private record Policy(String id, String version, String name, String severity, String defaultSelection,
                           List<String> artifactTypes, List<String> nativeKinds, String scopeResolution,
                           List<String> requiredRelationships, List<String> requiredFamilies,
-                          List<FactRequirement> requiredFacts, JsonNode predicate, String reasonCode) {}
+                          List<FactRequirement> requiredFacts, JsonNode predicate, Map<String,Object> parameterDefaults, String reasonCode) {}
     public record FactRequirement(String factKey, String valueType, Set<String> evidenceClasses,
                                   long maxAgeSeconds, Double minConfidence) {}
     private record FactIssue(String factKey, String kind) {}
