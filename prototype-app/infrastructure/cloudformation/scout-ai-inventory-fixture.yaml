@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Scout AI inventory fixture. Creates configuration-only Bedrock and SageMaker resources by default.
+  Cost-bearing hosted inference and notebook resources require explicit opt-in parameters.
+
+Parameters:
+  FixturePrefix:
+    Type: String
+    Default: scout-ai-inventory
+    AllowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-]{0,35}$'
+  CreateSageMakerDomain:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Creates a SageMaker Domain, Space, VPC, subnet, and EFS-backed storage.
+  CreateCostBearingCompute:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Creates a notebook and real-time endpoint. These incur SageMaker charges.
+  CreateInferenceProfile:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  FoundationModelArn:
+    Type: String
+    Default: ''
+    Description: Required only when CreateInferenceProfile=true; use a supported regional foundation-model ARN.
+  InferenceImageUri:
+    Type: String
+    Default: ''
+    Description: Required only when CreateCostBearingCompute=true; compatible SageMaker inference container image URI.
+  ModelDataUrl:
+    Type: String
+    Default: ''
+    Description: Optional S3 model artifact URL for the supplied inference image.
+
+Conditions:
+  CreateDomain: !Equals [!Ref CreateSageMakerDomain, 'true']
+  CreateCompute: !Equals [!Ref CreateCostBearingCompute, 'true']
+  CreateProfile: !Equals [!Ref CreateInferenceProfile, 'true']
+  HasModelData: !Not [!Equals [!Ref ModelDataUrl, '']]
+
+Resources:
+  FixtureExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${FixturePrefix}-execution-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [sagemaker.amazonaws.com, bedrock.amazonaws.com]
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: BedrockFlowFixture
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ['bedrock:InvokeModel']
+                Resource: '*'
+
+  FixtureVpc:
+    Condition: CreateDomain
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.203.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: !Sub '${FixturePrefix}-vpc'}]
+
+  FixtureSubnet:
+    Condition: CreateDomain
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref FixtureVpc
+      CidrBlock: 10.203.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{Key: Name, Value: !Sub '${FixturePrefix}-subnet'}]
+
+  FixtureSecurityGroup:
+    Condition: CreateDomain
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Scout fixture domain security group
+      VpcId: !Ref FixtureVpc
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+
+  SageMakerDomain:
+    Condition: CreateDomain
+    Type: AWS::SageMaker::Domain
+    Properties:
+      DomainName: !Sub '${FixturePrefix}-domain'
+      AuthMode: IAM
+      AppNetworkAccessType: PublicInternetOnly
+      VpcId: !Ref FixtureVpc
+      SubnetIds: [!Ref FixtureSubnet]
+      DefaultUserSettings:
+        ExecutionRole: !GetAtt FixtureExecutionRole.Arn
+        SecurityGroups: [!Ref FixtureSecurityGroup]
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  SageMakerSpace:
+    Condition: CreateDomain
+    Type: AWS::SageMaker::Space
+    Properties:
+      DomainId: !Ref SageMakerDomain
+      SpaceName: fixture-space
+      SpaceDisplayName: Scout fixture space
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  ModelPackageGroup:
+    Type: AWS::SageMaker::ModelPackageGroup
+    Properties:
+      ModelPackageGroupName: !Sub '${FixturePrefix}-models'
+      ModelPackageGroupDescription: Scout AI inventory fixture registry group
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixturePipeline:
+    Type: AWS::SageMaker::Pipeline
+    Properties:
+      PipelineName: !Sub '${FixturePrefix}-pipeline'
+      PipelineDisplayName: Scout inventory fixture pipeline
+      PipelineDescription: Metadata-only pipeline with no executable steps
+      RoleArn: !GetAtt FixtureExecutionRole.Arn
+      PipelineDefinition:
+        PipelineDefinitionBody: '{"Version":"2020-12-01","Parameters":[],"Steps":[]}'
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub '${FixturePrefix}-guardrail'
+      Description: Scout AI inventory fixture guardrail
+      BlockedInputMessaging: Input blocked by fixture guardrail
+      BlockedOutputsMessaging: Output blocked by fixture guardrail
+      Tags: {scout-fixture: ai-inventory}
+
+  FixturePrompt:
+    Type: AWS::Bedrock::Prompt
+    Properties:
+      Name: !Sub '${FixturePrefix}-prompt'
+      Description: Metadata-only Scout AI inventory fixture prompt
+      Tags: {scout-fixture: ai-inventory}
+
+  FixtureFlow:
+    Type: AWS::Bedrock::Flow
+    Properties:
+      Name: !Sub '${FixturePrefix}-flow'
+      Description: Metadata-only Scout AI inventory fixture flow
+      ExecutionRoleArn: !GetAtt FixtureExecutionRole.Arn
+      Definition:
+        Nodes: []
+        Connections: []
+      Tags: {scout-fixture: ai-inventory}
+
+  FixtureInferenceProfile:
+    Condition: CreateProfile
+    Type: AWS::Bedrock::ApplicationInferenceProfile
+    Properties:
+      InferenceProfileName: !Sub '${FixturePrefix}-profile'
+      Description: Scout AI inventory fixture profile
+      ModelSource:
+        CopyFrom: !Ref FoundationModelArn
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureModel:
+    Condition: CreateCompute
+    Type: AWS::SageMaker::Model
+    Properties:
+      ExecutionRoleArn: !GetAtt FixtureExecutionRole.Arn
+      ModelName: !Sub '${FixturePrefix}-model'
+      PrimaryContainer:
+        Image: !Ref InferenceImageUri
+        ModelDataUrl: !If [HasModelData, !Ref ModelDataUrl, !Ref 'AWS::NoValue']
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureModelPackage:
+    Condition: CreateCompute
+    Type: AWS::SageMaker::ModelPackage
+    Properties:
+      ModelPackageGroupName: !Ref ModelPackageGroup
+      ModelPackageDescription: Scout AI inventory fixture model package
+      ModelApprovalStatus: Approved
+      SkipModelValidation: All
+      InferenceSpecification:
+        Containers: [{Image: !Ref InferenceImageUri}]
+        SupportedContentTypes: [application/json]
+        SupportedResponseMIMETypes: [application/json]
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureEndpointConfig:
+    Condition: CreateCompute
+    Type: AWS::SageMaker::EndpointConfig
+    Properties:
+      EndpointConfigName: !Sub '${FixturePrefix}-endpoint-config'
+      ProductionVariants:
+        - VariantName: primary
+          ModelName: !Ref FixtureModel
+          InitialInstanceCount: 1
+          InstanceType: ml.t2.medium
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureEndpoint:
+    Condition: CreateCompute
+    Type: AWS::SageMaker::Endpoint
+    Properties:
+      EndpointName: !Sub '${FixturePrefix}-endpoint'
+      EndpointConfigName: !Ref FixtureEndpointConfig
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+  FixtureNotebook:
+    Condition: CreateCompute
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      NotebookInstanceName: !Sub '${FixturePrefix}-notebook'
+      InstanceType: ml.t2.medium
+      RoleArn: !GetAtt FixtureExecutionRole.Arn
+      Tags: [{Key: scout-fixture, Value: ai-inventory}]
+
+Outputs:
+  DeploymentReminder:
+    Value: Run Scout discovery after stack creation; delete this fixture stack after validation to stop costs.
+  SageMakerDomainId:
+    Condition: CreateDomain
+    Value: !Ref SageMakerDomain
+  GuardrailArn:
+    Value: !GetAtt FixtureGuardrail.GuardrailArn
+  PromptArn:
+    Value: !Ref FixturePrompt
+  FlowArn:
+    Value: !Ref FixtureFlow
+  ModelPackageGroupArn:
+    Value: !Ref ModelPackageGroup

@@ -79,6 +79,11 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     queryKey: ['ai-security-graph', artifactId],
     queryFn: () => api.getAiSecurityGraph(artifactId),
   });
+  const postureQuery = useQuery({
+    queryKey: ['ai-asset-posture', artifactId],
+    queryFn: () => api.getAiAssetPosture(artifactId),
+    enabled: tab === 'overview',
+  });
   const policyMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiSecurityPolicy(id, enabled),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
@@ -232,6 +237,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       <div className="fd3-body">
         <div className="fd3-col fd3-col-right">
           {tab === 'overview' && (
+            <>
             <InventoryOverviewPanel
               alerts={openFindings.length > 0 && (
                 <div className="fd3-panel">
@@ -256,6 +262,14 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
               primaryFooter={overviewOwnerFooter}
               secondaryFields={overviewSecondaryFields}
             />
+            <section className="fd3-panel">
+              <div className="fd3-panel-title">Control posture</div>
+              {postureQuery.isLoading ? <p className="panel-caption">Loading evaluated controls…</p> : postureQuery.isError ? <p className="notice error">Control posture could not be loaded.</p> : (postureQuery.data?.controls.length ?? 0) === 0 ? <p className="panel-caption">No current policy evidence covers this asset.</p> : <table className="data-table"><thead><tr><th>Control</th><th>Evidence</th><th>Decision</th></tr></thead><tbody>
+                {postureQuery.data?.controls.map((control) => <tr key={control.policyId}><td>{control.policyId}</td><td>{control.evidenceReadiness}</td><td>{control.decision}</td></tr>)}
+              </tbody></table>}
+              {(postureQuery.data?.exposures.length ?? 0) > 0 && <p className="panel-caption">{postureQuery.data?.exposures.length} validated exposure path{postureQuery.data?.exposures.length === 1 ? '' : 's'} use this asset as a root cause.</p>}
+            </section>
+            </>
           )}
 
           {tab === 'policies' && (
@@ -367,6 +381,12 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
                     <span>{edge.sourceName}</span>
                     <strong>{edge.relationshipType.replace(/_/g, ' ')}</strong>
                     <span>{edge.targetName}</span>
+                    <small className="panel-caption">
+                      {edge.attributes.confidence === 'INFERRED' ? 'Inferred reference' : 'Directly observed'}
+                      {typeof (edge.attributes.evidence as Record<string, unknown> | undefined)?.sourceApi === 'string'
+                        ? ` · ${(edge.attributes.evidence as Record<string, unknown>).sourceApi}`
+                        : ''}
+                    </small>
                   </div>
                 ))}
                 {graphQuery.data?.truncated && <p className="panel-caption">Graph capped for safe rendering.</p>}

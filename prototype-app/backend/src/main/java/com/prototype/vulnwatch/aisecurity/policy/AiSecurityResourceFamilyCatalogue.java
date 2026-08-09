@@ -9,13 +9,28 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiSecurityResourceFamilyCatalogue {
 
-    public static final String VERSION = "1.3";
+    public static final String VERSION = "1.4";
 
     private static final Map<String, ScopeSemantics> FAMILIES = Map.ofEntries(
             Map.entry("BEDROCK_AGENTS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_KNOWLEDGE_BASES", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_GUARDRAILS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_INVOCATION_LOGGING", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_DEPLOYABLE_MODELS", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_INFERENCE_PROFILES", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_MODEL_CUSTOMIZATION_JOBS", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_PROMPTS", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_FLOWS", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_DOMAINS", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_SPACES", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_MODEL_REGISTRY", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_ENDPOINTS", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_ENDPOINT_CONFIGURATIONS", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_JOBS", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_PIPELINES", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_COMPUTE", ScopeSemantics.REGIONAL),
+            Map.entry("SAGEMAKER_EXECUTION_ROLES", ScopeSemantics.ACCOUNT_GLOBAL),
+            Map.entry("SAGEMAKER_NETWORKING", ScopeSemantics.REGIONAL),
             Map.entry("LAMBDA_URLS", ScopeSemantics.REGIONAL),
             Map.entry("S3_EXPOSURE", ScopeSemantics.REGIONAL),
             Map.entry("IAM_GLOBAL", ScopeSemantics.ACCOUNT_GLOBAL),

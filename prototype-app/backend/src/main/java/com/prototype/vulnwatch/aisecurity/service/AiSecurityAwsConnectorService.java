@@ -18,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
@@ -139,7 +140,12 @@ public class AiSecurityAwsConnectorService {
     }
 
     public CredentialsHandle credentials(ConnectorSecret config) {
-        AwsCredentialsProvider base = DefaultCredentialsProvider.create();
+        // Local pilot runs use a named profile. Resolve it explicitly when present so an SDK
+        // upgrade cannot silently fall through to an unrelated environment/IMDS provider.
+        String profile = System.getenv("AWS_PROFILE");
+        AwsCredentialsProvider base = profile == null || profile.isBlank()
+                ? DefaultCredentialsProvider.create()
+                : ProfileCredentialsProvider.create(profile.trim());
         if (config.roleArn() == null || config.roleArn().isBlank()) {
             return new CredentialsHandle(base, null);
         }

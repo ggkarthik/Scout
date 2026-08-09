@@ -1,0 +1,22 @@
+{
+  "Name": "Scout Azure AI Search Definition Reader",
+  "IsCustom": true,
+  "Description": "Read-only AI Search definition inventory. Does not permit documents, queries, keys, or resource mutation.",
+  "Actions": [
+    "Microsoft.Search/searchServices/read",
+    "Microsoft.Search/searchServices/indexes/read",
+    "Microsoft.Search/searchServices/skillsets/read",
+    "Microsoft.Search/searchServices/indexers/read",
+    "Microsoft.Search/searchServices/dataSources/read",
+    "Microsoft.CognitiveServices/accounts/projects/read"
+  ],
+  "NotActions": [
+    "Microsoft.Search/searchServices/listAdminKeys/action",
+    "Microsoft.Search/searchServices/listQueryKeys/action",
+    "Microsoft.Search/searchServices/indexes/documents/read",
+    "Microsoft.Authorization/roleAssignments/write"
+  ],
+  "DataActions": [],
+  "NotDataActions": ["*"],
+  "AssignableScopes": ["/subscriptions/85de82e7-db21-4879-ace4-e5e4093ac0f0"]
+}

@@ -45,6 +45,29 @@ class AzureAiManagementClientTest {
     }
 
     @Test
+    void permitsOnlyPinnedAzureSearchDataPlaneHosts() {
+        assertDoesNotThrow(() -> client.validateSearchUri(
+                URI.create("https://pilot.search.windows.net/indexes?api-version=2024-07-01")));
+        assertDoesNotThrow(() -> client.validateSearchUri(
+                URI.create("https://pilot.search.azure.com/indexes?api-version=2024-07-01")));
+        var exception = assertThrows(
+                AzureAiManagementClient.AzureApiException.class,
+                () -> client.validateSearchUri(URI.create("https://pilot.search.windows.net.attacker.example/indexes")));
+        assertEquals("INVALID_CONFIGURATION", exception.failure().code());
+    }
+
+    @Test
+    void permitsOnlyPinnedAzureFoundryDataPlaneHosts() {
+        assertDoesNotThrow(() -> client.validateFoundryUri(
+                URI.create("https://pilot.services.ai.azure.com/api/projects/demo/agents?api-version=v1")));
+        var exception = assertThrows(
+                AzureAiManagementClient.AzureApiException.class,
+                () -> client.validateFoundryUri(
+                        URI.create("https://pilot.services.ai.azure.com.attacker.example/api/projects/demo/agents")));
+        assertEquals("INVALID_CONFIGURATION", exception.failure().code());
+    }
+
+    @Test
     void classifiesSubscriptionRoleAssignmentsAsGlobalRbac() {
         assertEquals(
                 "AZURE_RBAC_GLOBAL",
@@ -56,6 +79,11 @@ class AzureAiManagementClientTest {
         assertEquals(
                 "AZURE_RAI_POLICIES",
                 client.family("Microsoft.CognitiveServices/accounts/raiPolicies"));
+    }
+
+    @Test
+    void classifiesFoundryProjectAgentsAsFirstClassDiscoveryResources() {
+        assertEquals("AZURE_FOUNDRY_AGENTS", client.family("Microsoft.Foundry/projects/agents"));
     }
 
     @Test

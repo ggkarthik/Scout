@@ -54,6 +54,7 @@ describe('AiInventoryPage', () => {
       incompleteScopes: 0,
       lastCompleteSnapshotAt: '2026-07-29T09:05:00Z',
     });
+    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
 
     renderWithProviders(<AiInventoryPage />);
 
@@ -102,6 +103,7 @@ describe('AiInventoryPage', () => {
       incompleteScopes: 0,
       lastCompleteSnapshotAt: '2026-07-29T09:05:00Z',
     });
+    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
 
     renderWithProviders(<AiInventoryPage />, { route: '/inventory/ai' });
 
@@ -123,6 +125,7 @@ describe('AiInventoryPage', () => {
       incompleteScopes: 0,
       lastCompleteSnapshotAt: null,
     });
+    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
 
     renderWithProviders(<AiInventoryPage />, { route: '/inventory/ai' });
 
@@ -132,4 +135,38 @@ describe('AiInventoryPage', () => {
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/connect/connectors'));
   });
+
+  it('makes incomplete and unsupported inventory evidence explicit', async () => {
+    vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
+      artifactCounts: {}, openFindings: 0, incompleteScopes: 2, lastCompleteSnapshotAt: null,
+    });
+    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue({ ...emptyCoverage(), unsupported: 3 });
+
+    renderWithProviders(<AiInventoryPage />);
+
+    expect(await screen.findByText('Inventory coverage is incomplete.')).toBeInTheDocument();
+    expect(screen.getByText(/2 discovery scopes need attention; 3 policy evidence items remain unsupported/)).toBeInTheDocument();
+  });
 });
+
+function emptyCoverage() {
+  return {
+    runId: null,
+    coverageEpochId: null,
+    authoritativeScopeHeads: 0,
+    currentArtifacts: 0,
+    applicablePublished: 0,
+    required: 0,
+    tenantEnabled: 0,
+    preview: 0,
+    tenantDisabled: 0,
+    evidenceReady: 0,
+    evaluatedPass: 0,
+    evaluatedFail: 0,
+    noDecision: 0,
+    notApplicable: 0,
+    stale: 0,
+    unsupported: 0,
+  };
+}

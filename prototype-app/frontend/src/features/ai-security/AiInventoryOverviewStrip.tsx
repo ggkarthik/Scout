@@ -13,6 +13,11 @@ export function AiInventoryOverviewStrip() {
     queryFn: api.getAiSecuritySummary,
     enabled: entitled,
   });
+  const coverageQuery = useQuery({
+    queryKey: ['ai-grid-coverage'],
+    queryFn: api.getAiGridCoverage,
+    enabled: entitled,
+  });
   if (!entitled) return null;
 
   const summary = summaryQuery.data;
@@ -23,13 +28,16 @@ export function AiInventoryOverviewStrip() {
     <section className="ai-overview-strip">
       <div>
         <span className="ai-security-kicker">AI inventory</span>
-        <h3>Bedrock estate coverage</h3>
+        <h3>Cloud AI estate coverage</h3>
       </div>
       <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_AGENT ?? 0}</strong><span>Agents</span></button>
       <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_MODEL ?? 0}</strong><span>Models</span></button>
       <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{other}</strong><span>Other artifacts</span></button>
       <button type="button" onClick={() => navigate('/findings/ai')} className="risk"><strong>{summary?.openFindings ?? 0}</strong><span>Open findings</span></button>
-      <div className="coverage"><strong>{summary?.incompleteScopes ?? 0}</strong><span>Incomplete scopes</span></div>
+      <button type="button" onClick={() => navigate('/inventory/ai')}>
+        <strong>{(summary?.incompleteScopes ?? 0) + (coverageQuery.data?.unsupported ?? 0)}</strong>
+        <span>Incomplete or unsupported</span>
+      </button>
     </section>
   );
 }

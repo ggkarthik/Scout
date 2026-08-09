@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,7 +36,8 @@ public class AiSecurityObservationService {
             "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL", "USES_SEARCH_INDEX",
             "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
             "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
-            "HAS_ROLE_ASSIGNMENT");
+            "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
+            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -130,8 +132,8 @@ public class AiSecurityObservationService {
                         envelope.runId().toString()));
                 continue;
             }
-            UUID sourceId = artifactIds.get(relationship.sourceProviderResourceId());
-            UUID targetId = artifactIds.get(relationship.targetProviderResourceId());
+            UUID sourceId = resolveArtifactId(tenant, artifactIds, relationship.sourceProviderResourceId());
+            UUID targetId = resolveArtifactId(tenant, artifactIds, relationship.targetProviderResourceId());
             if (sourceId != null && targetId != null) {
                 upsertRelationship(tenant, envelope, relationship, sourceId, targetId);
             }
@@ -317,7 +319,7 @@ public class AiSecurityObservationService {
                 .addValue("sourceId", sourceId)
                 .addValue("targetId", targetId)
                 .addValue("type", relationship.relationshipType())
-                .addValue("attributes", json(relationship.attributes()))
+                .addValue("attributes", json(safeRelationshipAttributes(relationship, envelope)))
                 .addValue("observedAt", timestamp(envelope.observedAt()));
         jdbc.update("""
                 insert into ai_security_relationships (
@@ -333,6 +335,29 @@ public class AiSecurityObservationService {
                         active = true,
                         last_observed_at = excluded.last_observed_at
                 """, params);
+    }
+
+    /** Relationships may span independently collected scopes; resolve already-persisted endpoints safely. */
+    private UUID resolveArtifactId(Tenant tenant, Map<String, UUID> currentArtifacts, String providerResourceId) {
+        UUID current = currentArtifacts.get(providerResourceId);
+        if (current != null) return current;
+        List<UUID> persisted = jdbc.query("""
+                select id from ai_security_artifacts
+                 where tenant_id = :tenantId and provider_resource_id = :providerResourceId and active = true
+                 limit 1
+                """, Map.of("tenantId", tenant.getId(), "providerResourceId", providerResourceId),
+                (rs, rowNum) -> rs.getObject("id", UUID.class));
+        return persisted.isEmpty() ? null : persisted.get(0);
+    }
+
+    /** Adds non-sensitive provenance while allowing collectors to provide a precise API field reference. */
+    private Map<String, Object> safeRelationshipAttributes(
+            RelationshipObservation relationship, ObservationEnvelopeV1 envelope) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        if (relationship.attributes() != null) attributes.putAll(relationship.attributes());
+        attributes.putIfAbsent("confidence", "DIRECT");
+        attributes.putIfAbsent("evidence", Map.of("scopeKey", envelope.scopeKey()));
+        return attributes;
     }
 
     private void reconcileCompleteScope(ObservationEnvelopeV1 envelope) {

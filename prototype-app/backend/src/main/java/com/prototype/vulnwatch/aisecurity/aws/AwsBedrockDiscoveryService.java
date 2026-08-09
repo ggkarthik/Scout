@@ -41,6 +41,11 @@ import software.amazon.awssdk.services.bedrock.model.GetGuardrailRequest;
 import software.amazon.awssdk.services.bedrock.model.GetModelInvocationLoggingConfigurationRequest;
 import software.amazon.awssdk.services.bedrock.model.GuardrailContentFilter;
 import software.amazon.awssdk.services.bedrock.model.ListGuardrailsRequest;
+import software.amazon.awssdk.services.bedrock.model.ListCustomModelsRequest;
+import software.amazon.awssdk.services.bedrock.model.ListImportedModelsRequest;
+import software.amazon.awssdk.services.bedrock.model.ListInferenceProfilesRequest;
+import software.amazon.awssdk.services.bedrock.model.ListModelCustomizationJobsRequest;
+import software.amazon.awssdk.services.bedrock.model.ListProvisionedModelThroughputsRequest;
 import software.amazon.awssdk.services.bedrockagent.BedrockAgentClient;
 import software.amazon.awssdk.services.bedrockagent.model.GetAgentActionGroupRequest;
 import software.amazon.awssdk.services.bedrockagent.model.GetAgentRequest;
@@ -50,6 +55,8 @@ import software.amazon.awssdk.services.bedrockagent.model.ListAgentKnowledgeBase
 import software.amazon.awssdk.services.bedrockagent.model.ListAgentsRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListDataSourcesRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListKnowledgeBasesRequest;
+import software.amazon.awssdk.services.bedrockagent.model.ListFlowsRequest;
+import software.amazon.awssdk.services.bedrockagent.model.ListPromptsRequest;
 import software.amazon.awssdk.services.iam.IamClient;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
@@ -61,6 +68,24 @@ import software.amazon.awssdk.services.lambda.model.GetFunctionUrlConfigRequest;
 import software.amazon.awssdk.services.lambda.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetBucketPolicyStatusRequest;
+import software.amazon.awssdk.services.sagemaker.SageMakerClient;
+import software.amazon.awssdk.services.sagemaker.model.DescribeDomainRequest;
+import software.amazon.awssdk.services.sagemaker.model.DescribeEndpointConfigRequest;
+import software.amazon.awssdk.services.sagemaker.model.DescribeEndpointRequest;
+import software.amazon.awssdk.services.sagemaker.model.DescribeModelPackageGroupRequest;
+import software.amazon.awssdk.services.sagemaker.model.DescribeNotebookInstanceRequest;
+import software.amazon.awssdk.services.sagemaker.model.DescribeSpaceRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListDomainsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListEndpointConfigsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListEndpointsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListModelPackageGroupsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListModelPackagesRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListNotebookInstancesRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListPipelinesRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListProcessingJobsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListSpacesRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListTrainingJobsRequest;
+import software.amazon.awssdk.services.sagemaker.model.ListTransformJobsRequest;
 
 @Service
 public class AwsBedrockDiscoveryService {
@@ -116,7 +141,11 @@ public class AwsBedrockDiscoveryService {
             try {
                 budgets.admit(tenant, run.getId(), "AWS", List.of(
                         "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES",
-                        "S3_EXPOSURE", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING"), "*", "*");
+                        "S3_EXPOSURE", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
+                        "SAGEMAKER_DOMAINS", "SAGEMAKER_SPACES", "SAGEMAKER_MODEL_REGISTRY",
+                        "SAGEMAKER_ENDPOINTS", "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS",
+                        "SAGEMAKER_PIPELINES", "SAGEMAKER_COMPUTE", "SAGEMAKER_EXECUTION_ROLES",
+                        "SAGEMAKER_NETWORKING"), "*", "*");
                 try (CredentialsHandle credentials = connectorService.credentials(config)) {
                     Set<String> ingestedScopeKeys = new java.util.HashSet<>();
                     for (String regionName : config.regions()) {
@@ -170,7 +199,227 @@ public class AwsBedrockDiscoveryService {
         collectKnowledgeBases(config, credentials, region, agents, scopes);
         collectGuardrails(config, credentials, region, agents, scopes);
         collectInvocationLogging(config, credentials, region, scopes);
+        collectDeployableBedrockResources(config, credentials, region, scopes);
+        collectSageMaker(config, credentials, region, scopes);
         return new RegionContext(scopes);
+    }
+
+    /** Lists Bedrock resource metadata only; prompt bodies, flow definitions, and model data are never read. */
+    private void collectDeployableBedrockResources(
+            ConnectorSecret config, AwsCredentialsProvider credentials, Region region, List<ScopePayload> scopes) {
+        List<ArtifactObservation> models = new ArrayList<>(), profiles = new ArrayList<>(), jobs = new ArrayList<>(),
+                prompts = new ArrayList<>(), flows = new ArrayList<>();
+        List<RelationshipObservation> relationships = new ArrayList<>();
+        try (BedrockClient bedrock = BedrockClient.builder().region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
+             BedrockAgentClient agent = BedrockAgentClient.builder().region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
+            String token = null;
+            do {
+                var page = bedrock.listCustomModels(ListCustomModelsRequest.builder().nextToken(token).build());
+                for (var model : page.modelSummaries()) {
+                    models.add(new ArtifactObservation(model.modelArn(), "AI_MODEL", "AWS_BEDROCK_CUSTOM_MODEL", model.modelName(),
+                            Map.of("status", model.modelStatusAsString(), "baseModelArn", safeValue(model.baseModelArn()), "customizationType", safeValue(model.customizationTypeAsString()))));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            token = null;
+            do {
+                var page = bedrock.listImportedModels(ListImportedModelsRequest.builder().nextToken(token).build());
+                for (var model : page.modelSummaries()) models.add(new ArtifactObservation(model.modelArn(), "AI_MODEL", "AWS_BEDROCK_IMPORTED_MODEL", model.modelName(), Map.of("architecture", safeValue(model.modelArchitecture()))));
+                token = page.nextToken();
+            } while (hasText(token));
+            token = null;
+            do {
+                var page = bedrock.listProvisionedModelThroughputs(ListProvisionedModelThroughputsRequest.builder().nextToken(token).build());
+                for (var throughput : page.provisionedModelSummaries()) {
+                    models.add(new ArtifactObservation(throughput.provisionedModelArn(), "AI_MODEL", "AWS_BEDROCK_PROVISIONED_MODEL", throughput.provisionedModelName(), Map.of("status", throughput.statusAsString(), "modelArn", safeValue(throughput.modelArn()))));
+                    if (hasText(throughput.modelArn())) relationships.add(new RelationshipObservation(throughput.provisionedModelArn(), throughput.modelArn(), "USES_MODEL", Map.of()));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("BEDROCK_DEPLOYABLE_MODELS", models, relationships));
+
+            token = null;
+            do {
+                var page = bedrock.listInferenceProfiles(ListInferenceProfilesRequest.builder().nextToken(token).build());
+                for (var profile : page.inferenceProfileSummaries()) profiles.add(new ArtifactObservation(profile.inferenceProfileArn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_INFERENCE_PROFILE", profile.inferenceProfileName(), Map.of("status", profile.statusAsString(), "type", profile.typeAsString())));
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("BEDROCK_INFERENCE_PROFILES", profiles, List.of()));
+
+            token = null;
+            do {
+                var page = bedrock.listModelCustomizationJobs(ListModelCustomizationJobsRequest.builder().nextToken(token).build());
+                for (var job : page.modelCustomizationJobSummaries()) {
+                    jobs.add(new ArtifactObservation(job.jobArn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_MODEL_CUSTOMIZATION_JOB", job.jobName(), Map.of("status", job.statusAsString(), "baseModelArn", safeValue(job.baseModelArn()), "customModelArn", safeValue(job.customModelArn()))));
+                    if (hasText(job.customModelArn())) relationships.add(new RelationshipObservation(job.jobArn(), job.customModelArn(), "PRODUCES_MODEL", Map.of()));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("BEDROCK_MODEL_CUSTOMIZATION_JOBS", jobs, relationships));
+
+            token = null;
+            do {
+                var page = agent.listPrompts(ListPromptsRequest.builder().nextToken(token).build());
+                for (var prompt : page.promptSummaries()) prompts.add(new ArtifactObservation(prompt.arn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_PROMPT", prompt.name(), Map.of("id", prompt.id(), "version", safeValue(prompt.version()))));
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("BEDROCK_PROMPTS", prompts, List.of()));
+            token = null;
+            do {
+                var page = agent.listFlows(ListFlowsRequest.builder().nextToken(token).build());
+                for (var flow : page.flowSummaries()) flows.add(new ArtifactObservation(flow.arn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_FLOW", flow.name(), Map.of("id", flow.id(), "version", safeValue(flow.version()), "status", safeValue(flow.statusAsString()))));
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("BEDROCK_FLOWS", flows, List.of()));
+        } catch (Exception ex) {
+            List<String> permissions = List.of("bedrock:ListCustomModels", "bedrock:ListImportedModels", "bedrock:ListProvisionedModelThroughputs", "bedrock:ListInferenceProfiles", "bedrock:ListModelCustomizationJobs", "bedrock:ListPrompts", "bedrock:ListFlows");
+            for (String family : List.of("BEDROCK_DEPLOYABLE_MODELS", "BEDROCK_INFERENCE_PROFILES", "BEDROCK_MODEL_CUSTOMIZATION_JOBS", "BEDROCK_PROMPTS", "BEDROCK_FLOWS")) scopes.add(failed(family, ex, permissions));
+        }
+    }
+
+    /** Read-only SageMaker inventory.  It intentionally lists/describes configuration metadata only. */
+    private void collectSageMaker(
+            ConnectorSecret config, AwsCredentialsProvider credentials, Region region, List<ScopePayload> scopes) {
+        List<ArtifactObservation> domains = new ArrayList<>(), spaces = new ArrayList<>(), registry = new ArrayList<>(),
+                endpoints = new ArrayList<>(), endpointConfigs = new ArrayList<>(), jobs = new ArrayList<>(),
+                pipelines = new ArrayList<>(), compute = new ArrayList<>(), roles = new ArrayList<>(), networking = new ArrayList<>();
+        List<RelationshipObservation> domainRelations = new ArrayList<>(), registryRelations = new ArrayList<>(),
+                endpointConfigRelations = new ArrayList<>(), endpointRelations = new ArrayList<>();
+        try (SageMakerClient client = SageMakerClient.builder().region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
+            String token = null;
+            do {
+                var page = client.listDomains(ListDomainsRequest.builder().nextToken(token).build());
+                for (var summary : page.domains()) {
+                    var detail = client.describeDomain(DescribeDomainRequest.builder().domainId(summary.domainId()).build());
+                    String domainArn = detail.domainArn();
+                    domains.add(new ArtifactObservation(domainArn, "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_DOMAIN", detail.domainName(),
+                            Map.of("domainId", detail.domainId(), "authMode", detail.authModeAsString(), "vpcId", safeValue(detail.vpcId()))));
+                    if (hasText(detail.defaultUserSettings() == null ? null : detail.defaultUserSettings().executionRole())) {
+                        String roleArn = detail.defaultUserSettings().executionRole();
+                        roles.add(new ArtifactObservation(roleArn, "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_EXECUTION_ROLE", roleArn,
+                                Map.of("referencedBy", "domain")));
+                        domainRelations.add(direct(domainArn, roleArn, "USES_EXECUTION_ROLE",
+                                "sagemaker:DescribeDomain", "defaultUserSettings.executionRole"));
+                    }
+                    if (hasText(detail.vpcId())) {
+                        String networkId = "arn:aws:sagemaker:" + region.id() + ":" + config.accountId() + ":network/" + detail.vpcId();
+                        networking.add(new ArtifactObservation(networkId, "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_NETWORK", detail.vpcId(),
+                                Map.of("vpcId", detail.vpcId(), "subnetIds", detail.subnetIds())));
+                        domainRelations.add(direct(domainArn, networkId, "USES_NETWORK",
+                                "sagemaker:DescribeDomain", "vpcId"));
+                    }
+                    String spaceToken = null;
+                    do {
+                        var spacePage = client.listSpaces(ListSpacesRequest.builder().domainIdEquals(detail.domainId()).nextToken(spaceToken).build());
+                        for (var spaceSummary : spacePage.spaces()) {
+                            var space = client.describeSpace(DescribeSpaceRequest.builder().domainId(detail.domainId()).spaceName(spaceSummary.spaceName()).build());
+                            String spaceArn = space.spaceArn();
+                            spaces.add(new ArtifactObservation(spaceArn, "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_SPACE", space.spaceName(),
+                                    Map.of("domainId", detail.domainId(), "status", space.statusAsString())));
+                            domainRelations.add(direct(domainArn, spaceArn, "CONTAINS",
+                                    "sagemaker:ListSpaces", "domainId"));
+                        }
+                        spaceToken = spacePage.nextToken();
+                    } while (hasText(spaceToken));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("SAGEMAKER_DOMAINS", domains, domainRelations));
+            scopes.add(complete("SAGEMAKER_SPACES", spaces, domainRelations));
+            scopes.add(completeGlobal("SAGEMAKER_EXECUTION_ROLES", roles));
+            scopes.add(complete("SAGEMAKER_NETWORKING", networking, domainRelations));
+
+            token = null;
+            do {
+                var page = client.listModelPackageGroups(ListModelPackageGroupsRequest.builder().nextToken(token).build());
+                for (var group : page.modelPackageGroupSummaryList()) {
+                    var detail = client.describeModelPackageGroup(DescribeModelPackageGroupRequest.builder().modelPackageGroupName(group.modelPackageGroupName()).build());
+                    registry.add(new ArtifactObservation(detail.modelPackageGroupArn(), "AI_MODEL", "AWS_SAGEMAKER_MODEL_PACKAGE_GROUP", detail.modelPackageGroupName(), Map.of()));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            token = null;
+            do {
+                var page = client.listModelPackages(ListModelPackagesRequest.builder().nextToken(token).build());
+                for (var model : page.modelPackageSummaryList()) {
+                    registry.add(new ArtifactObservation(model.modelPackageArn(), "AI_MODEL", "AWS_SAGEMAKER_MODEL_PACKAGE", model.modelPackageName(), Map.of("status", model.modelPackageStatusAsString())));
+                    if (hasText(model.modelPackageGroupName())) {
+                        String groupArn = "arn:aws:sagemaker:" + region.id() + ":" + config.accountId()
+                                + ":model-package-group/" + model.modelPackageGroupName();
+                        registryRelations.add(direct(model.modelPackageArn(), groupArn, "CONTAINS",
+                                "sagemaker:ListModelPackages", "modelPackageGroupName"));
+                    }
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("SAGEMAKER_MODEL_REGISTRY", registry, registryRelations));
+
+            token = null;
+            do {
+                var page = client.listEndpointConfigs(ListEndpointConfigsRequest.builder().nextToken(token).build());
+                for (var summary : page.endpointConfigs()) {
+                    var detail = client.describeEndpointConfig(DescribeEndpointConfigRequest.builder().endpointConfigName(summary.endpointConfigName()).build());
+                    endpointConfigs.add(new ArtifactObservation(detail.endpointConfigArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_ENDPOINT_CONFIGURATION", detail.endpointConfigName(), Map.of("productionVariants", detail.productionVariants().size())));
+                    for (var variant : detail.productionVariants()) {
+                        if (!hasText(variant.modelName())) continue;
+                        String modelArn = "arn:aws:sagemaker:" + region.id() + ":" + config.accountId()
+                                + ":model/" + variant.modelName();
+                        endpointConfigs.add(new ArtifactObservation(modelArn, "AI_MODEL", "AWS_SAGEMAKER_MODEL_REFERENCE",
+                                variant.modelName(), Map.of("referenceOnly", true)));
+                        endpointConfigRelations.add(direct(detail.endpointConfigArn(), modelArn, "USES_MODEL",
+                                "sagemaker:DescribeEndpointConfig", "productionVariants[].modelName"));
+                    }
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("SAGEMAKER_ENDPOINT_CONFIGURATIONS", endpointConfigs, endpointConfigRelations));
+            token = null;
+            do {
+                var page = client.listEndpoints(ListEndpointsRequest.builder().nextToken(token).build());
+                for (var summary : page.endpoints()) {
+                    var detail = client.describeEndpoint(DescribeEndpointRequest.builder().endpointName(summary.endpointName()).build());
+                    endpoints.add(new ArtifactObservation(detail.endpointArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_ENDPOINT", detail.endpointName(), Map.of("status", detail.endpointStatusAsString(), "endpointConfigName", detail.endpointConfigName())));
+                    String configArn = "arn:aws:sagemaker:" + region.id() + ":" + config.accountId() + ":endpoint-config/" + detail.endpointConfigName();
+                    endpointRelations.add(direct(detail.endpointArn(), configArn, "USES_ENDPOINT_CONFIGURATION",
+                            "sagemaker:DescribeEndpoint", "endpointConfigName"));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("SAGEMAKER_ENDPOINTS", endpoints, endpointRelations));
+
+            client.listTrainingJobs(ListTrainingJobsRequest.builder().build()).trainingJobSummaries().forEach(job -> jobs.add(new ArtifactObservation(job.trainingJobArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_TRAINING_JOB", job.trainingJobName(), Map.of("status", job.trainingJobStatusAsString()))));
+            client.listProcessingJobs(ListProcessingJobsRequest.builder().build()).processingJobSummaries().forEach(job -> jobs.add(new ArtifactObservation(job.processingJobArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_PROCESSING_JOB", job.processingJobName(), Map.of("status", job.processingJobStatusAsString()))));
+            client.listTransformJobs(ListTransformJobsRequest.builder().build()).transformJobSummaries().forEach(job -> jobs.add(new ArtifactObservation(job.transformJobArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_TRANSFORM_JOB", job.transformJobName(), Map.of("status", job.transformJobStatusAsString()))));
+            scopes.add(complete("SAGEMAKER_JOBS", jobs, List.of()));
+            client.listPipelines(ListPipelinesRequest.builder().build()).pipelineSummaries().forEach(pipeline -> pipelines.add(new ArtifactObservation(pipeline.pipelineArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_PIPELINE", pipeline.pipelineName(), Map.of())));
+            scopes.add(complete("SAGEMAKER_PIPELINES", pipelines, List.of()));
+            token = null;
+            do {
+                var page = client.listNotebookInstances(ListNotebookInstancesRequest.builder().nextToken(token).build());
+                for (var summary : page.notebookInstances()) {
+                    var notebook = client.describeNotebookInstance(DescribeNotebookInstanceRequest.builder().notebookInstanceName(summary.notebookInstanceName()).build());
+                    compute.add(new ArtifactObservation(notebook.notebookInstanceArn(), "OTHER_AI_ARTIFACT", "AWS_SAGEMAKER_NOTEBOOK_INSTANCE", notebook.notebookInstanceName(), Map.of("instanceType", notebook.instanceTypeAsString(), "status", notebook.notebookInstanceStatusAsString())));
+                }
+                token = page.nextToken();
+            } while (hasText(token));
+            scopes.add(complete("SAGEMAKER_COMPUTE", compute, List.of()));
+        } catch (Exception ex) {
+            Map<String, List<String>> required = Map.of(
+                    "SAGEMAKER_DOMAINS", List.of("sagemaker:ListDomains", "sagemaker:DescribeDomain"),
+                    "SAGEMAKER_SPACES", List.of("sagemaker:ListSpaces", "sagemaker:DescribeSpace"),
+                    "SAGEMAKER_MODEL_REGISTRY", List.of("sagemaker:ListModelPackageGroups", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackages"),
+                    "SAGEMAKER_ENDPOINTS", List.of("sagemaker:ListEndpoints", "sagemaker:DescribeEndpoint"),
+                    "SAGEMAKER_ENDPOINT_CONFIGURATIONS", List.of("sagemaker:ListEndpointConfigs", "sagemaker:DescribeEndpointConfig"),
+                    "SAGEMAKER_JOBS", List.of("sagemaker:ListTrainingJobs", "sagemaker:ListProcessingJobs", "sagemaker:ListTransformJobs"),
+                    "SAGEMAKER_PIPELINES", List.of("sagemaker:ListPipelines"),
+                    "SAGEMAKER_COMPUTE", List.of("sagemaker:ListNotebookInstances", "sagemaker:DescribeNotebookInstance"),
+                    "SAGEMAKER_EXECUTION_ROLES", List.of("sagemaker:DescribeDomain"),
+                    "SAGEMAKER_NETWORKING", List.of("sagemaker:DescribeDomain"));
+            required.forEach((family, permissions) -> scopes.add(failed(family, ex, permissions)));
+        }
     }
 
     private AgentContext collectAgents(
@@ -645,6 +894,14 @@ public class AwsBedrockDiscoveryService {
         return new ArtifactObservation(agent.arn(), "AI_AGENT", "AWS_BEDROCK_AGENT", agent.id(), attributes);
     }
 
+    /** Relationship evidence is metadata-only: an API name and the allowlisted reference field. */
+    private RelationshipObservation direct(
+            String source, String target, String type, String sourceApi, String field) {
+        return new RelationshipObservation(source, target, type, Map.of(
+                "confidence", "DIRECT",
+                "evidence", Map.of("sourceApi", sourceApi, "field", field)));
+    }
+
     private String arn(ConnectorSecret config, Region region, String resource) {
         return "arn:aws:bedrock:" + region.id() + ":" + config.accountId() + ":" + resource;
     }
@@ -679,6 +936,10 @@ public class AwsBedrockDiscoveryService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String safeValue(String value) {
+        return value == null ? "" : value;
     }
 
     private record AgentFact(

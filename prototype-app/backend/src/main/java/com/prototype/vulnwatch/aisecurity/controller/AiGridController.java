@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.controller;
 
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
+import com.prototype.vulnwatch.aisecurity.service.AiExposureIntelligenceService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.RequestActorService;
@@ -24,13 +25,16 @@ public class AiGridController {
     private final RequestActorService actors;
     private final AiSecurityAccessService access;
     private final AiGridApiService api;
+    private final AiExposureIntelligenceService intelligence;
 
     public AiGridController(WorkspaceService workspaces, RequestActorService actors,
-                            AiSecurityAccessService access, AiGridApiService api) {
+                            AiSecurityAccessService access, AiGridApiService api,
+                            AiExposureIntelligenceService intelligence) {
         this.workspaces = workspaces;
         this.actors = actors;
         this.access = access;
         this.api = api;
+        this.intelligence = intelligence;
     }
 
     @GetMapping("/ai-systems")
@@ -72,6 +76,20 @@ public class AiGridController {
     }
     @GetMapping("/ai-exposures/{id}")
     public AiGridApiService.ExposureDetail exposure(@PathVariable UUID id) { return api.exposure(tenant(), id); }
+    @GetMapping("/ai-overview")
+    public AiExposureIntelligenceService.Overview overview() { return intelligence.overview(tenant()); }
+    @GetMapping("/ai-exposure-priorities")
+    public List<AiExposureIntelligenceService.ExposurePriority> exposurePriorities() {
+        return intelligence.priorities(tenant());
+    }
+    @GetMapping("/ai-action-queue")
+    public List<AiExposureIntelligenceService.ActionQueueItem> actionQueue() { return intelligence.actionQueue(tenant()); }
+    @GetMapping("/ai-assets/{id}/posture")
+    public AiExposureIntelligenceService.AssetPosture posture(@PathVariable UUID id) {
+        return intelligence.posture(tenant(), id);
+    }
+    @GetMapping("/ai-changes")
+    public List<AiExposureIntelligenceService.ActivityItem> changes() { return intelligence.recentActivity(tenant()); }
     @PostMapping("/ai-exposures/{id}/disposition")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public void disposition(@PathVariable UUID id, @RequestBody DispositionRequest request) {

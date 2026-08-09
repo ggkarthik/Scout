@@ -521,6 +521,10 @@ import type {
   AiGridRunMetrics,
   AiGridExposurePage,
   AiGridExposureDetail,
+  AiExposureIntelligenceOverview,
+  AiExposurePriority,
+  AiActionQueueItem,
+  AiAssetPosture,
   PolicyAssistExplanation,
   PolicyConfiguration,
   PolicyExceptionOverride,
@@ -1355,6 +1359,12 @@ export const api = {
     if (cursor) params.set('cursor', cursor);
     return request<AiGridExposurePage>(`/ai-exposures?${params.toString()}`);
   },
+  getAiExposureIntelligenceOverview: () => request<AiExposureIntelligenceOverview>('/ai-overview'),
+  listAiExposurePriorities: () => request<AiExposurePriority[]>('/ai-exposure-priorities'),
+  listAiActionQueue: () => request<AiActionQueueItem[]>('/ai-action-queue'),
+  getAiAssetPosture: (artifactId: string) => request<AiAssetPosture>(
+    `/ai-assets/${encodeURIComponent(artifactId)}/posture`,
+  ),
   getAiGridExposure: (exposureId: string) => request<AiGridExposureDetail>(
     `/ai-exposures/${encodeURIComponent(exposureId)}`,
   ),
