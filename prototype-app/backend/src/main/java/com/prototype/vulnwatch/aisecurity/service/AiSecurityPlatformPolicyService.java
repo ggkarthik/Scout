@@ -49,12 +49,17 @@ public class AiSecurityPlatformPolicyService {
                 .orElseThrow(() -> new IllegalArgumentException("Unknown AI Security policy: " + policyId));
         TenantContext.runAsPlatform(() -> {
             jdbc.update("""
-                    update platform.ai_security_policy_distribution
-                       set available = :available,
-                           default_enabled = :defaultEnabled,
-                           updated_by = :actor,
-                           updated_at = now()
-                     where policy_id = :policyId
+                    insert into platform.ai_grid_policy_distribution
+                        (policy_id, available, default_selection, rollout_stage, updated_by)
+                    select policy_id, :available,
+                           case when :defaultEnabled then 'ENABLED' else 'DISABLED' end,
+                           'GENERAL_AVAILABILITY', :actor
+                      from platform.ai_grid_policy_versions
+                     where policy_id = :policyId and lifecycle = 'PUBLISHED'
+                     order by published_at desc nulls last, version desc limit 1
+                    on conflict (policy_id) do update set available = excluded.available,
+                        default_selection = excluded.default_selection, updated_by = excluded.updated_by,
+                        updated_at = now()
                     """, Map.of(
                     "policyId", policyId,
                     "available", available,
@@ -80,8 +85,8 @@ public class AiSecurityPlatformPolicyService {
 
     private PlatformPolicyResponse response(PolicyDefinition definition) {
         return jdbc.queryForObject("""
-                select available, default_enabled, updated_by, updated_at
-                  from platform.ai_security_policy_distribution
+                select available, default_selection, updated_by, updated_at
+                  from platform.ai_grid_policy_distribution
                  where policy_id = :policyId
                 """, Map.of("policyId", definition.id()), (rs, rowNum) -> new PlatformPolicyResponse(
                 definition.id(),
@@ -89,7 +94,7 @@ public class AiSecurityPlatformPolicyService {
                 definition.name(),
                 definition.severity(),
                 rs.getBoolean("available"),
-                rs.getBoolean("default_enabled"),
+                "REQUIRED".equals(rs.getString("default_selection")) || "ENABLED".equals(rs.getString("default_selection")),
                 rs.getString("updated_by"),
                 rs.getTimestamp("updated_at").toInstant()));
     }

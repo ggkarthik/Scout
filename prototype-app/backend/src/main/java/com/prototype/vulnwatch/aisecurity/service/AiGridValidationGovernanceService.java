@@ -471,6 +471,9 @@ public class AiGridValidationGovernanceService {
             PrecisionReview precision = List.of("HIGH", "CRITICAL").contains(candidate.severity())
                     ? passingPrecisionReview(policyId, version, digest) : null;
             List<String> blockers = new ArrayList<>();
+            if (actor.equals(candidate.authoredBy())) {
+                blockers.add("Independent author and approver are required");
+            }
             if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
             if (List.of("HIGH", "CRITICAL").contains(candidate.severity()) && precision == null) {
                 blockers.add("No passing dual-reviewed precision review for this policy digest");
@@ -659,15 +662,16 @@ public class AiGridValidationGovernanceService {
 
     private PolicyCandidate policyCandidate(String policyId, String version) {
         PolicyCandidate candidate = jdbc.query("""
-                select severity, lifecycle, concat_ws('|', policy_id, version, name, description, severity,
+                select severity, lifecycle, authored_by, concat_ws('|', policy_id, version, name, description, severity,
                        workflow_class, default_selection, artifact_types_json::text, native_kinds_json::text,
                        required_capabilities_json::text, required_relationships_json::text,
                        required_resource_families_json::text, required_facts_json::text,
                        predicate_json::text, reason_code, remediation, framework_mappings_json::text,
-                       scope_resolution) digest_material
+                       scope_resolution, parameter_definitions_json::text, package_digest, package_source_ref, release_notes,
+                       replaces_policy_id, replaces_version) digest_material
                   from platform.ai_grid_policy_versions where policy_id = :policyId and version = :version
                 """, Map.of("policyId", policyId, "version", version), rs -> rs.next()
-                ? new PolicyCandidate(rs.getString("severity"), rs.getString("lifecycle"), rs.getString("digest_material"))
+                ? new PolicyCandidate(rs.getString("severity"), rs.getString("lifecycle"), rs.getString("authored_by"), rs.getString("digest_material"))
                 : null);
         if (candidate == null) throw notFound("AI Grid policy version not found");
         return candidate;
@@ -778,7 +782,7 @@ public class AiGridValidationGovernanceService {
     private record AssessmentProvenance(UUID id, String policyId, String policyVersion, String applicability,
                                         String decision, String decisionFingerprint, boolean findingPresent) {}
     private record ResolvedSample(boolean predictedFinding, List<String> labels, int reviewerCount, String finalLabel) {}
-    private record PolicyCandidate(String severity, String lifecycle, String digestMaterial) {}
+    private record PolicyCandidate(String severity, String lifecycle, String authoredBy, String digestMaterial) {}
     private record AnswerKeyGate(UUID runId, UUID environmentId) {}
     private record LatestDecision(String decision, String reason, Instant decidedAt) {}
 
