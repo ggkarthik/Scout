@@ -510,6 +510,17 @@ class AiSecurityObservationPostgresIntegrationTest {
                  where policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL' and version = '2.0.0'
                 on conflict do nothing
                 """, Map.of());
+        jdbc.update("""
+                insert into platform.ai_grid_policy_distribution
+                    (policy_id, available, default_selection, rollout_stage, updated_by)
+                values ('AI_GRID_COVERAGE_OMISSION_TEST', true, 'PREVIEW', 'GENERAL_AVAILABILITY', 'integration-test')
+                on conflict (policy_id) do update set
+                    available = excluded.available,
+                    default_selection = excluded.default_selection,
+                    rollout_stage = excluded.rollout_stage,
+                    updated_by = excluded.updated_by,
+                    updated_at = now()
+                """, Map.of());
         tenantExecution.run(tenant, () -> reconciliationService.reconcile(tenant, runId));
         tenantExecution.run(tenant, () -> {
             UUID epochId = coverageService.refreshCurrent(tenant, runId);
@@ -703,6 +714,13 @@ class AiSecurityObservationPostgresIntegrationTest {
                     """, Map.of());
         }
 
+        // Required controls are intentionally immutable for tenants.  Use an enabled
+        // distribution in this isolated test to exercise the owner-facing closure path.
+        jdbc.update("""
+                update platform.ai_grid_policy_distribution
+                   set default_selection = 'ENABLED', updated_at = now()
+                 where policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                """, Map.of());
         aiGridApiService.updateSelection(tenant, "AWS_BEDROCK_WEAK_GUARDRAIL", "DISABLED",
                 "integration-reviewer", "Validate governance downgrade lifecycle");
         aiGridApiService.replay(tenant, recurrenceRun);

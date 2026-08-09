@@ -91,13 +91,16 @@ public class AiGridRunMetricsService {
                                       List<AiGridCoverageService.CoverageItem> candidates) {
         long expected = candidates.size();
         long missing = candidates.stream().filter(item -> !item.assessmentPresent()).count();
-        long decisions = candidates.stream().filter(item -> List.of("PASS", "FAIL").contains(item.decision())).count();
+        long decisions = candidates.stream()
+                .filter(item -> "PASS".equals(item.decision()) || "FAIL".equals(item.decision()))
+                .count();
         long ownerExpected = candidates.stream()
-                .filter(item -> List.of("REQUIRED", "ENABLED").contains(item.selection()))
+                .filter(item -> "REQUIRED".equals(item.selection()) || "ENABLED".equals(item.selection()))
                 .filter(item -> !"NOT_APPLICABLE".equals(item.applicability())).count();
         long ownerDecisions = candidates.stream()
-                .filter(item -> List.of("REQUIRED", "ENABLED").contains(item.selection()))
-                .filter(item -> List.of("PASS", "FAIL").contains(item.decision())).count();
+                .filter(item -> "REQUIRED".equals(item.selection()) || "ENABLED".equals(item.selection()))
+                .filter(item -> "PASS".equals(item.decision()) || "FAIL".equals(item.decision()))
+                .count();
         double reachability = percentage(decisions, expected);
         double ownerUtility = percentage(ownerDecisions, ownerExpected);
         UUID connectorId = jdbc.query("""
