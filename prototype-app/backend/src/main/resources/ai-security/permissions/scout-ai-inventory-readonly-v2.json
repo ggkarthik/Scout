@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInventoryReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:GetGuardrail", "bedrock:GetModelInvocationLoggingConfiguration",
+        "bedrock:ListCustomModels", "bedrock:ListGuardrails", "bedrock:ListImportedModels",
+        "bedrock:ListInferenceProfiles", "bedrock:ListModelCustomizationJobs",
+        "bedrock:ListProvisionedModelThroughputs", "bedrock:ListAgents", "bedrock:GetAgent",
+        "bedrock:ListAgentActionGroups", "bedrock:GetAgentActionGroup", "bedrock:ListKnowledgeBases",
+        "bedrock:ListDataSources", "bedrock:GetDataSource", "bedrock:ListAgentKnowledgeBases",
+        "bedrock:ListPrompts", "bedrock:ListFlows"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SageMakerInventoryReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "sagemaker:ListDomains", "sagemaker:DescribeDomain", "sagemaker:ListSpaces", "sagemaker:DescribeSpace",
+        "sagemaker:ListModelPackageGroups", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackages",
+        "sagemaker:ListEndpoints", "sagemaker:DescribeEndpoint", "sagemaker:ListEndpointConfigs",
+        "sagemaker:DescribeEndpointConfig", "sagemaker:ListTrainingJobs", "sagemaker:ListProcessingJobs",
+        "sagemaker:ListTransformJobs", "sagemaker:ListPipelines", "sagemaker:ListNotebookInstances",
+        "sagemaker:DescribeNotebookInstance"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LinkedReadOnlyEvidence",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies", "lambda:GetFunctionUrlConfig", "s3:GetBucketPolicyStatus"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

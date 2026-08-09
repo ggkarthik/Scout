@@ -655,8 +655,8 @@ public class AiSecurityApiService {
                        started_at, completed_at
                   from ai_security_snapshot_scopes
                  where run_id = :runId
-                   and (:resourceFamily is null or resource_family = :resourceFamily)
-                   and (:status is null or status = :status)
+                   and (cast(:resourceFamily as varchar) is null or resource_family = :resourceFamily)
+                   and (cast(:status as varchar) is null or status = :status)
                  order by account_id, region, resource_family
                 """, new MapSqlParameterSource()
                 .addValue("runId", runId)
@@ -776,9 +776,9 @@ public class AiSecurityApiService {
                        r.target_artifact_id, target.name as target_name, r.attributes_json::text
                   from ai_security_relationships r
                   join ai_security_artifacts source on source.id = r.source_artifact_id
-                  join ai_security_artifacts target on target.id = r.target_artifact_id
+                 join ai_security_artifacts target on target.id = r.target_artifact_id
                  where r.active = true
-                   and (:root is null or r.source_artifact_id = :root or r.target_artifact_id = :root)
+                   and (cast(:root as uuid) is null or r.source_artifact_id = :root or r.target_artifact_id = :root)
                  order by r.last_observed_at desc limit :limit
                 """, params, (rs, rowNum) -> new RelationshipResponse(
                 rs.getObject("id", UUID.class),

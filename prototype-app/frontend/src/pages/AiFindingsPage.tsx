@@ -25,6 +25,10 @@ export function AiFindingsPage() {
       deferredSubscription || undefined,
     ),
   });
+  const actionQueueQuery = useQuery({
+    queryKey: ['ai-action-queue'],
+    queryFn: api.listAiActionQueue,
+  });
 
   const items = findingsQuery.data?.items ?? [];
   return (
@@ -70,6 +74,15 @@ export function AiFindingsPage() {
           <p>Findings appear only when a policy has complete evidence and returns a deterministic failure.</p>
         </section>
       ) : (
+        <>
+        <section className="panel ai-security-table-panel">
+          <div className="panel-header"><div><h3>Action queue</h3><p className="panel-caption">Open policy findings and validated exposure paths only.</p></div></div>
+          {(actionQueueQuery.data ?? []).length === 0 ? <div className="empty-state"><p>No AI actions require review.</p></div> : <table className="data-table"><thead><tr><th>Priority</th><th>Action</th><th>Owner</th><th>Scope</th><th>Recommended breakpoint</th></tr></thead><tbody>
+            {actionQueueQuery.data?.slice(0, 10).map((item) => <tr key={`${item.kind}-${item.id}`} onClick={() => navigate(item.kind === 'VALIDATED_EXPOSURE' ? `/findings/ai/exposures/${item.id}` : pathForAiFindingDetail(item.id, `${location.pathname}${location.search}`))}>
+              <td><strong>{item.priority}</strong><small>{item.severity}</small></td><td>{item.title}<small>{item.kind.replace(/_/g, ' ')}</small></td><td>{item.owner}</td><td>{item.provider}<small>{item.accountId}</small></td><td>{item.remediation}</td>
+            </tr>)}
+          </tbody></table>}
+        </section>
         <section className="panel ai-security-table-panel">
           <table className="data-table">
             <thead><tr><th>Finding</th><th>Policy</th><th>Artifact</th><th>State</th><th>Observed</th></tr></thead>
@@ -89,6 +102,7 @@ export function AiFindingsPage() {
             </tbody>
           </table>
         </section>
+        </>
       )}
     </div>
   );

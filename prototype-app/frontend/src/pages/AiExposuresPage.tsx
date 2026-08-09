@@ -61,17 +61,22 @@ export function AiExposuresPage() {
   const navigate = useNavigate();
   const [cursor, setCursor] = React.useState<string | undefined>();
   const exposures = useQuery({ queryKey: ['ai-grid-exposures', cursor], queryFn: () => api.listAiGridExposures(cursor) });
+  const priorities = useQuery({ queryKey: ['ai-exposure-priorities'], queryFn: api.listAiExposurePriorities });
   if (exposureId) return <ExposureDetail exposureId={exposureId} />;
   const items: AiGridExposureSummary[] = exposures.data?.items ?? [];
   return <section className="ai-security-page"><header className="ai-security-hero findings"><div>
     <span className="ai-security-kicker">Cross-system paths backed by temporal evidence</span><h2>AI Exposures</h2>
     <p>Hypotheses remain separate until trusted evidence validates the complete path.</p></div></header>
     {exposures.isLoading ? <section className="panel"><p>Loading exposures…</p></section> : exposures.isError ? <section className="panel"><p>Exposures could not be loaded.</p></section> :
-      <section className="panel ai-security-table-panel"><table className="data-table"><thead><tr><th>Exposure</th><th>State</th><th>Confidence</th><th>Systems</th><th>Observed</th></tr></thead><tbody>
-        {items.map((item) => <tr key={item.id} tabIndex={0} onClick={() => navigate(`/findings/ai/exposures/${item.id}`)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/findings/ai/exposures/${item.id}`); }}>
+      <section className="panel ai-security-table-panel"><table className="data-table"><thead><tr><th>Exposure</th><th>Priority</th><th>State</th><th>Owner</th><th>Confidence</th><th>Systems</th><th>Observed</th></tr></thead><tbody>
+        {items.map((item) => {
+          const priority = priorities.data?.find((candidate) => candidate.id === item.id);
+          return <tr key={item.id} tabIndex={0} onClick={() => navigate(`/findings/ai/exposures/${item.id}`)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/findings/ai/exposures/${item.id}`); }}>
           <td><span className={`severity-badge ${item.severity.toLowerCase()}`}>{item.severity}</span><strong>{item.title}</strong><small>{item.correlationId}</small></td>
-          <td><span className="status-pill">{item.state.replace(/_/g, ' ')}</span></td><td>{Math.round(item.confidence * 100)}%</td><td>{item.affectedSystems}</td><td>{new Date(item.lastObservedAt).toLocaleString()}</td>
-        </tr>)}</tbody></table>{items.length === 0 ? <div className="empty-state"><p>No exposure paths observed.</p></div> : null}
+          <td>{priority ? <><strong>{priority.priority}</strong><small>{priority.severityPoints}+{priority.confidencePoints}+{priority.publicExposurePoints}+{priority.criticalityPoints}+{priority.recencyPoints}</small></> : '—'}</td>
+          <td><span className="status-pill">{item.state.replace(/_/g, ' ')}</span></td><td>{priority?.owner ?? 'Unowned'}</td><td>{Math.round(item.confidence * 100)}%</td><td>{item.affectedSystems}</td><td>{new Date(item.lastObservedAt).toLocaleString()}</td>
+        </tr>;
+        })}</tbody></table>{items.length === 0 ? <div className="empty-state"><p>No exposure paths observed.</p></div> : null}
         {exposures.data?.nextCursor ? <button type="button" className="btn btn-secondary" onClick={() => setCursor(exposures.data?.nextCursor ?? undefined)}>Next page</button> : null}</section>}
   </section>;
 }

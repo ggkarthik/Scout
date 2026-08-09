@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.prototype.vulnwatch.aisecurity.controller.AiGridController;
+import com.prototype.vulnwatch.aisecurity.service.AiExposureIntelligenceService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
@@ -51,6 +52,7 @@ class AiGridEvidenceAuthorizationIntegrationTest {
     @MockBean private WorkspaceService workspaceService;
     @MockBean private AiSecurityAccessService accessService;
     @MockBean private AiGridApiService apiService;
+    @MockBean private AiExposureIntelligenceService intelligenceService;
     @MockBean private JwtDecoder jwtDecoder;
     @MockBean private JwtTenantAuthenticationService jwtAuthentication;
     @MockBean private TenantSupportGrantService tenantSupportGrantService;

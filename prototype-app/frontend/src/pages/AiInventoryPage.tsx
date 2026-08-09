@@ -7,6 +7,7 @@ import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 import { timeAgo } from '../lib/time';
 
 type InventoryPill = 'ALL' | 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
+type InventoryView = 'OVERVIEW' | 'ASSETS';
 
 const PILLS: Array<{ key: InventoryPill; label: string }> = [
   { key: 'ALL', label: 'All AI Assets' },
@@ -26,6 +27,7 @@ export function AiInventoryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activePill, setActivePill] = React.useState<InventoryPill>('ALL');
+  const [view, setView] = React.useState<InventoryView>('ASSETS');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
@@ -62,6 +64,12 @@ export function AiInventoryPage() {
     queryFn: api.getAiGridCoverage,
     refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
+  const overviewQuery = useQuery({
+    queryKey: ['ai-exposure-intelligence-overview'],
+    queryFn: api.getAiExposureIntelligenceOverview,
+    enabled: view === 'OVERVIEW',
+    refetchInterval: shouldPollAiRuns(runsQuery.data) ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
+  });
 
   const items = artifactsQuery.data?.items ?? [];
   const totalArtifacts = Object.values(summaryQuery.data?.artifactCounts ?? {})
@@ -73,12 +81,13 @@ export function AiInventoryPage() {
         <div>
           <span className="ai-security-kicker">AWS and Azure AI estate</span>
           <h2>AI Inventory</h2>
-          <p>Tenant-scoped agents, referenced models, and supporting AI-native resources.</p>
+          <p>Tenant-scoped cloud AI resources with explicit evidence coverage and discovery limits.</p>
         </div>
         <div className="ai-security-hero-metrics">
           <Metric label="Open AI findings" value={summaryQuery.data?.openFindings ?? 0} tone="danger" />
           <Metric label="AI systems" value={systemsQuery.data?.length ?? 0} tone="success" />
-          <Metric label="Coverage gaps" value={coverageQuery.data?.noDecision ?? summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
+          <Metric label="Incomplete scopes" value={summaryQuery.data?.incompleteScopes ?? 0} tone="warning" />
+          <Metric label="Unsupported evidence" value={coverageQuery.data?.unsupported ?? 0} tone="warning" />
         </div>
         <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')} aria-label="Cloud provider">
           <option value="">All providers</option>
@@ -97,6 +106,28 @@ export function AiInventoryPage() {
         </label>
       </section>
 
+      <div className="ai-security-pill-row" role="tablist" aria-label="AI inventory views">
+        <button type="button" role="tab" aria-selected={view === 'OVERVIEW'}
+          className={`ai-security-pill${view === 'OVERVIEW' ? ' active' : ''}`} onClick={() => setView('OVERVIEW')}>Overview</button>
+        <button type="button" role="tab" aria-selected={view === 'ASSETS'}
+          className={`ai-security-pill${view === 'ASSETS' ? ' active' : ''}`} onClick={() => setView('ASSETS')}>Assets</button>
+      </div>
+
+      {(summaryQuery.data?.incompleteScopes ?? 0) > 0 || (coverageQuery.data?.unsupported ?? 0) > 0 ? (
+        <section className="panel" aria-label="AI inventory coverage status">
+          <div className="notice warning">
+            <strong>Inventory coverage is incomplete.</strong>{' '}
+            {summaryQuery.data?.incompleteScopes ?? 0} discovery scope{(summaryQuery.data?.incompleteScopes ?? 0) === 1 ? '' : 's'} need attention;{' '}
+            {coverageQuery.data?.unsupported ?? 0} policy evidence item{(coverageQuery.data?.unsupported ?? 0) === 1 ? '' : 's'} remain unsupported.
+            Review connector run receipts before treating an empty result as no AI inventory.
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'OVERVIEW' ? (
+        <AiExecutiveOverview loading={overviewQuery.isLoading} error={overviewQuery.isError} overview={overviewQuery.data} />
+      ) : (
+        <>
       {(systemsQuery.data?.length ?? 0) > 0 && (
         <section className="panel ai-security-table-panel">
           <div className="panel-header">
@@ -175,8 +206,47 @@ export function AiInventoryPage() {
           </table>
         </section>
       )}
+        </>
+      )}
     </div>
   );
+}
+
+function AiExecutiveOverview({
+  loading,
+  error,
+  overview,
+}: {
+  loading: boolean;
+  error: boolean;
+  overview: Awaited<ReturnType<typeof api.getAiExposureIntelligenceOverview>> | undefined;
+}) {
+  if (loading) return <section className="panel"><div className="empty-state"><p>Loading AI exposure intelligence…</p></div></section>;
+  if (error || !overview) return <section className="panel"><div className="notice error">AI exposure intelligence could not be loaded.</div></section>;
+  return <>
+    <section className="panel">
+      <div className="panel-header"><div><h3>Design-partner executive view</h3><p className="panel-caption">Authoritative cloud AI evidence and validated exposure paths.</p></div></div>
+      <div className="stats-grid">
+        <Metric label="AI systems" value={overview.systemCount} tone="success" />
+        <Metric label="Assets in scope" value={overview.assetCount} tone="success" />
+        <Metric label="Critical / high paths" value={overview.criticalHighExposureCount} tone="danger" />
+        <Metric label="Coverage limitations" value={overview.incompleteScopeCount + overview.unsupportedScopeCount} tone="warning" />
+      </div>
+      <p className="panel-caption">Authoritative as of {overview.authoritativeAt ? new Date(overview.authoritativeAt).toLocaleString() : 'no completed coverage epoch'}.</p>
+    </section>
+    <section className="panel ai-security-table-panel">
+      <div className="panel-header"><div><h3>Top remediation priorities</h3><p className="panel-caption">Validated paths only. Priority combines severity, confidence, observed public exposure, criticality, and recency.</p></div></div>
+      {overview.topPriorities.length === 0 ? <div className="empty-state"><p>No validated exposure paths require action.</p></div> : <table className="data-table"><thead><tr><th>Exposure</th><th>Priority</th><th>Owner</th><th>Confidence</th><th>Breakpoint</th></tr></thead><tbody>
+        {overview.topPriorities.map((item) => <tr key={item.id}><td><span className={`severity-badge ${item.severity.toLowerCase()}`}>{item.severity}</span><strong>{item.title}</strong><small>{item.provider} · {item.accountId}</small></td><td><strong>{item.priority}</strong><small>{item.severityPoints}+{item.confidencePoints}+{item.publicExposurePoints}+{item.criticalityPoints}+{item.recencyPoints}</small></td><td>{item.owner}</td><td>{Math.round(item.confidence * 100)}%</td><td>{item.breakpoint}</td></tr>)}
+      </tbody></table>}
+    </section>
+    <section className="panel ai-security-table-panel">
+      <div className="panel-header"><div><h3>Recent authoritative activity</h3><p className="panel-caption">New inventory and newly validated paths observed in the last 14 days.</p></div></div>
+      {overview.recentActivity.length === 0 ? <div className="empty-state"><p>No recent AI inventory activity.</p></div> : <table className="data-table"><thead><tr><th>Event</th><th>Subject</th><th>Provider / Account</th><th>Observed</th></tr></thead><tbody>
+        {overview.recentActivity.map((item) => <tr key={`${item.subjectType}-${item.subjectId}-${item.observedAt}`}><td>{item.eventType}</td><td><strong>{item.name}</strong><small>{item.subjectType}</small></td><td>{item.provider}<small>{item.accountId}</small></td><td>{timeAgo(item.observedAt) ?? 'Unknown'}</td></tr>)}
+      </tbody></table>}
+    </section>
+  </>;
 }
 
 function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {

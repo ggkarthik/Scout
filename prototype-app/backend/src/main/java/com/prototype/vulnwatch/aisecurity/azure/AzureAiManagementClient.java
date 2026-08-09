@@ -29,6 +29,8 @@ public class AzureAiManagementClient {
 
     private static final String MANAGEMENT_HOST = "management.azure.com";
     private static final String MANAGEMENT_SCOPE = "https://management.azure.com/.default";
+    private static final String SEARCH_SCOPE = "https://search.azure.com/.default";
+    private static final String FOUNDRY_SCOPE = "https://ai.azure.com/.default";
     private static final int MAX_PAGES = 100;
     private static final int MAX_BODY_CHARS = 4_000_000;
     private static final int MAX_ATTEMPTS = 3;
@@ -103,8 +105,7 @@ public class AzureAiManagementClient {
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "raiPolicies", "AZURE_RAI_POLICIES", resources, failures);
         if (previewAgentsEnabled && requested.stream().anyMatch(family -> family.startsWith("AZURE_FOUNDRY_AGENT"))) {
-            collectChildren(credential, resources.get("AZURE_FOUNDRY_PROJECTS"),
-                    "applications/agentDeployments", "AZURE_FOUNDRY_AGENTS", resources, failures);
+            collectFoundryAgents(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), resources, failures);
         }
         collectRequestedChild(credential, requested, resources.get("AZURE_ML_WORKSPACES"),
                 "models", "AZURE_ML_MODELS", resources, failures);
@@ -119,6 +120,9 @@ public class AzureAiManagementClient {
                     "jobs", "AZURE_ML_JOBS", resources, failures);
             partitionPipelineJobs(resources);
         }
+        if (requested.stream().anyMatch(AzureAiManagementClient::isSearchDefinitionFamily)) {
+            collectSearchDefinitions(credential, requested, resources.get("AZURE_SEARCH_SERVICES"), resources, failures);
+        }
         collectRequestedChild(credential, requested, resources.get("AZURE_BOT_SERVICES"),
                 "channels", "AZURE_BOT_CHANNELS", resources, failures);
 
@@ -129,6 +133,128 @@ public class AzureAiManagementClient {
             collectSubscriptionRbac(credential, subscriptionId, resources, failures);
         }
         return new DiscoverySnapshot(resources, failures);
+    }
+
+    /**
+     * Azure AI Search definitions are read through the service data plane.  This deliberately
+     * uses only collection GET endpoints: it never calls documents, query, key, or index
+     * mutation endpoints.
+     */
+    private void collectSearchDefinitions(
+            TokenCredential credential,
+            Set<String> requested,
+            List<AzureResource> services,
+            Map<String, List<AzureResource>> resources,
+            Map<String, AzureApiFailure> failures
+    ) {
+        if (services == null) return;
+        Map<String, String> paths = Map.of(
+                "AZURE_SEARCH_INDEXES", "indexes",
+                "AZURE_SEARCH_SKILLSETS", "skillsets",
+                "AZURE_SEARCH_INDEXERS", "indexers",
+                "AZURE_SEARCH_DATA_SOURCES", "datasources");
+        for (AzureResource service : services) {
+            String endpoint = text(service.properties().path("endpoint"));
+            if (endpoint == null) endpoint = text(service.properties().path("hostName"));
+            if (endpoint == null) endpoint = service.name() == null ? null : service.name() + ".search.windows.net";
+            if (endpoint == null) continue;
+            String base = endpoint.startsWith("https://") ? endpoint : "https://" + endpoint;
+            for (Map.Entry<String, String> entry : paths.entrySet()) {
+                String family = entry.getKey();
+                if (!requested.contains(family) || failures.containsKey(family)) continue;
+                try {
+                    for (JsonNode node : searchList(credential, base + "/" + entry.getValue() + "?api-version=2024-07-01")) {
+                        AzureResource definition = searchResource(node, service, family).withParentId(service.id());
+                        resources.get(family).add(definition);
+                    }
+                } catch (AzureApiException exception) {
+                    failures.put(family, exception.failure());
+                }
+            }
+        }
+    }
+
+    private static boolean isSearchDefinitionFamily(String family) {
+        return "AZURE_SEARCH_INDEXES".equals(family) || "AZURE_SEARCH_SKILLSETS".equals(family)
+                || "AZURE_SEARCH_INDEXERS".equals(family) || "AZURE_SEARCH_DATA_SOURCES".equals(family);
+    }
+
+    /** Uses only GET /agents and published definitions; it never invokes agents, models, or tools. */
+    private void collectFoundryAgents(
+            TokenCredential credential, List<AzureResource> projects,
+            Map<String, List<AzureResource>> resources, Map<String, AzureApiFailure> failures
+    ) {
+        if (projects == null || failures.containsKey("AZURE_FOUNDRY_AGENTS")) return;
+        for (AzureResource project : projects) {
+            String endpoint = foundryProjectEndpoint(project);
+            if (endpoint == null) continue;
+            try {
+                for (JsonNode agent : foundryList(credential, endpoint + "/agents?api-version=v1")) {
+                    resources.get("AZURE_FOUNDRY_AGENTS").add(foundryAgentResource(agent, project));
+                }
+            } catch (AzureApiException exception) {
+                failures.put("AZURE_FOUNDRY_AGENTS", exception.failure());
+                return;
+            }
+        }
+    }
+
+    private String foundryProjectEndpoint(AzureResource project) {
+        if (project.id() == null) return null;
+        String lowered = project.id().toLowerCase(Locale.ROOT);
+        int accountStart = lowered.indexOf("/accounts/");
+        int projectStart = lowered.indexOf("/projects/");
+        if (accountStart < 0 || projectStart <= accountStart) return null;
+        String account = project.id().substring(accountStart + "/accounts/".length(), projectStart);
+        String projectName = project.id().substring(projectStart + "/projects/".length());
+        if (account.isBlank() || projectName.isBlank() || projectName.contains("/")) return null;
+        return "https://" + account + ".services.ai.azure.com/api/projects/" + encode(projectName);
+    }
+
+    private List<JsonNode> foundryList(TokenCredential credential, String url) {
+        List<JsonNode> values = new ArrayList<>();
+        JsonNode data = get(credential, url).path("data");
+        if (data.isArray()) data.forEach(values::add);
+        return values;
+    }
+
+    private AzureResource foundryAgentResource(JsonNode agent, AzureResource project) {
+        String name = text(agent.path("name"));
+        String id = project.id() + "/agents/" + (name == null ? "unnamed" : name);
+        com.fasterxml.jackson.databind.node.ObjectNode properties = objectMapper.createObjectNode();
+        JsonNode definition = agent.path("versions").path("latest").path("definition");
+        if (definition.isObject()) properties.setAll((com.fasterxml.jackson.databind.node.ObjectNode) definition);
+        String model = text(definition.path("model"));
+        if (model != null) properties.put("modelDeploymentName", model);
+        String version = text(agent.path("versions").path("latest").path("version"));
+        if (version != null) properties.put("agentVersion", version);
+        return new AzureResource(id.toLowerCase(Locale.ROOT), id, name,
+                "Microsoft.Foundry/projects/agents", "FoundryPromptAgent", project.location(),
+                project.subscriptionId(), project.resourceGroup(), objectMapper.createObjectNode(), properties,
+                objectMapper.createObjectNode(), Map.of(), project.id());
+    }
+
+    private List<JsonNode> searchList(TokenCredential credential, String initialUrl) {
+        List<JsonNode> values = new ArrayList<>();
+        String next = initialUrl;
+        for (int page = 0; next != null; page++) {
+            if (page >= MAX_PAGES) throw new AzureApiException(new AzureApiFailure(
+                    "INVALID_CONFIGURATION", "Azure Search pagination limit was exceeded", false, 0));
+            JsonNode response = get(credential, next);
+            JsonNode pageValues = response.path("value");
+            if (pageValues.isArray()) pageValues.forEach(values::add);
+            next = text(response.path("@odata.nextLink"));
+            if (next != null) validateSearchUri(URI.create(next));
+        }
+        return values;
+    }
+
+    private AzureResource searchResource(JsonNode node, AzureResource service, String family) {
+        String name = text(node.path("name"));
+        String id = service.id() + "/" + family.toLowerCase(Locale.ROOT) + "/" + (name == null ? "unnamed" : name);
+        return new AzureResource(id.toLowerCase(Locale.ROOT), id, name, family, null, service.location(),
+                service.subscriptionId(), service.resourceGroup(), objectMapper.createObjectNode(), node,
+                objectMapper.createObjectNode(), Map.of(), null);
     }
 
     private void collectSubscriptionRbac(
@@ -297,14 +423,14 @@ public class AzureAiManagementClient {
 
     private JsonNode get(TokenCredential credential, String url) {
         URI uri = URI.create(url);
-        validateManagementUri(uri);
+        validateAllowedUri(uri);
         AzureApiException terminal = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             HttpHeaders responseHeaders = HttpHeaders.of(Map.of(), (name, value) -> true);
             try {
                 HttpRequest request = HttpRequest.newBuilder(uri)
                         .timeout(Duration.ofSeconds(30))
-                        .header("Authorization", "Bearer " + bearerToken(credential))
+                        .header("Authorization", "Bearer " + bearerToken(credential, uri.getHost()))
                         .header("Accept", "application/json")
                         .GET()
                         .build();
@@ -424,6 +550,7 @@ public class AzureAiManagementClient {
         if (normalized.equals("microsoft.cognitiveservices/accounts/deployments")) return "AZURE_FOUNDRY_DEPLOYMENTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/raipolicies")) return "AZURE_RAI_POLICIES";
         if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
+        if (normalized.equals("microsoft.foundry/projects/agents")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";
         if (normalized.contains("/models")) return "AZURE_ML_MODELS";
         if (normalized.contains("/onlineendpoints/") && normalized.endsWith("/deployments")) {
@@ -460,8 +587,40 @@ public class AzureAiManagementClient {
         }
     }
 
-    private String bearerToken(TokenCredential credential) {
-        AccessToken token = credential.getToken(new TokenRequestContext().addScopes(MANAGEMENT_SCOPE))
+    private void validateAllowedUri(URI uri) {
+        if (MANAGEMENT_HOST.equalsIgnoreCase(uri.getHost())) {
+            validateManagementUri(uri);
+        } else if (isFoundryHost(uri.getHost())) {
+            validateFoundryUri(uri);
+        } else {
+            validateSearchUri(uri);
+        }
+    }
+
+    void validateSearchUri(URI uri) {
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getUserInfo() != null
+                || !(host.endsWith(".search.windows.net") || host.endsWith(".search.azure.com"))) {
+            throw new AzureApiException(new AzureApiFailure(
+                    "INVALID_CONFIGURATION", "Azure Search endpoint is not allowed", false, 0));
+        }
+    }
+
+    void validateFoundryUri(URI uri) {
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getUserInfo() != null || !isFoundryHost(uri.getHost())) {
+            throw new AzureApiException(new AzureApiFailure(
+                    "INVALID_CONFIGURATION", "Azure Foundry endpoint is not allowed", false, 0));
+        }
+    }
+
+    private boolean isFoundryHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).endsWith(".services.ai.azure.com");
+    }
+
+    private String bearerToken(TokenCredential credential, String host) {
+        String scope = host != null && (host.endsWith(".search.windows.net") || host.endsWith(".search.azure.com"))
+                ? SEARCH_SCOPE : isFoundryHost(host) ? FOUNDRY_SCOPE : MANAGEMENT_SCOPE;
+        AccessToken token = credential.getToken(new TokenRequestContext().addScopes(scope))
                 .block(Duration.ofSeconds(30));
         if (token == null || token.getToken() == null || token.getToken().isBlank()) {
             throw new AzureApiException(new AzureApiFailure(

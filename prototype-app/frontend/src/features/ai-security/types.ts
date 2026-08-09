@@ -396,6 +396,37 @@ export type AiGridExposureSummary = {
 
 export type AiGridExposurePage = { items: AiGridExposureSummary[]; nextCursor: string | null };
 
+export type AiExposurePriority = {
+  id: string; title: string; severity: string; priority: number;
+  severityPoints: number; confidencePoints: number; publicExposurePoints: number;
+  criticalityPoints: number; recencyPoints: number; confidence: number;
+  rootCauseArtifactId: string; breakpoint: string; owner: string; provider: string;
+  accountId: string; lastObservedAt: string;
+};
+
+export type AiOverviewActivity = {
+  eventType: 'DISCOVERED' | 'VALIDATED'; subjectType: 'ARTIFACT' | 'EXPOSURE'; subjectId: string;
+  name: string; provider: string; accountId: string; observedAt: string;
+};
+
+export type AiExposureIntelligenceOverview = {
+  systemCount: number; assetCount: number; validatedExposureCount: number; criticalHighExposureCount: number;
+  incompleteScopeCount: number; unsupportedScopeCount: number; authoritativeAt: string | null;
+  topPriorities: AiExposurePriority[]; recentActivity: AiOverviewActivity[];
+};
+
+export type AiActionQueueItem = {
+  id: string; kind: 'VALIDATED_EXPOSURE' | 'POLICY_FINDING'; title: string; severity: string;
+  priority: number; owner: string; provider: string; accountId: string; remediation: string;
+  confidence: number | null; lastObservedAt: string;
+};
+
+export type AiAssetPosture = {
+  artifactId: string;
+  controls: Array<{ policyId: string; selection: string; evidenceReadiness: string; decision: string; missingEvidenceJson: string }>;
+  exposures: AiExposurePriority[];
+};
+
 export type AiGridExposureDetail = {
   exposure: AiGridExposureSummary;
   observations: Array<{
